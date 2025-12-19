@@ -49,8 +49,8 @@ export default function Home() {
   const [locationLoading, setLocationLoading] = useState(true);
   const [locationError, setLocationError] = useState("");
   const [showLocationInput, setShowLocationInput] = useState(false);
-  const [customLat, setCustomLat] = useState("40.7128");
-  const [customLng, setCustomLng] = useState("-74.0060");
+  const [customLat, setCustomLat] = useState("37.898379");
+  const [customLng, setCustomLng] = useState("175.484486");
 
   useEffect(() => {
     if (!navigator.geolocation) {
