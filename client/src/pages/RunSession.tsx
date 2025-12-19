@@ -2,8 +2,9 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { VoiceVisualizer } from "@/components/VoiceVisualizer";
+import { RouteMap } from "@/components/RouteMap";
 import { motion, AnimatePresence } from "framer-motion";
-import { Pause, Play, Square, MapPin, Heart, Wind } from "lucide-react";
+import { Pause, Play, Square, MapPin, Heart, Wind, Map } from "lucide-react";
 
 import coachAvatar from "@assets/generated_images/glowing_ai_voice_sphere_interface.png";
 import mapBeginner from "@assets/generated_images/dark_mode_map_with_flat_green_route.png";
@@ -25,12 +26,15 @@ export default function RunSession() {
   const [distance, setDistance] = useState(0.00);
   const [message, setMessage] = useState("Starting run session...");
   const [lastMessageTime, setLastMessageTime] = useState(0);
+  const [showMap, setShowMap] = useState(false);
   const [, setLocation] = useLocation();
 
   // Get query params manually since wouter doesn't parse them automatically in the hook
   const searchParams = new URLSearchParams(window.location.search);
   const targetDistance = searchParams.get("distance") || "5";
   const levelId = searchParams.get("level") || "beginner";
+  const lat = parseFloat(searchParams.get("lat") || "40.7128");
+  const lng = parseFloat(searchParams.get("lng") || "-74.0060");
 
   const getMapImage = () => {
     switch(levelId) {
@@ -90,6 +94,23 @@ export default function RunSession() {
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col relative overflow-hidden font-sans">
+      {/* Live Map View */}
+      <AnimatePresence>
+        {showMap && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 p-6 bg-background/95 backdrop-blur-sm"
+            onClick={() => setShowMap(false)}
+          >
+            <div className="h-full rounded-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <RouteMap lat={lat} lng={lng} level={levelId as any} distance={parseFloat(targetDistance)} />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Background Map Visual */}
       <div className="absolute inset-0 z-0 opacity-20">
         <img src={getMapImage()} className="w-full h-full object-cover" alt="Map Route" />
@@ -179,9 +200,10 @@ export default function RunSession() {
             variant="outline" 
             size="icon" 
             className="w-14 h-14 rounded-full border-white/10 hover:bg-white/10 hover:border-white/20"
+            onClick={() => setShowMap(!showMap)}
             data-testid="button-map"
           >
-            <MapPin className="w-5 h-5" />
+            <Map className="w-5 h-5" />
           </Button>
         </div>
       </div>
