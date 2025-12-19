@@ -48,6 +48,9 @@ export default function Home() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationLoading, setLocationLoading] = useState(true);
   const [locationError, setLocationError] = useState("");
+  const [showLocationInput, setShowLocationInput] = useState(false);
+  const [customLat, setCustomLat] = useState("40.7128");
+  const [customLng, setCustomLng] = useState("-74.0060");
 
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -71,6 +74,11 @@ export default function Home() {
       }
     );
   }, []);
+
+  const handleUseCustomLocation = () => {
+    setUserLocation({ lat: parseFloat(customLat), lng: parseFloat(customLng) });
+    setShowLocationInput(false);
+  };
 
   const handleStart = () => {
     const params = new URLSearchParams({
@@ -107,11 +115,57 @@ export default function Home() {
         <motion.div 
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-muted/50 border border-muted-foreground/20 rounded-lg p-3 mb-6 flex items-center gap-2"
+          className="bg-muted/50 border border-muted-foreground/20 rounded-lg p-3 mb-6"
           data-testid="alert-location"
         >
-          <MapPin className="w-4 h-4 text-muted-foreground" />
-          <p className="text-xs text-muted-foreground">{locationError}</p>
+          <div className="flex items-center gap-2 mb-2">
+            <MapPin className="w-4 h-4 text-muted-foreground" />
+            <p className="text-xs text-muted-foreground">{locationError}</p>
+          </div>
+          <button 
+            onClick={() => setShowLocationInput(!showLocationInput)}
+            className="text-xs text-primary hover:text-primary/80 underline"
+            data-testid="button-manual-location"
+          >
+            {showLocationInput ? "Close" : "Enter location manually"}
+          </button>
+          
+          {showLocationInput && (
+            <motion.div 
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              className="mt-3 space-y-2"
+            >
+              <input
+                type="number"
+                placeholder="Latitude"
+                value={customLat}
+                onChange={(e) => setCustomLat(e.target.value)}
+                className="w-full px-2 py-1 bg-card border border-white/10 rounded text-xs text-foreground"
+                step="0.0001"
+                data-testid="input-latitude"
+              />
+              <input
+                type="number"
+                placeholder="Longitude"
+                value={customLng}
+                onChange={(e) => setCustomLng(e.target.value)}
+                className="w-full px-2 py-1 bg-card border border-white/10 rounded text-xs text-foreground"
+                step="0.0001"
+                data-testid="input-longitude"
+              />
+              <button
+                onClick={handleUseCustomLocation}
+                className="w-full px-2 py-1 bg-primary text-background text-xs rounded font-medium hover:bg-primary/90"
+                data-testid="button-use-location"
+              >
+                Use Location
+              </button>
+              <p className="text-xs text-muted-foreground mt-2">
+                Try: 40.7128, -74.0060 (NYC) or 51.5074, -0.1278 (London)
+              </p>
+            </motion.div>
+          )}
         </motion.div>
       )}
 
