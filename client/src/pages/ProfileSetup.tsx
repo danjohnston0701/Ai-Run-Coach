@@ -1,0 +1,202 @@
+import { useState } from "react";
+import { useLocation } from "wouter";
+import { Button } from "@/components/ui/button";
+import { motion } from "framer-motion";
+import { ArrowRight } from "lucide-react";
+
+const FITNESS_LEVELS = ["Unfit", "Casual", "Athletic", "Very Fit"];
+
+interface ProfileData {
+  name: string;
+  age: string;
+  gender: string;
+  height: string;
+  weight: string;
+  fitnessLevel: string;
+  desiredFitnessLevel: string;
+  coachName: string;
+}
+
+export default function ProfileSetup() {
+  const [, setLocation] = useLocation();
+  const [profile, setProfile] = useState<ProfileData>({
+    name: "",
+    age: "",
+    gender: "",
+    height: "",
+    weight: "",
+    fitnessLevel: "Casual",
+    desiredFitnessLevel: "Athletic",
+    coachName: "Coach AI",
+  });
+
+  const handleChange = (field: keyof ProfileData, value: string) => {
+    setProfile(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile.name || !profile.age || !profile.gender || !profile.height || !profile.weight) {
+      alert("Please fill in all fields");
+      return;
+    }
+    localStorage.setItem("userProfile", JSON.stringify(profile));
+    setLocation("/");
+  };
+
+  return (
+    <div className="min-h-screen bg-background text-foreground p-6 flex flex-col justify-center">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="max-w-md mx-auto w-full"
+      >
+        <div className="mb-8">
+          <h1 className="text-4xl font-display font-bold text-primary uppercase tracking-wider mb-2">
+            AI Coach
+          </h1>
+          <p className="text-muted-foreground text-sm">Create your profile to get started</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4" data-testid="form-profile">
+          {/* Name */}
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+              Your Name
+            </label>
+            <input
+              type="text"
+              placeholder="Enter your name"
+              value={profile.name}
+              onChange={(e) => handleChange("name", e.target.value)}
+              className="w-full px-3 py-2 bg-card border border-white/10 rounded-lg text-foreground focus:outline-none focus:border-primary transition-colors"
+              data-testid="input-name"
+            />
+          </div>
+
+          {/* Age */}
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+              Age
+            </label>
+            <input
+              type="number"
+              placeholder="Enter your age"
+              value={profile.age}
+              onChange={(e) => handleChange("age", e.target.value)}
+              className="w-full px-3 py-2 bg-card border border-white/10 rounded-lg text-foreground focus:outline-none focus:border-primary transition-colors"
+              data-testid="input-age"
+            />
+          </div>
+
+          {/* Gender */}
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+              Gender
+            </label>
+            <select
+              value={profile.gender}
+              onChange={(e) => handleChange("gender", e.target.value)}
+              className="w-full px-3 py-2 bg-card border border-white/10 rounded-lg text-foreground focus:outline-none focus:border-primary transition-colors"
+              data-testid="select-gender"
+            >
+              <option value="">Select gender</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+
+          {/* Height */}
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+              Height (cm)
+            </label>
+            <input
+              type="number"
+              placeholder="Enter your height"
+              value={profile.height}
+              onChange={(e) => handleChange("height", e.target.value)}
+              className="w-full px-3 py-2 bg-card border border-white/10 rounded-lg text-foreground focus:outline-none focus:border-primary transition-colors"
+              data-testid="input-height"
+            />
+          </div>
+
+          {/* Weight */}
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+              Weight (kg)
+            </label>
+            <input
+              type="number"
+              placeholder="Enter your weight"
+              value={profile.weight}
+              onChange={(e) => handleChange("weight", e.target.value)}
+              className="w-full px-3 py-2 bg-card border border-white/10 rounded-lg text-foreground focus:outline-none focus:border-primary transition-colors"
+              data-testid="input-weight"
+            />
+          </div>
+
+          {/* Current Fitness Level */}
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+              Current Fitness Level
+            </label>
+            <select
+              value={profile.fitnessLevel}
+              onChange={(e) => handleChange("fitnessLevel", e.target.value)}
+              className="w-full px-3 py-2 bg-card border border-white/10 rounded-lg text-foreground focus:outline-none focus:border-primary transition-colors"
+              data-testid="select-fitness"
+            >
+              {FITNESS_LEVELS.map(level => (
+                <option key={level} value={level}>{level}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Desired Fitness Level */}
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+              Desired Fitness Level
+            </label>
+            <select
+              value={profile.desiredFitnessLevel}
+              onChange={(e) => handleChange("desiredFitnessLevel", e.target.value)}
+              className="w-full px-3 py-2 bg-card border border-white/10 rounded-lg text-foreground focus:outline-none focus:border-primary transition-colors"
+              data-testid="select-desired-fitness"
+            >
+              {FITNESS_LEVELS.map(level => (
+                <option key={level} value={level}>{level}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Coach Name */}
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+              AI Coach Name
+            </label>
+            <input
+              type="text"
+              placeholder="e.g., Coach AI, Alex, etc."
+              value={profile.coachName}
+              onChange={(e) => handleChange("coachName", e.target.value)}
+              className="w-full px-3 py-2 bg-card border border-white/10 rounded-lg text-foreground focus:outline-none focus:border-primary transition-colors"
+              data-testid="input-coach-name"
+            />
+          </div>
+
+          <Button
+            type="submit"
+            size="lg"
+            className="w-full h-12 mt-6 text-lg font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-all flex items-center justify-center gap-2"
+            data-testid="button-create-profile"
+          >
+            Get Started
+            <ArrowRight className="w-5 h-5" />
+          </Button>
+        </form>
+      </motion.div>
+    </div>
+  );
+}

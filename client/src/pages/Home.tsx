@@ -41,6 +41,11 @@ const LEVELS = [
   }
 ];
 
+interface UserProfile {
+  name: string;
+  coachName: string;
+}
+
 export default function Home() {
   const [distance, setDistance] = useState([5]);
   const [selectedLevel, setSelectedLevel] = useState("beginner");
@@ -51,8 +56,14 @@ export default function Home() {
   const [showLocationInput, setShowLocationInput] = useState(false);
   const [customLat, setCustomLat] = useState("37.898379");
   const [customLng, setCustomLng] = useState("175.484486");
+  const [profile, setProfile] = useState<UserProfile | null>(null);
 
   useEffect(() => {
+    const userProfile = localStorage.getItem("userProfile");
+    if (userProfile) {
+      setProfile(JSON.parse(userProfile));
+    }
+
     if (!navigator.geolocation) {
       setLocationError("Geolocation not supported");
       setLocationLoading(false);
@@ -93,8 +104,10 @@ export default function Home() {
     <div className="min-h-screen bg-background p-6 pb-24 font-sans text-foreground">
       <header className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-4xl font-display font-bold text-primary uppercase tracking-wider">AI Coach</h1>
-          <p className="text-muted-foreground text-sm">Plan your run</p>
+          <h1 className="text-4xl font-display font-bold text-primary uppercase tracking-wider">
+            {profile?.coachName || "AI Coach"}
+          </h1>
+          <p className="text-muted-foreground text-sm">Welcome, {profile?.name}. Plan your run</p>
         </div>
         <motion.div 
           className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center border border-primary/50"
