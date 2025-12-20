@@ -8,7 +8,7 @@ const FITNESS_LEVELS = ["Unfit", "Casual", "Athletic", "Very Fit"];
 
 interface ProfileData {
   name: string;
-  age: string;
+  dob: string;
   gender: string;
   height: string;
   weight: string;
@@ -21,7 +21,7 @@ export default function ProfileSetup() {
   const [, setLocation] = useLocation();
   const [profile, setProfile] = useState<ProfileData>({
     name: "",
-    age: "",
+    dob: "",
     gender: "",
     height: "",
     weight: "",
@@ -36,7 +36,7 @@ export default function ProfileSetup() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile.name || !profile.age || !profile.gender || !profile.height || !profile.weight) {
+    if (!profile.name || !profile.dob || !profile.gender || !profile.height || !profile.weight) {
       alert("Please fill in all fields");
       return;
     }
@@ -74,18 +74,17 @@ export default function ProfileSetup() {
             />
           </div>
 
-          {/* Age */}
+          {/* Date of Birth */}
           <div>
             <label className="block text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
-              Age
+              Date of Birth (DD/MM/YYYY)
             </label>
             <input
-              type="number"
-              placeholder="Enter your age"
-              value={profile.age}
-              onChange={(e) => handleChange("age", e.target.value)}
+              type="date"
+              value={profile.dob}
+              onChange={(e) => handleChange("dob", e.target.value)}
               className="w-full px-3 py-2 bg-card border border-white/10 rounded-lg text-foreground focus:outline-none focus:border-primary transition-colors"
-              data-testid="input-age"
+              data-testid="input-dob"
             />
           </div>
 
