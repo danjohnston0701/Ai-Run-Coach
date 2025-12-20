@@ -111,17 +111,26 @@ export default function RunHistory() {
       )}
 
       {runs.length === 0 ? (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="flex flex-col items-center justify-center py-24 text-center"
-        >
-          <Route className="w-12 h-12 text-muted mb-4" />
-          <p className="text-muted-foreground mb-4">No runs yet. Complete your first run to see them here!</p>
-          <Button onClick={() => setLocation("/")} className="bg-primary text-background">
-            Start a Run
-          </Button>
-        </motion.div>
+        <div className="flex flex-col items-center justify-center min-h-[60vh]">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="text-center"
+          >
+            <Route className="w-16 h-16 text-muted-foreground/30 mx-auto mb-6" />
+            <h2 className="text-2xl font-display font-bold text-foreground mb-3">Ready to Track Your Progress?</h2>
+            <p className="text-muted-foreground max-w-sm mx-auto mb-8">
+              No previous run history. Complete your first session to track and review your performance.
+            </p>
+            <Button 
+              onClick={() => setLocation("/")} 
+              className="bg-primary text-background hover:bg-primary/90"
+              data-testid="button-start-first-run"
+            >
+              Start Your First Run
+            </Button>
+          </motion.div>
+        </div>
       ) : (
         <div className="space-y-3">
           {runs.map((run, index) => (
