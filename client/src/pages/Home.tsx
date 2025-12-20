@@ -60,6 +60,40 @@ export default function Home() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [lastRun, setLastRun] = useState<RunData | null>(null);
 
+  // Dummy previous runs for demonstration
+  const dummyRuns: RunData[] = [
+    {
+      id: "run-1",
+      distance: 5.2,
+      duration: "28:45",
+      avgPace: "5:32/km",
+      date: "Dec 18, 2024",
+      difficulty: "Beginner",
+      avgHeartRate: 162,
+      calories: 485,
+    },
+    {
+      id: "run-2",
+      distance: 8.5,
+      duration: "42:15",
+      avgPace: "4:58/km",
+      date: "Dec 15, 2024",
+      difficulty: "Moderate",
+      avgHeartRate: 168,
+      calories: 752,
+    },
+    {
+      id: "run-3",
+      distance: 10.3,
+      duration: "52:30",
+      avgPace: "5:06/km",
+      date: "Dec 12, 2024",
+      difficulty: "Expert",
+      avgHeartRate: 175,
+      calories: 925,
+    },
+  ];
+
   useEffect(() => {
     const userProfile = localStorage.getItem("userProfile");
     if (userProfile) {
@@ -72,6 +106,9 @@ export default function Home() {
       if (runs.length > 0) {
         setLastRun(runs[runs.length - 1]);
       }
+    } else {
+      // Use dummy data if no history exists
+      setLastRun(dummyRuns[0]);
     }
 
     if (!navigator.geolocation) {
