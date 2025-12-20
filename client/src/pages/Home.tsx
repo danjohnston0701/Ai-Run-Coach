@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
-import { Flame, Mountain, Footprints, Play, MapPin, Loader } from "lucide-react";
+import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight } from "lucide-react";
+import type { RunData } from "./RunHistory";
 
 import mapBeginner from "@assets/generated_images/dark_mode_map_with_flat_green_route.png";
 import mapModerate from "@assets/generated_images/dark_mode_map_with_yellow_moderate_route.png";
@@ -57,11 +58,20 @@ export default function Home() {
   const [customLat, setCustomLat] = useState("37.898379");
   const [customLng, setCustomLng] = useState("175.484486");
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [lastRun, setLastRun] = useState<RunData | null>(null);
 
   useEffect(() => {
     const userProfile = localStorage.getItem("userProfile");
     if (userProfile) {
       setProfile(JSON.parse(userProfile));
+    }
+
+    const runHistory = localStorage.getItem("runHistory");
+    if (runHistory) {
+      const runs = JSON.parse(runHistory);
+      if (runs.length > 0) {
+        setLastRun(runs[runs.length - 1]);
+      }
     }
 
     if (!navigator.geolocation) {
@@ -252,6 +262,51 @@ export default function Home() {
                 </Card>
               </motion.div>
             ))}
+
+            {lastRun && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                data-testid="card-last-run"
+              >
+                <Card className="relative overflow-hidden border-2 border-primary/30 bg-primary/5 cursor-pointer hover:border-primary/50 transition-all">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-3 mb-3">
+                      <History className="w-5 h-5 text-primary" />
+                      <h3 className="text-lg font-display font-bold uppercase">Last Run</h3>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm mb-4 pb-4 border-b border-white/10">
+                      <div>
+                        <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Distance</div>
+                        <div className="font-display font-bold text-primary">{lastRun.distance.toFixed(2)} km</div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Pace</div>
+                        <div className="font-display font-bold text-primary">{lastRun.avgPace}/km</div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Date</div>
+                        <div className="text-sm text-foreground">{lastRun.date}</div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Level</div>
+                        <Badge className="bg-primary/20 text-primary border-primary/30 text-xs">
+                          {lastRun.difficulty}
+                        </Badge>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setLocation("/history")}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-primary/20 hover:bg-primary/30 border border-primary/50 rounded-lg text-primary text-sm font-medium transition-colors"
+                      data-testid="button-view-dashboard"
+                    >
+                      View Run Dashboard
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            )}
           </div>
         </section>
       </main>

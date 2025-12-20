@@ -92,6 +92,36 @@ export default function RunSession() {
     return `${mins}'${secs.toString().padStart(2, '0')}"`;
   };
 
+  const saveRunData = () => {
+    const now = new Date();
+    const date = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()}`;
+    const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+
+    const runData = {
+      id: `run_${Date.now()}`,
+      date,
+      time: timeStr,
+      distance,
+      totalTime: time,
+      avgPace: calculatePace(),
+      difficulty: levelId,
+      lat,
+      lng,
+    };
+
+    const runHistory = localStorage.getItem("runHistory");
+    const runs = runHistory ? JSON.parse(runHistory) : [];
+    runs.push(runData);
+    localStorage.setItem("runHistory", JSON.stringify(runs));
+  };
+
+  const handleStop = () => {
+    if (time > 0 && distance > 0) {
+      saveRunData();
+    }
+    setLocation("/");
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col relative overflow-hidden font-sans">
       {/* Live Map View */}
@@ -181,7 +211,7 @@ export default function RunSession() {
             variant="outline" 
             size="icon" 
             className="w-14 h-14 rounded-full border-white/10 hover:bg-white/10 hover:border-white/20"
-            onClick={() => setLocation("/")}
+            onClick={handleStop}
             data-testid="button-stop"
           >
             <Square className="w-5 h-5 fill-foreground" />
