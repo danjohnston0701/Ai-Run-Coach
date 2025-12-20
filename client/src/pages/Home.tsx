@@ -294,7 +294,7 @@ export default function Home() {
                 onClick={handleStartSession}
                 data-testid="button-start-session"
               >
-                <Play className="mr-2 w-5 h-5 fill-current" /> Start Session
+                <Play className="mr-2 w-5 h-5 fill-current" /> Start Run Without Route
               </Button>
             </motion.div>
 
