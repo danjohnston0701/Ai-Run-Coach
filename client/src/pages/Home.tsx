@@ -101,7 +101,17 @@ export default function Home() {
     setShowLocationInput(false);
   };
 
-  const handleStart = () => {
+  const handleMapRun = () => {
+    const params = new URLSearchParams({
+      distance: distance[0].toString(),
+      level: selectedLevel,
+      ...(userLocation && { lat: userLocation.lat.toString(), lng: userLocation.lng.toString() }),
+      mapped: "true",
+    });
+    setLocation(`/run?${params.toString()}`);
+  };
+
+  const handleStartSession = () => {
     const params = new URLSearchParams({
       distance: distance[0].toString(),
       level: selectedLevel,
@@ -266,13 +276,38 @@ export default function Home() {
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
+              className="space-y-3"
+              data-testid="card-session-options"
+            >
+              <Button 
+                size="lg" 
+                className="w-full h-12 text-lg font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-all flex items-center justify-center gap-2"
+                onClick={handleMapRun}
+                data-testid="button-map-run"
+              >
+                <MapPin className="mr-2 w-5 h-5 fill-current" /> Map My Run
+              </Button>
+              <Button 
+                size="lg" 
+                variant="outline"
+                className="w-full h-12 text-lg font-display uppercase tracking-widest border-white/20 hover:bg-white/10 transition-all flex items-center justify-center gap-2"
+                onClick={handleStartSession}
+                data-testid="button-start-session"
+              >
+                <Play className="mr-2 w-5 h-5 fill-current" /> Start Session
+              </Button>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
               data-testid="card-last-run"
             >
               <Card className="relative overflow-hidden border-2 border-primary/30 bg-primary/5 cursor-pointer hover:border-primary/50 transition-all">
                 <CardContent className="p-4">
                   <div className="flex items-center gap-3 mb-3">
                     <History className="w-5 h-5 text-primary" />
-                    <h3 className="text-lg font-display font-bold uppercase">Last Run</h3>
+                    <h3 className="text-lg font-display font-bold uppercase">Previous Runs</h3>
                   </div>
                   {lastRun ? (
                     <>
@@ -321,10 +356,10 @@ export default function Home() {
         <Button 
           size="lg" 
           className="w-full h-16 text-xl font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-all"
-          onClick={handleStart}
-          data-testid="button-start-run"
+          onClick={handleMapRun}
+          data-testid="button-map-my-run"
         >
-          <Play className="mr-2 w-6 h-6 fill-current" /> Start Session
+          <MapPin className="mr-2 w-6 h-6 fill-current" /> Map My Run
         </Button>
       </div>
     </div>
