@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import { ArrowRight } from "lucide-react";
 
-const FITNESS_LEVELS = ["Unfit", "Casual", "Athletic", "Very Fit"];
+const FITNESS_LEVELS = ["Unfit", "Casual", "Athletic", "Very Fit", "Elite"];
 
 interface ProfileData {
   name: string;
@@ -27,7 +27,7 @@ export default function ProfileSetup() {
     weight: "",
     fitnessLevel: "Casual",
     desiredFitnessLevel: "Athletic",
-    coachName: "Coach AI",
+    coachName: "",
   });
 
   const handleChange = (field: keyof ProfileData, value: string) => {
@@ -65,7 +65,7 @@ export default function ProfileSetup() {
       >
         <div className="mb-8">
           <h1 className="text-4xl font-display font-bold text-primary uppercase tracking-wider mb-2">
-            AI Coach
+            User Profile
           </h1>
           <p className="text-muted-foreground text-sm">Create your profile to get started</p>
         </div>
@@ -187,7 +187,7 @@ export default function ProfileSetup() {
           {/* Coach Name */}
           <div>
             <label className="block text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
-              AI Coach Name
+              AI Coach's Name
             </label>
             <input
               type="text"

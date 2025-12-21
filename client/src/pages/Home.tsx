@@ -65,32 +65,35 @@ export default function Home() {
     {
       id: "run-1",
       distance: 5.2,
-      duration: "28:45",
-      avgPace: "5:32/km",
+      time: "14:30",
+      totalTime: 1725,
+      avgPace: "5:32",
       date: "Dec 18, 2024",
-      difficulty: "Beginner",
-      avgHeartRate: 162,
-      calories: 485,
+      difficulty: "beginner",
+      lat: 37.898379,
+      lng: 175.484486,
     },
     {
       id: "run-2",
       distance: 8.5,
-      duration: "42:15",
-      avgPace: "4:58/km",
+      time: "08:15",
+      totalTime: 2535,
+      avgPace: "4:58",
       date: "Dec 15, 2024",
-      difficulty: "Moderate",
-      avgHeartRate: 168,
-      calories: 752,
+      difficulty: "moderate",
+      lat: 37.898379,
+      lng: 175.484486,
     },
     {
       id: "run-3",
       distance: 10.3,
-      duration: "52:30",
-      avgPace: "5:06/km",
+      time: "17:45",
+      totalTime: 3150,
+      avgPace: "5:06",
       date: "Dec 12, 2024",
-      difficulty: "Expert",
-      avgHeartRate: 175,
-      calories: 925,
+      difficulty: "expert",
+      lat: 37.898379,
+      lng: 175.484486,
     },
   ];
 
@@ -108,6 +111,7 @@ export default function Home() {
       }
     } else {
       // Use dummy data if no history exists
+      localStorage.setItem("runHistory", JSON.stringify(dummyRuns));
       setLastRun(dummyRuns[0]);
     }
 
