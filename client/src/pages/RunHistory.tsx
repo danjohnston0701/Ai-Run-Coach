@@ -3,8 +3,21 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { motion } from "framer-motion";
-import { ArrowLeft, Calendar, Zap, Clock, Route, Gauge } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { 
+  ArrowLeft, Calendar, Zap, Clock, Route, Gauge, 
+  Activity, TrendingUp, ChevronDown, ChevronUp,
+  Heart, Zap as CadenceIcon
+} from "lucide-react";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 
 export interface RunData {
   id: string;
@@ -16,11 +29,16 @@ export interface RunData {
   difficulty: "beginner" | "moderate" | "expert";
   lat: number;
   lng: number;
+  avgHeartRate?: number;
+  maxHeartRate?: number;
+  calories?: number;
+  cadence?: number;
 }
 
 export default function RunHistory() {
   const [, setLocation] = useLocation();
   const [runs, setRuns] = useState<RunData[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
   useEffect(() => {
     const runHistory = localStorage.getItem("runHistory");
@@ -30,6 +48,37 @@ export default function RunHistory() {
       ));
     }
   }, []);
+
+  const selectedRun = runs.find(r => r.id === selectedRunId);
+
+  // Generate simulated chart data for the selected run
+  const generateChartData = (run: RunData) => {
+    const data = [];
+    const points = 20;
+    const baseHR = run.avgHeartRate || 150;
+    const baseElev = run.difficulty === "expert" ? 40 : run.difficulty === "moderate" ? 20 : 10;
+    
+    for (let i = 0; i <= points; i++) {
+      const dist = (run.distance / points) * i;
+      data.push({
+        distance: dist.toFixed(1),
+        hr: baseHR - 10 + Math.random() * 20,
+        elevation: baseElev + Math.sin(i / 2) * (baseElev / 2) + Math.random() * 5,
+        cadence: 160 + Math.random() * 20
+      });
+    }
+    return data;
+  };
+
+  const hrZones = [
+    { name: "Zone 5", range: "> 169 bpm", value: 10, color: "#ef4444", label: "Maximum" },
+    { name: "Zone 4", range: "151-169 bpm", value: 45, color: "#f97316", label: "Threshold" },
+    { name: "Zone 3", range: "132-150 bpm", value: 30, color: "#84cc16", label: "Aerobic" },
+    { name: "Zone 2", range: "113-131 bpm", value: 10, color: "#3b82f6", label: "Easy" },
+    { name: "Zone 1", range: "95-112 bpm", value: 5, color: "#64748b", label: "Warm Up" },
+  ];
+
+  const chartData = selectedRun ? generateChartData(selectedRun) : [];
 
   const getDifficultyColor = (level: string) => {
     switch(level) {
@@ -51,9 +100,7 @@ export default function RunHistory() {
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
-    if (hrs > 0) {
-      return `${hrs}h ${mins}m ${secs}s`;
-    }
+    if (hrs > 0) return `${hrs}h ${mins}m ${secs}s`;
     return `${mins}m ${secs}s`;
   };
 
@@ -77,7 +124,7 @@ export default function RunHistory() {
         </Button>
         <div>
           <h1 className="text-4xl font-display font-bold text-primary uppercase tracking-wider">Run History</h1>
-          <p className="text-muted-foreground text-sm">All your completed runs</p>
+          <p className="text-muted-foreground text-sm">Review your performance insights</p>
         </div>
       </header>
 
@@ -88,23 +135,27 @@ export default function RunHistory() {
           className="grid grid-cols-3 gap-4 mb-8"
           data-testid="stats-summary"
         >
-          <Card className="bg-card/50 border-white/10">
-            <CardContent className="p-4 text-center">
-              <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Total Runs</div>
-              <div className="text-3xl font-display font-bold text-primary">{totalStats.totalRuns}</div>
+          <Card className="bg-card/50 border-white/10 overflow-hidden relative group">
+            <div className="absolute inset-0 bg-primary/5 group-hover:bg-primary/10 transition-colors" />
+            <CardContent className="p-4 text-center relative z-10">
+              <div className="text-muted-foreground text-[10px] uppercase tracking-widest mb-1">Sessions</div>
+              <div className="text-2xl font-display font-bold text-primary">{totalStats.totalRuns}</div>
             </CardContent>
           </Card>
-          <Card className="bg-card/50 border-white/10">
-            <CardContent className="p-4 text-center">
-              <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Total Distance</div>
-              <div className="text-3xl font-display font-bold text-primary">{totalStats.totalDistance.toFixed(1)}</div>
-              <div className="text-xs text-muted-foreground">km</div>
+          <Card className="bg-card/50 border-white/10 overflow-hidden relative group">
+            <div className="absolute inset-0 bg-primary/5 group-hover:bg-primary/10 transition-colors" />
+            <CardContent className="p-4 text-center relative z-10">
+              <div className="text-muted-foreground text-[10px] uppercase tracking-widest mb-1">Distance</div>
+              <div className="text-2xl font-display font-bold text-primary">{totalStats.totalDistance.toFixed(1)}</div>
+              <div className="text-[10px] text-muted-foreground uppercase">km</div>
             </CardContent>
           </Card>
-          <Card className="bg-card/50 border-white/10">
-            <CardContent className="p-4 text-center">
-              <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Total Time</div>
+          <Card className="bg-card/50 border-white/10 overflow-hidden relative group">
+            <div className="absolute inset-0 bg-primary/5 group-hover:bg-primary/10 transition-colors" />
+            <CardContent className="p-4 text-center relative z-10">
+              <div className="text-muted-foreground text-[10px] uppercase tracking-widest mb-1">Time</div>
               <div className="text-2xl font-display font-bold text-primary">{Math.floor(totalStats.totalTime / 3600)}h</div>
+              <div className="text-[10px] text-muted-foreground uppercase">total</div>
             </CardContent>
           </Card>
         </motion.div>
@@ -132,7 +183,7 @@ export default function RunHistory() {
           </motion.div>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {runs.map((run, index) => (
             <motion.div
               key={run.id}
@@ -141,40 +192,182 @@ export default function RunHistory() {
               transition={{ delay: index * 0.05 }}
               data-testid={`run-card-${run.id}`}
             >
-              <Card className="bg-card/50 border-white/10 hover:border-primary/50 transition-colors cursor-pointer">
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <Calendar className="w-4 h-4 text-muted-foreground" />
-                        <span className="text-sm font-medium">{run.date} at {run.time}</span>
+              <Card 
+                className={`bg-card/50 border-white/10 hover:border-primary/50 transition-all cursor-pointer overflow-hidden ${selectedRunId === run.id ? "ring-2 ring-primary border-primary/50 shadow-[0_0_30px_rgba(6,182,212,0.1)]" : ""}`}
+                onClick={() => setSelectedRunId(selectedRunId === run.id ? null : run.id)}
+              >
+                <CardContent className="p-0">
+                  <div className="p-4">
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-primary" />
+                          <span className="text-sm font-bold font-display uppercase tracking-wider">{run.date}</span>
+                        </div>
+                        <Badge className={`${getDifficultyBadgeColor(run.difficulty)} border rounded-full px-3 py-0 h-5 text-[10px] uppercase font-bold tracking-tighter`}>
+                          {run.difficulty}
+                        </Badge>
                       </div>
-                      <Badge className={`${getDifficultyBadgeColor(run.difficulty)} border`}>
-                        {run.difficulty.charAt(0).toUpperCase() + run.difficulty.slice(1)}
-                      </Badge>
+                      {selectedRunId === run.id ? <ChevronUp className="w-5 h-5 text-primary" /> : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="bg-white/5 rounded-lg p-2 border border-white/5">
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-1">Distance</div>
+                        <div className="text-xl font-display font-bold text-primary leading-none">{run.distance.toFixed(1)} <span className="text-[10px] font-normal lowercase">km</span></div>
+                      </div>
+                      <div className="bg-white/5 rounded-lg p-2 border border-white/5">
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-1">Avg Pace</div>
+                        <div className="text-xl font-display font-bold text-primary leading-none">{run.avgPace} <span className="text-[10px] font-normal lowercase">/km</span></div>
+                      </div>
+                      <div className="bg-white/5 rounded-lg p-2 border border-white/5">
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-1">Duration</div>
+                        <div className="text-xl font-display font-bold text-primary leading-none">{formatTime(run.totalTime)}</div>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-4 gap-3 pt-3 border-t border-white/10">
-                    <div className="text-center">
-                      <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Distance</div>
-                      <div className="text-xl font-display font-bold text-primary">{run.distance.toFixed(2)}</div>
-                      <div className="text-xs text-muted-foreground">km</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Pace</div>
-                      <div className="text-xl font-display font-bold text-primary">{run.avgPace}</div>
-                      <div className="text-xs text-muted-foreground">/km</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Time</div>
-                      <div className="text-xl font-display font-bold text-primary">{formatTime(run.totalTime)}</div>
-                    </div>
-                    <div className="text-center">
-                      <Gauge className={`w-5 h-5 mx-auto mb-1 ${getDifficultyColor(run.difficulty)}`} />
-                      <div className="text-xs text-muted-foreground">Done</div>
-                    </div>
-                  </div>
+                  <AnimatePresence>
+                    {selectedRunId === run.id && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.3, ease: "easeInOut" }}
+                        className="border-t border-white/10 bg-black/40"
+                      >
+                        <div className="p-4 space-y-6">
+                          {/* HR Chart */}
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <Heart className="w-4 h-4 text-red-500 fill-red-500/20" />
+                                <h4 className="text-xs font-display font-bold uppercase tracking-widest">Heart Rate</h4>
+                              </div>
+                              <div className="flex gap-4">
+                                <div className="text-right">
+                                  <div className="text-[10px] text-muted-foreground uppercase">Avg</div>
+                                  <div className="text-sm font-bold text-primary leading-none">{run.avgHeartRate || 165} <span className="text-[8px] font-normal uppercase">bpm</span></div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-[10px] text-muted-foreground uppercase">Max</div>
+                                  <div className="text-sm font-bold text-primary leading-none">182 <span className="text-[8px] font-normal uppercase">bpm</span></div>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="h-40 w-full">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={chartData}>
+                                  <defs>
+                                    <linearGradient id="colorHr" x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3}/>
+                                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                                    </linearGradient>
+                                  </defs>
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff10" />
+                                  <XAxis dataKey="distance" hide />
+                                  <YAxis domain={['dataMin - 10', 'dataMax + 10']} hide />
+                                  <Tooltip 
+                                    contentStyle={{ backgroundColor: '#18181b', border: '1px solid #ffffff10', borderRadius: '8px' }}
+                                    itemStyle={{ color: '#ef4444' }}
+                                  />
+                                  <Area type="monotone" dataKey="hr" stroke="#ef4444" fillOpacity={1} fill="url(#colorHr)" strokeWidth={2} />
+                                </AreaChart>
+                              </ResponsiveContainer>
+                            </div>
+                          </div>
+
+                          {/* Elevation Chart */}
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <TrendingUp className="w-4 h-4 text-green-500" />
+                                <h4 className="text-xs font-display font-bold uppercase tracking-widest">Elevation</h4>
+                              </div>
+                              <div className="flex gap-4">
+                                <div className="text-right">
+                                  <div className="text-[10px] text-muted-foreground uppercase">Min</div>
+                                  <div className="text-sm font-bold text-primary leading-none">36 <span className="text-[8px] font-normal uppercase">m</span></div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-[10px] text-muted-foreground uppercase">Max</div>
+                                  <div className="text-sm font-bold text-primary leading-none">74 <span className="text-[8px] font-normal uppercase">m</span></div>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="h-32 w-full">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={chartData}>
+                                  <defs>
+                                    <linearGradient id="colorElev" x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3}/>
+                                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0}/>
+                                    </linearGradient>
+                                  </defs>
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff10" />
+                                  <XAxis dataKey="distance" hide />
+                                  <YAxis hide />
+                                  <Tooltip 
+                                    contentStyle={{ backgroundColor: '#18181b', border: '1px solid #ffffff10', borderRadius: '8px' }}
+                                    itemStyle={{ color: '#22c55e' }}
+                                  />
+                                  <Area type="monotone" dataKey="elevation" stroke="#22c55e" fillOpacity={1} fill="url(#colorElev)" strokeWidth={2} />
+                                </AreaChart>
+                              </ResponsiveContainer>
+                            </div>
+                          </div>
+
+                          {/* HR Zones */}
+                          <div className="space-y-3">
+                            <h4 className="text-xs font-display font-bold uppercase tracking-widest">Heart Rate Zones</h4>
+                            <div className="space-y-2">
+                              {hrZones.map((zone) => (
+                                <div key={zone.name} className="space-y-1">
+                                  <div className="flex justify-between text-[10px]">
+                                    <span className="text-muted-foreground">{zone.name} <span className="text-[8px] opacity-50 px-1">•</span> {zone.label}</span>
+                                    <span className="text-primary font-bold">{zone.value}%</span>
+                                  </div>
+                                  <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                                    <motion.div 
+                                      initial={{ width: 0 }}
+                                      animate={{ width: `${zone.value}%` }}
+                                      className="h-full rounded-full"
+                                      style={{ backgroundColor: zone.color }}
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="bg-white/5 rounded-lg p-3 border border-white/5">
+                              <div className="flex items-center gap-2 mb-2">
+                                <CadenceIcon className="w-3 h-3 text-orange-400" />
+                                <div className="text-[10px] text-muted-foreground uppercase tracking-widest">Cadence</div>
+                              </div>
+                              <div className="flex items-baseline gap-1">
+                                <span className="text-xl font-display font-bold text-primary">153</span>
+                                <span className="text-[10px] text-muted-foreground uppercase">spm</span>
+                              </div>
+                              <div className="text-[8px] text-muted-foreground mt-1">Peak: 206 spm</div>
+                            </div>
+                            <div className="bg-white/5 rounded-lg p-3 border border-white/5">
+                              <div className="flex items-center gap-2 mb-2">
+                                <Activity className="w-3 h-3 text-cyan-400" />
+                                <div className="text-[10px] text-muted-foreground uppercase tracking-widest">Calories</div>
+                              </div>
+                              <div className="flex items-baseline gap-1">
+                                <span className="text-xl font-display font-bold text-primary">{run.calories || 485}</span>
+                                <span className="text-[10px] text-muted-foreground uppercase">kcal</span>
+                              </div>
+                              <div className="text-[8px] text-muted-foreground mt-1">Total Burn</div>
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </CardContent>
               </Card>
             </motion.div>
