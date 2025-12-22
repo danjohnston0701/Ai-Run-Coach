@@ -196,9 +196,11 @@ export default function Home() {
           <p className="text-muted-foreground text-sm">Welcome, {profile?.name}. Plan your run</p>
         </div>
         <motion.div 
-          className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center border border-primary/50"
+          className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center border border-primary/50 cursor-pointer hover:bg-primary/30 transition-colors"
           animate={{ scale: locationLoading ? [1, 1.1, 1] : 1 }}
           transition={{ repeat: locationLoading ? Infinity : 0, duration: 1.5 }}
+          onClick={() => setLocation("/profile")}
+          data-testid="button-profile"
         >
           {locationLoading ? (
             <Loader className="w-5 h-5 text-primary animate-spin" />

@@ -10,6 +10,7 @@ import RunSession from "@/pages/RunSession";
 import RunHistory from "@/pages/RunHistory";
 import RunInsights from "@/pages/RunInsights";
 import ProfileSetup from "@/pages/ProfileSetup";
+import Profile from "@/pages/Profile";
 
 function Router() {
   const [hasProfile, setHasProfile] = useState(false);
@@ -34,6 +35,7 @@ function Router() {
           <Route path="/run" component={RunSession} />
           <Route path="/history" component={RunHistory} />
           <Route path="/history/:id" component={RunInsights} />
+          <Route path="/profile" component={Profile} />
         </>
       )}
       <Route component={NotFound} />
