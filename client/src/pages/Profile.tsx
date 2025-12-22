@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Save, User, Camera, Upload } from "lucide-react";
 
 const FITNESS_LEVELS = ["Unfit", "Casual", "Athletic", "Very Fit", "Elite"];
@@ -21,7 +21,9 @@ interface ProfileData {
 export default function Profile() {
   const [, setLocation] = useLocation();
   const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [showPhotoOptions, setShowPhotoOptions] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const savedProfile = localStorage.getItem("userProfile");
@@ -32,8 +34,14 @@ export default function Profile() {
     }
   }, [setLocation]);
 
-  const handlePhotoClick = () => {
+  const handleUploadClick = () => {
     fileInputRef.current?.click();
+    setShowPhotoOptions(false);
+  };
+
+  const handleCameraClick = () => {
+    cameraInputRef.current?.click();
+    setShowPhotoOptions(false);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -93,7 +101,7 @@ export default function Profile() {
           <div className="relative group">
             <div 
               className="w-24 h-24 rounded-full border-2 border-primary/50 overflow-hidden bg-white/5 flex items-center justify-center cursor-pointer hover:border-primary transition-colors"
-              onClick={handlePhotoClick}
+              onClick={() => setShowPhotoOptions(!showPhotoOptions)}
             >
               {profile.profilePic ? (
                 <img src={profile.profilePic} alt="Profile" className="w-full h-full object-cover" />
@@ -104,9 +112,43 @@ export default function Profile() {
                 <Camera className="w-6 h-6 text-white" />
               </div>
             </div>
+            
+            <AnimatePresence>
+              {showPhotoOptions && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  className="absolute top-full mt-2 w-48 bg-card border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden"
+                >
+                  <button
+                    type="button"
+                    onClick={handleCameraClick}
+                    className="w-full px-4 py-3 text-left text-xs font-display font-bold uppercase tracking-widest flex items-center gap-3 hover:bg-white/5 transition-colors border-b border-white/5"
+                  >
+                    <Camera className="w-4 h-4 text-primary" /> Take Photo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleUploadClick}
+                    className="w-full px-4 py-3 text-left text-xs font-display font-bold uppercase tracking-widest flex items-center gap-3 hover:bg-white/5 transition-colors"
+                  >
+                    <Upload className="w-4 h-4 text-primary" /> From Gallery
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             <input 
               type="file" 
               ref={fileInputRef} 
+              className="hidden" 
+              accept="image/*" 
+              onChange={handleFileChange}
+            />
+            <input 
+              type="file" 
+              ref={cameraInputRef} 
               className="hidden" 
               accept="image/*" 
               capture="user"
@@ -115,10 +157,10 @@ export default function Profile() {
           </div>
           <button 
             type="button"
-            onClick={handlePhotoClick}
+            onClick={() => setShowPhotoOptions(!showPhotoOptions)}
             className="mt-3 text-xs font-display font-bold text-primary uppercase tracking-widest flex items-center gap-2 hover:opacity-80"
           >
-            <Upload className="w-3 h-3" /> Update Photo
+            Update Profile Photo
           </button>
         </div>
 
