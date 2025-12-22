@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
-import { ArrowLeft, Save, User } from "lucide-react";
+import { ArrowLeft, Save, User, Camera, Upload } from "lucide-react";
 
 const FITNESS_LEVELS = ["Unfit", "Casual", "Athletic", "Very Fit", "Elite"];
 
@@ -15,11 +15,13 @@ interface ProfileData {
   fitnessLevel: string;
   desiredFitnessLevel: string;
   coachName: string;
+  profilePic?: string;
 }
 
 export default function Profile() {
   const [, setLocation] = useLocation();
   const [profile, setProfile] = useState<ProfileData | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const savedProfile = localStorage.getItem("userProfile");
@@ -29,6 +31,21 @@ export default function Profile() {
       setLocation("/");
     }
   }, [setLocation]);
+
+  const handlePhotoClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        handleChange("profilePic", reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleChange = (field: keyof ProfileData, value: string) => {
     if (!profile) return;
@@ -72,6 +89,39 @@ export default function Profile() {
         animate={{ opacity: 1, y: 0 }}
         className="max-w-md mx-auto w-full"
       >
+        <div className="flex flex-col items-center mb-8">
+          <div className="relative group">
+            <div 
+              className="w-24 h-24 rounded-full border-2 border-primary/50 overflow-hidden bg-white/5 flex items-center justify-center cursor-pointer hover:border-primary transition-colors"
+              onClick={handlePhotoClick}
+            >
+              {profile.profilePic ? (
+                <img src={profile.profilePic} alt="Profile" className="w-full h-full object-cover" />
+              ) : (
+                <User className="w-12 h-12 text-muted-foreground" />
+              )}
+              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                <Camera className="w-6 h-6 text-white" />
+              </div>
+            </div>
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              className="hidden" 
+              accept="image/*" 
+              capture="user"
+              onChange={handleFileChange}
+            />
+          </div>
+          <button 
+            type="button"
+            onClick={handlePhotoClick}
+            className="mt-3 text-xs font-display font-bold text-primary uppercase tracking-widest flex items-center gap-2 hover:opacity-80"
+          >
+            <Upload className="w-3 h-3" /> Update Photo
+          </button>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-6 pb-24">
           <div className="space-y-4 bg-card/50 p-6 rounded-2xl border border-white/5">
             <div className="flex items-center gap-3 mb-4">
