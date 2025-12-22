@@ -62,15 +62,28 @@ export default function Home() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [lastRun, setLastRun] = useState<RunData | null>(null);
   const [targetTimeActive, setTargetTimeActive] = useState(false);
-  const [targetTime, setTargetTime] = useState([30]);
+  const [targetTime, setTargetTime] = useState({ h: "0", m: "30", s: "00" });
 
   // Update target time when distance changes (default 6 min/km pace)
   useEffect(() => {
     if (!targetTimeActive) {
-      const calculatedTime = Math.round(distance[0] * 6);
-      setTargetTime([calculatedTime]);
+      const totalSeconds = Math.round(distance[0] * 6 * 60);
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      
+      setTargetTime({
+        h: hours.toString(),
+        m: minutes.toString().padStart(2, '0'),
+        s: seconds.toString().padStart(2, '0')
+      });
     }
   }, [distance, targetTimeActive]);
+
+  const handleTimeChange = (unit: 'h' | 'm' | 's', value: string) => {
+    const cleanValue = value.replace(/\D/g, '').slice(0, 2);
+    setTargetTime(prev => ({ ...prev, [unit]: cleanValue }));
+  };
 
   // Dummy previous runs for demonstration
   const dummyRuns: RunData[] = [
@@ -291,28 +304,52 @@ export default function Home() {
                 <Timer className={`w-5 h-5 ${targetTimeActive ? "text-primary" : "text-muted-foreground/40"}`} />
                 <h2 className={`text-xl font-display uppercase tracking-wide transition-opacity ${targetTimeActive ? "opacity-100" : "opacity-40"}`}>Target Time</h2>
               </div>
-              <div className="flex items-center gap-3">
-                {targetTimeActive && (
-                  <span className="text-2xl font-display font-bold text-primary">{targetTime[0]}m</span>
-                )}
-                <Switch 
-                  checked={targetTimeActive} 
-                  onCheckedChange={setTargetTimeActive}
-                  data-testid="switch-target-time"
+              <Switch 
+                checked={targetTimeActive} 
+                onCheckedChange={setTargetTimeActive}
+                data-testid="switch-target-time"
+              />
+            </div>
+            
+            <div className={`flex items-center gap-4 transition-all duration-300 ${targetTimeActive ? "opacity-100" : "opacity-30 pointer-events-none grayscale"}`}>
+              <div className="flex-1 space-y-1">
+                <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Hours</Label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={targetTime.h}
+                  onChange={(e) => handleTimeChange('h', e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg h-12 text-center font-display text-xl text-primary focus:border-primary/50 outline-none transition-colors"
+                  placeholder="00"
+                  disabled={!targetTimeActive}
                 />
               </div>
-            </div>
-            <div className={`transition-all duration-300 ${targetTimeActive ? "opacity-100" : "opacity-20 pointer-events-none grayscale"}`}>
-              <Slider
-                value={targetTime}
-                onValueChange={setTargetTime}
-                min={5}
-                max={120}
-                step={5}
-                className="py-4"
-                disabled={!targetTimeActive}
-                data-testid="slider-target-time"
-              />
+              <div className="pt-6 font-display text-xl text-muted-foreground">:</div>
+              <div className="flex-1 space-y-1">
+                <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Minutes</Label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={targetTime.m}
+                  onChange={(e) => handleTimeChange('m', e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg h-12 text-center font-display text-xl text-primary focus:border-primary/50 outline-none transition-colors"
+                  placeholder="00"
+                  disabled={!targetTimeActive}
+                />
+              </div>
+              <div className="pt-6 font-display text-xl text-muted-foreground">:</div>
+              <div className="flex-1 space-y-1">
+                <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Seconds</Label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={targetTime.s}
+                  onChange={(e) => handleTimeChange('s', e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg h-12 text-center font-display text-xl text-primary focus:border-primary/50 outline-none transition-colors"
+                  placeholder="00"
+                  disabled={!targetTimeActive}
+                />
+              </div>
             </div>
           </div>
         </section>
