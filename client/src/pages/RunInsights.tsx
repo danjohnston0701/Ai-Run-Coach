@@ -152,6 +152,7 @@ export default function RunInsights() {
                     fontSize={10} 
                     tickLine={false} 
                     axisLine={false}
+                    tickFormatter={(val) => Math.round(Number(val)).toString()}
                     label={{ value: 'Distance (km)', position: 'insideBottom', offset: -5, fontSize: 10, fill: '#64748b' }}
                   />
                   <YAxis 
@@ -160,6 +161,7 @@ export default function RunInsights() {
                     tickLine={false} 
                     axisLine={false}
                     domain={['dataMin - 10', 'dataMax + 10']}
+                    tickFormatter={(val) => Math.round(val).toString()}
                     label={{ value: 'BPM', angle: -90, position: 'insideLeft', offset: 10, fontSize: 10, fill: '#64748b' }}
                   />
                   <Tooltip 
@@ -208,6 +210,7 @@ export default function RunInsights() {
                     fontSize={10} 
                     tickLine={false} 
                     axisLine={false}
+                    tickFormatter={(val) => Math.round(Number(val)).toString()}
                     label={{ value: 'Distance (km)', position: 'insideBottom', offset: -5, fontSize: 10, fill: '#64748b' }}
                   />
                   <YAxis 
@@ -215,6 +218,7 @@ export default function RunInsights() {
                     fontSize={10} 
                     tickLine={false} 
                     axisLine={false}
+                    tickFormatter={(val) => Math.round(val).toString()}
                     label={{ value: 'Elevation (m)', angle: -90, position: 'insideLeft', offset: 10, fontSize: 10, fill: '#64748b' }}
                   />
                   <Tooltip 
