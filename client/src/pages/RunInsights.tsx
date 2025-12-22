@@ -152,7 +152,10 @@ export default function RunInsights() {
                     fontSize={10} 
                     tickLine={false} 
                     axisLine={false}
-                    tickFormatter={(val) => Math.round(Number(val)).toString()}
+                    type="number"
+                    domain={[0, 'dataMax']}
+                    ticks={Array.from({ length: Math.ceil(run.distance) + 1 }, (_, i) => i)}
+                    tickFormatter={(val) => Math.round(val).toString()}
                     label={{ value: 'Distance (km)', position: 'insideBottom', offset: -5, fontSize: 10, fill: '#64748b' }}
                   />
                   <YAxis 
@@ -210,7 +213,10 @@ export default function RunInsights() {
                     fontSize={10} 
                     tickLine={false} 
                     axisLine={false}
-                    tickFormatter={(val) => Math.round(Number(val)).toString()}
+                    type="number"
+                    domain={[0, 'dataMax']}
+                    ticks={Array.from({ length: Math.ceil(run.distance) + 1 }, (_, i) => i)}
+                    tickFormatter={(val) => Math.round(val).toString()}
                     label={{ value: 'Distance (km)', position: 'insideBottom', offset: -5, fontSize: 10, fill: '#64748b' }}
                   />
                   <YAxis 
