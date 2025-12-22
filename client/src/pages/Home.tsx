@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
-import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight } from "lucide-react";
+import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import type { RunData } from "./RunHistory";
 
 import mapBeginner from "@assets/generated_images/dark_mode_map_with_flat_green_route.png";
@@ -59,6 +61,8 @@ export default function Home() {
   const [customLng, setCustomLng] = useState("175.484486");
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [lastRun, setLastRun] = useState<RunData | null>(null);
+  const [targetTimeActive, setTargetTimeActive] = useState(false);
+  const [targetTime, setTargetTime] = useState([45]);
 
   // Dummy previous runs for demonstration
   const dummyRuns: RunData[] = [
@@ -256,20 +260,53 @@ export default function Home() {
       )}
 
       <main className="space-y-8">
-        <section className="space-y-4">
-          <div className="flex justify-between items-end">
-            <h2 className="text-xl font-display uppercase tracking-wide">Target Distance</h2>
-            <span className="text-4xl font-bold font-display text-primary">{distance} <span className="text-lg text-muted-foreground">km</span></span>
+        <section className="space-y-6">
+          <div className="space-y-4">
+            <div className="flex justify-between items-end">
+              <h2 className="text-xl font-display uppercase tracking-wide">Target Distance</h2>
+              <span className="text-4xl font-bold font-display text-primary">{distance} <span className="text-lg text-muted-foreground">km</span></span>
+            </div>
+            <Slider
+              defaultValue={[5]}
+              max={42}
+              step={1}
+              value={distance}
+              onValueChange={setDistance}
+              className="py-4"
+              data-testid="slider-distance"
+            />
           </div>
-          <Slider
-            defaultValue={[5]}
-            max={42}
-            step={1}
-            value={distance}
-            onValueChange={setDistance}
-            className="py-4"
-            data-testid="slider-distance"
-          />
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Timer className={`w-5 h-5 ${targetTimeActive ? "text-primary" : "text-muted-foreground/40"}`} />
+                <h2 className={`text-xl font-display uppercase tracking-wide transition-opacity ${targetTimeActive ? "opacity-100" : "opacity-40"}`}>Target Time</h2>
+              </div>
+              <div className="flex items-center gap-3">
+                {targetTimeActive && (
+                  <span className="text-2xl font-display font-bold text-primary">{targetTime[0]}m</span>
+                )}
+                <Switch 
+                  checked={targetTimeActive} 
+                  onCheckedChange={setTargetTimeActive}
+                  data-testid="switch-target-time"
+                />
+              </div>
+            </div>
+            <div className={`transition-all duration-300 ${targetTimeActive ? "opacity-100" : "opacity-20 pointer-events-none grayscale"}`}>
+              <Slider
+                value={targetTime}
+                onValueChange={setTargetTime}
+                min={5}
+                max={120}
+                step={5}
+                className="py-4"
+                disabled={!targetTimeActive}
+                data-testid="slider-target-time"
+              />
+            </div>
+          </div>
         </section>
 
         <section className="space-y-4">
