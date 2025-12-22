@@ -53,7 +53,7 @@ export default function ProfileSetup() {
       return;
     }
     localStorage.setItem("userProfile", JSON.stringify(profile));
-    setLocation("/");
+    window.location.href = "/";
   };
 
   return (
