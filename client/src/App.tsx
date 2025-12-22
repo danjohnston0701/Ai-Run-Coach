@@ -8,6 +8,7 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import RunSession from "@/pages/RunSession";
 import RunHistory from "@/pages/RunHistory";
+import RunInsights from "@/pages/RunInsights";
 import ProfileSetup from "@/pages/ProfileSetup";
 
 function Router() {
@@ -32,6 +33,7 @@ function Router() {
           <Route path="/" component={Home} />
           <Route path="/run" component={RunSession} />
           <Route path="/history" component={RunHistory} />
+          <Route path="/history/:id" component={RunInsights} />
         </>
       )}
       <Route component={NotFound} />
