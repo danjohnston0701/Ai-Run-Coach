@@ -62,7 +62,15 @@ export default function Home() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [lastRun, setLastRun] = useState<RunData | null>(null);
   const [targetTimeActive, setTargetTimeActive] = useState(false);
-  const [targetTime, setTargetTime] = useState([45]);
+  const [targetTime, setTargetTime] = useState([30]);
+
+  // Update target time when distance changes (default 6 min/km pace)
+  useEffect(() => {
+    if (!targetTimeActive) {
+      const calculatedTime = Math.round(distance[0] * 6);
+      setTargetTime([calculatedTime]);
+    }
+  }, [distance, targetTimeActive]);
 
   // Dummy previous runs for demonstration
   const dummyRuns: RunData[] = [
