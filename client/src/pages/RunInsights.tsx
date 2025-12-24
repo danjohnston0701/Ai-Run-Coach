@@ -7,8 +7,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { 
   ArrowLeft, Calendar, TrendingUp, Heart, 
-  Activity, Zap as CadenceIcon, Info, Timer, MapPin, Share2, Mail, User as UserIcon
+  Activity, Zap as CadenceIcon, Info, Timer, MapPin, Share2, Mail, User as UserIcon, Search
 } from "lucide-react";
+import type { Friend } from "./Profile";
 import {
   AreaChart,
   Area,
@@ -27,6 +28,8 @@ export default function RunInsights() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareEmail, setShareEmail] = useState("");
   const [sharedWith, setSharedWith] = useState<string[]>([]);
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     const runHistory = localStorage.getItem("runHistory");
@@ -42,23 +45,49 @@ export default function RunInsights() {
     if (shared) {
       setSharedWith(JSON.parse(shared));
     }
+
+    const profile = localStorage.getItem("userProfile");
+    if (profile) {
+      const parsed = JSON.parse(profile);
+      setFriends(parsed.friends || []);
+    }
   }, [params?.id]);
+
+  const handleShareFriend = (friend: Friend) => {
+    const recipient = friend.email || friend.name;
+    if (sharedWith.includes(recipient)) {
+      toast.error("Already shared with this friend");
+      return;
+    }
+    const updatedSharedWith = [...sharedWith, recipient];
+    setSharedWith(updatedSharedWith);
+    localStorage.setItem(`shared_${params?.id}`, JSON.stringify(updatedSharedWith));
+    toast.success(`Run shared with ${friend.name}!`);
+  };
 
   const handleShare = (e: React.FormEvent) => {
     e.preventDefault();
     if (!shareEmail.trim()) {
-      toast.error("Please enter a valid email address");
+      toast.error("Please enter a valid email address or username");
       return;
     }
     
+    if (sharedWith.includes(shareEmail)) {
+      toast.error("Already shared with this person");
+      return;
+    }
+
     const updatedSharedWith = [...sharedWith, shareEmail];
     setSharedWith(updatedSharedWith);
     localStorage.setItem(`shared_${params?.id}`, JSON.stringify(updatedSharedWith));
     
     toast.success(`Run shared with ${shareEmail}! They'll receive a notification.`);
     setShareEmail("");
-    setShowShareModal(false);
   };
+
+  const filteredFriends = friends.filter(f => 
+    f.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   if (!run) return null;
 
@@ -147,57 +176,80 @@ export default function RunInsights() {
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 100, opacity: 0 }}
               onClick={(e) => e.stopPropagation()}
-              className="w-full sm:max-w-md bg-card border border-white/10 rounded-2xl p-6 space-y-4"
+              className="w-full sm:max-w-md bg-card border border-white/10 rounded-2xl p-6 space-y-4 max-h-[80vh] overflow-y-auto"
             >
               <h2 className="text-xl font-display font-bold uppercase tracking-wider text-primary">Share Run</h2>
-              <p className="text-xs text-muted-foreground">Send this run record to a friend to inspire them.</p>
+              <p className="text-xs text-muted-foreground">Send this run record to inspire others.</p>
               
-              <form onSubmit={handleShare} className="space-y-4">
+              {/* Friends List */}
+              {friends.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">Quick Share - Friends</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {friends.map((friend, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => handleShareFriend(friend)}
+                        disabled={sharedWith.includes(friend.email || friend.name)}
+                        className="p-3 bg-white/5 hover:bg-primary/10 border border-white/10 hover:border-primary/50 rounded-lg text-xs font-bold uppercase transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {sharedWith.includes(friend.email || friend.name) ? "✓" : "+"} {friend.name.split(" ")[0]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Search/Lookup */}
+              <form onSubmit={handleShare} className="space-y-3 border-t border-white/10 pt-4">
                 <div>
                   <label className="block text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-2">
-                    Email or Username
+                    Search or Add by Email
                   </label>
-                  <input
-                    type="text"
-                    value={shareEmail}
-                    onChange={(e) => setShareEmail(e.target.value)}
-                    placeholder="friend@example.com"
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors text-sm"
-                  />
+                  <div className="relative">
+                    <Search className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
+                    <input
+                      type="text"
+                      value={shareEmail}
+                      onChange={(e) => setShareEmail(e.target.value)}
+                      placeholder="friend@example.com"
+                      className="w-full pl-9 pr-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors text-sm"
+                    />
+                  </div>
                 </div>
 
-                {sharedWith.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">Shared with:</p>
-                    <div className="space-y-2">
-                      {sharedWith.map((email, idx) => (
-                        <div key={idx} className="flex items-center gap-2 p-2 bg-white/5 rounded-lg border border-white/5">
-                          <UserIcon className="w-3 h-3 text-primary" />
-                          <span className="text-xs text-muted-foreground">{email}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex gap-3 pt-4">
+                <div className="flex gap-3">
                   <Button
                     type="button"
                     variant="outline"
                     onClick={() => setShowShareModal(false)}
-                    className="flex-1 border-white/10 hover:bg-white/5"
+                    className="flex-1 border-white/10 hover:bg-white/5 text-xs"
                   >
-                    Cancel
+                    Done
                   </Button>
                   <Button
                     type="submit"
-                    className="flex-1 bg-primary text-background hover:bg-primary/90 flex items-center justify-center gap-2"
+                    className="flex-1 bg-primary text-background hover:bg-primary/90 flex items-center justify-center gap-2 text-xs"
                   >
-                    <Mail className="w-4 h-4" />
+                    <Mail className="w-3 h-3" />
                     Share
                   </Button>
                 </div>
               </form>
+
+              {sharedWith.length > 0 && (
+                <div className="border-t border-white/10 pt-4 space-y-2">
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">Shared with ({sharedWith.length}):</p>
+                  <div className="space-y-2">
+                    {sharedWith.map((email, idx) => (
+                      <div key={idx} className="flex items-center gap-2 p-2 bg-white/5 rounded-lg border border-white/5">
+                        <UserIcon className="w-3 h-3 text-primary" />
+                        <span className="text-xs text-muted-foreground truncate">{email}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </motion.div>
           </motion.div>
         )}

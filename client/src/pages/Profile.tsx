@@ -2,9 +2,15 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Save, User, Camera, Upload } from "lucide-react";
+import { toast } from "sonner";
+import { ArrowLeft, Save, User, Camera, Upload, UserPlus, X, Users } from "lucide-react";
 
 const FITNESS_LEVELS = ["Unfit", "Casual", "Athletic", "Very Fit", "Elite"];
+
+export interface Friend {
+  name: string;
+  email?: string;
+}
 
 interface ProfileData {
   name: string;
@@ -16,19 +22,27 @@ interface ProfileData {
   desiredFitnessLevel: string;
   coachName: string;
   profilePic?: string;
+  friends?: Friend[];
 }
 
 export default function Profile() {
   const [, setLocation] = useLocation();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [showPhotoOptions, setShowPhotoOptions] = useState(false);
+  const [showAddFriend, setShowAddFriend] = useState(false);
+  const [friendName, setFriendName] = useState("");
+  const [friendEmail, setFriendEmail] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const savedProfile = localStorage.getItem("userProfile");
     if (savedProfile) {
-      setProfile(JSON.parse(savedProfile));
+      const parsed = JSON.parse(savedProfile);
+      if (!parsed.friends) {
+        parsed.friends = [];
+      }
+      setProfile(parsed);
     } else {
       setLocation("/");
     }
@@ -58,6 +72,36 @@ export default function Profile() {
   const handleChange = (field: keyof ProfileData, value: string) => {
     if (!profile) return;
     setProfile(prev => ({ ...prev!, [field]: value }));
+  };
+
+  const handleAddFriend = () => {
+    if (!profile) return;
+    
+    if (!friendName.trim()) {
+      toast.error("Please enter a friend's name");
+      return;
+    }
+    
+    const newFriend: Friend = {
+      name: friendName,
+      email: friendEmail || undefined
+    };
+    
+    const updatedFriends = [...(profile.friends || []), newFriend];
+    const updatedProfile = { ...profile, friends: updatedFriends };
+    setProfile(updatedProfile);
+    
+    toast.success(`${friendName} added to your friends!`);
+    setFriendName("");
+    setFriendEmail("");
+    setShowAddFriend(false);
+  };
+
+  const handleRemoveFriend = (index: number) => {
+    if (!profile) return;
+    const updatedFriends = profile.friends?.filter((_, i) => i !== index) || [];
+    setProfile({ ...profile, friends: updatedFriends });
+    toast.success("Friend removed");
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -298,6 +342,87 @@ export default function Profile() {
                 className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors"
               />
             </div>
+          </div>
+
+          <div className="space-y-4 bg-card/50 p-6 rounded-2xl border border-white/5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <Users className="w-5 h-5 text-primary" />
+                <h2 className="text-lg font-display font-bold uppercase tracking-wide">Friends</h2>
+              </div>
+              <Button
+                type="button"
+                onClick={() => setShowAddFriend(true)}
+                className="h-8 px-3 bg-primary/20 hover:bg-primary/30 text-primary text-xs font-bold uppercase flex items-center gap-2"
+              >
+                <UserPlus className="w-3 h-3" /> Add
+              </Button>
+            </div>
+
+            {profile.friends && profile.friends.length > 0 ? (
+              <div className="space-y-2">
+                {profile.friends.map((friend, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">{friend.name}</p>
+                      {friend.email && <p className="text-[10px] text-muted-foreground">{friend.email}</p>}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveFriend(idx)}
+                      className="p-1 hover:bg-white/10 rounded transition-colors"
+                    >
+                      <X className="w-4 h-4 text-muted-foreground hover:text-red-500" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground italic">No friends yet. Add some to easily share runs!</p>
+            )}
+
+            <AnimatePresence>
+              {showAddFriend && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10 space-y-3"
+                >
+                  <input
+                    type="text"
+                    value={friendName}
+                    onChange={(e) => setFriendName(e.target.value)}
+                    placeholder="Friend's name"
+                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-foreground text-sm focus:outline-none focus:border-primary transition-colors"
+                  />
+                  <input
+                    type="email"
+                    value={friendEmail}
+                    onChange={(e) => setFriendEmail(e.target.value)}
+                    placeholder="Email (optional)"
+                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-foreground text-sm focus:outline-none focus:border-primary transition-colors"
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      onClick={() => setShowAddFriend(false)}
+                      variant="outline"
+                      className="flex-1 border-white/10 text-xs"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={handleAddFriend}
+                      className="flex-1 bg-primary text-background text-xs hover:bg-primary/90"
+                    >
+                      Add Friend
+                    </Button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           <div className="fixed bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-background via-background to-transparent z-50">
