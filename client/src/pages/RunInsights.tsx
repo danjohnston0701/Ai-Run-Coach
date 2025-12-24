@@ -3,10 +3,11 @@ import { useLocation, useRoute } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
+import { toast } from "sonner";
 import { 
   ArrowLeft, Calendar, TrendingUp, Heart, 
-  Activity, Zap as CadenceIcon, Info, Timer, MapPin
+  Activity, Zap as CadenceIcon, Info, Timer, MapPin, Share2, Mail, User as UserIcon
 } from "lucide-react";
 import {
   AreaChart,
@@ -23,6 +24,9 @@ export default function RunInsights() {
   const [, setLocation] = useLocation();
   const [match, params] = useRoute("/history/:id");
   const [run, setRun] = useState<RunData | null>(null);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareEmail, setShareEmail] = useState("");
+  const [sharedWith, setSharedWith] = useState<string[]>([]);
 
   useEffect(() => {
     const runHistory = localStorage.getItem("runHistory");
@@ -33,7 +37,28 @@ export default function RunInsights() {
         setRun(foundRun);
       }
     }
+    
+    const shared = localStorage.getItem(`shared_${params?.id}`);
+    if (shared) {
+      setSharedWith(JSON.parse(shared));
+    }
   }, [params?.id]);
+
+  const handleShare = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!shareEmail.trim()) {
+      toast.error("Please enter a valid email address");
+      return;
+    }
+    
+    const updatedSharedWith = [...sharedWith, shareEmail];
+    setSharedWith(updatedSharedWith);
+    localStorage.setItem(`shared_${params?.id}`, JSON.stringify(updatedSharedWith));
+    
+    toast.success(`Run shared with ${shareEmail}! They'll receive a notification.`);
+    setShareEmail("");
+    setShowShareModal(false);
+  };
 
   if (!run) return null;
 
@@ -73,8 +98,8 @@ export default function RunInsights() {
 
   return (
     <div className="min-h-screen bg-background text-foreground p-6 pb-24 font-sans">
-      <header className="mb-8 flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <header className="mb-8 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4 flex-1">
           <Button
             variant="outline"
             size="icon"
@@ -91,10 +116,92 @@ export default function RunInsights() {
             </div>
           </div>
         </div>
-        <Badge className="bg-primary/10 border-primary/30 text-primary text-[10px] uppercase font-bold px-3">
-          {run.difficulty}
-        </Badge>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setShowShareModal(true)}
+            className="rounded-full border-primary/50 hover:bg-primary/20 text-primary"
+            data-testid="button-share-run"
+          >
+            <Share2 className="w-5 h-5" />
+          </Button>
+          <Badge className="bg-primary/10 border-primary/30 text-primary text-[10px] uppercase font-bold px-3">
+            {run.difficulty}
+          </Badge>
+        </div>
       </header>
+
+      {/* Share Modal */}
+      <AnimatePresence>
+        {showShareModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/50"
+            onClick={() => setShowShareModal(false)}
+          >
+            <motion.div 
+              initial={{ y: 100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 100, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full sm:max-w-md bg-card border border-white/10 rounded-2xl p-6 space-y-4"
+            >
+              <h2 className="text-xl font-display font-bold uppercase tracking-wider text-primary">Share Run</h2>
+              <p className="text-xs text-muted-foreground">Send this run record to a friend to inspire them.</p>
+              
+              <form onSubmit={handleShare} className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-2">
+                    Email or Username
+                  </label>
+                  <input
+                    type="text"
+                    value={shareEmail}
+                    onChange={(e) => setShareEmail(e.target.value)}
+                    placeholder="friend@example.com"
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors text-sm"
+                  />
+                </div>
+
+                {sharedWith.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">Shared with:</p>
+                    <div className="space-y-2">
+                      {sharedWith.map((email, idx) => (
+                        <div key={idx} className="flex items-center gap-2 p-2 bg-white/5 rounded-lg border border-white/5">
+                          <UserIcon className="w-3 h-3 text-primary" />
+                          <span className="text-xs text-muted-foreground">{email}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowShareModal(false)}
+                    className="flex-1 border-white/10 hover:bg-white/5"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    className="flex-1 bg-primary text-background hover:bg-primary/90 flex items-center justify-center gap-2"
+                  >
+                    <Mail className="w-4 h-4" />
+                    Share
+                  </Button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <main className="space-y-8">
         {/* Key Stats Grid */}
