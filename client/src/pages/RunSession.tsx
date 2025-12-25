@@ -272,13 +272,26 @@ export default function RunSession() {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
               </span>
-              <div className="text-[10px] font-display font-bold text-primary uppercase">Sharing Live</div>
+              <div className="text-[10px] font-display font-bold text-primary uppercase text-xs">Sharing Live</div>
             </motion.div>
           )}
         </div>
-        <div className="bg-destructive/20 backdrop-blur-md rounded-xl p-3 border border-destructive/30 flex items-center gap-2">
-          <Heart className="w-4 h-4 text-red-500 animate-pulse" />
-          <div className="text-xl font-display font-bold text-white">142 <span className="text-xs font-sans font-normal text-muted-foreground">BPM</span></div>
+        <div className="flex flex-col items-end gap-2">
+          <div className="bg-destructive/20 backdrop-blur-md rounded-xl p-3 border border-destructive/30 flex items-center gap-2">
+            <Heart className="w-4 h-4 text-red-500 animate-pulse" />
+            <div className="text-xl font-display font-bold text-white">142 <span className="text-xs font-sans font-normal text-muted-foreground">BPM</span></div>
+          </div>
+          <Button
+            onClick={() => setShowShareModal(true)}
+            className={`h-10 px-4 rounded-xl font-display text-[10px] uppercase tracking-widest transition-all ${
+              sharedWith.length > 0 
+                ? "bg-green-500 text-white border-2 border-green-300 shadow-[0_0_15px_rgba(34,197,94,0.5)]" 
+                : "bg-primary text-background hover:bg-primary/90"
+            }`}
+          >
+            <Share2 className="w-3 h-3 mr-2" />
+            Live Share {sharedWith.length > 0 && `Active (${sharedWith.length})`}
+          </Button>
         </div>
       </div>
 
@@ -347,16 +360,6 @@ export default function RunSession() {
             data-testid="button-toggle-play"
           >
             {active ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current ml-1" />}
-          </Button>
-
-          <Button 
-            variant="outline" 
-            size="icon" 
-            className={`w-12 h-12 rounded-full border-white/10 hover:bg-white/10 hover:border-white/20 transition-all ${sharedWith.length > 0 ? 'bg-primary/20 border-primary/50 text-primary shadow-[0_0_15px_rgba(6,182,212,0.3)]' : ''}`}
-            onClick={() => setShowShareModal(true)}
-            data-testid="button-live-share"
-          >
-            <Share2 className="w-4 h-4" />
           </Button>
           
           <Button 
