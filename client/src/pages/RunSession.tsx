@@ -296,12 +296,12 @@ export default function RunSession() {
       </div>
 
       {/* Center AI Avatar */}
-      <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-6 min-h-0 py-4">
-        <div className="relative mb-4 flex-shrink-1 min-h-0 flex flex-col items-center">
+      <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-6 min-h-0 py-2">
+        <div className="relative mb-2 flex-shrink-1 min-h-0 flex flex-col items-center">
            <div className={`absolute inset-0 bg-primary/20 blur-3xl rounded-full transition-all duration-1000 ${active ? 'scale-110 opacity-100' : 'scale-90 opacity-50'}`} />
            <img 
               src={coachAvatar} 
-              className="w-24 h-24 sm:w-32 sm:h-32 md:w-40 md:h-40 rounded-full border-4 border-primary/20 shadow-[0_0_50px_rgba(6,182,212,0.3)] object-cover relative z-10"
+              className="w-32 h-32 sm:w-48 sm:h-48 md:w-64 md:h-64 rounded-full border-4 border-primary/20 shadow-[0_0_50px_rgba(6,182,212,0.3)] object-cover relative z-10 transition-all duration-500"
               alt="AI Coach"
             />
             
@@ -320,27 +320,27 @@ export default function RunSession() {
             </AnimatePresence>
         </div>
         
-        <div className="mt-2">
+        <div className="mt-1">
           <VoiceVisualizer isActive={active && !!message} />
         </div>
       </div>
 
       {/* Bottom Stats & Controls */}
-      <div className="relative z-10 bg-card/40 backdrop-blur-xl border-t border-white/10 rounded-t-3xl p-6 pb-8 mt-auto flex-shrink-0">
-        <div className="grid grid-cols-3 gap-2 mb-6 text-center">
+      <div className="relative z-10 bg-card/40 backdrop-blur-xl border-t border-white/10 rounded-t-3xl p-4 pb-6 mt-auto flex-shrink-0">
+        <div className="grid grid-cols-3 gap-2 mb-4 text-center">
           <div>
-            <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Time</div>
-            <div className="text-4xl font-display font-bold">{formatTime(time)}</div>
+            <div className="text-muted-foreground text-[10px] uppercase tracking-wider mb-0.5">Time</div>
+            <div className="text-2xl font-display font-bold">{formatTime(time)}</div>
           </div>
           <div className="border-x border-white/10">
-             <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Distance</div>
-             <div className="text-4xl font-display font-bold">{distance.toFixed(2)}</div>
-             <div className="text-xs text-muted-foreground">km</div>
+             <div className="text-muted-foreground text-[10px] uppercase tracking-wider mb-0.5">Distance</div>
+             <div className="text-2xl font-display font-bold">{distance.toFixed(2)}</div>
+             <div className="text-[10px] text-muted-foreground">km</div>
           </div>
           <div>
-             <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Pace</div>
-             <div className="text-4xl font-display font-bold">{calculatePace()}</div>
-             <div className="text-xs text-muted-foreground">/km</div>
+             <div className="text-muted-foreground text-[10px] uppercase tracking-wider mb-0.5">Pace</div>
+             <div className="text-2xl font-display font-bold">{calculatePace()}</div>
+             <div className="text-[10px] text-muted-foreground">/km</div>
           </div>
         </div>
 
@@ -348,30 +348,30 @@ export default function RunSession() {
           <Button 
             variant="outline" 
             size="icon" 
-            className="w-12 h-12 rounded-full border-white/10 hover:bg-white/10 hover:border-white/20"
+            className="w-10 h-10 rounded-full border-white/10 hover:bg-white/10 hover:border-white/20"
             onClick={handleStop}
             data-testid="button-stop"
           >
-            <Square className="w-4 h-4 fill-foreground" />
+            <Square className="w-3.5 h-3.5 fill-foreground" />
           </Button>
           
           <Button 
             size="icon" 
-            className="w-16 h-16 rounded-full bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-transform active:scale-95"
+            className="w-14 h-14 rounded-full bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-transform active:scale-95"
             onClick={() => setActive(!active)}
             data-testid="button-toggle-play"
           >
-            {active ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current ml-1" />}
+            {active ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-1" />}
           </Button>
           
           <Button 
             variant="outline" 
             size="icon" 
-            className="w-12 h-12 rounded-full border-white/10 hover:bg-white/10 hover:border-white/20"
+            className="w-10 h-10 rounded-full border-white/10 hover:bg-white/10 hover:border-white/20"
             onClick={() => setShowMap(!showMap)}
             data-testid="button-map"
           >
-            <Map className="w-4 h-4" />
+            <Map className="w-3.5 h-3.5" />
           </Button>
         </div>
       </div>
