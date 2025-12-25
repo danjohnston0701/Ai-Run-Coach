@@ -59,6 +59,7 @@ export default function RunSession() {
   const searchParams = new URLSearchParams(window.location.search);
   const targetDistance = searchParams.get("distance") || "5";
   const levelId = searchParams.get("level") || "beginner";
+  const mapped = searchParams.get("mapped") === "true";
   const lat = parseFloat(searchParams.get("lat") || "40.7128");
   const lng = parseFloat(searchParams.get("lng") || "-74.0060");
 
@@ -169,7 +170,11 @@ export default function RunSession() {
 
       {/* Background Map Visual */}
       <div className="absolute inset-0 z-0 opacity-20">
-        <img src={getMapImage()} className="w-full h-full object-cover" alt="Map Route" />
+        {mapped ? (
+          <img src={getMapImage()} className="w-full h-full object-cover" alt="Map Route" />
+        ) : (
+          <div className="w-full h-full bg-slate-900" />
+        )}
         <div className="absolute inset-0 bg-gradient-to-b from-background via-transparent to-background" />
       </div>
 
