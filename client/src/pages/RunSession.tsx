@@ -150,7 +150,7 @@ export default function RunSession() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col relative overflow-hidden font-sans">
+    <div className="h-screen w-full bg-background text-foreground flex flex-col relative overflow-hidden font-sans select-none">
       {/* Live Map View */}
       <AnimatePresence>
         {showMap && (
@@ -296,12 +296,12 @@ export default function RunSession() {
       </div>
 
       {/* Center AI Avatar */}
-      <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-6">
-        <div className="relative mb-8">
+      <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-6 min-h-0 py-4">
+        <div className="relative mb-4 flex-shrink-1 min-h-0 flex flex-col items-center">
            <div className={`absolute inset-0 bg-primary/20 blur-3xl rounded-full transition-all duration-1000 ${active ? 'scale-110 opacity-100' : 'scale-90 opacity-50'}`} />
            <img 
               src={coachAvatar} 
-              className="w-48 h-48 rounded-full border-4 border-primary/20 shadow-[0_0_50px_rgba(6,182,212,0.3)] object-cover relative z-10"
+              className="w-24 h-24 sm:w-32 sm:h-32 md:w-40 md:h-40 rounded-full border-4 border-primary/20 shadow-[0_0_50px_rgba(6,182,212,0.3)] object-cover relative z-10"
               alt="AI Coach"
             />
             
@@ -309,23 +309,25 @@ export default function RunSession() {
             <AnimatePresence>
               {message && (
                 <motion.div 
-                  initial={{ opacity: 0, y: 20, scale: 0.9 }}
+                  initial={{ opacity: 0, y: 10, scale: 0.9 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -10, scale: 0.9 }}
-                  className="absolute -bottom-24 left-1/2 -translate-x-1/2 w-64 bg-card/80 backdrop-blur-xl border border-primary/30 p-4 rounded-2xl text-center shadow-2xl"
+                  exit={{ opacity: 0, y: -5, scale: 0.9 }}
+                  className="mt-4 w-64 bg-card/80 backdrop-blur-xl border border-primary/30 p-3 rounded-2xl text-center shadow-2xl relative z-20"
                 >
-                  <p className="text-primary font-medium text-sm leading-relaxed">"{message}"</p>
+                  <p className="text-primary font-medium text-xs leading-relaxed">"{message}"</p>
                 </motion.div>
               )}
             </AnimatePresence>
         </div>
         
-        <VoiceVisualizer isActive={active && !!message} />
+        <div className="mt-2">
+          <VoiceVisualizer isActive={active && !!message} />
+        </div>
       </div>
 
       {/* Bottom Stats & Controls */}
-      <div className="relative z-10 bg-card/40 backdrop-blur-xl border-t border-white/10 rounded-t-3xl p-8 pb-12 mt-auto">
-        <div className="grid grid-cols-3 gap-4 mb-8 text-center">
+      <div className="relative z-10 bg-card/40 backdrop-blur-xl border-t border-white/10 rounded-t-3xl p-6 pb-8 mt-auto flex-shrink-0">
+        <div className="grid grid-cols-3 gap-2 mb-6 text-center">
           <div>
             <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Time</div>
             <div className="text-4xl font-display font-bold">{formatTime(time)}</div>
