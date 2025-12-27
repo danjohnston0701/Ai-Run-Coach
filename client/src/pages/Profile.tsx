@@ -30,10 +30,27 @@ export default function Profile() {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [showPhotoOptions, setShowPhotoOptions] = useState(false);
   const [showAddFriend, setShowAddFriend] = useState(false);
-  const [friendName, setFriendName] = useState("");
-  const [friendEmail, setFriendEmail] = useState("");
+  const [friendSearchQuery, setFriendSearchQuery] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  // Mock users database for search
+  const mockUsersDatabase = [
+    { name: "Sarah Jenkins", email: "sarah.j@example.com" },
+    { name: "Mike Ross", email: "m.ross@law.com" },
+    { name: "Jessica Pearson", email: "jessica@pearsonhardman.com" },
+    { name: "Harvey Specter", email: "harvey@win.com" },
+    { name: "Donna Paulsen", email: "donna@knowsall.com" },
+    { name: "Alex Williams", email: "alex.w@runner.com" },
+    { name: "Rachel Zane", email: "rachel@fitness.com" },
+  ];
+
+  const searchResults = friendSearchQuery.length > 1 
+    ? mockUsersDatabase.filter(user => 
+        user.name.toLowerCase().includes(friendSearchQuery.toLowerCase()) || 
+        user.email.toLowerCase().includes(friendSearchQuery.toLowerCase())
+      ).filter(user => !profile?.friends?.some(f => f.email === user.email))
+    : [];
 
   useEffect(() => {
     const savedProfile = localStorage.getItem("userProfile");
@@ -74,26 +91,20 @@ export default function Profile() {
     setProfile(prev => ({ ...prev!, [field]: value }));
   };
 
-  const handleAddFriend = () => {
+  const handleAddFriendFromSearch = (user: { name: string, email: string }) => {
     if (!profile) return;
     
-    if (!friendName.trim()) {
-      toast.error("Please enter a friend's name");
-      return;
-    }
-    
     const newFriend: Friend = {
-      name: friendName,
-      email: friendEmail || undefined
+      name: user.name,
+      email: user.email
     };
     
     const updatedFriends = [...(profile.friends || []), newFriend];
     const updatedProfile = { ...profile, friends: updatedFriends };
     setProfile(updatedProfile);
     
-    toast.success(`${friendName} added to your friends!`);
-    setFriendName("");
-    setFriendEmail("");
+    toast.success(`${user.name} added to your friends!`);
+    setFriendSearchQuery("");
     setShowAddFriend(false);
   };
 
@@ -387,39 +398,54 @@ export default function Profile() {
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
-                  className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10 space-y-3"
+                  className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10 space-y-4"
                 >
-                  <input
-                    type="text"
-                    value={friendName}
-                    onChange={(e) => setFriendName(e.target.value)}
-                    placeholder="Friend's name"
-                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-foreground text-sm focus:outline-none focus:border-primary transition-colors"
-                  />
-                  <input
-                    type="email"
-                    value={friendEmail}
-                    onChange={(e) => setFriendEmail(e.target.value)}
-                    placeholder="Email (optional)"
-                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-foreground text-sm focus:outline-none focus:border-primary transition-colors"
-                  />
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      onClick={() => setShowAddFriend(false)}
-                      variant="outline"
-                      className="flex-1 border-white/10 text-xs"
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="button"
-                      onClick={handleAddFriend}
-                      className="flex-1 bg-primary text-background text-xs hover:bg-primary/90"
-                    >
-                      Add Friend
-                    </Button>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={friendSearchQuery}
+                      onChange={(e) => setFriendSearchQuery(e.target.value)}
+                      placeholder="Search name or email..."
+                      className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-foreground text-sm focus:outline-none focus:border-primary transition-colors"
+                      autoFocus
+                    />
                   </div>
+
+                  <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                    {searchResults.length > 0 ? (
+                      searchResults.map((user, idx) => (
+                        <div 
+                          key={idx}
+                          onClick={() => handleAddFriendFromSearch(user)}
+                          className="flex items-center justify-between p-2 rounded-lg bg-white/5 border border-white/5 hover:border-primary/30 hover:bg-white/10 transition-all cursor-pointer group"
+                        >
+                          <div>
+                            <p className="text-xs font-medium text-foreground">{user.name}</p>
+                            <p className="text-[10px] text-muted-foreground">{user.email}</p>
+                          </div>
+                          <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] opacity-0 group-hover:opacity-100">
+                            Add
+                          </Button>
+                        </div>
+                      ))
+                    ) : friendSearchQuery.length > 1 ? (
+                      <p className="text-[10px] text-center text-muted-foreground py-2 italic">No matching runners found</p>
+                    ) : (
+                      <p className="text-[10px] text-center text-muted-foreground py-2 italic">Start typing to search...</p>
+                    )}
+                  </div>
+
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      setShowAddFriend(false);
+                      setFriendSearchQuery("");
+                    }}
+                    variant="outline"
+                    className="w-full border-white/10 text-[10px] h-8 font-bold uppercase tracking-widest"
+                  >
+                    Cancel
+                  </Button>
                 </motion.div>
               )}
             </AnimatePresence>
