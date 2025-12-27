@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
+import LandingPage from "@/pages/LandingPage";
 import Home from "@/pages/Home";
 import RunSession from "@/pages/RunSession";
 import RunHistory from "@/pages/RunHistory";
@@ -28,7 +29,12 @@ function Router() {
 
   return (
     <Switch>
-      {!hasProfile && <Route path="/" component={ProfileSetup} />}
+      {!hasProfile && (
+        <>
+          <Route path="/" component={LandingPage} />
+          <Route path="/setup" component={ProfileSetup} />
+        </>
+      )}
       {hasProfile && (
         <>
           <Route path="/" component={Home} />
