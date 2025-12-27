@@ -1,0 +1,101 @@
+Features 
+Target distance
+Target time or pace
+Map run route after session
+Listen for breathing pattern
+Give advice based on up and coming terrain
+
+
+Integrations
+Google maps API
+OpenAi - run Coach
+Device location 
+
+
+Privacy Policy and Use of Information & third party account data.
+Last updated: 27 December 2025
+
+1. Who we are
+This Privacy Policy explains how runcoach.live trading as Run Coach Ai (“we”, “us”) collects, uses, and discloses information when you use our Run Coach Ai application and when you connect third party fitness accounts, specifically and limited to Garmin Connect, Apple Fitness +, Samsung Health and Strava applications and programs.​
+
+If you have questions, you can contact us at:
+Email: support@runcoach.live
+
+2. What data we receive from the stated fitness account(s):
+When you connect your account to AI Run Coach, the provider may share the following categories of data with us, depending on your permissions and device:​
+
+Activity data: workout type (e.g., run), start time, duration, distance, pace, cadence, lap and split information, GPS route points, elevation.
+
+Physiological data: heart rate, heart-rate zones, calories.
+
+Device and account identifiers: internal activity IDs, device type, and anonymized user identifiers.
+
+We do not receive your account password or payment information.
+
+3. How we use your data:
+We use your activity data only to provide and improve the AI Run Coach service, including:​
+
+Generating real-time and post-run coaching feedback (e.g., pace and heart-rate guidance).
+
+Creating summaries of your runs, progress reports, and personalized training suggestions.
+
+Maintaining basic analytics about app performance and training effectiveness (e.g., overall weekly distance, trends in pace), using anonymized or aggregated data where possible.
+
+We do not use your data for unrelated purposes such as targeted advertising or selling user profiles.
+
+4. How we share and disclose data
+We may share your information only in these limited situations:​
+
+Service providers: With third-party processors that help us operate the app (e.g., cloud hosting, databases, AI model providers), under contracts that require them to protect your data and use it only on our instructions.
+
+Legal obligations and protection: When required by law, court order, or to protect our rights, safety, or the rights and safety of others.
+
+Business transfers: If we are involved in a merger, acquisition, or asset sale, we may transfer data as part of that transaction, subject to continued protection.
+
+We do not sell, rent, or license your fitness device activity data to advertisers or other third parties for their independent marketing purposes.​
+
+5. How long we keep your data
+We keep your Garmin activity data only for as long as necessary to provide the AI Run Coach service and for legitimate business or legal purposes.​
+
+In general:
+
+Activity records and derived coaching insights are stored while your account is active.
+
+If you disconnect any of the fitness devices or delete your account, we will stop receiving new data and will delete or irreversibly anonymize stored data within a reasonable period, unless we are legally required to retain it.
+
+6. Your rights and choices
+You have control over your fitness data in several ways:​
+
+Disconnect the account: You can revoke our access to your fitness device account at any time via the the connected party app settings or within our app’s “Connected Services” page. After disconnection, we will no longer receive new data from your account.
+
+Access, correction, deletion: You can contact us to request access to the data we hold about you, to correct inaccurate data, or to request deletion, subject to applicable law.
+
+Withdraw consent: Where our processing is based on your consent (for example, connecting Garmin), you can withdraw that consent at any time, and we will stop processing the relevant data going forward.
+
+To exercise these rights, contact us at support@runcoach.live. We may need to verify your identity before completing your request.
+
+7. Security
+We use appropriate technical and organizational measures to protect your personal data against unauthorized access, loss, misuse, alteration, or destruction.​
+
+Examples include:
+
+Encrypted connections (HTTPS/TLS) for data in transit.
+
+Restricted access to databases on a need-to-know basis.
+
+Regular security updates and monitoring of our infrastructure.
+
+However, no method of transmission or storage is completely secure, and we cannot guarantee absolute security.
+
+8. International transfers
+Depending on where you are located and where our servers and service providers are hosted, your data may be processed in countries other than your own, which may have different data protection laws.​
+
+When we transfer personal data internationally, we take steps to ensure an appropriate level of protection in line with applicable laws (for example, contractual safeguards).
+
+9. Children
+AI Run Coach is not directed at children under 16, and we do not knowingly collect personal data from children in this age group. If you believe a child under 16 has provided us data, please contact us and we will delete it.​
+
+10. Changes to this policy
+We may update this Privacy Policy from time to time to reflect changes in our practices or legal requirements.​
+
+When we make material changes, we will update the “Last updated” date at the top of this page and, where appropriate, notify you in the app or by email. Your continued use of AI Run Coach after any changes indicates acceptance of the updated policy.
