@@ -128,23 +128,39 @@ export default function Profile() {
     setLocation("/");
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem("userProfile");
+    toast.success("Logged out successfully");
+    window.location.href = "/";
+  };
+
   if (!profile) return null;
 
   return (
     <div className="min-h-screen bg-background text-foreground p-6">
-      <header className="mb-8 flex items-center gap-4">
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={() => setLocation("/")}
-          className="rounded-full border-white/10 hover:bg-white/10"
-        >
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
-        <div>
-          <h1 className="text-4xl font-display font-bold text-primary uppercase tracking-wider">Profile</h1>
-          <p className="text-muted-foreground text-sm">Manage your personal details</p>
+      <header className="mb-8 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setLocation("/")}
+            className="rounded-full border-white/10 hover:bg-white/10"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </Button>
+          <div>
+            <h1 className="text-4xl font-display font-bold text-primary uppercase tracking-wider">Profile</h1>
+            <p className="text-muted-foreground text-sm">Manage your personal details</p>
+          </div>
         </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleLogout}
+          className="text-red-400 hover:text-red-300 hover:bg-red-500/10 gap-2 uppercase tracking-widest text-[10px] font-bold"
+        >
+          Logout
+        </Button>
       </header>
 
       <motion.div
