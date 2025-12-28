@@ -91,27 +91,6 @@ export default function LandingPage() {
             </Button>
           </motion.div>
         </div>
-
-        {/* Floating Stats Mockup */}
-        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-full max-w-5xl px-6 grid grid-cols-2 md:grid-cols-4 gap-4 z-20">
-          {[
-            { label: "Active Runners", value: "50k+" },
-            { label: "Miles Coached", value: "2.4M" },
-            { label: "Smart Routes", value: "15k+" },
-            { label: "AI Messages", value: "1M+" }
-          ].map((stat, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.6 + i * 0.1 }}
-              className="bg-card/40 backdrop-blur-xl border border-white/10 p-4 rounded-2xl text-center"
-            >
-              <div className="text-2xl font-display font-bold text-primary">{stat.value}</div>
-              <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{stat.label}</div>
-            </motion.div>
-          ))}
-        </div>
       </section>
 
       {/* Features Grid */}
