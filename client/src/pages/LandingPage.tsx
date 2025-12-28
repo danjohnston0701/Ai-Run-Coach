@@ -169,8 +169,22 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <footer className="py-12 px-6 text-center border-t border-white/5 opacity-40">
-        <p className="text-[10px] uppercase tracking-[0.2em]">© 2025 AI Runner Coach • Designed for Peak Performance</p>
+      <footer className="py-12 px-6 text-center border-t border-white/5 opacity-60">
+        <p className="text-[10px] uppercase tracking-[0.2em] mb-4">© 2025 AI Runner Coach • Designed for Peak Performance</p>
+        <div className="flex items-center justify-center gap-6">
+          <button 
+            onClick={() => setLocation("/privacy")}
+            className="text-[10px] uppercase tracking-widest text-muted-foreground hover:text-primary transition-colors"
+          >
+            Privacy Policy
+          </button>
+          <button 
+            onClick={() => setLocation("/terms")}
+            className="text-[10px] uppercase tracking-widest text-muted-foreground hover:text-primary transition-colors"
+          >
+            Terms of Use
+          </button>
+        </div>
       </footer>
     </div>
   );

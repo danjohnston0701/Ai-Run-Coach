@@ -12,6 +12,8 @@ import RunHistory from "@/pages/RunHistory";
 import RunInsights from "@/pages/RunInsights";
 import ProfileSetup from "@/pages/ProfileSetup";
 import Profile from "@/pages/Profile";
+import PrivacyPolicy from "@/pages/PrivacyPolicy";
+import TermsOfUse from "@/pages/TermsOfUse";
 
 function Router() {
   const [hasProfile, setHasProfile] = useState(false);
@@ -29,6 +31,8 @@ function Router() {
 
   return (
     <Switch>
+      <Route path="/privacy" component={PrivacyPolicy} />
+      <Route path="/terms" component={TermsOfUse} />
       {!hasProfile && (
         <>
           <Route path="/" component={LandingPage} />
