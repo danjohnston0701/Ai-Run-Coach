@@ -13,7 +13,7 @@ import {
   Heart
 } from "lucide-react";
 
-import heroImage from "@assets/stock_images/runner_night_city_ne_03871464.jpg";
+import heroImage from "@assets/stock_images/cinematic_runner_nig_a3303f7d.jpg";
 
 export default function LandingPage() {
   const [, setLocation] = useLocation();
@@ -44,13 +44,13 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
       {/* Hero Section */}
-      <section className="relative min-h-screen flex items-center justify-center pt-20 pb-32 px-6">
+      <section className="relative min-h-screen flex items-center justify-center pt-20 pb-32 px-6 overflow-hidden">
         <div className="absolute inset-0 z-0">
-          <div className="absolute inset-0 bg-gradient-to-b from-background/20 via-background/60 to-background z-10" />
+          <div className="absolute inset-0 bg-gradient-to-b from-background/60 via-background/40 to-background z-10" />
           <img 
             src={heroImage} 
             alt="Hero Runner" 
-            className="w-full h-full object-cover opacity-60 grayscale hover:grayscale-0 transition-all duration-1000"
+            className="w-full h-full object-cover object-[65%_center] sm:object-center opacity-80 grayscale hover:grayscale-0 transition-all duration-1000 scale-125 sm:scale-100"
           />
         </div>
 
@@ -96,7 +96,7 @@ export default function LandingPage() {
       {/* Features Grid */}
       <section className="py-32 px-6 max-w-7xl mx-auto">
         <div className="text-center mb-20 space-y-4">
-          <h2 className="text-4xl md:text-5xl font-display font-bold uppercase tracking-tight">Built for Elite Performance</h2>
+          <h2 className="text-4xl md:text-5xl font-display font-bold uppercase tracking-tight">Unleash your potential with your personalized Ai Coach</h2>
           <p className="text-muted-foreground max-w-xl mx-auto">Our features are designed to push you further, safer, and smarter.</p>
         </div>
 
