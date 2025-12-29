@@ -128,29 +128,14 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Social Proof Section */}
+      {/* Global Community Section */}
       <section className="py-24 bg-primary/5 border-y border-white/5 px-6">
-        <div className="max-w-7xl mx-auto flex flex-col items-center text-center space-y-12">
+        <div className="max-w-7xl mx-auto flex flex-col items-center text-center space-y-8">
           <div className="space-y-4">
             <h2 className="text-3xl md:text-4xl font-display font-bold uppercase tracking-tight">A Global Community of Runners</h2>
-            <p className="text-muted-foreground max-w-2xl mx-auto text-sm md:text-base">
+            <p className="text-muted-foreground max-w-2xl mx-auto text-sm md:text-base leading-relaxed">
               Join runners from around the world, including <span className="text-primary font-bold">New Zealand</span>, <span className="text-primary font-bold">Australia</span>, <span className="text-primary font-bold">North America</span>, <span className="text-primary font-bold">South America</span>, <span className="text-primary font-bold">Canada</span>, <span className="text-primary font-bold">UK</span>, <span className="text-primary font-bold">India</span>, <span className="text-primary font-bold">Philippines</span>, and <span className="text-primary font-bold">Japan</span>.
             </p>
-          </div>
-
-          <div className="w-full h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-
-          <div className="max-w-4xl mx-auto space-y-8">
-            <h3 className="text-2xl font-display font-bold uppercase italic opacity-80">"The AI coach changed my marathon prep. It's like having a pro runner in my ear 24/7."</h3>
-            <div className="flex items-center justify-center gap-4">
-              <div className="w-12 h-12 rounded-full bg-muted overflow-hidden">
-                <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="User" />
-              </div>
-              <div className="text-left">
-                <div className="font-bold">David Chen</div>
-                <div className="text-xs text-muted-foreground uppercase tracking-widest">Marathon Finisher</div>
-              </div>
-            </div>
           </div>
         </div>
       </section>
