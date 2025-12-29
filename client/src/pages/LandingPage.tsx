@@ -43,6 +43,17 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
+      {/* Navigation */}
+      <nav className="fixed top-0 left-0 right-0 z-50 p-6 flex justify-end">
+        <Button 
+          variant="ghost" 
+          onClick={() => setLocation("/auth")}
+          className="text-primary hover:text-primary/80 hover:bg-primary/10 uppercase text-xs font-bold tracking-widest"
+        >
+          Login
+        </Button>
+      </nav>
+
       {/* Hero Section */}
       <section className="relative min-h-screen flex items-center justify-center pt-20 pb-32 px-6 overflow-hidden">
         <div className="absolute inset-0 z-0">
@@ -77,7 +88,7 @@ export default function LandingPage() {
             <Button 
               size="lg" 
               className="h-16 px-10 text-xl font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] group"
-              onClick={() => setLocation("/setup")}
+              onClick={() => setLocation("/auth")}
             >
               Start Your Journey
               <ArrowRight className="ml-2 w-6 h-6 group-hover:translate-x-1 transition-transform" />

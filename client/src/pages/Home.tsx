@@ -192,9 +192,9 @@ export default function Home() {
       <header className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-display font-bold text-primary uppercase tracking-wider">
-            {profile?.coachName || "AI Coach"}
+            {profile?.name}
           </h1>
-          <p className="text-muted-foreground text-sm">Welcome, {profile?.name}. Plan your run</p>
+          <p className="text-muted-foreground text-sm">Welcome, Plan your run with {profile?.coachName}  </p>
         </div>
         <motion.div 
           className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center border border-primary/50 cursor-pointer hover:bg-primary/30 transition-colors overflow-hidden"
