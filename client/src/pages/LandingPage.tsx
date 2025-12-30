@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 
 import heroImage from "@assets/stock_images/cinematic_runner_nig_a3303f7d.jpg";
-import logoImage from "@/assets/ChatGPT_Image_Dec_30,_2025,_06_32_22_PM_1767072940813.png";
+import logoImage from "@/assets/logo-transparent.png";
 
 export default function LandingPage() {
   const [, setLocation] = useLocation();
@@ -47,9 +47,7 @@ export default function LandingPage() {
       {/* Navigation */}
       <nav className="fixed top-0 left-0 right-0 z-50 p-6 flex justify-between items-center">
         <div className="flex items-center gap-2">
-          <div className="bg-white rounded-lg p-1">
-            <img src={logoImage} alt="AI Runner Coach Logo" className="w-16 h-16 object-contain" />
-          </div>
+          <img src={logoImage} alt="AI Runner Coach Logo" className="w-24 h-24 object-contain" />
           <span className="font-display font-bold uppercase tracking-tighter text-2xl hidden sm:block">AI Runner Coach</span>
         </div>
         <Button 
@@ -79,10 +77,10 @@ export default function LandingPage() {
             transition={{ duration: 0.8 }}
           >
             <h1 className="text-6xl md:text-8xl font-display font-black uppercase tracking-tighter leading-none mb-6">
-              Run with <span className="text-primary text-glow-lg">Intelligence</span>
+              Ai Run <span className="text-primary text-glow-lg">Coach</span>
             </h1>
             <p className="text-xl md:text-2xl text-muted-foreground font-medium max-w-2xl mx-auto leading-relaxed">
-              Experience the world's most advanced AI-powered running companion. Real-time coaching, smart routing, and social sharing.
+              Experience the world's most advanced AI-powered running companion. Real-time coaching, smart routing, social sharing and run analysis.
             </p>
           </motion.div>
 
@@ -155,15 +153,15 @@ export default function LandingPage() {
           <Button 
             size="lg" 
             className="h-16 px-12 text-xl font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_40px_rgba(6,182,212,0.5)]"
-            onClick={() => setLocation("/setup")}
+            onClick={() => setLocation("/auth")}
           >
-            Get Started Now
+            Pre-Register Today
           </Button>
         </div>
       </section>
 
       <footer className="py-12 px-6 text-center border-t border-white/5 opacity-60">
-        <p className="text-[10px] uppercase tracking-[0.2em] mb-4">© 2025 AI Runner Coach • Designed for Peak Performance</p>
+        <p className="text-[10px] uppercase tracking-[0.2em] mb-4">© 2025 AI Run Coach • Designed for Peak Performance</p>
         <div className="flex items-center justify-center gap-6">
           <button 
             onClick={() => setLocation("/privacy")}
