@@ -64,10 +64,10 @@ export default function Auth() {
           <Tabs defaultValue="login" className="w-full">
             <CardHeader className="text-center">
               <CardTitle className="text-3xl font-display font-bold uppercase tracking-tight">AI Runner Coach</CardTitle>
-              <CardDescription>Experience the future of personal training</CardDescription>
+              <CardDescription>Join the future of personal training</CardDescription>
               <TabsList className="grid w-full grid-cols-2 mt-6 bg-background/50 border border-white/5">
                 <TabsTrigger value="login" className="data-[state=active]:bg-primary data-[state=active]:text-background uppercase text-[10px] font-bold tracking-widest">Login</TabsTrigger>
-                <TabsTrigger value="signup" className="data-[state=active]:bg-primary data-[state=active]:text-background uppercase text-[10px] font-bold tracking-widest">Sign Up</TabsTrigger>
+                <TabsTrigger value="signup" className="data-[state=active]:bg-primary data-[state=active]:text-background uppercase text-[10px] font-bold tracking-widest">Pre-register</TabsTrigger>
               </TabsList>
             </CardHeader>
 
@@ -102,30 +102,22 @@ export default function Auth() {
               <form onSubmit={handleCreateAccount}>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
+                    <Label htmlFor="new-name">Full Name</Label>
+                    <div className="relative">
+                      <Input id="new-name" placeholder="John Doe" className="bg-background/50 border-white/10" required />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
                     <Label htmlFor="new-email">Email</Label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input id="new-email" type="email" placeholder="name@example.com" className="pl-10 bg-background/50 border-white/10" required />
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="new-password">Password</Label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input id="new-password" type="password" className="pl-10 bg-background/50 border-white/10" required />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="confirm-password">Confirm Password</Label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input id="confirm-password" type="password" className="pl-10 bg-background/50 border-white/10" required />
-                    </div>
-                  </div>
                 </CardContent>
                 <CardFooter>
                   <Button type="submit" className="w-full h-12 bg-primary text-background hover:bg-primary/90 font-bold uppercase tracking-widest" disabled={loading}>
-                    {loading ? "Creating Account..." : "Create Account"}
+                    {loading ? "Registering..." : "Pre-register for Updates"}
                     {!loading && <UserPlus className="ml-2 w-4 h-4" />}
                   </Button>
                 </CardFooter>

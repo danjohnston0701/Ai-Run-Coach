@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 import heroImage from "@assets/stock_images/cinematic_runner_nig_a3303f7d.jpg";
+import logoImage from "@assets/generated_images/modern_minimalist_fitness_app_logo.png";
 
 export default function LandingPage() {
   const [, setLocation] = useLocation();
@@ -44,7 +45,11 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
       {/* Navigation */}
-      <nav className="fixed top-0 left-0 right-0 z-50 p-6 flex justify-end">
+      <nav className="fixed top-0 left-0 right-0 z-50 p-6 flex justify-between items-center">
+        <div className="flex items-center gap-2">
+          <img src={logoImage} alt="AI Runner Coach Logo" className="w-10 h-10 object-contain brightness-110" />
+          <span className="font-display font-bold uppercase tracking-tighter text-xl hidden sm:block">AI Runner Coach</span>
+        </div>
         <Button 
           variant="ghost" 
           onClick={() => setLocation("/auth")}
@@ -90,7 +95,7 @@ export default function LandingPage() {
               className="h-16 px-10 text-xl font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] group"
               onClick={() => setLocation("/auth")}
             >
-              Start Your Journey
+              Pre-register for launch Updates
               <ArrowRight className="ml-2 w-6 h-6 group-hover:translate-x-1 transition-transform" />
             </Button>
             <Button 
