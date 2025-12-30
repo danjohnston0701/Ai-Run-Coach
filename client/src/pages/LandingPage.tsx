@@ -48,7 +48,7 @@ export default function LandingPage() {
       <nav className="absolute top-0 left-0 right-0 z-50 p-6 flex justify-between items-center">
         <div className="flex items-center gap-2">
           <img src={logoImage} alt="AI Runner Coach Logo" className="w-24 h-24 object-contain" />
-          <span className="font-display font-bold uppercase tracking-tighter text-2xl hidden sm:block">AI Runner Coach</span>
+          <span className="font-display font-bold uppercase tracking-tighter text-2xl hidden sm:block">AI Run Coach</span>
         </div>
         <Button 
           variant="ghost" 
