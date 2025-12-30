@@ -77,7 +77,7 @@ export default function LandingPage() {
             transition={{ duration: 0.8 }}
           >
             <h1 className="text-6xl md:text-8xl font-display font-black uppercase tracking-tighter leading-none mb-6">
-              Ai Run <span className="text-primary text-glow-lg">Coach</span>
+              <br/> Ai Run <span className="text-primary text-glow-lg">Coach</span>
             </h1>
             <p className="text-xl md:text-2xl text-muted-foreground font-medium max-w-2xl mx-auto leading-relaxed">
               Experience the world's most advanced AI-powered running companion. Real-time coaching, smart routing, social sharing and run analysis.
