@@ -12,31 +12,57 @@ import { toast } from "sonner";
 export default function Auth() {
   const [, setLocation] = useLocation();
   const [loading, setLoading] = useState(false);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [signupName, setSignupName] = useState("");
+  const [signupEmail, setSignupEmail] = useState("");
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    // Mock login logic
-    setTimeout(() => {
-      const userProfile = localStorage.getItem("userProfile");
-      if (userProfile) {
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: loginEmail, password: loginPassword }),
+      });
+      if (res.ok) {
+        const user = await res.json();
+        localStorage.setItem("userProfile", JSON.stringify(user));
         toast.success("Welcome back!");
-        setLocation("/");
+        window.location.href = "/";
       } else {
-        toast.error("Account not found. Please create one.");
-        setLoading(false);
+        toast.error("Invalid credentials. Please try again.");
       }
-    }, 1000);
+    } catch (error) {
+      toast.error("Login failed. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleCreateAccount = (e: React.FormEvent) => {
+  const handlePreRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    // Mock account creation
-    setTimeout(() => {
-      toast.success("Account created! Let's set up your profile.");
-      setLocation("/setup");
-    }, 1000);
+    try {
+      const res = await fetch("/api/pre-register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: signupName, email: signupEmail }),
+      });
+      if (res.ok) {
+        toast.success("You're on the list! We'll notify you when we launch.");
+        setSignupName("");
+        setSignupEmail("");
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Registration failed. Please try again.");
+      }
+    } catch (error) {
+      toast.error("Registration failed. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -78,14 +104,29 @@ export default function Auth() {
                     <Label htmlFor="email">Email</Label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input id="email" type="email" placeholder="name@example.com" className="pl-10 bg-background/50 border-white/10" required />
+                      <Input 
+                        id="email" 
+                        type="email" 
+                        placeholder="name@example.com" 
+                        className="pl-10 bg-background/50 border-white/10" 
+                        value={loginEmail}
+                        onChange={(e) => setLoginEmail(e.target.value)}
+                        required 
+                      />
                     </div>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="password">Password</Label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input id="password" type="password" className="pl-10 bg-background/50 border-white/10" required />
+                      <Input 
+                        id="password" 
+                        type="password" 
+                        className="pl-10 bg-background/50 border-white/10" 
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                        required 
+                      />
                     </div>
                   </div>
                 </CardContent>
@@ -99,19 +140,34 @@ export default function Auth() {
             </TabsContent>
 
             <TabsContent value="signup">
-              <form onSubmit={handleCreateAccount}>
+              <form onSubmit={handlePreRegister}>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="new-name">Full Name</Label>
                     <div className="relative">
-                      <Input id="new-name" placeholder="John Doe" className="bg-background/50 border-white/10" required />
+                      <Input 
+                        id="new-name" 
+                        placeholder="John Doe" 
+                        className="bg-background/50 border-white/10" 
+                        value={signupName}
+                        onChange={(e) => setSignupName(e.target.value)}
+                        required 
+                      />
                     </div>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="new-email">Email</Label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input id="new-email" type="email" placeholder="name@example.com" className="pl-10 bg-background/50 border-white/10" required />
+                      <Input 
+                        id="new-email" 
+                        type="email" 
+                        placeholder="name@example.com" 
+                        className="pl-10 bg-background/50 border-white/10" 
+                        value={signupEmail}
+                        onChange={(e) => setSignupEmail(e.target.value)}
+                        required 
+                      />
                     </div>
                   </div>
                 </CardContent>
