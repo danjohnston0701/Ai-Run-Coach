@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 
 import heroImage from "@assets/stock_images/cinematic_runner_nig_a3303f7d.jpg";
-import logoImage from "@assets/generated_images/modern_minimalist_fitness_app_logo.png";
+import logoImage from "@/assets/ChatGPT_Image_Dec_30,_2025,_06_32_22_PM_1767072940813.png";
 
 export default function LandingPage() {
   const [, setLocation] = useLocation();
@@ -47,8 +47,10 @@ export default function LandingPage() {
       {/* Navigation */}
       <nav className="fixed top-0 left-0 right-0 z-50 p-6 flex justify-between items-center">
         <div className="flex items-center gap-2">
-          <img src={logoImage} alt="AI Runner Coach Logo" className="w-10 h-10 object-contain brightness-110" />
-          <span className="font-display font-bold uppercase tracking-tighter text-xl hidden sm:block">AI Runner Coach</span>
+          <div className="bg-white rounded-lg p-1">
+            <img src={logoImage} alt="AI Runner Coach Logo" className="w-16 h-16 object-contain" />
+          </div>
+          <span className="font-display font-bold uppercase tracking-tighter text-2xl hidden sm:block">AI Runner Coach</span>
         </div>
         <Button 
           variant="ghost" 
