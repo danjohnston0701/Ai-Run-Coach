@@ -247,23 +247,57 @@ function calculatePathUniqueness(polyline: string): number {
   return uniqueSegments.size / segments.length;
 }
 
-const HIGHWAY_KEYWORDS = [
-  'highway', 'hwy', 'motorway', 'freeway', 'expressway', 'state highway',
-  'sh-', 'sh ', ' sh ', 'interstate', 'i-', ' i ', 'route ', 'rt ',
-  'national road', 'main road', 'arterial', 'thermal explorer'
-];
-
-function containsHighwaySegment(instructions: string[]): { hasHighway: boolean; matchedRoad?: string } {
-  for (const instruction of instructions) {
-    const lowerInstruction = instruction.toLowerCase();
-    for (const keyword of HIGHWAY_KEYWORDS) {
-      if (lowerInstruction.includes(keyword)) {
-        return { hasHighway: true, matchedRoad: instruction };
+function calculateLoopUniqueness(polyline: string, startLat: number, startLng: number): { uniqueness: number; midRouteReuse: number } {
+  const points = decodePolyline(polyline);
+  if (points.length < 10) return { uniqueness: 1.0, midRouteReuse: 0 };
+  
+  const gridSize = 0.0005;
+  const startGrid = `${Math.round(startLat / gridSize)},${Math.round(startLng / gridSize)}`;
+  
+  const segmentCounts: Map<string, number[]> = new Map();
+  
+  for (let i = 0; i < points.length - 1; i++) {
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const g1 = `${Math.round(p1.lat / gridSize)},${Math.round(p1.lng / gridSize)}`;
+    const g2 = `${Math.round(p2.lat / gridSize)},${Math.round(p2.lng / gridSize)}`;
+    
+    if (g1 !== g2) {
+      const segmentKey = [g1, g2].sort().join("->");
+      const positions = segmentCounts.get(segmentKey) || [];
+      positions.push(i);
+      segmentCounts.set(segmentKey, positions);
+    }
+  }
+  
+  let midRouteReuse = 0;
+  const startZoneEnd = Math.floor(points.length * 0.15);
+  const endZoneStart = Math.floor(points.length * 0.85);
+  
+  const segmentEntries = Array.from(segmentCounts.entries());
+  for (let i = 0; i < segmentEntries.length; i++) {
+    const positions = segmentEntries[i][1];
+    if (positions.length > 1) {
+      const allNearStartOrEnd = positions.every((pos: number) => pos < startZoneEnd || pos > endZoneStart);
+      if (!allNearStartOrEnd) {
+        midRouteReuse += positions.length - 1;
       }
     }
   }
-  return { hasHighway: false };
+  
+  let totalSegments = 0;
+  let uniqueSegments = 0;
+  const segmentValues = Array.from(segmentCounts.values());
+  for (let i = 0; i < segmentValues.length; i++) {
+    totalSegments += segmentValues[i].length;
+    uniqueSegments += 1;
+  }
+  
+  const uniqueness = totalSegments > 0 ? uniqueSegments / totalSegments : 1.0;
+  
+  return { uniqueness, midRouteReuse };
 }
+
 
 async function fetchDirectionsRoute(
   origin: { lat: number; lng: number },
@@ -274,8 +308,6 @@ async function fetchDirectionsRoute(
   polyline: string;
   success: boolean;
   error?: string;
-  hasHighway?: boolean;
-  matchedRoad?: string;
 }> {
   if (!GOOGLE_MAPS_API_KEY) {
     return { distance: 0, duration: 0, polyline: "", success: false, error: "No API key" };
@@ -299,28 +331,17 @@ async function fetchDirectionsRoute(
     const route = data.routes[0];
     let totalDistance = 0;
     let totalDuration = 0;
-    const allInstructions: string[] = [];
 
     for (const leg of route.legs) {
       totalDistance += leg.distance.value;
       totalDuration += leg.duration.value;
-      for (const step of leg.steps) {
-        if (step.html_instructions) {
-          const cleanInstruction = step.html_instructions.replace(/<[^>]*>/g, '');
-          allInstructions.push(cleanInstruction);
-        }
-      }
     }
-
-    const { hasHighway, matchedRoad } = containsHighwaySegment(allInstructions);
 
     return {
       distance: totalDistance / 1000,
       duration: Math.round(totalDuration / 60),
       polyline: route.overview_polyline.points,
       success: true,
-      hasHighway,
-      matchedRoad,
     };
   } catch (error) {
     console.error("Directions fetch error:", error);
@@ -357,8 +378,8 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
     let currentRadius = baseRadius * learnedRatio;
     let radiusStep = currentRadius * 0.3;
     
-    for (let step = 0; step < 8 && attempts < config.maxRetries; step++) {
-      attempts++;
+    for (let step = 0; step < 8 && validAttempts < config.maxRetries && totalAttempts < maxTotalAttempts; step++) {
+      totalAttempts++;
       
       const waypoints = generatePolygonWaypoints(
         request.startLat,
@@ -374,38 +395,42 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
       );
 
       if (!result.success) {
-        console.log(`Attempt ${attempts}: API error - ${result.error} (radius: ${currentRadius.toFixed(3)}km, rotation: ${rotation}°)`);
+        console.log(`Attempt ${totalAttempts}: API error - ${result.error} (radius: ${currentRadius.toFixed(3)}km, rotation: ${rotation}°)`);
         currentRadius += radiusStep * 0.5;
         continue;
       }
 
-      if (result.hasHighway) {
-        console.log(`Attempt ${attempts}: REJECTED - route uses highway/major road: "${result.matchedRoad}" (radius: ${currentRadius.toFixed(3)}km, rotation: ${rotation}°)`);
-        currentRadius *= 0.85;
-        continue;
-      }
-
       const diff = Math.abs(result.distance - targetDistance);
-      const uniqueness = calculatePathUniqueness(result.polyline);
+      const { uniqueness, midRouteReuse } = calculateLoopUniqueness(result.polyline, request.startLat, request.startLng);
       const { deadEndCount, deadEndPenalty } = detectDeadEndPatterns(result.polyline);
       const adjustedUniqueness = Math.max(0, uniqueness - deadEndPenalty);
+      
+      const hasMidRouteReuse = midRouteReuse > 2;
+      
+      if (hasMidRouteReuse) {
+        console.log(`Attempt ${totalAttempts}: REJECTED - route reuses paths mid-route (${midRouteReuse} segments) (radius: ${currentRadius.toFixed(3)}km, rotation: ${rotation}°)`);
+        currentRadius *= 1.1;
+        continue;
+      }
+      
+      validAttempts++;
       
       const observedRatio = targetDistance / result.distance;
       learnedRatio = learnedRatio * 0.7 + (learnedRatio * observedRatio) * 0.3;
       
-      console.log(`Attempt ${attempts}: ${result.distance.toFixed(2)}km (target: ${targetDistance}km, diff: ${diff.toFixed(2)}km, uniqueness: ${(adjustedUniqueness * 100).toFixed(1)}%, dead-ends: ${deadEndCount}, radius: ${currentRadius.toFixed(3)}km, ratio: ${observedRatio.toFixed(3)}, rotation: ${rotation}°)`);
+      console.log(`Attempt ${totalAttempts} (valid: ${validAttempts}): ${result.distance.toFixed(2)}km (target: ${targetDistance}km, diff: ${diff.toFixed(2)}km, uniqueness: ${(adjustedUniqueness * 100).toFixed(1)}%, dead-ends: ${deadEndCount}, midReuse: ${midRouteReuse}, radius: ${currentRadius.toFixed(3)}km, rotation: ${rotation}°)`);
 
       if (result.distance >= minDistance && result.distance <= maxDistance && adjustedUniqueness >= config.minUniqueRatio && deadEndCount <= 1) {
         const distVariance = ((result.distance - targetDistance) / targetDistance) * 100;
         const grade = gradeRoute(adjustedUniqueness, deadEndCount, distVariance);
-        console.log(`Found valid route on attempt ${attempts} with ${(adjustedUniqueness * 100).toFixed(1)}% uniqueness, ${deadEndCount} dead-ends, grade: ${grade}`);
+        console.log(`Found valid route on attempt ${totalAttempts} with ${(adjustedUniqueness * 100).toFixed(1)}% uniqueness, ${deadEndCount} dead-ends, grade: ${grade}`);
         return {
           success: true,
           waypoints,
           actualDistance: result.distance,
           duration: result.duration,
           polyline: result.polyline,
-          attempts,
+          attempts: totalAttempts,
           routeName: `${targetDistance}km ${request.difficulty} Loop`,
           uniquenessScore: adjustedUniqueness,
           routeGrade: grade,
@@ -421,7 +446,7 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
           actualDistance: result.distance,
           duration: result.duration,
           polyline: result.polyline,
-          attempts,
+          attempts: totalAttempts,
           routeName: `${targetDistance}km ${request.difficulty} Loop`,
           uniquenessScore: adjustedUniqueness,
         };
@@ -436,7 +461,7 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
           actualDistance: result.distance,
           duration: result.duration,
           polyline: result.polyline,
-          attempts,
+          attempts: totalAttempts,
           routeName: `${targetDistance}km ${request.difficulty} Loop`,
           uniquenessScore: adjustedUniqueness,
         };
@@ -465,7 +490,7 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
     if (isWithinTolerance && uniqueness >= config.minUniqueRatio && hasAcceptableDeadEnds) {
       console.log(`Using best route: ${bestResult.actualDistance.toFixed(2)}km (${variance.toFixed(1)}% variance, ${(uniqueness * 100).toFixed(1)}% unique, ${deadEndCount} dead-ends, grade: ${grade}) - within tolerance`);
       bestResult.success = true;
-      bestResult.attempts = attempts;
+      bestResult.attempts = totalAttempts;
       bestResult.routeGrade = grade;
       bestResult.deadEndCount = deadEndCount;
       return bestResult;
@@ -478,7 +503,7 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
         actualDistance: bestResult.actualDistance,
         duration: bestResult.duration,
         polyline: bestResult.polyline,
-        attempts,
+        attempts: totalAttempts,
         routeName: `${bestResult.actualDistance.toFixed(1)}km ${request.difficulty} Loop`,
         needsApproval: true,
         variancePercent: parseFloat(variance.toFixed(1)),
@@ -490,7 +515,7 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
     } else if (isWithinExtendedTolerance && uniqueness >= config.minUniqueRatio && hasAcceptableDeadEnds) {
       console.log(`Using best route: ${bestResult.actualDistance.toFixed(2)}km (${variance.toFixed(1)}% variance, ${(uniqueness * 100).toFixed(1)}% unique, ${deadEndCount} dead-ends, grade: ${grade}) - within extended tolerance`);
       bestResult.success = true;
-      bestResult.attempts = attempts;
+      bestResult.attempts = totalAttempts;
       bestResult.routeName = `${bestResult.actualDistance.toFixed(1)}km ${request.difficulty} Loop`;
       bestResult.routeGrade = grade;
       bestResult.deadEndCount = deadEndCount;
@@ -503,7 +528,7 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
         actualDistance: bestResult.actualDistance,
         duration: bestResult.duration,
         polyline: bestResult.polyline,
-        attempts,
+        attempts: totalAttempts,
         routeName: `${bestResult.actualDistance.toFixed(1)}km ${request.difficulty} Loop`,
         needsApproval: true,
         variancePercent: parseFloat(variance.toFixed(1)),
@@ -521,7 +546,7 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
     actualDistance: 0,
     duration: 0,
     polyline: "",
-    attempts,
+    attempts: totalAttempts,
     routeName: "",
     error: "Could not generate a valid route",
   };
