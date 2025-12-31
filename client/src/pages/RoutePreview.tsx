@@ -42,6 +42,17 @@ export default function RoutePreview() {
   const [selectedRoute, setSelectedRoute] = useState<RouteCandidate | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [coachName, setCoachName] = useState("Your AI Coach");
+
+  useEffect(() => {
+    const savedProfile = localStorage.getItem("userProfile");
+    if (savedProfile) {
+      const parsed = JSON.parse(savedProfile);
+      if (parsed.coachName) {
+        setCoachName(parsed.coachName);
+      }
+    }
+  }, []);
 
   const generateRoutes = async () => {
     setLoading(true);
@@ -207,8 +218,8 @@ export default function RoutePreview() {
           className="flex flex-col items-center justify-center py-20"
         >
           <Loader2 className="w-12 h-12 animate-spin text-primary mb-4" />
-          <p className="text-muted-foreground">AI is designing your routes...</p>
-          <p className="text-xs text-muted-foreground/60 mt-2">Analyzing terrain, parks, and roads to create optimal routes</p>
+          <p className="text-muted-foreground">{coachName} is generating your personalized route options</p>
+          <p className="text-xs text-muted-foreground/60 mt-2">Analyzing terrain, parks, and roads to find the perfect routes for you</p>
         </motion.div>
       )}
 
