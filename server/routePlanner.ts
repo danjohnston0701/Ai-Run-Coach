@@ -305,22 +305,24 @@ async function fetchSingleRoute(
 
 export async function generateMultipleRoutes(request: RouteRequest): Promise<MultiRouteResult> {
   const targetDistance = request.targetDistance;
-  const baseRadius = targetDistance / (2 * Math.PI);
+  // Roads typically add 60-100% extra distance vs straight-line, so use 0.45 correction factor
+  const baseRadius = (targetDistance / (2 * Math.PI)) * 0.45;
   
-  console.log(`Generating 9 route options for ${targetDistance}km`);
+  console.log(`Generating 9 route options for ${targetDistance}km (base radius: ${baseRadius.toFixed(3)}km)`);
   
+  // Vary radius modifiers to get different distances around the target
   const configurations = [
-    { waypointCount: 4, rotation: 0, radiusMod: 1.0 },
+    { waypointCount: 4, rotation: 0, radiusMod: 0.9 },
     { waypointCount: 4, rotation: 45, radiusMod: 1.0 },
-    { waypointCount: 4, rotation: 90, radiusMod: 1.0 },
-    { waypointCount: 5, rotation: 0, radiusMod: 1.0 },
+    { waypointCount: 4, rotation: 90, radiusMod: 1.1 },
+    { waypointCount: 5, rotation: 0, radiusMod: 0.85 },
     { waypointCount: 5, rotation: 60, radiusMod: 1.0 },
-    { waypointCount: 5, rotation: 120, radiusMod: 1.0 },
-    { waypointCount: 6, rotation: 0, radiusMod: 1.0 },
-    { waypointCount: 6, rotation: 30, radiusMod: 1.0 },
-    { waypointCount: 6, rotation: 60, radiusMod: 1.0 },
-    { waypointCount: 4, rotation: 135, radiusMod: 1.1 },
-    { waypointCount: 5, rotation: 180, radiusMod: 0.9 },
+    { waypointCount: 5, rotation: 120, radiusMod: 1.15 },
+    { waypointCount: 6, rotation: 0, radiusMod: 0.8 },
+    { waypointCount: 6, rotation: 30, radiusMod: 0.95 },
+    { waypointCount: 6, rotation: 60, radiusMod: 1.1 },
+    { waypointCount: 4, rotation: 135, radiusMod: 1.2 },
+    { waypointCount: 5, rotation: 180, radiusMod: 0.75 },
     { waypointCount: 6, rotation: 90, radiusMod: 1.05 },
   ];
   

@@ -304,7 +304,7 @@ export default function GoogleMapsRoute({
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
         </div>
       )}
-      <div ref={mapRef} className="w-full h-full min-h-[300px]" />
+      <div ref={mapRef} className="w-full h-full" style={{ minHeight: '100%' }} />
       {(routeName || routeInfo) && (
         <div className="absolute bottom-4 left-4 right-4 bg-background/90 backdrop-blur-sm rounded-lg p-3 border border-white/10">
           {routeName && <h3 className="font-bold text-sm text-foreground">{routeName}</h3>}
