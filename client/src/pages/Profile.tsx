@@ -466,13 +466,12 @@ export default function Profile() {
                 Date of Birth
               </label>
               <input
-                type="text"
+                type="date"
                 value={profile.dob}
-                readOnly
-                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-muted-foreground cursor-not-allowed opacity-60"
+                onChange={(e) => handleChange("dob", e.target.value)}
+                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors"
                 data-testid="input-dob"
               />
-              <p className="text-[10px] text-muted-foreground/60 mt-1 ml-1">Date of birth cannot be changed.</p>
             </div>
 
             <div>
