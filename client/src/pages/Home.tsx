@@ -55,9 +55,14 @@ export default function Home() {
   const [selectedLevel, setSelectedLevel] = useState("beginner");
   const [, setLocation] = useLocation();
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [userAddress, setUserAddress] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(true);
   const [locationError, setLocationError] = useState("");
   const [showLocationInput, setShowLocationInput] = useState(false);
+  const [showAddressSearch, setShowAddressSearch] = useState(false);
+  const [addressSearch, setAddressSearch] = useState("");
+  const [addressSuggestions, setAddressSuggestions] = useState<Array<{description: string; placeId: string}>>([]);
+  const [searchingAddress, setSearchingAddress] = useState(false);
   // Default to user's location near Don's Landing, Mangawhai Heads
   const [customLat, setCustomLat] = useState("-36.1040");
   const [customLng, setCustomLng] = useState("174.5922");
@@ -150,7 +155,7 @@ export default function Home() {
 
     // Try to get fresh GPS first, only fall back to saved location if GPS fails
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         console.log("GPS location captured:", position.coords.latitude, position.coords.longitude);
         const loc = {
           lat: position.coords.latitude,
@@ -163,8 +168,19 @@ export default function Home() {
         localStorage.setItem("userGpsLocation", JSON.stringify(loc));
         setLocationLoading(false);
         setLocationError("");
+        
+        // Fetch address for the coordinates
+        try {
+          const res = await fetch(`/api/geocode/reverse?lat=${loc.lat}&lng=${loc.lng}`);
+          const data = await res.json();
+          if (data.address) {
+            setUserAddress(data.address);
+          }
+        } catch (error) {
+          console.log("Failed to fetch address:", error);
+        }
       },
-      (error) => {
+      async (error) => {
         console.log("GPS location error:", error.code, error.message);
         // Only use saved location if GPS fails
         const savedLocation = localStorage.getItem("userGpsLocation");
@@ -175,6 +191,17 @@ export default function Home() {
           setCustomLat(loc.lat.toString());
           setCustomLng(loc.lng.toString());
           setLocationLoading(false);
+          
+          // Fetch address for saved location
+          try {
+            const res = await fetch(`/api/geocode/reverse?lat=${loc.lat}&lng=${loc.lng}`);
+            const data = await res.json();
+            if (data.address) {
+              setUserAddress(data.address);
+            }
+          } catch (err) {
+            console.log("Failed to fetch address:", err);
+          }
         } else {
           setLocationError("Enable location access to get personalized routes");
           setLocationLoading(false);
@@ -188,20 +215,80 @@ export default function Home() {
     );
   }, []);
 
+  const fetchAddressFromCoords = async (lat: number, lng: number) => {
+    try {
+      const res = await fetch(`/api/geocode/reverse?lat=${lat}&lng=${lng}`);
+      const data = await res.json();
+      if (data.address) {
+        setUserAddress(data.address);
+      }
+    } catch (error) {
+      console.log("Failed to fetch address:", error);
+    }
+  };
+
   const handleUseCustomLocation = () => {
     const newLoc = { lat: parseFloat(customLat), lng: parseFloat(customLng) };
     setUserLocation(newLoc);
     localStorage.setItem("userGpsLocation", JSON.stringify(newLoc));
     setShowLocationInput(false);
+    setShowAddressSearch(false);
+    fetchAddressFromCoords(newLoc.lat, newLoc.lng);
+  };
+
+  const handleAddressSearch = async (input: string) => {
+    setAddressSearch(input);
+    if (input.length < 3) {
+      setAddressSuggestions([]);
+      return;
+    }
+    
+    setSearchingAddress(true);
+    try {
+      const res = await fetch(`/api/places/autocomplete?input=${encodeURIComponent(input)}`);
+      const data = await res.json();
+      if (data.predictions) {
+        setAddressSuggestions(data.predictions);
+      }
+    } catch (error) {
+      console.log("Address search error:", error);
+    } finally {
+      setSearchingAddress(false);
+    }
+  };
+
+  const handleSelectAddress = async (placeId: string, description: string) => {
+    setSearchingAddress(true);
+    try {
+      const res = await fetch(`/api/places/details?placeId=${placeId}`);
+      const data = await res.json();
+      if (data.lat && data.lng) {
+        const newLoc = { lat: data.lat, lng: data.lng };
+        setUserLocation(newLoc);
+        setUserAddress(data.address || description);
+        setCustomLat(data.lat.toString());
+        setCustomLng(data.lng.toString());
+        localStorage.setItem("userGpsLocation", JSON.stringify(newLoc));
+        setAddressSuggestions([]);
+        setAddressSearch("");
+        setShowAddressSearch(false);
+        setShowLocationInput(false);
+      }
+    } catch (error) {
+      console.log("Failed to get place details:", error);
+    } finally {
+      setSearchingAddress(false);
+    }
   };
 
   const handleRefreshLocation = () => {
     setLocationLoading(true);
     setLocationError("");
+    setUserAddress(null);
     localStorage.removeItem("userGpsLocation");
     
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         console.log("Fresh GPS location:", position.coords.latitude, position.coords.longitude, "accuracy:", position.coords.accuracy);
         const loc = {
           lat: position.coords.latitude,
@@ -212,6 +299,17 @@ export default function Home() {
         setCustomLng(loc.lng.toString());
         localStorage.setItem("userGpsLocation", JSON.stringify(loc));
         setLocationLoading(false);
+        
+        // Fetch address
+        try {
+          const res = await fetch(`/api/geocode/reverse?lat=${loc.lat}&lng=${loc.lng}`);
+          const data = await res.json();
+          if (data.address) {
+            setUserAddress(data.address);
+          }
+        } catch (error) {
+          console.log("Failed to fetch address:", error);
+        }
       },
       (error) => {
         console.log("GPS refresh error:", error.code, error.message);
@@ -359,7 +457,7 @@ export default function Home() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <MapPin className="w-4 h-4 text-primary" />
-              <p className="text-xs text-primary">GPS location detected</p>
+              <p className="text-xs text-primary">Location</p>
             </div>
             <div className="flex items-center gap-2">
               <button 
@@ -371,7 +469,14 @@ export default function Home() {
                 {locationLoading ? "..." : "Refresh"}
               </button>
               <button 
-                onClick={() => setShowLocationInput(!showLocationInput)}
+                onClick={() => { setShowAddressSearch(!showAddressSearch); setShowLocationInput(false); }}
+                className="text-xs text-primary hover:text-primary/80 underline"
+                data-testid="button-search-address"
+              >
+                Search
+              </button>
+              <button 
+                onClick={() => { setShowLocationInput(!showLocationInput); setShowAddressSearch(false); }}
                 className="text-xs text-primary hover:text-primary/80 underline"
                 data-testid="button-edit-location"
               >
@@ -379,12 +484,54 @@ export default function Home() {
               </button>
             </div>
           </div>
+          {userAddress && (
+            <p className="text-xs text-primary mt-1 font-medium">
+              {userAddress}
+            </p>
+          )}
           <p className="text-[10px] text-primary/60 mt-1 font-mono">
             {userLocation.lat.toFixed(6)}, {userLocation.lng.toFixed(6)}
           </p>
-          <p className="text-[9px] text-muted-foreground/50 mt-1">
-            Wrong location? Click Edit to enter correct coordinates
-          </p>
+          {!userAddress && (
+            <p className="text-[9px] text-muted-foreground/50 mt-1">
+              Wrong location? Click Search to find your address
+            </p>
+          )}
+          
+          {showAddressSearch && (
+            <motion.div 
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              className="mt-3 space-y-2"
+            >
+              <input
+                type="text"
+                placeholder="Search for your address..."
+                value={addressSearch}
+                onChange={(e) => handleAddressSearch(e.target.value)}
+                className="w-full px-3 py-2 bg-card border border-white/10 rounded text-sm text-foreground"
+                data-testid="input-address-search"
+              />
+              {searchingAddress && (
+                <p className="text-xs text-muted-foreground">Searching...</p>
+              )}
+              {addressSuggestions.length > 0 && (
+                <div className="bg-card border border-white/10 rounded max-h-40 overflow-y-auto">
+                  {addressSuggestions.map((suggestion) => (
+                    <button
+                      key={suggestion.placeId}
+                      onClick={() => handleSelectAddress(suggestion.placeId, suggestion.description)}
+                      className="w-full px-3 py-2 text-left text-xs text-foreground hover:bg-primary/20 border-b border-white/5 last:border-0"
+                      data-testid={`suggestion-${suggestion.placeId}`}
+                    >
+                      {suggestion.description}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+          
           {showLocationInput && (
             <motion.div 
               initial={{ opacity: 0, height: 0 }}

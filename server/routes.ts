@@ -400,5 +400,141 @@ export async function registerRoutes(
     res.json({ apiKey: key });
   });
 
+  // Reverse geocoding: coordinates to address
+  app.get("/api/geocode/reverse", async (req, res) => {
+    try {
+      const { lat, lng } = req.query;
+      if (!lat || !lng) {
+        return res.status(400).json({ error: "Missing lat or lng parameter" });
+      }
+
+      const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: "Google Maps API key not configured" });
+      }
+
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}`
+      );
+      const data = await response.json();
+
+      if (data.status === "OK" && data.results.length > 0) {
+        const result = data.results[0];
+        res.json({
+          address: result.formatted_address,
+          placeId: result.place_id,
+          components: result.address_components
+        });
+      } else {
+        res.json({ address: null, error: data.status });
+      }
+    } catch (error) {
+      console.error("Reverse geocoding error:", error);
+      res.status(500).json({ error: "Failed to reverse geocode" });
+    }
+  });
+
+  // Forward geocoding: address to coordinates
+  app.get("/api/geocode/address", async (req, res) => {
+    try {
+      const { address } = req.query;
+      if (!address) {
+        return res.status(400).json({ error: "Missing address parameter" });
+      }
+
+      const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: "Google Maps API key not configured" });
+      }
+
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(String(address))}&key=${apiKey}`
+      );
+      const data = await response.json();
+
+      if (data.status === "OK" && data.results.length > 0) {
+        const result = data.results[0];
+        res.json({
+          address: result.formatted_address,
+          lat: result.geometry.location.lat,
+          lng: result.geometry.location.lng,
+          placeId: result.place_id
+        });
+      } else {
+        res.json({ address: null, lat: null, lng: null, error: data.status });
+      }
+    } catch (error) {
+      console.error("Geocoding error:", error);
+      res.status(500).json({ error: "Failed to geocode address" });
+    }
+  });
+
+  // Places autocomplete
+  app.get("/api/places/autocomplete", async (req, res) => {
+    try {
+      const { input } = req.query;
+      if (!input) {
+        return res.status(400).json({ error: "Missing input parameter" });
+      }
+
+      const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: "Google Maps API key not configured" });
+      }
+
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(String(input))}&types=address&key=${apiKey}`
+      );
+      const data = await response.json();
+
+      if (data.status === "OK") {
+        res.json({
+          predictions: data.predictions.map((p: any) => ({
+            description: p.description,
+            placeId: p.place_id
+          }))
+        });
+      } else {
+        res.json({ predictions: [], error: data.status });
+      }
+    } catch (error) {
+      console.error("Autocomplete error:", error);
+      res.status(500).json({ error: "Failed to get autocomplete suggestions" });
+    }
+  });
+
+  // Get place details (coordinates from place ID)
+  app.get("/api/places/details", async (req, res) => {
+    try {
+      const { placeId } = req.query;
+      if (!placeId) {
+        return res.status(400).json({ error: "Missing placeId parameter" });
+      }
+
+      const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: "Google Maps API key not configured" });
+      }
+
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=geometry,formatted_address&key=${apiKey}`
+      );
+      const data = await response.json();
+
+      if (data.status === "OK" && data.result) {
+        res.json({
+          address: data.result.formatted_address,
+          lat: data.result.geometry.location.lat,
+          lng: data.result.geometry.location.lng
+        });
+      } else {
+        res.json({ address: null, lat: null, lng: null, error: data.status });
+      }
+    } catch (error) {
+      console.error("Place details error:", error);
+      res.status(500).json({ error: "Failed to get place details" });
+    }
+  });
+
   return httpServer;
 }
