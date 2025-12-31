@@ -1,13 +1,15 @@
 import webpush from 'web-push';
 import { storage } from './storage';
 
-const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
-const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
-const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:contact@airuncoach.com';
-
 let isConfigured = false;
+let vapidPublicKey: string | null = null;
 
 export function initializePushNotifications() {
+  // Read keys at initialization time, not module load time
+  const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
+  const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
+  const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:contact@airuncoach.com';
+
   if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
     console.log('[Push] VAPID keys not configured. Push notifications disabled.');
     console.log('[Push] To enable, generate keys using: npx web-push generate-vapid-keys');
@@ -34,6 +36,7 @@ export function initializePushNotifications() {
       privateKeyClean
     );
     isConfigured = true;
+    vapidPublicKey = publicKeyClean;
     console.log('[Push] Web Push notifications initialized successfully');
     return true;
   } catch (error: any) {
@@ -49,7 +52,7 @@ export function isPushConfigured() {
 }
 
 export function getPublicVapidKey() {
-  return VAPID_PUBLIC_KEY || null;
+  return vapidPublicKey;
 }
 
 interface NotificationPayload {
