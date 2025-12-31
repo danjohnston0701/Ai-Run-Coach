@@ -16,6 +16,7 @@ export default function Auth() {
   const [loginPassword, setLoginPassword] = useState("");
   const [signupName, setSignupName] = useState("");
   const [signupEmail, setSignupEmail] = useState("");
+  const [signupPassword, setSignupPassword] = useState("");
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,19 +42,24 @@ export default function Auth() {
     }
   };
 
-  const handlePreRegister = async (e: React.FormEvent) => {
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await fetch("/api/pre-register", {
+      const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: signupName, email: signupEmail }),
+        body: JSON.stringify({ 
+          name: signupName, 
+          email: signupEmail, 
+          password: signupPassword 
+        }),
       });
       if (res.ok) {
-        toast.success("You're on the list! We'll notify you when we launch.");
-        setSignupName("");
-        setSignupEmail("");
+        const user = await res.json();
+        localStorage.setItem("userProfile", JSON.stringify(user));
+        toast.success("Account created! Let's set up your profile.");
+        window.location.href = "/setup";
       } else {
         const data = await res.json();
         toast.error(data.error || "Registration failed. Please try again.");
@@ -93,7 +99,7 @@ export default function Auth() {
               <CardDescription>Join the future of personal training</CardDescription>
               <TabsList className="grid w-full grid-cols-2 mt-6 bg-background/50 border border-white/5">
                 <TabsTrigger value="login" className="data-[state=active]:bg-primary data-[state=active]:text-background uppercase text-[10px] font-bold tracking-widest">Login</TabsTrigger>
-                <TabsTrigger value="signup" className="data-[state=active]:bg-primary data-[state=active]:text-background uppercase text-[10px] font-bold tracking-widest">Pre-register</TabsTrigger>
+                <TabsTrigger value="signup" className="data-[state=active]:bg-primary data-[state=active]:text-background uppercase text-[10px] font-bold tracking-widest">Sign Up</TabsTrigger>
               </TabsList>
             </CardHeader>
 
@@ -140,7 +146,7 @@ export default function Auth() {
             </TabsContent>
 
             <TabsContent value="signup">
-              <form onSubmit={handlePreRegister}>
+              <form onSubmit={handleSignup}>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="new-name">Full Name</Label>
@@ -170,10 +176,26 @@ export default function Auth() {
                       />
                     </div>
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="new-password">Password</Label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input 
+                        id="new-password" 
+                        type="password" 
+                        placeholder="Create a password"
+                        className="pl-10 bg-background/50 border-white/10" 
+                        value={signupPassword}
+                        onChange={(e) => setSignupPassword(e.target.value)}
+                        required 
+                        minLength={6}
+                      />
+                    </div>
+                  </div>
                 </CardContent>
                 <CardFooter>
                   <Button type="submit" className="w-full h-12 bg-primary text-background hover:bg-primary/90 font-bold uppercase tracking-widest" disabled={loading}>
-                    {loading ? "Registering..." : "Pre-register for Updates"}
+                    {loading ? "Creating Account..." : "Create Account"}
                     {!loading && <UserPlus className="ml-2 w-4 h-4" />}
                   </Button>
                 </CardFooter>
