@@ -3,6 +3,8 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertPreRegistrationSchema, insertUserSchema, insertRouteSchema, insertRunSchema, insertLiveRunSessionSchema } from "@shared/schema";
 import { z } from "zod";
+import { generateRoute, getCoachingAdvice, analyzeRunPerformance } from "./openai";
+import bcrypt from "bcryptjs";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -35,7 +37,8 @@ export async function registerRoutes(
       if (existing) {
         return res.status(400).json({ error: "Email already exists" });
       }
-      const user = await storage.createUser(data);
+      const hashedPassword = await bcrypt.hash(data.password, 10);
+      const user = await storage.createUser({ ...data, password: hashedPassword });
       const { password, ...safeUser } = user;
       res.status(201).json(safeUser);
     } catch (error) {
@@ -50,7 +53,11 @@ export async function registerRoutes(
     try {
       const { email, password } = req.body;
       const user = await storage.getUserByEmail(email);
-      if (!user || user.password !== password) {
+      if (!user) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+      const isValidPassword = await bcrypt.compare(password, user.password);
+      if (!isValidPassword) {
         return res.status(401).json({ error: "Invalid credentials" });
       }
       const { password: _, ...safeUser } = user;
@@ -273,6 +280,113 @@ export async function registerRoutes(
     } catch (error) {
       res.status(500).json({ error: "Search failed" });
     }
+  });
+
+  // AI Route Generation endpoint
+  app.post("/api/ai/generate-route", async (req, res) => {
+    try {
+      const { startLat, startLng, distance, difficulty, terrainPreference, userFitnessLevel, userId } = req.body;
+      
+      if (startLat === undefined || startLat === null || 
+          startLng === undefined || startLng === null || 
+          !distance || !difficulty) {
+        return res.status(400).json({ error: "Missing required fields: startLat, startLng, distance, difficulty" });
+      }
+
+      const generatedRoute = await generateRoute({
+        startLat,
+        startLng,
+        distance,
+        difficulty,
+        terrainPreference,
+        userFitnessLevel
+      });
+
+      const savedRoute = await storage.createRoute({
+        userId: userId || null,
+        name: generatedRoute.name,
+        distance,
+        difficulty,
+        startLat,
+        startLng,
+        endLat: startLat,
+        endLng: startLng,
+        waypoints: generatedRoute.waypoints,
+        elevation: generatedRoute.elevation,
+        estimatedTime: generatedRoute.estimatedTime,
+        terrainType: terrainPreference || "mixed"
+      });
+
+      res.status(201).json({
+        ...savedRoute,
+        tips: generatedRoute.tips,
+        description: generatedRoute.description
+      });
+    } catch (error) {
+      console.error("Route generation error:", error);
+      res.status(500).json({ error: "Failed to generate route" });
+    }
+  });
+
+  // AI Coaching endpoint
+  app.post("/api/ai/coaching", async (req, res) => {
+    try {
+      const { currentPace, targetPace, heartRate, elapsedTime, distanceCovered, totalDistance, difficulty, userFitnessLevel } = req.body;
+      
+      if (!currentPace || !targetPace || elapsedTime === undefined || distanceCovered === undefined || !totalDistance) {
+        return res.status(400).json({ error: "Missing required coaching parameters" });
+      }
+
+      const advice = await getCoachingAdvice({
+        currentPace,
+        targetPace,
+        heartRate,
+        elapsedTime,
+        distanceCovered,
+        totalDistance,
+        difficulty: difficulty || "moderate",
+        userFitnessLevel
+      });
+
+      res.json(advice);
+    } catch (error) {
+      console.error("Coaching error:", error);
+      res.status(500).json({ error: "Failed to get coaching advice" });
+    }
+  });
+
+  // AI Run Analysis endpoint
+  app.post("/api/ai/analyze-run", async (req, res) => {
+    try {
+      const { distance, duration, avgPace, avgHeartRate, difficulty, userFitnessLevel } = req.body;
+      
+      if (!distance || !duration || !avgPace) {
+        return res.status(400).json({ error: "Missing required run data" });
+      }
+
+      const analysis = await analyzeRunPerformance({
+        distance,
+        duration,
+        avgPace,
+        avgHeartRate,
+        difficulty: difficulty || "moderate",
+        userFitnessLevel
+      });
+
+      res.json({ analysis });
+    } catch (error) {
+      console.error("Analysis error:", error);
+      res.status(500).json({ error: "Failed to analyze run" });
+    }
+  });
+
+  // Google Maps API key endpoint (for frontend)
+  app.get("/api/config/maps-key", (req, res) => {
+    const key = process.env.GOOGLE_MAPS_API_KEY;
+    if (!key) {
+      return res.status(500).json({ error: "Google Maps API key not configured" });
+    }
+    res.json({ apiKey: key });
   });
 
   return httpServer;
