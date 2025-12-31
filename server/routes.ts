@@ -854,7 +854,7 @@ export async function registerRoutes(
         // Notify requester that their request was accepted
         const addressee = await storage.getUser(request.addresseeId);
         if (addressee) {
-          await sendFriendAcceptedNotification(request.requesterId, addressee.name);
+          await sendFriendAcceptedNotification(request.requesterId, addressee.name, addressee.email);
         }
       }
 

@@ -123,11 +123,12 @@ export async function sendFriendRequestNotification(
 
 export async function sendFriendAcceptedNotification(
   requesterId: string,
-  addresseeName: string
+  addresseeName: string,
+  addresseeEmail: string
 ): Promise<boolean> {
   return sendPushNotification(requesterId, {
     title: 'Friend Request Accepted',
-    body: `${addresseeName} accepted your friend request!`,
+    body: `${addresseeName} (${addresseeEmail}) accepted your friend request!`,
     icon: '/favicon.ico',
     tag: 'friend-accepted',
     data: { type: 'friend-accepted' },
