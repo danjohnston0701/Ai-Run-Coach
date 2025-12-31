@@ -181,6 +181,9 @@ export default function Home() {
     const lat = userLocation?.lat ?? parseFloat(customLat);
     const lng = userLocation?.lng ?? parseFloat(customLng);
     
+    console.log("handleMapRun - userLocation state:", userLocation);
+    console.log("handleMapRun - using coordinates:", { lat, lng });
+    
     const params = new URLSearchParams({
       distance: distance[0].toString(),
       level: selectedLevel,

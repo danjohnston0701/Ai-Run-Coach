@@ -28,10 +28,13 @@ export default function RoutePreview() {
   const distance = parseFloat(params.get("distance") || "5");
   const level = params.get("level") || "beginner";
   // Default to Mangawhai, New Zealand if no location provided
-  const lat = parseFloat(params.get("lat") || "-36.1316");
-  const lng = parseFloat(params.get("lng") || "174.5755");
+  const latParam = params.get("lat");
+  const lngParam = params.get("lng");
+  const lat = parseFloat(latParam || "-36.1316");
+  const lng = parseFloat(lngParam || "174.5755");
   
-  console.log("Route generation with coordinates:", { lat, lng, distance, level });
+  console.log("RoutePreview - URL params:", { latParam, lngParam });
+  console.log("RoutePreview - parsed coordinates:", { lat, lng, distance, level });
 
   const [route, setRoute] = useState<GeneratedRoute | null>(null);
   const [loading, setLoading] = useState(true);
