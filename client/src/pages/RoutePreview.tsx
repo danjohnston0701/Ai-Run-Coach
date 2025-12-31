@@ -3,7 +3,7 @@ import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
-import { ArrowLeft, Play, MapPin, Loader2, RefreshCw, Lightbulb, Mountain, Clock, Route, AlertTriangle, Check, X } from "lucide-react";
+import { ArrowLeft, Play, MapPin, Loader2, RefreshCw, Lightbulb, Route, AlertTriangle, Check, X } from "lucide-react";
 import GoogleMapsRoute from "@/components/GoogleMapsRoute";
 
 interface GeneratedRoute {
@@ -16,8 +16,6 @@ interface GeneratedRoute {
   startLng: number;
   waypoints: Array<{ lat: number; lng: number }>;
   polyline?: string;
-  elevation: number | null;
-  estimatedTime: number | null;
   tips?: string[];
   description?: string;
   variance?: string;
@@ -81,8 +79,6 @@ export default function RoutePreview() {
         startLng: lng,
         waypoints: data.waypoints,
         polyline: data.polyline,
-        elevation: null,
-        estimatedTime: data.duration,
         variance: data.variance,
         attempts: data.attempts,
         needsApproval: data.needsApproval,
@@ -172,31 +168,16 @@ export default function RoutePreview() {
             startLng={lng}
             routeName={route.name}
             distance={route.actualDistance || route.distance}
-            estimatedTime={route.estimatedTime || undefined}
             polyline={route.polyline}
             className="h-[350px]"
           />
 
-          <div className="grid grid-cols-3 gap-3">
-            <Card className="bg-card/50 border-white/10">
+          <div className="flex justify-center">
+            <Card className="bg-card/50 border-white/10 w-32">
               <CardContent className="p-4 text-center">
                 <Route className="w-5 h-5 text-primary mx-auto mb-2" />
                 <p className="text-2xl font-display font-bold text-primary">{(route.actualDistance || route.distance).toFixed(1)}</p>
                 <p className="text-xs text-muted-foreground uppercase">km</p>
-              </CardContent>
-            </Card>
-            <Card className="bg-card/50 border-white/10">
-              <CardContent className="p-4 text-center">
-                <Clock className="w-5 h-5 text-primary mx-auto mb-2" />
-                <p className="text-2xl font-display font-bold text-primary">{route.estimatedTime || "--"}</p>
-                <p className="text-xs text-muted-foreground uppercase">min</p>
-              </CardContent>
-            </Card>
-            <Card className="bg-card/50 border-white/10">
-              <CardContent className="p-4 text-center">
-                <Mountain className="w-5 h-5 text-primary mx-auto mb-2" />
-                <p className="text-2xl font-display font-bold text-primary">{route.elevation || 0}</p>
-                <p className="text-xs text-muted-foreground uppercase">m elev</p>
               </CardContent>
             </Card>
           </div>

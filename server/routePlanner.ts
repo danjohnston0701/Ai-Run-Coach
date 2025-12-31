@@ -8,7 +8,6 @@ export interface RouteConfig {
   waypointCount: number;
   maxRetries: number;
   minUniqueRatio: number;
-  maxElevationGuidance: number;
 }
 
 export const DIFFICULTY_PRESETS: Record<string, RouteConfig> = {
@@ -16,19 +15,16 @@ export const DIFFICULTY_PRESETS: Record<string, RouteConfig> = {
     waypointCount: 4,
     maxRetries: 30,
     minUniqueRatio: 0.65,
-    maxElevationGuidance: 50,
   },
   moderate: {
     waypointCount: 5,
     maxRetries: 30,
     minUniqueRatio: 0.70,
-    maxElevationGuidance: 150,
   },
   expert: {
     waypointCount: 6,
     maxRetries: 30,
     minUniqueRatio: 0.75,
-    maxElevationGuidance: 300,
   },
 };
 

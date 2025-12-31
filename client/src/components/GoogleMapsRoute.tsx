@@ -12,7 +12,6 @@ interface GoogleMapsRouteProps {
   startLng: number;
   routeName?: string;
   distance?: number;
-  estimatedTime?: number;
   polyline?: string;
   className?: string;
 }
@@ -30,14 +29,13 @@ export default function GoogleMapsRoute({
   startLng,
   routeName,
   distance,
-  estimatedTime,
   polyline,
   className = "",
 }: GoogleMapsRouteProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [routeInfo, setRouteInfo] = useState<{ distance: string; duration: string } | null>(null);
+  const [routeInfo, setRouteInfo] = useState<{ distance: string } | null>(null);
   const mapInstanceRef = useRef<any>(null);
 
   useEffect(() => {
@@ -123,10 +121,9 @@ export default function GoogleMapsRoute({
         bounds.extend(center);
         map.fitBounds(bounds);
         
-        if (distance && estimatedTime) {
+        if (distance) {
           setRouteInfo({
             distance: distance.toFixed(2) + " km",
-            duration: estimatedTime + " min",
           });
         }
         setLoading(false);
@@ -205,7 +202,6 @@ export default function GoogleMapsRoute({
             
             setRouteInfo({
               distance: (totalDistance / 1000).toFixed(2) + " km",
-              duration: Math.round(totalDuration / 60) + " min",
             });
             setLoading(false);
           } else {
@@ -235,7 +231,6 @@ export default function GoogleMapsRoute({
                 });
                 setRouteInfo({
                   distance: (totalDistance / 1000).toFixed(2) + " km",
-                  duration: Math.round(totalDuration / 60) + " min",
                 });
               } else {
                 console.log("Simplified route also failed:", simpleStatus);
