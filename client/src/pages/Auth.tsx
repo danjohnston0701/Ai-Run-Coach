@@ -17,6 +17,7 @@ export default function Auth() {
   const [signupName, setSignupName] = useState("");
   const [signupEmail, setSignupEmail] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
+  const [signupConfirmPassword, setSignupConfirmPassword] = useState("");
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,6 +45,12 @@ export default function Auth() {
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (signupPassword !== signupConfirmPassword) {
+      toast.error("Passwords do not match");
+      return;
+    }
+    
     console.log("Signup form submitted", { signupName, signupEmail });
     setLoading(true);
     try {
@@ -194,6 +201,23 @@ export default function Auth() {
                         onChange={(e) => setSignupPassword(e.target.value)}
                         required 
                         minLength={6}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="confirm-password">Confirm Password</Label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input 
+                        id="confirm-password" 
+                        type="password" 
+                        placeholder="Confirm your password"
+                        className="pl-10 bg-background/50 border-white/10" 
+                        value={signupConfirmPassword}
+                        onChange={(e) => setSignupConfirmPassword(e.target.value)}
+                        required 
+                        minLength={6}
+                        data-testid="input-confirm-password"
                       />
                     </div>
                   </div>
