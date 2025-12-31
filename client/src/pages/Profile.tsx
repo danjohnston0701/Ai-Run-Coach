@@ -179,17 +179,27 @@ export default function Profile() {
   });
 
   const respondMutation = useMutation({
-    mutationFn: async ({ requestId, action }: { requestId: string; action: 'accept' | 'reject' }) => {
+    mutationFn: async ({ requestId, action, requesterName, requesterEmail }: { requestId: string; action: 'accept' | 'reject'; requesterName?: string; requesterEmail?: string }) => {
       const res = await apiRequest('POST', `/api/friend-requests/${requestId}/respond`, {
         action,
         userId: profile?.id,
       });
-      return res.json();
+      return { response: await res.json(), requesterName, requesterEmail, action };
     },
-    onSuccess: (_, { action }) => {
+    onSuccess: ({ requesterName, requesterEmail, action }) => {
       toast.success(action === 'accept' ? 'Friend added!' : 'Request declined');
       queryClient.invalidateQueries({ queryKey: ['friend-requests-incoming'] });
-      queryClient.invalidateQueries({ queryKey: ['friends'] });
+      
+      if (action === 'accept' && profile && requesterName) {
+        const newFriend: Friend = {
+          name: requesterName,
+          email: requesterEmail,
+        };
+        const updatedFriends = [...(profile.friends || []), newFriend];
+        const updatedProfile = { ...profile, friends: updatedFriends };
+        setProfile(updatedProfile);
+        localStorage.setItem("userProfile", JSON.stringify(updatedProfile));
+      }
     },
     onError: (error: Error) => {
       toast.error(error.message || 'Failed to respond to request');
@@ -604,7 +614,12 @@ export default function Profile() {
                         <Button
                           type="button"
                           size="sm"
-                          onClick={() => respondMutation.mutate({ requestId: request.id, action: 'accept' })}
+                          onClick={() => respondMutation.mutate({ 
+                            requestId: request.id, 
+                            action: 'accept',
+                            requesterName: request.requesterName,
+                            requesterEmail: request.requesterEmail
+                          })}
                           disabled={respondMutation.isPending}
                           className="h-7 px-2 bg-green-500/20 hover:bg-green-500/30 text-green-500"
                           data-testid={`button-accept-${request.id}`}

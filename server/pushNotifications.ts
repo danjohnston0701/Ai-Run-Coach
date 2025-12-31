@@ -15,17 +15,31 @@ export function initializePushNotifications() {
     return false;
   }
 
+  // Validate key format before attempting to initialize
+  const publicKeyClean = VAPID_PUBLIC_KEY.trim();
+  const privateKeyClean = VAPID_PRIVATE_KEY.trim();
+  
+  if (publicKeyClean.length < 80 || privateKeyClean.length < 40) {
+    console.log('[Push] VAPID keys appear to be incomplete or truncated.');
+    console.log('[Push] Public key length:', publicKeyClean.length, '(expected ~87 chars)');
+    console.log('[Push] Private key length:', privateKeyClean.length, '(expected ~43 chars)');
+    console.log('[Push] Push notifications disabled. Please regenerate keys with: npx web-push generate-vapid-keys');
+    return false;
+  }
+
   try {
     webpush.setVapidDetails(
       VAPID_SUBJECT,
-      VAPID_PUBLIC_KEY,
-      VAPID_PRIVATE_KEY
+      publicKeyClean,
+      privateKeyClean
     );
     isConfigured = true;
     console.log('[Push] Web Push notifications initialized successfully');
     return true;
-  } catch (error) {
-    console.error('[Push] Failed to initialize:', error);
+  } catch (error: any) {
+    console.log('[Push] Failed to initialize:', error.message);
+    console.log('[Push] Push notifications disabled. The app will continue to work without push notifications.');
+    console.log('[Push] To fix, regenerate VAPID keys and update the secrets.');
     return false;
   }
 }
