@@ -45,6 +45,7 @@ function Router() {
       {hasProfile && (
         <>
           <Route path="/" component={Home} />
+          <Route path="/setup" component={ProfileSetup} />
           <Route path="/route-preview" component={RoutePreview} />
           <Route path="/run" component={RunSession} />
           <Route path="/history" component={RunHistory} />
