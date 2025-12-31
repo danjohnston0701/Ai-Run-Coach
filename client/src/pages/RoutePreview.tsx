@@ -10,6 +10,7 @@ interface GeneratedRoute {
   id: string;
   name: string;
   distance: number;
+  actualDistance: number;
   difficulty: string;
   startLat: number;
   startLng: number;
@@ -18,6 +19,8 @@ interface GeneratedRoute {
   estimatedTime: number | null;
   tips?: string[];
   description?: string;
+  variance?: string;
+  attempts?: number;
 }
 
 export default function RoutePreview() {
@@ -45,29 +48,37 @@ export default function RoutePreview() {
     setError(null);
     
     try {
-      const userProfile = localStorage.getItem("userProfile");
-      const profile = userProfile ? JSON.parse(userProfile) : null;
-      
-      const res = await fetch("/api/ai/generate-route", {
+      const res = await fetch("/api/routes/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           startLat: lat,
           startLng: lng,
-          distance,
+          targetDistance: distance,
           difficulty: level,
-          terrainPreference: level === "beginner" ? "flat" : level === "expert" ? "hilly" : "mixed",
-          userFitnessLevel: profile?.fitnessLevel || "intermediate",
-          userId: profile?.id || null,
         }),
       });
 
       if (!res.ok) {
-        throw new Error("Failed to generate route");
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to generate route");
       }
 
       const data = await res.json();
-      setRoute(data);
+      setRoute({
+        id: `route-${Date.now()}`,
+        name: data.routeName || `${distance}km ${level} Loop`,
+        distance: distance,
+        actualDistance: data.actualDistance,
+        difficulty: level,
+        startLat: lat,
+        startLng: lng,
+        waypoints: data.waypoints,
+        elevation: null,
+        estimatedTime: data.duration,
+        variance: data.variance,
+        attempts: data.attempts,
+      });
     } catch (err) {
       setError("Failed to generate route. Please try again.");
       console.error(err);
@@ -158,7 +169,7 @@ export default function RoutePreview() {
             <Card className="bg-card/50 border-white/10">
               <CardContent className="p-4 text-center">
                 <Route className="w-5 h-5 text-primary mx-auto mb-2" />
-                <p className="text-2xl font-display font-bold text-primary">{route.distance.toFixed(1)}</p>
+                <p className="text-2xl font-display font-bold text-primary">{(route.actualDistance || route.distance).toFixed(1)}</p>
                 <p className="text-xs text-muted-foreground uppercase">km</p>
               </CardContent>
             </Card>

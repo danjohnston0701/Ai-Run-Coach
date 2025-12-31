@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { insertPreRegistrationSchema, insertUserSchema, insertRouteSchema, insertRunSchema, insertLiveRunSessionSchema } from "@shared/schema";
 import { z } from "zod";
 import { generateRoute, getCoachingAdvice, analyzeRunPerformance } from "./openai";
+import { generateCircularRoute } from "./routePlanner";
 import bcrypt from "bcryptjs";
 
 export async function registerRoutes(
@@ -125,6 +126,44 @@ export async function registerRoutes(
       res.json(routes);
     } catch (error) {
       res.status(500).json({ error: "Failed to get routes" });
+    }
+  });
+
+  // Circular route generation with distance validation
+  app.post("/api/routes/generate", async (req, res) => {
+    try {
+      const { startLat, startLng, targetDistance, difficulty } = req.body;
+      
+      if (startLat === undefined || startLat === null || 
+          startLng === undefined || startLng === null || 
+          targetDistance === undefined || targetDistance === null || 
+          !difficulty) {
+        return res.status(400).json({ error: "Missing required parameters" });
+      }
+
+      const result = await generateCircularRoute({
+        startLat: parseFloat(startLat),
+        startLng: parseFloat(startLng),
+        targetDistance: parseFloat(targetDistance),
+        difficulty: difficulty as "beginner" | "moderate" | "expert",
+      });
+
+      if (!result.success) {
+        return res.status(400).json({ error: result.error || "Could not generate route" });
+      }
+
+      res.json({
+        waypoints: result.waypoints,
+        actualDistance: result.actualDistance,
+        duration: result.duration,
+        polyline: result.polyline,
+        attempts: result.attempts,
+        routeName: result.routeName,
+        variance: ((result.actualDistance - targetDistance) / targetDistance * 100).toFixed(1),
+      });
+    } catch (error) {
+      console.error("Route generation error:", error);
+      res.status(500).json({ error: "Failed to generate route" });
     }
   });
 
