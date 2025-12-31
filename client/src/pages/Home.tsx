@@ -154,6 +154,9 @@ export default function Home() {
       const loc = JSON.parse(savedLocation);
       console.log("Using saved GPS location:", loc);
       setUserLocation(loc);
+      // Also update custom coordinates as fallback
+      setCustomLat(loc.lat.toString());
+      setCustomLng(loc.lng.toString());
     }
     
     navigator.geolocation.getCurrentPosition(
