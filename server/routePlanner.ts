@@ -380,65 +380,94 @@ export async function generateMultipleRoutes(request: RouteRequest): Promise<Mul
     return { success: false, routes: [], error: "Could not generate any routes" };
   }
   
-  // RULE: Routes with major roads MUST remain "hard" - never downgrade
   // Sort all candidates by difficulty score (ascending: easiest first)
   const sortedByScore = [...candidates].sort((a, b) => a.difficultyScore - b.difficultyScore);
   
-  // Separate routes that MUST be hard (have major roads) from flexible routes
-  const mustBeHard = sortedByScore.filter(r => r.hasMajorRoads);
-  const flexible = sortedByScore.filter(r => !r.hasMajorRoads);
+  // Check if we have any routes without major roads
+  const hasNonMajorRoadRoutes = sortedByScore.some(r => !r.hasMajorRoads);
   
   const easyRoutes: RouteCandidate[] = [];
   const moderateRoutes: RouteCandidate[] = [];
   const hardRoutes: RouteCandidate[] = [];
   
-  // First, add all must-be-hard routes to hard bucket (up to 3)
-  for (const route of mustBeHard) {
-    if (hardRoutes.length < 3) {
-      hardRoutes.push({ ...route, difficulty: "hard" as const, routeName: `${route.actualDistance.toFixed(1)}km hard Loop` });
-    }
-  }
-  
-  // Sort flexible routes by score (ascending = easiest first)
-  const sortedFlexible = [...flexible].sort((a, b) => a.difficultyScore - b.difficultyScore);
-  const numFlexible = sortedFlexible.length;
-  
-  // Calculate how many flexible routes we need for each bucket
-  const hardSlotsNeeded = 3 - hardRoutes.length;
-  const totalSlotsNeeded = 3 + 3 + hardSlotsNeeded; // easy + moderate + remaining hard
-  
-  // If we have enough flexible routes, allocate 3 to each category
-  // Priority order: easy (lowest scores), moderate (middle), hard (highest scores)
-  if (numFlexible >= totalSlotsNeeded) {
-    // Take 3 easiest for easy bucket
-    for (let i = 0; i < 3 && i < numFlexible; i++) {
-      easyRoutes.push({ ...sortedFlexible[i], difficulty: "easy" as const, routeName: `${sortedFlexible[i].actualDistance.toFixed(1)}km easy Loop` });
-    }
-    // Take 3 hardest flexible for hard bucket (if needed)
-    for (let i = numFlexible - 1; i >= 0 && hardRoutes.length < 3; i--) {
-      if (i >= 3) { // Don't take from easy slots
-        hardRoutes.push({ ...sortedFlexible[i], difficulty: "hard" as const, routeName: `${sortedFlexible[i].actualDistance.toFixed(1)}km hard Loop` });
+  if (hasNonMajorRoadRoutes) {
+    // Normal case: some routes don't have major roads
+    // Routes with major roads MUST be hard, others can be distributed
+    const mustBeHard = sortedByScore.filter(r => r.hasMajorRoads);
+    const flexible = sortedByScore.filter(r => !r.hasMajorRoads);
+    
+    // First, add must-be-hard routes to hard bucket (up to 3)
+    for (const route of mustBeHard) {
+      if (hardRoutes.length < 3) {
+        hardRoutes.push({ ...route, difficulty: "hard" as const, routeName: `${route.actualDistance.toFixed(1)}km hard Loop` });
       }
     }
-    // Fill moderate from the middle
-    const usedIds = new Set([...easyRoutes, ...hardRoutes].map(r => r.id));
-    for (const route of sortedFlexible) {
-      if (moderateRoutes.length >= 3) break;
-      if (!usedIds.has(route.id)) {
-        moderateRoutes.push({ ...route, difficulty: "moderate" as const, routeName: `${route.actualDistance.toFixed(1)}km moderate Loop` });
+    
+    // Sort flexible routes by score
+    const sortedFlexible = [...flexible].sort((a, b) => a.difficultyScore - b.difficultyScore);
+    const numFlexible = sortedFlexible.length;
+    const hardSlotsNeeded = 3 - hardRoutes.length;
+    const totalSlotsNeeded = 3 + 3 + hardSlotsNeeded;
+    
+    if (numFlexible >= totalSlotsNeeded) {
+      for (let i = 0; i < 3; i++) {
+        easyRoutes.push({ ...sortedFlexible[i], difficulty: "easy" as const, routeName: `${sortedFlexible[i].actualDistance.toFixed(1)}km easy Loop` });
+      }
+      for (let i = numFlexible - 1; i >= 0 && hardRoutes.length < 3; i--) {
+        if (i >= 3) {
+          hardRoutes.push({ ...sortedFlexible[i], difficulty: "hard" as const, routeName: `${sortedFlexible[i].actualDistance.toFixed(1)}km hard Loop` });
+        }
+      }
+      const usedIds = new Set([...easyRoutes, ...hardRoutes].map(r => r.id));
+      for (const route of sortedFlexible) {
+        if (moderateRoutes.length >= 3) break;
+        if (!usedIds.has(route.id)) {
+          moderateRoutes.push({ ...route, difficulty: "moderate" as const, routeName: `${route.actualDistance.toFixed(1)}km moderate Loop` });
+        }
+      }
+    } else {
+      const easyTarget = Math.min(3, Math.ceil(numFlexible / 3));
+      const moderateTarget = Math.min(3, Math.ceil((numFlexible - easyTarget) / 2));
+      
+      for (let i = 0; i < numFlexible; i++) {
+        const route = sortedFlexible[i];
+        if (easyRoutes.length < easyTarget) {
+          easyRoutes.push({ ...route, difficulty: "easy" as const, routeName: `${route.actualDistance.toFixed(1)}km easy Loop` });
+        } else if (moderateRoutes.length < moderateTarget) {
+          moderateRoutes.push({ ...route, difficulty: "moderate" as const, routeName: `${route.actualDistance.toFixed(1)}km moderate Loop` });
+        } else if (hardRoutes.length < 3) {
+          hardRoutes.push({ ...route, difficulty: "hard" as const, routeName: `${route.actualDistance.toFixed(1)}km hard Loop` });
+        }
       }
     }
   } else {
-    // Not enough flexible routes - distribute what we have proportionally
-    // Priority: fill each bucket evenly, then overflow to hard
-    const easyTarget = Math.min(3, Math.ceil(numFlexible / 3));
-    const moderateTarget = Math.min(3, Math.ceil((numFlexible - easyTarget) / 2));
+    // ALL routes have major roads - distribute by other difficulty factors
+    // Still label by relative difficulty within available routes
+    const numRoutes = sortedByScore.length;
+    const routesNeeded = Math.min(9, numRoutes);
     
-    for (let i = 0; i < numFlexible; i++) {
-      const route = sortedFlexible[i];
-      if (easyRoutes.length < easyTarget) {
+    // Take up to 9 routes and distribute 3/3/3
+    for (let i = 0; i < routesNeeded; i++) {
+      const route = sortedByScore[i];
+      if (i < 3 && easyRoutes.length < 3) {
+        // Easiest 3 (lowest scores among major road routes)
         easyRoutes.push({ ...route, difficulty: "easy" as const, routeName: `${route.actualDistance.toFixed(1)}km easy Loop` });
-      } else if (moderateRoutes.length < moderateTarget) {
+      } else if (i >= routesNeeded - 3 && hardRoutes.length < 3) {
+        // Hardest 3 (highest scores)
+        hardRoutes.push({ ...route, difficulty: "hard" as const, routeName: `${route.actualDistance.toFixed(1)}km hard Loop` });
+      } else if (moderateRoutes.length < 3) {
+        // Middle 3
+        moderateRoutes.push({ ...route, difficulty: "moderate" as const, routeName: `${route.actualDistance.toFixed(1)}km moderate Loop` });
+      }
+    }
+    
+    // If we still need to fill buckets, redistribute
+    const usedIds = new Set([...easyRoutes, ...moderateRoutes, ...hardRoutes].map(r => r.id));
+    for (const route of sortedByScore) {
+      if (usedIds.has(route.id)) continue;
+      if (easyRoutes.length < 3) {
+        easyRoutes.push({ ...route, difficulty: "easy" as const, routeName: `${route.actualDistance.toFixed(1)}km easy Loop` });
+      } else if (moderateRoutes.length < 3) {
         moderateRoutes.push({ ...route, difficulty: "moderate" as const, routeName: `${route.actualDistance.toFixed(1)}km moderate Loop` });
       } else if (hardRoutes.length < 3) {
         hardRoutes.push({ ...route, difficulty: "hard" as const, routeName: `${route.actualDistance.toFixed(1)}km hard Loop` });
