@@ -305,18 +305,6 @@ export default function GoogleMapsRoute({
         </div>
       )}
       <div ref={mapRef} className="w-full h-full" style={{ minHeight: '100%' }} />
-      {(routeName || routeInfo) && (
-        <div className="absolute bottom-4 left-4 right-4 bg-background/90 backdrop-blur-sm rounded-lg p-3 border border-white/10">
-          {routeName && <h3 className="font-bold text-sm text-foreground">{routeName}</h3>}
-          <div className="flex gap-4 mt-1 text-xs text-muted-foreground">
-            {routeInfo ? (
-              <span>{routeInfo.distance}</span>
-            ) : (
-              distance && <span>{distance.toFixed(1)} km</span>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
