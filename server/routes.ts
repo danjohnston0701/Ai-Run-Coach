@@ -5,6 +5,7 @@ import { insertPreRegistrationSchema, insertUserSchema, insertRouteSchema, inser
 import { z } from "zod";
 import { generateRoute, getCoachingAdvice, analyzeRunPerformance } from "./openai";
 import { generateCircularRoute, generateMultipleRoutes, isGoogleMapsConfigured } from "./routePlanner";
+import { generateAIRoutes } from "./aiRoutePlanner";
 import bcrypt from "bcryptjs";
 
 export async function registerRoutes(
@@ -149,11 +150,12 @@ export async function registerRoutes(
   });
 
   // Generate multiple route options (9 routes: 3 easy, 3 moderate, 3 hard)
+  // Uses AI-powered route planning: Google for area data → OpenAI for waypoint design → Google for final route
   app.post("/api/routes/generate-options", async (req, res) => {
     try {
-      const { startLat, startLng, targetDistance } = req.body;
+      const { startLat, startLng, targetDistance, useAI = true } = req.body;
       
-      console.log("Multi-route generation request:", { startLat, startLng, targetDistance, hasApiKey: isGoogleMapsConfigured() });
+      console.log("Multi-route generation request:", { startLat, startLng, targetDistance, useAI, hasApiKey: isGoogleMapsConfigured() });
       
       if (startLat === undefined || startLat === null || 
           startLng === undefined || startLng === null || 
@@ -166,11 +168,23 @@ export async function registerRoutes(
         return res.status(503).json({ error: "Route generation service is temporarily unavailable. Please try again later." });
       }
 
-      const result = await generateMultipleRoutes({
-        startLat: parseFloat(startLat),
-        startLng: parseFloat(startLng),
-        targetDistance: parseFloat(targetDistance),
-      });
+      // Use AI-powered route generation by default
+      let result;
+      if (useAI) {
+        console.log("[Route API] Using AI-powered route generation");
+        result = await generateAIRoutes({
+          startLat: parseFloat(startLat),
+          startLng: parseFloat(startLng),
+          targetDistance: parseFloat(targetDistance),
+        });
+      } else {
+        console.log("[Route API] Using geometric route generation (fallback)");
+        result = await generateMultipleRoutes({
+          startLat: parseFloat(startLat),
+          startLng: parseFloat(startLng),
+          targetDistance: parseFloat(targetDistance),
+        });
+      }
 
       if (!result.success) {
         console.error("Multi-route generation failed:", result.error);
@@ -181,6 +195,7 @@ export async function registerRoutes(
         success: true,
         routes: result.routes,
         targetDistance: parseFloat(targetDistance),
+        generationMethod: useAI ? "ai-powered" : "geometric",
       });
     } catch (error) {
       console.error("Multi-route generation error:", error);
