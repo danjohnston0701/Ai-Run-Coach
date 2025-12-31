@@ -382,6 +382,9 @@ export default function Home() {
           <p className="text-[10px] text-primary/60 mt-1 font-mono">
             {userLocation.lat.toFixed(6)}, {userLocation.lng.toFixed(6)}
           </p>
+          <p className="text-[9px] text-muted-foreground/50 mt-1">
+            Wrong location? Click Edit to enter correct coordinates
+          </p>
           {showLocationInput && (
             <motion.div 
               initial={{ opacity: 0, height: 0 }}
@@ -413,6 +416,9 @@ export default function Home() {
               >
                 Update Location
               </button>
+              <p className="text-[10px] text-muted-foreground mt-2">
+                Find your coordinates in Google Maps and enter them above
+              </p>
             </motion.div>
           )}
         </motion.div>
