@@ -63,9 +63,8 @@ export default function Home() {
   const [addressSearch, setAddressSearch] = useState("");
   const [addressSuggestions, setAddressSuggestions] = useState<Array<{description: string; placeId: string}>>([]);
   const [searchingAddress, setSearchingAddress] = useState(false);
-  // Default to user's location near Don's Landing, Mangawhai Heads
-  const [customLat, setCustomLat] = useState("-36.1040");
-  const [customLng, setCustomLng] = useState("174.5922");
+  const [customLat, setCustomLat] = useState("");
+  const [customLng, setCustomLng] = useState("");
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [lastRun, setLastRun] = useState<RunData | null>(null);
   const [targetTimeActive, setTargetTimeActive] = useState(false);
@@ -395,55 +394,39 @@ export default function Home() {
             <MapPin className="w-4 h-4 text-muted-foreground" />
             <p className="text-xs text-muted-foreground">{locationError}</p>
           </div>
-          <button 
-            onClick={() => setShowLocationInput(!showLocationInput)}
-            className="text-xs text-primary hover:text-primary/80 underline"
-            data-testid="button-manual-location"
-          >
-            {showLocationInput ? "Close" : "Enter location manually"}
-          </button>
           
-          {showLocationInput && (
-            <motion.div 
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              className="mt-3 space-y-2"
-            >
-              <input
-                type="number"
-                placeholder="Latitude"
-                value={customLat}
-                onChange={(e) => setCustomLat(e.target.value)}
-                className="w-full px-2 py-1 bg-card border border-white/10 rounded text-xs text-foreground"
-                step="0.0001"
-                data-testid="input-latitude"
-              />
-              <input
-                type="number"
-                placeholder="Longitude"
-                value={customLng}
-                onChange={(e) => setCustomLng(e.target.value)}
-                className="w-full px-2 py-1 bg-card border border-white/10 rounded text-xs text-foreground"
-                step="0.0001"
-                data-testid="input-longitude"
-              />
-              <button
-                onClick={handleUseCustomLocation}
-                className="w-full px-2 py-1 bg-primary text-background text-xs rounded font-medium hover:bg-primary/90"
-                data-testid="button-use-location"
-              >
-                Use Location
-              </button>
-              <p className="text-xs text-muted-foreground mt-2">
-                Your location: -36.1040, 174.5922 (Mangawhai Heads)
-              </p>
-            </motion.div>
-          )}
-          {!showLocationInput && (
-            <p className="text-[10px] text-muted-foreground/60 mt-1 font-mono">
-              Using: {customLat}, {customLng}
-            </p>
-          )}
+          <motion.div 
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            className="mt-3 space-y-2"
+          >
+            <p className="text-xs text-primary font-medium mb-2">Search for your starting location:</p>
+            <input
+              type="text"
+              placeholder="Enter your address or location..."
+              value={addressSearch}
+              onChange={(e) => handleAddressSearch(e.target.value)}
+              className="w-full px-3 py-2 bg-card border border-white/10 rounded text-sm text-foreground"
+              data-testid="input-address-search-no-location"
+            />
+            {searchingAddress && (
+              <p className="text-xs text-muted-foreground">Searching...</p>
+            )}
+            {addressSuggestions.length > 0 && (
+              <div className="bg-card border border-white/10 rounded max-h-40 overflow-y-auto">
+                {addressSuggestions.map((suggestion) => (
+                  <button
+                    key={suggestion.placeId}
+                    onClick={() => handleSelectAddress(suggestion.placeId, suggestion.description)}
+                    className="w-full px-3 py-2 text-left text-xs text-foreground hover:bg-primary/20 border-b border-white/5 last:border-0"
+                    data-testid={`suggestion-no-loc-${suggestion.placeId}`}
+                  >
+                    {suggestion.description}
+                  </button>
+                ))}
+              </div>
+            )}
+          </motion.div>
         </motion.div>
       )}
 
@@ -652,8 +635,13 @@ export default function Home() {
             >
               <Button 
                 size="lg" 
-                className="w-full h-12 text-lg font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-all flex items-center justify-center gap-2"
+                className={`w-full h-12 text-lg font-display uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
+                  userLocation 
+                    ? "bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)]" 
+                    : "bg-muted text-muted-foreground cursor-not-allowed"
+                }`}
                 onClick={handleMapRun}
+                disabled={!userLocation}
                 data-testid="button-map-run"
               >
                 <MapPin className="mr-2 w-5 h-5 fill-current" /> Map My Run
@@ -661,8 +649,13 @@ export default function Home() {
               <Button 
                 size="lg" 
                 variant="outline"
-                className="w-full h-12 text-lg font-display uppercase tracking-widest border-white/20 hover:bg-white/10 transition-all flex items-center justify-center gap-2"
+                className={`w-full h-12 text-lg font-display uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
+                  userLocation 
+                    ? "border-white/20 hover:bg-white/10" 
+                    : "border-muted/20 text-muted-foreground cursor-not-allowed"
+                }`}
                 onClick={handleStartSession}
+                disabled={!userLocation}
                 data-testid="button-start-session"
               >
                 <Play className="mr-2 w-5 h-5 fill-current" /> Start Run Without Route
@@ -726,11 +719,16 @@ export default function Home() {
       <div className="fixed bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-background via-background to-transparent z-50">
         <Button 
           size="lg" 
-          className="w-full h-16 text-xl font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-all"
+          className={`w-full h-16 text-xl font-display uppercase tracking-widest transition-all ${
+            userLocation 
+              ? "bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)]" 
+              : "bg-muted text-muted-foreground cursor-not-allowed"
+          }`}
           onClick={handleMapRun}
+          disabled={!userLocation}
           data-testid="button-map-my-run"
         >
-          <MapPin className="mr-2 w-6 h-6 fill-current" /> Map My Run
+          <MapPin className="mr-2 w-6 h-6 fill-current" /> {userLocation ? "Map My Run" : "Set Location to Continue"}
         </Button>
       </div>
     </div>
