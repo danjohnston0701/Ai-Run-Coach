@@ -291,24 +291,38 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getNotifications(userId: string): Promise<Notification[]> {
-    return withRetry(async () => {
-      return db.select().from(notifications)
-        .where(eq(notifications.userId, userId))
-        .orderBy(desc(notifications.createdAt))
-        .limit(50);
-    });
+    try {
+      return await withRetry(async () => {
+        return db.select().from(notifications)
+          .where(eq(notifications.userId, userId))
+          .orderBy(desc(notifications.createdAt))
+          .limit(50);
+      });
+    } catch (error: any) {
+      if (error?.code === '42P01') {
+        return [];
+      }
+      throw error;
+    }
   }
 
   async getUnreadNotificationCount(userId: string): Promise<number> {
-    return withRetry(async () => {
-      const result = await db.select({ count: sql<number>`count(*)` })
-        .from(notifications)
-        .where(and(
-          eq(notifications.userId, userId),
-          eq(notifications.read, false)
-        ));
-      return Number(result[0]?.count) || 0;
-    });
+    try {
+      return await withRetry(async () => {
+        const result = await db.select({ count: sql<number>`count(*)` })
+          .from(notifications)
+          .where(and(
+            eq(notifications.userId, userId),
+            eq(notifications.read, false)
+          ));
+        return Number(result[0]?.count) || 0;
+      });
+    } catch (error: any) {
+      if (error?.code === '42P01') {
+        return 0;
+      }
+      throw error;
+    }
   }
 
   async markNotificationAsRead(id: string): Promise<Notification | undefined> {
