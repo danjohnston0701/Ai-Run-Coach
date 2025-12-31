@@ -277,16 +277,16 @@ export default function Home() {
           if (!locationToastShown) {
             sessionStorage.setItem('locationToastShown', 'true');
             if (isIOSSafari()) {
-              toast.error('Location access denied. To enable: Go to Settings → Safari → Location → Allow', {
-                duration: 6000,
+              toast.error('Location access denied. To enable: Go to Settings → Safari → Location → Allow, then refresh this page', {
+                duration: 8000,
               });
             } else if (isSafari()) {
-              toast.error('Location access denied. Click Safari → Settings for this website → Allow Location', {
-                duration: 6000,
+              toast.error('Location access denied. Click Safari → Settings for this website → Allow Location, then refresh this page', {
+                duration: 8000,
               });
             } else {
-              toast.error('Location access denied. Please enable location in your browser settings.', {
-                duration: 5000,
+              toast.error('Location access denied. Please enable location in your browser settings and refresh the page.', {
+                duration: 6000,
               });
             }
           }
@@ -581,9 +581,20 @@ export default function Home() {
           className="bg-muted/50 border border-muted-foreground/20 rounded-lg p-3 mb-6"
           data-testid="alert-location"
         >
-          <div className="flex items-center gap-2 mb-2">
-            <MapPin className="w-4 h-4 text-muted-foreground" />
-            <p className="text-xs text-muted-foreground">{locationError}</p>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-muted-foreground" />
+              <p className="text-xs text-muted-foreground">{locationError}</p>
+            </div>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => window.location.reload()}
+              className="text-xs h-7 px-2"
+              data-testid="button-refresh-location"
+            >
+              Refresh & Retry
+            </Button>
           </div>
           
           <motion.div 
@@ -591,7 +602,7 @@ export default function Home() {
             animate={{ opacity: 1, height: "auto" }}
             className="mt-3 space-y-2"
           >
-            <p className="text-xs text-primary font-medium mb-2">Search for your starting location:</p>
+            <p className="text-xs text-primary font-medium mb-2">Or search for your starting location:</p>
             <input
               type="text"
               placeholder="Enter your address or location..."
