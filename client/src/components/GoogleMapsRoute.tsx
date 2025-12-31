@@ -13,6 +13,7 @@ interface GoogleMapsRouteProps {
   routeName?: string;
   distance?: number;
   estimatedTime?: number;
+  polyline?: string;
   className?: string;
 }
 
@@ -30,6 +31,7 @@ export default function GoogleMapsRoute({
   routeName,
   distance,
   estimatedTime,
+  polyline,
   className = "",
 }: GoogleMapsRouteProps) {
   const mapRef = useRef<HTMLDivElement>(null);
@@ -102,23 +104,46 @@ export default function GoogleMapsRoute({
         zIndex: 100,
       });
 
-      if (waypoints && waypoints.length > 0) {
-        console.log("Creating route with waypoints:", waypoints, "from center:", center);
+      if (polyline && polyline.length > 0) {
+        console.log("Using pre-computed polyline from backend");
+        
+        const decodedPath = window.google.maps.geometry.encoding.decodePath(polyline);
+        
+        new window.google.maps.Polyline({
+          path: decodedPath,
+          geodesic: true,
+          strokeColor: "#a855f7",
+          strokeOpacity: 0.9,
+          strokeWeight: 5,
+          map,
+        });
+        
+        const bounds = new window.google.maps.LatLngBounds();
+        decodedPath.forEach((point: any) => bounds.extend(point));
+        bounds.extend(center);
+        map.fitBounds(bounds);
+        
+        if (distance && estimatedTime) {
+          setRouteInfo({
+            distance: distance.toFixed(2) + " km",
+            duration: estimatedTime + " min",
+          });
+        }
+        setLoading(false);
+      } else if (waypoints && waypoints.length > 0) {
+        console.log("No polyline provided, calculating route from waypoints:", waypoints);
         
         // Filter out duplicate waypoints and those too close to start
         const validWaypoints = waypoints.filter((wp, index) => {
-          // Check for valid coordinates
           if (typeof wp.lat !== 'number' || typeof wp.lng !== 'number') return false;
           if (isNaN(wp.lat) || isNaN(wp.lng)) return false;
           
-          // Skip if too close to start (within 10 meters)
           const distFromStart = Math.sqrt(
             Math.pow((wp.lat - startLat) * 111000, 2) + 
             Math.pow((wp.lng - startLng) * 111000 * Math.cos(startLat * Math.PI / 180), 2)
           );
           if (distFromStart < 10) return false;
           
-          // Skip duplicates
           for (let i = 0; i < index; i++) {
             if (Math.abs(waypoints[i].lat - wp.lat) < 0.0001 && 
                 Math.abs(waypoints[i].lng - wp.lng) < 0.0001) {
@@ -130,7 +155,6 @@ export default function GoogleMapsRoute({
         
         console.log("Valid waypoints after filtering:", validWaypoints);
         
-        // Use Directions API to get road-following route
         const directionsService = new window.google.maps.DirectionsService();
         const directionsRenderer = new window.google.maps.DirectionsRenderer({
           map,
@@ -142,7 +166,6 @@ export default function GoogleMapsRoute({
           },
         });
 
-        // Create waypoints for Directions API
         const intermediateWaypoints = validWaypoints.map((wp) => ({
           location: new window.google.maps.LatLng(wp.lat, wp.lng),
           stopover: false,
@@ -150,7 +173,7 @@ export default function GoogleMapsRoute({
 
         const request = {
           origin: center,
-          destination: center, // Round trip back to start
+          destination: center,
           waypoints: intermediateWaypoints,
           travelMode: window.google.maps.TravelMode.WALKING,
           optimizeWaypoints: false,
@@ -173,7 +196,6 @@ export default function GoogleMapsRoute({
           if (status === window.google.maps.DirectionsStatus.OK) {
             directionsRenderer.setDirections(result);
             
-            // Calculate total distance and duration
             let totalDistance = 0;
             let totalDuration = 0;
             result.routes[0].legs.forEach((leg: any) => {
@@ -187,7 +209,6 @@ export default function GoogleMapsRoute({
             });
             setLoading(false);
           } else {
-            // Try a simpler route with just one waypoint
             console.log("Full route failed, trying simplified route:", status);
             const simplifiedWaypoints = validWaypoints.length > 2 
               ? [validWaypoints[Math.floor(validWaypoints.length / 2)]]

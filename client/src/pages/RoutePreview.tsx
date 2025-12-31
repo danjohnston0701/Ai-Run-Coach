@@ -15,6 +15,7 @@ interface GeneratedRoute {
   startLat: number;
   startLng: number;
   waypoints: Array<{ lat: number; lng: number }>;
+  polyline?: string;
   elevation: number | null;
   estimatedTime: number | null;
   tips?: string[];
@@ -79,6 +80,7 @@ export default function RoutePreview() {
         startLat: lat,
         startLng: lng,
         waypoints: data.waypoints,
+        polyline: data.polyline,
         elevation: null,
         estimatedTime: data.duration,
         variance: data.variance,
@@ -169,8 +171,9 @@ export default function RoutePreview() {
             startLat={lat}
             startLng={lng}
             routeName={route.name}
-            distance={route.distance}
+            distance={route.actualDistance || route.distance}
             estimatedTime={route.estimatedTime || undefined}
+            polyline={route.polyline}
             className="h-[350px]"
           />
 
