@@ -645,10 +645,8 @@ export default function Home() {
             <Loader className="w-5 h-5 text-primary animate-spin" />
           ) : profile?.profilePic ? (
             <img src={profile.profilePic} alt="Avatar" className="w-full h-full object-cover" />
-          ) : userLocation ? (
-            <MapPin className="w-5 h-5 text-primary" />
           ) : (
-            <div className="w-3 h-3 bg-muted rounded-full" />
+            <User className="w-5 h-5 text-primary" />
           )}
         </motion.div>
       </header>
