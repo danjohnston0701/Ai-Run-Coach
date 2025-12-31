@@ -159,8 +159,6 @@ export async function registerRoutes(
     try {
       const { startLat, startLng, targetDistance, useAI = true } = req.body;
       
-      console.log("Multi-route generation request:", { startLat, startLng, targetDistance, useAI, hasApiKey: isGoogleMapsConfigured() });
-      
       if (startLat === undefined || startLat === null || 
           startLng === undefined || startLng === null || 
           targetDistance === undefined || targetDistance === null) {
