@@ -1,7 +1,8 @@
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, or } from "drizzle-orm";
 import { db, withRetry } from "./db";
 import {
   users, preRegistrations, friends, routes, runs, liveRunSessions, garminData,
+  friendRequests, pushSubscriptions,
   type User, type InsertUser,
   type PreRegistration, type InsertPreRegistration,
   type Friend, type InsertFriend,
@@ -9,6 +10,8 @@ import {
   type Run, type InsertRun,
   type LiveRunSession, type InsertLiveRunSession,
   type GarminData, type InsertGarminData,
+  type FriendRequest, type InsertFriendRequest,
+  type PushSubscription, type InsertPushSubscription,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -42,6 +45,19 @@ export interface IStorage {
 
   saveGarminData(data: InsertGarminData): Promise<GarminData>;
   getUserGarminData(userId: string): Promise<GarminData[]>;
+
+  // Friend Requests
+  createFriendRequest(data: InsertFriendRequest): Promise<FriendRequest>;
+  getFriendRequest(id: string): Promise<FriendRequest | undefined>;
+  getIncomingFriendRequests(userId: string): Promise<FriendRequest[]>;
+  getOutgoingFriendRequests(userId: string): Promise<FriendRequest[]>;
+  getPendingRequestBetweenUsers(requesterId: string, addresseeId: string): Promise<FriendRequest | undefined>;
+  respondToFriendRequest(id: string, status: 'accepted' | 'rejected'): Promise<FriendRequest | undefined>;
+
+  // Push Subscriptions
+  savePushSubscription(data: InsertPushSubscription): Promise<PushSubscription>;
+  getPushSubscription(userId: string): Promise<PushSubscription | undefined>;
+  deletePushSubscription(userId: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -177,6 +193,85 @@ export class DatabaseStorage implements IStorage {
 
   async getUserGarminData(userId: string): Promise<GarminData[]> {
     return db.select().from(garminData).where(eq(garminData.userId, userId)).orderBy(desc(garminData.syncedAt));
+  }
+
+  // Friend Requests
+  async createFriendRequest(data: InsertFriendRequest): Promise<FriendRequest> {
+    return withRetry(async () => {
+      const [request] = await db.insert(friendRequests).values(data).returning();
+      return request;
+    });
+  }
+
+  async getFriendRequest(id: string): Promise<FriendRequest | undefined> {
+    return withRetry(async () => {
+      const [request] = await db.select().from(friendRequests).where(eq(friendRequests.id, id));
+      return request;
+    });
+  }
+
+  async getIncomingFriendRequests(userId: string): Promise<FriendRequest[]> {
+    return withRetry(async () => {
+      return db.select().from(friendRequests).where(
+        and(eq(friendRequests.addresseeId, userId), eq(friendRequests.status, 'pending'))
+      ).orderBy(desc(friendRequests.createdAt));
+    });
+  }
+
+  async getOutgoingFriendRequests(userId: string): Promise<FriendRequest[]> {
+    return withRetry(async () => {
+      return db.select().from(friendRequests).where(
+        and(eq(friendRequests.requesterId, userId), eq(friendRequests.status, 'pending'))
+      ).orderBy(desc(friendRequests.createdAt));
+    });
+  }
+
+  async getPendingRequestBetweenUsers(requesterId: string, addresseeId: string): Promise<FriendRequest | undefined> {
+    return withRetry(async () => {
+      const [request] = await db.select().from(friendRequests).where(
+        and(
+          eq(friendRequests.status, 'pending'),
+          or(
+            and(eq(friendRequests.requesterId, requesterId), eq(friendRequests.addresseeId, addresseeId)),
+            and(eq(friendRequests.requesterId, addresseeId), eq(friendRequests.addresseeId, requesterId))
+          )
+        )
+      );
+      return request;
+    });
+  }
+
+  async respondToFriendRequest(id: string, status: 'accepted' | 'rejected'): Promise<FriendRequest | undefined> {
+    return withRetry(async () => {
+      const [request] = await db.update(friendRequests).set({
+        status,
+        respondedAt: new Date(),
+      }).where(eq(friendRequests.id, id)).returning();
+      return request;
+    });
+  }
+
+  // Push Subscriptions
+  async savePushSubscription(data: InsertPushSubscription): Promise<PushSubscription> {
+    return withRetry(async () => {
+      // Delete existing subscription for this user first
+      await db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, data.userId));
+      const [subscription] = await db.insert(pushSubscriptions).values(data).returning();
+      return subscription;
+    });
+  }
+
+  async getPushSubscription(userId: string): Promise<PushSubscription | undefined> {
+    return withRetry(async () => {
+      const [subscription] = await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.userId, userId));
+      return subscription;
+    });
+  }
+
+  async deletePushSubscription(userId: string): Promise<void> {
+    return withRetry(async () => {
+      await db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, userId));
+    });
   }
 }
 

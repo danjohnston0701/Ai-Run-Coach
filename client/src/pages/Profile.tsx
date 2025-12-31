@@ -3,7 +3,9 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { ArrowLeft, Save, User, Camera, Upload, UserPlus, X, Users } from "lucide-react";
+import { ArrowLeft, Save, User, Camera, Upload, UserPlus, X, Users, Check, Bell, BellOff, Clock, Loader2 } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 
 const FITNESS_LEVELS = ["Unfit", "Casual", "Athletic", "Very Fit", "Elite"];
 
@@ -13,6 +15,7 @@ export interface Friend {
 }
 
 interface ProfileData {
+  id?: string;
   name: string;
   dob: string;
   gender: string;
@@ -25,32 +28,96 @@ interface ProfileData {
   friends?: Friend[];
 }
 
+interface FriendRequest {
+  id: string;
+  requesterId: string;
+  addresseeId: string;
+  status: string;
+  requesterName?: string;
+  requesterEmail?: string;
+  addresseeName?: string;
+  addresseeEmail?: string;
+  createdAt: string;
+}
+
+interface SearchUser {
+  id: string;
+  name: string;
+  email: string;
+}
+
+async function registerPushSubscription(userId: string) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    console.log('[Push] Push notifications not supported');
+    return false;
+  }
+
+  try {
+    const statusRes = await fetch('/api/push/status');
+    const { configured } = await statusRes.json();
+    if (!configured) {
+      console.log('[Push] Push notifications not configured on server');
+      return false;
+    }
+
+    const keyRes = await fetch('/api/push/vapid-public-key');
+    if (!keyRes.ok) {
+      console.log('[Push] Could not get VAPID key');
+      return false;
+    }
+    const { vapidPublicKey } = await keyRes.json();
+
+    const registration = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      console.log('[Push] Notification permission denied');
+      return false;
+    }
+
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+    });
+
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, subscription: subscription.toJSON() }),
+    });
+
+    console.log('[Push] Successfully subscribed');
+    return true;
+  } catch (error) {
+    console.error('[Push] Registration failed:', error);
+    return false;
+  }
+}
+
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
 export default function Profile() {
   const [, setLocation] = useLocation();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [showPhotoOptions, setShowPhotoOptions] = useState(false);
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [friendSearchQuery, setFriendSearchQuery] = useState("");
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-
-  // Mock users database for search
-  const mockUsersDatabase = [
-    { name: "Sarah Jenkins", email: "sarah.j@example.com" },
-    { name: "Mike Ross", email: "m.ross@law.com" },
-    { name: "Jessica Pearson", email: "jessica@pearsonhardman.com" },
-    { name: "Harvey Specter", email: "harvey@win.com" },
-    { name: "Donna Paulsen", email: "donna@knowsall.com" },
-    { name: "Alex Williams", email: "alex.w@runner.com" },
-    { name: "Rachel Zane", email: "rachel@fitness.com" },
-  ];
-
-  const searchResults = friendSearchQuery.length > 1 
-    ? mockUsersDatabase.filter(user => 
-        user.name.toLowerCase().includes(friendSearchQuery.toLowerCase()) || 
-        user.email.toLowerCase().includes(friendSearchQuery.toLowerCase())
-      ).filter(user => !profile?.friends?.some(f => f.email === user.email))
-    : [];
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     const savedProfile = localStorage.getItem("userProfile");
@@ -60,10 +127,115 @@ export default function Profile() {
         parsed.friends = [];
       }
       setProfile(parsed);
+
+      if ('Notification' in window) {
+        setNotificationsEnabled(Notification.permission === 'granted');
+      }
     } else {
       setLocation("/");
     }
   }, [setLocation]);
+
+  const { data: incomingRequests = [], isLoading: loadingIncoming } = useQuery({
+    queryKey: ['friend-requests-incoming', profile?.id],
+    queryFn: async () => {
+      if (!profile?.id) return [];
+      const res = await fetch(`/api/friend-requests/incoming/${profile.id}`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!profile?.id,
+  });
+
+  const { data: outgoingRequests = [], isLoading: loadingOutgoing } = useQuery({
+    queryKey: ['friend-requests-outgoing', profile?.id],
+    queryFn: async () => {
+      if (!profile?.id) return [];
+      const res = await fetch(`/api/friend-requests/outgoing/${profile.id}`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!profile?.id,
+  });
+
+  const sendRequestMutation = useMutation({
+    mutationFn: async (addresseeId: string) => {
+      const res = await apiRequest('POST', '/api/friend-requests', {
+        requesterId: profile?.id,
+        addresseeId,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast.success('Friend request sent!');
+      queryClient.invalidateQueries({ queryKey: ['friend-requests-outgoing'] });
+      setFriendSearchQuery("");
+      setShowAddFriend(false);
+      setSearchResults([]);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to send friend request');
+    },
+  });
+
+  const respondMutation = useMutation({
+    mutationFn: async ({ requestId, action }: { requestId: string; action: 'accept' | 'reject' }) => {
+      const res = await apiRequest('POST', `/api/friend-requests/${requestId}/respond`, {
+        action,
+        userId: profile?.id,
+      });
+      return res.json();
+    },
+    onSuccess: (_, { action }) => {
+      toast.success(action === 'accept' ? 'Friend added!' : 'Request declined');
+      queryClient.invalidateQueries({ queryKey: ['friend-requests-incoming'] });
+      queryClient.invalidateQueries({ queryKey: ['friends'] });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Failed to respond to request');
+    },
+  });
+
+  useEffect(() => {
+    const searchUsers = async () => {
+      if (friendSearchQuery.length < 2) {
+        setSearchResults([]);
+        return;
+      }
+
+      setIsSearching(true);
+      try {
+        const res = await fetch(`/api/users/search?q=${encodeURIComponent(friendSearchQuery)}`);
+        if (res.ok) {
+          const users = await res.json();
+          const filtered = users.filter((u: SearchUser) => 
+            u.id !== profile?.id && 
+            !profile?.friends?.some(f => f.email === u.email) &&
+            !outgoingRequests.some((r: FriendRequest) => r.addresseeId === u.id)
+          );
+          setSearchResults(filtered);
+        }
+      } catch (error) {
+        console.error('Search failed:', error);
+      } finally {
+        setIsSearching(false);
+      }
+    };
+
+    const debounce = setTimeout(searchUsers, 300);
+    return () => clearTimeout(debounce);
+  }, [friendSearchQuery, profile?.id, profile?.friends, outgoingRequests]);
+
+  const handleEnableNotifications = async () => {
+    if (!profile?.id) return;
+    const success = await registerPushSubscription(profile.id);
+    if (success) {
+      setNotificationsEnabled(true);
+      toast.success('Notifications enabled! You\'ll be notified of friend requests.');
+    } else {
+      toast.error('Could not enable notifications. Please check your browser settings.');
+    }
+  };
 
   const handleUploadClick = () => {
     fileInputRef.current?.click();
@@ -91,21 +263,8 @@ export default function Profile() {
     setProfile(prev => ({ ...prev!, [field]: value }));
   };
 
-  const handleAddFriendFromSearch = (user: { name: string, email: string }) => {
-    if (!profile) return;
-    
-    const newFriend: Friend = {
-      name: user.name,
-      email: user.email
-    };
-    
-    const updatedFriends = [...(profile.friends || []), newFriend];
-    const updatedProfile = { ...profile, friends: updatedFriends };
-    setProfile(updatedProfile);
-    
-    toast.success(`${user.name} added to your friends!`);
-    setFriendSearchQuery("");
-    setShowAddFriend(false);
+  const handleSendRequest = (user: SearchUser) => {
+    sendRequestMutation.mutate(user.id);
   };
 
   const handleRemoveFriend = (index: number) => {
@@ -145,6 +304,7 @@ export default function Profile() {
             size="icon"
             onClick={() => setLocation("/")}
             className="rounded-full border-white/10 hover:bg-white/10"
+            data-testid="button-back"
           >
             <ArrowLeft className="w-5 h-5" />
           </Button>
@@ -158,6 +318,7 @@ export default function Profile() {
           size="sm"
           onClick={handleLogout}
           className="text-red-400 hover:text-red-300 hover:bg-red-500/10 gap-2 uppercase tracking-widest text-[10px] font-bold"
+          data-testid="button-logout"
         >
           Logout
         </Button>
@@ -173,6 +334,7 @@ export default function Profile() {
             <div 
               className="w-24 h-24 rounded-full border-2 border-primary/50 overflow-hidden bg-white/5 flex items-center justify-center cursor-pointer hover:border-primary transition-colors"
               onClick={() => setShowPhotoOptions(!showPhotoOptions)}
+              data-testid="button-profile-photo"
             >
               {profile.profilePic ? (
                 <img src={profile.profilePic} alt="Profile" className="w-full h-full object-cover" />
@@ -196,6 +358,7 @@ export default function Profile() {
                     type="button"
                     onClick={handleCameraClick}
                     className="w-full px-4 py-3 text-left text-xs font-display font-bold uppercase tracking-widest flex items-center gap-3 hover:bg-white/5 transition-colors border-b border-white/5"
+                    data-testid="button-take-photo"
                   >
                     <Camera className="w-4 h-4 text-primary" /> Take Photo
                   </button>
@@ -203,6 +366,7 @@ export default function Profile() {
                     type="button"
                     onClick={handleUploadClick}
                     className="w-full px-4 py-3 text-left text-xs font-display font-bold uppercase tracking-widest flex items-center gap-3 hover:bg-white/5 transition-colors"
+                    data-testid="button-upload-photo"
                   >
                     <Upload className="w-4 h-4 text-primary" /> From Gallery
                   </button>
@@ -242,7 +406,6 @@ export default function Profile() {
               <h2 className="text-lg font-display font-bold uppercase tracking-wide">Personal Info</h2>
             </div>
 
-            {/* Name */}
             <div>
               <label className="block text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-1.5 ml-1">
                 Your Name
@@ -252,10 +415,10 @@ export default function Profile() {
                 value={profile.name}
                 onChange={(e) => handleChange("name", e.target.value)}
                 className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors"
+                data-testid="input-name"
               />
             </div>
 
-            {/* Date of Birth (Read Only) */}
             <div>
               <label className="block text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-1.5 ml-1">
                 Date of Birth
@@ -265,11 +428,11 @@ export default function Profile() {
                 value={profile.dob}
                 readOnly
                 className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-muted-foreground cursor-not-allowed opacity-60"
+                data-testid="input-dob"
               />
               <p className="text-[10px] text-muted-foreground/60 mt-1 ml-1">Date of birth cannot be changed.</p>
             </div>
 
-            {/* Gender */}
             <div>
               <label className="block text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-1.5 ml-1">
                 Gender
@@ -278,6 +441,7 @@ export default function Profile() {
                 value={profile.gender}
                 onChange={(e) => handleChange("gender", e.target.value)}
                 className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors"
+                data-testid="select-gender"
               >
                 <option value="Male">Male</option>
                 <option value="Female">Female</option>
@@ -295,6 +459,7 @@ export default function Profile() {
                   value={profile.height}
                   onChange={(e) => handleChange("height", e.target.value)}
                   className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors"
+                  data-testid="input-height"
                 />
               </div>
               <div>
@@ -306,6 +471,7 @@ export default function Profile() {
                   value={profile.weight}
                   onChange={(e) => handleChange("weight", e.target.value)}
                   className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors"
+                  data-testid="input-weight"
                 />
               </div>
             </div>
@@ -327,6 +493,7 @@ export default function Profile() {
                 value={profile.fitnessLevel}
                 onChange={(e) => handleChange("fitnessLevel", e.target.value)}
                 className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors"
+                data-testid="select-fitness-level"
               >
                 {FITNESS_LEVELS.map(level => (
                   <option key={level} value={level}>{level}</option>
@@ -342,6 +509,7 @@ export default function Profile() {
                 value={profile.desiredFitnessLevel}
                 onChange={(e) => handleChange("desiredFitnessLevel", e.target.value)}
                 className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors"
+                data-testid="select-target-level"
               >
                 {FITNESS_LEVELS.map(level => (
                   <option key={level} value={level}>{level}</option>
@@ -367,7 +535,40 @@ export default function Profile() {
                 value={profile.coachName}
                 onChange={(e) => handleChange("coachName", e.target.value)}
                 className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors"
+                data-testid="input-coach-name"
               />
+            </div>
+          </div>
+
+          <div className="space-y-4 bg-card/50 p-6 rounded-2xl border border-white/5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <Bell className="w-5 h-5 text-primary" />
+                <h2 className="text-lg font-display font-bold uppercase tracking-wide">Notifications</h2>
+              </div>
+            </div>
+            
+            <div className="flex items-center justify-between p-3 bg-white/5 rounded-lg">
+              <div>
+                <p className="text-sm font-medium">Push Notifications</p>
+                <p className="text-[10px] text-muted-foreground">Get notified when friends add you</p>
+              </div>
+              {notificationsEnabled ? (
+                <div className="flex items-center gap-2 text-green-500">
+                  <Bell className="w-4 h-4" />
+                  <span className="text-xs font-bold">ON</span>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleEnableNotifications}
+                  className="h-8 px-3 bg-primary/20 hover:bg-primary/30 text-primary text-xs font-bold"
+                  data-testid="button-enable-notifications"
+                >
+                  Enable
+                </Button>
+              )}
             </div>
           </div>
 
@@ -381,15 +582,76 @@ export default function Profile() {
                 type="button"
                 onClick={() => setShowAddFriend(true)}
                 className="h-8 px-3 bg-primary/20 hover:bg-primary/30 text-primary text-xs font-bold uppercase flex items-center gap-2"
+                data-testid="button-add-friend"
               >
                 <UserPlus className="w-3 h-3" /> Add
               </Button>
             </div>
 
+            {incomingRequests.length > 0 && (
+              <div className="mb-4">
+                <p className="text-[10px] font-bold text-amber-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                  <Clock className="w-3 h-3" /> Pending Requests ({incomingRequests.length})
+                </p>
+                <div className="space-y-2">
+                  {incomingRequests.map((request: FriendRequest) => (
+                    <div key={request.id} className="flex items-center justify-between p-3 bg-amber-500/10 rounded-lg border border-amber-500/20" data-testid={`request-incoming-${request.id}`}>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{request.requesterName}</p>
+                        <p className="text-[10px] text-muted-foreground">{request.requesterEmail}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => respondMutation.mutate({ requestId: request.id, action: 'accept' })}
+                          disabled={respondMutation.isPending}
+                          className="h-7 px-2 bg-green-500/20 hover:bg-green-500/30 text-green-500"
+                          data-testid={`button-accept-${request.id}`}
+                        >
+                          <Check className="w-3 h-3" />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => respondMutation.mutate({ requestId: request.id, action: 'reject' })}
+                          disabled={respondMutation.isPending}
+                          className="h-7 px-2 bg-red-500/20 hover:bg-red-500/30 text-red-500"
+                          data-testid={`button-reject-${request.id}`}
+                        >
+                          <X className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {outgoingRequests.length > 0 && (
+              <div className="mb-4">
+                <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Sent Requests ({outgoingRequests.length})
+                </p>
+                <div className="space-y-2">
+                  {outgoingRequests.map((request: FriendRequest) => (
+                    <div key={request.id} className="flex items-center justify-between p-3 bg-blue-500/10 rounded-lg border border-blue-500/20" data-testid={`request-outgoing-${request.id}`}>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{request.addresseeName}</p>
+                        <p className="text-[10px] text-muted-foreground">{request.addresseeEmail}</p>
+                      </div>
+                      <span className="text-[10px] text-blue-400 font-bold uppercase">Pending</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {profile.friends && profile.friends.length > 0 ? (
               <div className="space-y-2">
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">Your Friends</p>
                 {profile.friends.map((friend, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5">
+                  <div key={idx} className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5" data-testid={`friend-${idx}`}>
                     <div>
                       <p className="text-sm font-medium text-foreground">{friend.name}</p>
                       {friend.email && <p className="text-[10px] text-muted-foreground">{friend.email}</p>}
@@ -398,15 +660,16 @@ export default function Profile() {
                       type="button"
                       onClick={() => handleRemoveFriend(idx)}
                       className="p-1 hover:bg-white/10 rounded transition-colors"
+                      data-testid={`button-remove-friend-${idx}`}
                     >
                       <X className="w-4 h-4 text-muted-foreground hover:text-red-500" />
                     </button>
                   </div>
                 ))}
               </div>
-            ) : (
+            ) : !incomingRequests.length && !outgoingRequests.length ? (
               <p className="text-xs text-muted-foreground italic">No friends yet. Add some to easily share runs!</p>
-            )}
+            ) : null}
 
             <AnimatePresence>
               {showAddFriend && (
@@ -424,27 +687,39 @@ export default function Profile() {
                       placeholder="Search name or email..."
                       className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-foreground text-sm focus:outline-none focus:border-primary transition-colors"
                       autoFocus
+                      data-testid="input-search-friend"
                     />
+                    {isSearching && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                        <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                     {searchResults.length > 0 ? (
-                      searchResults.map((user, idx) => (
+                      searchResults.map((user) => (
                         <div 
-                          key={idx}
-                          onClick={() => handleAddFriendFromSearch(user)}
+                          key={user.id}
+                          onClick={() => handleSendRequest(user)}
                           className="flex items-center justify-between p-2 rounded-lg bg-white/5 border border-white/5 hover:border-primary/30 hover:bg-white/10 transition-all cursor-pointer group"
+                          data-testid={`search-result-${user.id}`}
                         >
                           <div>
                             <p className="text-xs font-medium text-foreground">{user.name}</p>
                             <p className="text-[10px] text-muted-foreground">{user.email}</p>
                           </div>
-                          <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] opacity-0 group-hover:opacity-100">
-                            Add
+                          <Button 
+                            size="sm" 
+                            variant="ghost" 
+                            className="h-6 px-2 text-[10px] opacity-0 group-hover:opacity-100"
+                            disabled={sendRequestMutation.isPending}
+                          >
+                            {sendRequestMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Send Request'}
                           </Button>
                         </div>
                       ))
-                    ) : friendSearchQuery.length > 1 ? (
+                    ) : friendSearchQuery.length > 1 && !isSearching ? (
                       <p className="text-[10px] text-center text-muted-foreground py-2 italic">No matching runners found</p>
                     ) : (
                       <p className="text-[10px] text-center text-muted-foreground py-2 italic">Start typing to search...</p>
@@ -456,9 +731,11 @@ export default function Profile() {
                     onClick={() => {
                       setShowAddFriend(false);
                       setFriendSearchQuery("");
+                      setSearchResults([]);
                     }}
                     variant="outline"
                     className="w-full border-white/10 text-[10px] h-8 font-bold uppercase tracking-widest"
+                    data-testid="button-cancel-add-friend"
                   >
                     Cancel
                   </Button>
@@ -472,6 +749,7 @@ export default function Profile() {
               type="submit"
               size="lg"
               className="w-full h-16 text-xl font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-all flex items-center justify-center gap-2"
+              data-testid="button-save-profile"
             >
               <Save className="w-6 h-6" />
               Save Changes

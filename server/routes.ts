@@ -1,17 +1,21 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertPreRegistrationSchema, insertUserSchema, insertRouteSchema, insertRunSchema, insertLiveRunSessionSchema } from "@shared/schema";
+import { insertPreRegistrationSchema, insertUserSchema, insertRouteSchema, insertRunSchema, insertLiveRunSessionSchema, insertPushSubscriptionSchema } from "@shared/schema";
 import { z } from "zod";
 import { generateRoute, getCoachingAdvice, analyzeRunPerformance } from "./openai";
 import { generateCircularRoute, generateMultipleRoutes, isGoogleMapsConfigured } from "./routePlanner";
 import { generateAIRoutes } from "./aiRoutePlanner";
 import bcrypt from "bcryptjs";
+import { initializePushNotifications, isPushConfigured, getPublicVapidKey, sendFriendRequestNotification, sendFriendAcceptedNotification } from "./pushNotifications";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  
+  // Initialize push notifications
+  initializePushNotifications();
   
   // Pre-registration endpoint
   app.post("/api/pre-register", async (req, res) => {
@@ -653,6 +657,233 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Place details error:", error);
       res.status(500).json({ error: "Failed to get place details" });
+    }
+  });
+
+  // Push notification configuration
+  app.get("/api/push/vapid-public-key", (req, res) => {
+    const key = getPublicVapidKey();
+    if (!key) {
+      return res.status(503).json({ error: "Push notifications not configured" });
+    }
+    res.json({ vapidPublicKey: key });
+  });
+
+  app.get("/api/push/status", (req, res) => {
+    res.json({ configured: isPushConfigured() });
+  });
+
+  // Subscribe to push notifications
+  app.post("/api/push/subscribe", async (req, res) => {
+    try {
+      const { userId, subscription } = req.body;
+      if (!userId || !subscription) {
+        return res.status(400).json({ error: "Missing userId or subscription" });
+      }
+
+      const { endpoint, keys } = subscription;
+      if (!endpoint || !keys?.p256dh || !keys?.auth) {
+        return res.status(400).json({ error: "Invalid subscription format" });
+      }
+
+      const saved = await storage.savePushSubscription({
+        userId,
+        endpoint,
+        p256dhKey: keys.p256dh,
+        authKey: keys.auth,
+        userAgent: req.headers['user-agent'] || null,
+      });
+
+      console.log(`[Push] Subscription saved for user ${userId}`);
+      res.json({ success: true, id: saved.id });
+    } catch (error) {
+      console.error("Push subscription error:", error);
+      res.status(500).json({ error: "Failed to save subscription" });
+    }
+  });
+
+  // Unsubscribe from push notifications
+  app.delete("/api/push/subscribe/:userId", async (req, res) => {
+    try {
+      await storage.deletePushSubscription(req.params.userId);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to unsubscribe" });
+    }
+  });
+
+  // Friend Request endpoints
+  app.post("/api/friend-requests", async (req, res) => {
+    try {
+      const { requesterId, addresseeId, message } = req.body;
+      
+      if (!requesterId || !addresseeId) {
+        return res.status(400).json({ error: "Missing requesterId or addresseeId" });
+      }
+
+      if (requesterId === addresseeId) {
+        return res.status(400).json({ error: "Cannot send friend request to yourself" });
+      }
+
+      // Check if they're already friends
+      const existingFriends = await storage.getFriends(requesterId);
+      if (existingFriends.some(f => f.friendId === addresseeId)) {
+        return res.status(400).json({ error: "You are already friends with this user" });
+      }
+
+      // Check if there's already a pending request
+      const existingRequest = await storage.getPendingRequestBetweenUsers(requesterId, addresseeId);
+      if (existingRequest) {
+        return res.status(400).json({ error: "A friend request already exists between these users" });
+      }
+
+      // Create the friend request
+      const request = await storage.createFriendRequest({
+        requesterId,
+        addresseeId,
+        status: 'pending',
+        message: message || null,
+      });
+
+      // Get requester details for notification
+      const requester = await storage.getUser(requesterId);
+      if (requester) {
+        await sendFriendRequestNotification(
+          addresseeId,
+          requester.name,
+          requester.email
+        );
+      }
+
+      res.status(201).json(request);
+    } catch (error) {
+      console.error("Friend request error:", error);
+      res.status(500).json({ error: "Failed to send friend request" });
+    }
+  });
+
+  // Get incoming friend requests
+  app.get("/api/friend-requests/incoming/:userId", async (req, res) => {
+    try {
+      const requests = await storage.getIncomingFriendRequests(req.params.userId);
+      
+      // Enrich with requester info
+      const enrichedRequests = await Promise.all(
+        requests.map(async (request) => {
+          const requester = await storage.getUser(request.requesterId);
+          return {
+            ...request,
+            requesterName: requester?.name || 'Unknown',
+            requesterEmail: requester?.email || '',
+            requesterProfilePic: requester?.profilePic || null,
+          };
+        })
+      );
+      
+      res.json(enrichedRequests);
+    } catch (error) {
+      console.error("Get incoming requests error:", error);
+      res.status(500).json({ error: "Failed to get friend requests" });
+    }
+  });
+
+  // Get outgoing friend requests
+  app.get("/api/friend-requests/outgoing/:userId", async (req, res) => {
+    try {
+      const requests = await storage.getOutgoingFriendRequests(req.params.userId);
+      
+      // Enrich with addressee info
+      const enrichedRequests = await Promise.all(
+        requests.map(async (request) => {
+          const addressee = await storage.getUser(request.addresseeId);
+          return {
+            ...request,
+            addresseeName: addressee?.name || 'Unknown',
+            addresseeEmail: addressee?.email || '',
+            addresseeProfilePic: addressee?.profilePic || null,
+          };
+        })
+      );
+      
+      res.json(enrichedRequests);
+    } catch (error) {
+      console.error("Get outgoing requests error:", error);
+      res.status(500).json({ error: "Failed to get friend requests" });
+    }
+  });
+
+  // Respond to friend request (accept/reject)
+  app.post("/api/friend-requests/:id/respond", async (req, res) => {
+    try {
+      const { action, userId } = req.body;
+      const requestId = req.params.id;
+
+      if (!action || !['accept', 'reject'].includes(action)) {
+        return res.status(400).json({ error: "Invalid action. Must be 'accept' or 'reject'" });
+      }
+
+      const request = await storage.getFriendRequest(requestId);
+      if (!request) {
+        return res.status(404).json({ error: "Friend request not found" });
+      }
+
+      if (request.addresseeId !== userId) {
+        return res.status(403).json({ error: "Not authorized to respond to this request" });
+      }
+
+      if (request.status !== 'pending') {
+        return res.status(400).json({ error: "This request has already been responded to" });
+      }
+
+      const status = action === 'accept' ? 'accepted' : 'rejected';
+      const updatedRequest = await storage.respondToFriendRequest(requestId, status);
+
+      if (action === 'accept') {
+        // Add both users as friends (bidirectional)
+        await storage.addFriend({
+          userId: request.requesterId,
+          friendId: request.addresseeId,
+          status: 'accepted',
+        });
+        await storage.addFriend({
+          userId: request.addresseeId,
+          friendId: request.requesterId,
+          status: 'accepted',
+        });
+
+        // Notify requester that their request was accepted
+        const addressee = await storage.getUser(request.addresseeId);
+        if (addressee) {
+          await sendFriendAcceptedNotification(request.requesterId, addressee.name);
+        }
+      }
+
+      res.json(updatedRequest);
+    } catch (error) {
+      console.error("Respond to friend request error:", error);
+      res.status(500).json({ error: "Failed to respond to friend request" });
+    }
+  });
+
+  // Cancel outgoing friend request
+  app.delete("/api/friend-requests/:id", async (req, res) => {
+    try {
+      const { userId } = req.body;
+      const requestId = req.params.id;
+
+      const request = await storage.getFriendRequest(requestId);
+      if (!request) {
+        return res.status(404).json({ error: "Friend request not found" });
+      }
+
+      if (request.requesterId !== userId) {
+        return res.status(403).json({ error: "Not authorized to cancel this request" });
+      }
+
+      await storage.respondToFriendRequest(requestId, 'rejected');
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to cancel friend request" });
     }
   });
 
