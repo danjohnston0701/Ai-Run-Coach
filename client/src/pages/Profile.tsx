@@ -46,10 +46,29 @@ interface SearchUser {
   email: string;
 }
 
-async function registerPushSubscription(userId: string) {
+function isIOSSafari() {
+  const ua = navigator.userAgent;
+  return /iPad|iPhone|iPod/.test(ua) && !('MSStream' in window);
+}
+
+function isStandalonePWA() {
+  return window.matchMedia('(display-mode: standalone)').matches || 
+         (window.navigator as any).standalone === true;
+}
+
+interface PushResult {
+  success: boolean;
+  error?: 'safari_requires_homescreen' | 'not_supported' | 'not_configured' | 'permission_denied' | 'failed';
+}
+
+async function registerPushSubscription(userId: string): Promise<PushResult> {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     console.log('[Push] Push notifications not supported');
-    return false;
+    
+    if (isIOSSafari() && !isStandalonePWA()) {
+      return { success: false, error: 'safari_requires_homescreen' };
+    }
+    return { success: false, error: 'not_supported' };
   }
 
   try {
@@ -57,13 +76,13 @@ async function registerPushSubscription(userId: string) {
     const { configured } = await statusRes.json();
     if (!configured) {
       console.log('[Push] Push notifications not configured on server');
-      return false;
+      return { success: false, error: 'not_configured' };
     }
 
     const keyRes = await fetch('/api/push/vapid-public-key');
     if (!keyRes.ok) {
       console.log('[Push] Could not get VAPID key');
-      return false;
+      return { success: false, error: 'not_configured' };
     }
     const { vapidPublicKey } = await keyRes.json();
 
@@ -73,7 +92,7 @@ async function registerPushSubscription(userId: string) {
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
       console.log('[Push] Notification permission denied');
-      return false;
+      return { success: false, error: 'permission_denied' };
     }
 
     const subscription = await registration.pushManager.subscribe({
@@ -88,10 +107,10 @@ async function registerPushSubscription(userId: string) {
     });
 
     console.log('[Push] Successfully subscribed');
-    return true;
+    return { success: true };
   } catch (error) {
     console.error('[Push] Registration failed:', error);
-    return false;
+    return { success: false, error: 'failed' };
   }
 }
 
@@ -238,12 +257,24 @@ export default function Profile() {
 
   const handleEnableNotifications = async () => {
     if (!profile?.id) return;
-    const success = await registerPushSubscription(profile.id);
-    if (success) {
+    const result = await registerPushSubscription(profile.id);
+    if (result.success) {
       setNotificationsEnabled(true);
       toast.success('Notifications enabled! You\'ll be notified of friend requests.');
     } else {
-      toast.error('Could not enable notifications. Please check your browser settings.');
+      switch (result.error) {
+        case 'safari_requires_homescreen':
+          toast.error('On Safari, add this app to your Home Screen first (tap Share → Add to Home Screen), then enable notifications.');
+          break;
+        case 'permission_denied':
+          toast.error('Notification permission was denied. Check your browser settings to enable notifications.');
+          break;
+        case 'not_supported':
+          toast.error('Push notifications are not supported on this browser.');
+          break;
+        default:
+          toast.error('Could not enable notifications. Please check your browser settings.');
+      }
     }
   };
 
