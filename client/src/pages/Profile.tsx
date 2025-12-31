@@ -319,12 +319,19 @@ export default function Profile() {
     e.preventDefault();
     if (!profile) return;
     
-    if (!profile.name || !profile.gender || !profile.height || !profile.weight) {
-      alert("Please fill in all required fields");
+    const missingFields: string[] = [];
+    if (!profile.name) missingFields.push("Name");
+    if (!profile.gender) missingFields.push("Gender");
+    if (!profile.height) missingFields.push("Height");
+    if (!profile.weight) missingFields.push("Weight");
+    
+    if (missingFields.length > 0) {
+      toast.error(`Please fill in: ${missingFields.join(", ")}`);
       return;
     }
     
     localStorage.setItem("userProfile", JSON.stringify(profile));
+    toast.success("Profile saved!");
     setLocation("/");
   };
 
