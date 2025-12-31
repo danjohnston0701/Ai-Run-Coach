@@ -97,8 +97,8 @@ export class DatabaseStorage implements IStorage {
       
       const lowerQuery = query.toLowerCase();
       return allUsers.filter(u => 
-        u.name.toLowerCase().includes(lowerQuery) || 
-        u.email.toLowerCase().includes(lowerQuery)
+        (u.name && u.name.toLowerCase().includes(lowerQuery)) || 
+        (u.email && u.email.toLowerCase().includes(lowerQuery))
       );
     });
   }
