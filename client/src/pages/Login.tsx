@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { motion } from "framer-motion";
-import { ArrowLeft, Mail, Lock, UserPlus, LogIn } from "lucide-react";
+import { ArrowLeft, Mail, Lock, UserPlus, LogIn, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Auth() {
@@ -18,6 +18,9 @@ export default function Auth() {
   const [signupEmail, setSignupEmail] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
   const [signupConfirmPassword, setSignupConfirmPassword] = useState("");
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showSignupPassword, setShowSignupPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -142,12 +145,20 @@ export default function Auth() {
                       <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input 
                         id="password" 
-                        type="password" 
-                        className="pl-10 bg-background/50 border-white/10" 
+                        type={showLoginPassword ? "text" : "password"} 
+                        className="pl-10 pr-10 bg-background/50 border-white/10" 
                         value={loginPassword}
                         onChange={(e) => setLoginPassword(e.target.value)}
                         required 
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowLoginPassword(!showLoginPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        data-testid="toggle-login-password"
+                      >
+                        {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
                     </div>
                   </div>
                 </CardContent>
@@ -197,14 +208,22 @@ export default function Auth() {
                       <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input 
                         id="new-password" 
-                        type="password" 
+                        type={showSignupPassword ? "text" : "password"} 
                         placeholder="Create a password"
-                        className="pl-10 bg-background/50 border-white/10" 
+                        className="pl-10 pr-10 bg-background/50 border-white/10" 
                         value={signupPassword}
                         onChange={(e) => setSignupPassword(e.target.value)}
                         required 
                         minLength={6}
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowSignupPassword(!showSignupPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        data-testid="toggle-signup-password"
+                      >
+                        {showSignupPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
                     </div>
                   </div>
                   <div className="space-y-2">
@@ -213,15 +232,23 @@ export default function Auth() {
                       <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input 
                         id="confirm-password" 
-                        type="password" 
+                        type={showConfirmPassword ? "text" : "password"} 
                         placeholder="Confirm your password"
-                        className="pl-10 bg-background/50 border-white/10" 
+                        className="pl-10 pr-10 bg-background/50 border-white/10" 
                         value={signupConfirmPassword}
                         onChange={(e) => setSignupConfirmPassword(e.target.value)}
                         required 
                         minLength={6}
                         data-testid="input-confirm-password"
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        data-testid="toggle-confirm-password"
+                      >
+                        {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
                     </div>
                   </div>
                 </CardContent>
