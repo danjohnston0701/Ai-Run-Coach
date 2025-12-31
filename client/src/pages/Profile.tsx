@@ -319,14 +319,8 @@ export default function Profile() {
     e.preventDefault();
     if (!profile) return;
     
-    const missingFields: string[] = [];
-    if (!profile.name) missingFields.push("Name");
-    if (!profile.gender) missingFields.push("Gender");
-    if (!profile.height) missingFields.push("Height");
-    if (!profile.weight) missingFields.push("Weight");
-    
-    if (missingFields.length > 0) {
-      toast.error(`Please fill in: ${missingFields.join(", ")}`);
+    if (!profile.name) {
+      toast.error("Please fill in your name");
       return;
     }
     
