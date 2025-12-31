@@ -29,6 +29,18 @@ Preferred communication style: Simple, everyday language.
 - **Database ORM**: Drizzle ORM with PostgreSQL dialect
 - **AI Integration**: OpenAI API for coaching advice and route generation
 
+### AI-Powered Route Planning System
+The route generation uses a hybrid AI approach:
+1. **Area Data Collection**: Google Places API retrieves nearby parks, Google Elevation API samples terrain
+2. **AI Waypoint Design**: OpenAI analyzes area data and designs optimal waypoints based on target distance, difficulty level (easy/moderate/hard), and terrain preferences
+3. **Route Generation**: Google Directions API creates final walking routes from AI-designed waypoints
+4. **Elevation Analysis**: Route elevation gain/loss is calculated and displayed on route cards
+
+Key files:
+- `server/aiRoutePlanner.ts`: Core AI route planning logic
+- `server/routePlanner.ts`: Fallback geometric route generation
+- Endpoint: `POST /api/routes/generate-options` (generates 9 routes: 3 easy, 3 moderate, 3 hard)
+
 ### Data Storage
 - **Database**: PostgreSQL (configured via DATABASE_URL environment variable)
 - **Schema Location**: `shared/schema.ts` - contains tables for users, pre-registrations, friends, routes, runs, live sessions, and Garmin data
@@ -53,7 +65,8 @@ Preferred communication style: Simple, everyday language.
 ## External Dependencies
 
 ### Third-Party Services
-- **OpenAI API**: Powers AI coaching advice, route generation, and run performance analysis (requires `OPENAI_API_KEY`)
+- **OpenAI API**: Powers AI coaching advice, route waypoint design, and run performance analysis (requires `OPENAI_API_KEY`)
+- **Google Maps API**: Provides Places API (parks/POIs), Directions API (walking routes), and Elevation API (terrain data) for route generation (requires `GOOGLE_MAPS_API_KEY`)
 - **OpenStreetMap**: Tile provider for Leaflet maps (no API key required)
 
 ### Database
