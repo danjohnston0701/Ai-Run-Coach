@@ -270,6 +270,28 @@ export default function Home() {
       },
       async (error) => {
         console.log("GPS location error:", error.code, error.message);
+        
+        // Show toast for permission denied (only once per session)
+        if (error.code === 1) {
+          const locationToastShown = sessionStorage.getItem('locationToastShown');
+          if (!locationToastShown) {
+            sessionStorage.setItem('locationToastShown', 'true');
+            if (isIOSSafari()) {
+              toast.error('Location access denied. To enable: Go to Settings → Safari → Location → Allow', {
+                duration: 6000,
+              });
+            } else if (isSafari()) {
+              toast.error('Location access denied. Click Safari → Settings for this website → Allow Location', {
+                duration: 6000,
+              });
+            } else {
+              toast.error('Location access denied. Please enable location in your browser settings.', {
+                duration: 5000,
+              });
+            }
+          }
+        }
+        
         // Only use saved location if GPS fails
         const savedLocation = localStorage.getItem("userGpsLocation");
         if (savedLocation) {
