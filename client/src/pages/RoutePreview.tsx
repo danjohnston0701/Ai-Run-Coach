@@ -23,6 +23,8 @@ interface GeneratedRoute {
   needsApproval?: boolean;
   variancePercent?: number;
   targetDistance?: number;
+  routeGrade?: "easy" | "moderate" | "hard";
+  deadEndCount?: number;
 }
 
 export default function RoutePreview() {
@@ -84,6 +86,8 @@ export default function RoutePreview() {
         needsApproval: data.needsApproval,
         variancePercent: data.variancePercent,
         targetDistance: data.targetDistance,
+        routeGrade: data.routeGrade,
+        deadEndCount: data.deadEndCount,
       });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Failed to generate route";
@@ -172,7 +176,7 @@ export default function RoutePreview() {
             className="h-[350px]"
           />
 
-          <div className="flex justify-center">
+          <div className="flex justify-center gap-4">
             <Card className="bg-card/50 border-white/10 w-32">
               <CardContent className="p-4 text-center">
                 <Route className="w-5 h-5 text-primary mx-auto mb-2" />
@@ -180,7 +184,91 @@ export default function RoutePreview() {
                 <p className="text-xs text-muted-foreground uppercase">km</p>
               </CardContent>
             </Card>
+            {route.routeGrade && (
+              <Card className={`border w-32 ${
+                route.routeGrade === 'easy' ? 'bg-green-500/10 border-green-500/30' :
+                route.routeGrade === 'moderate' ? 'bg-yellow-500/10 border-yellow-500/30' :
+                'bg-red-500/10 border-red-500/30'
+              }`}>
+                <CardContent className="p-4 text-center">
+                  <div className={`w-5 h-5 rounded-full mx-auto mb-2 ${
+                    route.routeGrade === 'easy' ? 'bg-green-500' :
+                    route.routeGrade === 'moderate' ? 'bg-yellow-500' :
+                    'bg-red-500'
+                  }`} />
+                  <p className={`text-lg font-display font-bold uppercase ${
+                    route.routeGrade === 'easy' ? 'text-green-500' :
+                    route.routeGrade === 'moderate' ? 'text-yellow-500' :
+                    'text-red-500'
+                  }`}>{route.routeGrade}</p>
+                  <p className="text-xs text-muted-foreground uppercase">grade</p>
+                </CardContent>
+              </Card>
+            )}
           </div>
+
+          {route.routeGrade && !routeAccepted && (
+            <Card className={`border ${
+              route.routeGrade === 'easy' ? 'bg-green-500/10 border-green-500/30' :
+              route.routeGrade === 'moderate' ? 'bg-yellow-500/10 border-yellow-500/30' :
+              'bg-red-500/10 border-red-500/30'
+            }`}>
+              <CardContent className="p-4">
+                <div className="flex items-start gap-3">
+                  <div className={`w-5 h-5 rounded-full flex-shrink-0 mt-0.5 ${
+                    route.routeGrade === 'easy' ? 'bg-green-500' :
+                    route.routeGrade === 'moderate' ? 'bg-yellow-500' :
+                    'bg-red-500'
+                  }`} />
+                  <div className="flex-1">
+                    <h3 className={`font-display font-bold uppercase text-sm mb-1 ${
+                      route.routeGrade === 'easy' ? 'text-green-500' :
+                      route.routeGrade === 'moderate' ? 'text-yellow-500' :
+                      'text-red-500'
+                    }`}>
+                      {route.routeGrade === 'easy' ? 'Great Route Found' :
+                       route.routeGrade === 'moderate' ? 'Good Route Found' :
+                       'Challenging Route'}
+                    </h3>
+                    <p className="text-sm text-muted-foreground mb-2">
+                      {route.routeGrade === 'easy' 
+                        ? 'This route has minimal backtracking and follows a clean loop pattern. Perfect for an enjoyable run!'
+                        : route.routeGrade === 'moderate'
+                        ? 'This route is good but may have some minor backtracking or road reuse. Still a solid choice for your run.'
+                        : 'This route has some sections that reuse roads or include turnarounds. You may want to regenerate for a cleaner loop.'
+                      }
+                    </p>
+                    <p className="text-xs text-muted-foreground mb-3">
+                      Dead-ends detected: {route.deadEndCount || 0}
+                    </p>
+                    <div className="flex gap-2">
+                      <Button 
+                        size="sm" 
+                        onClick={() => setRouteAccepted(true)}
+                        className={`text-white gap-1 ${
+                          route.routeGrade === 'easy' ? 'bg-green-600 hover:bg-green-700' :
+                          route.routeGrade === 'moderate' ? 'bg-yellow-600 hover:bg-yellow-700' :
+                          'bg-red-600 hover:bg-red-700'
+                        }`}
+                        data-testid="button-accept-grade"
+                      >
+                        <Check className="w-4 h-4" /> Accept This Route
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={generateRoute}
+                        className="border-white/20 gap-1"
+                        data-testid="button-regenerate-grade"
+                      >
+                        <RefreshCw className="w-4 h-4" /> Try Different Route
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {route.needsApproval && !routeAccepted && (
             <Card className="bg-yellow-500/10 border-yellow-500/30">

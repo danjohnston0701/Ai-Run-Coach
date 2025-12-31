@@ -48,6 +48,8 @@ export interface RouteResult {
   variancePercent?: number;
   targetDistance?: number;
   uniquenessScore?: number;
+  routeGrade?: "easy" | "moderate" | "hard";
+  deadEndCount?: number;
 }
 
 function toRadians(degrees: number): number {
@@ -175,8 +177,8 @@ function detectDeadEndPatterns(polyline: string): { deadEndCount: number; deadEn
   if (points.length < 20) return { deadEndCount: 0, deadEndPenalty: 0 };
   
   let deadEndCount = 0;
-  const minSegmentLength = 10;
-  const turnThreshold = 150;
+  const minSegmentLength = 8;
+  const turnThreshold = 140;
   
   for (let i = 2; i < points.length - 2; i++) {
     const dist1 = getDistanceMeters(points[i-1], points[i]);
@@ -195,7 +197,7 @@ function detectDeadEndPatterns(polyline: string): { deadEndCount: number; deadEn
       let approachAngle = Math.abs(bearing1 - prevBearing);
       if (approachAngle > 180) approachAngle = 360 - approachAngle;
       
-      if (approachAngle < 45) {
+      if (approachAngle < 60) {
         deadEndCount++;
       }
     }
@@ -203,9 +205,21 @@ function detectDeadEndPatterns(polyline: string): { deadEndCount: number; deadEn
   
   const routeLengthKm = points.length * 0.01;
   const deadEndsPerKm = deadEndCount / Math.max(routeLengthKm, 1);
-  const deadEndPenalty = Math.min(deadEndsPerKm * 0.1, 0.3);
+  const deadEndPenalty = Math.min(deadEndsPerKm * 0.15, 0.4);
   
   return { deadEndCount, deadEndPenalty };
+}
+
+function gradeRoute(uniqueness: number, deadEndCount: number, distanceVariance: number): "easy" | "moderate" | "hard" {
+  const score = (uniqueness * 40) + (Math.max(0, 10 - deadEndCount * 3) * 3) + (Math.max(0, 30 - Math.abs(distanceVariance)));
+  
+  if (score >= 70 && deadEndCount <= 1 && uniqueness >= 0.75) {
+    return "easy";
+  } else if (score >= 50 && deadEndCount <= 3 && uniqueness >= 0.60) {
+    return "moderate";
+  } else {
+    return "hard";
+  }
 }
 
 function calculatePathUniqueness(polyline: string): number {
@@ -251,7 +265,7 @@ async function fetchDirectionsRoute(
     .map((wp) => `${wp.lat},${wp.lng}`)
     .join("|");
 
-  const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.lat},${origin.lng}&destination=${origin.lat},${origin.lng}&waypoints=${waypointsStr}&mode=walking&key=${GOOGLE_MAPS_API_KEY}`;
+  const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.lat},${origin.lng}&destination=${origin.lat},${origin.lng}&waypoints=${waypointsStr}&mode=walking&avoid=highways&key=${GOOGLE_MAPS_API_KEY}`;
 
   try {
     const response = await fetch(url);
@@ -341,8 +355,10 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
       
       console.log(`Attempt ${attempts}: ${result.distance.toFixed(2)}km (target: ${targetDistance}km, diff: ${diff.toFixed(2)}km, uniqueness: ${(adjustedUniqueness * 100).toFixed(1)}%, dead-ends: ${deadEndCount}, radius: ${currentRadius.toFixed(3)}km, ratio: ${observedRatio.toFixed(3)}, rotation: ${rotation}°)`);
 
-      if (result.distance >= minDistance && result.distance <= maxDistance && adjustedUniqueness >= config.minUniqueRatio && deadEndCount <= 2) {
-        console.log(`Found valid route on attempt ${attempts} with ${(adjustedUniqueness * 100).toFixed(1)}% uniqueness and ${deadEndCount} dead-ends`);
+      if (result.distance >= minDistance && result.distance <= maxDistance && adjustedUniqueness >= config.minUniqueRatio && deadEndCount <= 1) {
+        const distVariance = ((result.distance - targetDistance) / targetDistance) * 100;
+        const grade = gradeRoute(adjustedUniqueness, deadEndCount, distVariance);
+        console.log(`Found valid route on attempt ${attempts} with ${(adjustedUniqueness * 100).toFixed(1)}% uniqueness, ${deadEndCount} dead-ends, grade: ${grade}`);
         return {
           success: true,
           waypoints,
@@ -352,6 +368,8 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
           attempts,
           routeName: `${targetDistance}km ${request.difficulty} Loop`,
           uniquenessScore: adjustedUniqueness,
+          routeGrade: grade,
+          deadEndCount,
         };
       }
 
@@ -369,7 +387,7 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
         };
       }
       
-      const qualityScore = diff + (adjustedUniqueness < config.minUniqueRatio ? 2 : 0) + (deadEndCount > 2 ? 1 : 0);
+      const qualityScore = diff + (adjustedUniqueness < config.minUniqueRatio ? 2 : 0) + (deadEndCount > 1 ? 1 : 0);
       if (qualityScore < bestQualityScore) {
         bestQualityScore = qualityScore;
         bestQualityResult = {
@@ -401,16 +419,19 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
     const isWithinExtendedTolerance = Math.abs(variance) <= 25;
     const uniqueness = bestResult.uniquenessScore || 0;
     const { deadEndCount } = detectDeadEndPatterns(bestResult.polyline);
-    const hasAcceptableDeadEnds = deadEndCount <= 2;
+    const hasAcceptableDeadEnds = deadEndCount <= 1;
+    const grade = gradeRoute(uniqueness, deadEndCount, variance);
     
     if (isWithinTolerance && uniqueness >= config.minUniqueRatio && hasAcceptableDeadEnds) {
-      console.log(`Using best route: ${bestResult.actualDistance.toFixed(2)}km (${variance.toFixed(1)}% variance, ${(uniqueness * 100).toFixed(1)}% unique, ${deadEndCount} dead-ends) - within tolerance`);
+      console.log(`Using best route: ${bestResult.actualDistance.toFixed(2)}km (${variance.toFixed(1)}% variance, ${(uniqueness * 100).toFixed(1)}% unique, ${deadEndCount} dead-ends, grade: ${grade}) - within tolerance`);
       bestResult.success = true;
       bestResult.attempts = attempts;
+      bestResult.routeGrade = grade;
+      bestResult.deadEndCount = deadEndCount;
       return bestResult;
     } else if (isWithinTolerance && (uniqueness < config.minUniqueRatio || !hasAcceptableDeadEnds)) {
       const reason = !hasAcceptableDeadEnds ? `too many dead-ends (${deadEndCount})` : `low uniqueness (${(uniqueness * 100).toFixed(1)}%)`;
-      console.log(`Best route ${bestResult.actualDistance.toFixed(2)}km has ${reason} - needs user approval`);
+      console.log(`Best route ${bestResult.actualDistance.toFixed(2)}km has ${reason}, grade: ${grade} - needs user approval`);
       return {
         success: true,
         waypoints: bestResult.waypoints,
@@ -423,15 +444,19 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
         variancePercent: parseFloat(variance.toFixed(1)),
         targetDistance,
         uniquenessScore: uniqueness,
+        routeGrade: grade,
+        deadEndCount,
       };
     } else if (isWithinExtendedTolerance && uniqueness >= config.minUniqueRatio && hasAcceptableDeadEnds) {
-      console.log(`Using best route: ${bestResult.actualDistance.toFixed(2)}km (${variance.toFixed(1)}% variance, ${(uniqueness * 100).toFixed(1)}% unique, ${deadEndCount} dead-ends) - within extended tolerance`);
+      console.log(`Using best route: ${bestResult.actualDistance.toFixed(2)}km (${variance.toFixed(1)}% variance, ${(uniqueness * 100).toFixed(1)}% unique, ${deadEndCount} dead-ends, grade: ${grade}) - within extended tolerance`);
       bestResult.success = true;
       bestResult.attempts = attempts;
       bestResult.routeName = `${bestResult.actualDistance.toFixed(1)}km ${request.difficulty} Loop`;
+      bestResult.routeGrade = grade;
+      bestResult.deadEndCount = deadEndCount;
       return bestResult;
     } else {
-      console.log(`Best route ${bestResult.actualDistance.toFixed(2)}km exceeds tolerance (${variance.toFixed(1)}% variance) - needs user approval`);
+      console.log(`Best route ${bestResult.actualDistance.toFixed(2)}km exceeds tolerance (${variance.toFixed(1)}% variance), grade: ${grade} - needs user approval`);
       return {
         success: true,
         waypoints: bestResult.waypoints,
@@ -444,6 +469,8 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
         variancePercent: parseFloat(variance.toFixed(1)),
         targetDistance,
         uniquenessScore: uniqueness,
+        routeGrade: grade,
+        deadEndCount,
       };
     }
   }
