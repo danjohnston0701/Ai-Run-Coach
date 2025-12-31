@@ -147,6 +147,71 @@ function decodePolyline(encoded: string): Array<{ lat: number; lng: number }> {
   return points;
 }
 
+function calculateBearing(p1: { lat: number; lng: number }, p2: { lat: number; lng: number }): number {
+  const lat1 = toRadians(p1.lat);
+  const lat2 = toRadians(p2.lat);
+  const dLng = toRadians(p2.lng - p1.lng);
+  
+  const x = Math.sin(dLng) * Math.cos(lat2);
+  const y = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  
+  let bearing = toDegrees(Math.atan2(x, y));
+  return (bearing + 360) % 360;
+}
+
+function getDistanceMeters(p1: { lat: number; lng: number }, p2: { lat: number; lng: number }): number {
+  const R = 6371000;
+  const lat1 = toRadians(p1.lat);
+  const lat2 = toRadians(p2.lat);
+  const dLat = toRadians(p2.lat - p1.lat);
+  const dLng = toRadians(p2.lng - p1.lng);
+  
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1) * Math.cos(lat2) *
+            Math.sin(dLng/2) * Math.sin(dLng/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  
+  return R * c;
+}
+
+function detectDeadEndPatterns(polyline: string): { deadEndCount: number; deadEndPenalty: number } {
+  const points = decodePolyline(polyline);
+  if (points.length < 20) return { deadEndCount: 0, deadEndPenalty: 0 };
+  
+  let deadEndCount = 0;
+  const minSegmentLength = 10;
+  const turnThreshold = 150;
+  
+  for (let i = 2; i < points.length - 2; i++) {
+    const dist1 = getDistanceMeters(points[i-1], points[i]);
+    const dist2 = getDistanceMeters(points[i], points[i+1]);
+    
+    if (dist1 < minSegmentLength || dist2 < minSegmentLength) continue;
+    
+    const bearing1 = calculateBearing(points[i-1], points[i]);
+    const bearing2 = calculateBearing(points[i], points[i+1]);
+    
+    let turnAngle = Math.abs(bearing2 - bearing1);
+    if (turnAngle > 180) turnAngle = 360 - turnAngle;
+    
+    if (turnAngle >= turnThreshold) {
+      const prevBearing = i >= 3 ? calculateBearing(points[i-2], points[i-1]) : bearing1;
+      let approachAngle = Math.abs(bearing1 - prevBearing);
+      if (approachAngle > 180) approachAngle = 360 - approachAngle;
+      
+      if (approachAngle < 45) {
+        deadEndCount++;
+      }
+    }
+  }
+  
+  const routeLengthKm = points.length * 0.01;
+  const deadEndsPerKm = deadEndCount / Math.max(routeLengthKm, 1);
+  const deadEndPenalty = Math.min(deadEndsPerKm * 0.1, 0.3);
+  
+  return { deadEndCount, deadEndPenalty };
+}
+
 function calculatePathUniqueness(polyline: string): number {
   const points = decodePolyline(polyline);
   if (points.length < 10) return 1.0;
@@ -272,11 +337,13 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
 
       const diff = Math.abs(result.distance - targetDistance);
       const uniqueness = calculatePathUniqueness(result.polyline);
+      const { deadEndCount, deadEndPenalty } = detectDeadEndPatterns(result.polyline);
+      const adjustedUniqueness = Math.max(0, uniqueness - deadEndPenalty);
       
-      console.log(`Attempt ${attempts}: ${result.distance.toFixed(2)}km (target: ${targetDistance}km, diff: ${diff.toFixed(2)}km, uniqueness: ${(uniqueness * 100).toFixed(1)}%, radius: ${testRadius.toFixed(3)}km, rotation: ${rotation}°)`);
+      console.log(`Attempt ${attempts}: ${result.distance.toFixed(2)}km (target: ${targetDistance}km, diff: ${diff.toFixed(2)}km, uniqueness: ${(uniqueness * 100).toFixed(1)}%, dead-ends: ${deadEndCount}, adjusted: ${(adjustedUniqueness * 100).toFixed(1)}%, radius: ${testRadius.toFixed(3)}km, rotation: ${rotation}°)`);
 
-      if (result.distance >= minDistance && result.distance <= maxDistance && uniqueness >= config.minUniqueRatio) {
-        console.log(`Found valid route on attempt ${attempts} with ${(uniqueness * 100).toFixed(1)}% uniqueness`);
+      if (result.distance >= minDistance && result.distance <= maxDistance && adjustedUniqueness >= config.minUniqueRatio && deadEndCount <= 2) {
+        console.log(`Found valid route on attempt ${attempts} with ${(adjustedUniqueness * 100).toFixed(1)}% uniqueness and ${deadEndCount} dead-ends`);
         return {
           success: true,
           waypoints,
@@ -285,11 +352,11 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
           polyline: result.polyline,
           attempts,
           routeName: `${targetDistance}km ${request.difficulty} Loop`,
-          uniquenessScore: uniqueness,
+          uniquenessScore: adjustedUniqueness,
         };
       }
 
-      const weightedScore = diff + (uniqueness < config.minUniqueRatio ? (1 - uniqueness) * targetDistance : 0);
+      const weightedScore = diff + (adjustedUniqueness < config.minUniqueRatio ? (1 - adjustedUniqueness) * targetDistance : 0) + (deadEndCount * 0.5);
       
       if (result.distance > 0 && weightedScore < closestDiff) {
         closestDiff = weightedScore;
@@ -301,7 +368,7 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
           polyline: result.polyline,
           attempts,
           routeName: `${targetDistance}km ${request.difficulty} Loop`,
-          uniquenessScore: uniqueness,
+          uniquenessScore: adjustedUniqueness,
         };
         
         if (result.distance > targetDistance) {
@@ -333,14 +400,17 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
     const isWithinTolerance = bestResult.actualDistance >= minDistance && bestResult.actualDistance <= maxDistance;
     const isWithinExtendedTolerance = Math.abs(variance) <= 25;
     const uniqueness = bestResult.uniquenessScore || 0;
+    const { deadEndCount } = detectDeadEndPatterns(bestResult.polyline);
+    const hasAcceptableDeadEnds = deadEndCount <= 2;
     
-    if (isWithinTolerance && uniqueness >= config.minUniqueRatio) {
-      console.log(`Using best route: ${bestResult.actualDistance.toFixed(2)}km (${variance.toFixed(1)}% variance, ${(uniqueness * 100).toFixed(1)}% unique) - within tolerance`);
+    if (isWithinTolerance && uniqueness >= config.minUniqueRatio && hasAcceptableDeadEnds) {
+      console.log(`Using best route: ${bestResult.actualDistance.toFixed(2)}km (${variance.toFixed(1)}% variance, ${(uniqueness * 100).toFixed(1)}% unique, ${deadEndCount} dead-ends) - within tolerance`);
       bestResult.success = true;
       bestResult.attempts = attempts;
       return bestResult;
-    } else if (isWithinTolerance && uniqueness < config.minUniqueRatio) {
-      console.log(`Best route ${bestResult.actualDistance.toFixed(2)}km has low uniqueness (${(uniqueness * 100).toFixed(1)}%) - needs user approval`);
+    } else if (isWithinTolerance && (uniqueness < config.minUniqueRatio || !hasAcceptableDeadEnds)) {
+      const reason = !hasAcceptableDeadEnds ? `too many dead-ends (${deadEndCount})` : `low uniqueness (${(uniqueness * 100).toFixed(1)}%)`;
+      console.log(`Best route ${bestResult.actualDistance.toFixed(2)}km has ${reason} - needs user approval`);
       return {
         success: true,
         waypoints: bestResult.waypoints,
@@ -354,8 +424,8 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
         targetDistance,
         uniquenessScore: uniqueness,
       };
-    } else if (isWithinExtendedTolerance && uniqueness >= config.minUniqueRatio) {
-      console.log(`Using best route: ${bestResult.actualDistance.toFixed(2)}km (${variance.toFixed(1)}% variance, ${(uniqueness * 100).toFixed(1)}% unique) - within extended tolerance`);
+    } else if (isWithinExtendedTolerance && uniqueness >= config.minUniqueRatio && hasAcceptableDeadEnds) {
+      console.log(`Using best route: ${bestResult.actualDistance.toFixed(2)}km (${variance.toFixed(1)}% variance, ${(uniqueness * 100).toFixed(1)}% unique, ${deadEndCount} dead-ends) - within extended tolerance`);
       bestResult.success = true;
       bestResult.attempts = attempts;
       bestResult.routeName = `${bestResult.actualDistance.toFixed(1)}km ${request.difficulty} Loop`;
