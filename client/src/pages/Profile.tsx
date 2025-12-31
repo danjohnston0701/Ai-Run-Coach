@@ -72,6 +72,7 @@ async function registerPushSubscription(userId: string): Promise<PushResult> {
   }
 
   try {
+    console.log('[Push] Checking server configuration...');
     const statusRes = await fetch('/api/push/status');
     const { configured } = await statusRes.json();
     if (!configured) {
@@ -79,32 +80,47 @@ async function registerPushSubscription(userId: string): Promise<PushResult> {
       return { success: false, error: 'not_configured' };
     }
 
+    console.log('[Push] Getting VAPID key...');
     const keyRes = await fetch('/api/push/vapid-public-key');
     if (!keyRes.ok) {
       console.log('[Push] Could not get VAPID key');
       return { success: false, error: 'not_configured' };
     }
     const { vapidPublicKey } = await keyRes.json();
+    console.log('[Push] Got VAPID key');
 
+    console.log('[Push] Registering service worker...');
     const registration = await navigator.serviceWorker.register('/sw.js');
+    console.log('[Push] Service worker registered, waiting for ready...');
     await navigator.serviceWorker.ready;
+    console.log('[Push] Service worker ready');
 
+    console.log('[Push] Requesting notification permission...');
     const permission = await Notification.requestPermission();
+    console.log('[Push] Permission result:', permission);
     if (permission !== 'granted') {
       console.log('[Push] Notification permission denied');
       return { success: false, error: 'permission_denied' };
     }
 
+    console.log('[Push] Subscribing to push manager...');
     const subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
     });
+    console.log('[Push] Got push subscription');
 
-    await fetch('/api/push/subscribe', {
+    console.log('[Push] Saving subscription to server...');
+    const saveRes = await fetch('/api/push/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, subscription: subscription.toJSON() }),
     });
+    
+    if (!saveRes.ok) {
+      console.error('[Push] Failed to save subscription to server');
+      return { success: false, error: 'failed' };
+    }
 
     console.log('[Push] Successfully subscribed');
     return { success: true };
@@ -272,8 +288,11 @@ export default function Profile() {
         case 'not_supported':
           toast.error('Push notifications are not supported on this browser.');
           break;
+        case 'not_configured':
+          toast.error('Push notifications are not configured on this server.');
+          break;
         default:
-          toast.error('Could not enable notifications. Please check your browser settings.');
+          toast.error('Could not enable notifications. Try refreshing the page and allowing when prompted.');
       }
     }
   };
