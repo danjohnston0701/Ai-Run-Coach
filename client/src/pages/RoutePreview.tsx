@@ -106,34 +106,47 @@ export default function RoutePreview() {
     return (
       <Card 
         className={`cursor-pointer transition-all ${colors.bg} ${colors.border} border-2 ${
-          isSelected ? 'ring-2 ring-primary scale-[1.02]' : 'hover:scale-[1.01]'
+          isSelected ? 'ring-2 ring-primary scale-[1.01]' : 'hover:scale-[1.005]'
         }`}
         onClick={() => setSelectedRoute(route)}
         data-testid={`card-route-${route.id}`}
       >
-        <CardContent className="p-3">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <div className={`w-3 h-3 rounded-full ${colors.dot}`} />
+        <CardContent className="p-0">
+          <div className="relative">
+            <GoogleMapsRoute
+              waypoints={route.waypoints || []}
+              startLat={lat}
+              startLng={lng}
+              routeName={route.routeName}
+              distance={route.actualDistance}
+              polyline={route.polyline}
+              className="h-[150px] rounded-t-lg"
+            />
+            {isSelected && (
+              <div className="absolute top-2 right-2 bg-primary text-background px-2 py-1 rounded-full text-xs font-bold">
+                Selected
+              </div>
+            )}
+            <div className={`absolute top-2 left-2 flex items-center gap-1 px-2 py-1 rounded-full ${colors.bg} backdrop-blur-sm`}>
+              <div className={`w-2 h-2 rounded-full ${colors.dot}`} />
               <span className={`text-xs font-bold uppercase ${colors.text}`}>{route.difficulty}</span>
             </div>
-            {isSelected && (
-              <span className="text-xs bg-primary text-background px-2 py-0.5 rounded-full font-bold">Selected</span>
+          </div>
+          <div className="p-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1">
+                <Route className="w-4 h-4 text-muted-foreground" />
+                <span className="text-lg font-bold">{route.actualDistance.toFixed(1)} km</span>
+              </div>
+              <div className="flex items-center gap-1 text-muted-foreground">
+                <Clock className="w-3 h-3" />
+                <span className="text-xs">{route.duration} min</span>
+              </div>
+            </div>
+            {route.hasMajorRoads && (
+              <p className="text-xs text-muted-foreground mt-1">Includes major roads</p>
             )}
           </div>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1">
-              <Route className="w-4 h-4 text-muted-foreground" />
-              <span className="text-lg font-bold">{route.actualDistance.toFixed(1)} km</span>
-            </div>
-            <div className="flex items-center gap-1 text-muted-foreground">
-              <Clock className="w-3 h-3" />
-              <span className="text-xs">{route.duration} min</span>
-            </div>
-          </div>
-          {route.hasMajorRoads && (
-            <p className="text-xs text-muted-foreground mt-1">Includes major roads</p>
-          )}
         </CardContent>
       </Card>
     );
@@ -145,7 +158,7 @@ export default function RoutePreview() {
     return (
       <div className="mb-6">
         <h3 className={`text-sm font-bold uppercase tracking-wider mb-3 ${color}`}>{title}</h3>
-        <div className="grid grid-cols-1 gap-3">
+        <div className="grid grid-cols-1 gap-4">
           {routeList.map((route) => (
             <RouteCard key={route.id} route={route} />
           ))}
@@ -204,28 +217,6 @@ export default function RoutePreview() {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-6"
         >
-          {selectedRoute && (
-            <div className="mb-6">
-              <GoogleMapsRoute
-                waypoints={selectedRoute.waypoints || []}
-                startLat={lat}
-                startLng={lng}
-                routeName={selectedRoute.routeName}
-                distance={selectedRoute.actualDistance}
-                polyline={selectedRoute.polyline}
-                className="h-[250px]"
-              />
-            </div>
-          )}
-
-          {!selectedRoute && (
-            <Card className="bg-primary/10 border-primary/30">
-              <CardContent className="p-4 text-center">
-                <p className="text-sm text-muted-foreground">Tap a route below to preview it on the map</p>
-              </CardContent>
-            </Card>
-          )}
-
           <DifficultySection title="Easy Routes" routeList={easyRoutes} color="text-green-400" />
           <DifficultySection title="Moderate Routes" routeList={moderateRoutes} color="text-yellow-400" />
           <DifficultySection title="Hard Routes" routeList={hardRoutes} color="text-red-400" />
