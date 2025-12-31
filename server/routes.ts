@@ -226,8 +226,6 @@ export async function registerRoutes(
     try {
       const { startLat, startLng, targetDistance, difficulty } = req.body;
       
-      console.log("Route generation request:", { startLat, startLng, targetDistance, difficulty, hasApiKey: isGoogleMapsConfigured() });
-      
       if (startLat === undefined || startLat === null || 
           startLng === undefined || startLng === null || 
           targetDistance === undefined || targetDistance === null) {
