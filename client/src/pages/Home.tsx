@@ -173,9 +173,8 @@ export default function Home() {
       distance: distance[0].toString(),
       level: selectedLevel,
       ...(userLocation && { lat: userLocation.lat.toString(), lng: userLocation.lng.toString() }),
-      mapped: "true",
     });
-    setLocation(`/run?${params.toString()}`);
+    setLocation(`/route-preview?${params.toString()}`);
   };
 
   const handleStartSession = () => {

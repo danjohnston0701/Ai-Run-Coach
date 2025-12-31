@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import LandingPage from "@/pages/LandingPage";
 import Home from "@/pages/Home";
+import RoutePreview from "@/pages/RoutePreview";
 import RunSession from "@/pages/RunSession";
 import RunHistory from "@/pages/RunHistory";
 import RunInsights from "@/pages/RunInsights";
@@ -44,6 +45,7 @@ function Router() {
       {hasProfile && (
         <>
           <Route path="/" component={Home} />
+          <Route path="/route-preview" component={RoutePreview} />
           <Route path="/run" component={RunSession} />
           <Route path="/history" component={RunHistory} />
           <Route path="/history/:id" component={RunInsights} />
