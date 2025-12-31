@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
@@ -30,6 +30,24 @@ export default function ProfileSetup() {
     coachName: "",
   });
 
+  useEffect(() => {
+    const savedProfile = localStorage.getItem("userProfile");
+    if (savedProfile) {
+      const parsed = JSON.parse(savedProfile);
+      setProfile(prev => ({
+        ...prev,
+        name: parsed.name || "",
+        dob: parsed.dob || "",
+        gender: parsed.gender || "",
+        height: parsed.height || "",
+        weight: parsed.weight || "",
+        fitnessLevel: parsed.fitnessLevel || "Casual",
+        desiredFitnessLevel: parsed.desiredFitnessLevel || "Athletic",
+        coachName: parsed.coachName || "",
+      }));
+    }
+  }, []);
+
   const handleChange = (field: keyof ProfileData, value: string) => {
     setProfile(prev => ({ ...prev, [field]: value }));
   };
@@ -52,7 +70,10 @@ export default function ProfileSetup() {
       alert("Please fill in all fields");
       return;
     }
-    localStorage.setItem("userProfile", JSON.stringify(profile));
+    const savedProfile = localStorage.getItem("userProfile");
+    const existingData = savedProfile ? JSON.parse(savedProfile) : {};
+    const mergedProfile = { ...existingData, ...profile };
+    localStorage.setItem("userProfile", JSON.stringify(mergedProfile));
     window.location.href = "/";
   };
 
