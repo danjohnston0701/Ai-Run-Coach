@@ -51,7 +51,11 @@ export async function registerRoutes(
         return res.status(400).json({ error: error.errors });
       }
       const errorMessage = error instanceof Error ? error.message : "Failed to create user";
-      res.status(500).json({ error: errorMessage });
+      if (errorMessage.includes("EAI_AGAIN") || errorMessage.includes("getaddrinfo")) {
+        res.status(503).json({ error: "It seems there was an error accessing the database, please try again shortly" });
+      } else {
+        res.status(500).json({ error: errorMessage });
+      }
     }
   });
 
@@ -75,7 +79,11 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Login error:", error);
       const errorMessage = error instanceof Error ? error.message : "Login failed";
-      res.status(500).json({ error: errorMessage });
+      if (errorMessage.includes("EAI_AGAIN") || errorMessage.includes("getaddrinfo")) {
+        res.status(503).json({ error: "It seems there was an error accessing the database, please try again shortly" });
+      } else {
+        res.status(500).json({ error: errorMessage });
+      }
     }
   });
 
