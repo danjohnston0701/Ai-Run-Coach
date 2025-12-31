@@ -295,31 +295,31 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
   
   console.log(`Generating ${request.difficulty} route: target ${targetDistance}km (${minDistance.toFixed(2)}-${maxDistance.toFixed(2)}km acceptable)`);
 
-  const estimatedCircumference = targetDistance;
-  let lowerRadius = (estimatedCircumference / (2 * Math.PI)) * 0.3;
-  let upperRadius = (estimatedCircumference / (2 * Math.PI)) * 2.0;
-  
-  let bestResult: RouteResult | null = null;
-  let closestDiff = Infinity;
+  let bestDistanceResult: RouteResult | null = null;
+  let bestDistanceDiff = Infinity;
+  let bestQualityResult: RouteResult | null = null;
+  let bestQualityScore = Infinity;
   let attempts = 0;
   
-  const rotationAngles = [0, 45, 22.5, 67.5, 15, 30, 60, 75, 90, 120, 135, 150, 180, 210, 240, 270, 300, 330, 10, 50];
+  let learnedRatio = 1.0;
+  const baseRadius = targetDistance / (2 * Math.PI);
+  
+  const rotationAngles = [0, 45, 90, 135, 180, 225, 270, 315, 22.5, 67.5, 112.5, 157.5, 202.5, 247.5, 292.5, 337.5];
   
   for (const rotation of rotationAngles) {
     if (attempts >= config.maxRetries) break;
+    if (bestDistanceDiff <= targetDistance * 0.03) break;
     
-    let searchLower = lowerRadius;
-    let searchUpper = upperRadius;
+    let currentRadius = baseRadius * learnedRatio;
+    let radiusStep = currentRadius * 0.3;
     
-    for (let binaryStep = 0; binaryStep < 5 && attempts < config.maxRetries; binaryStep++) {
+    for (let step = 0; step < 8 && attempts < config.maxRetries; step++) {
       attempts++;
-      
-      const testRadius = (searchLower + searchUpper) / 2;
       
       const waypoints = generatePolygonWaypoints(
         request.startLat,
         request.startLng,
-        testRadius,
+        currentRadius,
         config.waypointCount,
         rotation
       );
@@ -330,8 +330,8 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
       );
 
       if (!result.success) {
-        console.log(`Attempt ${attempts}: API error - ${result.error} (radius: ${testRadius.toFixed(3)}km, rotation: ${rotation}°)`);
-        searchLower = testRadius;
+        console.log(`Attempt ${attempts}: API error - ${result.error} (radius: ${currentRadius.toFixed(3)}km, rotation: ${rotation}°)`);
+        currentRadius += radiusStep * 0.5;
         continue;
       }
 
@@ -340,7 +340,10 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
       const { deadEndCount, deadEndPenalty } = detectDeadEndPatterns(result.polyline);
       const adjustedUniqueness = Math.max(0, uniqueness - deadEndPenalty);
       
-      console.log(`Attempt ${attempts}: ${result.distance.toFixed(2)}km (target: ${targetDistance}km, diff: ${diff.toFixed(2)}km, uniqueness: ${(uniqueness * 100).toFixed(1)}%, dead-ends: ${deadEndCount}, adjusted: ${(adjustedUniqueness * 100).toFixed(1)}%, radius: ${testRadius.toFixed(3)}km, rotation: ${rotation}°)`);
+      const observedRatio = targetDistance / result.distance;
+      learnedRatio = learnedRatio * 0.7 + (learnedRatio * observedRatio) * 0.3;
+      
+      console.log(`Attempt ${attempts}: ${result.distance.toFixed(2)}km (target: ${targetDistance}km, diff: ${diff.toFixed(2)}km, uniqueness: ${(adjustedUniqueness * 100).toFixed(1)}%, dead-ends: ${deadEndCount}, radius: ${currentRadius.toFixed(3)}km, ratio: ${observedRatio.toFixed(3)}, rotation: ${rotation}°)`);
 
       if (result.distance >= minDistance && result.distance <= maxDistance && adjustedUniqueness >= config.minUniqueRatio && deadEndCount <= 2) {
         console.log(`Found valid route on attempt ${attempts} with ${(adjustedUniqueness * 100).toFixed(1)}% uniqueness and ${deadEndCount} dead-ends`);
@@ -356,11 +359,9 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
         };
       }
 
-      const weightedScore = diff + (adjustedUniqueness < config.minUniqueRatio ? (1 - adjustedUniqueness) * targetDistance : 0) + (deadEndCount * 0.5);
-      
-      if (result.distance > 0 && weightedScore < closestDiff) {
-        closestDiff = weightedScore;
-        bestResult = {
+      if (diff < bestDistanceDiff) {
+        bestDistanceDiff = diff;
+        bestDistanceResult = {
           success: false,
           waypoints,
           actualDistance: result.distance,
@@ -370,30 +371,33 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
           routeName: `${targetDistance}km ${request.difficulty} Loop`,
           uniquenessScore: adjustedUniqueness,
         };
-        
-        if (result.distance > targetDistance) {
-          searchUpper = testRadius;
-        } else {
-          searchLower = testRadius;
-        }
-        
-        lowerRadius = Math.min(lowerRadius, searchLower * 0.9);
-        upperRadius = Math.max(upperRadius, searchUpper * 1.1);
-      } else {
-        if (result.distance > targetDistance) {
-          searchUpper = testRadius;
-        } else {
-          searchLower = testRadius;
-        }
       }
-    }
-    
-    if (bestResult && 
-        Math.abs(bestResult.actualDistance - targetDistance) / targetDistance <= 0.05 &&
-        (bestResult.uniquenessScore || 0) >= config.minUniqueRatio) {
-      break;
+      
+      const qualityScore = diff + (adjustedUniqueness < config.minUniqueRatio ? 2 : 0) + (deadEndCount > 2 ? 1 : 0);
+      if (qualityScore < bestQualityScore) {
+        bestQualityScore = qualityScore;
+        bestQualityResult = {
+          success: false,
+          waypoints,
+          actualDistance: result.distance,
+          duration: result.duration,
+          polyline: result.polyline,
+          attempts,
+          routeName: `${targetDistance}km ${request.difficulty} Loop`,
+          uniquenessScore: adjustedUniqueness,
+        };
+      }
+
+      if (result.distance > targetDistance) {
+        currentRadius = currentRadius * observedRatio * 0.95;
+      } else {
+        currentRadius = currentRadius * observedRatio * 1.05;
+      }
+      radiusStep *= 0.6;
     }
   }
+  
+  const bestResult = bestDistanceResult || bestQualityResult;
 
   if (bestResult) {
     const variance = ((bestResult.actualDistance - targetDistance) / targetDistance) * 100;
