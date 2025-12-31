@@ -189,8 +189,41 @@ export default function Home() {
   }, []);
 
   const handleUseCustomLocation = () => {
-    setUserLocation({ lat: parseFloat(customLat), lng: parseFloat(customLng) });
+    const newLoc = { lat: parseFloat(customLat), lng: parseFloat(customLng) };
+    setUserLocation(newLoc);
+    localStorage.setItem("userGpsLocation", JSON.stringify(newLoc));
     setShowLocationInput(false);
+  };
+
+  const handleRefreshLocation = () => {
+    setLocationLoading(true);
+    setLocationError("");
+    localStorage.removeItem("userGpsLocation");
+    
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        console.log("Fresh GPS location:", position.coords.latitude, position.coords.longitude, "accuracy:", position.coords.accuracy);
+        const loc = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        };
+        setUserLocation(loc);
+        setCustomLat(loc.lat.toString());
+        setCustomLng(loc.lng.toString());
+        localStorage.setItem("userGpsLocation", JSON.stringify(loc));
+        setLocationLoading(false);
+      },
+      (error) => {
+        console.log("GPS refresh error:", error.code, error.message);
+        setLocationError("Could not get fresh location. Try again or enter manually.");
+        setLocationLoading(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0
+      }
+    );
   };
 
   const handleMapRun = () => {
@@ -328,13 +361,23 @@ export default function Home() {
               <MapPin className="w-4 h-4 text-primary" />
               <p className="text-xs text-primary">GPS location detected</p>
             </div>
-            <button 
-              onClick={() => setShowLocationInput(!showLocationInput)}
-              className="text-xs text-primary hover:text-primary/80 underline"
-              data-testid="button-edit-location"
-            >
-              Edit
-            </button>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={handleRefreshLocation}
+                className="text-xs text-primary hover:text-primary/80 underline flex items-center gap-1"
+                data-testid="button-refresh-location"
+                disabled={locationLoading}
+              >
+                {locationLoading ? "..." : "Refresh"}
+              </button>
+              <button 
+                onClick={() => setShowLocationInput(!showLocationInput)}
+                className="text-xs text-primary hover:text-primary/80 underline"
+                data-testid="button-edit-location"
+              >
+                Edit
+              </button>
+            </div>
           </div>
           <p className="text-[10px] text-primary/60 mt-1 font-mono">
             {userLocation.lat.toFixed(6)}, {userLocation.lng.toFixed(6)}
