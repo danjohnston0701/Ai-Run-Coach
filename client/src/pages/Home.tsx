@@ -58,9 +58,9 @@ export default function Home() {
   const [locationLoading, setLocationLoading] = useState(true);
   const [locationError, setLocationError] = useState("");
   const [showLocationInput, setShowLocationInput] = useState(false);
-  // Default to Mangawhai, New Zealand
-  const [customLat, setCustomLat] = useState("-36.1316");
-  const [customLng, setCustomLng] = useState("174.5755");
+  // Default to user's location near Don's Landing, Mangawhai Heads
+  const [customLat, setCustomLat] = useState("-36.1040");
+  const [customLng, setCustomLng] = useState("174.5922");
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [lastRun, setLastRun] = useState<RunData | null>(null);
   const [targetTimeActive, setTargetTimeActive] = useState(false);
@@ -301,9 +301,14 @@ export default function Home() {
                 Use Location
               </button>
               <p className="text-xs text-muted-foreground mt-2">
-                Try: 40.7128, -74.0060 (NYC) or 51.5074, -0.1278 (London)
+                Your location: -36.1040, 174.5922 (Mangawhai Heads)
               </p>
             </motion.div>
+          )}
+          {!showLocationInput && (
+            <p className="text-[10px] text-muted-foreground/60 mt-1 font-mono">
+              Using: {customLat}, {customLng}
+            </p>
           )}
         </motion.div>
       )}
@@ -315,13 +320,55 @@ export default function Home() {
           className="bg-primary/10 border border-primary/30 rounded-lg p-3 mb-6"
           data-testid="alert-location-found"
         >
-          <div className="flex items-center gap-2">
-            <MapPin className="w-4 h-4 text-primary" />
-            <p className="text-xs text-primary">GPS location detected</p>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-primary" />
+              <p className="text-xs text-primary">GPS location detected</p>
+            </div>
+            <button 
+              onClick={() => setShowLocationInput(!showLocationInput)}
+              className="text-xs text-primary hover:text-primary/80 underline"
+              data-testid="button-edit-location"
+            >
+              Edit
+            </button>
           </div>
           <p className="text-[10px] text-primary/60 mt-1 font-mono">
             {userLocation.lat.toFixed(6)}, {userLocation.lng.toFixed(6)}
           </p>
+          {showLocationInput && (
+            <motion.div 
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              className="mt-3 space-y-2"
+            >
+              <input
+                type="number"
+                placeholder="Latitude"
+                value={customLat}
+                onChange={(e) => setCustomLat(e.target.value)}
+                className="w-full px-2 py-1 bg-card border border-white/10 rounded text-xs text-foreground"
+                step="0.0001"
+                data-testid="input-latitude-edit"
+              />
+              <input
+                type="number"
+                placeholder="Longitude"
+                value={customLng}
+                onChange={(e) => setCustomLng(e.target.value)}
+                className="w-full px-2 py-1 bg-card border border-white/10 rounded text-xs text-foreground"
+                step="0.0001"
+                data-testid="input-longitude-edit"
+              />
+              <button
+                onClick={handleUseCustomLocation}
+                className="w-full px-2 py-1 bg-primary text-background text-xs rounded font-medium hover:bg-primary/90"
+                data-testid="button-update-location"
+              >
+                Update Location
+              </button>
+            </motion.div>
+          )}
         </motion.div>
       )}
 
