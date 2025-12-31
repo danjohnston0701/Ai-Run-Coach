@@ -287,35 +287,46 @@ export async function registerRoutes(
     try {
       const { startLat, startLng, distance, difficulty, terrainPreference, userFitnessLevel, userId } = req.body;
       
+      console.log("Route generation request received:", { startLat, startLng, distance, difficulty });
+      
       if (startLat === undefined || startLat === null || 
           startLng === undefined || startLng === null || 
           !distance || !difficulty) {
         return res.status(400).json({ error: "Missing required fields: startLat, startLng, distance, difficulty" });
       }
 
+      // Parse coordinates as numbers to ensure correct type
+      const parsedLat = parseFloat(startLat);
+      const parsedLng = parseFloat(startLng);
+      const parsedDistance = parseFloat(distance);
+
       const generatedRoute = await generateRoute({
-        startLat,
-        startLng,
-        distance,
+        startLat: parsedLat,
+        startLng: parsedLng,
+        distance: parsedDistance,
         difficulty,
         terrainPreference,
         userFitnessLevel
       });
 
+      console.log("Generated route waypoints:", generatedRoute.waypoints);
+
       const savedRoute = await storage.createRoute({
         userId: userId || null,
         name: generatedRoute.name,
-        distance,
+        distance: parsedDistance,
         difficulty,
-        startLat,
-        startLng,
-        endLat: startLat,
-        endLng: startLng,
+        startLat: parsedLat,
+        startLng: parsedLng,
+        endLat: parsedLat,
+        endLng: parsedLng,
         waypoints: generatedRoute.waypoints,
         elevation: generatedRoute.elevation,
         estimatedTime: generatedRoute.estimatedTime,
         terrainType: terrainPreference || "mixed"
       });
+
+      console.log("Saved route coordinates:", { startLat: savedRoute.startLat, startLng: savedRoute.startLng });
 
       res.status(201).json({
         ...savedRoute,

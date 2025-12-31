@@ -41,6 +41,8 @@ export interface CoachingResponse {
 }
 
 export async function generateRoute(request: RouteGenerationRequest): Promise<GeneratedRoute> {
+  console.log("Generating route with params:", request);
+  
   const prompt = `You are an expert running coach and route planner. Generate a running route based on these parameters:
 - Starting location: ${request.startLat}, ${request.startLng}
 - Target distance: ${request.distance} km
@@ -48,12 +50,18 @@ export async function generateRoute(request: RouteGenerationRequest): Promise<Ge
 - Terrain preference: ${request.terrainPreference || "mixed"}
 - User fitness level: ${request.userFitnessLevel || "intermediate"}
 
-Create a circular route that returns to the starting point. Consider safety, scenic value, and appropriate challenge level.
+IMPORTANT: Create a circular running route that:
+1. Returns to the starting point
+2. Uses ONLY roads and paths (avoid water, private property, highways)
+3. Total distance should be approximately ${request.distance} km
+4. Stays within ${request.distance * 0.3} km radius of the start point
+
+Generate 3-5 waypoints that follow actual roads near the starting location. The route should form a loop.
 
 Respond in JSON format with:
 {
   "name": "Creative route name",
-  "waypoints": [{"lat": number, "lng": number}, ...], // 4-8 waypoints including start/end
+  "waypoints": [{"lat": number, "lng": number}, ...],
   "estimatedTime": minutes as number,
   "elevation": total elevation gain in meters,
   "tips": ["tip1", "tip2", "tip3"],

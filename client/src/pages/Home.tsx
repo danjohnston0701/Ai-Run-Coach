@@ -58,8 +58,9 @@ export default function Home() {
   const [locationLoading, setLocationLoading] = useState(true);
   const [locationError, setLocationError] = useState("");
   const [showLocationInput, setShowLocationInput] = useState(false);
-  const [customLat, setCustomLat] = useState("37.898379");
-  const [customLng, setCustomLng] = useState("175.484486");
+  // Default to Mangawhai, New Zealand
+  const [customLat, setCustomLat] = useState("-36.1316");
+  const [customLng, setCustomLng] = useState("174.5755");
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [lastRun, setLastRun] = useState<RunData | null>(null);
   const [targetTimeActive, setTargetTimeActive] = useState(false);
@@ -169,19 +170,30 @@ export default function Home() {
   };
 
   const handleMapRun = () => {
+    // Use GPS location if available, otherwise use custom coordinates
+    const lat = userLocation?.lat ?? parseFloat(customLat);
+    const lng = userLocation?.lng ?? parseFloat(customLng);
+    
     const params = new URLSearchParams({
       distance: distance[0].toString(),
       level: selectedLevel,
-      ...(userLocation && { lat: userLocation.lat.toString(), lng: userLocation.lng.toString() }),
+      lat: lat.toString(),
+      lng: lng.toString(),
     });
+    console.log("Navigating to route preview with params:", { lat, lng, distance: distance[0], level: selectedLevel });
     setLocation(`/route-preview?${params.toString()}`);
   };
 
   const handleStartSession = () => {
+    // Use GPS location if available, otherwise use custom coordinates
+    const lat = userLocation?.lat ?? parseFloat(customLat);
+    const lng = userLocation?.lng ?? parseFloat(customLng);
+    
     const params = new URLSearchParams({
       distance: distance[0].toString(),
       level: selectedLevel,
-      ...(userLocation && { lat: userLocation.lat.toString(), lng: userLocation.lng.toString() }),
+      lat: lat.toString(),
+      lng: lng.toString(),
     });
     setLocation(`/run?${params.toString()}`);
   };

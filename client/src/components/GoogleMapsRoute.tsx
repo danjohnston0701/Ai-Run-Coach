@@ -103,6 +103,33 @@ export default function GoogleMapsRoute({
       });
 
       if (waypoints && waypoints.length > 0) {
+        console.log("Creating route with waypoints:", waypoints, "from center:", center);
+        
+        // Filter out duplicate waypoints and those too close to start
+        const validWaypoints = waypoints.filter((wp, index) => {
+          // Check for valid coordinates
+          if (typeof wp.lat !== 'number' || typeof wp.lng !== 'number') return false;
+          if (isNaN(wp.lat) || isNaN(wp.lng)) return false;
+          
+          // Skip if too close to start (within 10 meters)
+          const distFromStart = Math.sqrt(
+            Math.pow((wp.lat - startLat) * 111000, 2) + 
+            Math.pow((wp.lng - startLng) * 111000 * Math.cos(startLat * Math.PI / 180), 2)
+          );
+          if (distFromStart < 10) return false;
+          
+          // Skip duplicates
+          for (let i = 0; i < index; i++) {
+            if (Math.abs(waypoints[i].lat - wp.lat) < 0.0001 && 
+                Math.abs(waypoints[i].lng - wp.lng) < 0.0001) {
+              return false;
+            }
+          }
+          return true;
+        });
+        
+        console.log("Valid waypoints after filtering:", validWaypoints);
+        
         // Use Directions API to get road-following route
         const directionsService = new window.google.maps.DirectionsService();
         const directionsRenderer = new window.google.maps.DirectionsRenderer({
@@ -115,8 +142,8 @@ export default function GoogleMapsRoute({
           },
         });
 
-        // Create waypoints for Directions API (exclude first and last as they're origin/destination)
-        const intermediateWaypoints = waypoints.slice(0, -1).map((wp) => ({
+        // Create waypoints for Directions API
+        const intermediateWaypoints = validWaypoints.map((wp) => ({
           location: new window.google.maps.LatLng(wp.lat, wp.lng),
           stopover: false,
         }));
@@ -127,9 +154,11 @@ export default function GoogleMapsRoute({
           waypoints: intermediateWaypoints,
           travelMode: window.google.maps.TravelMode.WALKING,
           optimizeWaypoints: false,
+          provideRouteAlternatives: false,
         };
 
         directionsService.route(request, (result: any, status: any) => {
+          console.log("Directions API response:", status);
           if (status === window.google.maps.DirectionsStatus.OK) {
             directionsRenderer.setDirections(result);
             
@@ -145,12 +174,44 @@ export default function GoogleMapsRoute({
               distance: (totalDistance / 1000).toFixed(2) + " km",
               duration: Math.round(totalDuration / 60) + " min",
             });
+            setLoading(false);
           } else {
-            // Fallback to simple polyline if Directions fails
-            console.log("Directions request failed:", status);
-            drawSimpleRoute(map, center, waypoints);
+            // Try a simpler route with just one waypoint
+            console.log("Full route failed, trying simplified route:", status);
+            const simplifiedWaypoints = validWaypoints.length > 2 
+              ? [validWaypoints[Math.floor(validWaypoints.length / 2)]]
+              : [];
+            
+            const simpleRequest = {
+              origin: center,
+              destination: center,
+              waypoints: simplifiedWaypoints.map(wp => ({
+                location: new window.google.maps.LatLng(wp.lat, wp.lng),
+                stopover: false,
+              })),
+              travelMode: window.google.maps.TravelMode.WALKING,
+            };
+            
+            directionsService.route(simpleRequest, (simpleResult: any, simpleStatus: any) => {
+              if (simpleStatus === window.google.maps.DirectionsStatus.OK) {
+                directionsRenderer.setDirections(simpleResult);
+                let totalDistance = 0;
+                let totalDuration = 0;
+                simpleResult.routes[0].legs.forEach((leg: any) => {
+                  totalDistance += leg.distance.value;
+                  totalDuration += leg.duration.value;
+                });
+                setRouteInfo({
+                  distance: (totalDistance / 1000).toFixed(2) + " km",
+                  duration: Math.round(totalDuration / 60) + " min",
+                });
+              } else {
+                console.log("Simplified route also failed:", simpleStatus);
+                drawSimpleRoute(map, center, validWaypoints);
+              }
+              setLoading(false);
+            });
           }
-          setLoading(false);
         });
       } else {
         setLoading(false);
