@@ -157,8 +157,19 @@ export default function GoogleMapsRoute({
           provideRouteAlternatives: false,
         };
 
+        console.log("Calling Directions API with request:", {
+          origin: center,
+          destination: center,
+          waypointsCount: intermediateWaypoints.length,
+          travelMode: "WALKING"
+        });
+        
         directionsService.route(request, (result: any, status: any) => {
-          console.log("Directions API response:", status);
+          console.log("Directions API response status:", status);
+          if (status === "REQUEST_DENIED") {
+            console.error("Directions API request denied - please enable Directions API in Google Cloud Console");
+            setError("Directions API not enabled. Please enable it in Google Cloud Console.");
+          }
           if (status === window.google.maps.DirectionsStatus.OK) {
             directionsRenderer.setDirections(result);
             
