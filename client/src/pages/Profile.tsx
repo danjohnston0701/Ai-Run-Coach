@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { ArrowLeft, Save, User, Camera, Upload, UserPlus, X, Users, Check, Bell, BellOff, Clock, Loader2 } from "lucide-react";
+import { ArrowLeft, Save, User, Camera, Upload, UserPlus, X, Users, Check, Bell, BellOff, Clock, Loader2, Pencil } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -151,6 +151,8 @@ export default function Profile() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [isEditingEmail, setIsEditingEmail] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
@@ -395,6 +397,42 @@ export default function Profile() {
     setLocation("/");
   };
 
+  const handleSaveEmail = async () => {
+    if (!profile?.id || !newEmail) {
+      toast.error("Please enter a valid email");
+      return;
+    }
+    
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newEmail)) {
+      toast.error("Please enter a valid email address");
+      return;
+    }
+    
+    try {
+      const res = await fetch(`/api/users/${profile.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: newEmail }),
+      });
+      
+      if (res.ok) {
+        const updatedUser = await res.json();
+        setProfile(prev => prev ? { ...prev, email: newEmail } : null);
+        localStorage.setItem("userProfile", JSON.stringify(updatedUser));
+        setIsEditingEmail(false);
+        setNewEmail("");
+        toast.success("Email updated successfully");
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Failed to update email");
+      }
+    } catch (error) {
+      console.error("Error updating email:", error);
+      toast.error("Failed to update email");
+    }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem("userProfile");
     toast.success("Logged out successfully");
@@ -532,12 +570,51 @@ export default function Profile() {
                 <label className="block text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-1.5 ml-1">
                   Email
                 </label>
-                <div
-                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-muted-foreground"
-                  data-testid="text-email"
-                >
-                  {profile.email}
-                </div>
+                {isEditingEmail ? (
+                  <div className="flex gap-2">
+                    <input
+                      type="email"
+                      value={newEmail}
+                      onChange={(e) => setNewEmail(e.target.value)}
+                      placeholder="Enter new email"
+                      className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors"
+                      data-testid="input-new-email"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSaveEmail}
+                      className="px-3 py-2 bg-primary text-background rounded-xl hover:bg-primary/90 transition-colors"
+                      data-testid="button-save-email"
+                    >
+                      <Check className="w-5 h-5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setIsEditingEmail(false); setNewEmail(""); }}
+                      className="px-3 py-2 bg-white/10 text-foreground rounded-xl hover:bg-white/20 transition-colors"
+                      data-testid="button-cancel-email"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-muted-foreground"
+                      data-testid="text-email"
+                    >
+                      {profile.email}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setIsEditingEmail(true); setNewEmail(profile.email || ""); }}
+                      className="px-3 py-3 bg-white/10 text-foreground rounded-xl hover:bg-white/20 transition-colors"
+                      data-testid="button-edit-email"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
