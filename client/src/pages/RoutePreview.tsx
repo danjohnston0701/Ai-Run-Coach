@@ -3,7 +3,7 @@ import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
-import { ArrowLeft, Play, Loader2, RefreshCw, Route, Clock } from "lucide-react";
+import { ArrowLeft, Play, Loader2, RefreshCw, Route, Clock, TrendingUp } from "lucide-react";
 import GoogleMapsRoute from "@/components/GoogleMapsRoute";
 
 interface RouteCandidate {
@@ -18,6 +18,13 @@ interface RouteCandidate {
   hasMajorRoads: boolean;
   uniquenessScore: number;
   deadEndCount: number;
+  elevation?: {
+    gain: number;
+    loss: number;
+    maxElevation: number;
+    minElevation: number;
+  };
+  aiReasoning?: string;
 }
 
 export default function RoutePreview() {
@@ -138,9 +145,17 @@ export default function RoutePreview() {
                 <Route className="w-4 h-4 text-muted-foreground" />
                 <span className="text-lg font-bold">{route.actualDistance.toFixed(1)} km</span>
               </div>
-              <div className="flex items-center gap-1 text-muted-foreground">
-                <Clock className="w-3 h-3" />
-                <span className="text-xs">{route.duration} min</span>
+              <div className="flex items-center gap-3">
+                {route.elevation && route.elevation.gain > 0 && (
+                  <div className="flex items-center gap-1 text-muted-foreground">
+                    <TrendingUp className="w-3 h-3" />
+                    <span className="text-xs">{route.elevation.gain}m</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-1 text-muted-foreground">
+                  <Clock className="w-3 h-3" />
+                  <span className="text-xs">{route.duration} min</span>
+                </div>
               </div>
             </div>
             {route.hasMajorRoads && (
@@ -192,8 +207,8 @@ export default function RoutePreview() {
           className="flex flex-col items-center justify-center py-20"
         >
           <Loader2 className="w-12 h-12 animate-spin text-primary mb-4" />
-          <p className="text-muted-foreground">Generating route options...</p>
-          <p className="text-xs text-muted-foreground/60 mt-2">Finding easy, moderate, and hard routes</p>
+          <p className="text-muted-foreground">AI is designing your routes...</p>
+          <p className="text-xs text-muted-foreground/60 mt-2">Analyzing terrain, parks, and roads to create optimal routes</p>
         </motion.div>
       )}
 
