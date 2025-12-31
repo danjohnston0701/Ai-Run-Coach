@@ -3,7 +3,7 @@ import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
-import { ArrowLeft, Play, MapPin, Loader2, RefreshCw, Lightbulb, Mountain, Clock, Route } from "lucide-react";
+import { ArrowLeft, Play, MapPin, Loader2, RefreshCw, Lightbulb, Mountain, Clock, Route, AlertTriangle, Check, X } from "lucide-react";
 import GoogleMapsRoute from "@/components/GoogleMapsRoute";
 
 interface GeneratedRoute {
@@ -21,6 +21,9 @@ interface GeneratedRoute {
   description?: string;
   variance?: string;
   attempts?: number;
+  needsApproval?: boolean;
+  variancePercent?: number;
+  targetDistance?: number;
 }
 
 export default function RoutePreview() {
@@ -42,10 +45,12 @@ export default function RoutePreview() {
   const [route, setRoute] = useState<GeneratedRoute | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [routeAccepted, setRouteAccepted] = useState(false);
 
   const generateRoute = async () => {
     setLoading(true);
     setError(null);
+    setRouteAccepted(false);
     
     try {
       const res = await fetch("/api/routes/generate", {
@@ -78,6 +83,9 @@ export default function RoutePreview() {
         estimatedTime: data.duration,
         variance: data.variance,
         attempts: data.attempts,
+        needsApproval: data.needsApproval,
+        variancePercent: data.variancePercent,
+        targetDistance: data.targetDistance,
       });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Failed to generate route";
@@ -190,6 +198,45 @@ export default function RoutePreview() {
             </Card>
           </div>
 
+          {route.needsApproval && !routeAccepted && (
+            <Card className="bg-yellow-500/10 border-yellow-500/30">
+              <CardContent className="p-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <h3 className="font-display font-bold uppercase text-sm text-yellow-500 mb-1">
+                      Route Distance Differs
+                    </h3>
+                    <p className="text-sm text-muted-foreground mb-3">
+                      We couldn't find a route exactly matching your {route.targetDistance}km target. 
+                      The best available route is {route.actualDistance?.toFixed(1)}km 
+                      ({route.variancePercent && route.variancePercent > 0 ? '+' : ''}{route.variancePercent}% difference).
+                    </p>
+                    <div className="flex gap-2">
+                      <Button 
+                        size="sm" 
+                        onClick={() => setRouteAccepted(true)}
+                        className="bg-green-600 hover:bg-green-700 text-white gap-1"
+                        data-testid="button-accept-route"
+                      >
+                        <Check className="w-4 h-4" /> Accept Route
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={generateRoute}
+                        className="border-white/20 gap-1"
+                        data-testid="button-try-again"
+                      >
+                        <RefreshCw className="w-4 h-4" /> Try Again
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {route.description && (
             <Card className="bg-card/50 border-white/10">
               <CardContent className="p-4">
@@ -240,7 +287,7 @@ export default function RoutePreview() {
           size="lg" 
           className="w-full h-16 text-xl font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-all"
           onClick={handleStartRun}
-          disabled={!route || loading}
+          disabled={!route || loading || (route?.needsApproval && !routeAccepted)}
           data-testid="button-start-run"
         >
           <Play className="mr-2 w-6 h-6 fill-current" /> Start Run

@@ -187,6 +187,9 @@ export async function registerRoutes(
         attempts: result.attempts,
         routeName: result.routeName,
         variance: ((result.actualDistance - targetDistance) / targetDistance * 100).toFixed(1),
+        needsApproval: result.needsApproval || false,
+        variancePercent: result.variancePercent,
+        targetDistance: result.targetDistance || targetDistance,
       });
     } catch (error) {
       console.error("Route generation error:", error);

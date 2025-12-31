@@ -52,6 +52,9 @@ export interface RouteResult {
   attempts: number;
   routeName: string;
   error?: string;
+  needsApproval?: boolean;
+  variancePercent?: number;
+  targetDistance?: number;
 }
 
 function toRadians(degrees: number): number {
@@ -249,16 +252,18 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
       bestResult.routeName = `${bestResult.actualDistance.toFixed(1)}km ${request.difficulty} Loop`;
       return bestResult;
     } else {
-      console.log(`Best route ${bestResult.actualDistance.toFixed(2)}km exceeds tolerance (${variance.toFixed(1)}% variance)`);
+      console.log(`Best route ${bestResult.actualDistance.toFixed(2)}km exceeds tolerance (${variance.toFixed(1)}% variance) - needs user approval`);
       return {
-        success: false,
+        success: true,
         waypoints: bestResult.waypoints,
         actualDistance: bestResult.actualDistance,
         duration: bestResult.duration,
         polyline: bestResult.polyline,
         attempts: config.maxRetries,
-        routeName: "",
-        error: `Could not generate route close to ${request.targetDistance}km. Best available: ${bestResult.actualDistance.toFixed(1)}km. Try a different location or distance.`,
+        routeName: `${bestResult.actualDistance.toFixed(1)}km ${request.difficulty} Loop`,
+        needsApproval: true,
+        variancePercent: parseFloat(variance.toFixed(1)),
+        targetDistance: request.targetDistance,
       };
     }
   }
