@@ -247,6 +247,24 @@ function calculatePathUniqueness(polyline: string): number {
   return uniqueSegments.size / segments.length;
 }
 
+const HIGHWAY_KEYWORDS = [
+  'highway', 'hwy', 'motorway', 'freeway', 'expressway', 'state highway',
+  'sh-', 'sh ', ' sh ', 'interstate', 'i-', ' i ', 'route ', 'rt ',
+  'national road', 'main road', 'arterial', 'thermal explorer'
+];
+
+function containsHighwaySegment(instructions: string[]): { hasHighway: boolean; matchedRoad?: string } {
+  for (const instruction of instructions) {
+    const lowerInstruction = instruction.toLowerCase();
+    for (const keyword of HIGHWAY_KEYWORDS) {
+      if (lowerInstruction.includes(keyword)) {
+        return { hasHighway: true, matchedRoad: instruction };
+      }
+    }
+  }
+  return { hasHighway: false };
+}
+
 async function fetchDirectionsRoute(
   origin: { lat: number; lng: number },
   waypoints: Array<{ lat: number; lng: number }>
@@ -256,6 +274,8 @@ async function fetchDirectionsRoute(
   polyline: string;
   success: boolean;
   error?: string;
+  hasHighway?: boolean;
+  matchedRoad?: string;
 }> {
   if (!GOOGLE_MAPS_API_KEY) {
     return { distance: 0, duration: 0, polyline: "", success: false, error: "No API key" };
@@ -265,7 +285,7 @@ async function fetchDirectionsRoute(
     .map((wp) => `${wp.lat},${wp.lng}`)
     .join("|");
 
-  const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.lat},${origin.lng}&destination=${origin.lat},${origin.lng}&waypoints=${waypointsStr}&mode=walking&avoid=highways&key=${GOOGLE_MAPS_API_KEY}`;
+  const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.lat},${origin.lng}&destination=${origin.lat},${origin.lng}&waypoints=${waypointsStr}&mode=walking&key=${GOOGLE_MAPS_API_KEY}`;
 
   try {
     const response = await fetch(url);
@@ -279,17 +299,28 @@ async function fetchDirectionsRoute(
     const route = data.routes[0];
     let totalDistance = 0;
     let totalDuration = 0;
+    const allInstructions: string[] = [];
 
     for (const leg of route.legs) {
       totalDistance += leg.distance.value;
       totalDuration += leg.duration.value;
+      for (const step of leg.steps) {
+        if (step.html_instructions) {
+          const cleanInstruction = step.html_instructions.replace(/<[^>]*>/g, '');
+          allInstructions.push(cleanInstruction);
+        }
+      }
     }
+
+    const { hasHighway, matchedRoad } = containsHighwaySegment(allInstructions);
 
     return {
       distance: totalDistance / 1000,
       duration: Math.round(totalDuration / 60),
       polyline: route.overview_polyline.points,
       success: true,
+      hasHighway,
+      matchedRoad,
     };
   } catch (error) {
     console.error("Directions fetch error:", error);
@@ -342,6 +373,12 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
       if (!result.success) {
         console.log(`Attempt ${attempts}: API error - ${result.error} (radius: ${currentRadius.toFixed(3)}km, rotation: ${rotation}°)`);
         currentRadius += radiusStep * 0.5;
+        continue;
+      }
+
+      if (result.hasHighway) {
+        console.log(`Attempt ${attempts}: REJECTED - route uses highway/major road: "${result.matchedRoad}" (radius: ${currentRadius.toFixed(3)}km, rotation: ${rotation}°)`);
+        currentRadius *= 0.85;
         continue;
       }
 
