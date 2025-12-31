@@ -294,15 +294,9 @@ export default function GoogleMapsRoute({
           {routeName && <h3 className="font-bold text-sm text-foreground">{routeName}</h3>}
           <div className="flex gap-4 mt-1 text-xs text-muted-foreground">
             {routeInfo ? (
-              <>
-                <span>{routeInfo.distance}</span>
-                <span>{routeInfo.duration} walking</span>
-              </>
+              <span>{routeInfo.distance}</span>
             ) : (
-              <>
-                {distance && <span>{distance.toFixed(1)} km</span>}
-                {estimatedTime && <span>{estimatedTime} min</span>}
-              </>
+              distance && <span>{distance.toFixed(1)} km</span>
             )}
           </div>
         </div>

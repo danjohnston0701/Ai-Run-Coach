@@ -11,23 +11,23 @@ export interface RouteConfig {
 export const DIFFICULTY_PRESETS: Record<string, RouteConfig> = {
   beginner: {
     waypointCount: 3,
-    radiusMultiplier: 0.12,
-    headingJitter: 15,
-    maxRetries: 8,
+    radiusMultiplier: 0.18,
+    headingJitter: 20,
+    maxRetries: 15,
     minUniqueRatio: 0.65,
   },
   moderate: {
     waypointCount: 4,
-    radiusMultiplier: 0.14,
-    headingJitter: 25,
-    maxRetries: 10,
+    radiusMultiplier: 0.20,
+    headingJitter: 30,
+    maxRetries: 15,
     minUniqueRatio: 0.70,
   },
   expert: {
     waypointCount: 5,
-    radiusMultiplier: 0.16,
-    headingJitter: 35,
-    maxRetries: 12,
+    radiusMultiplier: 0.22,
+    headingJitter: 40,
+    maxRetries: 15,
     minUniqueRatio: 0.75,
   },
 };
@@ -91,19 +91,21 @@ function generateWaypoints(
   startLng: number,
   targetDistance: number,
   config: RouteConfig,
-  attempt: number
+  attempt: number,
+  scaleFactor: number = 1
 ): Array<{ lat: number; lng: number }> {
-  const radiusKm = (targetDistance / (2 * Math.PI)) * config.radiusMultiplier * (2 + Math.random() * 0.5);
-  const adjustedRadius = radiusKm * (1 + (attempt * 0.1));
+  const baseRadius = (targetDistance / (2 * Math.PI)) * config.radiusMultiplier;
+  const attemptVariation = 1 + (attempt * 0.05) * (attempt % 2 === 0 ? 1 : -0.5);
+  const radiusKm = baseRadius * attemptVariation * scaleFactor;
   
   const waypoints: Array<{ lat: number; lng: number }> = [];
-  const baseAngle = Math.random() * 360;
+  const baseAngle = (attempt * 37) % 360;
   const angleStep = 360 / config.waypointCount;
   
   for (let i = 0; i < config.waypointCount; i++) {
     const jitter = (Math.random() - 0.5) * 2 * config.headingJitter;
     const bearing = baseAngle + (i * angleStep) + jitter;
-    const radiusVariation = adjustedRadius * (0.8 + Math.random() * 0.4);
+    const radiusVariation = radiusKm * (0.85 + Math.random() * 0.3);
     
     const point = projectPoint(startLat, startLng, bearing, radiusVariation);
     waypoints.push(point);
@@ -177,13 +179,13 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
       ? request.targetDistance / bestResult.actualDistance 
       : 1;
     
-    const adjustedTarget = request.targetDistance * scaleFactor;
     const waypoints = generateWaypoints(
       request.startLat,
       request.startLng,
-      adjustedTarget,
+      request.targetDistance,
       config,
-      attempt
+      attempt,
+      scaleFactor
     );
 
     const result = await fetchDirectionsRoute(
