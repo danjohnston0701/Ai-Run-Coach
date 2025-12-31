@@ -6,8 +6,6 @@ export function isGoogleMapsConfigured(): boolean {
 
 export interface RouteConfig {
   waypointCount: number;
-  radiusMultiplier: number;
-  headingJitter: number;
   maxRetries: number;
   minUniqueRatio: number;
   maxElevationGuidance: number;
@@ -15,26 +13,20 @@ export interface RouteConfig {
 
 export const DIFFICULTY_PRESETS: Record<string, RouteConfig> = {
   beginner: {
-    waypointCount: 3,
-    radiusMultiplier: 0.18,
-    headingJitter: 20,
-    maxRetries: 15,
+    waypointCount: 4,
+    maxRetries: 30,
     minUniqueRatio: 0.65,
     maxElevationGuidance: 50,
   },
   moderate: {
-    waypointCount: 4,
-    radiusMultiplier: 0.20,
-    headingJitter: 30,
-    maxRetries: 15,
+    waypointCount: 5,
+    maxRetries: 30,
     minUniqueRatio: 0.70,
     maxElevationGuidance: 150,
   },
   expert: {
-    waypointCount: 5,
-    radiusMultiplier: 0.22,
-    headingJitter: 40,
-    maxRetries: 15,
+    waypointCount: 6,
+    maxRetries: 30,
     minUniqueRatio: 0.75,
     maxElevationGuidance: 300,
   },
@@ -59,6 +51,7 @@ export interface RouteResult {
   needsApproval?: boolean;
   variancePercent?: number;
   targetDistance?: number;
+  uniquenessScore?: number;
 }
 
 function toRadians(degrees: number): number {
@@ -97,32 +90,86 @@ function projectPoint(
   };
 }
 
-function generateWaypoints(
+function generatePolygonWaypoints(
   startLat: number,
   startLng: number,
-  targetDistance: number,
-  config: RouteConfig,
-  attempt: number,
-  scaleFactor: number = 1
+  radiusKm: number,
+  waypointCount: number,
+  rotationOffset: number = 0
 ): Array<{ lat: number; lng: number }> {
-  const baseRadius = (targetDistance / (2 * Math.PI)) * config.radiusMultiplier;
-  const attemptVariation = 1 + (attempt * 0.05) * (attempt % 2 === 0 ? 1 : -0.5);
-  const radiusKm = baseRadius * attemptVariation * scaleFactor;
-  
   const waypoints: Array<{ lat: number; lng: number }> = [];
-  const baseAngle = (attempt * 37) % 360;
-  const angleStep = 360 / config.waypointCount;
+  const angleStep = 360 / waypointCount;
   
-  for (let i = 0; i < config.waypointCount; i++) {
-    const jitter = (Math.random() - 0.5) * 2 * config.headingJitter;
-    const bearing = baseAngle + (i * angleStep) + jitter;
-    const radiusVariation = radiusKm * (0.85 + Math.random() * 0.3);
-    
-    const point = projectPoint(startLat, startLng, bearing, radiusVariation);
+  for (let i = 0; i < waypointCount; i++) {
+    const bearing = rotationOffset + (i * angleStep);
+    const point = projectPoint(startLat, startLng, bearing, radiusKm);
     waypoints.push(point);
   }
   
   return waypoints;
+}
+
+function decodePolyline(encoded: string): Array<{ lat: number; lng: number }> {
+  const points: Array<{ lat: number; lng: number }> = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+
+  while (index < encoded.length) {
+    let shift = 0;
+    let result = 0;
+    let byte: number;
+
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+
+    const dlat = result & 1 ? ~(result >> 1) : result >> 1;
+    lat += dlat;
+
+    shift = 0;
+    result = 0;
+
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+
+    const dlng = result & 1 ? ~(result >> 1) : result >> 1;
+    lng += dlng;
+
+    points.push({ lat: lat / 1e5, lng: lng / 1e5 });
+  }
+
+  return points;
+}
+
+function calculatePathUniqueness(polyline: string): number {
+  const points = decodePolyline(polyline);
+  if (points.length < 10) return 1.0;
+  
+  const gridSize = 0.0005;
+  const segments: string[] = [];
+  
+  for (let i = 0; i < points.length - 1; i++) {
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const g1 = `${Math.round(p1.lat / gridSize)},${Math.round(p1.lng / gridSize)}`;
+    const g2 = `${Math.round(p2.lat / gridSize)},${Math.round(p2.lng / gridSize)}`;
+    
+    if (g1 !== g2) {
+      const segmentKey = [g1, g2].sort().join("->");
+      segments.push(segmentKey);
+    }
+  }
+  
+  if (segments.length === 0) return 1.0;
+  
+  const uniqueSegments = new Set(segments);
+  return uniqueSegments.size / segments.length;
 }
 
 async function fetchDirectionsRoute(
@@ -177,84 +224,140 @@ async function fetchDirectionsRoute(
 
 export async function generateCircularRoute(request: RouteRequest): Promise<RouteResult> {
   const config = DIFFICULTY_PRESETS[request.difficulty] || DIFFICULTY_PRESETS.moderate;
-  const minDistance = request.targetDistance * 0.95;
-  const maxDistance = request.targetDistance * 1.05;
+  const targetDistance = request.targetDistance;
+  const minDistance = targetDistance * 0.95;
+  const maxDistance = targetDistance * 1.05;
   
-  console.log(`Generating ${request.difficulty} route: target ${request.targetDistance}km (${minDistance.toFixed(2)}-${maxDistance.toFixed(2)}km acceptable)`);
+  console.log(`Generating ${request.difficulty} route: target ${targetDistance}km (${minDistance.toFixed(2)}-${maxDistance.toFixed(2)}km acceptable)`);
 
+  const estimatedCircumference = targetDistance;
+  let lowerRadius = (estimatedCircumference / (2 * Math.PI)) * 0.3;
+  let upperRadius = (estimatedCircumference / (2 * Math.PI)) * 2.0;
+  
   let bestResult: RouteResult | null = null;
   let closestDiff = Infinity;
+  let attempts = 0;
+  
+  const rotationAngles = [0, 45, 22.5, 67.5, 15, 30, 60, 75, 90, 120, 135, 150, 180, 210, 240, 270, 300, 330, 10, 50];
+  
+  for (const rotation of rotationAngles) {
+    if (attempts >= config.maxRetries) break;
+    
+    let searchLower = lowerRadius;
+    let searchUpper = upperRadius;
+    
+    for (let binaryStep = 0; binaryStep < 5 && attempts < config.maxRetries; binaryStep++) {
+      attempts++;
+      
+      const testRadius = (searchLower + searchUpper) / 2;
+      
+      const waypoints = generatePolygonWaypoints(
+        request.startLat,
+        request.startLng,
+        testRadius,
+        config.waypointCount,
+        rotation
+      );
 
-  for (let attempt = 0; attempt < config.maxRetries; attempt++) {
-    let scaleFactor = 1;
-    if (bestResult && bestResult.actualDistance > 0) {
-      const rawScale = request.targetDistance / bestResult.actualDistance;
-      scaleFactor = Math.max(0.6, Math.min(1.5, rawScale));
+      const result = await fetchDirectionsRoute(
+        { lat: request.startLat, lng: request.startLng },
+        waypoints
+      );
+
+      if (!result.success) {
+        console.log(`Attempt ${attempts}: API error - ${result.error} (radius: ${testRadius.toFixed(3)}km, rotation: ${rotation}°)`);
+        searchLower = testRadius;
+        continue;
+      }
+
+      const diff = Math.abs(result.distance - targetDistance);
+      const uniqueness = calculatePathUniqueness(result.polyline);
+      
+      console.log(`Attempt ${attempts}: ${result.distance.toFixed(2)}km (target: ${targetDistance}km, diff: ${diff.toFixed(2)}km, uniqueness: ${(uniqueness * 100).toFixed(1)}%, radius: ${testRadius.toFixed(3)}km, rotation: ${rotation}°)`);
+
+      if (result.distance >= minDistance && result.distance <= maxDistance && uniqueness >= config.minUniqueRatio) {
+        console.log(`Found valid route on attempt ${attempts} with ${(uniqueness * 100).toFixed(1)}% uniqueness`);
+        return {
+          success: true,
+          waypoints,
+          actualDistance: result.distance,
+          duration: result.duration,
+          polyline: result.polyline,
+          attempts,
+          routeName: `${targetDistance}km ${request.difficulty} Loop`,
+          uniquenessScore: uniqueness,
+        };
+      }
+
+      const weightedScore = diff + (uniqueness < config.minUniqueRatio ? (1 - uniqueness) * targetDistance : 0);
+      
+      if (result.distance > 0 && weightedScore < closestDiff) {
+        closestDiff = weightedScore;
+        bestResult = {
+          success: false,
+          waypoints,
+          actualDistance: result.distance,
+          duration: result.duration,
+          polyline: result.polyline,
+          attempts,
+          routeName: `${targetDistance}km ${request.difficulty} Loop`,
+          uniquenessScore: uniqueness,
+        };
+        
+        if (result.distance > targetDistance) {
+          searchUpper = testRadius;
+        } else {
+          searchLower = testRadius;
+        }
+        
+        lowerRadius = Math.min(lowerRadius, searchLower * 0.9);
+        upperRadius = Math.max(upperRadius, searchUpper * 1.1);
+      } else {
+        if (result.distance > targetDistance) {
+          searchUpper = testRadius;
+        } else {
+          searchLower = testRadius;
+        }
+      }
     }
     
-    const waypoints = generateWaypoints(
-      request.startLat,
-      request.startLng,
-      request.targetDistance,
-      config,
-      attempt,
-      scaleFactor
-    );
-
-    const result = await fetchDirectionsRoute(
-      { lat: request.startLat, lng: request.startLng },
-      waypoints
-    );
-
-    if (!result.success) {
-      console.log(`Attempt ${attempt + 1}: API error - ${result.error}`);
-      continue;
-    }
-
-    const diff = Math.abs(result.distance - request.targetDistance);
-    console.log(`Attempt ${attempt + 1}: ${result.distance.toFixed(2)}km (diff: ${diff.toFixed(2)}km)`);
-
-    if (result.distance >= minDistance && result.distance <= maxDistance) {
-      console.log(`Found valid route on attempt ${attempt + 1}`);
-      return {
-        success: true,
-        waypoints,
-        actualDistance: result.distance,
-        duration: result.duration,
-        polyline: result.polyline,
-        attempts: attempt + 1,
-        routeName: `${request.targetDistance}km ${request.difficulty} Loop`,
-      };
-    }
-
-    if (result.distance > 0 && diff < closestDiff) {
-      closestDiff = diff;
-      bestResult = {
-        success: false,
-        waypoints,
-        actualDistance: result.distance,
-        duration: result.duration,
-        polyline: result.polyline,
-        attempts: attempt + 1,
-        routeName: `${request.targetDistance}km ${request.difficulty} Loop`,
-      };
+    if (bestResult && 
+        Math.abs(bestResult.actualDistance - targetDistance) / targetDistance <= 0.05 &&
+        (bestResult.uniquenessScore || 0) >= config.minUniqueRatio) {
+      break;
     }
   }
 
   if (bestResult) {
-    const variance = ((bestResult.actualDistance - request.targetDistance) / request.targetDistance) * 100;
+    const variance = ((bestResult.actualDistance - targetDistance) / targetDistance) * 100;
     const isWithinTolerance = bestResult.actualDistance >= minDistance && bestResult.actualDistance <= maxDistance;
     const isWithinExtendedTolerance = Math.abs(variance) <= 25;
+    const uniqueness = bestResult.uniquenessScore || 0;
     
-    if (isWithinTolerance) {
-      console.log(`Using best route: ${bestResult.actualDistance.toFixed(2)}km (${variance.toFixed(1)}% variance) - within tolerance`);
+    if (isWithinTolerance && uniqueness >= config.minUniqueRatio) {
+      console.log(`Using best route: ${bestResult.actualDistance.toFixed(2)}km (${variance.toFixed(1)}% variance, ${(uniqueness * 100).toFixed(1)}% unique) - within tolerance`);
       bestResult.success = true;
-      bestResult.attempts = config.maxRetries;
+      bestResult.attempts = attempts;
       return bestResult;
-    } else if (isWithinExtendedTolerance) {
-      console.log(`Using best route: ${bestResult.actualDistance.toFixed(2)}km (${variance.toFixed(1)}% variance) - within extended tolerance`);
+    } else if (isWithinTolerance && uniqueness < config.minUniqueRatio) {
+      console.log(`Best route ${bestResult.actualDistance.toFixed(2)}km has low uniqueness (${(uniqueness * 100).toFixed(1)}%) - needs user approval`);
+      return {
+        success: true,
+        waypoints: bestResult.waypoints,
+        actualDistance: bestResult.actualDistance,
+        duration: bestResult.duration,
+        polyline: bestResult.polyline,
+        attempts,
+        routeName: `${bestResult.actualDistance.toFixed(1)}km ${request.difficulty} Loop`,
+        needsApproval: true,
+        variancePercent: parseFloat(variance.toFixed(1)),
+        targetDistance,
+        uniquenessScore: uniqueness,
+      };
+    } else if (isWithinExtendedTolerance && uniqueness >= config.minUniqueRatio) {
+      console.log(`Using best route: ${bestResult.actualDistance.toFixed(2)}km (${variance.toFixed(1)}% variance, ${(uniqueness * 100).toFixed(1)}% unique) - within extended tolerance`);
       bestResult.success = true;
-      bestResult.attempts = config.maxRetries;
+      bestResult.attempts = attempts;
       bestResult.routeName = `${bestResult.actualDistance.toFixed(1)}km ${request.difficulty} Loop`;
       return bestResult;
     } else {
@@ -265,11 +368,12 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
         actualDistance: bestResult.actualDistance,
         duration: bestResult.duration,
         polyline: bestResult.polyline,
-        attempts: config.maxRetries,
+        attempts,
         routeName: `${bestResult.actualDistance.toFixed(1)}km ${request.difficulty} Loop`,
         needsApproval: true,
         variancePercent: parseFloat(variance.toFixed(1)),
-        targetDistance: request.targetDistance,
+        targetDistance,
+        uniquenessScore: uniqueness,
       };
     }
   }
@@ -280,7 +384,7 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
     actualDistance: 0,
     duration: 0,
     polyline: "",
-    attempts: config.maxRetries,
+    attempts,
     routeName: "",
     error: "Could not generate a valid route",
   };
