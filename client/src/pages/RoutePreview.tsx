@@ -143,8 +143,8 @@ export default function RoutePreview() {
         >
           <GoogleMapsRoute
             waypoints={route.waypoints || []}
-            startLat={route.startLat}
-            startLng={route.startLng}
+            startLat={lat}
+            startLng={lng}
             routeName={route.name}
             distance={route.distance}
             estimatedTime={route.estimatedTime || undefined}
