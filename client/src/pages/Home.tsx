@@ -346,18 +346,33 @@ export default function Home() {
   useEffect(() => {
     if (!profile?.id) return;
     
-    // Check if notifications are supported and not yet granted
-    if ('Notification' in window && Notification.permission === 'default') {
-      // Check if user has dismissed the prompt this session
-      const dismissed = sessionStorage.getItem('notificationPromptDismissed');
-      if (!dismissed) {
-        // Show prompt after a short delay
-        const timer = setTimeout(() => {
-          setShowNotificationPrompt(true);
-        }, 2000);
-        return () => clearTimeout(timer);
+    const checkNotificationStatus = async () => {
+      // Skip if notifications not supported or already granted/denied
+      if (!('Notification' in window)) return;
+      if (Notification.permission !== 'default') return;
+      
+      // Check if user has dismissed the prompt permanently
+      const dismissed = localStorage.getItem('notificationPromptDismissed');
+      if (dismissed) return;
+      
+      // Check if user already has an active subscription on the server
+      try {
+        const res = await fetch(`/api/push/subscription-status?userId=${profile.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.hasSubscription) return; // Already subscribed, don't prompt
+        }
+      } catch (err) {
+        // Continue to show prompt if check fails
       }
-    }
+      
+      // Show prompt after a short delay
+      setTimeout(() => {
+        setShowNotificationPrompt(true);
+      }, 2000);
+    };
+    
+    checkNotificationStatus();
   }, [profile?.id]);
 
   const handleEnableNotifications = async () => {
@@ -387,7 +402,7 @@ export default function Home() {
   };
 
   const handleDismissNotificationPrompt = () => {
-    sessionStorage.setItem('notificationPromptDismissed', 'true');
+    localStorage.setItem('notificationPromptDismissed', 'true');
     setShowNotificationPrompt(false);
   };
 

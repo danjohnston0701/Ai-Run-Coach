@@ -707,6 +707,20 @@ export async function registerRoutes(
     }
   });
 
+  // Check if user has an active push subscription
+  app.get("/api/push/subscription-status", async (req, res) => {
+    try {
+      const userId = req.query.userId as string;
+      if (!userId) {
+        return res.status(400).json({ error: "Missing userId" });
+      }
+      const subscription = await storage.getPushSubscription(userId);
+      res.json({ hasSubscription: !!subscription });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to check subscription status" });
+    }
+  });
+
   // Notification endpoints
   app.get("/api/notifications", async (req, res) => {
     try {
