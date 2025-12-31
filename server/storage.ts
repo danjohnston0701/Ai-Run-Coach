@@ -205,58 +205,100 @@ export class DatabaseStorage implements IStorage {
 
   // Friend Requests
   async createFriendRequest(data: InsertFriendRequest): Promise<FriendRequest> {
-    return withRetry(async () => {
-      const [request] = await db.insert(friendRequests).values(data).returning();
-      return request;
-    });
+    try {
+      return await withRetry(async () => {
+        const [request] = await db.insert(friendRequests).values(data).returning();
+        return request;
+      });
+    } catch (error: any) {
+      if (error?.code === '42P01') {
+        throw new Error('Friend requests feature is not yet available. Please try again later.');
+      }
+      throw error;
+    }
   }
 
   async getFriendRequest(id: string): Promise<FriendRequest | undefined> {
-    return withRetry(async () => {
-      const [request] = await db.select().from(friendRequests).where(eq(friendRequests.id, id));
-      return request;
-    });
+    try {
+      return await withRetry(async () => {
+        const [request] = await db.select().from(friendRequests).where(eq(friendRequests.id, id));
+        return request;
+      });
+    } catch (error: any) {
+      if (error?.code === '42P01') {
+        return undefined;
+      }
+      throw error;
+    }
   }
 
   async getIncomingFriendRequests(userId: string): Promise<FriendRequest[]> {
-    return withRetry(async () => {
-      return db.select().from(friendRequests).where(
-        and(eq(friendRequests.addresseeId, userId), eq(friendRequests.status, 'pending'))
-      ).orderBy(desc(friendRequests.createdAt));
-    });
+    try {
+      return await withRetry(async () => {
+        return db.select().from(friendRequests).where(
+          and(eq(friendRequests.addresseeId, userId), eq(friendRequests.status, 'pending'))
+        ).orderBy(desc(friendRequests.createdAt));
+      });
+    } catch (error: any) {
+      if (error?.code === '42P01') {
+        return [];
+      }
+      throw error;
+    }
   }
 
   async getOutgoingFriendRequests(userId: string): Promise<FriendRequest[]> {
-    return withRetry(async () => {
-      return db.select().from(friendRequests).where(
-        and(eq(friendRequests.requesterId, userId), eq(friendRequests.status, 'pending'))
-      ).orderBy(desc(friendRequests.createdAt));
-    });
+    try {
+      return await withRetry(async () => {
+        return db.select().from(friendRequests).where(
+          and(eq(friendRequests.requesterId, userId), eq(friendRequests.status, 'pending'))
+        ).orderBy(desc(friendRequests.createdAt));
+      });
+    } catch (error: any) {
+      if (error?.code === '42P01') {
+        return [];
+      }
+      throw error;
+    }
   }
 
   async getPendingRequestBetweenUsers(requesterId: string, addresseeId: string): Promise<FriendRequest | undefined> {
-    return withRetry(async () => {
-      const [request] = await db.select().from(friendRequests).where(
-        and(
-          eq(friendRequests.status, 'pending'),
-          or(
-            and(eq(friendRequests.requesterId, requesterId), eq(friendRequests.addresseeId, addresseeId)),
-            and(eq(friendRequests.requesterId, addresseeId), eq(friendRequests.addresseeId, requesterId))
+    try {
+      return await withRetry(async () => {
+        const [request] = await db.select().from(friendRequests).where(
+          and(
+            eq(friendRequests.status, 'pending'),
+            or(
+              and(eq(friendRequests.requesterId, requesterId), eq(friendRequests.addresseeId, addresseeId)),
+              and(eq(friendRequests.requesterId, addresseeId), eq(friendRequests.addresseeId, requesterId))
+            )
           )
-        )
-      );
-      return request;
-    });
+        );
+        return request;
+      });
+    } catch (error: any) {
+      if (error?.code === '42P01') {
+        return undefined;
+      }
+      throw error;
+    }
   }
 
   async respondToFriendRequest(id: string, status: 'accepted' | 'rejected'): Promise<FriendRequest | undefined> {
-    return withRetry(async () => {
-      const [request] = await db.update(friendRequests).set({
-        status,
-        respondedAt: new Date(),
-      }).where(eq(friendRequests.id, id)).returning();
-      return request;
-    });
+    try {
+      return await withRetry(async () => {
+        const [request] = await db.update(friendRequests).set({
+          status,
+          respondedAt: new Date(),
+        }).where(eq(friendRequests.id, id)).returning();
+        return request;
+      });
+    } catch (error: any) {
+      if (error?.code === '42P01') {
+        throw new Error('Friend requests feature is not yet available. Please try again later.');
+      }
+      throw error;
+    }
   }
 
   // Push Subscriptions
