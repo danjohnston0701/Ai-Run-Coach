@@ -186,9 +186,11 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
   let closestDiff = Infinity;
 
   for (let attempt = 0; attempt < config.maxRetries; attempt++) {
-    const scaleFactor = bestResult 
-      ? request.targetDistance / bestResult.actualDistance 
-      : 1;
+    let scaleFactor = 1;
+    if (bestResult && bestResult.actualDistance > 0) {
+      const rawScale = request.targetDistance / bestResult.actualDistance;
+      scaleFactor = Math.max(0.6, Math.min(1.5, rawScale));
+    }
     
     const waypoints = generateWaypoints(
       request.startLat,
@@ -225,7 +227,7 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
       };
     }
 
-    if (diff < closestDiff) {
+    if (result.distance > 0 && diff < closestDiff) {
       closestDiff = diff;
       bestResult = {
         success: false,
