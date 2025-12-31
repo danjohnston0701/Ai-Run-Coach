@@ -95,7 +95,7 @@ export default function Auth() {
         <Card className="border-white/10 bg-card/50 backdrop-blur-xl">
           <Tabs defaultValue="login" className="w-full">
             <CardHeader className="text-center">
-              <CardTitle className="text-3xl font-display font-bold uppercase tracking-tight">AI Runner Coach</CardTitle>
+              <CardTitle className="text-3xl font-display font-bold uppercase tracking-tight">AI Run Coach</CardTitle>
               <CardDescription>Join the future of personal training</CardDescription>
               <TabsList className="grid w-full grid-cols-2 mt-6 bg-background/50 border border-white/5">
                 <TabsTrigger value="login" className="data-[state=active]:bg-primary data-[state=active]:text-background uppercase text-[10px] font-bold tracking-widest">Login</TabsTrigger>

@@ -1,8 +1,8 @@
-# AI Runner Coach
+# AI Run Coach
 
 ## Overview
 
-AI Runner Coach is a mobile-first web application that provides AI-powered running coaching, route mapping, and session tracking. The app helps runners plan routes based on difficulty level, receive real-time voice coaching during runs, and analyze their performance with detailed insights. Key features include target distance/time settings, GPS route mapping, live run sharing with friends, and integration with OpenAI for personalized coaching advice.
+AI Run Coach is a mobile-first web application that provides AI-powered running coaching, route mapping, and session tracking. The app helps runners plan routes based on difficulty level, receive real-time voice coaching during runs, and analyze their performance with detailed insights. Key features include target distance/time settings, GPS route mapping, live run sharing with friends, and integration with OpenAI for personalized coaching advice.
 
 ## User Preferences
 
