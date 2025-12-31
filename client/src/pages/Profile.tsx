@@ -323,6 +323,18 @@ export default function Profile() {
     setProfile(prev => ({ ...prev!, [field]: value }));
   };
 
+  const formatDateInput = (value: string) => {
+    const cleaned = value.replace(/\D/g, "");
+    if (cleaned.length <= 2) return cleaned;
+    if (cleaned.length <= 4) return `${cleaned.slice(0, 2)}/${cleaned.slice(2)}`;
+    return `${cleaned.slice(0, 2)}/${cleaned.slice(2, 4)}/${cleaned.slice(4, 8)}`;
+  };
+
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const formatted = formatDateInput(e.target.value);
+    handleChange("dob", formatted);
+  };
+
   const handleSendRequest = (user: SearchUser) => {
     sendRequestMutation.mutate(user.id);
   };
@@ -485,9 +497,11 @@ export default function Profile() {
                 Date of Birth
               </label>
               <input
-                type="date"
+                type="text"
+                placeholder="DD/MM/YYYY"
                 value={profile.dob}
-                onChange={(e) => handleChange("dob", e.target.value)}
+                onChange={handleDateChange}
+                maxLength={10}
                 className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors"
                 data-testid="input-dob"
               />
