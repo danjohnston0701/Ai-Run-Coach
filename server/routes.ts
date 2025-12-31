@@ -50,7 +50,8 @@ export async function registerRoutes(
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors });
       }
-      res.status(500).json({ error: "Failed to create user" });
+      const errorMessage = error instanceof Error ? error.message : "Failed to create user";
+      res.status(500).json({ error: errorMessage });
     }
   });
 
