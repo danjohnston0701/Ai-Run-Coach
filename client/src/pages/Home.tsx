@@ -150,6 +150,7 @@ export default function Home() {
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
+        console.log("GPS location captured:", position.coords.latitude, position.coords.longitude);
         setUserLocation({
           lat: position.coords.latitude,
           lng: position.coords.longitude,
@@ -158,8 +159,14 @@ export default function Home() {
         setLocationError("");
       },
       (error) => {
+        console.log("GPS location error:", error.code, error.message);
         setLocationError("Enable location access to get personalized routes");
         setLocationLoading(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000
       }
     );
   }, []);
@@ -288,11 +295,16 @@ export default function Home() {
         <motion.div 
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-primary/10 border border-primary/30 rounded-lg p-3 mb-6 flex items-center gap-2"
+          className="bg-primary/10 border border-primary/30 rounded-lg p-3 mb-6"
           data-testid="alert-location-found"
         >
-          <MapPin className="w-4 h-4 text-primary" />
-          <p className="text-xs text-primary">Route will be tailored to your location</p>
+          <div className="flex items-center gap-2">
+            <MapPin className="w-4 h-4 text-primary" />
+            <p className="text-xs text-primary">GPS location detected</p>
+          </div>
+          <p className="text-[10px] text-primary/60 mt-1 font-mono">
+            {userLocation.lat.toFixed(6)}, {userLocation.lng.toFixed(6)}
+          </p>
         </motion.div>
       )}
 
