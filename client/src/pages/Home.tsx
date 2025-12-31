@@ -148,17 +148,7 @@ export default function Home() {
       return;
     }
 
-    // Check if we have a saved GPS location first
-    const savedLocation = localStorage.getItem("userGpsLocation");
-    if (savedLocation) {
-      const loc = JSON.parse(savedLocation);
-      console.log("Using saved GPS location:", loc);
-      setUserLocation(loc);
-      // Also update custom coordinates as fallback
-      setCustomLat(loc.lat.toString());
-      setCustomLng(loc.lng.toString());
-    }
-    
+    // Try to get fresh GPS first, only fall back to saved location if GPS fails
     navigator.geolocation.getCurrentPosition(
       (position) => {
         console.log("GPS location captured:", position.coords.latitude, position.coords.longitude);
@@ -167,20 +157,33 @@ export default function Home() {
           lng: position.coords.longitude,
         };
         setUserLocation(loc);
-        // Save to localStorage for persistence
+        setCustomLat(loc.lat.toString());
+        setCustomLng(loc.lng.toString());
+        // Save fresh GPS to localStorage
         localStorage.setItem("userGpsLocation", JSON.stringify(loc));
         setLocationLoading(false);
         setLocationError("");
       },
       (error) => {
         console.log("GPS location error:", error.code, error.message);
-        setLocationError("Enable location access to get personalized routes");
-        setLocationLoading(false);
+        // Only use saved location if GPS fails
+        const savedLocation = localStorage.getItem("userGpsLocation");
+        if (savedLocation) {
+          const loc = JSON.parse(savedLocation);
+          console.log("GPS failed, using saved location:", loc);
+          setUserLocation(loc);
+          setCustomLat(loc.lat.toString());
+          setCustomLng(loc.lng.toString());
+          setLocationLoading(false);
+        } else {
+          setLocationError("Enable location access to get personalized routes");
+          setLocationLoading(false);
+        }
       },
       {
         enableHighAccuracy: true,
         timeout: 10000,
-        maximumAge: 60000
+        maximumAge: 0  // Don't use cached position, get fresh GPS
       }
     );
   }, []);
