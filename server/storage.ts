@@ -1,8 +1,8 @@
-import { eq, and, desc, or } from "drizzle-orm";
+import { eq, and, desc, or, sql } from "drizzle-orm";
 import { db, withRetry } from "./db";
 import {
   users, preRegistrations, friends, routes, runs, liveRunSessions, garminData,
-  friendRequests, pushSubscriptions,
+  friendRequests, pushSubscriptions, notifications,
   type User, type InsertUser,
   type PreRegistration, type InsertPreRegistration,
   type Friend, type InsertFriend,
@@ -12,6 +12,7 @@ import {
   type GarminData, type InsertGarminData,
   type FriendRequest, type InsertFriendRequest,
   type PushSubscription, type InsertPushSubscription,
+  type Notification, type InsertNotification,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -58,6 +59,13 @@ export interface IStorage {
   savePushSubscription(data: InsertPushSubscription): Promise<PushSubscription>;
   getPushSubscription(userId: string): Promise<PushSubscription | undefined>;
   deletePushSubscription(userId: string): Promise<void>;
+
+  // Notifications
+  createNotification(data: InsertNotification): Promise<Notification>;
+  getNotifications(userId: string): Promise<Notification[]>;
+  getUnreadNotificationCount(userId: string): Promise<number>;
+  markNotificationAsRead(id: string): Promise<Notification | undefined>;
+  markAllNotificationsAsRead(userId: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -271,6 +279,53 @@ export class DatabaseStorage implements IStorage {
   async deletePushSubscription(userId: string): Promise<void> {
     return withRetry(async () => {
       await db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, userId));
+    });
+  }
+
+  // Notifications
+  async createNotification(data: InsertNotification): Promise<Notification> {
+    return withRetry(async () => {
+      const [notification] = await db.insert(notifications).values(data).returning();
+      return notification;
+    });
+  }
+
+  async getNotifications(userId: string): Promise<Notification[]> {
+    return withRetry(async () => {
+      return db.select().from(notifications)
+        .where(eq(notifications.userId, userId))
+        .orderBy(desc(notifications.createdAt))
+        .limit(50);
+    });
+  }
+
+  async getUnreadNotificationCount(userId: string): Promise<number> {
+    return withRetry(async () => {
+      const result = await db.select({ count: sql<number>`count(*)` })
+        .from(notifications)
+        .where(and(
+          eq(notifications.userId, userId),
+          eq(notifications.read, false)
+        ));
+      return Number(result[0]?.count) || 0;
+    });
+  }
+
+  async markNotificationAsRead(id: string): Promise<Notification | undefined> {
+    return withRetry(async () => {
+      const [notification] = await db.update(notifications)
+        .set({ read: true })
+        .where(eq(notifications.id, id))
+        .returning();
+      return notification;
+    });
+  }
+
+  async markAllNotificationsAsRead(userId: string): Promise<void> {
+    return withRetry(async () => {
+      await db.update(notifications)
+        .set({ read: true })
+        .where(eq(notifications.userId, userId));
     });
   }
 }

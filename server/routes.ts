@@ -707,6 +707,62 @@ export async function registerRoutes(
     }
   });
 
+  // Notification endpoints
+  app.get("/api/notifications", async (req, res) => {
+    try {
+      const userId = req.query.userId as string;
+      if (!userId) {
+        return res.status(400).json({ error: "Missing userId" });
+      }
+      const notifications = await storage.getNotifications(userId);
+      res.json(notifications);
+    } catch (error) {
+      console.error("Get notifications error:", error);
+      res.status(500).json({ error: "Failed to get notifications" });
+    }
+  });
+
+  app.get("/api/notifications/unread-count", async (req, res) => {
+    try {
+      const userId = req.query.userId as string;
+      if (!userId) {
+        return res.status(400).json({ error: "Missing userId" });
+      }
+      const count = await storage.getUnreadNotificationCount(userId);
+      res.json({ count });
+    } catch (error) {
+      console.error("Get unread count error:", error);
+      res.status(500).json({ error: "Failed to get unread count" });
+    }
+  });
+
+  app.post("/api/notifications/:id/read", async (req, res) => {
+    try {
+      const notification = await storage.markNotificationAsRead(req.params.id);
+      if (!notification) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
+      res.json(notification);
+    } catch (error) {
+      console.error("Mark notification read error:", error);
+      res.status(500).json({ error: "Failed to mark notification as read" });
+    }
+  });
+
+  app.post("/api/notifications/mark-all-read", async (req, res) => {
+    try {
+      const userId = req.query.userId as string;
+      if (!userId) {
+        return res.status(400).json({ error: "Missing userId" });
+      }
+      await storage.markAllNotificationsAsRead(userId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Mark all notifications read error:", error);
+      res.status(500).json({ error: "Failed to mark all as read" });
+    }
+  });
+
   // Friend Request endpoints
   app.post("/api/friend-requests", async (req, res) => {
     try {

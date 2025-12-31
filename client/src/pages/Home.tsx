@@ -5,11 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
-import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell } from "lucide-react";
+import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
 import type { RunData } from "./RunHistory";
 
 function urlBase64ToUint8Array(base64String: string) {
@@ -158,6 +160,21 @@ export default function Home() {
   const [targetTime, setTargetTime] = useState({ h: "0", m: "30", s: "00" });
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
   const [enablingNotifications, setEnablingNotifications] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const { data: unreadCount = 0 } = useQuery<number>({
+    queryKey: ['/api/notifications/unread-count', profile?.id],
+    queryFn: async () => {
+      if (!profile?.id) return 0;
+      const res = await fetch(`/api/notifications/unread-count?userId=${profile.id}`);
+      if (!res.ok) return 0;
+      const data = await res.json();
+      return data.count || 0;
+    },
+    enabled: !!profile?.id,
+    refetchInterval: 30000,
+    staleTime: 0,
+  });
 
   // Update target time when distance changes (default 6 min/km pace)
   useEffect(() => {
@@ -549,11 +566,73 @@ export default function Home() {
       </Dialog>
 
       <header className="mb-8 flex items-center justify-between">
-        <div>
-          <h1 className="text-4xl font-display font-bold text-primary uppercase tracking-wider">
-            {profile?.name}
-          </h1>
-          <p className="text-muted-foreground text-sm">Welcome, Plan your run with {profile?.coachName}  </p>
+        <div className="flex items-center gap-3">
+          <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+            <SheetTrigger asChild>
+              <button 
+                className="relative p-2 -ml-2 rounded-lg hover:bg-muted/50 transition-colors"
+                data-testid="button-hamburger-menu"
+              >
+                <Menu className="w-6 h-6 text-foreground" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center px-1">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                )}
+              </button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-72">
+              <SheetHeader className="text-left">
+                <SheetTitle className="text-primary font-display uppercase tracking-wider">Menu</SheetTitle>
+              </SheetHeader>
+              <nav className="mt-6 space-y-2">
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setLocation("/profile");
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left"
+                  data-testid="menu-profile"
+                >
+                  <User className="w-5 h-5 text-primary" />
+                  <span className="font-medium">Profile</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setLocation("/notifications");
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left"
+                  data-testid="menu-notifications"
+                >
+                  <Bell className="w-5 h-5 text-primary" />
+                  <span className="font-medium flex-1">Notifications</span>
+                  {unreadCount > 0 && (
+                    <span className="min-w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center px-1">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setLocation("/history");
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left"
+                  data-testid="menu-history"
+                >
+                  <History className="w-5 h-5 text-primary" />
+                  <span className="font-medium">Run History</span>
+                </button>
+              </nav>
+            </SheetContent>
+          </Sheet>
+          <div>
+            <h1 className="text-4xl font-display font-bold text-primary uppercase tracking-wider">
+              {profile?.name}
+            </h1>
+            <p className="text-muted-foreground text-sm">Welcome, Plan your run with {profile?.coachName}</p>
+          </div>
         </div>
         <motion.div 
           className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center border border-primary/50 cursor-pointer hover:bg-primary/30 transition-colors overflow-hidden"

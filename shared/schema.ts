@@ -125,6 +125,17 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   lastUsedAt: timestamp("last_used_at"),
 });
 
+export const notifications = pgTable("notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  type: text("type").notNull(),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  read: boolean("read").default(false),
+  data: jsonb("data"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 export const insertPreRegistrationSchema = createInsertSchema(preRegistrations).omit({ id: true, createdAt: true });
 export const insertFriendSchema = createInsertSchema(friends).omit({ id: true, createdAt: true });
@@ -134,6 +145,7 @@ export const insertLiveRunSessionSchema = createInsertSchema(liveRunSessions).om
 export const insertGarminDataSchema = createInsertSchema(garminData).omit({ id: true, syncedAt: true });
 export const insertFriendRequestSchema = createInsertSchema(friendRequests).omit({ id: true, createdAt: true, respondedAt: true });
 export const insertPushSubscriptionSchema = createInsertSchema(pushSubscriptions).omit({ id: true, createdAt: true, lastUsedAt: true });
+export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -161,3 +173,6 @@ export type FriendRequest = typeof friendRequests.$inferSelect;
 
 export type InsertPushSubscription = z.infer<typeof insertPushSubscriptionSchema>;
 export type PushSubscription = typeof pushSubscriptions.$inferSelect;
+
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type Notification = typeof notifications.$inferSelect;

@@ -14,6 +14,7 @@ import RunHistory from "@/pages/RunHistory";
 import RunInsights from "@/pages/RunInsights";
 import ProfileSetup from "@/pages/ProfileSetup";
 import Profile from "@/pages/Profile";
+import Notifications from "@/pages/Notifications";
 import PrivacyPolicy from "@/pages/PrivacyPolicy";
 import TermsOfUse from "@/pages/TermsOfUse";
 import Login from "@/pages/Login";
@@ -52,6 +53,7 @@ function Router() {
           <Route path="/history" component={RunHistory} />
           <Route path="/history/:id" component={RunInsights} />
           <Route path="/profile" component={Profile} />
+          <Route path="/notifications" component={Notifications} />
         </>
       )}
       <Route component={NotFound} />
