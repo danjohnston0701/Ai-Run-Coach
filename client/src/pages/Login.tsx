@@ -77,7 +77,8 @@ export default function Auth() {
       }
     } catch (error) {
       console.error("Registration exception:", error);
-      toast.error("Registration failed. Please try again.");
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      toast.error(`Registration failed: ${errorMsg}`);
     } finally {
       setLoading(false);
     }
