@@ -35,6 +35,7 @@ export default function GoogleMapsRoute({
   const mapRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [routeInfo, setRouteInfo] = useState<{ distance: string; duration: string } | null>(null);
   const mapInstanceRef = useRef<any>(null);
 
   useEffect(() => {
@@ -54,7 +55,7 @@ export default function GoogleMapsRoute({
         }
 
         const script = document.createElement("script");
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry`;
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry,places`;
         script.async = true;
         script.defer = true;
         script.onload = () => {
@@ -85,58 +86,112 @@ export default function GoogleMapsRoute({
 
       mapInstanceRef.current = map;
 
+      // Add start marker
       new window.google.maps.Marker({
         position: center,
         map,
         title: "Start / End",
         icon: {
           path: window.google.maps.SymbolPath.CIRCLE,
-          scale: 12,
+          scale: 14,
           fillColor: "#22c55e",
           fillOpacity: 1,
           strokeColor: "#ffffff",
           strokeWeight: 3,
         },
+        zIndex: 100,
       });
 
       if (waypoints && waypoints.length > 0) {
-        const routePath = [
-          { lat: startLat, lng: startLng },
-          ...waypoints,
-          { lat: startLat, lng: startLng },
-        ];
-
-        new window.google.maps.Polyline({
-          path: routePath,
-          geodesic: true,
-          strokeColor: "#a855f7",
-          strokeOpacity: 0.9,
-          strokeWeight: 4,
+        // Use Directions API to get road-following route
+        const directionsService = new window.google.maps.DirectionsService();
+        const directionsRenderer = new window.google.maps.DirectionsRenderer({
           map,
+          suppressMarkers: true,
+          polylineOptions: {
+            strokeColor: "#a855f7",
+            strokeOpacity: 0.9,
+            strokeWeight: 5,
+          },
         });
 
-        waypoints.forEach((waypoint, index) => {
-          new window.google.maps.Marker({
-            position: waypoint,
-            map,
-            title: `Waypoint ${index + 1}`,
-            icon: {
-              path: window.google.maps.SymbolPath.CIRCLE,
-              scale: 8,
-              fillColor: "#a855f7",
-              fillOpacity: 1,
-              strokeColor: "#ffffff",
-              strokeWeight: 2,
-            },
-          });
-        });
+        // Create waypoints for Directions API (exclude first and last as they're origin/destination)
+        const intermediateWaypoints = waypoints.slice(0, -1).map((wp) => ({
+          location: new window.google.maps.LatLng(wp.lat, wp.lng),
+          stopover: false,
+        }));
 
-        const bounds = new window.google.maps.LatLngBounds();
-        routePath.forEach((point) => bounds.extend(point));
-        map.fitBounds(bounds, 50);
+        const request = {
+          origin: center,
+          destination: center, // Round trip back to start
+          waypoints: intermediateWaypoints,
+          travelMode: window.google.maps.TravelMode.WALKING,
+          optimizeWaypoints: false,
+        };
+
+        directionsService.route(request, (result: any, status: any) => {
+          if (status === window.google.maps.DirectionsStatus.OK) {
+            directionsRenderer.setDirections(result);
+            
+            // Calculate total distance and duration
+            let totalDistance = 0;
+            let totalDuration = 0;
+            result.routes[0].legs.forEach((leg: any) => {
+              totalDistance += leg.distance.value;
+              totalDuration += leg.duration.value;
+            });
+            
+            setRouteInfo({
+              distance: (totalDistance / 1000).toFixed(2) + " km",
+              duration: Math.round(totalDuration / 60) + " min",
+            });
+          } else {
+            // Fallback to simple polyline if Directions fails
+            console.log("Directions request failed:", status);
+            drawSimpleRoute(map, center, waypoints);
+          }
+          setLoading(false);
+        });
+      } else {
+        setLoading(false);
       }
+    }
 
-      setLoading(false);
+    function drawSimpleRoute(map: any, center: Waypoint, waypoints: Waypoint[]) {
+      const routePath = [
+        center,
+        ...waypoints,
+        center,
+      ];
+
+      new window.google.maps.Polyline({
+        path: routePath,
+        geodesic: true,
+        strokeColor: "#a855f7",
+        strokeOpacity: 0.9,
+        strokeWeight: 4,
+        map,
+      });
+
+      waypoints.forEach((waypoint, index) => {
+        new window.google.maps.Marker({
+          position: waypoint,
+          map,
+          title: `Waypoint ${index + 1}`,
+          icon: {
+            path: window.google.maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: "#a855f7",
+            fillOpacity: 1,
+            strokeColor: "#ffffff",
+            strokeWeight: 2,
+          },
+        });
+      });
+
+      const bounds = new window.google.maps.LatLngBounds();
+      routePath.forEach((point) => bounds.extend(point));
+      map.fitBounds(bounds, 50);
     }
 
     loadGoogleMaps();
@@ -162,12 +217,21 @@ export default function GoogleMapsRoute({
         </div>
       )}
       <div ref={mapRef} className="w-full h-full min-h-[300px]" />
-      {routeName && (
+      {(routeName || routeInfo) && (
         <div className="absolute bottom-4 left-4 right-4 bg-background/90 backdrop-blur-sm rounded-lg p-3 border border-white/10">
-          <h3 className="font-bold text-sm text-foreground">{routeName}</h3>
+          {routeName && <h3 className="font-bold text-sm text-foreground">{routeName}</h3>}
           <div className="flex gap-4 mt-1 text-xs text-muted-foreground">
-            {distance && <span>{distance.toFixed(1)} km</span>}
-            {estimatedTime && <span>{estimatedTime} min</span>}
+            {routeInfo ? (
+              <>
+                <span>{routeInfo.distance}</span>
+                <span>{routeInfo.duration} walking</span>
+              </>
+            ) : (
+              <>
+                {distance && <span>{distance.toFixed(1)} km</span>}
+                {estimatedTime && <span>{estimatedTime} min</span>}
+              </>
+            )}
           </div>
         </div>
       )}

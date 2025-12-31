@@ -93,18 +93,27 @@ Respond in JSON format with:
 }
 
 function generateDefaultWaypoints(startLat: number, startLng: number, distance: number): Array<{ lat: number; lng: number }> {
-  const radius = distance * 0.001;
-  const numPoints = 6;
+  // Calculate radius based on distance (approximate: 1km = 0.009 degrees latitude)
+  // For a loop route, we want the radius to be roughly distance / (2 * PI)
+  const kmPerDegree = 111; // approximate km per degree of latitude
+  const loopRadius = (distance / (2 * Math.PI)) / kmPerDegree;
+  
+  // Create 4 waypoints for a simpler route that Directions API can handle
+  const numPoints = 4;
   const waypoints = [];
   
+  // Add some randomness to make routes less predictable
+  const randomOffset = Math.random() * Math.PI * 0.5;
+  
   for (let i = 0; i < numPoints; i++) {
-    const angle = (2 * Math.PI * i) / numPoints;
+    const angle = randomOffset + (2 * Math.PI * i) / numPoints;
+    // Adjust for longitude scaling based on latitude
+    const lngScale = Math.cos(startLat * Math.PI / 180);
     waypoints.push({
-      lat: startLat + radius * Math.sin(angle),
-      lng: startLng + radius * Math.cos(angle)
+      lat: startLat + loopRadius * Math.sin(angle),
+      lng: startLng + (loopRadius / lngScale) * Math.cos(angle)
     });
   }
-  waypoints.push({ lat: startLat, lng: startLng });
   
   return waypoints;
 }
