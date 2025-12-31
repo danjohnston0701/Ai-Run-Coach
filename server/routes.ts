@@ -390,16 +390,14 @@ export async function registerRoutes(
   app.get("/api/users/search", async (req, res) => {
     try {
       const { q } = req.query;
-      if (!q || typeof q !== 'string') {
+      if (!q || typeof q !== 'string' || q.length < 2) {
         return res.json([]);
       }
-      const registrations = await storage.getPreRegistrations();
-      const filtered = registrations.filter(r => 
-        r.name.toLowerCase().includes(q.toLowerCase()) || 
-        r.email.toLowerCase().includes(q.toLowerCase())
-      );
-      res.json(filtered);
+      // Search registered users in the database
+      const users = await storage.searchUsers(q);
+      res.json(users);
     } catch (error) {
+      console.error("User search error:", error);
       res.status(500).json({ error: "Search failed" });
     }
   });
