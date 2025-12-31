@@ -34,10 +34,12 @@ export default function Auth() {
         toast.success("Welcome back!");
         window.location.href = "/";
       } else {
-        toast.error("Invalid credentials. Please try again.");
+        const data = await res.json();
+        toast.error(data.error || "Invalid credentials. Please try again.");
       }
     } catch (error) {
-      toast.error("Login failed. Please try again.");
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      toast.error(`Login failed: ${errorMsg}`);
     } finally {
       setLoading(false);
     }
