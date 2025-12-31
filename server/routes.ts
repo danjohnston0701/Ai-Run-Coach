@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { insertPreRegistrationSchema, insertUserSchema, insertRouteSchema, insertRunSchema, insertLiveRunSessionSchema } from "@shared/schema";
 import { z } from "zod";
 import { generateRoute, getCoachingAdvice, analyzeRunPerformance } from "./openai";
-import { generateCircularRoute, isGoogleMapsConfigured } from "./routePlanner";
+import { generateCircularRoute, generateMultipleRoutes, isGoogleMapsConfigured } from "./routePlanner";
 import bcrypt from "bcryptjs";
 
 export async function registerRoutes(
@@ -148,7 +148,48 @@ export async function registerRoutes(
     }
   });
 
-  // Circular route generation with distance validation
+  // Generate multiple route options (9 routes: 3 easy, 3 moderate, 3 hard)
+  app.post("/api/routes/generate-options", async (req, res) => {
+    try {
+      const { startLat, startLng, targetDistance } = req.body;
+      
+      console.log("Multi-route generation request:", { startLat, startLng, targetDistance, hasApiKey: isGoogleMapsConfigured() });
+      
+      if (startLat === undefined || startLat === null || 
+          startLng === undefined || startLng === null || 
+          targetDistance === undefined || targetDistance === null) {
+        return res.status(400).json({ error: "Missing required parameters" });
+      }
+
+      if (!isGoogleMapsConfigured()) {
+        console.error("Google Maps API key not configured");
+        return res.status(503).json({ error: "Route generation service is temporarily unavailable. Please try again later." });
+      }
+
+      const result = await generateMultipleRoutes({
+        startLat: parseFloat(startLat),
+        startLng: parseFloat(startLng),
+        targetDistance: parseFloat(targetDistance),
+      });
+
+      if (!result.success) {
+        console.error("Multi-route generation failed:", result.error);
+        return res.status(400).json({ error: result.error || "Could not generate routes. Please try a different location or distance." });
+      }
+
+      res.json({
+        success: true,
+        routes: result.routes,
+        targetDistance: parseFloat(targetDistance),
+      });
+    } catch (error) {
+      console.error("Multi-route generation error:", error);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      res.status(500).json({ error: `Failed to generate routes: ${errorMessage}` });
+    }
+  });
+
+  // Single route generation (legacy endpoint)
   app.post("/api/routes/generate", async (req, res) => {
     try {
       const { startLat, startLng, targetDistance, difficulty } = req.body;
@@ -157,8 +198,7 @@ export async function registerRoutes(
       
       if (startLat === undefined || startLat === null || 
           startLng === undefined || startLng === null || 
-          targetDistance === undefined || targetDistance === null || 
-          !difficulty) {
+          targetDistance === undefined || targetDistance === null) {
         return res.status(400).json({ error: "Missing required parameters" });
       }
 
@@ -171,7 +211,7 @@ export async function registerRoutes(
         startLat: parseFloat(startLat),
         startLng: parseFloat(startLng),
         targetDistance: parseFloat(targetDistance),
-        difficulty: difficulty as "beginner" | "moderate" | "expert",
+        difficulty: difficulty || "moderate",
       });
 
       if (!result.success) {
@@ -186,10 +226,7 @@ export async function registerRoutes(
         polyline: result.polyline,
         attempts: result.attempts,
         routeName: result.routeName,
-        variance: ((result.actualDistance - targetDistance) / targetDistance * 100).toFixed(1),
-        needsApproval: result.needsApproval || false,
-        variancePercent: result.variancePercent,
-        targetDistance: result.targetDistance || targetDistance,
+        routeGrade: result.routeGrade,
       });
     } catch (error) {
       console.error("Route generation error:", error);

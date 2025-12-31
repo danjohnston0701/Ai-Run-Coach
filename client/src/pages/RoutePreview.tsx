@@ -3,28 +3,21 @@ import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
-import { ArrowLeft, Play, MapPin, Loader2, RefreshCw, Lightbulb, Route, AlertTriangle, Check, X } from "lucide-react";
+import { ArrowLeft, Play, Loader2, RefreshCw, Route, Clock } from "lucide-react";
 import GoogleMapsRoute from "@/components/GoogleMapsRoute";
 
-interface GeneratedRoute {
+interface RouteCandidate {
   id: string;
-  name: string;
-  distance: number;
-  actualDistance: number;
-  difficulty: string;
-  startLat: number;
-  startLng: number;
   waypoints: Array<{ lat: number; lng: number }>;
-  polyline?: string;
-  tips?: string[];
-  description?: string;
-  variance?: string;
-  attempts?: number;
-  needsApproval?: boolean;
-  variancePercent?: number;
-  targetDistance?: number;
-  routeGrade?: "easy" | "moderate" | "hard";
-  deadEndCount?: number;
+  actualDistance: number;
+  duration: number;
+  polyline: string;
+  routeName: string;
+  difficulty: "easy" | "moderate" | "hard";
+  difficultyScore: number;
+  hasMajorRoads: boolean;
+  uniquenessScore: number;
+  deadEndCount: number;
 }
 
 export default function RoutePreview() {
@@ -33,64 +26,41 @@ export default function RoutePreview() {
   const params = new URLSearchParams(searchString);
   
   const distance = parseFloat(params.get("distance") || "5");
-  const level = params.get("level") || "beginner";
-  // Default to Mangawhai, New Zealand if no location provided
   const latParam = params.get("lat");
   const lngParam = params.get("lng");
   const lat = parseFloat(latParam || "-36.1316");
   const lng = parseFloat(lngParam || "174.5755");
-  
-  console.log("RoutePreview - URL params:", { latParam, lngParam });
-  console.log("RoutePreview - parsed coordinates:", { lat, lng, distance, level });
 
-  const [route, setRoute] = useState<GeneratedRoute | null>(null);
+  const [routes, setRoutes] = useState<RouteCandidate[]>([]);
+  const [selectedRoute, setSelectedRoute] = useState<RouteCandidate | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [routeAccepted, setRouteAccepted] = useState(false);
 
-  const generateRoute = async () => {
+  const generateRoutes = async () => {
     setLoading(true);
     setError(null);
-    setRouteAccepted(false);
+    setSelectedRoute(null);
     
     try {
-      const res = await fetch("/api/routes/generate", {
+      const res = await fetch("/api/routes/generate-options", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           startLat: lat,
           startLng: lng,
           targetDistance: distance,
-          difficulty: level,
         }),
       });
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || "Failed to generate route");
+        throw new Error(errData.error || "Failed to generate routes");
       }
 
       const data = await res.json();
-      setRoute({
-        id: `route-${Date.now()}`,
-        name: data.routeName || `${distance}km ${level} Loop`,
-        distance: distance,
-        actualDistance: data.actualDistance,
-        difficulty: level,
-        startLat: lat,
-        startLng: lng,
-        waypoints: data.waypoints,
-        polyline: data.polyline,
-        variance: data.variance,
-        attempts: data.attempts,
-        needsApproval: data.needsApproval,
-        variancePercent: data.variancePercent,
-        targetDistance: data.targetDistance,
-        routeGrade: data.routeGrade,
-        deadEndCount: data.deadEndCount,
-      });
+      setRoutes(data.routes || []);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to generate route";
+      const errorMessage = err instanceof Error ? err.message : "Failed to generate routes";
       setError(errorMessage);
       console.error("Route generation error:", err);
     } finally {
@@ -99,21 +69,89 @@ export default function RoutePreview() {
   };
 
   useEffect(() => {
-    generateRoute();
+    generateRoutes();
   }, []);
 
   const handleStartRun = () => {
-    if (!route) return;
+    if (!selectedRoute) return;
     
     const runParams = new URLSearchParams({
       distance: distance.toString(),
-      level,
+      level: selectedRoute.difficulty,
       lat: lat.toString(),
       lng: lng.toString(),
-      routeId: route.id,
-      routeName: route.name,
+      routeId: selectedRoute.id,
+      routeName: selectedRoute.routeName,
     });
     setLocation(`/run?${runParams.toString()}`);
+  };
+
+  const easyRoutes = routes.filter(r => r.difficulty === "easy");
+  const moderateRoutes = routes.filter(r => r.difficulty === "moderate");
+  const hardRoutes = routes.filter(r => r.difficulty === "hard");
+
+  const getDifficultyColor = (difficulty: string) => {
+    switch (difficulty) {
+      case "easy": return { bg: "bg-green-500/20", border: "border-green-500/40", text: "text-green-400", dot: "bg-green-500" };
+      case "moderate": return { bg: "bg-yellow-500/20", border: "border-yellow-500/40", text: "text-yellow-400", dot: "bg-yellow-500" };
+      case "hard": return { bg: "bg-red-500/20", border: "border-red-500/40", text: "text-red-400", dot: "bg-red-500" };
+      default: return { bg: "bg-gray-500/20", border: "border-gray-500/40", text: "text-gray-400", dot: "bg-gray-500" };
+    }
+  };
+
+  const RouteCard = ({ route }: { route: RouteCandidate }) => {
+    const colors = getDifficultyColor(route.difficulty);
+    const isSelected = selectedRoute?.id === route.id;
+    
+    return (
+      <Card 
+        className={`cursor-pointer transition-all ${colors.bg} ${colors.border} border-2 ${
+          isSelected ? 'ring-2 ring-primary scale-[1.02]' : 'hover:scale-[1.01]'
+        }`}
+        onClick={() => setSelectedRoute(route)}
+        data-testid={`card-route-${route.id}`}
+      >
+        <CardContent className="p-3">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <div className={`w-3 h-3 rounded-full ${colors.dot}`} />
+              <span className={`text-xs font-bold uppercase ${colors.text}`}>{route.difficulty}</span>
+            </div>
+            {isSelected && (
+              <span className="text-xs bg-primary text-background px-2 py-0.5 rounded-full font-bold">Selected</span>
+            )}
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1">
+              <Route className="w-4 h-4 text-muted-foreground" />
+              <span className="text-lg font-bold">{route.actualDistance.toFixed(1)} km</span>
+            </div>
+            <div className="flex items-center gap-1 text-muted-foreground">
+              <Clock className="w-3 h-3" />
+              <span className="text-xs">{route.duration} min</span>
+            </div>
+          </div>
+          {route.hasMajorRoads && (
+            <p className="text-xs text-muted-foreground mt-1">Includes major roads</p>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
+
+  const DifficultySection = ({ title, routeList, color }: { title: string; routeList: RouteCandidate[]; color: string }) => {
+    if (routeList.length === 0) return null;
+    
+    return (
+      <div className="mb-6">
+        <h3 className={`text-sm font-bold uppercase tracking-wider mb-3 ${color}`}>{title}</h3>
+        <div className="grid grid-cols-1 gap-3">
+          {routeList.map((route) => (
+            <RouteCard key={route.id} route={route} />
+          ))}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -129,8 +167,8 @@ export default function RoutePreview() {
           <ArrowLeft className="w-5 h-5" />
         </Button>
         <div>
-          <h1 className="text-2xl font-display font-bold uppercase tracking-wider">Your Route</h1>
-          <p className="text-muted-foreground text-sm">AI-generated {distance}km {level} route</p>
+          <h1 className="text-2xl font-display font-bold uppercase tracking-wider">Choose Your Route</h1>
+          <p className="text-muted-foreground text-sm">Select from {routes.length} route options for your {distance}km run</p>
         </div>
       </header>
 
@@ -141,8 +179,8 @@ export default function RoutePreview() {
           className="flex flex-col items-center justify-center py-20"
         >
           <Loader2 className="w-12 h-12 animate-spin text-primary mb-4" />
-          <p className="text-muted-foreground">Generating your personalized route...</p>
-          <p className="text-xs text-muted-foreground/60 mt-2">This may take a few seconds</p>
+          <p className="text-muted-foreground">Generating route options...</p>
+          <p className="text-xs text-muted-foreground/60 mt-2">Finding easy, moderate, and hard routes</p>
         </motion.div>
       )}
 
@@ -153,202 +191,54 @@ export default function RoutePreview() {
           className="flex flex-col items-center justify-center py-20"
         >
           <p className="text-destructive mb-4">{error}</p>
-          <Button onClick={generateRoute} variant="outline" className="gap-2">
+          <Button onClick={generateRoutes} variant="outline" className="gap-2" data-testid="button-try-again">
             <RefreshCw className="w-4 h-4" />
             Try Again
           </Button>
         </motion.div>
       )}
 
-      {route && !loading && (
+      {!loading && !error && routes.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="space-y-6"
         >
-          <GoogleMapsRoute
-            waypoints={route.waypoints || []}
-            startLat={lat}
-            startLng={lng}
-            routeName={route.name}
-            distance={route.actualDistance || route.distance}
-            polyline={route.polyline}
-            className="h-[350px]"
-          />
+          {selectedRoute && (
+            <div className="mb-6">
+              <GoogleMapsRoute
+                waypoints={selectedRoute.waypoints || []}
+                startLat={lat}
+                startLng={lng}
+                routeName={selectedRoute.routeName}
+                distance={selectedRoute.actualDistance}
+                polyline={selectedRoute.polyline}
+                className="h-[250px]"
+              />
+            </div>
+          )}
 
-          <div className="flex justify-center gap-4">
-            <Card className="bg-card/50 border-white/10 w-32">
+          {!selectedRoute && (
+            <Card className="bg-primary/10 border-primary/30">
               <CardContent className="p-4 text-center">
-                <Route className="w-5 h-5 text-primary mx-auto mb-2" />
-                <p className="text-2xl font-display font-bold text-primary">{(route.actualDistance || route.distance).toFixed(1)}</p>
-                <p className="text-xs text-muted-foreground uppercase">km</p>
-              </CardContent>
-            </Card>
-            {route.routeGrade && (
-              <Card className={`border w-32 ${
-                route.routeGrade === 'easy' ? 'bg-green-500/10 border-green-500/30' :
-                route.routeGrade === 'moderate' ? 'bg-yellow-500/10 border-yellow-500/30' :
-                'bg-red-500/10 border-red-500/30'
-              }`}>
-                <CardContent className="p-4 text-center">
-                  <div className={`w-5 h-5 rounded-full mx-auto mb-2 ${
-                    route.routeGrade === 'easy' ? 'bg-green-500' :
-                    route.routeGrade === 'moderate' ? 'bg-yellow-500' :
-                    'bg-red-500'
-                  }`} />
-                  <p className={`text-lg font-display font-bold uppercase ${
-                    route.routeGrade === 'easy' ? 'text-green-500' :
-                    route.routeGrade === 'moderate' ? 'text-yellow-500' :
-                    'text-red-500'
-                  }`}>{route.routeGrade}</p>
-                  <p className="text-xs text-muted-foreground uppercase">grade</p>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
-          {route.routeGrade && !routeAccepted && (
-            <Card className={`border ${
-              route.routeGrade === 'easy' ? 'bg-green-500/10 border-green-500/30' :
-              route.routeGrade === 'moderate' ? 'bg-yellow-500/10 border-yellow-500/30' :
-              'bg-red-500/10 border-red-500/30'
-            }`}>
-              <CardContent className="p-4">
-                <div className="flex items-start gap-3">
-                  <div className={`w-5 h-5 rounded-full flex-shrink-0 mt-0.5 ${
-                    route.routeGrade === 'easy' ? 'bg-green-500' :
-                    route.routeGrade === 'moderate' ? 'bg-yellow-500' :
-                    'bg-red-500'
-                  }`} />
-                  <div className="flex-1">
-                    <h3 className={`font-display font-bold uppercase text-sm mb-1 ${
-                      route.routeGrade === 'easy' ? 'text-green-500' :
-                      route.routeGrade === 'moderate' ? 'text-yellow-500' :
-                      'text-red-500'
-                    }`}>
-                      {route.routeGrade === 'easy' ? 'Great Route Found' :
-                       route.routeGrade === 'moderate' ? 'Good Route Found' :
-                       'Challenging Route'}
-                    </h3>
-                    <p className="text-sm text-muted-foreground mb-2">
-                      {route.routeGrade === 'easy' 
-                        ? 'This route has minimal backtracking and follows a clean loop pattern. Perfect for an enjoyable run!'
-                        : route.routeGrade === 'moderate'
-                        ? 'This route is good but may have some minor backtracking or road reuse. Still a solid choice for your run.'
-                        : 'This route has some sections that reuse roads or include turnarounds. You may want to regenerate for a cleaner loop.'
-                      }
-                    </p>
-                    <p className="text-xs text-muted-foreground mb-3">
-                      Dead-ends detected: {route.deadEndCount || 0}
-                    </p>
-                    <div className="flex gap-2">
-                      <Button 
-                        size="sm" 
-                        onClick={() => setRouteAccepted(true)}
-                        className={`text-white gap-1 ${
-                          route.routeGrade === 'easy' ? 'bg-green-600 hover:bg-green-700' :
-                          route.routeGrade === 'moderate' ? 'bg-yellow-600 hover:bg-yellow-700' :
-                          'bg-red-600 hover:bg-red-700'
-                        }`}
-                        data-testid="button-accept-grade"
-                      >
-                        <Check className="w-4 h-4" /> Accept This Route
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        onClick={generateRoute}
-                        className="border-white/20 gap-1"
-                        data-testid="button-regenerate-grade"
-                      >
-                        <RefreshCw className="w-4 h-4" /> Try Different Route
-                      </Button>
-                    </div>
-                  </div>
-                </div>
+                <p className="text-sm text-muted-foreground">Tap a route below to preview it on the map</p>
               </CardContent>
             </Card>
           )}
 
-          {route.needsApproval && !routeAccepted && (
-            <Card className="bg-yellow-500/10 border-yellow-500/30">
-              <CardContent className="p-4">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <h3 className="font-display font-bold uppercase text-sm text-yellow-500 mb-1">
-                      Route Distance Differs
-                    </h3>
-                    <p className="text-sm text-muted-foreground mb-3">
-                      We couldn't find a route exactly matching your {route.targetDistance}km target. 
-                      The best available route is {route.actualDistance?.toFixed(1)}km 
-                      ({route.variancePercent && route.variancePercent > 0 ? '+' : ''}{route.variancePercent}% difference).
-                    </p>
-                    <div className="flex gap-2">
-                      <Button 
-                        size="sm" 
-                        onClick={() => setRouteAccepted(true)}
-                        className="bg-green-600 hover:bg-green-700 text-white gap-1"
-                        data-testid="button-accept-route"
-                      >
-                        <Check className="w-4 h-4" /> Accept Route
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        onClick={generateRoute}
-                        className="border-white/20 gap-1"
-                        data-testid="button-try-again"
-                      >
-                        <RefreshCw className="w-4 h-4" /> Try Again
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+          <DifficultySection title="Easy Routes" routeList={easyRoutes} color="text-green-400" />
+          <DifficultySection title="Moderate Routes" routeList={moderateRoutes} color="text-yellow-400" />
+          <DifficultySection title="Hard Routes" routeList={hardRoutes} color="text-red-400" />
 
-          {route.description && (
-            <Card className="bg-card/50 border-white/10">
-              <CardContent className="p-4">
-                <h3 className="font-display font-bold uppercase text-sm mb-2 flex items-center gap-2">
-                  <MapPin className="w-4 h-4 text-primary" />
-                  Route Overview
-                </h3>
-                <p className="text-sm text-muted-foreground">{route.description}</p>
-              </CardContent>
-            </Card>
-          )}
-
-          {route.tips && route.tips.length > 0 && (
-            <Card className="bg-primary/5 border-primary/20">
-              <CardContent className="p-4">
-                <h3 className="font-display font-bold uppercase text-sm mb-3 flex items-center gap-2">
-                  <Lightbulb className="w-4 h-4 text-primary" />
-                  AI Coach Tips
-                </h3>
-                <ul className="space-y-2">
-                  {route.tips.map((tip, index) => (
-                    <li key={index} className="text-sm text-muted-foreground flex items-start gap-2">
-                      <span className="text-primary font-bold">{index + 1}.</span>
-                      {tip}
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-          )}
-
-          <div className="flex gap-3">
+          <div className="pt-4">
             <Button 
               variant="outline" 
-              onClick={generateRoute}
-              className="flex-1 h-12 gap-2 border-white/20"
+              onClick={generateRoutes}
+              className="w-full h-12 gap-2 border-white/20"
               data-testid="button-regenerate"
             >
               <RefreshCw className="w-4 h-4" />
-              New Route
+              Generate New Routes
             </Button>
           </div>
         </motion.div>
@@ -357,12 +247,13 @@ export default function RoutePreview() {
       <div className="fixed bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-background via-background to-transparent z-50">
         <Button 
           size="lg" 
-          className="w-full h-16 text-xl font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-all"
+          className="w-full h-16 text-xl font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-all disabled:opacity-50"
           onClick={handleStartRun}
-          disabled={!route || loading || (route?.needsApproval && !routeAccepted)}
+          disabled={!selectedRoute || loading}
           data-testid="button-start-run"
         >
-          <Play className="mr-2 w-6 h-6 fill-current" /> Start Run
+          <Play className="mr-2 w-6 h-6 fill-current" /> 
+          {selectedRoute ? `Start ${selectedRoute.actualDistance.toFixed(1)}km Run` : 'Select a Route'}
         </Button>
       </div>
     </div>
