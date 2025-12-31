@@ -699,6 +699,11 @@ export default function Profile() {
                       type="text"
                       value={friendSearchQuery}
                       onChange={(e) => setFriendSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                        }
+                      }}
                       placeholder="Search name or email..."
                       className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-foreground text-sm focus:outline-none focus:border-primary transition-colors"
                       autoFocus
