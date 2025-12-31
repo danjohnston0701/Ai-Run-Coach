@@ -5,10 +5,72 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
-import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer } from "lucide-react";
+import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { toast } from "sonner";
 import type { RunData } from "./RunHistory";
+
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+async function registerPushSubscription(userId: string) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    console.log('[Push] Push notifications not supported');
+    return false;
+  }
+
+  try {
+    const statusRes = await fetch('/api/push/status');
+    const { configured } = await statusRes.json();
+    if (!configured) {
+      console.log('[Push] Push notifications not configured on server');
+      return false;
+    }
+
+    const keyRes = await fetch('/api/push/vapid-public-key');
+    if (!keyRes.ok) {
+      console.log('[Push] Could not get VAPID key');
+      return false;
+    }
+    const { vapidPublicKey } = await keyRes.json();
+
+    const registration = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      console.log('[Push] Notification permission denied');
+      return false;
+    }
+
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+    });
+
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, subscription: subscription.toJSON() }),
+    });
+
+    console.log('[Push] Successfully subscribed');
+    return true;
+  } catch (error) {
+    console.error('[Push] Registration failed:', error);
+    return false;
+  }
+}
 
 import mapBeginner from "@assets/generated_images/dark_mode_map_with_flat_green_route.png";
 import mapModerate from "@assets/generated_images/dark_mode_map_with_yellow_moderate_route.png";
@@ -45,6 +107,7 @@ const LEVELS = [
 ];
 
 interface UserProfile {
+  id?: string;
   name: string;
   coachName: string;
   profilePic?: string;
@@ -69,6 +132,8 @@ export default function Home() {
   const [lastRun, setLastRun] = useState<RunData | null>(null);
   const [targetTimeActive, setTargetTimeActive] = useState(false);
   const [targetTime, setTargetTime] = useState({ h: "0", m: "30", s: "00" });
+  const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
+  const [enablingNotifications, setEnablingNotifications] = useState(false);
 
   // Update target time when distance changes (default 6 min/km pace)
   useEffect(() => {
@@ -214,6 +279,43 @@ export default function Home() {
     );
   }, []);
 
+  // Check for notification permission after login
+  useEffect(() => {
+    if (!profile?.id) return;
+    
+    // Check if notifications are supported and not yet granted
+    if ('Notification' in window && Notification.permission === 'default') {
+      // Check if user has dismissed the prompt this session
+      const dismissed = sessionStorage.getItem('notificationPromptDismissed');
+      if (!dismissed) {
+        // Show prompt after a short delay
+        const timer = setTimeout(() => {
+          setShowNotificationPrompt(true);
+        }, 2000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [profile?.id]);
+
+  const handleEnableNotifications = async () => {
+    if (!profile?.id) return;
+    setEnablingNotifications(true);
+    const success = await registerPushSubscription(profile.id);
+    setEnablingNotifications(false);
+    setShowNotificationPrompt(false);
+    
+    if (success) {
+      toast.success('Notifications enabled! You\'ll be notified of friend requests.');
+    } else {
+      toast.error('Could not enable notifications. You can try again in your profile settings.');
+    }
+  };
+
+  const handleDismissNotificationPrompt = () => {
+    sessionStorage.setItem('notificationPromptDismissed', 'true');
+    setShowNotificationPrompt(false);
+  };
+
   const fetchAddressFromCoords = async (lat: number, lng: number) => {
     try {
       const res = await fetch(`/api/geocode/reverse?lat=${lat}&lng=${lng}`);
@@ -357,6 +459,37 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background p-6 pb-24 font-sans text-foreground">
+      {/* Notification Permission Dialog */}
+      <Dialog open={showNotificationPrompt} onOpenChange={setShowNotificationPrompt}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Bell className="w-5 h-5 text-primary" />
+              Stay Connected
+            </DialogTitle>
+            <DialogDescription>
+              Enable notifications to get alerts when friends send you requests or when your coach has updates for you.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 sm:justify-between">
+            <Button
+              variant="outline"
+              onClick={handleDismissNotificationPrompt}
+              data-testid="button-dismiss-notifications"
+            >
+              Maybe Later
+            </Button>
+            <Button
+              onClick={handleEnableNotifications}
+              disabled={enablingNotifications}
+              data-testid="button-enable-notifications"
+            >
+              {enablingNotifications ? "Enabling..." : "Enable Notifications"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <header className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-display font-bold text-primary uppercase tracking-wider">
