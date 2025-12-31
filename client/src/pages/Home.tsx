@@ -22,7 +22,7 @@ const LEVELS = [
     icon: Footprints,
     color: "text-green-400",
     image: mapBeginner,
-    stats: "0m Elev • Paved"
+    stats: "50m Elev • Mixed"
   },
   {
     id: "moderate",
@@ -52,7 +52,7 @@ interface UserProfile {
 
 export default function Home() {
   const [distance, setDistance] = useState([5]);
-  const [selectedLevel, setSelectedLevel] = useState("beginner");
+  const [selectedLevel, setSelectedLevel] = useState("moderate");
   const [, setLocation] = useLocation();
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [userAddress, setUserAddress] = useState<string | null>(null);

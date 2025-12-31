@@ -10,6 +10,7 @@ export interface RouteConfig {
   headingJitter: number;
   maxRetries: number;
   minUniqueRatio: number;
+  maxElevationGuidance: number;
 }
 
 export const DIFFICULTY_PRESETS: Record<string, RouteConfig> = {
@@ -19,6 +20,7 @@ export const DIFFICULTY_PRESETS: Record<string, RouteConfig> = {
     headingJitter: 20,
     maxRetries: 15,
     minUniqueRatio: 0.65,
+    maxElevationGuidance: 50,
   },
   moderate: {
     waypointCount: 4,
@@ -26,6 +28,7 @@ export const DIFFICULTY_PRESETS: Record<string, RouteConfig> = {
     headingJitter: 30,
     maxRetries: 15,
     minUniqueRatio: 0.70,
+    maxElevationGuidance: 150,
   },
   expert: {
     waypointCount: 5,
@@ -33,6 +36,7 @@ export const DIFFICULTY_PRESETS: Record<string, RouteConfig> = {
     headingJitter: 40,
     maxRetries: 15,
     minUniqueRatio: 0.75,
+    maxElevationGuidance: 300,
   },
 };
 
