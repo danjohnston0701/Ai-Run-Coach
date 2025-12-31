@@ -277,8 +277,8 @@ export default function Home() {
           if (!locationToastShown) {
             sessionStorage.setItem('locationToastShown', 'true');
             if (isIOSSafari()) {
-              toast.error('Location access denied. To enable: Go to Settings → Safari → Location → Allow, then refresh this page', {
-                duration: 8000,
+              toast.error('Location blocked. Open iPhone Settings → Privacy & Security → Location Services → Safari Websites → set to "While Using"', {
+                duration: 10000,
               });
             } else if (isSafari()) {
               toast.error('Location access denied. Click Safari → Settings for this website → Allow Location, then refresh this page', {
@@ -596,6 +596,20 @@ export default function Home() {
               Refresh & Retry
             </Button>
           </div>
+
+          {isIOSSafari() && (
+            <div className="bg-card/50 border border-primary/20 rounded p-2 mt-2 mb-3">
+              <p className="text-xs text-primary font-medium mb-1">To enable location on iPhone/iPad:</p>
+              <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+                <li>Open iPhone <strong>Settings</strong> app</li>
+                <li>Tap <strong>Privacy & Security</strong></li>
+                <li>Tap <strong>Location Services</strong> (make sure it's ON)</li>
+                <li>Scroll down and tap <strong>Safari Websites</strong></li>
+                <li>Select <strong>"While Using"</strong> or <strong>"Ask Next Time"</strong></li>
+                <li>Close Safari completely and reopen this page</li>
+              </ol>
+            </div>
+          )}
           
           <motion.div 
             initial={{ opacity: 0, height: 0 }}
