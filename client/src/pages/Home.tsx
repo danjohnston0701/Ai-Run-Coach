@@ -148,13 +148,24 @@ export default function Home() {
       return;
     }
 
+    // Check if we have a saved GPS location first
+    const savedLocation = localStorage.getItem("userGpsLocation");
+    if (savedLocation) {
+      const loc = JSON.parse(savedLocation);
+      console.log("Using saved GPS location:", loc);
+      setUserLocation(loc);
+    }
+    
     navigator.geolocation.getCurrentPosition(
       (position) => {
         console.log("GPS location captured:", position.coords.latitude, position.coords.longitude);
-        setUserLocation({
+        const loc = {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
-        });
+        };
+        setUserLocation(loc);
+        // Save to localStorage for persistence
+        localStorage.setItem("userGpsLocation", JSON.stringify(loc));
         setLocationLoading(false);
         setLocationError("");
       },
