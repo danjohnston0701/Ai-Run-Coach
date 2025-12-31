@@ -16,6 +16,7 @@ export interface Friend {
 
 interface ProfileData {
   id?: string;
+  email?: string;
   name: string;
   dob: string;
   gender: string;
@@ -525,6 +526,20 @@ export default function Profile() {
                 data-testid="input-name"
               />
             </div>
+
+            {profile.email && (
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-1.5 ml-1">
+                  Email
+                </label>
+                <div
+                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-muted-foreground"
+                  data-testid="text-email"
+                >
+                  {profile.email}
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="block text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-1.5 ml-1">
