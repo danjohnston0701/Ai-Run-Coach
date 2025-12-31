@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import { ArrowRight } from "lucide-react";
+import { toast } from "sonner";
 
 const FITNESS_LEVELS = ["Unfit", "Casual", "Athletic", "Very Fit", "Elite"];
 
@@ -64,16 +65,48 @@ export default function ProfileSetup() {
     handleChange("dob", formatted);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile.name || !profile.dob || !profile.gender || !profile.height || !profile.weight) {
-      alert("Please fill in all fields");
+      toast.error("Please fill in all fields");
       return;
     }
     const savedProfile = localStorage.getItem("userProfile");
     const existingData = savedProfile ? JSON.parse(savedProfile) : {};
     const mergedProfile = { ...existingData, ...profile };
-    localStorage.setItem("userProfile", JSON.stringify(mergedProfile));
+    
+    // Save to database if user has an ID
+    if (existingData.id) {
+      try {
+        const res = await fetch(`/api/users/${existingData.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: profile.name,
+            dob: profile.dob,
+            gender: profile.gender,
+            height: profile.height,
+            weight: profile.weight,
+            fitnessLevel: profile.fitnessLevel,
+            desiredFitnessLevel: profile.desiredFitnessLevel,
+            coachName: profile.coachName,
+          }),
+        });
+        if (res.ok) {
+          const updatedUser = await res.json();
+          localStorage.setItem("userProfile", JSON.stringify(updatedUser));
+        } else {
+          console.error("Failed to save profile to database");
+          localStorage.setItem("userProfile", JSON.stringify(mergedProfile));
+        }
+      } catch (error) {
+        console.error("Error saving profile:", error);
+        localStorage.setItem("userProfile", JSON.stringify(mergedProfile));
+      }
+    } else {
+      localStorage.setItem("userProfile", JSON.stringify(mergedProfile));
+    }
+    
     window.location.href = "/";
   };
 

@@ -346,7 +346,7 @@ export default function Profile() {
     toast.success("Friend removed");
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile) return;
     
@@ -355,8 +355,42 @@ export default function Profile() {
       return;
     }
     
-    localStorage.setItem("userProfile", JSON.stringify(profile));
-    toast.success("Profile saved!");
+    // Save to database if user has an ID
+    if (profile.id) {
+      try {
+        const res = await fetch(`/api/users/${profile.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: profile.name,
+            dob: profile.dob,
+            gender: profile.gender,
+            height: profile.height,
+            weight: profile.weight,
+            fitnessLevel: profile.fitnessLevel,
+            desiredFitnessLevel: profile.desiredFitnessLevel,
+            coachName: profile.coachName,
+            profilePic: profile.profilePic,
+          }),
+        });
+        if (res.ok) {
+          const updatedUser = await res.json();
+          localStorage.setItem("userProfile", JSON.stringify(updatedUser));
+          toast.success("Profile saved!");
+        } else {
+          toast.error("Failed to save profile");
+          return;
+        }
+      } catch (error) {
+        console.error("Error saving profile:", error);
+        toast.error("Failed to save profile");
+        return;
+      }
+    } else {
+      localStorage.setItem("userProfile", JSON.stringify(profile));
+      toast.success("Profile saved!");
+    }
+    
     setLocation("/");
   };
 
