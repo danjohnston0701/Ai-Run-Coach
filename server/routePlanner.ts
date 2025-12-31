@@ -340,7 +340,9 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
   let bestDistanceDiff = Infinity;
   let bestQualityResult: RouteResult | null = null;
   let bestQualityScore = Infinity;
-  let attempts = 0;
+  let validAttempts = 0;
+  let totalAttempts = 0;
+  const maxTotalAttempts = config.maxRetries * 3;
   
   let learnedRatio = 1.0;
   const baseRadius = targetDistance / (2 * Math.PI);
@@ -348,7 +350,8 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
   const rotationAngles = [0, 45, 90, 135, 180, 225, 270, 315, 22.5, 67.5, 112.5, 157.5, 202.5, 247.5, 292.5, 337.5];
   
   for (const rotation of rotationAngles) {
-    if (attempts >= config.maxRetries) break;
+    if (validAttempts >= config.maxRetries) break;
+    if (totalAttempts >= maxTotalAttempts) break;
     if (bestDistanceDiff <= targetDistance * 0.03) break;
     
     let currentRadius = baseRadius * learnedRatio;
