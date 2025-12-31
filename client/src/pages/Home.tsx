@@ -469,18 +469,11 @@ export default function Home() {
                 {locationLoading ? "..." : "Refresh"}
               </button>
               <button 
-                onClick={() => { setShowAddressSearch(!showAddressSearch); setShowLocationInput(false); }}
+                onClick={() => setShowAddressSearch(!showAddressSearch)}
                 className="text-xs text-primary hover:text-primary/80 underline"
                 data-testid="button-search-address"
               >
                 Search
-              </button>
-              <button 
-                onClick={() => { setShowLocationInput(!showLocationInput); setShowAddressSearch(false); }}
-                className="text-xs text-primary hover:text-primary/80 underline"
-                data-testid="button-edit-location"
-              >
-                Edit
               </button>
             </div>
           </div>
@@ -532,42 +525,6 @@ export default function Home() {
             </motion.div>
           )}
           
-          {showLocationInput && (
-            <motion.div 
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              className="mt-3 space-y-2"
-            >
-              <input
-                type="number"
-                placeholder="Latitude"
-                value={customLat}
-                onChange={(e) => setCustomLat(e.target.value)}
-                className="w-full px-2 py-1 bg-card border border-white/10 rounded text-xs text-foreground"
-                step="0.0001"
-                data-testid="input-latitude-edit"
-              />
-              <input
-                type="number"
-                placeholder="Longitude"
-                value={customLng}
-                onChange={(e) => setCustomLng(e.target.value)}
-                className="w-full px-2 py-1 bg-card border border-white/10 rounded text-xs text-foreground"
-                step="0.0001"
-                data-testid="input-longitude-edit"
-              />
-              <button
-                onClick={handleUseCustomLocation}
-                className="w-full px-2 py-1 bg-primary text-background text-xs rounded font-medium hover:bg-primary/90"
-                data-testid="button-update-location"
-              >
-                Update Location
-              </button>
-              <p className="text-[10px] text-muted-foreground mt-2">
-                Find your coordinates in Google Maps and enter them above
-              </p>
-            </motion.div>
-          )}
         </motion.div>
       )}
 
