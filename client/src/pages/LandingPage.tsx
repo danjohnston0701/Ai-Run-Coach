@@ -52,7 +52,7 @@ export default function LandingPage() {
         </div>
         <Button 
           variant="ghost" 
-          onClick={() => setLocation("/auth")}
+          onClick={() => setLocation("/login")}
           className="text-primary hover:text-primary/80 hover:bg-primary/10 uppercase text-xs font-bold tracking-widest"
         >
           Login
@@ -93,7 +93,7 @@ export default function LandingPage() {
             <Button 
               size="lg" 
               className="h-16 px-10 text-xl font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] group"
-              onClick={() => setLocation("/auth")}
+              onClick={() => setLocation("/login")}
             >
               Pre-register for launch Updates
               <ArrowRight className="ml-2 w-6 h-6 group-hover:translate-x-1 transition-transform" />
@@ -153,7 +153,7 @@ export default function LandingPage() {
           <Button 
             size="lg" 
             className="h-16 px-12 text-xl font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_40px_rgba(6,182,212,0.5)]"
-            onClick={() => setLocation("/auth")}
+            onClick={() => setLocation("/login")}
           >
             Pre-Register Today
           </Button>

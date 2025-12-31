@@ -15,7 +15,7 @@ import ProfileSetup from "@/pages/ProfileSetup";
 import Profile from "@/pages/Profile";
 import PrivacyPolicy from "@/pages/PrivacyPolicy";
 import TermsOfUse from "@/pages/TermsOfUse";
-import Auth from "@/pages/Auth";
+import Login from "@/pages/Login";
 
 function Router() {
   const [hasProfile, setHasProfile] = useState(false);
@@ -35,7 +35,7 @@ function Router() {
     <Switch>
       <Route path="/privacy" component={PrivacyPolicy} />
       <Route path="/terms" component={TermsOfUse} />
-      <Route path="/auth" component={Auth} />
+      <Route path="/login" component={Login} />
       {!hasProfile && (
         <>
           <Route path="/" component={LandingPage} />
