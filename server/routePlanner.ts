@@ -1,5 +1,9 @@
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
+export function isGoogleMapsConfigured(): boolean {
+  return !!GOOGLE_MAPS_API_KEY;
+}
+
 export interface RouteConfig {
   waypointCount: number;
   radiusMultiplier: number;

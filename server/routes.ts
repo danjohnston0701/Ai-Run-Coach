@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { insertPreRegistrationSchema, insertUserSchema, insertRouteSchema, insertRunSchema, insertLiveRunSessionSchema } from "@shared/schema";
 import { z } from "zod";
 import { generateRoute, getCoachingAdvice, analyzeRunPerformance } from "./openai";
-import { generateCircularRoute } from "./routePlanner";
+import { generateCircularRoute, isGoogleMapsConfigured } from "./routePlanner";
 import bcrypt from "bcryptjs";
 
 export async function registerRoutes(
@@ -153,11 +153,18 @@ export async function registerRoutes(
     try {
       const { startLat, startLng, targetDistance, difficulty } = req.body;
       
+      console.log("Route generation request:", { startLat, startLng, targetDistance, difficulty, hasApiKey: isGoogleMapsConfigured() });
+      
       if (startLat === undefined || startLat === null || 
           startLng === undefined || startLng === null || 
           targetDistance === undefined || targetDistance === null || 
           !difficulty) {
         return res.status(400).json({ error: "Missing required parameters" });
+      }
+
+      if (!isGoogleMapsConfigured()) {
+        console.error("Google Maps API key not configured");
+        return res.status(503).json({ error: "Route generation service is temporarily unavailable. Please try again later." });
       }
 
       const result = await generateCircularRoute({
@@ -168,7 +175,8 @@ export async function registerRoutes(
       });
 
       if (!result.success) {
-        return res.status(400).json({ error: result.error || "Could not generate route" });
+        console.error("Route generation failed:", result.error);
+        return res.status(400).json({ error: result.error || "Could not generate route. Please try a different location or distance." });
       }
 
       res.json({
@@ -182,7 +190,8 @@ export async function registerRoutes(
       });
     } catch (error) {
       console.error("Route generation error:", error);
-      res.status(500).json({ error: "Failed to generate route" });
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      res.status(500).json({ error: `Failed to generate route: ${errorMessage}` });
     }
   });
 

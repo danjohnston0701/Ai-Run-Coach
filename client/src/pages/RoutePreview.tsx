@@ -80,8 +80,9 @@ export default function RoutePreview() {
         attempts: data.attempts,
       });
     } catch (err) {
-      setError("Failed to generate route. Please try again.");
-      console.error(err);
+      const errorMessage = err instanceof Error ? err.message : "Failed to generate route";
+      setError(errorMessage);
+      console.error("Route generation error:", err);
     } finally {
       setLoading(false);
     }
