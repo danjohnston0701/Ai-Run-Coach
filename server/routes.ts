@@ -32,17 +32,21 @@ export async function registerRoutes(
 
   // User authentication routes
   app.post("/api/auth/register", async (req, res) => {
+    console.log("Registration attempt:", { email: req.body.email, name: req.body.name });
     try {
       const data = insertUserSchema.parse(req.body);
       const existing = await storage.getUserByEmail(data.email);
       if (existing) {
+        console.log("Registration failed: email already exists");
         return res.status(400).json({ error: "Email already exists" });
       }
       const hashedPassword = await bcrypt.hash(data.password, 10);
       const user = await storage.createUser({ ...data, password: hashedPassword });
       const { password, ...safeUser } = user;
+      console.log("User created successfully:", safeUser.id);
       res.status(201).json(safeUser);
     } catch (error) {
+      console.error("Registration error:", error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors });
       }

@@ -44,6 +44,7 @@ export default function Auth() {
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("Signup form submitted", { signupName, signupEmail });
     setLoading(true);
     try {
       const res = await fetch("/api/auth/register", {
@@ -55,16 +56,20 @@ export default function Auth() {
           password: signupPassword 
         }),
       });
+      console.log("Registration response status:", res.status);
       if (res.ok) {
         const user = await res.json();
+        console.log("User created:", user);
         localStorage.setItem("userProfile", JSON.stringify(user));
         toast.success("Account created! Let's set up your profile.");
         window.location.href = "/setup";
       } else {
         const data = await res.json();
+        console.error("Registration error:", data);
         toast.error(data.error || "Registration failed. Please try again.");
       }
     } catch (error) {
+      console.error("Registration exception:", error);
       toast.error("Registration failed. Please try again.");
     } finally {
       setLoading(false);
@@ -194,7 +199,12 @@ export default function Auth() {
                   </div>
                 </CardContent>
                 <CardFooter>
-                  <Button type="submit" className="w-full h-12 bg-primary text-background hover:bg-primary/90 font-bold uppercase tracking-widest" disabled={loading}>
+                  <Button 
+                    type="submit" 
+                    className="w-full h-12 bg-primary text-background hover:bg-primary/90 font-bold uppercase tracking-widest" 
+                    disabled={loading}
+                    data-testid="button-create-account"
+                  >
                     {loading ? "Creating Account..." : "Create Account"}
                     {!loading && <UserPlus className="ml-2 w-4 h-4" />}
                   </Button>
