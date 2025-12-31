@@ -235,14 +235,21 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
   if (bestResult) {
     const variance = ((bestResult.actualDistance - request.targetDistance) / request.targetDistance) * 100;
     const isWithinTolerance = bestResult.actualDistance >= minDistance && bestResult.actualDistance <= maxDistance;
+    const isWithinExtendedTolerance = Math.abs(variance) <= 25;
     
     if (isWithinTolerance) {
       console.log(`Using best route: ${bestResult.actualDistance.toFixed(2)}km (${variance.toFixed(1)}% variance) - within tolerance`);
       bestResult.success = true;
       bestResult.attempts = config.maxRetries;
       return bestResult;
+    } else if (isWithinExtendedTolerance) {
+      console.log(`Using best route: ${bestResult.actualDistance.toFixed(2)}km (${variance.toFixed(1)}% variance) - within extended tolerance`);
+      bestResult.success = true;
+      bestResult.attempts = config.maxRetries;
+      bestResult.routeName = `${bestResult.actualDistance.toFixed(1)}km ${request.difficulty} Loop`;
+      return bestResult;
     } else {
-      console.log(`Best route ${bestResult.actualDistance.toFixed(2)}km exceeds 5% tolerance (${variance.toFixed(1)}% variance)`);
+      console.log(`Best route ${bestResult.actualDistance.toFixed(2)}km exceeds tolerance (${variance.toFixed(1)}% variance)`);
       return {
         success: false,
         waypoints: bestResult.waypoints,
@@ -251,7 +258,7 @@ export async function generateCircularRoute(request: RouteRequest): Promise<Rout
         polyline: bestResult.polyline,
         attempts: config.maxRetries,
         routeName: "",
-        error: `Could not generate route within 5% of ${request.targetDistance}km. Best available: ${bestResult.actualDistance.toFixed(1)}km (${variance.toFixed(1)}% off)`,
+        error: `Could not generate route close to ${request.targetDistance}km. Best available: ${bestResult.actualDistance.toFixed(1)}km. Try a different location or distance.`,
       };
     }
   }
