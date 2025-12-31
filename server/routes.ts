@@ -92,6 +92,21 @@ export async function registerRoutes(
     }
   });
 
+  // Search users (for adding friends) - must be before /api/users/:id to avoid route conflict
+  app.get("/api/users/search", async (req, res) => {
+    try {
+      const { q } = req.query;
+      if (!q || typeof q !== 'string' || q.length < 2) {
+        return res.json([]);
+      }
+      const users = await storage.searchUsers(q);
+      res.json(users);
+    } catch (error) {
+      console.error("User search error:", error);
+      res.status(500).json({ error: "Search failed" });
+    }
+  });
+
   app.get("/api/users/:id", async (req, res) => {
     try {
       const user = await storage.getUser(req.params.id);
@@ -385,22 +400,6 @@ export async function registerRoutes(
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to remove friend" });
-    }
-  });
-
-  // Search users (for adding friends)
-  app.get("/api/users/search", async (req, res) => {
-    try {
-      const { q } = req.query;
-      if (!q || typeof q !== 'string' || q.length < 2) {
-        return res.json([]);
-      }
-      // Search registered users in the database
-      const users = await storage.searchUsers(q);
-      res.json(users);
-    } catch (error) {
-      console.error("User search error:", error);
-      res.status(500).json({ error: "Search failed" });
     }
   });
 
