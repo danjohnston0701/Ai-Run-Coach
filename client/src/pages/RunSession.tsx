@@ -6,7 +6,7 @@ import { RouteMap } from "@/components/RouteMap";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { 
-  Pause, Play, Square, Heart, Map, Share2, Users, Navigation, Volume2, VolumeX 
+  Pause, Play, Square, Heart, Map, Share2, Users, Navigation, Volume2, VolumeX, Footprints 
 } from "lucide-react";
 import type { Friend } from "./Profile";
 
@@ -116,6 +116,25 @@ const COACH_MESSAGES = [
   "Focus on your rhythm. In, two, three. Out, two, three."
 ];
 
+const MOTIVATIONAL_MESSAGES = [
+  "You're crushing it!",
+  "Keep pushing, you've got this!",
+  "Strong work! Stay focused.",
+  "You're doing amazing!",
+  "Every step counts. Keep going!",
+  "That's the pace! Maintain it.",
+  "You're a machine!",
+  "Fantastic effort!"
+];
+
+function getCadenceFeedback(cadence: number): string {
+  if (cadence < 150) return "Try to pick up your step frequency.";
+  if (cadence < 165) return "Good rhythm, try slightly quicker steps.";
+  if (cadence >= 165 && cadence <= 185) return "Perfect cadence!";
+  if (cadence > 185) return "Great turnover, stay relaxed.";
+  return "";
+}
+
 export default function RunSession() {
   const [active, setActive] = useState(true);
   const [time, setTime] = useState(0);
@@ -136,9 +155,16 @@ export default function RunSession() {
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [lastDirectionTime, setLastDirectionTime] = useState(0);
   
+  const [cadence, setCadence] = useState(0);
+  const [lastKmAnnounced, setLastKmAnnounced] = useState(0);
+  const [kmSplits, setKmSplits] = useState<number[]>([]);
+  const [motionPermission, setMotionPermission] = useState<"unknown" | "granted" | "denied" | "unavailable">("unknown");
+  
   const positionsRef = useRef<Position[]>([]);
   const watchIdRef = useRef<number | null>(null);
   const speechSynthRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const stepTimestampsRef = useRef<number[]>([]);
+  const lastAccelRef = useRef<number>(0);
 
   const searchParams = new URLSearchParams(window.location.search);
   const targetDistance = searchParams.get("distance") || "5";
@@ -345,6 +371,126 @@ export default function RunSession() {
     return () => clearInterval(interval);
   }, [active, gpsStatus]);
 
+  const requestMotionPermission = useCallback(async () => {
+    if (!('DeviceMotionEvent' in window)) {
+      setMotionPermission("unavailable");
+      return;
+    }
+    
+    if (typeof (DeviceMotionEvent as any).requestPermission === 'function') {
+      try {
+        const response = await (DeviceMotionEvent as any).requestPermission();
+        if (response === 'granted') {
+          setMotionPermission("granted");
+          toast.success("Motion tracking enabled!");
+        } else {
+          setMotionPermission("denied");
+          toast.error("Motion permission denied");
+        }
+      } catch (err) {
+        console.error("Motion permission error:", err);
+        setMotionPermission("denied");
+      }
+    } else {
+      setMotionPermission("granted");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!active || motionPermission !== "granted") return;
+    
+    const handleMotion = (event: DeviceMotionEvent) => {
+      const acc = event.accelerationIncludingGravity;
+      if (!acc || acc.z === null) return;
+      
+      const magnitude = Math.sqrt(
+        (acc.x || 0) ** 2 + 
+        (acc.y || 0) ** 2 + 
+        (acc.z || 0) ** 2
+      );
+      
+      const threshold = 12;
+      const minTimeBetweenSteps = 200;
+      const now = Date.now();
+      
+      if (magnitude > threshold && lastAccelRef.current <= threshold) {
+        const lastStep = stepTimestampsRef.current[stepTimestampsRef.current.length - 1] || 0;
+        if (now - lastStep > minTimeBetweenSteps) {
+          stepTimestampsRef.current.push(now);
+          
+          if (stepTimestampsRef.current.length > 60) {
+            stepTimestampsRef.current = stepTimestampsRef.current.slice(-60);
+          }
+          
+          const recentSteps = stepTimestampsRef.current.filter(t => now - t < 60000);
+          if (recentSteps.length >= 2) {
+            const timeSpan = (recentSteps[recentSteps.length - 1] - recentSteps[0]) / 1000 / 60;
+            if (timeSpan > 0) {
+              const stepsPerMinute = Math.round((recentSteps.length - 1) / timeSpan);
+              setCadence(stepsPerMinute);
+            }
+          }
+        }
+      }
+      
+      lastAccelRef.current = magnitude;
+    };
+    
+    window.addEventListener('devicemotion', handleMotion);
+    
+    return () => {
+      window.removeEventListener('devicemotion', handleMotion);
+    };
+  }, [active, motionPermission]);
+
+  useEffect(() => {
+    if (!active || gpsStatus !== "active") return;
+    
+    const currentKm = Math.floor(distance);
+    
+    if (currentKm > lastKmAnnounced && currentKm > 0) {
+      setLastKmAnnounced(currentKm);
+      
+      const splitTime = time;
+      setKmSplits(prev => [...prev, splitTime]);
+      
+      const lastSplitTime = kmSplits.length > 0 ? kmSplits[kmSplits.length - 1] : 0;
+      const thisKmTime = splitTime - lastSplitTime;
+      const thisKmMins = Math.floor(thisKmTime / 60);
+      const thisKmSecs = thisKmTime % 60;
+      
+      const targetDistNum = parseFloat(targetDistance);
+      const remainingKm = targetDistNum - currentKm;
+      
+      const avgPaceSeconds = time / currentKm;
+      const avgPaceMins = Math.floor(avgPaceSeconds / 60);
+      const avgPaceSecs = Math.floor(avgPaceSeconds % 60);
+      
+      const motivation = MOTIVATIONAL_MESSAGES[Math.floor(Math.random() * MOTIVATIONAL_MESSAGES.length)];
+      
+      let announcement = `${currentKm} kilometer${currentKm > 1 ? 's' : ''} complete. `;
+      announcement += `Split time: ${thisKmMins} minute${thisKmMins !== 1 ? 's' : ''} ${thisKmSecs} seconds. `;
+      announcement += `Average pace: ${avgPaceMins}:${avgPaceSecs.toString().padStart(2, '0')} per kilometer. `;
+      
+      if (remainingKm > 0) {
+        announcement += `${remainingKm.toFixed(1)} kilometers to go. `;
+      }
+      
+      if (cadence > 0) {
+        const cadenceFeedback = getCadenceFeedback(cadence);
+        if (cadenceFeedback) {
+          announcement += `Cadence: ${cadence} steps per minute. ${cadenceFeedback} `;
+        }
+      }
+      
+      announcement += motivation;
+      
+      speak(announcement);
+      setMessage(`${currentKm}km - ${thisKmMins}:${thisKmSecs.toString().padStart(2, '0')} split`);
+      setLastMessageTime(Date.now());
+    }
+  }, [active, gpsStatus, distance, lastKmAnnounced, time, kmSplits, targetDistance, cadence, speak]);
+
   const toggleLiveShare = (friend: Friend) => {
     const friendId = friend.email || friend.name;
     if (sharedWith.includes(friendId)) {
@@ -438,6 +584,8 @@ export default function RunSession() {
       routeName,
       routeId,
       gpsTrack: positionsRef.current.slice(0, 500),
+      avgCadence: cadence,
+      kmSplits: kmSplits,
     };
 
     const runHistory = localStorage.getItem("runHistory");
@@ -604,6 +752,21 @@ export default function RunSession() {
             >
               {audioEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
             </Button>
+            {motionPermission === "unknown" && (
+              <Button
+                onClick={requestMotionPermission}
+                size="icon"
+                className="h-10 w-10 rounded-xl bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 animate-pulse"
+                data-testid="button-enable-cadence"
+              >
+                <Footprints className="w-4 h-4" />
+              </Button>
+            )}
+            {motionPermission === "granted" && (
+              <div className="h-10 w-10 rounded-xl bg-green-500/20 text-green-400 border border-green-500/30 flex items-center justify-center">
+                <Footprints className="w-4 h-4" />
+              </div>
+            )}
             <Button
               onClick={() => setShowShareModal(true)}
               className={`h-10 px-4 rounded-xl font-display text-[10px] uppercase tracking-widest transition-all ${
@@ -648,20 +811,27 @@ export default function RunSession() {
       </div>
 
       <div className="relative z-10 bg-card/40 backdrop-blur-xl border-t border-white/10 rounded-t-3xl p-4 pb-6 mt-auto flex-shrink-0">
-        <div className="grid grid-cols-3 gap-2 mb-4 text-center">
+        <div className="grid grid-cols-4 gap-2 mb-4 text-center">
           <div>
             <div className="text-muted-foreground text-[10px] uppercase tracking-wider mb-0.5">Time</div>
-            <div className="text-2xl font-display font-bold">{formatTime(time)}</div>
+            <div className="text-xl font-display font-bold">{formatTime(time)}</div>
           </div>
           <div className="border-x border-white/10">
              <div className="text-muted-foreground text-[10px] uppercase tracking-wider mb-0.5">Distance</div>
-             <div className="text-2xl font-display font-bold">{distance.toFixed(2)}</div>
+             <div className="text-xl font-display font-bold">{distance.toFixed(2)}</div>
              <div className="text-[10px] text-muted-foreground">km</div>
           </div>
-          <div>
+          <div className="border-r border-white/10">
              <div className="text-muted-foreground text-[10px] uppercase tracking-wider mb-0.5">Pace</div>
-             <div className="text-2xl font-display font-bold">{calculatePace()}</div>
+             <div className="text-xl font-display font-bold">{calculatePace()}</div>
              <div className="text-[10px] text-muted-foreground">/km</div>
+          </div>
+          <div>
+             <div className="text-muted-foreground text-[10px] uppercase tracking-wider mb-0.5">Cadence</div>
+             <div className={`text-xl font-display font-bold ${cadence >= 165 && cadence <= 185 ? 'text-green-400' : cadence > 0 ? 'text-yellow-400' : ''}`}>
+               {cadence > 0 ? cadence : '--'}
+             </div>
+             <div className="text-[10px] text-muted-foreground">spm</div>
           </div>
         </div>
 
