@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertPreRegistrationSchema, insertUserSchema, insertRouteSchema, insertRunSchema, insertLiveRunSessionSchema, insertPushSubscriptionSchema } from "@shared/schema";
 import { z } from "zod";
-import { generateRoute, getCoachingAdvice, analyzeRunPerformance } from "./openai";
+import { generateRoute, getCoachingAdvice, analyzeRunPerformance, generateTTS, type CoachTone, type TTSVoice } from "./openai";
 import { generateCircularRoute, generateMultipleRoutes, isGoogleMapsConfigured } from "./routePlanner";
 import { generateAIRoutes } from "./aiRoutePlanner";
 import bcrypt from "bcryptjs";
@@ -511,6 +511,45 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Coaching error:", error);
       res.status(500).json({ error: "Failed to get coaching advice" });
+    }
+  });
+
+  // AI Text-to-Speech endpoint
+  app.post("/api/ai/tts", async (req, res) => {
+    try {
+      const { text, tone, voice, speed } = req.body;
+      
+      if (!text || typeof text !== 'string') {
+        return res.status(400).json({ error: "Missing or invalid text parameter" });
+      }
+      
+      if (text.length > 2000) {
+        return res.status(400).json({ error: "Text too long. Maximum 2000 characters." });
+      }
+      
+      const validTones: CoachTone[] = ['energetic', 'motivational', 'instructive', 'factual', 'abrupt'];
+      const coachTone: CoachTone = validTones.includes(tone) ? tone : 'motivational';
+      
+      const validVoices: TTSVoice[] = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer', 'ash', 'coral'];
+      const coachVoice: TTSVoice | undefined = validVoices.includes(voice) ? voice : undefined;
+      
+      const audioBuffer = await generateTTS({
+        text,
+        tone: coachTone,
+        voice: coachVoice,
+        speed: typeof speed === 'number' ? speed : 1.0
+      });
+      
+      res.set({
+        'Content-Type': 'audio/mpeg',
+        'Content-Length': audioBuffer.length.toString(),
+        'Cache-Control': 'public, max-age=300'
+      });
+      
+      res.send(audioBuffer);
+    } catch (error) {
+      console.error("TTS error:", error);
+      res.status(500).json({ error: "Failed to generate speech" });
     }
   });
 
