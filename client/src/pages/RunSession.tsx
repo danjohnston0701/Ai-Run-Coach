@@ -136,6 +136,38 @@ function getCadenceFeedback(cadence: number): string {
   return "";
 }
 
+function bearingToCardinal(bearing: number): string {
+  const directions = [
+    "north", "north-east", "east", "south-east",
+    "south", "south-west", "west", "north-west"
+  ];
+  const index = Math.round(bearing / 45) % 8;
+  return directions[index];
+}
+
+function getInitialDirectionAnnouncement(
+  currentLat: number, 
+  currentLng: number, 
+  routePoints: Array<{ lat: number; lng: number }>,
+  targetDistance: string
+): string {
+  if (routePoints.length < 2) {
+    return `Your ${targetDistance} kilometer run has started. Follow the route on your map.`;
+  }
+  
+  const firstWaypoint = routePoints[Math.min(5, routePoints.length - 1)];
+  const bearing = getBearing(currentLat, currentLng, firstWaypoint.lat, firstWaypoint.lng);
+  const direction = bearingToCardinal(bearing);
+  const distanceToFirst = haversineDistance(currentLat, currentLng, firstWaypoint.lat, firstWaypoint.lng);
+  const distanceMeters = Math.round(distanceToFirst * 1000);
+  
+  if (distanceMeters < 50) {
+    return `Your ${targetDistance} kilometer run has started. Head ${direction} to begin your route.`;
+  }
+  
+  return `Your ${targetDistance} kilometer run has started. Head ${direction} for about ${distanceMeters} meters to begin your route.`;
+}
+
 export default function RunSession() {
   const [active, setActive] = useState(true);
   const [time, setTime] = useState(0);
@@ -186,6 +218,7 @@ export default function RunSession() {
   const runMetricsRef = useRef({ time: 0, distance: 0 });
   const startTimestampRef = useRef<number>(Date.now());
   const sessionIdRef = useRef<string>(`run-${Date.now()}`);
+  const initialAnnouncementMadeRef = useRef<boolean>(false);
 
   const searchParams = new URLSearchParams(window.location.search);
   const isResuming = searchParams.get("resume") === "true";
@@ -347,7 +380,6 @@ export default function RunSession() {
       if (gpsStatus === "acquiring") {
         setGpsStatus("active");
         setMessage("GPS locked! Start running.");
-        speak("GPS signal acquired. Your run has started.");
       }
       
       if (active && positionsRef.current.length > 0) {
@@ -400,6 +432,25 @@ export default function RunSession() {
       }
     };
   }, [active, gpsStatus, speak]);
+
+  useEffect(() => {
+    if (gpsStatus !== "active" || !currentPosition || initialAnnouncementMadeRef.current) return;
+    if (isResuming) {
+      initialAnnouncementMadeRef.current = true;
+      speak("Welcome back! Resuming your run.");
+      return;
+    }
+    
+    initialAnnouncementMadeRef.current = true;
+    const targetDist = sessionMetadataRef.current.targetDistance;
+    const announcement = getInitialDirectionAnnouncement(
+      currentPosition.lat,
+      currentPosition.lng,
+      routePoints,
+      targetDist
+    );
+    speak(announcement);
+  }, [gpsStatus, currentPosition, routePoints, isResuming, speak]);
 
   useEffect(() => {
     if (!active || !currentPosition || routePoints.length < 2) return;
