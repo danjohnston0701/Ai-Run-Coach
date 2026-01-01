@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { Friend } from "./Profile";
 import { saveActiveRunSession, loadActiveRunSession, clearActiveRunSession, type ActiveRunSession } from "@/lib/activeRunSession";
+import { loadCoachSettings, getVoicePreferences, type AiCoachSettings } from "@/lib/coachSettings";
 
 import coachAvatar from "@assets/generated_images/glowing_ai_voice_sphere_interface.png";
 import mapBeginner from "@assets/generated_images/dark_mode_map_with_flat_green_route.png";
@@ -230,6 +231,7 @@ export default function RunSession() {
   const [motionPermission, setMotionPermission] = useState<"unknown" | "granted" | "denied" | "unavailable">("unknown");
   
   const [aiCoachEnabled, setAiCoachEnabled] = useState(true);
+  const [coachSettings, setCoachSettings] = useState<AiCoachSettings>(() => loadCoachSettings());
   const [coachingInterval] = useState(120);
   const [isCoaching, setIsCoaching] = useState(false);
   const [coachPreferences, setCoachPreferences] = useState("");
@@ -377,33 +379,39 @@ export default function RunSession() {
     const voices = window.speechSynthesis.getVoices();
     if (voices.length === 0) return null;
     
-    const preferredVoices = [
-      'Daniel', 'James', 'Arthur', 'Oliver',
-      'Google UK English Male', 'Microsoft George', 'Microsoft Ryan',
-      'Aaron', 'Gordon', 'Lee',
-      'en-GB', 'en-AU', 'en-NZ', 'en-IE'
-    ];
+    const prefs = getVoicePreferences(coachSettings);
     
-    for (const pref of preferredVoices) {
-      const voice = voices.find(v => 
-        v.name.includes(pref) || v.lang.includes(pref)
-      );
+    for (const name of prefs.preferredNames) {
+      const voice = voices.find(v => v.name.includes(name));
       if (voice) return voice;
     }
     
-    const englishMale = voices.find(v => 
+    for (const lang of prefs.langPreferences) {
+      const voice = voices.find(v => v.lang.includes(lang));
+      if (voice) return voice;
+    }
+    
+    const femaleVoiceKeywords = ['samantha', 'victoria', 'kate', 'karen', 'moira', 'female', 'fiona', 'susan', 'allison', 'catherine'];
+    const maleVoiceKeywords = ['daniel', 'james', 'arthur', 'oliver', 'alex', 'fred', 'tom', 'george', 'ryan', 'aaron', 'gordon', 'lee', 'male'];
+    
+    const genderKeywords = coachSettings.gender === 'female' ? femaleVoiceKeywords : maleVoiceKeywords;
+    const oppositeKeywords = coachSettings.gender === 'female' ? maleVoiceKeywords : femaleVoiceKeywords;
+    
+    const genderMatch = voices.find(v => 
       v.lang.startsWith('en') && 
-      !v.name.toLowerCase().includes('female') &&
-      !v.name.toLowerCase().includes('samantha') &&
-      !v.name.toLowerCase().includes('victoria') &&
-      !v.name.toLowerCase().includes('kate') &&
-      !v.name.toLowerCase().includes('karen') &&
-      !v.name.toLowerCase().includes('moira')
+      genderKeywords.some(k => v.name.toLowerCase().includes(k)) &&
+      !oppositeKeywords.some(k => v.name.toLowerCase().includes(k))
     );
-    if (englishMale) return englishMale;
+    if (genderMatch) return genderMatch;
+    
+    const anyEnglish = voices.find(v => 
+      v.lang.startsWith('en') &&
+      !oppositeKeywords.some(k => v.name.toLowerCase().includes(k))
+    );
+    if (anyEnglish) return anyEnglish;
     
     return voices.find(v => v.lang.startsWith('en')) || voices[0];
-  }, []);
+  }, [coachSettings]);
 
   const speak = useCallback((text: string, force: boolean = false) => {
     console.log("speak() called with:", text, "audioEnabled:", audioEnabled, "force:", force);
@@ -425,8 +433,9 @@ export default function RunSession() {
       console.log("Using voice:", voice.name, voice.lang);
     }
     
-    utterance.rate = 1.05;
-    utterance.pitch = 1.1;
+    const prefs = getVoicePreferences(coachSettings);
+    utterance.rate = prefs.rate;
+    utterance.pitch = prefs.pitch;
     utterance.volume = 1;
     utterance.onstart = () => console.log("Speech started");
     utterance.onend = () => console.log("Speech ended");
@@ -434,7 +443,7 @@ export default function RunSession() {
     speechSynthRef.current = utterance;
     window.speechSynthesis.speak(utterance);
     console.log("speechSynthesis.speak() called");
-  }, [audioEnabled, getCoachVoice]);
+  }, [audioEnabled, getCoachVoice, coachSettings]);
 
   useEffect(() => {
     if (!('geolocation' in navigator)) {
@@ -807,11 +816,12 @@ export default function RunSession() {
       utterance.voice = voice;
     }
     
-    utterance.rate = 1.05;
-    utterance.pitch = 1.1;
+    const prefs = getVoicePreferences(coachSettings);
+    utterance.rate = prefs.rate;
+    utterance.pitch = prefs.pitch;
     utterance.volume = 1;
     window.speechSynthesis.speak(utterance);
-  }, [getCoachVoice]);
+  }, [getCoachVoice, coachSettings]);
 
   const fetchCoaching = useCallback(async (userMessage?: string) => {
     const { active: isActive, aiCoachEnabled: isEnabled, gpsStatus: gps } = coachingControlRef.current;
