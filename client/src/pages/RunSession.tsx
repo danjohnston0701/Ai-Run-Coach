@@ -232,6 +232,26 @@ export default function RunSession() {
   
   const [aiCoachEnabled, setAiCoachEnabled] = useState(true);
   const [coachSettings, setCoachSettings] = useState<AiCoachSettings>(() => loadCoachSettings());
+
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'aiCoachSettings') {
+        setCoachSettings(loadCoachSettings());
+      }
+    };
+    
+    const handleFocus = () => {
+      setCoachSettings(loadCoachSettings());
+    };
+    
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('focus', handleFocus);
+    
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
   const [coachingInterval] = useState(120);
   const [isCoaching, setIsCoaching] = useState(false);
   const [coachPreferences, setCoachPreferences] = useState("");
@@ -867,6 +887,7 @@ export default function RunSession() {
           coachName: userProfile?.coachName,
           userMessage: userMessage,
           coachPreferences: coachPreferences || undefined,
+          coachTone: coachSettings.tone,
         })
       });
       

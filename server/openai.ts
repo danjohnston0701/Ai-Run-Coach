@@ -41,6 +41,7 @@ export interface CoachingRequest {
   coachName?: string;
   userMessage?: string;
   coachPreferences?: string;
+  coachTone?: 'energetic' | 'motivational' | 'instructive' | 'factual' | 'abrupt';
 }
 
 export interface CoachingResponse {
@@ -173,8 +174,20 @@ export async function getCoachingAdvice(request: CoachingRequest): Promise<Coach
   const coachIdentity = request.coachName && request.coachName !== "AI Coach" 
     ? `You are ${request.coachName}, a personalized AI running coach.`
     : "You are an encouraging AI running coach.";
+
+  const toneInstructions: Record<string, string> = {
+    energetic: "Be high-energy, enthusiastic, and upbeat. Use exclamation marks and energizing language!",
+    motivational: "Be inspiring and supportive. Focus on encouragement and building confidence.",
+    instructive: "Be clear and educational. Provide detailed guidance and technique tips.",
+    factual: "Be straightforward and data-focused. Stick to stats and objective information.",
+    abrupt: "Be very brief and direct. Use short, commanding phrases. No fluff."
+  };
   
-  const prompt = `${coachIdentity} Providing real-time guidance.${userProfileInfo}
+  const toneStyle = request.coachTone ? toneInstructions[request.coachTone] : toneInstructions.motivational;
+  
+  const prompt = `${coachIdentity} Providing real-time guidance.
+
+COACHING STYLE: ${toneStyle}${userProfileInfo}
 
 Current Run Stats:
 - Current pace: ${request.currentPace}
