@@ -75,21 +75,21 @@ export function getVoicePreferences(settings: AiCoachSettings): {
   const { gender, accent, tone } = settings;
   
   const maleVoices: Record<CoachAccent, string[]> = {
-    british: ['Daniel', 'James', 'Arthur', 'Oliver', 'George', 'Google UK English Male'],
-    australian: ['Lee', 'Gordon', 'Aaron'],
-    american: ['Alex', 'Fred', 'Tom', 'Google US English'],
-    irish: ['Moira'],
-    scottish: ['Fiona'],
-    newzealand: ['Daniel'],
+    british: ['Daniel', 'James', 'Arthur', 'Oliver', 'George', 'Google UK English Male', 'Microsoft Ryan', 'Microsoft George'],
+    australian: ['Lee', 'Gordon', 'Aaron', 'Google UK English Male'],
+    american: ['Alex', 'Fred', 'Tom', 'Aaron', 'Google US English Male'],
+    irish: ['Daniel', 'James', 'Google UK English Male'],
+    scottish: ['Daniel', 'James', 'Google UK English Male'],
+    newzealand: ['Daniel', 'Lee', 'Google UK English Male'],
   };
   
   const femaleVoices: Record<CoachAccent, string[]> = {
-    british: ['Kate', 'Serena', 'Martha', 'Google UK English Female'],
-    australian: ['Karen', 'Catherine'],
-    american: ['Samantha', 'Victoria', 'Allison', 'Susan', 'Google US English'],
-    irish: ['Moira'],
-    scottish: ['Fiona'],
-    newzealand: ['Karen'],
+    british: ['Kate', 'Serena', 'Martha', 'Google UK English Female', 'Microsoft Hazel'],
+    australian: ['Karen', 'Catherine', 'Google UK English Female'],
+    american: ['Samantha', 'Victoria', 'Allison', 'Susan', 'Ava', 'Google US English Female'],
+    irish: ['Moira', 'Kate', 'Google UK English Female'],
+    scottish: ['Fiona', 'Kate', 'Google UK English Female'],
+    newzealand: ['Karen', 'Catherine', 'Google UK English Female'],
   };
   
   const langMap: Record<CoachAccent, string> = {

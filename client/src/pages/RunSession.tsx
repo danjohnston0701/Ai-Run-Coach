@@ -397,40 +397,64 @@ export default function RunSession() {
 
   const getCoachVoice = useCallback((): SpeechSynthesisVoice | null => {
     const voices = window.speechSynthesis.getVoices();
-    if (voices.length === 0) return null;
+    if (voices.length === 0) {
+      console.log("No voices available");
+      return null;
+    }
+    
+    console.log("Coach settings:", coachSettings);
+    console.log("Available voices:", voices.map(v => `${v.name} (${v.lang})`).join(', '));
+    
+    const femaleKeywords = ['samantha', 'victoria', 'kate', 'karen', 'moira', 'female', 'fiona', 'susan', 'allison', 'catherine', 'zoe', 'nicky', 'ava', 'tessa', 'veena', 'rishi', 'serena', 'martha'];
+    const maleKeywords = ['daniel', 'james', 'arthur', 'oliver', 'alex', 'fred', 'tom', 'george', 'ryan', 'aaron', 'gordon', 'lee', 'male', 'ralph', 'bruce', 'albert'];
+    
+    const targetGenderKeywords = coachSettings.gender === 'female' ? femaleKeywords : maleKeywords;
+    const oppositeGenderKeywords = coachSettings.gender === 'female' ? maleKeywords : femaleKeywords;
+    
+    const isTargetGender = (voice: SpeechSynthesisVoice) => {
+      const name = voice.name.toLowerCase();
+      return targetGenderKeywords.some(k => name.includes(k)) && 
+             !oppositeGenderKeywords.some(k => name.includes(k));
+    };
+    
+    const isOppositeGender = (voice: SpeechSynthesisVoice) => {
+      const name = voice.name.toLowerCase();
+      return oppositeGenderKeywords.some(k => name.includes(k));
+    };
     
     const prefs = getVoicePreferences(coachSettings);
     
     for (const name of prefs.preferredNames) {
-      const voice = voices.find(v => v.name.includes(name));
-      if (voice) return voice;
+      const voice = voices.find(v => v.name.includes(name) && !isOppositeGender(v));
+      if (voice) {
+        console.log("Selected voice (preferred name):", voice.name);
+        return voice;
+      }
     }
     
     for (const lang of prefs.langPreferences) {
-      const voice = voices.find(v => v.lang.includes(lang));
-      if (voice) return voice;
+      const voice = voices.find(v => v.lang.includes(lang) && isTargetGender(v));
+      if (voice) {
+        console.log("Selected voice (lang + gender):", voice.name);
+        return voice;
+      }
     }
     
-    const femaleVoiceKeywords = ['samantha', 'victoria', 'kate', 'karen', 'moira', 'female', 'fiona', 'susan', 'allison', 'catherine'];
-    const maleVoiceKeywords = ['daniel', 'james', 'arthur', 'oliver', 'alex', 'fred', 'tom', 'george', 'ryan', 'aaron', 'gordon', 'lee', 'male'];
+    const genderMatch = voices.find(v => v.lang.startsWith('en') && isTargetGender(v));
+    if (genderMatch) {
+      console.log("Selected voice (gender match):", genderMatch.name);
+      return genderMatch;
+    }
     
-    const genderKeywords = coachSettings.gender === 'female' ? femaleVoiceKeywords : maleVoiceKeywords;
-    const oppositeKeywords = coachSettings.gender === 'female' ? maleVoiceKeywords : femaleVoiceKeywords;
+    const anyEnglishNotOpposite = voices.find(v => v.lang.startsWith('en') && !isOppositeGender(v));
+    if (anyEnglishNotOpposite) {
+      console.log("Selected voice (english, not opposite gender):", anyEnglishNotOpposite.name);
+      return anyEnglishNotOpposite;
+    }
     
-    const genderMatch = voices.find(v => 
-      v.lang.startsWith('en') && 
-      genderKeywords.some(k => v.name.toLowerCase().includes(k)) &&
-      !oppositeKeywords.some(k => v.name.toLowerCase().includes(k))
-    );
-    if (genderMatch) return genderMatch;
-    
-    const anyEnglish = voices.find(v => 
-      v.lang.startsWith('en') &&
-      !oppositeKeywords.some(k => v.name.toLowerCase().includes(k))
-    );
-    if (anyEnglish) return anyEnglish;
-    
-    return voices.find(v => v.lang.startsWith('en')) || voices[0];
+    const fallback = voices.find(v => v.lang.startsWith('en')) || voices[0];
+    console.log("Selected voice (fallback):", fallback?.name);
+    return fallback;
   }, [coachSettings]);
 
   const speak = useCallback((text: string, force: boolean = false) => {
