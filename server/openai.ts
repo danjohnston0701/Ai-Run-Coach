@@ -361,15 +361,37 @@ export async function analyzeRunPerformance(runData: {
   avgHeartRate?: number;
   difficulty: string;
   userFitnessLevel?: string;
+  aiConfig?: AiCoachConfig;
 }): Promise<string> {
-  const prompt = `As an AI running coach, analyze this completed run:
+  let coachIdentity = "As an AI running coach";
+  let configSection = "";
+  
+  if (runData.aiConfig) {
+    if (runData.aiConfig.description) {
+      coachIdentity = runData.aiConfig.description;
+    }
+    if (runData.aiConfig.instructions && runData.aiConfig.instructions.length > 0) {
+      configSection += "\n\nANALYSIS GUIDELINES:\n";
+      for (const inst of runData.aiConfig.instructions) {
+        configSection += `- ${inst.title}: ${inst.content}\n`;
+      }
+    }
+    if (runData.aiConfig.knowledge && runData.aiConfig.knowledge.length > 0) {
+      configSection += "\n\nKNOWLEDGE BASE:\n";
+      for (const kb of runData.aiConfig.knowledge) {
+        configSection += `- ${kb.title}: ${kb.content}\n`;
+      }
+    }
+  }
+  
+  const prompt = `${coachIdentity}, analyze this completed run:
 - Distance: ${runData.distance} km
 - Duration: ${runData.duration} minutes
 - Average pace: ${runData.avgPace}
 - Average heart rate: ${runData.avgHeartRate || "not recorded"} bpm
 - Difficulty: ${runData.difficulty}
 - Fitness level: ${runData.userFitnessLevel || "intermediate"}
-
+${configSection}
 Provide a brief, encouraging analysis (2-3 sentences) with one specific improvement tip.`;
 
   try {

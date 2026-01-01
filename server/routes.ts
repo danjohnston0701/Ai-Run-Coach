@@ -319,6 +319,7 @@ export async function registerRoutes(
       const savedRoutes = [];
       for (const route of result.routes) {
         try {
+          const routeElevation = (route as any).elevation;
           const savedRoute = await storage.createRoute({
             userId: userId || null,
             name: route.routeName,
@@ -330,10 +331,10 @@ export async function registerRoutes(
             endLng: parseFloat(startLng),
             waypoints: route.waypoints,
             polyline: route.polyline,
-            elevation: route.elevation?.gain || null,
-            elevationGain: route.elevation?.gain || null,
-            elevationLoss: route.elevation?.loss || null,
-            elevationProfile: route.elevation?.profile || null,
+            elevation: routeElevation?.gain || null,
+            elevationGain: routeElevation?.gain || null,
+            elevationLoss: routeElevation?.loss || null,
+            elevationProfile: routeElevation?.profile || null,
             estimatedTime: route.duration,
             terrainType: route.hasMajorRoads ? 'road' : 'mixed',
             startLocationLabel,
@@ -726,13 +727,33 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Missing required run data" });
       }
 
+      // Load AI config for analysis
+      let aiConfig: AiCoachConfig | undefined;
+      try {
+        const [description, instructions, knowledge, faqs] = await Promise.all([
+          storage.getAiCoachDescription(),
+          storage.getAiCoachInstructions(),
+          storage.getAiCoachKnowledge(),
+          storage.getAiCoachFaqs()
+        ]);
+        aiConfig = {
+          description: description?.content,
+          instructions: instructions.filter(i => i.isActive).map(i => ({ title: i.title, content: i.content })),
+          knowledge: knowledge.filter(k => k.isActive).map(k => ({ title: k.title, content: k.content })),
+          faqs: faqs.filter(f => f.isActive).map(f => ({ question: f.question, answer: f.answer }))
+        };
+      } catch (configErr) {
+        console.warn("Failed to load AI config for analysis:", configErr);
+      }
+
       const analysis = await analyzeRunPerformance({
         distance,
         duration,
         avgPace,
         avgHeartRate,
         difficulty: difficulty || "moderate",
-        userFitnessLevel
+        userFitnessLevel,
+        aiConfig
       });
 
       res.json({ analysis });
