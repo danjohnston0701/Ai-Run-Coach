@@ -232,6 +232,57 @@ export default function Home() {
     staleTime: 0,
   });
 
+  interface RecentRoute {
+    id: string;
+    name: string;
+    distance: number;
+    difficulty: string;
+    startLocationLabel?: string;
+    elevationGain?: number;
+    createdAt: string;
+    startLat: number;
+    startLng: number;
+    polyline?: string;
+  }
+
+  const { data: recentRoutes = [], isLoading: routesLoading } = useQuery<RecentRoute[]>({
+    queryKey: ['/api/routes/recent'],
+    queryFn: async () => {
+      const res = await fetch('/api/routes/recent?limit=4');
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 60000,
+  });
+
+  const getDifficultyColor = (difficulty: string) => {
+    switch (difficulty) {
+      case 'easy':
+      case 'beginner':
+        return 'text-green-400 border-green-400/30 bg-green-400/10';
+      case 'moderate':
+        return 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10';
+      case 'hard':
+      case 'expert':
+        return 'text-red-400 border-red-400/30 bg-red-400/10';
+      default:
+        return 'text-primary border-primary/30 bg-primary/10';
+    }
+  };
+
+  const handleSelectRoute = (route: RecentRoute) => {
+    const targetSeconds = parseInt(targetTime.h || "0") * 3600 + parseInt(targetTime.m || "0") * 60 + parseInt(targetTime.s || "0");
+    const params = new URLSearchParams({
+      routeId: route.id,
+      distance: route.distance.toString(),
+      level: route.difficulty,
+      lat: route.startLat.toString(),
+      lng: route.startLng.toString(),
+      targetTime: targetSeconds.toString(),
+    });
+    setLocation(`/run?${params.toString()}`);
+  };
+
   // Update target time when distance changes (default 6 min/km pace)
   useEffect(() => {
     if (!targetTimeActive) {
@@ -1116,46 +1167,62 @@ export default function Home() {
         </section>
 
         <section className="space-y-4">
-          <h2 className="text-xl font-display uppercase tracking-wide">Select Difficulty</h2>
-          <div className="grid gap-4">
-            {LEVELS.map((level) => (
-              <motion.div
-                key={level.id}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => setSelectedLevel(level.id)}
-              >
-                <Card 
-                  className={`relative overflow-hidden border-2 cursor-pointer transition-all duration-300 ${
-                    selectedLevel === level.id 
-                      ? "border-primary shadow-[0_0_20px_rgba(6,182,212,0.3)] bg-primary/5" 
-                      : "border-border hover:border-primary/50 bg-card/50"
-                  }`}
-                  data-testid={`card-level-${level.id}`}
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-display uppercase tracking-wide">Recent Routes</h2>
+            {recentRoutes.length > 0 && (
+              <Button variant="ghost" size="sm" className="text-primary" onClick={() => setLocation('/routes')}>
+                View All <ArrowRight className="w-4 h-4 ml-1" />
+              </Button>
+            )}
+          </div>
+          <div className="grid gap-3">
+            {routesLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader className="w-6 h-6 animate-spin text-primary" />
+              </div>
+            ) : recentRoutes.length > 0 ? (
+              recentRoutes.map((route) => (
+                <motion.div
+                  key={route.id}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => handleSelectRoute(route)}
                 >
-                  <div className="absolute inset-0 z-0 opacity-40">
-                    <img src={level.image} alt={level.title} className="w-full h-full object-cover grayscale opacity-50 mix-blend-luminosity" />
-                    <div className="absolute inset-0 bg-gradient-to-r from-background via-background/80 to-transparent" />
-                  </div>
-                  
-                  <CardContent className="relative z-10 p-4 flex items-center justify-between">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <level.icon className={`w-5 h-5 ${level.color}`} />
-                        <h3 className="text-2xl font-display font-bold uppercase">{level.title}</h3>
+                  <Card 
+                    className="relative overflow-hidden border border-white/10 cursor-pointer transition-all duration-300 hover:border-primary/50 bg-card/50"
+                    data-testid={`card-route-${route.id}`}
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Badge className={`text-xs uppercase font-medium ${getDifficultyColor(route.difficulty)}`}>
+                              {route.difficulty}
+                            </Badge>
+                            <span className="text-lg font-display font-bold text-primary">{route.distance.toFixed(1)} km</span>
+                          </div>
+                          <p className="text-sm text-muted-foreground truncate">{route.startLocationLabel || 'Unknown location'}</p>
+                          {route.elevationGain && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              <Mountain className="w-3 h-3 inline mr-1" />
+                              {route.elevationGain}m elevation
+                            </p>
+                          )}
+                        </div>
+                        <ArrowRight className="w-5 h-5 text-muted-foreground flex-shrink-0 mt-1" />
                       </div>
-                      <p className="text-sm text-muted-foreground">{level.description}</p>
-                      <Badge variant="outline" className="mt-2 bg-background/50 backdrop-blur border-white/10 text-xs">
-                        {level.stats}
-                      </Badge>
-                    </div>
-                    
-                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${selectedLevel === level.id ? "border-primary" : "border-muted"}`}>
-                      {selectedLevel === level.id && <div className="w-3 h-3 bg-primary rounded-full" />}
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              ))
+            ) : (
+              <Card className="border border-dashed border-white/20 bg-transparent">
+                <CardContent className="p-6 text-center">
+                  <MapPin className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">No routes yet</p>
+                  <p className="text-xs text-muted-foreground mt-1">Generate your first route below</p>
+                </CardContent>
+              </Card>
+            )}
 
             <motion.div
               initial={{ opacity: 0, y: 10 }}
