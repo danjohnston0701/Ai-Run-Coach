@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
-import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw } from "lucide-react";
+import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, Settings } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -14,6 +14,8 @@ import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import type { RunData } from "./RunHistory";
 import { loadActiveRunSession, clearActiveRunSession, type ActiveRunSession } from "@/lib/activeRunSession";
+import { loadCoachSettings, saveCoachSettings, type AiCoachSettings, type CoachGender, type CoachAccent, type CoachTone, accentLabels, toneLabels, toneDescriptions, defaultSettings } from "@/lib/coachSettings";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -179,6 +181,12 @@ export default function Home() {
   const [enablingNotifications, setEnablingNotifications] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeSession, setActiveSession] = useState<ActiveRunSession | null>(null);
+  const [coachSettingsOpen, setCoachSettingsOpen] = useState(false);
+  const [coachSettings, setCoachSettings] = useState<AiCoachSettings>(defaultSettings);
+
+  useEffect(() => {
+    setCoachSettings(loadCoachSettings());
+  }, []);
 
   useEffect(() => {
     const session = loadActiveRunSession();
@@ -673,6 +681,102 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
+      {/* AI Coach Settings Dialog */}
+      <Dialog open={coachSettingsOpen} onOpenChange={setCoachSettingsOpen}>
+        <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mic className="w-5 h-5 text-primary" />
+              AI Coach Settings
+            </DialogTitle>
+            <DialogDescription>
+              Customize your AI coach's voice and personality
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-6 py-4">
+            {/* Gender Selection */}
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">Voice Gender</Label>
+              <RadioGroup
+                value={coachSettings.gender}
+                onValueChange={(value: CoachGender) => setCoachSettings(prev => ({ ...prev, gender: value }))}
+                className="flex gap-4"
+              >
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="male" id="gender-male" data-testid="radio-gender-male" />
+                  <Label htmlFor="gender-male" className="cursor-pointer">Male</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="female" id="gender-female" data-testid="radio-gender-female" />
+                  <Label htmlFor="gender-female" className="cursor-pointer">Female</Label>
+                </div>
+              </RadioGroup>
+            </div>
+
+            {/* Accent Selection */}
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">Accent</Label>
+              <RadioGroup
+                value={coachSettings.accent}
+                onValueChange={(value: CoachAccent) => setCoachSettings(prev => ({ ...prev, accent: value }))}
+                className="grid grid-cols-2 gap-2"
+              >
+                {(Object.entries(accentLabels) as [CoachAccent, string][]).map(([value, label]) => (
+                  <div key={value} className="flex items-center space-x-2">
+                    <RadioGroupItem value={value} id={`accent-${value}`} data-testid={`radio-accent-${value}`} />
+                    <Label htmlFor={`accent-${value}`} className="cursor-pointer text-sm">{label}</Label>
+                  </div>
+                ))}
+              </RadioGroup>
+            </div>
+
+            {/* Tone Selection */}
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">Coaching Tone</Label>
+              <RadioGroup
+                value={coachSettings.tone}
+                onValueChange={(value: CoachTone) => setCoachSettings(prev => ({ ...prev, tone: value }))}
+                className="space-y-2"
+              >
+                {(Object.entries(toneLabels) as [CoachTone, string][]).map(([value, label]) => (
+                  <div key={value} className="flex items-center space-x-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
+                    <RadioGroupItem value={value} id={`tone-${value}`} data-testid={`radio-tone-${value}`} />
+                    <div className="flex-1">
+                      <Label htmlFor={`tone-${value}`} className="cursor-pointer font-medium">{label}</Label>
+                      <p className="text-xs text-muted-foreground">{toneDescriptions[value]}</p>
+                    </div>
+                  </div>
+                ))}
+              </RadioGroup>
+            </div>
+          </div>
+
+          <DialogFooter className="flex gap-2 sm:justify-between">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCoachSettings(loadCoachSettings());
+                setCoachSettingsOpen(false);
+              }}
+              data-testid="button-cancel-coach-settings"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                saveCoachSettings(coachSettings);
+                setCoachSettingsOpen(false);
+                toast.success("Coach settings saved!");
+              }}
+              data-testid="button-save-coach-settings"
+            >
+              Save Settings
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <header className="mb-8 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
@@ -731,6 +835,17 @@ export default function Home() {
                 >
                   <History className="w-5 h-5 text-primary" />
                   <span className="font-medium">Run History</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setCoachSettingsOpen(true);
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left"
+                  data-testid="menu-coach-settings"
+                >
+                  <Mic className="w-5 h-5 text-primary" />
+                  <span className="font-medium">AI Coach Settings</span>
                 </button>
               </nav>
             </SheetContent>
