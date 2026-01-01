@@ -11,31 +11,15 @@ interface RouteRequest {
 }
 
 interface AreaData {
-  roads: Array<{
-    name: string;
-    type: string;
-    geometry: Array<{ lat: number; lng: number }>;
-  }>;
   parks: Array<{
     name: string;
     location: { lat: number; lng: number };
-  }>;
-  paths: Array<{
-    name: string;
-    type: string;
-    geometry: Array<{ lat: number; lng: number }>;
   }>;
   elevation: {
     min: number;
     max: number;
     avgSlope: number;
   };
-}
-
-interface AIWaypointResult {
-  waypoints: Array<{ lat: number; lng: number }>;
-  reasoning: string;
-  estimatedDifficulty: string;
 }
 
 interface RouteCandidate {
@@ -65,262 +49,7 @@ interface MultiRouteResult {
   error?: string;
 }
 
-// Query Google Places API to find nearby roads, parks, and paths
-async function getAreaData(lat: number, lng: number, radiusKm: number): Promise<AreaData> {
-  const radiusMeters = radiusKm * 1000;
-  const parks: AreaData["parks"] = [];
-  const roads: AreaData["roads"] = [];
-  const paths: AreaData["paths"] = [];
-
-  try {
-    // Get nearby parks and recreational areas
-    const placesUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radiusMeters}&type=park&key=${GOOGLE_MAPS_API_KEY}`;
-    const placesRes = await fetch(placesUrl);
-    const placesData = await placesRes.json();
-    
-    if (placesData.results) {
-      for (const place of placesData.results.slice(0, 10)) {
-        parks.push({
-          name: place.name,
-          location: {
-            lat: place.geometry.location.lat,
-            lng: place.geometry.location.lng,
-          },
-        });
-      }
-    }
-
-    // Get roads data using Roads API (sample points in the area)
-    const samplePoints = generateSamplePoints(lat, lng, radiusKm);
-    const roadsUrl = `https://roads.googleapis.com/v1/nearestRoads?points=${samplePoints.map(p => `${p.lat},${p.lng}`).join('|')}&key=${GOOGLE_MAPS_API_KEY}`;
-    
-    try {
-      const roadsRes = await fetch(roadsUrl);
-      const roadsData = await roadsRes.json();
-      
-      if (roadsData.snappedPoints) {
-        // Group snapped points by placeId to identify unique roads
-        const roadMap = new Map<string, Array<{ lat: number; lng: number }>>();
-        for (const point of roadsData.snappedPoints) {
-          const placeId = point.placeId;
-          if (!roadMap.has(placeId)) {
-            roadMap.set(placeId, []);
-          }
-          roadMap.get(placeId)!.push({
-            lat: point.location.latitude,
-            lng: point.location.longitude,
-          });
-        }
-        
-        let roadIndex = 0;
-        Array.from(roadMap.values()).forEach((geometry) => {
-          roads.push({
-            name: `Road ${roadIndex + 1}`,
-            type: "road",
-            geometry,
-          });
-          roadIndex++;
-        });
-      }
-    } catch (roadsError) {
-      console.log("Roads API not available, using fallback");
-    }
-
-  } catch (error) {
-    console.error("Error fetching area data:", error);
-  }
-
-  // Get elevation data for the area
-  const elevation = await getAreaElevation(lat, lng, radiusKm);
-
-  return { roads, parks, paths, elevation };
-}
-
-function generateSamplePoints(lat: number, lng: number, radiusKm: number): Array<{ lat: number; lng: number }> {
-  const points: Array<{ lat: number; lng: number }> = [];
-  const numRings = 3;
-  const pointsPerRing = 8;
-  
-  for (let ring = 1; ring <= numRings; ring++) {
-    const ringRadius = (radiusKm / numRings) * ring;
-    for (let i = 0; i < pointsPerRing; i++) {
-      const angle = (360 / pointsPerRing) * i;
-      const point = projectPoint(lat, lng, angle, ringRadius);
-      points.push(point);
-    }
-  }
-  
-  return points;
-}
-
-async function getAreaElevation(lat: number, lng: number, radiusKm: number): Promise<AreaData["elevation"]> {
-  try {
-    // Sample elevation at multiple points around the area
-    const samplePoints = [
-      { lat, lng }, // center
-      projectPoint(lat, lng, 0, radiusKm),
-      projectPoint(lat, lng, 90, radiusKm),
-      projectPoint(lat, lng, 180, radiusKm),
-      projectPoint(lat, lng, 270, radiusKm),
-    ];
-    
-    const locations = samplePoints.map(p => `${p.lat},${p.lng}`).join('|');
-    const url = `https://maps.googleapis.com/maps/api/elevation/json?locations=${locations}&key=${GOOGLE_MAPS_API_KEY}`;
-    
-    const res = await fetch(url);
-    const data = await res.json();
-    
-    if (data.status === "OK" && data.results) {
-      const elevations = data.results.map((r: any) => r.elevation);
-      const min = Math.min(...elevations);
-      const max = Math.max(...elevations);
-      const avgSlope = (max - min) / (radiusKm * 1000) * 100; // percentage slope
-      
-      return { min, max, avgSlope };
-    }
-  } catch (error) {
-    console.error("Elevation API error:", error);
-  }
-  
-  return { min: 0, max: 0, avgSlope: 0 };
-}
-
-// Use OpenAI to design optimal waypoints based on area data and criteria
-async function designWaypointsWithAI(
-  startLat: number,
-  startLng: number,
-  targetDistance: number,
-  difficulty: "easy" | "moderate" | "hard",
-  areaData: AreaData,
-  routeVariant: number
-): Promise<AIWaypointResult> {
-  const difficultyGuidelines = {
-    easy: "Prefer flat terrain, residential streets, parks, and paths. Avoid busy roads, highways, and steep hills. Prioritize scenic, quiet routes.",
-    moderate: "Balance between convenience and challenge. Can include some moderate hills and busier roads. Mix of residential and commercial areas is fine.",
-    hard: "Include challenging elements: steep hills, longer stretches, can use busier roads. Maximize elevation gain and route complexity."
-  };
-
-  // Calculate approximate radius needed for the target distance
-  const approximateRadius = (targetDistance / (2 * Math.PI)) * 0.5; // Correction factor for real roads
-
-  const prompt = `You are a running route designer. Design waypoints for a circular running route.
-
-START LOCATION: ${startLat}, ${startLng}
-TARGET DISTANCE: ${targetDistance} km
-DIFFICULTY: ${difficulty}
-ROUTE VARIANT: ${routeVariant} (create a unique route different from variants 0-${routeVariant - 1})
-
-AREA DATA:
-- Parks nearby: ${areaData.parks.map(p => `${p.name} at (${p.location.lat.toFixed(5)}, ${p.location.lng.toFixed(5)})`).join(', ') || 'None found'}
-- Elevation range: ${areaData.elevation.min.toFixed(0)}m to ${areaData.elevation.max.toFixed(0)}m (avg slope: ${areaData.elevation.avgSlope.toFixed(1)}%)
-- Approximate search radius: ${approximateRadius.toFixed(2)} km
-
-DIFFICULTY GUIDELINES FOR ${difficulty.toUpperCase()}:
-${difficultyGuidelines[difficulty]}
-
-REQUIREMENTS:
-1. Create a CIRCULAR route that starts and ends at the start location
-2. Design ${4 + (routeVariant % 3)} waypoints arranged to form a loop
-3. Route must be approximately ${targetDistance} km (roads add ~60-100% distance to straight-line paths)
-4. For variant ${routeVariant}, rotate the route ${routeVariant * 40} degrees from north to create variety
-5. ${difficulty === 'easy' ? 'Route through parks if available: ' + areaData.parks.slice(0, 2).map(p => p.name).join(', ') : ''}
-
-Return a JSON object with:
-{
-  "waypoints": [{"lat": number, "lng": number}, ...],
-  "reasoning": "Brief explanation of route design choices",
-  "estimatedDifficulty": "easy|moderate|hard"
-}
-
-IMPORTANT: Return ONLY valid JSON, no markdown or extra text.`;
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        {
-          role: "system",
-          content: "You are a running route designer that outputs only valid JSON. Design routes that are safe, enjoyable, and match the specified criteria."
-        },
-        { role: "user", content: prompt }
-      ],
-      temperature: 0.7 + (routeVariant * 0.05), // Vary temperature for different routes
-      max_tokens: 1000,
-    });
-
-    const content = response.choices[0]?.message?.content || "";
-    
-    // Parse the JSON response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("No valid JSON in response");
-    }
-    
-    const result = JSON.parse(jsonMatch[0]);
-    
-    // Validate waypoints
-    if (!Array.isArray(result.waypoints) || result.waypoints.length < 3) {
-      throw new Error("Invalid waypoints array");
-    }
-    
-    // Ensure waypoints are valid numbers
-    const validWaypoints = result.waypoints.filter((wp: any) => 
-      typeof wp.lat === 'number' && typeof wp.lng === 'number' &&
-      !isNaN(wp.lat) && !isNaN(wp.lng)
-    );
-    
-    if (validWaypoints.length < 3) {
-      throw new Error("Not enough valid waypoints");
-    }
-    
-    return {
-      waypoints: validWaypoints,
-      reasoning: result.reasoning || "AI-designed route",
-      estimatedDifficulty: result.estimatedDifficulty || difficulty,
-    };
-    
-  } catch (error) {
-    console.error("OpenAI waypoint design error:", error);
-    // Fallback to geometric waypoints
-    const fallbackWaypoints = generateFallbackWaypoints(startLat, startLng, targetDistance, difficulty, routeVariant);
-    return {
-      waypoints: fallbackWaypoints,
-      reasoning: "Fallback geometric route (AI unavailable)",
-      estimatedDifficulty: difficulty,
-    };
-  }
-}
-
-function generateFallbackWaypoints(
-  startLat: number,
-  startLng: number,
-  targetDistance: number,
-  difficulty: string,
-  variant: number
-): Array<{ lat: number; lng: number }> {
-  const waypointCount = 4 + (variant % 3);
-  const radius = (targetDistance / (2 * Math.PI)) * 0.45;
-  const rotation = variant * 40;
-  
-  const waypoints: Array<{ lat: number; lng: number }> = [];
-  const angleStep = 360 / waypointCount;
-  
-  for (let i = 0; i < waypointCount; i++) {
-    const bearing = rotation + (i * angleStep);
-    // Add some randomness based on variant
-    const radiusVariation = radius * (0.9 + (variant % 3) * 0.1);
-    const point = projectPoint(startLat, startLng, bearing, radiusVariation);
-    waypoints.push(point);
-  }
-  
-  return waypoints;
-}
-
-// Fetch route from Google Directions API with elevation data
-async function fetchRouteWithElevation(
-  origin: { lat: number; lng: number },
-  waypoints: Array<{ lat: number; lng: number }>
-): Promise<{
+interface DirectionsResult {
   distance: number;
   duration: number;
   polyline: string;
@@ -333,13 +62,69 @@ async function fetchRouteWithElevation(
     minElevation: number;
   };
   error?: string;
-}> {
+}
+
+// Loop template shapes - different polygon types for variety
+type LoopShape = "square" | "pentagon" | "hexagon" | "triangle" | "octagon";
+
+const LOOP_SHAPES: Record<LoopShape, number> = {
+  triangle: 3,
+  square: 4,
+  pentagon: 5,
+  hexagon: 6,
+  octagon: 8,
+};
+
+// Generate waypoints for a loop template
+function generateLoopTemplate(
+  centerLat: number,
+  centerLng: number,
+  radiusKm: number,
+  shape: LoopShape,
+  rotationDegrees: number = 0
+): Array<{ lat: number; lng: number }> {
+  const numPoints = LOOP_SHAPES[shape];
+  const waypoints: Array<{ lat: number; lng: number }> = [];
+  const angleStep = 360 / numPoints;
+
+  for (let i = 0; i < numPoints; i++) {
+    const bearing = rotationDegrees + (i * angleStep);
+    const point = projectPoint(centerLat, centerLng, bearing, radiusKm);
+    waypoints.push(point);
+  }
+
+  return waypoints;
+}
+
+// Calculate initial radius estimate based on target distance and shape
+// Roads typically add 20-40% to the straight-line perimeter due to curves
+function estimateInitialRadius(targetDistanceKm: number, shape: LoopShape): number {
+  const numSides = LOOP_SHAPES[shape];
+  // For a regular polygon: perimeter = 2 * n * r * sin(π/n)
+  // But real roads add ~30% overhead, so we use a correction factor
+  const roadOverheadFactor = 1.3;
+  const perimeter = targetDistanceKm / roadOverheadFactor;
+  const sideLength = perimeter / numSides;
+  // For regular polygon: side = 2 * r * sin(π/n)
+  const angleRad = Math.PI / numSides;
+  const radius = sideLength / (2 * Math.sin(angleRad));
+  return radius;
+}
+
+// Fetch route from Google Directions API (loop back to start)
+async function fetchLoopRoute(
+  origin: { lat: number; lng: number },
+  waypoints: Array<{ lat: number; lng: number }>
+): Promise<DirectionsResult> {
   if (!GOOGLE_MAPS_API_KEY) {
     return { distance: 0, duration: 0, polyline: "", success: false, instructions: [], error: "No API key" };
   }
 
-  const waypointsStr = waypoints.map((wp) => `${wp.lat},${wp.lng}`).join("|");
-  const directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.lat},${origin.lng}&destination=${origin.lat},${origin.lng}&waypoints=${waypointsStr}&mode=walking&key=${GOOGLE_MAPS_API_KEY}`;
+  // Format waypoints for the API (via points)
+  const waypointsStr = waypoints.map((wp) => `via:${wp.lat},${wp.lng}`).join("|");
+  
+  // Request walking route that returns to origin, avoiding highways
+  const directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.lat},${origin.lng}&destination=${origin.lat},${origin.lng}&waypoints=${waypointsStr}&mode=walking&avoid=highways&key=${GOOGLE_MAPS_API_KEY}`;
 
   try {
     const response = await fetch(directionsUrl);
@@ -369,8 +154,8 @@ async function fetchRouteWithElevation(
     const elevation = await getRouteElevation(route.overview_polyline.points);
 
     return {
-      distance: totalDistance / 1000,
-      duration: Math.round(totalDuration / 60),
+      distance: totalDistance / 1000, // Convert to km
+      duration: Math.round(totalDuration / 60), // Convert to minutes
       polyline: route.overview_polyline.points,
       success: true,
       instructions: allInstructions,
@@ -382,19 +167,181 @@ async function fetchRouteWithElevation(
   }
 }
 
+// Iteratively calibrate the route to match target distance
+// Uses binary search to adjust radius until distance is within tolerance
+async function calibrateRouteDistance(
+  startLat: number,
+  startLng: number,
+  targetDistanceKm: number,
+  shape: LoopShape,
+  rotationDegrees: number,
+  tolerancePercent: number = 15,
+  maxIterations: number = 5
+): Promise<{ waypoints: Array<{ lat: number; lng: number }>; result: DirectionsResult } | null> {
+  
+  let radiusKm = estimateInitialRadius(targetDistanceKm, shape);
+  let minRadius = radiusKm * 0.3;
+  let maxRadius = radiusKm * 3.0;
+  
+  let bestResult: { waypoints: Array<{ lat: number; lng: number }>; result: DirectionsResult } | null = null;
+  let bestError = Infinity;
+
+  for (let iteration = 0; iteration < maxIterations; iteration++) {
+    const waypoints = generateLoopTemplate(startLat, startLng, radiusKm, shape, rotationDegrees);
+    const result = await fetchLoopRoute({ lat: startLat, lng: startLng }, waypoints);
+    
+    if (!result.success) {
+      // Try with a smaller radius if route fails
+      maxRadius = radiusKm;
+      radiusKm = (minRadius + maxRadius) / 2;
+      continue;
+    }
+
+    const errorPercent = Math.abs((result.distance - targetDistanceKm) / targetDistanceKm) * 100;
+    
+    console.log(`[Calibration] Iteration ${iteration + 1}: radius=${radiusKm.toFixed(3)}km, distance=${result.distance.toFixed(2)}km, error=${errorPercent.toFixed(1)}%`);
+    
+    // Track the best result so far
+    if (errorPercent < bestError) {
+      bestError = errorPercent;
+      bestResult = { waypoints, result };
+    }
+
+    // Check if we're within tolerance
+    if (errorPercent <= tolerancePercent) {
+      console.log(`[Calibration] Target achieved within ${tolerancePercent}% tolerance`);
+      return { waypoints, result };
+    }
+
+    // Adjust radius using binary search
+    if (result.distance < targetDistanceKm) {
+      // Route too short, increase radius
+      minRadius = radiusKm;
+    } else {
+      // Route too long, decrease radius
+      maxRadius = radiusKm;
+    }
+    
+    radiusKm = (minRadius + maxRadius) / 2;
+  }
+
+  // Return best result even if not perfect (as long as it's reasonable)
+  if (bestResult && bestError < 50) {
+    console.log(`[Calibration] Returning best result with ${bestError.toFixed(1)}% error`);
+    return bestResult;
+  }
+  
+  return null;
+}
+
+// Get nearby parks for scenic routing
+async function getNearbyParks(lat: number, lng: number, radiusKm: number): Promise<AreaData["parks"]> {
+  if (!GOOGLE_MAPS_API_KEY) return [];
+  
+  const radiusMeters = radiusKm * 1000;
+  const parks: AreaData["parks"] = [];
+
+  try {
+    const placesUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radiusMeters}&type=park&key=${GOOGLE_MAPS_API_KEY}`;
+    const placesRes = await fetch(placesUrl);
+    const placesData = await placesRes.json();
+    
+    if (placesData.results) {
+      for (const place of placesData.results.slice(0, 8)) {
+        parks.push({
+          name: place.name,
+          location: {
+            lat: place.geometry.location.lat,
+            lng: place.geometry.location.lng,
+          },
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Error fetching parks:", error);
+  }
+
+  return parks;
+}
+
+// Use AI to select optimal anchor points from parks for scenic routes
+async function selectScenicAnchors(
+  startLat: number,
+  startLng: number,
+  targetDistance: number,
+  parks: AreaData["parks"],
+  difficulty: "easy" | "moderate" | "hard",
+  variant: number
+): Promise<Array<{ lat: number; lng: number }> | null> {
+  if (parks.length < 2) return null;
+  
+  const approximateRadius = estimateInitialRadius(targetDistance, "pentagon");
+
+  const prompt = `You are a running route optimizer. Select 3-5 parks/locations from the list below to create a scenic loop route.
+
+START LOCATION: ${startLat.toFixed(6)}, ${startLng.toFixed(6)}
+TARGET DISTANCE: ${targetDistance} km
+DIFFICULTY: ${difficulty}
+APPROXIMATE ROUTE RADIUS: ${approximateRadius.toFixed(2)} km
+
+AVAILABLE PARKS/LOCATIONS:
+${parks.map((p, i) => `${i + 1}. ${p.name} at (${p.location.lat.toFixed(6)}, ${p.location.lng.toFixed(6)})`).join('\n')}
+
+REQUIREMENTS:
+1. Select 3-5 locations that form a roughly circular loop around the start point
+2. For variant ${variant}, prefer ${variant === 0 ? 'northern/eastern' : variant === 1 ? 'southern/western' : 'varied direction'} parks
+3. Parks should be roughly evenly spaced around the start point
+4. ${difficulty === 'easy' ? 'Prioritize parks that are close together for a gentler route' : difficulty === 'hard' ? 'Include parks that are more spread out for a challenging route' : 'Balance convenience with variety'}
+
+Return ONLY a JSON array of selected park indices (1-indexed), e.g.: [1, 3, 5, 7]
+No explanation, just the JSON array.`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You output only valid JSON arrays of numbers." },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.3 + (variant * 0.1),
+      max_tokens: 100,
+    });
+
+    const content = response.choices[0]?.message?.content || "";
+    const indices = JSON.parse(content);
+    
+    if (!Array.isArray(indices) || indices.length < 3) {
+      return null;
+    }
+
+    // Convert indices to coordinates
+    const anchors = indices
+      .filter((i: number) => i >= 1 && i <= parks.length)
+      .map((i: number) => parks[i - 1].location);
+
+    return anchors.length >= 3 ? anchors : null;
+    
+  } catch (error) {
+    console.error("AI anchor selection error:", error);
+    return null;
+  }
+}
+
+// Get elevation data along a route polyline
 async function getRouteElevation(polyline: string): Promise<{
   gain: number;
   loss: number;
   maxElevation: number;
   minElevation: number;
 } | undefined> {
+  if (!GOOGLE_MAPS_API_KEY) return undefined;
+  
   try {
-    // Decode polyline to get points
     const points = decodePolyline(polyline);
     
-    // Sample points along the route (max 512 for Elevation API)
-    const sampleRate = Math.max(1, Math.floor(points.length / 100));
-    const sampledPoints = points.filter((_, i) => i % sampleRate === 0).slice(0, 100);
+    // Sample points along the route (max 100 for Elevation API efficiency)
+    const sampleRate = Math.max(1, Math.floor(points.length / 80));
+    const sampledPoints = points.filter((_, i) => i % sampleRate === 0).slice(0, 80);
     
     if (sampledPoints.length < 2) return undefined;
     
@@ -430,7 +377,7 @@ async function getRouteElevation(polyline: string): Promise<{
   return undefined;
 }
 
-// Helper functions
+// Helper: Project a point at a given bearing and distance
 function toRadians(degrees: number): number {
   return degrees * (Math.PI / 180);
 }
@@ -460,6 +407,7 @@ function projectPoint(lat: number, lng: number, bearingDegrees: number, distance
   };
 }
 
+// Decode Google polyline to points
 function decodePolyline(encoded: string): Array<{ lat: number; lng: number }> {
   const points: Array<{ lat: number; lng: number }> = [];
   let index = 0;
@@ -498,10 +446,10 @@ function decodePolyline(encoded: string): Array<{ lat: number; lng: number }> {
   return points;
 }
 
+// Check if route contains major roads
 const MAJOR_ROAD_KEYWORDS = [
   'highway', 'hwy', 'motorway', 'state highway', 'sh-', 'sh ', ' sh ',
-  'a road', 'a-road', 'm road', 'm-road', ' m1', ' m2', ' m3', ' m4', ' m5',
-  ' a1', ' a2', ' a3', ' a4', ' a5', 'expressway', 'freeway'
+  'expressway', 'freeway', 'interstate', ' i-', 'turnpike'
 ];
 
 function containsMajorRoads(instructions: string[]): boolean {
@@ -516,11 +464,12 @@ function containsMajorRoads(instructions: string[]): boolean {
   return false;
 }
 
+// Calculate how much of the route backtracks (lower is better for loops)
 function calculatePathUniqueness(polyline: string): number {
   const points = decodePolyline(polyline);
   if (points.length < 10) return 1.0;
   
-  const gridSize = 0.0005;
+  const gridSize = 0.0003; // ~30 meter grid cells
   const segments: string[] = [];
   
   for (let i = 0; i < points.length - 1; i++) {
@@ -541,116 +490,167 @@ function calculatePathUniqueness(polyline: string): number {
   return uniqueSegments.size / segments.length;
 }
 
+// Calculate difficulty score based on route characteristics
 function calculateDifficultyScore(
   hasMajorRoads: boolean,
   uniqueness: number,
-  elevationGain: number,
-  targetDifficulty: string
+  elevationGain: number
 ): number {
   let score = 0;
   
   if (hasMajorRoads) score += 50;
-  if (uniqueness < 0.5) score += 20;
-  else if (uniqueness < 0.7) score += 10;
-  
-  // Add elevation-based scoring
-  if (elevationGain > 100) score += 20;
-  else if (elevationGain > 50) score += 10;
+  if (uniqueness < 0.6) score += 20; // Lots of backtracking
+  if (elevationGain > 100) score += 30;
+  else if (elevationGain > 50) score += 15;
   
   return score;
 }
 
-// Main function: Generate AI-powered routes
+// Main function: Generate calibrated loop routes
 export async function generateAIRoutes(request: RouteRequest): Promise<MultiRouteResult> {
   const { startLat, startLng, targetDistance } = request;
   
   console.log(`[AI Route Planner] Starting generation for ${targetDistance}km route`);
   
-  // Step 1: Get area data from Google
-  const searchRadius = (targetDistance / (2 * Math.PI)) * 1.5; // Search a bit wider than needed
-  console.log(`[AI Route Planner] Fetching area data within ${searchRadius.toFixed(2)}km radius`);
+  // Step 1: Get nearby parks for scenic anchor options
+  const searchRadius = estimateInitialRadius(targetDistance, "pentagon") * 1.5;
+  const parks = await getNearbyParks(startLat, startLng, searchRadius);
+  console.log(`[AI Route Planner] Found ${parks.length} nearby parks`);
   
-  const areaData = await getAreaData(startLat, startLng, searchRadius);
-  console.log(`[AI Route Planner] Found ${areaData.parks.length} parks, elevation range: ${areaData.elevation.min.toFixed(0)}-${areaData.elevation.max.toFixed(0)}m`);
-  
-  // Step 2: Generate 9 routes (3 easy, 3 moderate, 3 hard) using AI
+  // Step 2: Generate 9 routes using calibrated geometric templates
   const candidates: RouteCandidate[] = [];
-  const difficulties: Array<"easy" | "moderate" | "hard"> = ["easy", "easy", "easy", "moderate", "moderate", "moderate", "hard", "hard", "hard"];
+  const difficulties: Array<"easy" | "moderate" | "hard"> = [
+    "easy", "easy", "easy", 
+    "moderate", "moderate", "moderate", 
+    "hard", "hard", "hard"
+  ];
   
+  // Different shapes and rotations for variety
+  const routeConfigs: Array<{ shape: LoopShape; rotation: number }> = [
+    { shape: "pentagon", rotation: 0 },
+    { shape: "square", rotation: 45 },
+    { shape: "hexagon", rotation: 30 },
+    { shape: "pentagon", rotation: 72 },
+    { shape: "square", rotation: 0 },
+    { shape: "hexagon", rotation: 60 },
+    { shape: "pentagon", rotation: 144 },
+    { shape: "octagon", rotation: 22.5 },
+    { shape: "hexagon", rotation: 0 },
+  ];
+
   for (let i = 0; i < 9; i++) {
     const difficulty = difficulties[i];
-    const variant = Math.floor(i / 3); // 0, 0, 0, 1, 1, 1, 2, 2, 2
-    const subVariant = i % 3; // 0, 1, 2, 0, 1, 2, 0, 1, 2
+    const config = routeConfigs[i];
+    const variantIndex = i % 3;
     
-    console.log(`[AI Route Planner] Designing ${difficulty} route variant ${subVariant}`);
+    console.log(`[AI Route Planner] Generating ${difficulty} route ${variantIndex + 1} (${config.shape}, rotation ${config.rotation}°)`);
     
-    // Step 2a: Use OpenAI to design waypoints
-    const aiResult = await designWaypointsWithAI(
-      startLat,
-      startLng,
-      targetDistance,
-      difficulty,
-      areaData,
-      i // Use index as variant for variety
-    );
+    let calibrationResult: { waypoints: Array<{ lat: number; lng: number }>; result: DirectionsResult } | null = null;
     
-    console.log(`[AI Route Planner] AI designed ${aiResult.waypoints.length} waypoints: ${aiResult.reasoning}`);
+    // Try AI-selected scenic anchors first for easy routes
+    if (difficulty === "easy" && parks.length >= 3) {
+      const scenicAnchors = await selectScenicAnchors(
+        startLat, startLng, targetDistance, parks, difficulty, variantIndex
+      );
+      
+      if (scenicAnchors && scenicAnchors.length >= 3) {
+        console.log(`[AI Route Planner] Using ${scenicAnchors.length} AI-selected scenic anchors`);
+        
+        // Try to get route through scenic points
+        const scenicResult = await fetchLoopRoute({ lat: startLat, lng: startLng }, scenicAnchors);
+        
+        if (scenicResult.success) {
+          const errorPercent = Math.abs((scenicResult.distance - targetDistance) / targetDistance) * 100;
+          
+          if (errorPercent <= 25) {
+            calibrationResult = { waypoints: scenicAnchors, result: scenicResult };
+            console.log(`[AI Route Planner] Scenic route accepted: ${scenicResult.distance.toFixed(2)}km (${errorPercent.toFixed(1)}% error)`);
+          }
+        }
+      }
+    }
     
-    // Step 2b: Feed waypoints to Google to get actual route with elevation
-    const routeResult = await fetchRouteWithElevation(
-      { lat: startLat, lng: startLng },
-      aiResult.waypoints
-    );
+    // Fall back to geometric calibration if scenic route didn't work
+    if (!calibrationResult) {
+      calibrationResult = await calibrateRouteDistance(
+        startLat,
+        startLng,
+        targetDistance,
+        config.shape,
+        config.rotation,
+        15, // 15% tolerance
+        4   // max iterations
+      );
+    }
     
-    if (!routeResult.success) {
-      console.log(`[AI Route Planner] Route ${i} failed: ${routeResult.error}`);
+    if (!calibrationResult) {
+      console.log(`[AI Route Planner] Route ${i} calibration failed, skipping`);
       continue;
     }
     
-    const hasMajorRoads = containsMajorRoads(routeResult.instructions);
-    const uniqueness = calculatePathUniqueness(routeResult.polyline);
-    const elevationGain = routeResult.elevation?.gain || 0;
-    const difficultyScore = calculateDifficultyScore(hasMajorRoads, uniqueness, elevationGain, difficulty);
+    const { waypoints, result } = calibrationResult;
     
-    // Determine final difficulty based on actual route characteristics
-    let finalDifficulty = difficulty;
-    if (hasMajorRoads && difficulty !== "hard") {
-      finalDifficulty = "hard"; // Major roads always make it hard
+    const hasMajorRoads = containsMajorRoads(result.instructions);
+    const uniqueness = calculatePathUniqueness(result.polyline);
+    const elevationGain = result.elevation?.gain || 0;
+    const difficultyScore = calculateDifficultyScore(hasMajorRoads, uniqueness, elevationGain);
+    
+    // Reject routes with too much backtracking (not real loops)
+    if (uniqueness < 0.4) {
+      console.log(`[AI Route Planner] Route ${i} rejected: too much backtracking (${(uniqueness * 100).toFixed(0)}% unique)`);
+      continue;
     }
     
-    const variance = ((routeResult.distance - targetDistance) / targetDistance) * 100;
-    console.log(`[AI Route Planner] Route ${i}: ${routeResult.distance.toFixed(2)}km (${variance.toFixed(1)}% off target), ${finalDifficulty}, elevation gain: ${elevationGain}m`);
+    // Adjust final difficulty based on actual characteristics
+    let finalDifficulty = difficulty;
+    if (hasMajorRoads && difficulty !== "hard") {
+      finalDifficulty = "hard";
+    } else if (elevationGain > 80 && difficulty === "easy") {
+      finalDifficulty = "moderate";
+    }
+    
+    const errorPercent = ((result.distance - targetDistance) / targetDistance) * 100;
+    console.log(`[AI Route Planner] Route ${i}: ${result.distance.toFixed(2)}km (${errorPercent.toFixed(1)}% off target), ${finalDifficulty}, elevation: +${elevationGain}m`);
     
     candidates.push({
       id: `ai-route-${i}`,
-      waypoints: aiResult.waypoints,
-      actualDistance: routeResult.distance,
-      duration: routeResult.duration,
-      polyline: routeResult.polyline,
-      routeName: `${routeResult.distance.toFixed(1)}km ${finalDifficulty} Loop`,
+      waypoints,
+      actualDistance: result.distance,
+      duration: result.duration,
+      polyline: result.polyline,
+      routeName: `${result.distance.toFixed(1)}km ${finalDifficulty} Loop`,
       difficulty: finalDifficulty,
       difficultyScore,
       hasMajorRoads,
       uniquenessScore: uniqueness,
       deadEndCount: 0,
-      elevation: routeResult.elevation,
-      aiReasoning: aiResult.reasoning,
+      elevation: result.elevation,
+      aiReasoning: `${config.shape} template with ${config.rotation}° rotation`,
     });
   }
   
   if (candidates.length === 0) {
-    return { success: false, routes: [], error: "Could not generate any routes" };
+    return { success: false, routes: [], error: "Could not generate any routes matching criteria" };
   }
   
-  // Step 3: Organize routes by difficulty (3 easy, 3 moderate, 3 hard)
+  // Sort candidates by distance accuracy first, then by quality
+  candidates.sort((a, b) => {
+    const aError = Math.abs(a.actualDistance - targetDistance);
+    const bError = Math.abs(b.actualDistance - targetDistance);
+    if (Math.abs(aError - bError) > 0.3) {
+      return aError - bError; // Prioritize distance accuracy
+    }
+    return a.difficultyScore - b.difficultyScore; // Then quality (lower = better)
+  });
+  
+  // Organize routes by difficulty (up to 3 per category)
   const easyRoutes = candidates.filter(r => r.difficulty === "easy").slice(0, 3);
   const moderateRoutes = candidates.filter(r => r.difficulty === "moderate").slice(0, 3);
   const hardRoutes = candidates.filter(r => r.difficulty === "hard").slice(0, 3);
   
-  // Fill in any missing slots
-  const remaining = candidates.filter(r => 
-    !easyRoutes.includes(r) && !moderateRoutes.includes(r) && !hardRoutes.includes(r)
-  );
+  // Fill missing slots from remaining candidates
+  const usedIds = new Set([...easyRoutes, ...moderateRoutes, ...hardRoutes].map(r => r.id));
+  const remaining = candidates.filter(r => !usedIds.has(r.id));
   
   while (easyRoutes.length < 3 && remaining.length > 0) {
     const route = remaining.shift()!;
@@ -667,7 +667,8 @@ export async function generateAIRoutes(request: RouteRequest): Promise<MultiRout
   
   const finalRoutes = [...easyRoutes, ...moderateRoutes, ...hardRoutes];
   
-  console.log(`[AI Route Planner] Generated ${finalRoutes.length} AI-powered routes: ${easyRoutes.length} easy, ${moderateRoutes.length} moderate, ${hardRoutes.length} hard`);
+  console.log(`[AI Route Planner] Generated ${finalRoutes.length} calibrated routes`);
+  console.log(`[AI Route Planner] Distance range: ${Math.min(...finalRoutes.map(r => r.actualDistance)).toFixed(2)}km - ${Math.max(...finalRoutes.map(r => r.actualDistance)).toFixed(2)}km (target: ${targetDistance}km)`);
   
   return {
     success: true,
