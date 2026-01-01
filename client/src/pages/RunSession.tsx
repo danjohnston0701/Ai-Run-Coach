@@ -275,6 +275,7 @@ export default function RunSession() {
   const [coachPreferences, setCoachPreferences] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [showExitConfirmation, setShowExitConfirmation] = useState(false);
+  const [showPauseConfirmation, setShowPauseConfirmation] = useState(false);
   const [userProfile, setUserProfile] = useState<{
     name?: string;
     dob?: string;
@@ -1347,6 +1348,21 @@ export default function RunSession() {
     setShowExitConfirmation(true);
   };
 
+  const handlePauseClick = () => {
+    if (active) {
+      setShowPauseConfirmation(true);
+    } else {
+      setActive(true);
+      speak("Let's go! Run resumed.");
+    }
+  };
+
+  const confirmPause = () => {
+    setShowPauseConfirmation(false);
+    setActive(false);
+    speak("Run paused. Take a breather.");
+  };
+
   const confirmStop = () => {
     setShowExitConfirmation(false);
     if (audioRef.current) {
@@ -1638,8 +1654,12 @@ export default function RunSession() {
           
           <Button 
             size="icon" 
-            className="w-14 h-14 rounded-full bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-transform active:scale-95"
-            onClick={() => setActive(!active)}
+            className={`w-14 h-14 rounded-full transition-transform active:scale-95 ${
+              active 
+                ? "bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)]" 
+                : "bg-green-500 text-white hover:bg-green-600 shadow-[0_0_30px_rgba(34,197,94,0.4)]"
+            }`}
+            onClick={handlePauseClick}
             data-testid="button-toggle-play"
           >
             {active ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-1" />}
@@ -1693,6 +1713,37 @@ export default function RunSession() {
               data-testid="button-confirm-exit"
             >
               End Run
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showPauseConfirmation} onOpenChange={setShowPauseConfirmation}>
+        <AlertDialogContent className="bg-card border-white/10 rounded-2xl max-w-sm">
+          <AlertDialogHeader>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 rounded-full bg-yellow-500/20">
+                <Pause className="w-5 h-5 text-yellow-500" />
+              </div>
+              <AlertDialogTitle className="text-lg font-display font-bold">Pause Run?</AlertDialogTitle>
+            </div>
+            <AlertDialogDescription className="text-muted-foreground text-sm">
+              Are you sure you want to pause your run? The timer will stop until you resume.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex gap-2 mt-4">
+            <AlertDialogCancel 
+              className="flex-1 h-11 bg-white/5 border-white/10 hover:bg-white/10 text-foreground rounded-xl font-bold uppercase text-xs tracking-wider"
+              data-testid="button-cancel-pause"
+            >
+              Keep Running
+            </AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={confirmPause}
+              className="flex-1 h-11 bg-yellow-500 hover:bg-yellow-600 text-black rounded-xl font-bold uppercase text-xs tracking-wider"
+              data-testid="button-confirm-pause"
+            >
+              Pause Run
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
