@@ -1,7 +1,12 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertPreRegistrationSchema, insertUserSchema, insertRouteSchema, insertRunSchema, insertLiveRunSessionSchema, insertPushSubscriptionSchema } from "@shared/schema";
+import { 
+  insertPreRegistrationSchema, insertUserSchema, insertRouteSchema, insertRunSchema, 
+  insertLiveRunSessionSchema, insertPushSubscriptionSchema,
+  insertAiCoachDescriptionSchema, insertAiCoachInstructionSchema, 
+  insertAiCoachKnowledgeSchema, insertAiCoachFaqSchema
+} from "@shared/schema";
 import { z } from "zod";
 import { generateRoute, getCoachingAdvice, analyzeRunPerformance, generateTTS, type CoachTone, type TTSVoice } from "./openai";
 import { generateCircularRoute, generateMultipleRoutes, isGoogleMapsConfigured } from "./routePlanner";
@@ -1171,6 +1176,213 @@ export async function registerRoutes(
     } catch (error: any) {
       const errorMessage = error?.message || "Failed to cancel friend request";
       res.status(500).json({ error: errorMessage });
+    }
+  });
+
+  // =============================================
+  // ADMIN: AI Coach Configuration Endpoints
+  // =============================================
+
+  // Middleware to check admin status
+  const requireAdmin = async (req: any, res: any, next: any) => {
+    const userId = req.headers['x-user-id'] || req.body.userId;
+    if (!userId) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    const user = await storage.getUser(userId);
+    if (!user?.isAdmin) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+    req.adminUser = user;
+    next();
+  };
+
+  // Check if user is admin
+  app.get("/api/admin/check", async (req, res) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) {
+        return res.json({ isAdmin: false });
+      }
+      const user = await storage.getUser(userId);
+      res.json({ isAdmin: user?.isAdmin || false });
+    } catch (error) {
+      res.json({ isAdmin: false });
+    }
+  });
+
+  // AI Coach Description
+  app.get("/api/admin/ai-config/description", requireAdmin, async (req, res) => {
+    try {
+      const description = await storage.getAiCoachDescription();
+      res.json(description || null);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get description" });
+    }
+  });
+
+  app.put("/api/admin/ai-config/description", requireAdmin, async (req, res) => {
+    try {
+      const { content } = req.body;
+      if (!content || typeof content !== 'string') {
+        return res.status(400).json({ error: "Content is required" });
+      }
+      const description = await storage.upsertAiCoachDescription(content);
+      res.json(description);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update description" });
+    }
+  });
+
+  // AI Coach Instructions
+  app.get("/api/admin/ai-config/instructions", requireAdmin, async (req, res) => {
+    try {
+      const instructions = await storage.getAiCoachInstructions();
+      res.json(instructions);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get instructions" });
+    }
+  });
+
+  app.post("/api/admin/ai-config/instructions", requireAdmin, async (req, res) => {
+    try {
+      const data = insertAiCoachInstructionSchema.parse(req.body);
+      const instruction = await storage.createAiCoachInstruction(data);
+      res.status(201).json(instruction);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      res.status(500).json({ error: "Failed to create instruction" });
+    }
+  });
+
+  app.put("/api/admin/ai-config/instructions/:id", requireAdmin, async (req, res) => {
+    try {
+      const instruction = await storage.updateAiCoachInstruction(req.params.id, req.body);
+      if (!instruction) {
+        return res.status(404).json({ error: "Instruction not found" });
+      }
+      res.json(instruction);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update instruction" });
+    }
+  });
+
+  app.delete("/api/admin/ai-config/instructions/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteAiCoachInstruction(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete instruction" });
+    }
+  });
+
+  // AI Coach Knowledge Base
+  app.get("/api/admin/ai-config/knowledge", requireAdmin, async (req, res) => {
+    try {
+      const knowledge = await storage.getAiCoachKnowledge();
+      res.json(knowledge);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get knowledge" });
+    }
+  });
+
+  app.post("/api/admin/ai-config/knowledge", requireAdmin, async (req, res) => {
+    try {
+      const data = insertAiCoachKnowledgeSchema.parse(req.body);
+      const knowledge = await storage.createAiCoachKnowledge(data);
+      res.status(201).json(knowledge);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      res.status(500).json({ error: "Failed to create knowledge" });
+    }
+  });
+
+  app.put("/api/admin/ai-config/knowledge/:id", requireAdmin, async (req, res) => {
+    try {
+      const knowledge = await storage.updateAiCoachKnowledge(req.params.id, req.body);
+      if (!knowledge) {
+        return res.status(404).json({ error: "Knowledge not found" });
+      }
+      res.json(knowledge);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update knowledge" });
+    }
+  });
+
+  app.delete("/api/admin/ai-config/knowledge/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteAiCoachKnowledge(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete knowledge" });
+    }
+  });
+
+  // AI Coach FAQ
+  app.get("/api/admin/ai-config/faqs", requireAdmin, async (req, res) => {
+    try {
+      const faqs = await storage.getAiCoachFaqs();
+      res.json(faqs);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get FAQs" });
+    }
+  });
+
+  app.post("/api/admin/ai-config/faqs", requireAdmin, async (req, res) => {
+    try {
+      const data = insertAiCoachFaqSchema.parse(req.body);
+      const faq = await storage.createAiCoachFaq(data);
+      res.status(201).json(faq);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      res.status(500).json({ error: "Failed to create FAQ" });
+    }
+  });
+
+  app.put("/api/admin/ai-config/faqs/:id", requireAdmin, async (req, res) => {
+    try {
+      const faq = await storage.updateAiCoachFaq(req.params.id, req.body);
+      if (!faq) {
+        return res.status(404).json({ error: "FAQ not found" });
+      }
+      res.json(faq);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update FAQ" });
+    }
+  });
+
+  app.delete("/api/admin/ai-config/faqs/:id", requireAdmin, async (req, res) => {
+    try {
+      await storage.deleteAiCoachFaq(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete FAQ" });
+    }
+  });
+
+  // Get all AI config (for coaching calls - no admin check)
+  app.get("/api/ai-config/all", async (req, res) => {
+    try {
+      const [description, instructions, knowledge, faqs] = await Promise.all([
+        storage.getAiCoachDescription(),
+        storage.getAiCoachInstructions(),
+        storage.getAiCoachKnowledge(),
+        storage.getAiCoachFaqs()
+      ]);
+      res.json({
+        description: description?.content || null,
+        instructions: instructions.filter(i => i.isActive),
+        knowledge: knowledge.filter(k => k.isActive),
+        faqs: faqs.filter(f => f.isActive)
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get AI config" });
     }
   });
 
