@@ -525,7 +525,7 @@ export default function RunSession() {
     console.log("Fallback device TTS used with voice:", cachedVoiceRef.current?.name || "default");
   }, [getCoachVoice, coachSettings]);
 
-  const speak = useCallback(async (text: string, force: boolean = false) => {
+  const speak = useCallback((text: string, force: boolean = false) => {
     console.log("speak() called with:", text, "audioEnabled:", audioEnabled, "force:", force);
     if (!force && !audioEnabled) {
       console.log("Speech blocked: audio disabled");
@@ -533,61 +533,9 @@ export default function RunSession() {
     }
     
     cleanupAudio();
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-    
-    const ttsVoice = getTTSVoice(coachSettings);
-    const prefs = getVoicePreferences(coachSettings);
-    
-    try {
-      console.log(`Calling TTS API: voice=${ttsVoice}, tone=${coachSettings.tone}`);
-      const response = await fetch('/api/ai/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          tone: coachSettings.tone,
-          voice: ttsVoice,
-          speed: prefs.rate
-        })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`TTS API error: ${response.status}`);
-      }
-      
-      const audioBlob = await response.blob();
-      const audioUrl = URL.createObjectURL(audioBlob);
-      audioUrlRef.current = audioUrl;
-      
-      const audio = new Audio(audioUrl);
-      audioRef.current = audio;
-      audio.volume = 1;
-      
-      audio.onended = () => {
-        if (audioUrlRef.current === audioUrl) {
-          URL.revokeObjectURL(audioUrl);
-          audioUrlRef.current = null;
-        }
-        console.log("OpenAI TTS playback ended");
-      };
-      audio.onerror = (e) => {
-        console.error("Audio playback error:", e);
-        if (audioUrlRef.current === audioUrl) {
-          URL.revokeObjectURL(audioUrl);
-          audioUrlRef.current = null;
-        }
-        speakWithDeviceTTS(text);
-      };
-      
-      await audio.play();
-      console.log("OpenAI TTS playback started");
-    } catch (error) {
-      console.error("TTS API failed, using device fallback:", error);
-      speakWithDeviceTTS(text);
-    }
-  }, [audioEnabled, coachSettings, speakWithDeviceTTS, cleanupAudio]);
+    speakWithDeviceTTS(text);
+    console.log("Using device TTS for navigation/directions (cost-saving mode)");
+  }, [audioEnabled, speakWithDeviceTTS, cleanupAudio]);
 
   useEffect(() => {
     if (!('geolocation' in navigator)) {
