@@ -38,6 +38,11 @@ export interface IStorage {
   createRoute(data: InsertRoute): Promise<Route>;
   getRoute(id: string): Promise<Route | undefined>;
   getUserRoutes(userId: string): Promise<Route[]>;
+  getRecentRoutes(limit?: number): Promise<Route[]>;
+  getAllRoutes(filters?: { difficulty?: string; userId?: string }): Promise<Route[]>;
+  toggleRouteFavorite(id: string): Promise<Route | undefined>;
+  getFavoriteRoutes(userId?: string): Promise<Route[]>;
+  getRoutesByLocation(startLat: number, startLng: number, radiusKm?: number): Promise<Route[]>;
 
   createRun(data: InsertRun): Promise<Run>;
   getRun(id: string): Promise<Run | undefined>;
@@ -178,6 +183,72 @@ export class DatabaseStorage implements IStorage {
 
   async getUserRoutes(userId: string): Promise<Route[]> {
     return db.select().from(routes).where(eq(routes.userId, userId)).orderBy(desc(routes.createdAt));
+  }
+
+  async getRecentRoutes(limit: number = 4): Promise<Route[]> {
+    return withRetry(async () => {
+      return db.select().from(routes).orderBy(desc(routes.createdAt)).limit(limit);
+    });
+  }
+
+  async getAllRoutes(filters?: { difficulty?: string; userId?: string }): Promise<Route[]> {
+    return withRetry(async () => {
+      const conditions = [];
+      
+      if (filters?.difficulty) {
+        conditions.push(eq(routes.difficulty, filters.difficulty));
+      }
+      if (filters?.userId) {
+        conditions.push(eq(routes.userId, filters.userId));
+      }
+      
+      if (conditions.length > 0) {
+        return db.select().from(routes)
+          .where(and(...conditions))
+          .orderBy(desc(routes.createdAt));
+      }
+      
+      return db.select().from(routes).orderBy(desc(routes.createdAt));
+    });
+  }
+
+  async toggleRouteFavorite(id: string): Promise<Route | undefined> {
+    return withRetry(async () => {
+      const [route] = await db.select().from(routes).where(eq(routes.id, id));
+      if (!route) return undefined;
+      
+      const [updated] = await db.update(routes)
+        .set({ isFavorite: !route.isFavorite })
+        .where(eq(routes.id, id))
+        .returning();
+      return updated;
+    });
+  }
+
+  async getFavoriteRoutes(userId?: string): Promise<Route[]> {
+    return withRetry(async () => {
+      if (userId) {
+        return db.select().from(routes)
+          .where(and(eq(routes.isFavorite, true), eq(routes.userId, userId)))
+          .orderBy(desc(routes.createdAt));
+      }
+      return db.select().from(routes)
+        .where(eq(routes.isFavorite, true))
+        .orderBy(desc(routes.createdAt));
+    });
+  }
+
+  async getRoutesByLocation(startLat: number, startLng: number, radiusKm: number = 0.5): Promise<Route[]> {
+    return withRetry(async () => {
+      const allRoutes = await db.select().from(routes).orderBy(desc(routes.createdAt));
+      
+      return allRoutes.filter(route => {
+        const latDiff = Math.abs(route.startLat - startLat);
+        const lngDiff = Math.abs(route.startLng - startLng);
+        const approxDistKm = Math.sqrt(latDiff * latDiff + lngDiff * lngDiff) * 111;
+        return approxDistKm <= radiusKm;
+      });
+    });
   }
 
   async createRun(data: InsertRun): Promise<Run> {

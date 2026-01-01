@@ -173,7 +173,79 @@ export async function registerRoutes(
     }
   });
 
-  // Generate multiple route options (9 routes: 3 easy, 3 moderate, 3 hard)
+  // Get recent routes
+  app.get("/api/routes/recent", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 4;
+      const routes = await storage.getRecentRoutes(limit);
+      res.json(routes);
+    } catch (error) {
+      console.error("Failed to get recent routes:", error);
+      res.status(500).json({ error: "Failed to get recent routes" });
+    }
+  });
+
+  // Get all routes with optional filters
+  app.get("/api/routes", async (req, res) => {
+    try {
+      const { difficulty, userId } = req.query;
+      const filters: { difficulty?: string; userId?: string } = {};
+      if (difficulty) filters.difficulty = difficulty as string;
+      if (userId) filters.userId = userId as string;
+      const routes = await storage.getAllRoutes(filters);
+      res.json(routes);
+    } catch (error) {
+      console.error("Failed to get routes:", error);
+      res.status(500).json({ error: "Failed to get routes" });
+    }
+  });
+
+  // Get favorite routes
+  app.get("/api/routes/favorites", async (req, res) => {
+    try {
+      const { userId } = req.query;
+      const routes = await storage.getFavoriteRoutes(userId as string | undefined);
+      res.json(routes);
+    } catch (error) {
+      console.error("Failed to get favorite routes:", error);
+      res.status(500).json({ error: "Failed to get favorite routes" });
+    }
+  });
+
+  // Toggle route favorite
+  app.post("/api/routes/:id/favorite", async (req, res) => {
+    try {
+      const route = await storage.toggleRouteFavorite(req.params.id);
+      if (!route) {
+        return res.status(404).json({ error: "Route not found" });
+      }
+      res.json(route);
+    } catch (error) {
+      console.error("Failed to toggle favorite:", error);
+      res.status(500).json({ error: "Failed to toggle favorite" });
+    }
+  });
+
+  // Get routes by location
+  app.get("/api/routes/by-location", async (req, res) => {
+    try {
+      const { lat, lng, radiusKm } = req.query;
+      if (!lat || !lng) {
+        return res.status(400).json({ error: "Missing lat/lng parameters" });
+      }
+      const routes = await storage.getRoutesByLocation(
+        parseFloat(lat as string),
+        parseFloat(lng as string),
+        radiusKm ? parseFloat(radiusKm as string) : 0.5
+      );
+      res.json(routes);
+    } catch (error) {
+      console.error("Failed to get routes by location:", error);
+      res.status(500).json({ error: "Failed to get routes by location" });
+    }
+  });
+
+  // Generate multiple route options (5 routes: mixed difficulties)
   // Uses AI-powered route planning: Google for area data → OpenAI for waypoint design → Google for final route
   app.post("/api/routes/generate-options", async (req, res) => {
     try {
@@ -226,11 +298,59 @@ export async function registerRoutes(
         return res.status(400).json({ error: result.error || "Could not generate routes. Please try a different location or distance." });
       }
 
+      // Get location label for grouping
+      let startLocationLabel = "Unknown Location";
+      try {
+        const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${startLat},${startLng}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+        const geocodeRes = await fetch(geocodeUrl);
+        const geocodeData = await geocodeRes.json();
+        if (geocodeData.results && geocodeData.results.length > 0) {
+          const components = geocodeData.results[0].address_components;
+          const neighborhood = components?.find((c: any) => c.types.includes('neighborhood'))?.long_name;
+          const locality = components?.find((c: any) => c.types.includes('locality'))?.long_name;
+          const sublocality = components?.find((c: any) => c.types.includes('sublocality'))?.long_name;
+          startLocationLabel = neighborhood || sublocality || locality || geocodeData.results[0].formatted_address?.split(',')[0] || "Unknown Location";
+        }
+      } catch (err) {
+        console.log("[Route API] Could not get location label");
+      }
+
+      // Save routes to database
+      const savedRoutes = [];
+      for (const route of result.routes) {
+        try {
+          const savedRoute = await storage.createRoute({
+            userId: userId || null,
+            name: route.routeName,
+            distance: route.actualDistance,
+            difficulty: route.difficulty,
+            startLat: parseFloat(startLat),
+            startLng: parseFloat(startLng),
+            endLat: parseFloat(startLat),
+            endLng: parseFloat(startLng),
+            waypoints: route.waypoints,
+            polyline: route.polyline,
+            elevation: route.elevation?.gain || null,
+            elevationGain: route.elevation?.gain || null,
+            elevationLoss: route.elevation?.loss || null,
+            elevationProfile: route.elevation?.profile || null,
+            estimatedTime: route.duration,
+            terrainType: route.hasMajorRoads ? 'road' : 'mixed',
+            startLocationLabel,
+          });
+          savedRoutes.push({ ...route, dbId: savedRoute.id });
+        } catch (saveErr) {
+          console.error("[Route API] Failed to save route:", saveErr);
+          savedRoutes.push(route);
+        }
+      }
+
       res.json({
         success: true,
-        routes: result.routes,
+        routes: savedRoutes,
         targetDistance: parseFloat(targetDistance),
         generationMethod: useAI ? "ai-powered" : "geometric",
+        startLocationLabel,
       });
     } catch (error) {
       console.error("Multi-route generation error:", error);

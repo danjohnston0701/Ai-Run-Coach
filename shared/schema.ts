@@ -46,10 +46,15 @@ export const routes = pgTable("routes", {
   endLat: real("end_lat"),
   endLng: real("end_lng"),
   waypoints: jsonb("waypoints"),
+  polyline: text("polyline"),
   elevation: real("elevation"),
+  elevationGain: real("elevation_gain"),
+  elevationLoss: real("elevation_loss"),
   elevationProfile: jsonb("elevation_profile"),
   estimatedTime: integer("estimated_time"),
   terrainType: text("terrain_type"),
+  startLocationLabel: text("start_location_label"),
+  isFavorite: boolean("is_favorite").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

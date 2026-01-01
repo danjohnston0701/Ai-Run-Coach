@@ -723,12 +723,12 @@ export async function generateAIRoutes(
   const acceptedPolylines: string[] = [];
   
   for (const maxBacktrack of backtrackThresholds) {
-    if (candidates.length >= 9) break;
+    if (candidates.length >= 5) break;
     
     console.log(`[Route Gen] Trying with backtrack threshold ${(maxBacktrack*100).toFixed(0)}%`);
     
     for (const template of templates) {
-      if (candidates.length >= 9) break;
+      if (candidates.length >= 5) break;
       
       const cached = calibratedCache.get(template.name);
       if (!cached) continue;
