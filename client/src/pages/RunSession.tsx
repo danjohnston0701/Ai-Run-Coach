@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { VoiceVisualizer } from "@/components/VoiceVisualizer";
@@ -6,7 +6,7 @@ import { RouteMap } from "@/components/RouteMap";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { 
-  Pause, Play, Square, MapPin, Heart, Wind, Map, Share2, Users, Eye, EyeOff 
+  Pause, Play, Square, Heart, Map, Share2, Users, Navigation, Volume2, VolumeX 
 } from "lucide-react";
 import type { Friend } from "./Profile";
 
@@ -15,26 +15,138 @@ import mapBeginner from "@assets/generated_images/dark_mode_map_with_flat_green_
 import mapModerate from "@assets/generated_images/dark_mode_map_with_yellow_moderate_route.png";
 import mapExpert from "@assets/generated_images/dark_mode_map_with_red_expert_route.png";
 
-const MESSAGES = [
+interface RouteData {
+  id: string;
+  routeName: string;
+  difficulty: string;
+  actualDistance: number;
+  polyline: string;
+  waypoints: Array<{ lat: number; lng: number }>;
+  startLat: number;
+  startLng: number;
+}
+
+interface Position {
+  lat: number;
+  lng: number;
+  timestamp: number;
+}
+
+function decodePolyline(encoded: string): Array<{ lat: number; lng: number }> {
+  const points: Array<{ lat: number; lng: number }> = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+
+  while (index < encoded.length) {
+    let b;
+    let shift = 0;
+    let result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlat = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+    lat += dlat;
+
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlng = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+    lng += dlng;
+
+    points.push({ lat: lat / 1e5, lng: lng / 1e5 });
+  }
+
+  return points;
+}
+
+function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function getBearing(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const y = Math.sin(dLng) * Math.cos(lat2 * Math.PI / 180);
+  const x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
+            Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dLng);
+  const bearing = Math.atan2(y, x) * 180 / Math.PI;
+  return (bearing + 360) % 360;
+}
+
+function getDirectionInstruction(currentBearing: number, nextBearing: number, distanceToWaypoint: number): string {
+  const diff = ((nextBearing - currentBearing + 540) % 360) - 180;
+  const distanceMeters = Math.round(distanceToWaypoint * 1000);
+  
+  if (Math.abs(diff) < 20) {
+    return `Continue straight for ${distanceMeters} meters`;
+  } else if (diff > 0 && diff < 70) {
+    return `In ${distanceMeters} meters, turn slightly right`;
+  } else if (diff >= 70 && diff < 110) {
+    return `In ${distanceMeters} meters, turn right`;
+  } else if (diff >= 110) {
+    return `In ${distanceMeters} meters, turn sharp right`;
+  } else if (diff < 0 && diff > -70) {
+    return `In ${distanceMeters} meters, turn slightly left`;
+  } else if (diff <= -70 && diff > -110) {
+    return `In ${distanceMeters} meters, turn left`;
+  } else {
+    return `In ${distanceMeters} meters, turn sharp left`;
+  }
+}
+
+const COACH_MESSAGES = [
   "Good pace. Keep your breathing steady.",
-  "You're approaching a slight incline. Shorten your stride.",
-  "Heart rate is optimal. Push a little harder.",
+  "You're doing great! Stay focused.",
+  "Heart rate is optimal. Keep it up.",
   "Relax your shoulders. Form looks good.",
-  "Halfway to your next checkpoint.",
   "Focus on your rhythm. In, two, three. Out, two, three."
 ];
 
 export default function RunSession() {
   const [active, setActive] = useState(true);
   const [time, setTime] = useState(0);
-  const [distance, setDistance] = useState(0.00);
-  const [message, setMessage] = useState("Starting run session...");
+  const [distance, setDistance] = useState(0);
+  const [message, setMessage] = useState("Acquiring GPS signal...");
   const [lastMessageTime, setLastMessageTime] = useState(0);
   const [showMap, setShowMap] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [friends, setFriends] = useState<Friend[]>([]);
   const [sharedWith, setSharedWith] = useState<string[]>([]);
   const [, setLocation] = useLocation();
+  
+  const [currentPosition, setCurrentPosition] = useState<Position | null>(null);
+  const [gpsStatus, setGpsStatus] = useState<"acquiring" | "active" | "error">("acquiring");
+  const [routeData, setRouteData] = useState<RouteData | null>(null);
+  const [routePoints, setRoutePoints] = useState<Array<{ lat: number; lng: number }>>([]);
+  const [currentWaypointIndex, setCurrentWaypointIndex] = useState(0);
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [lastDirectionTime, setLastDirectionTime] = useState(0);
+  
+  const positionsRef = useRef<Position[]>([]);
+  const watchIdRef = useRef<number | null>(null);
+  const speechSynthRef = useRef<SpeechSynthesisUtterance | null>(null);
+
+  const searchParams = new URLSearchParams(window.location.search);
+  const targetDistance = searchParams.get("distance") || "5";
+  const levelId = searchParams.get("level") || "beginner";
+  const lat = parseFloat(searchParams.get("lat") || "40.7128");
+  const lng = parseFloat(searchParams.get("lng") || "-74.0060");
+  const routeName = searchParams.get("routeName") || "";
+  const routeId = searchParams.get("routeId") || "";
 
   useEffect(() => {
     const profile = localStorage.getItem("userProfile");
@@ -42,7 +154,196 @@ export default function RunSession() {
       const parsed = JSON.parse(profile);
       setFriends(parsed.friends || []);
     }
+    
+    const savedRoute = localStorage.getItem("activeRoute");
+    if (savedRoute) {
+      const route: RouteData = JSON.parse(savedRoute);
+      setRouteData(route);
+      if (route.polyline) {
+        const points = decodePolyline(route.polyline);
+        setRoutePoints(points);
+      }
+    }
   }, []);
+
+  const speak = useCallback((text: string) => {
+    if (!audioEnabled || !('speechSynthesis' in window)) return;
+    
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.9;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    speechSynthRef.current = utterance;
+    window.speechSynthesis.speak(utterance);
+  }, [audioEnabled]);
+
+  useEffect(() => {
+    if (!('geolocation' in navigator)) {
+      setGpsStatus("error");
+      setMessage("GPS not available on this device");
+      return;
+    }
+
+    const handlePosition = (position: GeolocationPosition) => {
+      const newPos: Position = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        timestamp: position.timestamp
+      };
+      
+      setCurrentPosition(newPos);
+      
+      if (gpsStatus === "acquiring") {
+        setGpsStatus("active");
+        setMessage("GPS locked! Start running.");
+        speak("GPS signal acquired. Your run has started.");
+      }
+      
+      if (active && positionsRef.current.length > 0) {
+        const lastPos = positionsRef.current[positionsRef.current.length - 1];
+        const segmentDistance = haversineDistance(
+          lastPos.lat, lastPos.lng,
+          newPos.lat, newPos.lng
+        );
+        
+        const timeDiff = (newPos.timestamp - lastPos.timestamp) / 1000;
+        const speedKmh = timeDiff > 0 ? (segmentDistance / timeDiff) * 3600 : 0;
+        
+        if (segmentDistance > 0.0005 && segmentDistance < 0.1 && speedKmh < 30) {
+          setDistance(d => d + segmentDistance);
+        }
+      }
+      
+      positionsRef.current.push(newPos);
+    };
+
+    const handleError = (error: GeolocationPositionError) => {
+      console.error("GPS Error:", error);
+      setGpsStatus("error");
+      switch (error.code) {
+        case error.PERMISSION_DENIED:
+          setMessage("Please enable location access");
+          break;
+        case error.POSITION_UNAVAILABLE:
+          setMessage("GPS signal unavailable");
+          break;
+        case error.TIMEOUT:
+          setMessage("GPS timeout - trying again...");
+          break;
+      }
+    };
+
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      handlePosition,
+      handleError,
+      {
+        enableHighAccuracy: true,
+        maximumAge: 1000,
+        timeout: 10000
+      }
+    );
+
+    return () => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+    };
+  }, [active, gpsStatus, speak]);
+
+  useEffect(() => {
+    if (!active || !currentPosition || routePoints.length < 2) return;
+    
+    const now = Date.now();
+    if (now - lastDirectionTime < 12000) return;
+    
+    let nearestIndex = currentWaypointIndex;
+    let nearestDistance = Infinity;
+    
+    const searchWindow = Math.min(100, routePoints.length - currentWaypointIndex);
+    for (let i = currentWaypointIndex; i < currentWaypointIndex + searchWindow; i++) {
+      if (i >= routePoints.length) break;
+      const point = routePoints[i];
+      const dist = haversineDistance(currentPosition.lat, currentPosition.lng, point.lat, point.lng);
+      if (dist < nearestDistance) {
+        nearestDistance = dist;
+        nearestIndex = i;
+      }
+    }
+    
+    if (nearestIndex > currentWaypointIndex) {
+      setCurrentWaypointIndex(nearestIndex);
+    }
+    
+    const remainingPoints = routePoints.length - nearestIndex;
+    if (remainingPoints < 10 && nearestDistance < 0.05) {
+      speak("You're approaching the finish. Great job!");
+      setMessage("Almost there! Finish strong!");
+      setLastDirectionTime(now);
+      setLastMessageTime(now);
+      return;
+    }
+    
+    const lookAheadDistance = Math.min(50, Math.floor(routePoints.length * 0.05));
+    const lookAhead = Math.min(nearestIndex + Math.max(lookAheadDistance, 15), routePoints.length - 1);
+    
+    if (lookAhead > nearestIndex && nearestDistance < 0.05) {
+      const nextPoint = routePoints[lookAhead];
+      const distToNext = haversineDistance(
+        currentPosition.lat, currentPosition.lng,
+        nextPoint.lat, nextPoint.lng
+      );
+      
+      if (distToNext < 0.2) {
+        const currentBearing = getBearing(
+          currentPosition.lat, currentPosition.lng,
+          routePoints[nearestIndex].lat, routePoints[nearestIndex].lng
+        );
+        
+        const futureLookAhead = Math.min(lookAhead + lookAheadDistance, routePoints.length - 1);
+        const futurePoint = routePoints[futureLookAhead];
+        const nextBearing = getBearing(
+          nextPoint.lat, nextPoint.lng,
+          futurePoint.lat, futurePoint.lng
+        );
+        
+        const diff = Math.abs(((nextBearing - currentBearing + 540) % 360) - 180);
+        
+        if (diff > 30) {
+          const instruction = getDirectionInstruction(currentBearing, nextBearing, distToNext);
+          speak(instruction);
+          setMessage(instruction);
+          setLastDirectionTime(now);
+          setLastMessageTime(now);
+        }
+      }
+    }
+  }, [active, currentPosition, routePoints, currentWaypointIndex, lastDirectionTime, speak]);
+
+  useEffect(() => {
+    if (!active) return;
+    
+    const interval = setInterval(() => {
+      if (Date.now() - lastMessageTime > 30000 && gpsStatus === "active") {
+        const randomMsg = COACH_MESSAGES[Math.floor(Math.random() * COACH_MESSAGES.length)];
+        setMessage(randomMsg);
+        speak(randomMsg);
+        setLastMessageTime(Date.now());
+      }
+    }, 20000);
+
+    return () => clearInterval(interval);
+  }, [active, lastMessageTime, gpsStatus, speak]);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (active && gpsStatus === "active") {
+      interval = setInterval(() => {
+        setTime(t => t + 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [active, gpsStatus]);
 
   const toggleLiveShare = (friend: Friend) => {
     const friendId = friend.email || friend.name;
@@ -55,16 +356,6 @@ export default function RunSession() {
     }
   };
 
-  // Get query params manually since wouter doesn't parse them automatically in the hook
-  const searchParams = new URLSearchParams(window.location.search);
-  const targetDistance = searchParams.get("distance") || "5";
-  const levelId = searchParams.get("level") || "beginner";
-  const mapped = searchParams.get("mapped") === "true";
-  const lat = parseFloat(searchParams.get("lat") || "40.7128");
-  const lng = parseFloat(searchParams.get("lng") || "-74.0060");
-  const routeName = searchParams.get("routeName") || "";
-  const routeId = searchParams.get("routeId") || "";
-
   const getMapImage = () => {
     switch(levelId) {
       case 'expert': return mapExpert;
@@ -73,40 +364,6 @@ export default function RunSession() {
     }
   };
 
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (active) {
-      interval = setInterval(() => {
-        setTime(t => t + 1);
-        setDistance(d => d + 0.003); // Simulate distance
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [active]);
-
-  // AI Coach Logic
-  useEffect(() => {
-    if (!active) return;
-    
-    // Random message every 10-20 seconds
-    const interval = setInterval(() => {
-       const randomMsg = MESSAGES[Math.floor(Math.random() * MESSAGES.length)];
-       setMessage(randomMsg);
-       setLastMessageTime(Date.now());
-       
-       // Clear message after 5 seconds
-       setTimeout(() => {
-         if (Date.now() - lastMessageTime > 4000) {
-            setMessage(""); 
-         }
-       }, 5000);
-
-    }, 12000);
-
-    return () => clearInterval(interval);
-  }, [active, lastMessageTime]);
-
-
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -114,11 +371,53 @@ export default function RunSession() {
   };
 
   const calculatePace = () => {
-    if (distance === 0) return "0:00";
+    if (distance < 0.01) return "--:--";
     const paceSeconds = time / distance;
     const mins = Math.floor(paceSeconds / 60);
     const secs = Math.floor(paceSeconds % 60);
     return `${mins}'${secs.toString().padStart(2, '0')}"`;
+  };
+
+  const openGoogleMaps = () => {
+    if (!currentPosition) {
+      toast.error("Waiting for GPS signal...");
+      return;
+    }
+    
+    let mapsUrl = `https://www.google.com/maps/dir/?api=1`;
+    mapsUrl += `&origin=${currentPosition.lat},${currentPosition.lng}`;
+    
+    if (routeData && routeData.waypoints.length > 0) {
+      const destination = routeData.waypoints[routeData.waypoints.length - 1] || 
+                          { lat: routeData.startLat, lng: routeData.startLng };
+      mapsUrl += `&destination=${destination.lat},${destination.lng}`;
+      
+      if (routeData.waypoints.length > 1) {
+        const maxWaypoints = 8;
+        const allWaypoints = routeData.waypoints.slice(0, -1);
+        let sampledWaypoints = allWaypoints;
+        
+        if (allWaypoints.length > maxWaypoints) {
+          const step = allWaypoints.length / maxWaypoints;
+          sampledWaypoints = [];
+          for (let i = 0; i < maxWaypoints; i++) {
+            sampledWaypoints.push(allWaypoints[Math.floor(i * step)]);
+          }
+        }
+        
+        const waypointStr = sampledWaypoints
+          .map(w => `${w.lat.toFixed(6)},${w.lng.toFixed(6)}`)
+          .join('|');
+        mapsUrl += `&waypoints=${encodeURIComponent(waypointStr)}`;
+      }
+      
+      mapsUrl += `&travelmode=walking`;
+    } else {
+      mapsUrl += `&destination=${lat},${lng}`;
+      mapsUrl += `&travelmode=walking`;
+    }
+    
+    window.open(mapsUrl, '_blank');
   };
 
   const saveRunData = () => {
@@ -138,24 +437,28 @@ export default function RunSession() {
       lng,
       routeName,
       routeId,
+      gpsTrack: positionsRef.current.slice(0, 500),
     };
 
     const runHistory = localStorage.getItem("runHistory");
     const runs = runHistory ? JSON.parse(runHistory) : [];
     runs.push(runData);
     localStorage.setItem("runHistory", JSON.stringify(runs));
+    
+    localStorage.removeItem("activeRoute");
   };
 
   const handleStop = () => {
+    window.speechSynthesis.cancel();
     if (time > 0 && distance > 0) {
       saveRunData();
+      speak("Run complete! Great job!");
     }
     setLocation("/");
   };
 
   return (
     <div className="h-screen w-full bg-background text-foreground flex flex-col relative overflow-hidden font-sans select-none">
-      {/* Live Map View */}
       <AnimatePresence>
         {showMap && (
           <motion.div
@@ -172,17 +475,11 @@ export default function RunSession() {
         )}
       </AnimatePresence>
 
-      {/* Background Map Visual */}
       <div className="absolute inset-0 z-0 opacity-20">
-        {mapped ? (
-          <img src={getMapImage()} className="w-full h-full object-cover" alt="Map Route" />
-        ) : (
-          <div className="w-full h-full bg-slate-900" />
-        )}
+        <img src={getMapImage()} className="w-full h-full object-cover" alt="Map Route" />
         <div className="absolute inset-0 bg-gradient-to-b from-background via-transparent to-background" />
       </div>
 
-      {/* Share Live Modal */}
       <AnimatePresence>
         {showShareModal && (
           <motion.div 
@@ -259,12 +556,25 @@ export default function RunSession() {
         )}
       </AnimatePresence>
 
-      {/* Top HUD */}
       <div className="relative z-10 p-6 flex justify-between items-start">
         <div className="flex gap-2">
           <div className="bg-card/30 backdrop-blur-md rounded-xl p-3 border border-white/10">
             <div className="text-xs text-muted-foreground uppercase tracking-widest mb-1">Target</div>
             <div className="text-xl font-display font-bold text-primary">{targetDistance} km</div>
+          </div>
+          <div className={`backdrop-blur-md rounded-xl p-3 border flex items-center gap-2 ${
+            gpsStatus === "active" ? "bg-green-500/20 border-green-500/30" :
+            gpsStatus === "error" ? "bg-red-500/20 border-red-500/30" :
+            "bg-yellow-500/20 border-yellow-500/30"
+          }`}>
+            <div className={`w-2 h-2 rounded-full ${
+              gpsStatus === "active" ? "bg-green-500 animate-pulse" :
+              gpsStatus === "error" ? "bg-red-500" :
+              "bg-yellow-500 animate-pulse"
+            }`} />
+            <span className="text-xs font-bold uppercase">
+              {gpsStatus === "active" ? "GPS" : gpsStatus === "error" ? "No GPS" : "..."}
+            </span>
           </div>
           {sharedWith.length > 0 && (
             <motion.div 
@@ -283,23 +593,32 @@ export default function RunSession() {
         <div className="flex flex-col items-end gap-2">
           <div className="bg-destructive/20 backdrop-blur-md rounded-xl p-3 border border-destructive/30 flex items-center gap-2">
             <Heart className="w-4 h-4 text-red-500 animate-pulse" />
-            <div className="text-xl font-display font-bold text-white">142 <span className="text-xs font-sans font-normal text-muted-foreground">BPM</span></div>
+            <div className="text-xl font-display font-bold text-white">-- <span className="text-xs font-sans font-normal text-muted-foreground">BPM</span></div>
           </div>
-          <Button
-            onClick={() => setShowShareModal(true)}
-            className={`h-10 px-4 rounded-xl font-display text-[10px] uppercase tracking-widest transition-all ${
-              sharedWith.length > 0 
-                ? "bg-green-500 text-white border-2 border-green-300 shadow-[0_0_15px_rgba(34,197,94,0.5)]" 
-                : "bg-primary text-background hover:bg-primary/90"
-            }`}
-          >
-            <Share2 className="w-3 h-3 mr-2" />
-            Live Share {sharedWith.length > 0 && `Active (${sharedWith.length})`}
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={() => setAudioEnabled(!audioEnabled)}
+              size="icon"
+              className={`h-10 w-10 rounded-xl ${audioEnabled ? "bg-primary text-background" : "bg-white/10 text-muted-foreground"}`}
+              data-testid="button-audio-toggle"
+            >
+              {audioEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            </Button>
+            <Button
+              onClick={() => setShowShareModal(true)}
+              className={`h-10 px-4 rounded-xl font-display text-[10px] uppercase tracking-widest transition-all ${
+                sharedWith.length > 0 
+                  ? "bg-green-500 text-white border-2 border-green-300 shadow-[0_0_15px_rgba(34,197,94,0.5)]" 
+                  : "bg-primary text-background hover:bg-primary/90"
+              }`}
+            >
+              <Share2 className="w-3 h-3 mr-2" />
+              Share
+            </Button>
+          </div>
         </div>
       </div>
 
-      {/* Center AI Avatar */}
       <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-6 min-h-0 py-2">
         <div className="relative mb-2 flex-shrink-1 min-h-0 flex flex-col items-center">
            <div className={`absolute inset-0 bg-primary/20 blur-3xl rounded-full transition-all duration-1000 ${active ? 'scale-110 opacity-100' : 'scale-90 opacity-50'}`} />
@@ -309,14 +628,13 @@ export default function RunSession() {
               alt="AI Coach"
             />
             
-            {/* Message Bubble */}
             <AnimatePresence>
               {message && (
                 <motion.div 
                   initial={{ opacity: 0, y: 10, scale: 0.9 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -5, scale: 0.9 }}
-                  className="mt-4 w-64 bg-card/80 backdrop-blur-xl border border-primary/30 p-3 rounded-2xl text-center shadow-2xl relative z-20"
+                  className="mt-4 w-72 bg-card/80 backdrop-blur-xl border border-primary/30 p-3 rounded-2xl text-center shadow-2xl relative z-20"
                 >
                   <p className="text-primary font-medium text-xs leading-relaxed">"{message}"</p>
                 </motion.div>
@@ -329,7 +647,6 @@ export default function RunSession() {
         </div>
       </div>
 
-      {/* Bottom Stats & Controls */}
       <div className="relative z-10 bg-card/40 backdrop-blur-xl border-t border-white/10 rounded-t-3xl p-4 pb-6 mt-auto flex-shrink-0">
         <div className="grid grid-cols-3 gap-2 mb-4 text-center">
           <div>
@@ -376,6 +693,16 @@ export default function RunSession() {
             data-testid="button-map"
           >
             <Map className="w-3.5 h-3.5" />
+          </Button>
+          
+          <Button 
+            variant="outline" 
+            size="icon" 
+            className="w-10 h-10 rounded-full border-primary/50 bg-primary/10 hover:bg-primary/20 text-primary"
+            onClick={openGoogleMaps}
+            data-testid="button-google-maps"
+          >
+            <Navigation className="w-3.5 h-3.5" />
           </Button>
         </div>
       </div>

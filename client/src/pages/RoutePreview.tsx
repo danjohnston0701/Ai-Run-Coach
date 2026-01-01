@@ -98,6 +98,17 @@ export default function RoutePreview() {
   const handleStartRun = () => {
     if (!selectedRoute) return;
     
+    localStorage.setItem("activeRoute", JSON.stringify({
+      id: selectedRoute.id,
+      routeName: selectedRoute.routeName,
+      difficulty: selectedRoute.difficulty,
+      actualDistance: selectedRoute.actualDistance,
+      polyline: selectedRoute.polyline,
+      waypoints: selectedRoute.waypoints || [],
+      startLat: lat,
+      startLng: lng,
+    }));
+    
     const runParams = new URLSearchParams({
       distance: distance.toString(),
       level: selectedRoute.difficulty,
