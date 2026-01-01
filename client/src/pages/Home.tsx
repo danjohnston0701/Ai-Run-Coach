@@ -240,6 +240,7 @@ export default function Home() {
     startLocationLabel?: string;
     elevationGain?: number;
     createdAt: string;
+    lastStartedAt?: string;
     startLat: number;
     startLng: number;
     polyline?: string;
@@ -270,7 +271,14 @@ export default function Home() {
     }
   };
 
-  const handleSelectRoute = (route: RecentRoute) => {
+  const handleSelectRoute = async (route: RecentRoute) => {
+    // Mark route as started
+    try {
+      await fetch(`/api/routes/${route.id}/start`, { method: 'POST' });
+    } catch (err) {
+      console.log("Failed to mark route started:", err);
+    }
+    
     const targetSeconds = parseInt(targetTime.h || "0") * 3600 + parseInt(targetTime.m || "0") * 60 + parseInt(targetTime.s || "0");
     const params = new URLSearchParams({
       routeId: route.id,
@@ -281,6 +289,19 @@ export default function Home() {
       targetTime: targetSeconds.toString(),
     });
     setLocation(`/run?${params.toString()}`);
+  };
+
+  const formatLastStarted = (dateStr?: string) => {
+    if (!dateStr) return null;
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) return "Last run: Today";
+    if (diffDays === 1) return "Last run: Yesterday";
+    if (diffDays < 7) return `Last run: ${diffDays} days ago`;
+    return `Last run: ${date.toLocaleDateString()}`;
   };
 
   // Update target time when distance changes (default 6 min/km pace)
@@ -1201,12 +1222,19 @@ export default function Home() {
                             <span className="text-lg font-display font-bold text-primary">{route.distance.toFixed(1)} km</span>
                           </div>
                           <p className="text-sm text-muted-foreground truncate">{route.startLocationLabel || 'Unknown location'}</p>
-                          {route.elevationGain && (
-                            <p className="text-xs text-muted-foreground mt-1">
-                              <Mountain className="w-3 h-3 inline mr-1" />
-                              {route.elevationGain}m elevation
-                            </p>
-                          )}
+                          <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                            {route.elevationGain && (
+                              <span>
+                                <Mountain className="w-3 h-3 inline mr-1" />
+                                {route.elevationGain}m
+                              </span>
+                            )}
+                            {formatLastStarted(route.lastStartedAt) ? (
+                              <span className="text-primary/70">{formatLastStarted(route.lastStartedAt)}</span>
+                            ) : (
+                              <span className="text-muted-foreground/50">Never started</span>
+                            )}
+                          </div>
                         </div>
                         <ArrowRight className="w-5 h-5 text-muted-foreground flex-shrink-0 mt-1" />
                       </div>

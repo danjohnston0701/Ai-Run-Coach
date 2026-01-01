@@ -43,6 +43,7 @@ export interface IStorage {
   toggleRouteFavorite(id: string): Promise<Route | undefined>;
   getFavoriteRoutes(userId?: string): Promise<Route[]>;
   getRoutesByLocation(startLat: number, startLng: number, radiusKm?: number): Promise<Route[]>;
+  markRouteStarted(id: string): Promise<Route | undefined>;
 
   createRun(data: InsertRun): Promise<Run>;
   getRun(id: string): Promise<Run | undefined>;
@@ -248,6 +249,16 @@ export class DatabaseStorage implements IStorage {
         const approxDistKm = Math.sqrt(latDiff * latDiff + lngDiff * lngDiff) * 111;
         return approxDistKm <= radiusKm;
       });
+    });
+  }
+
+  async markRouteStarted(id: string): Promise<Route | undefined> {
+    return withRetry(async () => {
+      const [updated] = await db.update(routes)
+        .set({ lastStartedAt: new Date() })
+        .where(eq(routes.id, id))
+        .returning();
+      return updated;
     });
   }
 

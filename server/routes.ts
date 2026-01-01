@@ -226,6 +226,20 @@ export async function registerRoutes(
     }
   });
 
+  // Mark route as started (updates lastStartedAt timestamp)
+  app.post("/api/routes/:id/start", async (req, res) => {
+    try {
+      const route = await storage.markRouteStarted(req.params.id);
+      if (!route) {
+        return res.status(404).json({ error: "Route not found" });
+      }
+      res.json(route);
+    } catch (error) {
+      console.error("Failed to mark route started:", error);
+      res.status(500).json({ error: "Failed to mark route started" });
+    }
+  });
+
   // Get routes by location
   app.get("/api/routes/by-location", async (req, res) => {
     try {

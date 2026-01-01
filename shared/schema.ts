@@ -55,6 +55,7 @@ export const routes = pgTable("routes", {
   terrainType: text("terrain_type"),
   startLocationLabel: text("start_location_label"),
   isFavorite: boolean("is_favorite").default(false),
+  lastStartedAt: timestamp("last_started_at"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
