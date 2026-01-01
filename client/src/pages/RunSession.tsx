@@ -11,6 +11,7 @@ import {
 import type { Friend } from "./Profile";
 import { saveActiveRunSession, loadActiveRunSession, clearActiveRunSession, type ActiveRunSession } from "@/lib/activeRunSession";
 import { loadCoachSettings, getVoicePreferences, getTTSVoice, type AiCoachSettings } from "@/lib/coachSettings";
+import { calculateTerrainData, shouldTriggerTerrainCoaching, type ElevationPoint, type TerrainData } from "@/lib/elevationTracker";
 
 import coachAvatar from "@assets/generated_images/glowing_ai_voice_sphere_interface.png";
 import mapBeginner from "@assets/generated_images/dark_mode_map_with_flat_green_route.png";
@@ -26,6 +27,13 @@ interface RouteData {
   waypoints: Array<{ lat: number; lng: number }>;
   startLat: number;
   startLng: number;
+  elevation?: {
+    gain: number;
+    loss: number;
+    maxElevation: number;
+    minElevation: number;
+    profile?: ElevationPoint[];
+  };
 }
 
 interface Position {
@@ -276,6 +284,7 @@ export default function RunSession() {
   const runMetricsRef = useRef({ time: 0, distance: 0 });
   const startTimestampRef = useRef<number>(Date.now());
   const sessionIdRef = useRef<string>(`run-${Date.now()}`);
+  const lastTerrainCoachingTimeRef = useRef<number>(0);
   const initialAnnouncementMadeRef = useRef<boolean>(false);
 
   const searchParams = new URLSearchParams(window.location.search);
@@ -990,6 +999,23 @@ export default function RunSession() {
       };
       
       const metadata = sessionMetadataRef.current;
+      
+      let terrainData: TerrainData | undefined;
+      if (routeData?.elevation?.profile && currentPosition) {
+        terrainData = calculateTerrainData(
+          currentPosition.lat,
+          currentPosition.lng,
+          currentDistance * 1000,
+          routeData.elevation.profile,
+          routeData.elevation.gain,
+          routeData.elevation.loss
+        );
+        
+        if (terrainData?.upcomingTerrain) {
+          lastTerrainCoachingTimeRef.current = Date.now();
+        }
+      }
+      
       const response = await fetch('/api/ai/coaching', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1012,6 +1038,7 @@ export default function RunSession() {
           userMessage: userMessage,
           coachPreferences: coachPreferences || undefined,
           coachTone: coachSettings.tone,
+          terrain: terrainData,
         })
       });
       
@@ -1049,7 +1076,7 @@ export default function RunSession() {
     } finally {
       setIsCoaching(false);
     }
-  }, [userProfile, coachPreferences, speakCoaching, speak]);
+  }, [userProfile, coachPreferences, speakCoaching, speak, routeData, currentPosition]);
 
   useEffect(() => {
     if (!active || !aiCoachEnabled || gpsStatus !== "active") {
