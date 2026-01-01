@@ -458,6 +458,25 @@ export default function RunSession() {
   }, [coachSettings]);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+  
+  const cleanupAudio = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+      audioRef.current = null;
+    }
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+  }, []);
+  
+  useEffect(() => {
+    return () => {
+      cleanupAudio();
+    };
+  }, [cleanupAudio]);
   
   const speakWithDeviceTTS = useCallback((text: string) => {
     if (!('speechSynthesis' in window)) {
@@ -489,10 +508,7 @@ export default function RunSession() {
       return;
     }
     
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.src = '';
-    }
+    cleanupAudio();
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
@@ -519,18 +535,25 @@ export default function RunSession() {
       
       const audioBlob = await response.blob();
       const audioUrl = URL.createObjectURL(audioBlob);
+      audioUrlRef.current = audioUrl;
       
       const audio = new Audio(audioUrl);
       audioRef.current = audio;
       audio.volume = 1;
       
       audio.onended = () => {
-        URL.revokeObjectURL(audioUrl);
+        if (audioUrlRef.current === audioUrl) {
+          URL.revokeObjectURL(audioUrl);
+          audioUrlRef.current = null;
+        }
         console.log("OpenAI TTS playback ended");
       };
       audio.onerror = (e) => {
         console.error("Audio playback error:", e);
-        URL.revokeObjectURL(audioUrl);
+        if (audioUrlRef.current === audioUrl) {
+          URL.revokeObjectURL(audioUrl);
+          audioUrlRef.current = null;
+        }
         speakWithDeviceTTS(text);
       };
       
@@ -540,7 +563,7 @@ export default function RunSession() {
       console.error("TTS API failed, falling back to device TTS:", error);
       speakWithDeviceTTS(text);
     }
-  }, [audioEnabled, coachSettings, speakWithDeviceTTS]);
+  }, [audioEnabled, coachSettings, speakWithDeviceTTS, cleanupAudio]);
 
   useEffect(() => {
     if (!('geolocation' in navigator)) {
@@ -906,6 +929,8 @@ export default function RunSession() {
       return;
     }
     
+    cleanupAudio();
+    
     const ttsVoice = getTTSVoice(coachSettings);
     const prefs = getVoicePreferences(coachSettings);
     
@@ -925,15 +950,22 @@ export default function RunSession() {
       
       const audioBlob = await response.blob();
       const audioUrl = URL.createObjectURL(audioBlob);
+      audioUrlRef.current = audioUrl;
+      
       const audio = new Audio(audioUrl);
       audioRef.current = audio;
-      audio.onended = () => URL.revokeObjectURL(audioUrl);
+      audio.onended = () => {
+        if (audioUrlRef.current === audioUrl) {
+          URL.revokeObjectURL(audioUrl);
+          audioUrlRef.current = null;
+        }
+      };
       await audio.play();
     } catch (error) {
       console.error('Coaching TTS error, using fallback:', error);
       speakWithDeviceTTS(text);
     }
-  }, [coachSettings, speakWithDeviceTTS]);
+  }, [coachSettings, speakWithDeviceTTS, cleanupAudio]);
 
   const fetchCoaching = useCallback(async (userMessage?: string) => {
     const { active: isActive, aiCoachEnabled: isEnabled, gpsStatus: gps } = coachingControlRef.current;
