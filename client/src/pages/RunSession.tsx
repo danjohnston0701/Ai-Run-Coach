@@ -2,11 +2,10 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { VoiceVisualizer } from "@/components/VoiceVisualizer";
-import { RouteMap } from "@/components/RouteMap";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { 
-  Pause, Play, Square, Heart, Map, Share2, Users, Navigation, Volume2, VolumeX, Footprints, Mic, MicOff, MessageCircle, AlertTriangle
+  Pause, Play, Square, Heart, Share2, Users, Navigation, Volume2, VolumeX, Footprints, Mic, MicOff, MessageCircle, AlertTriangle
 } from "lucide-react";
 import {
   AlertDialog,
@@ -229,7 +228,6 @@ export default function RunSession() {
   const [distance, setDistance] = useState(0);
   const [message, setMessage] = useState("Acquiring GPS signal...");
   const [lastMessageTime, setLastMessageTime] = useState(0);
-  const [showMap, setShowMap] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [friends, setFriends] = useState<Friend[]>([]);
   const [sharedWith, setSharedWith] = useState<string[]>([]);
@@ -696,14 +694,14 @@ export default function RunSession() {
     if (!active || !currentPosition || routePoints.length < 2) return;
     
     const now = Date.now();
-    if (now - lastDirectionTime < 12000) return;
     
     let nearestIndex = currentWaypointIndex;
     let nearestDistance = Infinity;
     
-    const searchWindow = Math.min(100, routePoints.length - currentWaypointIndex);
-    for (let i = currentWaypointIndex; i < currentWaypointIndex + searchWindow; i++) {
-      if (i >= routePoints.length) break;
+    const lookBack = Math.max(0, currentWaypointIndex - 10);
+    const lookForward = Math.min(routePoints.length, currentWaypointIndex + 150);
+    
+    for (let i = lookBack; i < lookForward; i++) {
       const point = routePoints[i];
       const dist = haversineDistance(currentPosition.lat, currentPosition.lng, point.lat, point.lng);
       if (dist < nearestDistance) {
@@ -712,12 +710,17 @@ export default function RunSession() {
       }
     }
     
-    if (nearestIndex > currentWaypointIndex) {
-      setCurrentWaypointIndex(nearestIndex);
+    if (nearestIndex !== currentWaypointIndex) {
+      if (nearestIndex >= currentWaypointIndex || nearestDistance < 0.03) {
+        setCurrentWaypointIndex(nearestIndex);
+        console.log(`Waypoint updated: ${nearestIndex}/${routePoints.length}, distance: ${(nearestDistance * 1000).toFixed(0)}m`);
+      }
     }
     
+    if (now - lastDirectionTime < 8000) return;
+    
     const remainingPoints = routePoints.length - nearestIndex;
-    if (remainingPoints < 10 && nearestDistance < 0.05) {
+    if (remainingPoints < 15 && nearestDistance < 0.1) {
       speak("You're approaching the finish. Great job!");
       setMessage("Almost there! Finish strong!");
       setLastDirectionTime(now);
@@ -725,38 +728,49 @@ export default function RunSession() {
       return;
     }
     
-    const lookAheadDistance = Math.min(50, Math.floor(routePoints.length * 0.05));
-    const lookAhead = Math.min(nearestIndex + Math.max(lookAheadDistance, 15), routePoints.length - 1);
+    if (nearestDistance > 0.15) {
+      const nearestPoint = routePoints[nearestIndex];
+      const bearing = getBearing(currentPosition.lat, currentPosition.lng, nearestPoint.lat, nearestPoint.lng);
+      const direction = bearingToCardinal(bearing);
+      const distMeters = Math.round(nearestDistance * 1000);
+      const instruction = `You're ${distMeters} meters off route. Head ${direction} to get back on track.`;
+      speak(instruction);
+      setMessage(instruction);
+      setLastDirectionTime(now);
+      setLastMessageTime(now);
+      return;
+    }
     
-    if (lookAhead > nearestIndex && nearestDistance < 0.05) {
+    const lookAheadPoints = Math.min(Math.max(20, Math.floor(routePoints.length * 0.03)), 60);
+    const lookAhead = Math.min(nearestIndex + lookAheadPoints, routePoints.length - 1);
+    
+    if (lookAhead > nearestIndex + 5) {
+      const currentPoint = routePoints[nearestIndex];
       const nextPoint = routePoints[lookAhead];
-      const distToNext = haversineDistance(
-        currentPosition.lat, currentPosition.lng,
-        nextPoint.lat, nextPoint.lng
-      );
+      const distToNext = haversineDistance(currentPosition.lat, currentPosition.lng, nextPoint.lat, nextPoint.lng);
       
-      if (distToNext < 0.2) {
-        const currentBearing = getBearing(
-          currentPosition.lat, currentPosition.lng,
-          routePoints[nearestIndex].lat, routePoints[nearestIndex].lng
-        );
-        
-        const futureLookAhead = Math.min(lookAhead + lookAheadDistance, routePoints.length - 1);
-        const futurePoint = routePoints[futureLookAhead];
-        const nextBearing = getBearing(
-          nextPoint.lat, nextPoint.lng,
-          futurePoint.lat, futurePoint.lng
-        );
-        
-        const diff = Math.abs(((nextBearing - currentBearing + 540) % 360) - 180);
-        
-        if (diff > 30) {
-          const instruction = getDirectionInstruction(currentBearing, nextBearing, distToNext);
-          speak(instruction);
-          setMessage(instruction);
-          setLastDirectionTime(now);
-          setLastMessageTime(now);
-        }
+      const currentBearing = getBearing(currentPoint.lat, currentPoint.lng, nextPoint.lat, nextPoint.lng);
+      
+      const futureLookAhead = Math.min(lookAhead + lookAheadPoints, routePoints.length - 1);
+      const futurePoint = routePoints[futureLookAhead];
+      const nextBearing = getBearing(nextPoint.lat, nextPoint.lng, futurePoint.lat, futurePoint.lng);
+      
+      const diff = Math.abs(((nextBearing - currentBearing + 540) % 360) - 180);
+      
+      if (diff > 25) {
+        const instruction = getDirectionInstruction(currentBearing, nextBearing, distToNext);
+        speak(instruction);
+        setMessage(instruction);
+        setLastDirectionTime(now);
+        setLastMessageTime(now);
+      } else if (distToNext > 0.08 && distToNext < 0.3) {
+        const direction = bearingToCardinal(currentBearing);
+        const distMeters = Math.round(distToNext * 1000);
+        const instruction = `Continue ${direction} for ${distMeters} meters.`;
+        speak(instruction);
+        setMessage(instruction);
+        setLastDirectionTime(now);
+        setLastMessageTime(now);
       }
     }
   }, [active, currentPosition, routePoints, currentWaypointIndex, lastDirectionTime, speak]);
@@ -1271,46 +1285,97 @@ export default function RunSession() {
     return `${mins}'${secs.toString().padStart(2, '0')}"`;
   };
 
-  const openGoogleMaps = () => {
+  const openGoogleMapsNavigation = () => {
     if (!currentPosition) {
       toast.error("Waiting for GPS signal...");
       return;
     }
     
-    let mapsUrl = `https://www.google.com/maps/dir/?api=1`;
-    mapsUrl += `&origin=${currentPosition.lat},${currentPosition.lng}`;
+    let destination: { lat: number; lng: number };
+    let waypoints: Array<{ lat: number; lng: number }> = [];
     
     if (routeData && routeData.waypoints.length > 0) {
-      const destination = routeData.waypoints[routeData.waypoints.length - 1] || 
-                          { lat: routeData.startLat, lng: routeData.startLng };
-      mapsUrl += `&destination=${destination.lat},${destination.lng}`;
+      destination = routeData.waypoints[routeData.waypoints.length - 1] || 
+                    { lat: routeData.startLat, lng: routeData.startLng };
       
       if (routeData.waypoints.length > 1) {
         const maxWaypoints = 8;
         const allWaypoints = routeData.waypoints.slice(0, -1);
-        let sampledWaypoints = allWaypoints;
         
         if (allWaypoints.length > maxWaypoints) {
           const step = allWaypoints.length / maxWaypoints;
-          sampledWaypoints = [];
           for (let i = 0; i < maxWaypoints; i++) {
-            sampledWaypoints.push(allWaypoints[Math.floor(i * step)]);
+            waypoints.push(allWaypoints[Math.floor(i * step)]);
           }
+        } else {
+          waypoints = allWaypoints;
         }
-        
-        const waypointStr = sampledWaypoints
-          .map(w => `${w.lat.toFixed(6)},${w.lng.toFixed(6)}`)
-          .join('|');
-        mapsUrl += `&waypoints=${encodeURIComponent(waypointStr)}`;
       }
-      
-      mapsUrl += `&travelmode=walking`;
     } else {
-      mapsUrl += `&destination=${sessionMetadataRef.current.startLat},${sessionMetadataRef.current.startLng}`;
-      mapsUrl += `&travelmode=walking`;
+      destination = { lat: sessionMetadataRef.current.startLat, lng: sessionMetadataRef.current.startLng };
     }
     
-    window.open(mapsUrl, '_blank');
+    const waypointStr = waypoints.length > 0
+      ? waypoints.map(w => `${w.lat.toFixed(6)},${w.lng.toFixed(6)}`).join('|')
+      : '';
+    
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isAndroid = /Android/.test(navigator.userAgent);
+    
+    if (isIOS) {
+      let iosUrl = `comgooglemaps://?api=1&origin=${currentPosition.lat},${currentPosition.lng}`;
+      iosUrl += `&destination=${destination.lat},${destination.lng}`;
+      if (waypointStr) {
+        iosUrl += `&waypoints=${encodeURIComponent(waypointStr)}`;
+      }
+      iosUrl += `&travelmode=walking&dir_action=navigate`;
+      
+      const fallbackUrl = buildWebMapsUrl(currentPosition, destination, waypointStr);
+      
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = iosUrl;
+      document.body.appendChild(iframe);
+      
+      setTimeout(() => {
+        document.body.removeChild(iframe);
+        window.open(fallbackUrl, '_blank');
+      }, 1500);
+      
+    } else if (isAndroid) {
+      let androidUrl = `google.navigation:q=${destination.lat},${destination.lng}&mode=w`;
+      
+      const fallbackUrl = buildWebMapsUrl(currentPosition, destination, waypointStr);
+      
+      const link = document.createElement('a');
+      link.href = androidUrl;
+      link.click();
+      
+      setTimeout(() => {
+        window.open(fallbackUrl, '_blank');
+      }, 1500);
+      
+    } else {
+      const webUrl = buildWebMapsUrl(currentPosition, destination, waypointStr);
+      window.open(webUrl, '_blank');
+    }
+    
+    toast.info("Opening Google Maps navigation. Your AI coach will continue running in the background!");
+  };
+  
+  const buildWebMapsUrl = (
+    origin: { lat: number; lng: number },
+    destination: { lat: number; lng: number },
+    waypointStr: string
+  ) => {
+    let url = `https://www.google.com/maps/dir/?api=1`;
+    url += `&origin=${origin.lat},${origin.lng}`;
+    url += `&destination=${destination.lat},${destination.lng}`;
+    if (waypointStr) {
+      url += `&waypoints=${encodeURIComponent(waypointStr)}`;
+    }
+    url += `&travelmode=walking`;
+    return url;
   };
 
   const saveRunData = () => {
@@ -1382,29 +1447,6 @@ export default function RunSession() {
 
   return (
     <div className="h-screen w-full bg-background text-foreground flex flex-col relative overflow-hidden font-sans select-none">
-      <AnimatePresence>
-        {showMap && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 p-6 bg-background/95 backdrop-blur-sm"
-            onClick={() => setShowMap(false)}
-          >
-            <div className="h-full rounded-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
-              <RouteMap 
-                lat={sessionMetadataRef.current.startLat} 
-                lng={sessionMetadataRef.current.startLng} 
-                level={sessionMetadataRef.current.levelId as any} 
-                distance={parseFloat(sessionMetadataRef.current.targetDistance)}
-                routePolyline={routeData?.polyline}
-                routeWaypoints={routeData?.waypoints}
-              />
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       <div className="absolute inset-0 z-0 opacity-20">
         <img src={getMapImage()} className="w-full h-full object-cover" alt="Map Route" />
         <div className="absolute inset-0 bg-gradient-to-b from-background via-transparent to-background" />
@@ -1668,19 +1710,9 @@ export default function RunSession() {
           <Button 
             variant="outline" 
             size="icon" 
-            className="w-10 h-10 rounded-full border-white/10 hover:bg-white/10 hover:border-white/20"
-            onClick={() => setShowMap(!showMap)}
-            data-testid="button-map"
-          >
-            <Map className="w-3.5 h-3.5" />
-          </Button>
-          
-          <Button 
-            variant="outline" 
-            size="icon" 
             className="w-10 h-10 rounded-full border-primary/50 bg-primary/10 hover:bg-primary/20 text-primary"
-            onClick={openGoogleMaps}
-            data-testid="button-google-maps"
+            onClick={openGoogleMapsNavigation}
+            data-testid="button-google-navigation"
           >
             <Navigation className="w-3.5 h-3.5" />
           </Button>
