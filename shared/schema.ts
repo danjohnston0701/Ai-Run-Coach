@@ -47,6 +47,7 @@ export const routes = pgTable("routes", {
   endLng: real("end_lng"),
   waypoints: jsonb("waypoints"),
   elevation: real("elevation"),
+  elevationProfile: jsonb("elevation_profile"),
   estimatedTime: integer("estimated_time"),
   terrainType: text("terrain_type"),
   createdAt: timestamp("created_at").defaultNow(),
