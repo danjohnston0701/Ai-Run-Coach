@@ -46,6 +46,19 @@ export interface GeneratedRoute {
   description: string;
 }
 
+export interface TerrainData {
+  currentAltitude?: number;
+  currentGrade?: number;
+  upcomingTerrain?: {
+    distanceAhead: number;
+    grade: number;
+    elevationChange: number;
+    description: string;
+  };
+  totalElevationGain?: number;
+  totalElevationLoss?: number;
+}
+
 export interface CoachingRequest {
   currentPace: string;
   targetPace: string;
@@ -67,6 +80,7 @@ export interface CoachingRequest {
   coachPreferences?: string;
   coachTone?: 'energetic' | 'motivational' | 'instructive' | 'factual' | 'abrupt';
   aiConfig?: AiCoachConfig;
+  terrain?: TerrainData;
 }
 
 export interface CoachingResponse {
@@ -238,6 +252,33 @@ export async function getCoachingAdvice(request: CoachingRequest): Promise<Coach
   
   const toneStyle = request.coachTone ? toneInstructions[request.coachTone] : toneInstructions.motivational;
   
+  let terrainSection = "";
+  if (request.terrain) {
+    terrainSection = "\n\nTERRAIN DATA:";
+    if (request.terrain.currentAltitude !== undefined) {
+      terrainSection += `\n- Current altitude: ${request.terrain.currentAltitude}m`;
+    }
+    if (request.terrain.currentGrade !== undefined) {
+      const gradeDesc = request.terrain.currentGrade > 5 ? "steep uphill" : 
+                        request.terrain.currentGrade > 2 ? "gentle uphill" :
+                        request.terrain.currentGrade < -5 ? "steep downhill" :
+                        request.terrain.currentGrade < -2 ? "gentle downhill" : "flat";
+      terrainSection += `\n- Current grade: ${request.terrain.currentGrade.toFixed(1)}% (${gradeDesc})`;
+    }
+    if (request.terrain.upcomingTerrain) {
+      terrainSection += `\n- UPCOMING: ${request.terrain.upcomingTerrain.description} in ${request.terrain.upcomingTerrain.distanceAhead}m (${request.terrain.upcomingTerrain.grade.toFixed(1)}% grade, ${request.terrain.upcomingTerrain.elevationChange > 0 ? '+' : ''}${request.terrain.upcomingTerrain.elevationChange}m)`;
+    }
+    if (request.terrain.totalElevationGain !== undefined) {
+      terrainSection += `\n- Route elevation gain: ${request.terrain.totalElevationGain}m`;
+    }
+    
+    terrainSection += `\n\nHILL COACHING PRIORITIES:
+- For upcoming hills: Warn 100-200m ahead, advise on pace conservation
+- On steep uphills (>5%): Suggest shorter strides, lean forward slightly, maintain cadence
+- On downhills: Control pace, light braking with legs, don't overstride
+- After hills: Acknowledge effort, guide recovery pace`;
+  }
+  
   const prompt = `${coachIdentity} Providing real-time guidance.${aiConfigSection}
 
 COACHING STYLE: ${toneStyle}${userProfileInfo}
@@ -249,9 +290,9 @@ Current Run Stats:
 - Progress: ${request.distanceCovered.toFixed(2)}km of ${request.totalDistance}km (${progressPercent}%)
 - Elapsed time: ${Math.floor(request.elapsedTime / 60)} minutes ${request.elapsedTime % 60} seconds
 - Difficulty: ${request.difficulty}
-- Fitness level: ${request.userFitnessLevel || "intermediate"}${targetTimeInfo}${preferencesSection}${userMessageSection}
+- Fitness level: ${request.userFitnessLevel || "intermediate"}${targetTimeInfo}${preferencesSection}${terrainSection}${userMessageSection}
 
-${request.userMessage ? "Respond to the runner's message while providing coaching." : "Provide brief, motivating coaching advice."} ${request.userName ? `Use ${request.userName}'s name occasionally for personalization.` : ""} Be specific but concise.
+${request.terrain?.upcomingTerrain ? "PRIORITIZE terrain coaching - warn about upcoming hills." : ""} ${request.userMessage ? "Respond to the runner's message while providing coaching." : "Provide brief, motivating coaching advice."} ${request.userName ? `Use ${request.userName}'s name occasionally for personalization.` : ""} Be specific but concise.
 
 Respond in JSON format:
 {
