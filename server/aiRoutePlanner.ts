@@ -27,6 +27,7 @@ interface RouteCandidate {
     loss: number;
     maxElevation: number;
     minElevation: number;
+    profile?: ElevationPoint[];
   };
   aiReasoning?: string;
 }
@@ -569,19 +570,30 @@ async function calibrateRoute(
   return null;
 }
 
-// Get elevation data
+// Elevation profile point for real-time terrain awareness
+export interface ElevationPoint {
+  lat: number;
+  lng: number;
+  elevation: number;
+  distance: number; // cumulative distance from start in meters
+  grade: number; // grade to next point as percentage (positive = uphill)
+}
+
+// Get elevation data with full profile for real-time coaching
 async function getRouteElevation(polyline: string): Promise<{
   gain: number;
   loss: number;
   maxElevation: number;
   minElevation: number;
+  profile?: ElevationPoint[];
 } | undefined> {
   if (!GOOGLE_MAPS_API_KEY) return undefined;
   
   try {
     const points = decodePolyline(polyline);
-    const sampleRate = Math.max(1, Math.floor(points.length / 50));
-    const sampledPoints = points.filter((_, i) => i % sampleRate === 0).slice(0, 50);
+    // Sample more points for better real-time detection (up to 100 points)
+    const sampleRate = Math.max(1, Math.floor(points.length / 100));
+    const sampledPoints = points.filter((_, i) => i % sampleRate === 0).slice(0, 100);
     
     if (sampledPoints.length < 2) return undefined;
     
@@ -597,10 +609,44 @@ async function getRouteElevation(polyline: string): Promise<{
       let gain = 0;
       let loss = 0;
       
-      for (let i = 1; i < elevations.length; i++) {
-        const diff = elevations[i] - elevations[i - 1];
-        if (diff > 0) gain += diff;
-        else loss += Math.abs(diff);
+      // Build elevation profile with distance and grade
+      const profile: ElevationPoint[] = [];
+      let cumulativeDistance = 0;
+      
+      for (let i = 0; i < sampledPoints.length; i++) {
+        const point = sampledPoints[i];
+        const elevation = elevations[i];
+        
+        // Calculate distance from previous point
+        if (i > 0) {
+          const prevPoint = sampledPoints[i - 1];
+          const segmentDistance = getDistanceKm(prevPoint, point) * 1000; // meters
+          cumulativeDistance += segmentDistance;
+          
+          // Track gain/loss
+          const elevDiff = elevation - elevations[i - 1];
+          if (elevDiff > 0) gain += elevDiff;
+          else loss += Math.abs(elevDiff);
+        }
+        
+        // Calculate grade to next point (if not last point)
+        let grade = 0;
+        if (i < sampledPoints.length - 1) {
+          const nextPoint = sampledPoints[i + 1];
+          const nextElevation = elevations[i + 1];
+          const segmentLength = getDistanceKm(point, nextPoint) * 1000; // meters
+          if (segmentLength > 0) {
+            grade = ((nextElevation - elevation) / segmentLength) * 100;
+          }
+        }
+        
+        profile.push({
+          lat: point.lat,
+          lng: point.lng,
+          elevation: Math.round(elevation * 10) / 10,
+          distance: Math.round(cumulativeDistance),
+          grade: Math.round(grade * 10) / 10,
+        });
       }
       
       return {
@@ -608,6 +654,7 @@ async function getRouteElevation(polyline: string): Promise<{
         loss: Math.round(loss),
         maxElevation: Math.round(Math.max(...elevations)),
         minElevation: Math.round(Math.min(...elevations)),
+        profile,
       };
     }
   } catch (error) {
