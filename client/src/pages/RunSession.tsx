@@ -238,16 +238,28 @@ export default function RunSession() {
     }
   }, []);
 
-  const speak = useCallback((text: string) => {
-    if (!audioEnabled || !('speechSynthesis' in window)) return;
+  const speak = useCallback((text: string, force: boolean = false) => {
+    console.log("speak() called with:", text, "audioEnabled:", audioEnabled, "force:", force);
+    if (!force && !audioEnabled) {
+      console.log("Speech blocked: audio disabled");
+      return;
+    }
+    if (!('speechSynthesis' in window)) {
+      console.log("Speech blocked: speechSynthesis not available");
+      return;
+    }
     
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 0.9;
     utterance.pitch = 1;
     utterance.volume = 1;
+    utterance.onstart = () => console.log("Speech started");
+    utterance.onend = () => console.log("Speech ended");
+    utterance.onerror = (e) => console.log("Speech error:", e);
     speechSynthRef.current = utterance;
     window.speechSynthesis.speak(utterance);
+    console.log("speechSynthesis.speak() called");
   }, [audioEnabled]);
 
   useEffect(() => {
@@ -634,9 +646,10 @@ export default function RunSession() {
         }
         
         if (coachMessage.trim()) {
-          // Use speak() for user questions to bypass run state checks
+          // Use speak() with force=true for user questions to bypass all checks
           if (userMessage) {
-            speak(coachMessage.trim());
+            console.log("User question - forcing speech response");
+            speak(coachMessage.trim(), true);
           } else {
             speakCoaching(coachMessage.trim());
           }
