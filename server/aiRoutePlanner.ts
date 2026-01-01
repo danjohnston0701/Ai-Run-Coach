@@ -595,8 +595,8 @@ async function generateCalibratedRoute(
       
       console.log(`[Calibration] r=${radiusKm.toFixed(2)}km: dist=${result.distance.toFixed(2)}km (${errorPercent.toFixed(0)}%), uniq=${(uniqueness*100).toFixed(0)}%, rpt=${repeatedStreets}, foot=${footprint.toFixed(2)}km, score=${score.toFixed(1)}`);
       
-      // Only consider routes with good uniqueness
-      if (uniqueness < 0.6) continue;
+      // Only consider routes with reasonable uniqueness (lowered threshold for more results)
+      if (uniqueness < 0.45) continue;
       
       // Check if within tolerance
       if (errorPercent <= tolerancePercent) {
