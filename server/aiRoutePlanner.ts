@@ -64,325 +64,15 @@ interface DirectionsResult {
   error?: string;
 }
 
-// Loop template shapes - different polygon types for variety
-type LoopShape = "square" | "pentagon" | "hexagon" | "triangle" | "octagon";
-
-const LOOP_SHAPES: Record<LoopShape, number> = {
-  triangle: 3,
-  square: 4,
-  pentagon: 5,
-  hexagon: 6,
-  octagon: 8,
-};
-
-// Generate waypoints for a loop template
-function generateLoopTemplate(
-  centerLat: number,
-  centerLng: number,
-  radiusKm: number,
-  shape: LoopShape,
-  rotationDegrees: number = 0
-): Array<{ lat: number; lng: number }> {
-  const numPoints = LOOP_SHAPES[shape];
-  const waypoints: Array<{ lat: number; lng: number }> = [];
-  const angleStep = 360 / numPoints;
-
-  for (let i = 0; i < numPoints; i++) {
-    const bearing = rotationDegrees + (i * angleStep);
-    const point = projectPoint(centerLat, centerLng, bearing, radiusKm);
-    waypoints.push(point);
-  }
-
-  return waypoints;
+// Probe result for detecting viable directions
+interface ProbeResult {
+  bearing: number;
+  isViable: boolean;
+  reachableDistance: number;
+  hasDeadEnd: boolean;
 }
 
-// Calculate initial radius estimate based on target distance
-// Uses circular model: circumference = 2πr, so r = distance / 2π
-// Real running routes typically have only 5-15% overhead from road inefficiency
-function estimateInitialRadius(targetDistanceKm: number, shape: LoopShape): number {
-  // Use circular circumference as the base model
-  // This gives a much larger, more realistic footprint
-  const baseRadius = targetDistanceKm / (2 * Math.PI);
-  
-  // Apply only a small efficiency factor (roads add ~10% to ideal path)
-  // This ensures we start with a large loop that calibration can trim down
-  const roadEfficiencyFactor = 1.1;
-  
-  // Polygons with more sides are closer to circles, need slightly less adjustment
-  const numSides = LOOP_SHAPES[shape];
-  const shapeMultiplier = 1 + (0.05 * (6 - numSides) / 3); // squares get +5%, hexagons get 0%
-  
-  return baseRadius * roadEfficiencyFactor * Math.max(0.95, shapeMultiplier);
-}
-
-// Fetch route from Google Directions API (loop back to start)
-async function fetchLoopRoute(
-  origin: { lat: number; lng: number },
-  waypoints: Array<{ lat: number; lng: number }>
-): Promise<DirectionsResult> {
-  if (!GOOGLE_MAPS_API_KEY) {
-    return { distance: 0, duration: 0, polyline: "", success: false, instructions: [], error: "No API key" };
-  }
-
-  // Format waypoints for the API (as stop points for proper loop routing)
-  const waypointsStr = waypoints.map((wp) => `${wp.lat},${wp.lng}`).join("|");
-  
-  // Request walking route that returns to origin, avoiding highways
-  const directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.lat},${origin.lng}&destination=${origin.lat},${origin.lng}&waypoints=${waypointsStr}&mode=walking&avoid=highways&key=${GOOGLE_MAPS_API_KEY}`;
-
-  try {
-    const response = await fetch(directionsUrl);
-    const data = await response.json();
-
-    if (data.status !== "OK") {
-      return { distance: 0, duration: 0, polyline: "", success: false, instructions: [], error: data.status };
-    }
-
-    const route = data.routes[0];
-    let totalDistance = 0;
-    let totalDuration = 0;
-    const allInstructions: string[] = [];
-
-    for (const leg of route.legs) {
-      totalDistance += leg.distance.value;
-      totalDuration += leg.duration.value;
-      for (const step of leg.steps) {
-        if (step.html_instructions) {
-          const cleanInstruction = step.html_instructions.replace(/<[^>]*>/g, '');
-          allInstructions.push(cleanInstruction);
-        }
-      }
-    }
-
-    // Get elevation data along the route
-    const elevation = await getRouteElevation(route.overview_polyline.points);
-
-    return {
-      distance: totalDistance / 1000, // Convert to km
-      duration: Math.round(totalDuration / 60), // Convert to minutes
-      polyline: route.overview_polyline.points,
-      success: true,
-      instructions: allInstructions,
-      elevation,
-    };
-  } catch (error) {
-    console.error("Directions fetch error:", error);
-    return { distance: 0, duration: 0, polyline: "", success: false, instructions: [], error: "Fetch failed" };
-  }
-}
-
-// Iteratively calibrate the route to match target distance
-// Uses binary search to adjust radius until distance is within tolerance
-async function calibrateRouteDistance(
-  startLat: number,
-  startLng: number,
-  targetDistanceKm: number,
-  shape: LoopShape,
-  rotationDegrees: number,
-  tolerancePercent: number = 15,
-  maxIterations: number = 7
-): Promise<{ waypoints: Array<{ lat: number; lng: number }>; result: DirectionsResult } | null> {
-  
-  let radiusKm = estimateInitialRadius(targetDistanceKm, shape);
-  let minRadius = radiusKm * 0.3;
-  let maxRadius = radiusKm * 3.0;
-  
-  let bestResult: { waypoints: Array<{ lat: number; lng: number }>; result: DirectionsResult } | null = null;
-  let bestError = Infinity;
-
-  for (let iteration = 0; iteration < maxIterations; iteration++) {
-    const waypoints = generateLoopTemplate(startLat, startLng, radiusKm, shape, rotationDegrees);
-    const result = await fetchLoopRoute({ lat: startLat, lng: startLng }, waypoints);
-    
-    if (!result.success) {
-      // Try with a smaller radius if route fails
-      maxRadius = radiusKm;
-      radiusKm = (minRadius + maxRadius) / 2;
-      continue;
-    }
-
-    const errorPercent = Math.abs((result.distance - targetDistanceKm) / targetDistanceKm) * 100;
-    
-    console.log(`[Calibration] Iteration ${iteration + 1}: radius=${radiusKm.toFixed(3)}km, distance=${result.distance.toFixed(2)}km, error=${errorPercent.toFixed(1)}%`);
-    
-    // Track the best result so far
-    if (errorPercent < bestError) {
-      bestError = errorPercent;
-      bestResult = { waypoints, result };
-    }
-
-    // Check if we're within tolerance
-    if (errorPercent <= tolerancePercent) {
-      console.log(`[Calibration] Target achieved within ${tolerancePercent}% tolerance`);
-      return { waypoints, result };
-    }
-
-    // Adjust radius using binary search
-    if (result.distance < targetDistanceKm) {
-      // Route too short, increase radius
-      minRadius = radiusKm;
-    } else {
-      // Route too long, decrease radius
-      maxRadius = radiusKm;
-    }
-    
-    radiusKm = (minRadius + maxRadius) / 2;
-  }
-
-  // Only return results within the tolerance - reject routes that are too far off
-  if (bestResult && bestError <= tolerancePercent) {
-    console.log(`[Calibration] Returning best result with ${bestError.toFixed(1)}% error`);
-    return bestResult;
-  }
-  
-  console.log(`[Calibration] Failed to achieve ${tolerancePercent}% tolerance (best: ${bestError.toFixed(1)}%)`);
-  return null;
-}
-
-// Get nearby parks for scenic routing
-async function getNearbyParks(lat: number, lng: number, radiusKm: number): Promise<AreaData["parks"]> {
-  if (!GOOGLE_MAPS_API_KEY) return [];
-  
-  const radiusMeters = radiusKm * 1000;
-  const parks: AreaData["parks"] = [];
-
-  try {
-    const placesUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radiusMeters}&type=park&key=${GOOGLE_MAPS_API_KEY}`;
-    const placesRes = await fetch(placesUrl);
-    const placesData = await placesRes.json();
-    
-    if (placesData.results) {
-      for (const place of placesData.results.slice(0, 8)) {
-        parks.push({
-          name: place.name,
-          location: {
-            lat: place.geometry.location.lat,
-            lng: place.geometry.location.lng,
-          },
-        });
-      }
-    }
-  } catch (error) {
-    console.error("Error fetching parks:", error);
-  }
-
-  return parks;
-}
-
-// Use AI to select optimal anchor points from parks for scenic routes
-async function selectScenicAnchors(
-  startLat: number,
-  startLng: number,
-  targetDistance: number,
-  parks: AreaData["parks"],
-  difficulty: "easy" | "moderate" | "hard",
-  variant: number
-): Promise<Array<{ lat: number; lng: number }> | null> {
-  if (parks.length < 2) return null;
-  
-  const approximateRadius = estimateInitialRadius(targetDistance, "pentagon");
-
-  const prompt = `You are a running route optimizer. Select 3-5 parks/locations from the list below to create a scenic loop route.
-
-START LOCATION: ${startLat.toFixed(6)}, ${startLng.toFixed(6)}
-TARGET DISTANCE: ${targetDistance} km
-DIFFICULTY: ${difficulty}
-APPROXIMATE ROUTE RADIUS: ${approximateRadius.toFixed(2)} km
-
-AVAILABLE PARKS/LOCATIONS:
-${parks.map((p, i) => `${i + 1}. ${p.name} at (${p.location.lat.toFixed(6)}, ${p.location.lng.toFixed(6)})`).join('\n')}
-
-REQUIREMENTS:
-1. Select 3-5 locations that form a roughly circular loop around the start point
-2. For variant ${variant}, prefer ${variant === 0 ? 'northern/eastern' : variant === 1 ? 'southern/western' : 'varied direction'} parks
-3. Parks should be roughly evenly spaced around the start point
-4. ${difficulty === 'easy' ? 'Prioritize parks that are close together for a gentler route' : difficulty === 'hard' ? 'Include parks that are more spread out for a challenging route' : 'Balance convenience with variety'}
-
-Return ONLY a JSON array of selected park indices (1-indexed), e.g.: [1, 3, 5, 7]
-No explanation, just the JSON array.`;
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: "You output only valid JSON arrays of numbers." },
-        { role: "user", content: prompt }
-      ],
-      temperature: 0.3 + (variant * 0.1),
-      max_tokens: 100,
-    });
-
-    const content = response.choices[0]?.message?.content || "";
-    const indices = JSON.parse(content);
-    
-    if (!Array.isArray(indices) || indices.length < 3) {
-      return null;
-    }
-
-    // Convert indices to coordinates
-    const anchors = indices
-      .filter((i: number) => i >= 1 && i <= parks.length)
-      .map((i: number) => parks[i - 1].location);
-
-    return anchors.length >= 3 ? anchors : null;
-    
-  } catch (error) {
-    console.error("AI anchor selection error:", error);
-    return null;
-  }
-}
-
-// Get elevation data along a route polyline
-async function getRouteElevation(polyline: string): Promise<{
-  gain: number;
-  loss: number;
-  maxElevation: number;
-  minElevation: number;
-} | undefined> {
-  if (!GOOGLE_MAPS_API_KEY) return undefined;
-  
-  try {
-    const points = decodePolyline(polyline);
-    
-    // Sample points along the route (max 100 for Elevation API efficiency)
-    const sampleRate = Math.max(1, Math.floor(points.length / 80));
-    const sampledPoints = points.filter((_, i) => i % sampleRate === 0).slice(0, 80);
-    
-    if (sampledPoints.length < 2) return undefined;
-    
-    const locations = sampledPoints.map(p => `${p.lat},${p.lng}`).join('|');
-    const url = `https://maps.googleapis.com/maps/api/elevation/json?locations=${locations}&key=${GOOGLE_MAPS_API_KEY}`;
-    
-    const res = await fetch(url);
-    const data = await res.json();
-    
-    if (data.status === "OK" && data.results && data.results.length > 1) {
-      const elevations = data.results.map((r: any) => r.elevation);
-      
-      let gain = 0;
-      let loss = 0;
-      
-      for (let i = 1; i < elevations.length; i++) {
-        const diff = elevations[i] - elevations[i - 1];
-        if (diff > 0) gain += diff;
-        else loss += Math.abs(diff);
-      }
-      
-      return {
-        gain: Math.round(gain),
-        loss: Math.round(loss),
-        maxElevation: Math.round(Math.max(...elevations)),
-        minElevation: Math.round(Math.min(...elevations)),
-      };
-    }
-  } catch (error) {
-    console.error("Route elevation error:", error);
-  }
-  
-  return undefined;
-}
-
-// Helper: Project a point at a given bearing and distance
+// Helper functions
 function toRadians(degrees: number): number {
   return degrees * (Math.PI / 180);
 }
@@ -410,6 +100,254 @@ function projectPoint(lat: number, lng: number, bearingDegrees: number, distance
     lat: toDegrees(lat2),
     lng: toDegrees(lng2),
   };
+}
+
+function getDistanceKm(p1: { lat: number; lng: number }, p2: { lat: number; lng: number }): number {
+  const R = 6371;
+  const lat1 = toRadians(p1.lat);
+  const lat2 = toRadians(p2.lat);
+  const dLat = toRadians(p2.lat - p1.lat);
+  const dLng = toRadians(p2.lng - p1.lng);
+  
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1) * Math.cos(lat2) *
+            Math.sin(dLng/2) * Math.sin(dLng/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  
+  return R * c;
+}
+
+// Probe a direction to check if it leads to a dead end
+async function probeDirection(
+  startLat: number,
+  startLng: number,
+  bearing: number,
+  probeDistanceKm: number
+): Promise<ProbeResult> {
+  if (!GOOGLE_MAPS_API_KEY) {
+    return { bearing, isViable: true, reachableDistance: probeDistanceKm, hasDeadEnd: false };
+  }
+
+  const targetPoint = projectPoint(startLat, startLng, bearing, probeDistanceKm);
+  
+  // Get walking directions to the probe point
+  const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${startLat},${startLng}&destination=${targetPoint.lat},${targetPoint.lng}&mode=walking&key=${GOOGLE_MAPS_API_KEY}`;
+  
+  try {
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (data.status !== "OK" || !data.routes[0]) {
+      return { bearing, isViable: false, reachableDistance: 0, hasDeadEnd: true };
+    }
+    
+    const route = data.routes[0];
+    const actualDistance = route.legs[0].distance.value / 1000;
+    const straightLineDistance = probeDistanceKm;
+    
+    // Check route efficiency - if actual distance is much longer than straight line,
+    // it likely involves backtracking or detours around obstacles
+    const efficiency = straightLineDistance / actualDistance;
+    
+    // Check for "Head back" or "Turn around" instructions indicating dead ends
+    let hasDeadEndMarkers = false;
+    for (const step of route.legs[0].steps) {
+      const instruction = (step.html_instructions || "").toLowerCase();
+      if (instruction.includes("head back") || 
+          instruction.includes("turn around") ||
+          instruction.includes("make a u-turn")) {
+        hasDeadEndMarkers = true;
+        break;
+      }
+    }
+    
+    // Direction is viable if efficiency > 60% and no dead end markers
+    const isViable = efficiency > 0.6 && !hasDeadEndMarkers;
+    
+    return {
+      bearing,
+      isViable,
+      reachableDistance: actualDistance,
+      hasDeadEnd: hasDeadEndMarkers || efficiency < 0.5,
+    };
+  } catch (error) {
+    console.error(`Probe error for bearing ${bearing}:`, error);
+    return { bearing, isViable: true, reachableDistance: probeDistanceKm, hasDeadEnd: false };
+  }
+}
+
+// Probe multiple directions to find viable routes (avoid dead ends)
+async function probeViableDirections(
+  startLat: number,
+  startLng: number,
+  radiusKm: number,
+  numProbes: number = 8
+): Promise<number[]> {
+  const bearings: number[] = [];
+  const angleStep = 360 / numProbes;
+  
+  // Create probe bearings
+  for (let i = 0; i < numProbes; i++) {
+    bearings.push(i * angleStep);
+  }
+  
+  console.log(`[Probe] Testing ${numProbes} directions at radius ${radiusKm.toFixed(2)}km`);
+  
+  // Probe all directions in parallel
+  const probePromises = bearings.map(bearing => 
+    probeDirection(startLat, startLng, bearing, radiusKm)
+  );
+  
+  const results = await Promise.all(probePromises);
+  
+  // Filter to viable directions
+  const viableBearings = results
+    .filter(r => r.isViable)
+    .map(r => r.bearing);
+  
+  console.log(`[Probe] Found ${viableBearings.length}/${numProbes} viable directions: ${viableBearings.join(', ')}`);
+  
+  return viableBearings;
+}
+
+// Generate waypoints using only viable directions, ensuring quadrant coverage
+function generateSmartWaypoints(
+  startLat: number,
+  startLng: number,
+  radiusKm: number,
+  viableBearings: number[],
+  numWaypoints: number = 4,
+  rotationOffset: number = 0
+): Array<{ lat: number; lng: number }> {
+  if (viableBearings.length < 3) {
+    // Fallback to geometric if not enough viable directions
+    return generateGeometricWaypoints(startLat, startLng, radiusKm, numWaypoints, rotationOffset);
+  }
+  
+  // Divide into quadrants and pick bearings from each
+  const quadrants = [
+    viableBearings.filter(b => b >= 0 && b < 90),
+    viableBearings.filter(b => b >= 90 && b < 180),
+    viableBearings.filter(b => b >= 180 && b < 270),
+    viableBearings.filter(b => b >= 270 && b < 360),
+  ];
+  
+  const selectedBearings: number[] = [];
+  
+  // Try to get one bearing from each quadrant
+  for (let i = 0; i < 4; i++) {
+    const quadrantIndex = (i + Math.floor(rotationOffset / 90)) % 4;
+    const quadrant = quadrants[quadrantIndex];
+    if (quadrant.length > 0) {
+      // Pick the bearing closest to the center of this quadrant
+      const idealBearing = quadrantIndex * 90 + 45 + rotationOffset;
+      const closest = quadrant.reduce((a, b) => 
+        Math.abs(a - idealBearing) < Math.abs(b - idealBearing) ? a : b
+      );
+      selectedBearings.push(closest);
+    }
+  }
+  
+  // If we don't have enough, add more from viable bearings
+  while (selectedBearings.length < numWaypoints && viableBearings.length > selectedBearings.length) {
+    for (const b of viableBearings) {
+      if (!selectedBearings.includes(b)) {
+        selectedBearings.push(b);
+        break;
+      }
+    }
+  }
+  
+  // Sort bearings clockwise
+  selectedBearings.sort((a, b) => a - b);
+  
+  // Generate waypoints at these bearings
+  return selectedBearings.map(bearing => 
+    projectPoint(startLat, startLng, bearing, radiusKm)
+  );
+}
+
+// Fallback geometric waypoint generation
+function generateGeometricWaypoints(
+  startLat: number,
+  startLng: number,
+  radiusKm: number,
+  numWaypoints: number,
+  rotationOffset: number
+): Array<{ lat: number; lng: number }> {
+  const waypoints: Array<{ lat: number; lng: number }> = [];
+  const angleStep = 360 / numWaypoints;
+  
+  for (let i = 0; i < numWaypoints; i++) {
+    const bearing = rotationOffset + (i * angleStep);
+    waypoints.push(projectPoint(startLat, startLng, bearing, radiusKm));
+  }
+  
+  return waypoints;
+}
+
+// Calculate initial radius - use larger footprint
+function estimateInitialRadius(targetDistanceKm: number): number {
+  // Use circular model: circumference = 2πr
+  // For a running loop, radius ≈ distance / (2π) with slight efficiency factor
+  // Start larger so calibration can adjust down if needed
+  return (targetDistanceKm / (2 * Math.PI)) * 1.15;
+}
+
+// Fetch route with alternatives for better loop selection
+async function fetchLoopRouteWithAlternatives(
+  origin: { lat: number; lng: number },
+  waypoints: Array<{ lat: number; lng: number }>
+): Promise<DirectionsResult[]> {
+  if (!GOOGLE_MAPS_API_KEY) {
+    return [{ distance: 0, duration: 0, polyline: "", success: false, instructions: [], error: "No API key" }];
+  }
+
+  const waypointsStr = waypoints.map((wp) => `${wp.lat},${wp.lng}`).join("|");
+  
+  // Request with alternatives=true to get multiple route options
+  const directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.lat},${origin.lng}&destination=${origin.lat},${origin.lng}&waypoints=optimize:false|${waypointsStr}&mode=walking&avoid=highways&alternatives=true&key=${GOOGLE_MAPS_API_KEY}`;
+
+  try {
+    const response = await fetch(directionsUrl);
+    const data = await response.json();
+
+    if (data.status !== "OK" || !data.routes || data.routes.length === 0) {
+      return [{ distance: 0, duration: 0, polyline: "", success: false, instructions: [], error: data.status }];
+    }
+
+    const results: DirectionsResult[] = [];
+    
+    for (const route of data.routes) {
+      let totalDistance = 0;
+      let totalDuration = 0;
+      const allInstructions: string[] = [];
+
+      for (const leg of route.legs) {
+        totalDistance += leg.distance.value;
+        totalDuration += leg.duration.value;
+        for (const step of leg.steps) {
+          if (step.html_instructions) {
+            const cleanInstruction = step.html_instructions.replace(/<[^>]*>/g, '');
+            allInstructions.push(cleanInstruction);
+          }
+        }
+      }
+
+      results.push({
+        distance: totalDistance / 1000,
+        duration: Math.round(totalDuration / 60),
+        polyline: route.overview_polyline.points,
+        success: true,
+        instructions: allInstructions,
+      });
+    }
+
+    return results;
+  } catch (error) {
+    console.error("Directions fetch error:", error);
+    return [{ distance: 0, duration: 0, polyline: "", success: false, instructions: [], error: "Fetch failed" }];
+  }
 }
 
 // Decode Google polyline to points
@@ -451,7 +389,61 @@ function decodePolyline(encoded: string): Array<{ lat: number; lng: number }> {
   return points;
 }
 
-// Check if route contains major roads
+// Calculate uniqueness - how much of the route doesn't backtrack
+function calculatePathUniqueness(polyline: string): number {
+  const points = decodePolyline(polyline);
+  if (points.length < 10) return 1.0;
+  
+  // Use smaller grid for more accurate detection
+  const gridSize = 0.0002; // ~20 meter cells
+  const segments: string[] = [];
+  
+  for (let i = 0; i < points.length - 1; i++) {
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const g1 = `${Math.round(p1.lat / gridSize)},${Math.round(p1.lng / gridSize)}`;
+    const g2 = `${Math.round(p2.lat / gridSize)},${Math.round(p2.lng / gridSize)}`;
+    
+    if (g1 !== g2) {
+      // Create bidirectional segment key
+      const segmentKey = [g1, g2].sort().join("->");
+      segments.push(segmentKey);
+    }
+  }
+  
+  if (segments.length === 0) return 1.0;
+  
+  const uniqueSegments = new Set(segments);
+  return uniqueSegments.size / segments.length;
+}
+
+// Count repeated street names in instructions
+function countRepeatedStreets(instructions: string[]): number {
+  const streetMentions: Record<string, number> = {};
+  
+  for (const instruction of instructions) {
+    // Extract street names (words ending in St, Ave, Rd, Dr, Ln, Blvd, Way, etc.)
+    const streetPattern = /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Ln|Lane|Blvd|Boulevard|Way|Pl|Place|Ct|Court|Cres|Crescent))\b/gi;
+    const matches = instruction.match(streetPattern) || [];
+    
+    for (const street of matches) {
+      const normalized = street.toLowerCase();
+      streetMentions[normalized] = (streetMentions[normalized] || 0) + 1;
+    }
+  }
+  
+  // Count streets mentioned more than twice (indicating backtracking)
+  let repeatedCount = 0;
+  for (const count of Object.values(streetMentions)) {
+    if (count > 2) {
+      repeatedCount += count - 2;
+    }
+  }
+  
+  return repeatedCount;
+}
+
+// Check for major roads
 const MAJOR_ROAD_KEYWORDS = [
   'highway', 'hwy', 'motorway', 'state highway', 'sh-', 'sh ', ' sh ',
   'expressway', 'freeway', 'interstate', ' i-', 'turnpike'
@@ -469,213 +461,292 @@ function containsMajorRoads(instructions: string[]): boolean {
   return false;
 }
 
-// Calculate how much of the route backtracks (lower is better for loops)
-function calculatePathUniqueness(polyline: string): number {
-  const points = decodePolyline(polyline);
-  if (points.length < 10) return 1.0;
+// Get elevation data
+async function getRouteElevation(polyline: string): Promise<{
+  gain: number;
+  loss: number;
+  maxElevation: number;
+  minElevation: number;
+} | undefined> {
+  if (!GOOGLE_MAPS_API_KEY) return undefined;
   
-  const gridSize = 0.0003; // ~30 meter grid cells
-  const segments: string[] = [];
-  
-  for (let i = 0; i < points.length - 1; i++) {
-    const p1 = points[i];
-    const p2 = points[i + 1];
-    const g1 = `${Math.round(p1.lat / gridSize)},${Math.round(p1.lng / gridSize)}`;
-    const g2 = `${Math.round(p2.lat / gridSize)},${Math.round(p2.lng / gridSize)}`;
+  try {
+    const points = decodePolyline(polyline);
+    const sampleRate = Math.max(1, Math.floor(points.length / 60));
+    const sampledPoints = points.filter((_, i) => i % sampleRate === 0).slice(0, 60);
     
-    if (g1 !== g2) {
-      const segmentKey = [g1, g2].sort().join("->");
-      segments.push(segmentKey);
+    if (sampledPoints.length < 2) return undefined;
+    
+    const locations = sampledPoints.map(p => `${p.lat},${p.lng}`).join('|');
+    const url = `https://maps.googleapis.com/maps/api/elevation/json?locations=${locations}&key=${GOOGLE_MAPS_API_KEY}`;
+    
+    const res = await fetch(url);
+    const data = await res.json();
+    
+    if (data.status === "OK" && data.results && data.results.length > 1) {
+      const elevations = data.results.map((r: any) => r.elevation);
+      
+      let gain = 0;
+      let loss = 0;
+      
+      for (let i = 1; i < elevations.length; i++) {
+        const diff = elevations[i] - elevations[i - 1];
+        if (diff > 0) gain += diff;
+        else loss += Math.abs(diff);
+      }
+      
+      return {
+        gain: Math.round(gain),
+        loss: Math.round(loss),
+        maxElevation: Math.round(Math.max(...elevations)),
+        minElevation: Math.round(Math.min(...elevations)),
+      };
     }
+  } catch (error) {
+    console.error("Route elevation error:", error);
   }
   
-  if (segments.length === 0) return 1.0;
-  
-  const uniqueSegments = new Set(segments);
-  return uniqueSegments.size / segments.length;
+  return undefined;
 }
 
-// Calculate difficulty score based on route characteristics
-function calculateDifficultyScore(
-  hasMajorRoads: boolean,
-  uniqueness: number,
-  elevationGain: number
-): number {
+// Calculate route footprint (how spread out it is)
+function calculateRouteFootprint(polyline: string): number {
+  const points = decodePolyline(polyline);
+  if (points.length < 2) return 0;
+  
+  let minLat = Infinity, maxLat = -Infinity;
+  let minLng = Infinity, maxLng = -Infinity;
+  
+  for (const p of points) {
+    minLat = Math.min(minLat, p.lat);
+    maxLat = Math.max(maxLat, p.lat);
+    minLng = Math.min(minLng, p.lng);
+    maxLng = Math.max(maxLng, p.lng);
+  }
+  
+  // Return diagonal distance in km
+  return getDistanceKm({ lat: minLat, lng: minLng }, { lat: maxLat, lng: maxLng });
+}
+
+// Score a route based on quality metrics
+function scoreRoute(
+  result: DirectionsResult,
+  targetDistance: number
+): { score: number; uniqueness: number; repeatedStreets: number; footprint: number } {
+  const distanceError = Math.abs(result.distance - targetDistance) / targetDistance;
+  const uniqueness = calculatePathUniqueness(result.polyline);
+  const repeatedStreets = countRepeatedStreets(result.instructions);
+  const footprint = calculateRouteFootprint(result.polyline);
+  const hasMajorRoads = containsMajorRoads(result.instructions);
+  
+  // Score components (higher is better)
   let score = 0;
   
-  if (hasMajorRoads) score += 50;
-  if (uniqueness < 0.6) score += 20; // Lots of backtracking
-  if (elevationGain > 100) score += 30;
-  else if (elevationGain > 50) score += 15;
+  // Distance accuracy (0-30 points)
+  score += Math.max(0, 30 - distanceError * 100);
   
-  return score;
+  // Uniqueness (0-40 points) - most important
+  score += uniqueness * 40;
+  
+  // Low repeated streets (0-20 points)
+  score += Math.max(0, 20 - repeatedStreets * 3);
+  
+  // Good footprint (0-10 points)
+  const expectedFootprint = targetDistance / 3; // Expect ~1/3 of distance as diameter
+  const footprintRatio = Math.min(footprint / expectedFootprint, 1.5);
+  score += footprintRatio * 10 / 1.5;
+  
+  // Penalty for major roads
+  if (hasMajorRoads) score -= 10;
+  
+  return { score, uniqueness, repeatedStreets, footprint };
 }
 
-// Main function: Generate calibrated loop routes
-export async function generateAIRoutes(request: RouteRequest): Promise<MultiRouteResult> {
-  const { startLat, startLng, targetDistance } = request;
+// Generate a single calibrated route
+async function generateCalibratedRoute(
+  startLat: number,
+  startLng: number,
+  targetDistance: number,
+  viableBearings: number[],
+  numWaypoints: number,
+  rotationOffset: number,
+  tolerancePercent: number = 20
+): Promise<{ waypoints: Array<{ lat: number; lng: number }>; result: DirectionsResult; score: number } | null> {
   
-  console.log(`[AI Route Planner] Starting generation for ${targetDistance}km route`);
+  let radiusKm = estimateInitialRadius(targetDistance);
+  let minRadius = radiusKm * 0.4;
+  let maxRadius = radiusKm * 2.5; // Allow much larger radius for exploration
   
-  // Step 1: Get nearby parks for scenic anchor options
-  const searchRadius = estimateInitialRadius(targetDistance, "pentagon") * 1.5;
-  const parks = await getNearbyParks(startLat, startLng, searchRadius);
-  console.log(`[AI Route Planner] Found ${parks.length} nearby parks`);
-  
-  // Step 2: Generate 9 routes using calibrated geometric templates
-  const candidates: RouteCandidate[] = [];
-  const difficulties: Array<"easy" | "moderate" | "hard"> = [
-    "easy", "easy", "easy", 
-    "moderate", "moderate", "moderate", 
-    "hard", "hard", "hard"
-  ];
-  
-  // Different shapes and rotations for variety
-  const routeConfigs: Array<{ shape: LoopShape; rotation: number }> = [
-    { shape: "pentagon", rotation: 0 },
-    { shape: "square", rotation: 45 },
-    { shape: "hexagon", rotation: 30 },
-    { shape: "pentagon", rotation: 72 },
-    { shape: "square", rotation: 0 },
-    { shape: "hexagon", rotation: 60 },
-    { shape: "pentagon", rotation: 144 },
-    { shape: "octagon", rotation: 22.5 },
-    { shape: "hexagon", rotation: 0 },
-  ];
+  let bestResult: { waypoints: Array<{ lat: number; lng: number }>; result: DirectionsResult; score: number } | null = null;
 
-  for (let i = 0; i < 9; i++) {
-    const difficulty = difficulties[i];
-    const config = routeConfigs[i];
-    const variantIndex = i % 3;
+  for (let iteration = 0; iteration < 6; iteration++) {
+    const waypoints = generateSmartWaypoints(
+      startLat, startLng, radiusKm, viableBearings, numWaypoints, rotationOffset
+    );
     
-    console.log(`[AI Route Planner] Generating ${difficulty} route ${variantIndex + 1} (${config.shape}, rotation ${config.rotation}°)`);
+    const results = await fetchLoopRouteWithAlternatives({ lat: startLat, lng: startLng }, waypoints);
     
-    let calibrationResult: { waypoints: Array<{ lat: number; lng: number }>; result: DirectionsResult } | null = null;
-    
-    // Try AI-selected scenic anchors first for easy routes
-    if (difficulty === "easy" && parks.length >= 3) {
-      const scenicAnchors = await selectScenicAnchors(
-        startLat, startLng, targetDistance, parks, difficulty, variantIndex
-      );
+    // Score all alternatives and pick the best
+    for (const result of results) {
+      if (!result.success) continue;
       
-      if (scenicAnchors && scenicAnchors.length >= 3) {
-        console.log(`[AI Route Planner] Using ${scenicAnchors.length} AI-selected scenic anchors`);
-        
-        // Try to get route through scenic points
-        const scenicResult = await fetchLoopRoute({ lat: startLat, lng: startLng }, scenicAnchors);
-        
-        if (scenicResult.success) {
-          const errorPercent = Math.abs((scenicResult.distance - targetDistance) / targetDistance) * 100;
-          
-          if (errorPercent <= 15) {
-            calibrationResult = { waypoints: scenicAnchors, result: scenicResult };
-            console.log(`[AI Route Planner] Scenic route accepted: ${scenicResult.distance.toFixed(2)}km (${errorPercent.toFixed(1)}% error)`);
-          } else {
-            console.log(`[AI Route Planner] Scenic route rejected: ${scenicResult.distance.toFixed(2)}km (${errorPercent.toFixed(1)}% error exceeds 15%)`);
-          }
+      const { score, uniqueness, repeatedStreets, footprint } = scoreRoute(result, targetDistance);
+      const errorPercent = Math.abs((result.distance - targetDistance) / targetDistance) * 100;
+      
+      console.log(`[Calibration] r=${radiusKm.toFixed(2)}km: dist=${result.distance.toFixed(2)}km (${errorPercent.toFixed(0)}%), uniq=${(uniqueness*100).toFixed(0)}%, rpt=${repeatedStreets}, foot=${footprint.toFixed(2)}km, score=${score.toFixed(1)}`);
+      
+      // Only consider routes with good uniqueness
+      if (uniqueness < 0.6) continue;
+      
+      // Check if within tolerance
+      if (errorPercent <= tolerancePercent) {
+        if (!bestResult || score > bestResult.score) {
+          bestResult = { waypoints, result, score };
         }
       }
     }
     
-    // Fall back to geometric calibration if scenic route didn't work
-    if (!calibrationResult) {
-      calibrationResult = await calibrateRouteDistance(
-        startLat,
-        startLng,
-        targetDistance,
-        config.shape,
-        config.rotation,
-        15, // 15% tolerance
-        7   // max iterations for better convergence
-      );
+    // If we found a good result, we can stop or try to improve
+    if (bestResult && bestResult.score > 60) {
+      break;
     }
     
-    if (!calibrationResult) {
-      console.log(`[AI Route Planner] Route ${i} calibration failed, skipping`);
+    // Adjust radius based on best result so far
+    const testResult = results.find(r => r.success);
+    if (testResult) {
+      if (testResult.distance < targetDistance) {
+        minRadius = radiusKm;
+      } else {
+        maxRadius = radiusKm;
+      }
+    }
+    
+    radiusKm = (minRadius + maxRadius) / 2;
+  }
+  
+  return bestResult;
+}
+
+// Main function: Generate high-quality loop routes
+export async function generateAIRoutes(request: RouteRequest): Promise<MultiRouteResult> {
+  const { startLat, startLng, targetDistance } = request;
+  
+  console.log(`[AI Route Planner] Generating routes for ${targetDistance}km`);
+  
+  // Step 1: Probe directions to find viable (non-dead-end) bearings
+  const probeRadius = estimateInitialRadius(targetDistance);
+  const viableBearings = await probeViableDirections(startLat, startLng, probeRadius, 12);
+  
+  if (viableBearings.length < 3) {
+    console.log(`[AI Route Planner] Not enough viable directions, using geometric fallback`);
+  }
+  
+  // Step 2: Generate routes with different configurations
+  const candidates: RouteCandidate[] = [];
+  
+  const configs = [
+    { numWaypoints: 4, rotation: 0 },
+    { numWaypoints: 4, rotation: 45 },
+    { numWaypoints: 5, rotation: 0 },
+    { numWaypoints: 5, rotation: 36 },
+    { numWaypoints: 6, rotation: 0 },
+    { numWaypoints: 6, rotation: 30 },
+    { numWaypoints: 4, rotation: 90 },
+    { numWaypoints: 5, rotation: 72 },
+    { numWaypoints: 6, rotation: 60 },
+  ];
+  
+  for (let i = 0; i < configs.length; i++) {
+    const config = configs[i];
+    console.log(`[AI Route Planner] Generating route ${i + 1}/${configs.length}: ${config.numWaypoints} waypoints, rotation ${config.rotation}°`);
+    
+    const result = await generateCalibratedRoute(
+      startLat,
+      startLng,
+      targetDistance,
+      viableBearings,
+      config.numWaypoints,
+      config.rotation,
+      20 // 20% tolerance
+    );
+    
+    if (!result) {
+      console.log(`[AI Route Planner] Route ${i + 1} failed to generate`);
       continue;
     }
     
-    const { waypoints, result } = calibrationResult;
+    const { waypoints, result: routeResult, score } = result;
     
-    const hasMajorRoads = containsMajorRoads(result.instructions);
-    const uniqueness = calculatePathUniqueness(result.polyline);
-    const elevationGain = result.elevation?.gain || 0;
-    const difficultyScore = calculateDifficultyScore(hasMajorRoads, uniqueness, elevationGain);
+    const hasMajorRoads = containsMajorRoads(routeResult.instructions);
+    const uniqueness = calculatePathUniqueness(routeResult.polyline);
+    const footprint = calculateRouteFootprint(routeResult.polyline);
     
-    // Reject routes with too much backtracking (not real loops)
-    if (uniqueness < 0.4) {
-      console.log(`[AI Route Planner] Route ${i} rejected: too much backtracking (${(uniqueness * 100).toFixed(0)}% unique)`);
-      continue;
+    // Assign difficulty based on characteristics
+    let difficulty: "easy" | "moderate" | "hard" = "easy";
+    if (hasMajorRoads) {
+      difficulty = "hard";
+    } else if (uniqueness < 0.7 || footprint < targetDistance / 4) {
+      difficulty = "moderate";
     }
     
-    // Adjust final difficulty based on actual characteristics
-    let finalDifficulty = difficulty;
-    if (hasMajorRoads && difficulty !== "hard") {
-      finalDifficulty = "hard";
-    } else if (elevationGain > 80 && difficulty === "easy") {
-      finalDifficulty = "moderate";
+    // Get elevation
+    const elevation = await getRouteElevation(routeResult.polyline);
+    if (elevation && elevation.gain > 80) {
+      if (difficulty === "easy") difficulty = "moderate";
+      if (elevation.gain > 150 && difficulty === "moderate") difficulty = "hard";
     }
-    
-    const errorPercent = ((result.distance - targetDistance) / targetDistance) * 100;
-    console.log(`[AI Route Planner] Route ${i}: ${result.distance.toFixed(2)}km (${errorPercent.toFixed(1)}% off target), ${finalDifficulty}, elevation: +${elevationGain}m`);
     
     candidates.push({
-      id: `ai-route-${i}`,
+      id: `route-${i}`,
       waypoints,
-      actualDistance: result.distance,
-      duration: result.duration,
-      polyline: result.polyline,
-      routeName: `${result.distance.toFixed(1)}km ${finalDifficulty} Loop`,
-      difficulty: finalDifficulty,
-      difficultyScore,
+      actualDistance: routeResult.distance,
+      duration: routeResult.duration,
+      polyline: routeResult.polyline,
+      routeName: `${routeResult.distance.toFixed(1)}km ${difficulty} Loop`,
+      difficulty,
+      difficultyScore: 100 - score, // Lower is better
       hasMajorRoads,
       uniquenessScore: uniqueness,
       deadEndCount: 0,
-      elevation: result.elevation,
-      aiReasoning: `${config.shape} template with ${config.rotation}° rotation`,
+      elevation,
+      aiReasoning: `${config.numWaypoints} waypoints, ${footprint.toFixed(2)}km footprint`,
     });
   }
   
   if (candidates.length === 0) {
-    return { success: false, routes: [], error: "Could not generate any routes matching criteria" };
+    return { success: false, routes: [], error: "Could not generate any routes" };
   }
   
-  // Sort candidates by distance accuracy first, then by quality
-  candidates.sort((a, b) => {
-    const aError = Math.abs(a.actualDistance - targetDistance);
-    const bError = Math.abs(b.actualDistance - targetDistance);
-    if (Math.abs(aError - bError) > 0.3) {
-      return aError - bError; // Prioritize distance accuracy
-    }
-    return a.difficultyScore - b.difficultyScore; // Then quality (lower = better)
-  });
+  // Sort by score (higher uniqueness, better distance match)
+  candidates.sort((a, b) => a.difficultyScore - b.difficultyScore);
   
-  // Organize routes by difficulty (up to 3 per category)
+  // Distribute into difficulty buckets
   const easyRoutes = candidates.filter(r => r.difficulty === "easy").slice(0, 3);
   const moderateRoutes = candidates.filter(r => r.difficulty === "moderate").slice(0, 3);
   const hardRoutes = candidates.filter(r => r.difficulty === "hard").slice(0, 3);
   
-  // Fill missing slots from remaining candidates
+  // Fill missing slots
   const usedIds = new Set([...easyRoutes, ...moderateRoutes, ...hardRoutes].map(r => r.id));
   const remaining = candidates.filter(r => !usedIds.has(r.id));
   
   while (easyRoutes.length < 3 && remaining.length > 0) {
-    const route = remaining.shift()!;
-    easyRoutes.push({ ...route, difficulty: "easy", routeName: `${route.actualDistance.toFixed(1)}km easy Loop` });
+    const r = remaining.shift()!;
+    easyRoutes.push({ ...r, difficulty: "easy", routeName: `${r.actualDistance.toFixed(1)}km easy Loop` });
   }
   while (moderateRoutes.length < 3 && remaining.length > 0) {
-    const route = remaining.shift()!;
-    moderateRoutes.push({ ...route, difficulty: "moderate", routeName: `${route.actualDistance.toFixed(1)}km moderate Loop` });
+    const r = remaining.shift()!;
+    moderateRoutes.push({ ...r, difficulty: "moderate", routeName: `${r.actualDistance.toFixed(1)}km moderate Loop` });
   }
   while (hardRoutes.length < 3 && remaining.length > 0) {
-    const route = remaining.shift()!;
-    hardRoutes.push({ ...route, difficulty: "hard", routeName: `${route.actualDistance.toFixed(1)}km hard Loop` });
+    const r = remaining.shift()!;
+    hardRoutes.push({ ...r, difficulty: "hard", routeName: `${r.actualDistance.toFixed(1)}km hard Loop` });
   }
   
   const finalRoutes = [...easyRoutes, ...moderateRoutes, ...hardRoutes];
   
-  console.log(`[AI Route Planner] Generated ${finalRoutes.length} calibrated routes`);
-  console.log(`[AI Route Planner] Distance range: ${Math.min(...finalRoutes.map(r => r.actualDistance)).toFixed(2)}km - ${Math.max(...finalRoutes.map(r => r.actualDistance)).toFixed(2)}km (target: ${targetDistance}km)`);
+  console.log(`[AI Route Planner] Generated ${finalRoutes.length} routes`);
+  const footprints = finalRoutes.map(r => calculateRouteFootprint(r.polyline));
+  console.log(`[AI Route Planner] Footprint range: ${Math.min(...footprints).toFixed(2)}km - ${Math.max(...footprints).toFixed(2)}km`);
   
   return {
     success: true,
