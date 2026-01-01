@@ -688,7 +688,9 @@ export default function RunSession() {
     
     recognition.onstart = () => {
       setIsListening(true);
-      window.speechSynthesis.cancel();
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
     };
     
     recognition.onresult = (event: any) => {
