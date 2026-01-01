@@ -627,15 +627,11 @@ export async function generateAIRoutes(request: RouteRequest): Promise<MultiRout
   const templates = generateRouteTemplates(startLat, startLng, targetDistance);
   console.log(`[Route Gen] Created ${templates.length} unique templates`);
   
-  const candidates: RouteCandidate[] = [];
-  const acceptedPolylines: string[] = [];
+  // Cache calibrated routes to avoid re-fetching when relaxing thresholds
+  const calibratedCache: Map<string, { waypoints: Array<{lat: number; lng: number}>, result: DirectionsResult, backtrackRatio: number }> = new Map();
   
-  // Try each template until we have 9 unique routes
+  // First pass: calibrate all templates
   for (const template of templates) {
-    if (candidates.length >= 9) break;
-    
-    console.log(`[Route Gen] Trying template: ${template.name}`);
-    
     const calibrated = await calibrateRoute(
       startLat,
       startLng,
@@ -644,68 +640,94 @@ export async function generateAIRoutes(request: RouteRequest): Promise<MultiRout
       template.optimize
     );
     
-    if (!calibrated) {
-      console.log(`[Route Gen] Template ${template.name} failed calibration`);
-      continue;
-    }
-    
-    const { waypoints, result } = calibrated;
-    
-    // Check for backtracking (dead-ends that double back)
-    const backtrackRatio = calculateBacktrackRatio(result.polyline);
-    if (backtrackRatio > 0.25) {
-      console.log(`[Route Gen] Template ${template.name} rejected: too much backtracking (${(backtrackRatio*100).toFixed(0)}%)`);
-      continue;
-    }
-    
-    // Check if this route is too similar to existing routes
-    let tooSimilar = false;
-    for (const existingPolyline of acceptedPolylines) {
-      const overlap = calculateRouteOverlap(result.polyline, existingPolyline);
-      if (overlap > 0.4) {
-        console.log(`[Route Gen] Template ${template.name} too similar (${(overlap*100).toFixed(0)}% overlap)`);
-        tooSimilar = true;
-        break;
-      }
-    }
-    
-    if (tooSimilar) continue;
-    
-    const footprint = getRouteFootprint(result.polyline);
-    const hasMajorRoads = containsMajorRoads(result.instructions);
-    const segments = getRouteSegments(result.polyline);
-    const uniqueRatio = segments.size > 0 ? 1 : 0;
-    
-    console.log(`[Route Gen] Accepted ${template.name}: ${result.distance.toFixed(2)}km, footprint ${footprint.toFixed(2)}km`);
-    
-    // Assign difficulty based on route number and characteristics
-    let difficulty: "easy" | "moderate" | "hard";
-    if (candidates.length < 3) {
-      difficulty = "easy";
-    } else if (candidates.length < 6) {
-      difficulty = "moderate";
+    if (calibrated) {
+      const backtrackRatio = calculateBacktrackRatio(calibrated.result.polyline);
+      calibratedCache.set(template.name, { 
+        waypoints: calibrated.waypoints, 
+        result: calibrated.result,
+        backtrackRatio
+      });
+      console.log(`[Route Gen] Calibrated ${template.name}: ${calibrated.result.distance.toFixed(2)}km, backtrack ${(backtrackRatio*100).toFixed(0)}%`);
     } else {
-      difficulty = "hard";
+      console.log(`[Route Gen] Template ${template.name} failed calibration`);
     }
+  }
+  
+  // Progressive relaxation: try increasingly lenient thresholds
+  const backtrackThresholds = [0.25, 0.40, 0.55, 0.70];
+  
+  const candidates: RouteCandidate[] = [];
+  const acceptedPolylines: string[] = [];
+  
+  for (const maxBacktrack of backtrackThresholds) {
+    if (candidates.length >= 9) break;
     
-    if (hasMajorRoads) difficulty = "hard";
+    console.log(`[Route Gen] Trying with backtrack threshold ${(maxBacktrack*100).toFixed(0)}%`);
     
-    candidates.push({
-      id: `route-${candidates.length}`,
-      waypoints,
-      actualDistance: result.distance,
-      duration: result.duration,
-      polyline: result.polyline,
-      routeName: `${result.distance.toFixed(1)}km ${difficulty} - ${template.name}`,
-      difficulty,
-      difficultyScore: candidates.length * 10,
-      hasMajorRoads,
-      uniquenessScore: uniqueRatio,
-      deadEndCount: 0,
-      aiReasoning: template.name,
-    });
-    
-    acceptedPolylines.push(result.polyline);
+    for (const template of templates) {
+      if (candidates.length >= 9) break;
+      
+      const cached = calibratedCache.get(template.name);
+      if (!cached) continue;
+      
+      // Skip if already accepted
+      if (acceptedPolylines.includes(cached.result.polyline)) continue;
+      
+      // Check backtrack threshold for this pass
+      if (cached.backtrackRatio > maxBacktrack) continue;
+      
+      const { waypoints, result } = cached;
+      
+      // Check if this route is too similar to existing routes
+      let tooSimilar = false;
+      for (const existingPolyline of acceptedPolylines) {
+        const overlap = calculateRouteOverlap(result.polyline, existingPolyline);
+        if (overlap > 0.4) {
+          tooSimilar = true;
+          break;
+        }
+      }
+      
+      if (tooSimilar) continue;
+      
+      const footprint = getRouteFootprint(result.polyline);
+      const hasMajorRoads = containsMajorRoads(result.instructions);
+      const segments = getRouteSegments(result.polyline);
+      const uniqueRatio = segments.size > 0 ? 1 : 0;
+      
+      console.log(`[Route Gen] Accepted ${template.name}: ${result.distance.toFixed(2)}km, footprint ${footprint.toFixed(2)}km, backtrack ${(cached.backtrackRatio*100).toFixed(0)}%`);
+      
+      // Assign difficulty based on route characteristics
+      let difficulty: "easy" | "moderate" | "hard";
+      
+      // Routes with less backtracking are easier, more backtracking means harder
+      if (cached.backtrackRatio <= 0.25) {
+        difficulty = "easy";
+      } else if (cached.backtrackRatio <= 0.40) {
+        difficulty = "moderate";
+      } else {
+        difficulty = "hard";
+      }
+      
+      if (hasMajorRoads) difficulty = "hard";
+      
+      candidates.push({
+        id: `route-${candidates.length}`,
+        waypoints,
+        actualDistance: result.distance,
+        duration: result.duration,
+        polyline: result.polyline,
+        routeName: `${result.distance.toFixed(1)}km ${difficulty} - ${template.name}`,
+        difficulty,
+        difficultyScore: Math.round(cached.backtrackRatio * 100),
+        hasMajorRoads,
+        uniquenessScore: uniqueRatio,
+        deadEndCount: 0,
+        aiReasoning: template.name,
+      });
+      
+      acceptedPolylines.push(result.polyline);
+    }
   }
   
   if (candidates.length === 0) {
