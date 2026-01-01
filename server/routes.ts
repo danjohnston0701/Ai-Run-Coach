@@ -821,9 +821,10 @@ export async function registerRoutes(
       }
 
       res.status(201).json(request);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Friend request error:", error);
-      res.status(500).json({ error: "Failed to send friend request" });
+      const errorMessage = error?.message || "Failed to send friend request";
+      res.status(500).json({ error: errorMessage });
     }
   });
 
@@ -846,9 +847,10 @@ export async function registerRoutes(
       );
       
       res.json(enrichedRequests);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Get incoming requests error:", error);
-      res.status(500).json({ error: "Failed to get friend requests" });
+      const errorMessage = error?.message || "Failed to get friend requests";
+      res.status(500).json({ error: errorMessage });
     }
   });
 
@@ -871,9 +873,10 @@ export async function registerRoutes(
       );
       
       res.json(enrichedRequests);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Get outgoing requests error:", error);
-      res.status(500).json({ error: "Failed to get friend requests" });
+      const errorMessage = error?.message || "Failed to get friend requests";
+      res.status(500).json({ error: errorMessage });
     }
   });
 
@@ -924,9 +927,10 @@ export async function registerRoutes(
       }
 
       res.json(updatedRequest);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Respond to friend request error:", error);
-      res.status(500).json({ error: "Failed to respond to friend request" });
+      const errorMessage = error?.message || "Failed to respond to friend request";
+      res.status(500).json({ error: errorMessage });
     }
   });
 
@@ -947,8 +951,9 @@ export async function registerRoutes(
 
       await storage.respondToFriendRequest(requestId, 'rejected');
       res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to cancel friend request" });
+    } catch (error: any) {
+      const errorMessage = error?.message || "Failed to cancel friend request";
+      res.status(500).json({ error: errorMessage });
     }
   });
 
