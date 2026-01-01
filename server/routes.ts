@@ -1012,7 +1012,41 @@ export async function registerRoutes(
     }
   });
 
-  // Cancel outgoing friend request
+  // Cancel outgoing friend request (POST version for easier client use)
+  app.post("/api/friend-requests/:id/cancel", async (req, res) => {
+    try {
+      const { userId } = req.body;
+      const requestId = req.params.id;
+
+      const request = await storage.getFriendRequest(requestId);
+      if (!request) {
+        return res.status(404).json({ error: "Friend request not found" });
+      }
+
+      if (request.requesterId !== userId) {
+        return res.status(403).json({ error: "Not authorized to cancel this request" });
+      }
+
+      // Delete the friend request
+      await storage.respondToFriendRequest(requestId, 'cancelled');
+      
+      // Also delete the notification for the addressee
+      try {
+        await storage.deleteNotificationByData(request.addresseeId, 'friend_request', request.requesterId);
+      } catch (notifError) {
+        console.error("Failed to delete notification:", notifError);
+        // Don't fail the whole request if notification deletion fails
+      }
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Cancel friend request error:", error);
+      const errorMessage = error?.message || "Failed to cancel friend request";
+      res.status(500).json({ error: errorMessage });
+    }
+  });
+
+  // Cancel outgoing friend request (DELETE version - kept for backwards compatibility)
   app.delete("/api/friend-requests/:id", async (req, res) => {
     try {
       const { userId } = req.body;
@@ -1027,7 +1061,7 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Not authorized to cancel this request" });
       }
 
-      await storage.respondToFriendRequest(requestId, 'rejected');
+      await storage.respondToFriendRequest(requestId, 'cancelled');
       res.json({ success: true });
     } catch (error: any) {
       const errorMessage = error?.message || "Failed to cancel friend request";

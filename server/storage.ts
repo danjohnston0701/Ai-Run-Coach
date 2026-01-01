@@ -53,7 +53,7 @@ export interface IStorage {
   getIncomingFriendRequests(userId: string): Promise<FriendRequest[]>;
   getOutgoingFriendRequests(userId: string): Promise<FriendRequest[]>;
   getPendingRequestBetweenUsers(requesterId: string, addresseeId: string): Promise<FriendRequest | undefined>;
-  respondToFriendRequest(id: string, status: 'accepted' | 'rejected'): Promise<FriendRequest | undefined>;
+  respondToFriendRequest(id: string, status: 'accepted' | 'rejected' | 'cancelled'): Promise<FriendRequest | undefined>;
 
   // Push Subscriptions
   savePushSubscription(data: InsertPushSubscription): Promise<PushSubscription>;
@@ -66,6 +66,7 @@ export interface IStorage {
   getUnreadNotificationCount(userId: string): Promise<number>;
   markNotificationAsRead(id: string): Promise<Notification | undefined>;
   markAllNotificationsAsRead(userId: string): Promise<void>;
+  deleteNotificationByData(userId: string, type: string, relatedUserId: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -284,7 +285,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async respondToFriendRequest(id: string, status: 'accepted' | 'rejected'): Promise<FriendRequest | undefined> {
+  async respondToFriendRequest(id: string, status: 'accepted' | 'rejected' | 'cancelled'): Promise<FriendRequest | undefined> {
     try {
       return await withRetry(async () => {
         const [request] = await db.update(friendRequests).set({
@@ -382,6 +383,28 @@ export class DatabaseStorage implements IStorage {
       await db.update(notifications)
         .set({ read: true })
         .where(eq(notifications.userId, userId));
+    });
+  }
+
+  async deleteNotificationByData(userId: string, type: string, relatedUserId: string): Promise<void> {
+    return withRetry(async () => {
+      // Find and delete notifications that match the type and contain the relatedUserId in data
+      const userNotifications = await db.select()
+        .from(notifications)
+        .where(and(
+          eq(notifications.userId, userId),
+          eq(notifications.type, type)
+        ));
+      
+      for (const notification of userNotifications) {
+        if (notification.data) {
+          const data = notification.data as Record<string, any>;
+          // Check if this notification is related to the user we're cancelling
+          if (data.requesterId === relatedUserId || data.requesterEmail) {
+            await db.delete(notifications).where(eq(notifications.id, notification.id));
+          }
+        }
+      }
     });
   }
 }

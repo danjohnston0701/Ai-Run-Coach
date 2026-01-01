@@ -272,6 +272,25 @@ export default function Profile() {
     },
   });
 
+  const cancelRequestMutation = useMutation({
+    mutationFn: async (requestId: string) => {
+      const res = await fetch(`/api/friend-requests/${requestId}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: profile?.id }),
+      });
+      if (!res.ok) throw new Error('Failed to cancel request');
+      return res.json();
+    },
+    onSuccess: () => {
+      toast.success('Friend request cancelled');
+      queryClient.invalidateQueries({ queryKey: ['friend-requests-outgoing', profile?.id] });
+    },
+    onError: () => {
+      toast.error('Failed to cancel friend request');
+    },
+  });
+
   useEffect(() => {
     const searchUsers = async () => {
       if (friendSearchQuery.length < 2) {
@@ -891,7 +910,16 @@ export default function Profile() {
                         <p className="text-sm font-medium text-foreground">{request.addresseeName}</p>
                         <p className="text-[10px] text-muted-foreground">{request.addresseeEmail}</p>
                       </div>
-                      <span className="text-[10px] text-blue-400 font-bold uppercase">Pending</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => cancelRequestMutation.mutate(request.id)}
+                        disabled={cancelRequestMutation.isPending}
+                        className="h-7 px-3 bg-red-500/20 hover:bg-red-500/30 text-red-400 text-[10px] font-bold uppercase"
+                        data-testid={`button-cancel-${request.id}`}
+                      >
+                        Cancel
+                      </Button>
                     </div>
                   ))}
                 </div>
