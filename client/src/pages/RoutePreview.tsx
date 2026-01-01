@@ -3,7 +3,7 @@ import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
-import { ArrowLeft, Play, Loader2, RefreshCw, Route, Clock, TrendingUp } from "lucide-react";
+import { ArrowLeft, Play, Loader2, RefreshCw, Route, TrendingUp } from "lucide-react";
 import GoogleMapsRoute from "@/components/GoogleMapsRoute";
 
 interface RouteCandidate {
@@ -161,18 +161,12 @@ export default function RoutePreview() {
                 <Route className="w-4 h-4 text-muted-foreground" />
                 <span className="text-lg font-bold">{route.actualDistance.toFixed(1)} km</span>
               </div>
-              <div className="flex items-center gap-3">
-                {route.elevation && route.elevation.gain > 0 && (
-                  <div className="flex items-center gap-1 text-muted-foreground">
-                    <TrendingUp className="w-3 h-3" />
-                    <span className="text-xs">{route.elevation.gain}m</span>
-                  </div>
-                )}
+              {route.elevation && route.elevation.gain > 0 && (
                 <div className="flex items-center gap-1 text-muted-foreground">
-                  <Clock className="w-3 h-3" />
-                  <span className="text-xs">{route.duration} min</span>
+                  <TrendingUp className="w-3 h-3" />
+                  <span className="text-xs">{route.elevation.gain}m</span>
                 </div>
-              </div>
+              )}
             </div>
             {route.hasMajorRoads && (
               <p className="text-xs text-muted-foreground mt-1">Includes major roads</p>
