@@ -177,6 +177,49 @@ function calculateRouteOverlap(polyline1: string, polyline2: string): number {
   return overlap / Math.min(seg1.size, seg2.size);
 }
 
+// Detect backtracking - returns percentage of route that doubles back on itself (0-1)
+function calculateBacktrackRatio(polyline: string): number {
+  const points = decodePolyline(polyline);
+  if (points.length < 10) return 0;
+  
+  const gridSize = 0.0003; // ~30m grid for finer detection
+  const directedSegments: string[] = [];
+  
+  // Create directed segments (A->B is different from B->A)
+  for (let i = 0; i < points.length - 1; i++) {
+    const g1 = `${Math.round(points[i].lat / gridSize)},${Math.round(points[i].lng / gridSize)}`;
+    const g2 = `${Math.round(points[i+1].lat / gridSize)},${Math.round(points[i+1].lng / gridSize)}`;
+    if (g1 !== g2) {
+      directedSegments.push(`${g1}->${g2}`);
+    }
+  }
+  
+  if (directedSegments.length === 0) return 0;
+  
+  // Count how many segments have their reverse also in the route
+  const segmentSet = new Set(directedSegments);
+  let backtrackCount = 0;
+  
+  for (let i = 0; i < directedSegments.length; i++) {
+    const seg = directedSegments[i];
+    const parts = seg.split('->');
+    const reverse = `${parts[1]}->${parts[0]}`;
+    
+    if (segmentSet.has(reverse)) {
+      backtrackCount++;
+    }
+  }
+  
+  // Return ratio of backtracked segments
+  return backtrackCount / directedSegments.length;
+}
+
+// Check if route has acceptable loop quality (low backtracking)
+function isGoodLoop(polyline: string, maxBacktrackRatio: number = 0.25): boolean {
+  const backtrackRatio = calculateBacktrackRatio(polyline);
+  return backtrackRatio <= maxBacktrackRatio;
+}
+
 // Check for major roads
 const MAJOR_ROAD_KEYWORDS = ['highway', 'hwy', 'motorway', 'expressway', 'freeway', 'interstate', 'turnpike'];
 
@@ -607,6 +650,13 @@ export async function generateAIRoutes(request: RouteRequest): Promise<MultiRout
     }
     
     const { waypoints, result } = calibrated;
+    
+    // Check for backtracking (dead-ends that double back)
+    const backtrackRatio = calculateBacktrackRatio(result.polyline);
+    if (backtrackRatio > 0.25) {
+      console.log(`[Route Gen] Template ${template.name} rejected: too much backtracking (${(backtrackRatio*100).toFixed(0)}%)`);
+      continue;
+    }
     
     // Check if this route is too similar to existing routes
     let tooSimilar = false;
