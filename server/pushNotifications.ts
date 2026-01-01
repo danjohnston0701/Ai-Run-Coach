@@ -112,6 +112,21 @@ export async function sendFriendRequestNotification(
   requesterName: string,
   requesterEmail: string
 ): Promise<boolean> {
+  // Create notification record in database (so it appears in notifications page)
+  try {
+    await storage.createNotification({
+      userId: addresseeId,
+      type: 'friend_request',
+      title: 'New Friend Request',
+      message: `${requesterName} (${requesterEmail}) wants to be your friend!`,
+      read: false,
+      data: JSON.stringify({ type: 'friend-request', requesterEmail }),
+    });
+  } catch (error) {
+    console.error('[Notification] Failed to create notification record:', error);
+  }
+
+  // Also send push notification if configured
   return sendPushNotification(addresseeId, {
     title: 'New Friend Request',
     body: `${requesterName} (${requesterEmail}) wants to be your friend!`,
@@ -129,6 +144,21 @@ export async function sendFriendAcceptedNotification(
   addresseeName: string,
   addresseeEmail: string
 ): Promise<boolean> {
+  // Create notification record in database (so it appears in notifications page)
+  try {
+    await storage.createNotification({
+      userId: requesterId,
+      type: 'friend_accepted',
+      title: 'Friend Request Accepted',
+      message: `${addresseeName} (${addresseeEmail}) accepted your friend request!`,
+      read: false,
+      data: JSON.stringify({ type: 'friend-accepted', addresseeEmail }),
+    });
+  } catch (error) {
+    console.error('[Notification] Failed to create notification record:', error);
+  }
+
+  // Also send push notification if configured
   return sendPushNotification(requesterId, {
     title: 'Friend Request Accepted',
     body: `${addresseeName} (${addresseeEmail}) accepted your friend request!`,
