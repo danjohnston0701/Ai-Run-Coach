@@ -6,7 +6,7 @@ import { RouteMap } from "@/components/RouteMap";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { 
-  Pause, Play, Square, Heart, Map, Share2, Users, Navigation, Volume2, VolumeX, Footprints 
+  Pause, Play, Square, Heart, Map, Share2, Users, Navigation, Volume2, VolumeX, Footprints, Mic, MicOff 
 } from "lucide-react";
 import type { Friend } from "./Profile";
 
@@ -160,11 +160,16 @@ export default function RunSession() {
   const [kmSplits, setKmSplits] = useState<number[]>([]);
   const [motionPermission, setMotionPermission] = useState<"unknown" | "granted" | "denied" | "unavailable">("unknown");
   
+  const [aiCoachEnabled, setAiCoachEnabled] = useState(true);
+  const [coachingInterval] = useState(120);
+  const [isCoaching, setIsCoaching] = useState(false);
+  
   const positionsRef = useRef<Position[]>([]);
   const watchIdRef = useRef<number | null>(null);
   const speechSynthRef = useRef<SpeechSynthesisUtterance | null>(null);
   const stepTimestampsRef = useRef<number[]>([]);
   const lastAccelRef = useRef<number>(0);
+  const runMetricsRef = useRef({ time: 0, distance: 0 });
 
   const searchParams = new URLSearchParams(window.location.search);
   const targetDistance = searchParams.get("distance") || "5";
@@ -491,6 +496,133 @@ export default function RunSession() {
     }
   }, [active, gpsStatus, distance, lastKmAnnounced, time, kmSplits, targetDistance, cadence, speak]);
 
+  const coachingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const audioEnabledRef = useRef(audioEnabled);
+  const coachingControlRef = useRef({ active, aiCoachEnabled, gpsStatus });
+  
+  useEffect(() => {
+    runMetricsRef.current = { time, distance };
+  }, [time, distance]);
+  
+  useEffect(() => {
+    audioEnabledRef.current = audioEnabled;
+  }, [audioEnabled]);
+  
+  useEffect(() => {
+    coachingControlRef.current = { active, aiCoachEnabled, gpsStatus };
+  }, [active, aiCoachEnabled, gpsStatus]);
+  
+  const speakCoaching = useCallback((text: string) => {
+    const { active: isActive, aiCoachEnabled: isEnabled } = coachingControlRef.current;
+    if (!isActive || !isEnabled || !audioEnabledRef.current || !('speechSynthesis' in window)) return;
+    
+    if (window.speechSynthesis.speaking) {
+      setTimeout(() => speakCoaching(text), 2000);
+      return;
+    }
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.9;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    window.speechSynthesis.speak(utterance);
+  }, []);
+
+  const fetchCoaching = useCallback(async () => {
+    const { active: isActive, aiCoachEnabled: isEnabled, gpsStatus: gps } = coachingControlRef.current;
+    if (!isActive || !isEnabled || gps !== "active") return;
+    
+    const { time: currentTime, distance: currentDistance } = runMetricsRef.current;
+    if (currentDistance < 0.1) return;
+    
+    setIsCoaching(true);
+    
+    try {
+      const paceSeconds = currentTime / currentDistance;
+      const paceMins = Math.floor(paceSeconds / 60);
+      const paceSecs = Math.floor(paceSeconds % 60);
+      const currentPace = `${paceMins}:${paceSecs.toString().padStart(2, '0')}`;
+      
+      const targetPaceMap: Record<string, string> = {
+        'beginner': '7:00',
+        'moderate': '5:30',
+        'expert': '4:30'
+      };
+      
+      const response = await fetch('/api/ai/coaching', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          currentPace,
+          targetPace: targetPaceMap[levelId] || '6:00',
+          elapsedTime: currentTime,
+          distanceCovered: currentDistance,
+          totalDistance: parseFloat(targetDistance),
+          difficulty: levelId,
+          userFitnessLevel: 'intermediate'
+        })
+      });
+      
+      if (response.ok) {
+        const { active: stillActive, aiCoachEnabled: stillEnabled } = coachingControlRef.current;
+        if (!stillActive || !stillEnabled) return;
+        
+        const advice = await response.json();
+        
+        let coachMessage = advice.message || '';
+        if (advice.paceAdvice && advice.paceAdvice !== advice.message) {
+          coachMessage += ' ' + advice.paceAdvice;
+        }
+        if (advice.breathingTip) {
+          coachMessage += ' ' + advice.breathingTip;
+        }
+        if (advice.encouragement && advice.encouragement !== advice.message) {
+          coachMessage += ' ' + advice.encouragement;
+        }
+        
+        if (coachMessage.trim()) {
+          speakCoaching(coachMessage.trim());
+          setMessage(advice.message || "Coach says...");
+        }
+      }
+    } catch (error) {
+      console.error('AI coaching error:', error);
+    } finally {
+      setIsCoaching(false);
+    }
+  }, [targetDistance, levelId, speakCoaching]);
+
+  useEffect(() => {
+    if (!active || !aiCoachEnabled || gpsStatus !== "active") {
+      if (coachingTimeoutRef.current) {
+        clearTimeout(coachingTimeoutRef.current);
+        coachingTimeoutRef.current = null;
+      }
+      return;
+    }
+    
+    const runCoachingCycle = () => {
+      const { active: isActive, aiCoachEnabled: isEnabled, gpsStatus: gps } = coachingControlRef.current;
+      if (!isActive || !isEnabled || gps !== "active") {
+        coachingTimeoutRef.current = null;
+        return;
+      }
+      
+      fetchCoaching();
+      coachingTimeoutRef.current = setTimeout(runCoachingCycle, coachingInterval * 1000);
+    };
+    
+    const initialDelay = setTimeout(runCoachingCycle, coachingInterval * 1000);
+    
+    return () => {
+      clearTimeout(initialDelay);
+      if (coachingTimeoutRef.current) {
+        clearTimeout(coachingTimeoutRef.current);
+        coachingTimeoutRef.current = null;
+      }
+    };
+  }, [active, aiCoachEnabled, gpsStatus, coachingInterval, fetchCoaching]);
+
   const toggleLiveShare = (friend: Friend) => {
     const friendId = friend.email || friend.name;
     if (sharedWith.includes(friendId)) {
@@ -751,6 +883,18 @@ export default function RunSession() {
               data-testid="button-audio-toggle"
             >
               {audioEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            </Button>
+            <Button
+              onClick={() => setAiCoachEnabled(!aiCoachEnabled)}
+              size="icon"
+              className={`h-10 w-10 rounded-xl ${
+                aiCoachEnabled 
+                  ? "bg-blue-500 text-white border border-blue-400" 
+                  : "bg-white/10 text-muted-foreground"
+              } ${isCoaching ? "animate-pulse" : ""}`}
+              data-testid="button-ai-coach-toggle"
+            >
+              {aiCoachEnabled ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
             </Button>
             {motionPermission === "unknown" && (
               <Button
