@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { 
   ArrowLeft, Calendar, TrendingUp, Heart, 
-  Activity, Zap as CadenceIcon, Info, Timer, MapPin, Share2, Mail, User as UserIcon, Search
+  Activity, Zap as CadenceIcon, Info, Timer, MapPin, Share2, Mail, User as UserIcon, Search, Star
 } from "lucide-react";
 import type { Friend } from "./Profile";
 import {
@@ -30,6 +30,9 @@ export default function RunInsights() {
   const [sharedWith, setSharedWith] = useState<string[]>([]);
   const [friends, setFriends] = useState<Friend[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [routeRating, setRouteRating] = useState<number | null>(null);
+  const [hoverRating, setHoverRating] = useState<number | null>(null);
+  const [ratingSubmitted, setRatingSubmitted] = useState(false);
 
   useEffect(() => {
     const runHistory = localStorage.getItem("runHistory");
@@ -38,6 +41,11 @@ export default function RunInsights() {
       const foundRun = runs.find((r: RunData) => r.id === params.id);
       if (foundRun) {
         setRun(foundRun);
+        // Check if already rated
+        if (foundRun.rating) {
+          setRouteRating(foundRun.rating);
+          setRatingSubmitted(true);
+        }
       }
     }
     
@@ -52,6 +60,53 @@ export default function RunInsights() {
       setFriends(parsed.friends || []);
     }
   }, [params?.id]);
+
+  const submitRating = async (rating: number) => {
+    if (!run || ratingSubmitted) return;
+    
+    setRouteRating(rating);
+    
+    try {
+      const profile = localStorage.getItem("userProfile");
+      const userId = profile ? JSON.parse(profile).id : null;
+      
+      if (userId) {
+        // Extract template name from route name (e.g., "5.2km hard - North Loop" -> "North Loop")
+        const templateMatch = (run as any).routeName?.match(/- (.+)$/);
+        const templateName = templateMatch ? templateMatch[1] : null;
+        
+        await fetch("/api/route-ratings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId,
+            runId: run.id,
+            rating,
+            templateName,
+            routeDistance: run.distance,
+            startLat: (run as any).lat,
+            startLng: (run as any).lng,
+          }),
+        });
+      }
+      
+      // Save rating to local storage
+      const runHistory = localStorage.getItem("runHistory");
+      if (runHistory) {
+        const runs = JSON.parse(runHistory);
+        const updatedRuns = runs.map((r: RunData) => 
+          r.id === run.id ? { ...r, rating } : r
+        );
+        localStorage.setItem("runHistory", JSON.stringify(updatedRuns));
+      }
+      
+      setRatingSubmitted(true);
+      toast.success(`Route rated ${rating}/10! This helps improve future suggestions.`);
+    } catch (error) {
+      console.error("Failed to submit rating:", error);
+      toast.error("Failed to save rating");
+    }
+  };
 
   const handleShareFriend = (friend: Friend) => {
     const recipient = friend.email || friend.name;
@@ -454,6 +509,69 @@ export default function RunInsights() {
               </div>
             </div>
           </div>
+
+          {/* Route Rating */}
+          {(run as any).routeName && (
+            <div className="space-y-4">
+              <h3 className="text-xs font-display font-bold uppercase tracking-widest flex items-center gap-2">
+                <Star className="w-3 h-3 text-primary" /> Rate This Route
+              </h3>
+              <div className="bg-gradient-to-br from-primary/10 to-primary/5 rounded-2xl p-5 border border-primary/20">
+                {ratingSubmitted ? (
+                  <div className="text-center space-y-2">
+                    <div className="flex justify-center gap-1">
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((star) => (
+                        <Star
+                          key={star}
+                          className={`w-5 h-5 ${
+                            star <= (routeRating || 0) 
+                              ? "text-yellow-400 fill-yellow-400" 
+                              : "text-gray-600"
+                          }`}
+                        />
+                      ))}
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      You rated this route <span className="text-primary font-bold">{routeRating}/10</span>
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Your feedback helps improve future route suggestions!
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-sm text-center text-muted-foreground">
+                      How was the <span className="text-primary font-semibold">{(run as any).routeName?.split(' - ')[1] || 'route'}</span>?
+                    </p>
+                    <div className="flex justify-center gap-1">
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((star) => (
+                        <button
+                          key={star}
+                          onClick={() => submitRating(star)}
+                          onMouseEnter={() => setHoverRating(star)}
+                          onMouseLeave={() => setHoverRating(null)}
+                          className="p-1 transition-transform hover:scale-110"
+                          data-testid={`button-rate-${star}`}
+                        >
+                          <Star
+                            className={`w-6 h-6 transition-colors ${
+                              star <= (hoverRating || routeRating || 0)
+                                ? "text-yellow-400 fill-yellow-400"
+                                : "text-gray-600 hover:text-yellow-400/50"
+                            }`}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex justify-between text-[10px] text-muted-foreground px-2">
+                      <span>Terrible</span>
+                      <span>Perfect</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </section>
       </main>
     </div>

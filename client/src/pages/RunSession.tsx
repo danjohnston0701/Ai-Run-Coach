@@ -62,6 +62,8 @@ export default function RunSession() {
   const mapped = searchParams.get("mapped") === "true";
   const lat = parseFloat(searchParams.get("lat") || "40.7128");
   const lng = parseFloat(searchParams.get("lng") || "-74.0060");
+  const routeName = searchParams.get("routeName") || "";
+  const routeId = searchParams.get("routeId") || "";
 
   const getMapImage = () => {
     switch(levelId) {
@@ -134,6 +136,8 @@ export default function RunSession() {
       difficulty: levelId,
       lat,
       lng,
+      routeName,
+      routeId,
     };
 
     const runHistory = localStorage.getItem("runHistory");
