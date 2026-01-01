@@ -120,8 +120,8 @@ async function fetchLoopRoute(
     return { distance: 0, duration: 0, polyline: "", success: false, instructions: [], error: "No API key" };
   }
 
-  // Format waypoints for the API (via points)
-  const waypointsStr = waypoints.map((wp) => `via:${wp.lat},${wp.lng}`).join("|");
+  // Format waypoints for the API (as stop points for proper loop routing)
+  const waypointsStr = waypoints.map((wp) => `${wp.lat},${wp.lng}`).join("|");
   
   // Request walking route that returns to origin, avoiding highways
   const directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.lat},${origin.lng}&destination=${origin.lat},${origin.lng}&waypoints=${waypointsStr}&mode=walking&avoid=highways&key=${GOOGLE_MAPS_API_KEY}`;
