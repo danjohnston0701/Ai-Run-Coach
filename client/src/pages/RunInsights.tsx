@@ -7,7 +7,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { 
   ArrowLeft, Calendar, TrendingUp, Heart, 
-  Activity, Zap as CadenceIcon, Info, Timer, MapPin, Share2, Mail, User as UserIcon, Search, Star
+  Activity, Zap as CadenceIcon, Info, Timer, MapPin, Share2, Mail, User as UserIcon, Search, Star,
+  Facebook, Instagram, Download, X
 } from "lucide-react";
 import type { Friend } from "./Profile";
 import {
@@ -20,6 +21,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import type { RunData } from "./RunHistory";
+import { shareToSocialMedia, downloadShareImage } from "@/lib/shareImageGenerator";
 
 export default function RunInsights() {
   const [, setLocation] = useLocation();
@@ -33,6 +35,9 @@ export default function RunInsights() {
   const [routeRating, setRouteRating] = useState<number | null>(null);
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
+  const [showSocialShareModal, setShowSocialShareModal] = useState(false);
+  const [isGeneratingShare, setIsGeneratingShare] = useState(false);
+  const [shareFormat, setShareFormat] = useState<"post" | "story">("post");
 
   useEffect(() => {
     const runHistory = localStorage.getItem("runHistory");
@@ -144,6 +149,42 @@ export default function RunInsights() {
     f.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const handleSocialShare = async (platform: "facebook" | "instagram" | "native") => {
+    if (!run) return;
+    setIsGeneratingShare(true);
+    try {
+      const routeCoords = (run as any).gpsTrack || (run as any).routeCoords;
+      await shareToSocialMedia({ run, routeCoords, format: shareFormat }, platform);
+      if (platform === "instagram") {
+        toast.success("Image downloaded! Open Instagram and share from your gallery.");
+      } else if (platform === "facebook") {
+        toast.success("Image downloaded! You can attach it to your Facebook post.");
+      } else {
+        toast.success("Run summary shared!");
+      }
+    } catch (error) {
+      console.error("Share error:", error);
+      toast.error("Could not share. Try downloading the image instead.");
+    } finally {
+      setIsGeneratingShare(false);
+    }
+  };
+
+  const handleDownloadImage = async () => {
+    if (!run) return;
+    setIsGeneratingShare(true);
+    try {
+      const routeCoords = (run as any).gpsTrack || (run as any).routeCoords;
+      await downloadShareImage({ run, routeCoords, format: shareFormat });
+      toast.success("Image downloaded!");
+    } catch (error) {
+      console.error("Download error:", error);
+      toast.error("Could not download image.");
+    } finally {
+      setIsGeneratingShare(false);
+    }
+  };
+
   if (!run) return null;
 
   // Generate simulated chart data
@@ -204,9 +245,20 @@ export default function RunInsights() {
           <Button
             variant="outline"
             size="icon"
-            onClick={() => setShowShareModal(true)}
+            onClick={() => setShowSocialShareModal(true)}
             className="rounded-full border-primary/50 hover:bg-primary/20 text-primary"
+            data-testid="button-social-share"
+            title="Share to Social Media"
+          >
+            <Instagram className="w-5 h-5" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setShowShareModal(true)}
+            className="rounded-full border-white/20 hover:bg-white/10 text-muted-foreground"
             data-testid="button-share-run"
+            title="Share with Friends"
           >
             <Share2 className="w-5 h-5" />
           </Button>
@@ -305,6 +357,141 @@ export default function RunInsights() {
                   </div>
                 </div>
               )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Social Media Share Modal */}
+      <AnimatePresence>
+        {showSocialShareModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/70"
+            onClick={() => setShowSocialShareModal(false)}
+          >
+            <motion.div 
+              initial={{ y: 100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 100, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full sm:max-w-md bg-card border border-white/10 rounded-2xl p-6 space-y-5"
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-display font-bold uppercase tracking-wider text-primary">Share to Social</h2>
+                <button 
+                  onClick={() => setShowSocialShareModal(false)}
+                  className="p-2 rounded-full hover:bg-white/10 transition-colors"
+                  data-testid="button-close-social-share"
+                >
+                  <X className="w-5 h-5 text-muted-foreground" />
+                </button>
+              </div>
+              
+              <p className="text-xs text-muted-foreground">
+                Share your run achievement with friends on social media. We'll generate a beautiful image with your stats!
+              </p>
+
+              {/* Format Selection */}
+              <div className="space-y-2">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">Image Format</p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShareFormat("post")}
+                    className={`flex-1 py-3 px-4 rounded-xl border transition-all ${
+                      shareFormat === "post" 
+                        ? "bg-primary/20 border-primary text-primary" 
+                        : "bg-white/5 border-white/10 text-muted-foreground hover:border-white/30"
+                    }`}
+                    data-testid="button-format-post"
+                  >
+                    <div className="text-sm font-bold">Post</div>
+                    <div className="text-[10px] opacity-70">1:1 Square</div>
+                  </button>
+                  <button
+                    onClick={() => setShareFormat("story")}
+                    className={`flex-1 py-3 px-4 rounded-xl border transition-all ${
+                      shareFormat === "story" 
+                        ? "bg-primary/20 border-primary text-primary" 
+                        : "bg-white/5 border-white/10 text-muted-foreground hover:border-white/30"
+                    }`}
+                    data-testid="button-format-story"
+                  >
+                    <div className="text-sm font-bold">Story</div>
+                    <div className="text-[10px] opacity-70">9:16 Vertical</div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Social Platforms */}
+              <div className="space-y-3">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">Share To</p>
+                
+                <button
+                  onClick={() => handleSocialShare("facebook")}
+                  disabled={isGeneratingShare}
+                  className="w-full flex items-center gap-4 p-4 bg-[#1877F2]/10 hover:bg-[#1877F2]/20 border border-[#1877F2]/30 rounded-xl transition-all disabled:opacity-50"
+                  data-testid="button-share-facebook"
+                >
+                  <div className="p-2 bg-[#1877F2] rounded-lg">
+                    <Facebook className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="text-left flex-1">
+                    <div className="text-sm font-bold text-white">Facebook</div>
+                    <div className="text-[10px] text-muted-foreground">Post or Story</div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => handleSocialShare("instagram")}
+                  disabled={isGeneratingShare}
+                  className="w-full flex items-center gap-4 p-4 bg-gradient-to-r from-[#833AB4]/10 via-[#FD1D1D]/10 to-[#F77737]/10 hover:from-[#833AB4]/20 hover:via-[#FD1D1D]/20 hover:to-[#F77737]/20 border border-[#E1306C]/30 rounded-xl transition-all disabled:opacity-50"
+                  data-testid="button-share-instagram"
+                >
+                  <div className="p-2 bg-gradient-to-br from-[#833AB4] via-[#FD1D1D] to-[#F77737] rounded-lg">
+                    <Instagram className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="text-left flex-1">
+                    <div className="text-sm font-bold text-white">Instagram</div>
+                    <div className="text-[10px] text-muted-foreground">Post or Story</div>
+                  </div>
+                </button>
+
+                {typeof navigator !== 'undefined' && 'share' in navigator && (
+                  <button
+                    onClick={() => handleSocialShare("native")}
+                    disabled={isGeneratingShare}
+                    className="w-full flex items-center gap-4 p-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all disabled:opacity-50"
+                    data-testid="button-share-native"
+                  >
+                    <div className="p-2 bg-primary/20 rounded-lg">
+                      <Share2 className="w-5 h-5 text-primary" />
+                    </div>
+                    <div className="text-left flex-1">
+                      <div className="text-sm font-bold text-white">More Options</div>
+                      <div className="text-[10px] text-muted-foreground">Use device sharing</div>
+                    </div>
+                  </button>
+                )}
+              </div>
+
+              {/* Download Option */}
+              <div className="border-t border-white/10 pt-4">
+                <button
+                  onClick={handleDownloadImage}
+                  disabled={isGeneratingShare}
+                  className="w-full flex items-center justify-center gap-2 py-3 bg-primary/10 hover:bg-primary/20 border border-primary/30 rounded-xl text-primary font-bold text-sm transition-all disabled:opacity-50"
+                  data-testid="button-download-image"
+                >
+                  <Download className="w-4 h-4" />
+                  {isGeneratingShare ? "Generating..." : "Download Image"}
+                </button>
+                <p className="text-[10px] text-center text-muted-foreground mt-2">
+                  Save the image and share it anywhere
+                </p>
+              </div>
             </motion.div>
           </motion.div>
         )}
