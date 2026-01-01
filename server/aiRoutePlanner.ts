@@ -176,7 +176,7 @@ async function calibrateRouteDistance(
   shape: LoopShape,
   rotationDegrees: number,
   tolerancePercent: number = 15,
-  maxIterations: number = 5
+  maxIterations: number = 7
 ): Promise<{ waypoints: Array<{ lat: number; lng: number }>; result: DirectionsResult } | null> {
   
   let radiusKm = estimateInitialRadius(targetDistanceKm, shape);
@@ -225,12 +225,13 @@ async function calibrateRouteDistance(
     radiusKm = (minRadius + maxRadius) / 2;
   }
 
-  // Return best result even if not perfect (as long as it's reasonable)
-  if (bestResult && bestError < 50) {
+  // Only return results within the tolerance - reject routes that are too far off
+  if (bestResult && bestError <= tolerancePercent) {
     console.log(`[Calibration] Returning best result with ${bestError.toFixed(1)}% error`);
     return bestResult;
   }
   
+  console.log(`[Calibration] Failed to achieve ${tolerancePercent}% tolerance (best: ${bestError.toFixed(1)}%)`);
   return null;
 }
 
@@ -562,9 +563,11 @@ export async function generateAIRoutes(request: RouteRequest): Promise<MultiRout
         if (scenicResult.success) {
           const errorPercent = Math.abs((scenicResult.distance - targetDistance) / targetDistance) * 100;
           
-          if (errorPercent <= 25) {
+          if (errorPercent <= 15) {
             calibrationResult = { waypoints: scenicAnchors, result: scenicResult };
             console.log(`[AI Route Planner] Scenic route accepted: ${scenicResult.distance.toFixed(2)}km (${errorPercent.toFixed(1)}% error)`);
+          } else {
+            console.log(`[AI Route Planner] Scenic route rejected: ${scenicResult.distance.toFixed(2)}km (${errorPercent.toFixed(1)}% error exceeds 15%)`);
           }
         }
       }
@@ -579,7 +582,7 @@ export async function generateAIRoutes(request: RouteRequest): Promise<MultiRout
         config.shape,
         config.rotation,
         15, // 15% tolerance
-        4   // max iterations
+        7   // max iterations for better convergence
       );
     }
     
