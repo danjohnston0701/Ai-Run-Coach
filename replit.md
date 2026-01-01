@@ -47,6 +47,15 @@ Key files:
 - **Migrations**: Drizzle Kit with migrations output to `./migrations`
 - **Client-side Storage**: localStorage for user profile and run history (interim solution)
 
+### Session Persistence
+The app supports resuming interrupted runs with the following architecture:
+- **Active Session Storage**: `client/src/lib/activeRunSession.ts` provides save/load/clear functions using localStorage
+- **Session Data**: Captures elapsed time, distance, cadence, splits, route data, audio settings, and run metadata
+- **Auto-save**: RunSession saves state every 5 seconds during active runs
+- **12-hour Expiration**: Sessions older than 12 hours are automatically cleared
+- **Resume Flow**: Home page displays a resume banner when an active session exists, allowing users to continue where they left off
+- **Metadata Tracking**: sessionMetadataRef in RunSession tracks route parameters (targetDistance, levelId, startLat/Lng, routeName, routeId) separately from real-time GPS tracking
+
 ### Key Design Patterns
 - **Monorepo Structure**: Client code in `/client`, server in `/server`, shared types in `/shared`
 - **Path Aliases**: `@/` for client src, `@shared/` for shared code, `@assets/` for attached assets
