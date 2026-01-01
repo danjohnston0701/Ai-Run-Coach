@@ -145,27 +145,63 @@ function bearingToCardinal(bearing: number): string {
   return directions[index];
 }
 
-function getInitialDirectionAnnouncement(
+async function getStreetName(lat: number, lng: number): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/geocode/reverse?lat=${lat}&lng=${lng}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const streetComponent = data.components?.find((c: any) => 
+      c.types?.includes('route') || c.types?.includes('street_address')
+    );
+    return streetComponent?.long_name || null;
+  } catch {
+    return null;
+  }
+}
+
+async function getInitialDirectionAnnouncement(
   currentLat: number, 
   currentLng: number, 
   routePoints: Array<{ lat: number; lng: number }>,
   targetDistance: string
-): string {
+): Promise<string> {
   if (routePoints.length < 2) {
     return `Your ${targetDistance} kilometer run has started. Follow the route on your map.`;
   }
   
-  const firstWaypoint = routePoints[Math.min(5, routePoints.length - 1)];
+  const firstWaypointIdx = Math.min(5, routePoints.length - 1);
+  const firstWaypoint = routePoints[firstWaypointIdx];
   const bearing = getBearing(currentLat, currentLng, firstWaypoint.lat, firstWaypoint.lng);
   const direction = bearingToCardinal(bearing);
   const distanceToFirst = haversineDistance(currentLat, currentLng, firstWaypoint.lat, firstWaypoint.lng);
   const distanceMeters = Math.round(distanceToFirst * 1000);
   
+  const streetName = await getStreetName(firstWaypoint.lat, firstWaypoint.lng);
+  const streetPhrase = streetName ? ` towards ${streetName}` : "";
+  
+  let announcement = `Your ${targetDistance} kilometer run has started.`;
+  
   if (distanceMeters < 50) {
-    return `Your ${targetDistance} kilometer run has started. Head ${direction} to begin your route.`;
+    announcement += ` Head ${direction}${streetPhrase} to begin.`;
+    
+    const secondWaypointIdx = Math.min(firstWaypointIdx + 10, routePoints.length - 1);
+    if (secondWaypointIdx > firstWaypointIdx) {
+      const secondWaypoint = routePoints[secondWaypointIdx];
+      const secondBearing = getBearing(firstWaypoint.lat, firstWaypoint.lng, secondWaypoint.lat, secondWaypoint.lng);
+      const secondDirection = bearingToCardinal(secondBearing);
+      const secondDistance = haversineDistance(firstWaypoint.lat, firstWaypoint.lng, secondWaypoint.lat, secondWaypoint.lng);
+      const secondDistanceMeters = Math.round(secondDistance * 1000);
+      
+      const secondStreetName = await getStreetName(secondWaypoint.lat, secondWaypoint.lng);
+      const secondStreetPhrase = secondStreetName ? ` onto ${secondStreetName}` : "";
+      
+      announcement += ` Then head ${secondDirection}${secondStreetPhrase} for about ${secondDistanceMeters} meters.`;
+    }
+  } else {
+    announcement += ` Head ${direction}${streetPhrase} for about ${distanceMeters} meters.`;
   }
   
-  return `Your ${targetDistance} kilometer run has started. Head ${direction} for about ${distanceMeters} meters to begin your route.`;
+  return announcement;
 }
 
 export default function RunSession() {
@@ -443,13 +479,15 @@ export default function RunSession() {
     
     initialAnnouncementMadeRef.current = true;
     const targetDist = sessionMetadataRef.current.targetDistance;
-    const announcement = getInitialDirectionAnnouncement(
+    
+    getInitialDirectionAnnouncement(
       currentPosition.lat,
       currentPosition.lng,
       routePoints,
       targetDist
-    );
-    speak(announcement);
+    ).then(announcement => {
+      speak(announcement);
+    });
   }, [gpsStatus, currentPosition, routePoints, isResuming, speak]);
 
   useEffect(() => {
