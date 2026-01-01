@@ -6,8 +6,18 @@ import { RouteMap } from "@/components/RouteMap";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { 
-  Pause, Play, Square, Heart, Map, Share2, Users, Navigation, Volume2, VolumeX, Footprints, Mic, MicOff, MessageCircle 
+  Pause, Play, Square, Heart, Map, Share2, Users, Navigation, Volume2, VolumeX, Footprints, Mic, MicOff, MessageCircle, AlertTriangle
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { Friend } from "./Profile";
 import { saveActiveRunSession, loadActiveRunSession, clearActiveRunSession, type ActiveRunSession } from "@/lib/activeRunSession";
 import { loadCoachSettings, getVoicePreferences, getTTSVoice, type AiCoachSettings } from "@/lib/coachSettings";
@@ -264,6 +274,7 @@ export default function RunSession() {
   const [isCoaching, setIsCoaching] = useState(false);
   const [coachPreferences, setCoachPreferences] = useState("");
   const [isListening, setIsListening] = useState(false);
+  const [showExitConfirmation, setShowExitConfirmation] = useState(false);
   const [userProfile, setUserProfile] = useState<{
     name?: string;
     dob?: string;
@@ -801,6 +812,22 @@ export default function RunSession() {
   }, [active, time, distance, cadence, routeData, audioEnabled, aiCoachEnabled, kmSplits, lastKmAnnounced]);
 
   useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (time > 0 || distance > 0) {
+        e.preventDefault();
+        e.returnValue = 'You have an active run session. Are you sure you want to leave?';
+        return e.returnValue;
+      }
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [time, distance]);
+
+  useEffect(() => {
     if (!active && time === 0) return;
     
     const saveInterval = setInterval(saveSessionNow, 5000);
@@ -1316,7 +1343,12 @@ export default function RunSession() {
     localStorage.removeItem("activeRoute");
   };
 
-  const handleStop = () => {
+  const handleStopClick = () => {
+    setShowExitConfirmation(true);
+  };
+
+  const confirmStop = () => {
+    setShowExitConfirmation(false);
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.src = '';
@@ -1598,7 +1630,7 @@ export default function RunSession() {
             variant="outline" 
             size="icon" 
             className="w-10 h-10 rounded-full border-white/10 hover:bg-white/10 hover:border-white/20"
-            onClick={handleStop}
+            onClick={handleStopClick}
             data-testid="button-stop"
           >
             <Square className="w-3.5 h-3.5 fill-foreground" />
@@ -1634,6 +1666,37 @@ export default function RunSession() {
           </Button>
         </div>
       </div>
+
+      <AlertDialog open={showExitConfirmation} onOpenChange={setShowExitConfirmation}>
+        <AlertDialogContent className="bg-card border-white/10 rounded-2xl max-w-sm">
+          <AlertDialogHeader>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 rounded-full bg-orange-500/20">
+                <AlertTriangle className="w-5 h-5 text-orange-500" />
+              </div>
+              <AlertDialogTitle className="text-lg font-display font-bold">End Run?</AlertDialogTitle>
+            </div>
+            <AlertDialogDescription className="text-muted-foreground text-sm">
+              Are you sure you want to end your run? Your progress will be saved, but you won't be able to resume this session.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex gap-2 mt-4">
+            <AlertDialogCancel 
+              className="flex-1 h-11 bg-white/5 border-white/10 hover:bg-white/10 text-foreground rounded-xl font-bold uppercase text-xs tracking-wider"
+              data-testid="button-cancel-exit"
+            >
+              Keep Running
+            </AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={confirmStop}
+              className="flex-1 h-11 bg-red-500 hover:bg-red-600 text-white rounded-xl font-bold uppercase text-xs tracking-wider"
+              data-testid="button-confirm-exit"
+            >
+              End Run
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
