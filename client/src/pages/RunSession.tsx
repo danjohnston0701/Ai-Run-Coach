@@ -468,6 +468,7 @@ export default function RunSession() {
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
+  const cachedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   
   const cleanupAudio = useCallback(() => {
     if (audioRef.current) {
@@ -496,9 +497,13 @@ export default function RunSession() {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     
-    const voice = getCoachVoice();
-    if (voice) {
-      utterance.voice = voice;
+    if (!cachedVoiceRef.current) {
+      cachedVoiceRef.current = getCoachVoice();
+    }
+    
+    if (cachedVoiceRef.current) {
+      utterance.voice = cachedVoiceRef.current;
+      console.log("Using cached device voice:", cachedVoiceRef.current.name);
     }
     
     const prefs = getVoicePreferences(coachSettings);
@@ -507,7 +512,7 @@ export default function RunSession() {
     utterance.volume = 1;
     speechSynthRef.current = utterance;
     window.speechSynthesis.speak(utterance);
-    console.log("Fallback device TTS used");
+    console.log("Fallback device TTS used with voice:", cachedVoiceRef.current?.name || "default");
   }, [getCoachVoice, coachSettings]);
 
   const speak = useCallback(async (text: string, force: boolean = false) => {
@@ -569,7 +574,7 @@ export default function RunSession() {
       await audio.play();
       console.log("OpenAI TTS playback started");
     } catch (error) {
-      console.error("TTS API failed, falling back to device TTS:", error);
+      console.error("TTS API failed, using device fallback:", error);
       speakWithDeviceTTS(text);
     }
   }, [audioEnabled, coachSettings, speakWithDeviceTTS, cleanupAudio]);
@@ -605,8 +610,16 @@ export default function RunSession() {
         const timeDiff = (newPos.timestamp - lastPos.timestamp) / 1000;
         const speedKmh = timeDiff > 0 ? (segmentDistance / timeDiff) * 3600 : 0;
         
-        if (segmentDistance > 0.0005 && segmentDistance < 0.1 && speedKmh < 30) {
+        const minDist = 0.001;
+        const maxDist = 0.15;
+        const maxSpeed = 35;
+        const maxTimeDiff = 30;
+        
+        if (segmentDistance > minDist && segmentDistance < maxDist && speedKmh < maxSpeed && timeDiff < maxTimeDiff) {
           setDistance(d => d + segmentDistance);
+          console.log(`Distance updated: +${(segmentDistance * 1000).toFixed(1)}m, speed: ${speedKmh.toFixed(1)}km/h`);
+        } else if (segmentDistance > minDist) {
+          console.log(`Distance skipped: ${(segmentDistance * 1000).toFixed(1)}m, speed: ${speedKmh.toFixed(1)}km/h, timeDiff: ${timeDiff.toFixed(1)}s`);
         }
       }
       
@@ -761,37 +774,57 @@ export default function RunSession() {
     return () => clearInterval(interval);
   }, [active, gpsStatus]);
 
+  const saveSessionNow = useCallback(() => {
+    const metadata = sessionMetadataRef.current;
+    const session: ActiveRunSession = {
+      id: sessionIdRef.current,
+      startTimestamp: startTimestampRef.current,
+      elapsedSeconds: time,
+      distanceKm: distance,
+      cadence,
+      routeId: routeData?.id || metadata.routeId,
+      routeName: routeData?.routeName || metadata.routeName,
+      routePolyline: routeData?.polyline || "",
+      routeWaypoints: routeData?.waypoints || [],
+      startLat: metadata.startLat,
+      startLng: metadata.startLng,
+      targetDistance: metadata.targetDistance,
+      levelId: metadata.levelId,
+      targetTimeSeconds: metadata.targetTimeSeconds,
+      audioEnabled,
+      aiCoachEnabled,
+      kmSplits,
+      lastKmAnnounced,
+      status: active ? 'active' : 'paused',
+    };
+    saveActiveRunSession(session);
+  }, [active, time, distance, cadence, routeData, audioEnabled, aiCoachEnabled, kmSplits, lastKmAnnounced]);
+
   useEffect(() => {
     if (!active && time === 0) return;
     
-    const saveInterval = setInterval(() => {
-      const metadata = sessionMetadataRef.current;
-      const session: ActiveRunSession = {
-        id: sessionIdRef.current,
-        startTimestamp: startTimestampRef.current,
-        elapsedSeconds: time,
-        distanceKm: distance,
-        cadence,
-        routeId: routeData?.id || metadata.routeId,
-        routeName: routeData?.routeName || metadata.routeName,
-        routePolyline: routeData?.polyline || "",
-        routeWaypoints: routeData?.waypoints || [],
-        startLat: metadata.startLat,
-        startLng: metadata.startLng,
-        targetDistance: metadata.targetDistance,
-        levelId: metadata.levelId,
-        targetTimeSeconds: metadata.targetTimeSeconds,
-        audioEnabled,
-        aiCoachEnabled,
-        kmSplits,
-        lastKmAnnounced,
-        status: active ? 'active' : 'paused',
-      };
-      saveActiveRunSession(session);
-    }, 5000);
+    const saveInterval = setInterval(saveSessionNow, 5000);
     
-    return () => clearInterval(saveInterval);
-  }, [active, time, distance, cadence, routeData, audioEnabled, aiCoachEnabled, kmSplits, lastKmAnnounced]);
+    const handleBeforeUnload = () => {
+      saveSessionNow();
+    };
+    
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        saveSessionNow();
+      }
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      clearInterval(saveInterval);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      saveSessionNow();
+    };
+  }, [active, time, saveSessionNow]);
 
   const requestMotionPermission = useCallback(async () => {
     if (!('DeviceMotionEvent' in window)) {
@@ -971,7 +1004,7 @@ export default function RunSession() {
       };
       await audio.play();
     } catch (error) {
-      console.error('Coaching TTS error, using fallback:', error);
+      console.error('Coaching TTS error, using device fallback:', error);
       speakWithDeviceTTS(text);
     }
   }, [coachSettings, speakWithDeviceTTS, cleanupAudio]);
