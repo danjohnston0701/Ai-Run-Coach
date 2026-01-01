@@ -96,19 +96,23 @@ function generateLoopTemplate(
   return waypoints;
 }
 
-// Calculate initial radius estimate based on target distance and shape
-// Roads typically add 20-40% to the straight-line perimeter due to curves
+// Calculate initial radius estimate based on target distance
+// Uses circular model: circumference = 2πr, so r = distance / 2π
+// Real running routes typically have only 5-15% overhead from road inefficiency
 function estimateInitialRadius(targetDistanceKm: number, shape: LoopShape): number {
+  // Use circular circumference as the base model
+  // This gives a much larger, more realistic footprint
+  const baseRadius = targetDistanceKm / (2 * Math.PI);
+  
+  // Apply only a small efficiency factor (roads add ~10% to ideal path)
+  // This ensures we start with a large loop that calibration can trim down
+  const roadEfficiencyFactor = 1.1;
+  
+  // Polygons with more sides are closer to circles, need slightly less adjustment
   const numSides = LOOP_SHAPES[shape];
-  // For a regular polygon: perimeter = 2 * n * r * sin(π/n)
-  // But real roads add ~30% overhead, so we use a correction factor
-  const roadOverheadFactor = 1.3;
-  const perimeter = targetDistanceKm / roadOverheadFactor;
-  const sideLength = perimeter / numSides;
-  // For regular polygon: side = 2 * r * sin(π/n)
-  const angleRad = Math.PI / numSides;
-  const radius = sideLength / (2 * Math.sin(angleRad));
-  return radius;
+  const shapeMultiplier = 1 + (0.05 * (6 - numSides) / 3); // squares get +5%, hexagons get 0%
+  
+  return baseRadius * roadEfficiencyFactor * Math.max(0.95, shapeMultiplier);
 }
 
 // Fetch route from Google Directions API (loop back to start)
