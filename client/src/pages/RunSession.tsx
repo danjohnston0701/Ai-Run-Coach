@@ -617,7 +617,8 @@ export default function RunSession() {
       
       if (response.ok) {
         const { active: stillActive, aiCoachEnabled: stillEnabled } = coachingControlRef.current;
-        if (!stillActive || !stillEnabled) return;
+        // Skip active check if user asked a question - always respond
+        if (!userMessage && (!stillActive || !stillEnabled)) return;
         
         const advice = await response.json();
         
@@ -633,7 +634,12 @@ export default function RunSession() {
         }
         
         if (coachMessage.trim()) {
-          speakCoaching(coachMessage.trim());
+          // Use speak() for user questions to bypass run state checks
+          if (userMessage) {
+            speak(coachMessage.trim());
+          } else {
+            speakCoaching(coachMessage.trim());
+          }
           setMessage(advice.message || "Coach says...");
         }
       }
@@ -642,7 +648,7 @@ export default function RunSession() {
     } finally {
       setIsCoaching(false);
     }
-  }, [targetDistance, levelId, targetTimeSeconds, userProfile, coachPreferences, speakCoaching]);
+  }, [targetDistance, levelId, targetTimeSeconds, userProfile, coachPreferences, speakCoaching, speak]);
 
   useEffect(() => {
     if (!active || !aiCoachEnabled || gpsStatus !== "active") {
