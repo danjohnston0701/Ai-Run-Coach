@@ -35,11 +35,25 @@ The route generation uses a hybrid AI approach:
 2. **AI Waypoint Design**: OpenAI analyzes area data and designs optimal waypoints based on target distance, difficulty level (easy/moderate/hard), and terrain preferences
 3. **Route Generation**: Google Directions API creates final walking routes from AI-designed waypoints
 4. **Elevation Analysis**: Route elevation gain/loss is calculated and displayed on route cards
+5. **Elevation Profiles**: Full elevation profile with lat/lng, elevation, distance, and grade stored for each route
 
 Key files:
-- `server/aiRoutePlanner.ts`: Core AI route planning logic
+- `server/aiRoutePlanner.ts`: Core AI route planning logic with elevation profiling
 - `server/routePlanner.ts`: Fallback geometric route generation
 - Endpoint: `POST /api/routes/generate-options` (generates 9 routes: 3 easy, 3 moderate, 3 hard)
+
+### Hill-Awareness Coaching System
+Real-time terrain-aware coaching during runs:
+1. **Elevation Tracking**: Routes store detailed elevation profiles with grade calculations for each segment
+2. **Terrain Detection**: `client/src/lib/elevationTracker.ts` calculates current grade and upcoming terrain changes within 200m
+3. **AI Integration**: Coaching endpoint receives terrain data (current altitude, grade, upcoming hills) and prioritizes hill guidance
+4. **Knowledge Base**: Hill-specific coaching knowledge includes technique tips, pacing strategies, breathing advice, and mental approaches
+
+Key data structure (ElevationPoint):
+- `lat/lng`: GPS coordinates
+- `elevation`: Altitude in meters
+- `distance`: Cumulative distance from start
+- `grade`: Slope percentage to next point (positive = uphill)
 
 ### Data Storage
 - **Database**: PostgreSQL (configured via DATABASE_URL environment variable)
