@@ -136,6 +136,21 @@ export const notifications = pgTable("notifications", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const routeRatings = pgTable("route_ratings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  runId: varchar("run_id").references(() => runs.id),
+  rating: integer("rating").notNull(),
+  templateName: text("template_name"),
+  backtrackRatio: real("backtrack_ratio"),
+  routeDistance: real("route_distance"),
+  startLat: real("start_lat"),
+  startLng: real("start_lng"),
+  polylineHash: text("polyline_hash"),
+  feedback: text("feedback"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 export const insertPreRegistrationSchema = createInsertSchema(preRegistrations).omit({ id: true, createdAt: true });
 export const insertFriendSchema = createInsertSchema(friends).omit({ id: true, createdAt: true });
@@ -146,6 +161,7 @@ export const insertGarminDataSchema = createInsertSchema(garminData).omit({ id: 
 export const insertFriendRequestSchema = createInsertSchema(friendRequests).omit({ id: true, createdAt: true, respondedAt: true });
 export const insertPushSubscriptionSchema = createInsertSchema(pushSubscriptions).omit({ id: true, createdAt: true, lastUsedAt: true });
 export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
+export const insertRouteRatingSchema = createInsertSchema(routeRatings).omit({ id: true, createdAt: true });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -176,3 +192,6 @@ export type PushSubscription = typeof pushSubscriptions.$inferSelect;
 
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 export type Notification = typeof notifications.$inferSelect;
+
+export type InsertRouteRating = z.infer<typeof insertRouteRatingSchema>;
+export type RouteRating = typeof routeRatings.$inferSelect;

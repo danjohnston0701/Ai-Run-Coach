@@ -2,7 +2,7 @@ import { eq, and, desc, or, sql } from "drizzle-orm";
 import { db, withRetry } from "./db";
 import {
   users, preRegistrations, friends, routes, runs, liveRunSessions, garminData,
-  friendRequests, pushSubscriptions, notifications,
+  friendRequests, pushSubscriptions, notifications, routeRatings,
   type User, type InsertUser,
   type PreRegistration, type InsertPreRegistration,
   type Friend, type InsertFriend,
@@ -13,6 +13,7 @@ import {
   type FriendRequest, type InsertFriendRequest,
   type PushSubscription, type InsertPushSubscription,
   type Notification, type InsertNotification,
+  type RouteRating, type InsertRouteRating,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -67,6 +68,11 @@ export interface IStorage {
   markNotificationAsRead(id: string): Promise<Notification | undefined>;
   markAllNotificationsAsRead(userId: string): Promise<void>;
   deleteNotificationByData(userId: string, type: string, relatedUserId: string): Promise<void>;
+
+  // Route Ratings
+  createRouteRating(data: InsertRouteRating): Promise<RouteRating>;
+  getUserRouteRatings(userId: string): Promise<RouteRating[]>;
+  getTemplateRatings(userId: string): Promise<Array<{ templateName: string; avgRating: number; count: number }>>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -405,6 +411,53 @@ export class DatabaseStorage implements IStorage {
           }
         }
       }
+    });
+  }
+
+  async createRouteRating(data: InsertRouteRating): Promise<RouteRating> {
+    return withRetry(async () => {
+      const [rating] = await db.insert(routeRatings).values(data).returning();
+      return rating;
+    });
+  }
+
+  async getUserRouteRatings(userId: string): Promise<RouteRating[]> {
+    return withRetry(async () => {
+      return db.select()
+        .from(routeRatings)
+        .where(eq(routeRatings.userId, userId))
+        .orderBy(desc(routeRatings.createdAt));
+    });
+  }
+
+  async getTemplateRatings(userId: string): Promise<Array<{ templateName: string; avgRating: number; count: number }>> {
+    return withRetry(async () => {
+      const ratings = await db.select()
+        .from(routeRatings)
+        .where(eq(routeRatings.userId, userId));
+      
+      // Group by template name and calculate averages
+      const templateMap = new Map<string, { total: number; count: number }>();
+      
+      for (const rating of ratings) {
+        if (rating.templateName) {
+          const existing = templateMap.get(rating.templateName) || { total: 0, count: 0 };
+          existing.total += rating.rating;
+          existing.count += 1;
+          templateMap.set(rating.templateName, existing);
+        }
+      }
+      
+      const result: Array<{ templateName: string; avgRating: number; count: number }> = [];
+      templateMap.forEach((value, key) => {
+        result.push({
+          templateName: key,
+          avgRating: value.total / value.count,
+          count: value.count,
+        });
+      });
+      
+      return result.sort((a, b) => b.avgRating - a.avgRating);
     });
   }
 }
