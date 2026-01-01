@@ -371,9 +371,25 @@ export async function registerRoutes(
   // Friends endpoints
   app.get("/api/users/:userId/friends", async (req, res) => {
     try {
-      const friends = await storage.getFriends(req.params.userId);
-      res.json(friends);
+      const friendRecords = await storage.getFriends(req.params.userId);
+      
+      // Enrich with friend user details
+      const enrichedFriends = await Promise.all(
+        friendRecords.map(async (record) => {
+          const friendUser = await storage.getUser(record.friendId);
+          return {
+            id: record.id,
+            name: friendUser?.name || 'Unknown',
+            email: friendUser?.email || '',
+            friendId: record.friendId,
+            profilePic: friendUser?.profilePic || null,
+          };
+        })
+      );
+      
+      res.json(enrichedFriends);
     } catch (error) {
+      console.error("Get friends error:", error);
       res.status(500).json({ error: "Failed to get friends" });
     }
   });
@@ -931,6 +947,68 @@ export async function registerRoutes(
       console.error("Respond to friend request error:", error);
       const errorMessage = error?.message || "Failed to respond to friend request";
       res.status(500).json({ error: errorMessage });
+    }
+  });
+
+  // Shortcut endpoints for accept/decline from notifications
+  app.post("/api/friend-requests/:id/accept", async (req, res) => {
+    try {
+      const requestId = req.params.id;
+      const request = await storage.getFriendRequest(requestId);
+      
+      if (!request) {
+        return res.status(404).json({ error: "Friend request not found" });
+      }
+
+      if (request.status !== 'pending') {
+        return res.status(400).json({ error: "This request has already been responded to" });
+      }
+
+      await storage.respondToFriendRequest(requestId, 'accepted');
+      
+      // Add both users as friends (bidirectional)
+      await storage.addFriend({
+        userId: request.requesterId,
+        friendId: request.addresseeId,
+        status: 'accepted',
+      });
+      await storage.addFriend({
+        userId: request.addresseeId,
+        friendId: request.requesterId,
+        status: 'accepted',
+      });
+
+      // Notify requester that their request was accepted
+      const addressee = await storage.getUser(request.addresseeId);
+      if (addressee) {
+        await sendFriendAcceptedNotification(request.requesterId, addressee.name, addressee.email);
+      }
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Accept friend request error:", error);
+      res.status(500).json({ error: "Failed to accept friend request" });
+    }
+  });
+
+  app.post("/api/friend-requests/:id/decline", async (req, res) => {
+    try {
+      const requestId = req.params.id;
+      const request = await storage.getFriendRequest(requestId);
+      
+      if (!request) {
+        return res.status(404).json({ error: "Friend request not found" });
+      }
+
+      if (request.status !== 'pending') {
+        return res.status(400).json({ error: "This request has already been responded to" });
+      }
+
+      await storage.respondToFriendRequest(requestId, 'rejected');
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Decline friend request error:", error);
+      res.status(500).json({ error: "Failed to decline friend request" });
     }
   });
 

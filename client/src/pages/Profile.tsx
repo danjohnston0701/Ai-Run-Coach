@@ -12,6 +12,7 @@ const FITNESS_LEVELS = ["Unfit", "Casual", "Athletic", "Very Fit", "Elite"];
 export interface Friend {
   name: string;
   email?: string;
+  friendId?: string;
 }
 
 interface ProfileData {
@@ -196,6 +197,39 @@ export default function Profile() {
     enabled: !!profile?.id,
   });
 
+  // Fetch friends from database
+  const { data: dbFriends = [] } = useQuery({
+    queryKey: ['friends', profile?.id],
+    queryFn: async () => {
+      if (!profile?.id) return [];
+      const res = await fetch(`/api/users/${profile.id}/friends`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!profile?.id,
+  });
+
+  // Update profile with friends from database
+  useEffect(() => {
+    if (profile && dbFriends.length > 0) {
+      const friendsList = dbFriends.map((f: any) => ({
+        name: f.name,
+        email: f.email,
+        friendId: f.friendId,
+      }));
+      
+      // Only update if friends are different
+      const currentFriendsStr = JSON.stringify(profile.friends || []);
+      const newFriendsStr = JSON.stringify(friendsList);
+      
+      if (currentFriendsStr !== newFriendsStr) {
+        const updatedProfile = { ...profile, friends: friendsList };
+        setProfile(updatedProfile);
+        localStorage.setItem("userProfile", JSON.stringify(updatedProfile));
+      }
+    }
+  }, [dbFriends]);
+
   const sendRequestMutation = useMutation({
     mutationFn: async (addresseeId: string) => {
       const res = await apiRequest('POST', '/api/friend-requests', {
@@ -224,19 +258,13 @@ export default function Profile() {
       });
       return { response: await res.json(), requesterName, requesterEmail, action };
     },
-    onSuccess: ({ requesterName, requesterEmail, action }) => {
+    onSuccess: ({ action }) => {
       toast.success(action === 'accept' ? 'Friend added!' : 'Request declined');
       queryClient.invalidateQueries({ queryKey: ['friend-requests-incoming'] });
       
-      if (action === 'accept' && profile && requesterName) {
-        const newFriend: Friend = {
-          name: requesterName,
-          email: requesterEmail,
-        };
-        const updatedFriends = [...(profile.friends || []), newFriend];
-        const updatedProfile = { ...profile, friends: updatedFriends };
-        setProfile(updatedProfile);
-        localStorage.setItem("userProfile", JSON.stringify(updatedProfile));
+      if (action === 'accept') {
+        // Refetch friends from database
+        queryClient.invalidateQueries({ queryKey: ['friends', profile?.id] });
       }
     },
     onError: (error: Error) => {
@@ -342,10 +370,28 @@ export default function Profile() {
     sendRequestMutation.mutate(user.id);
   };
 
-  const handleRemoveFriend = (index: number) => {
+  const handleRemoveFriend = async (index: number) => {
     if (!profile) return;
+    const friend = profile.friends?.[index];
+    if (!friend) return;
+    
+    // Remove from database if we have the friendId
+    if (friend.friendId) {
+      try {
+        await fetch(`/api/users/${profile.id}/friends/${friend.friendId}`, {
+          method: 'DELETE',
+        });
+      } catch (error) {
+        console.error('Failed to remove friend from database:', error);
+      }
+    }
+    
+    // Update local state
     const updatedFriends = profile.friends?.filter((_, i) => i !== index) || [];
-    setProfile({ ...profile, friends: updatedFriends });
+    const updatedProfile = { ...profile, friends: updatedFriends };
+    setProfile(updatedProfile);
+    localStorage.setItem("userProfile", JSON.stringify(updatedProfile));
+    queryClient.invalidateQueries({ queryKey: ['friends', profile.id] });
     toast.success("Friend removed");
   };
 

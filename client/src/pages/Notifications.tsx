@@ -105,7 +105,7 @@ export default function Notifications() {
       toast.success('Friend request accepted!');
       queryClient.invalidateQueries({ queryKey: ['/api/friend-requests/incoming', profile?.id] });
       queryClient.invalidateQueries({ queryKey: ['/api/notifications', profile?.id] });
-      queryClient.invalidateQueries({ queryKey: ['/api/friends'] });
+      queryClient.invalidateQueries({ queryKey: ['friends', profile?.id] });
     },
     onError: () => {
       toast.error('Failed to accept friend request');
