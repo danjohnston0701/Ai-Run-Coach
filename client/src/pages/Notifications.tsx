@@ -3,8 +3,9 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
-import { ArrowLeft, Bell, UserPlus, Route, Trophy, Clock } from "lucide-react";
+import { ArrowLeft, Bell, UserPlus, Route, Trophy, Clock, Check, X } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 interface Notification {
   id: string;
@@ -13,7 +14,16 @@ interface Notification {
   message: string;
   read: boolean;
   createdAt: string;
-  data?: Record<string, any>;
+  data?: string;
+}
+
+interface FriendRequest {
+  id: string;
+  requesterId: string;
+  addresseeId: string;
+  status: string;
+  requesterName?: string;
+  requesterEmail?: string;
 }
 
 interface UserProfile {
@@ -70,6 +80,70 @@ export default function Notifications() {
       queryClient.invalidateQueries({ queryKey: ['/api/notifications'] });
     },
   });
+
+  // Fetch incoming friend requests to match with notifications
+  const { data: friendRequests = [] } = useQuery<FriendRequest[]>({
+    queryKey: ['/api/friend-requests/incoming', profile?.id],
+    queryFn: async () => {
+      if (!profile?.id) return [];
+      const res = await fetch(`/api/friend-requests/incoming/${profile.id}`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!profile?.id,
+  });
+
+  const acceptFriendMutation = useMutation({
+    mutationFn: async (requestId: string) => {
+      const res = await fetch(`/api/friend-requests/${requestId}/accept`, {
+        method: 'POST',
+      });
+      if (!res.ok) throw new Error('Failed to accept friend request');
+      return res.json();
+    },
+    onSuccess: () => {
+      toast.success('Friend request accepted!');
+      queryClient.invalidateQueries({ queryKey: ['/api/friend-requests/incoming', profile?.id] });
+      queryClient.invalidateQueries({ queryKey: ['/api/notifications', profile?.id] });
+      queryClient.invalidateQueries({ queryKey: ['/api/friends'] });
+    },
+    onError: () => {
+      toast.error('Failed to accept friend request');
+    },
+  });
+
+  const declineFriendMutation = useMutation({
+    mutationFn: async (requestId: string) => {
+      const res = await fetch(`/api/friend-requests/${requestId}/decline`, {
+        method: 'POST',
+      });
+      if (!res.ok) throw new Error('Failed to decline friend request');
+      return res.json();
+    },
+    onSuccess: () => {
+      toast.success('Friend request declined');
+      queryClient.invalidateQueries({ queryKey: ['/api/friend-requests/incoming', profile?.id] });
+      queryClient.invalidateQueries({ queryKey: ['/api/notifications', profile?.id] });
+    },
+    onError: () => {
+      toast.error('Failed to decline friend request');
+    },
+  });
+
+  // Helper to find matching friend request for a notification
+  const findFriendRequest = (notification: Notification): FriendRequest | undefined => {
+    if (notification.type !== 'friend_request') return undefined;
+    try {
+      const data = notification.data ? JSON.parse(notification.data) : {};
+      const requesterEmail = data.requesterEmail;
+      if (requesterEmail) {
+        return friendRequests.find(req => req.requesterEmail === requesterEmail && req.status === 'pending');
+      }
+    } catch (e) {
+      // Invalid JSON, ignore
+    }
+    return undefined;
+  };
 
   const getIcon = (type: string) => {
     switch (type) {
@@ -201,6 +275,44 @@ export default function Notifications() {
                         <Clock className="w-3 h-3" />
                         {formatTime(notification.createdAt)}
                       </div>
+                      {/* Accept/Decline buttons for pending friend requests */}
+                      {(() => {
+                        const friendRequest = findFriendRequest(notification);
+                        if (friendRequest) {
+                          return (
+                            <div className="flex gap-2 mt-3">
+                              <Button
+                                size="sm"
+                                className="flex-1 bg-primary hover:bg-primary/90"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  acceptFriendMutation.mutate(friendRequest.id);
+                                }}
+                                disabled={acceptFriendMutation.isPending || declineFriendMutation.isPending}
+                                data-testid={`button-accept-friend-${friendRequest.id}`}
+                              >
+                                <Check className="w-4 h-4 mr-1" />
+                                Accept
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="flex-1"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  declineFriendMutation.mutate(friendRequest.id);
+                                }}
+                                disabled={acceptFriendMutation.isPending || declineFriendMutation.isPending}
+                                data-testid={`button-decline-friend-${friendRequest.id}`}
+                              >
+                                <X className="w-4 h-4 mr-1" />
+                                Decline
+                              </Button>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
                   </div>
                 </CardContent>
