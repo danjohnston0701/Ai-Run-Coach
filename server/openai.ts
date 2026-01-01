@@ -293,4 +293,83 @@ Provide a brief, encouraging analysis (2-3 sentences) with one specific improvem
   }
 }
 
+export type CoachTone = 'energetic' | 'motivational' | 'instructive' | 'factual' | 'abrupt';
+export type TTSVoice = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'sage' | 'shimmer' | 'ash' | 'coral';
+
+export interface TTSRequest {
+  text: string;
+  tone: CoachTone;
+  voice?: TTSVoice;
+  speed?: number;
+}
+
+const ttsCache = new Map<string, { audio: Buffer; timestamp: number }>();
+const TTS_CACHE_TTL = 5 * 60 * 1000;
+
+function getToneInstructions(tone: CoachTone): string {
+  const instructions: Record<CoachTone, string> = {
+    energetic: "Speak with high energy and enthusiasm! Be upbeat, use dynamic pacing with emphasis on encouraging words. Sound like an excited coach pumping up their athlete.",
+    motivational: "Speak in a warm, inspiring tone. Be supportive and encouraging, with a steady confident pace. Sound like a trusted mentor building confidence.",
+    instructive: "Speak clearly and precisely. Use measured pacing with emphasis on key technique points. Sound like a knowledgeable coach teaching form and strategy.",
+    factual: "Speak in a straightforward, matter-of-fact tone. Be concise and data-focused. Sound like a professional analyst delivering performance metrics.",
+    abrupt: "Speak very briefly and directly. Use short, punchy phrases with commanding delivery. Sound like a drill sergeant giving quick orders."
+  };
+  return instructions[tone];
+}
+
+function getDefaultVoiceForTone(tone: CoachTone): TTSVoice {
+  const voiceMap: Record<CoachTone, TTSVoice> = {
+    energetic: 'echo',
+    motivational: 'onyx',
+    instructive: 'fable',
+    factual: 'alloy',
+    abrupt: 'ash'
+  };
+  return voiceMap[tone];
+}
+
+export async function generateTTS(request: TTSRequest): Promise<Buffer> {
+  const { text, tone, voice, speed = 1.0 } = request;
+  
+  const cacheKey = `${text}:${tone}:${voice || 'default'}:${speed}`;
+  const cached = ttsCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < TTS_CACHE_TTL) {
+    console.log("TTS cache hit for:", text.substring(0, 50));
+    return cached.audio;
+  }
+  
+  const selectedVoice = voice || getDefaultVoiceForTone(tone);
+  const instructions = getToneInstructions(tone);
+  
+  console.log(`Generating TTS: voice=${selectedVoice}, tone=${tone}, text="${text.substring(0, 50)}..."`);
+  
+  try {
+    const response = await openai.audio.speech.create({
+      model: "gpt-4o-mini-tts",
+      voice: selectedVoice,
+      input: text,
+      instructions: instructions,
+      speed: Math.max(0.25, Math.min(4.0, speed)),
+      response_format: "mp3",
+    });
+    
+    const arrayBuffer = await response.arrayBuffer();
+    const audioBuffer = Buffer.from(arrayBuffer);
+    
+    ttsCache.set(cacheKey, { audio: audioBuffer, timestamp: Date.now() });
+    
+    const now = Date.now();
+    ttsCache.forEach((value, key) => {
+      if (now - value.timestamp > TTS_CACHE_TTL) {
+        ttsCache.delete(key);
+      }
+    });
+    
+    return audioBuffer;
+  } catch (error) {
+    console.error("TTS generation error:", error);
+    throw error;
+  }
+}
+
 export { openai };
