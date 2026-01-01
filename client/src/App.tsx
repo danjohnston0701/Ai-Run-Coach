@@ -18,6 +18,7 @@ import Notifications from "@/pages/Notifications";
 import PrivacyPolicy from "@/pages/PrivacyPolicy";
 import TermsOfUse from "@/pages/TermsOfUse";
 import Login from "@/pages/Login";
+import AdminAIConfig from "@/pages/AdminAIConfig";
 
 function Router() {
   const [hasProfile, setHasProfile] = useState(false);
@@ -54,6 +55,7 @@ function Router() {
           <Route path="/history/:id" component={RunInsights} />
           <Route path="/profile" component={Profile} />
           <Route path="/notifications" component={Notifications} />
+          <Route path="/admin/ai-config" component={AdminAIConfig} />
         </>
       )}
       <Route component={NotFound} />
