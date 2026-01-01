@@ -4,6 +4,30 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+export function calculateAge(dateOfBirth: string | Date | null | undefined): number | undefined {
+  if (!dateOfBirth) return undefined;
+  
+  const dob = typeof dateOfBirth === 'string' ? new Date(dateOfBirth) : dateOfBirth;
+  if (isNaN(dob.getTime())) return undefined;
+  
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const monthDiff = today.getMonth() - dob.getMonth();
+  
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+    age--;
+  }
+  
+  return age >= 0 && age < 150 ? age : undefined;
+}
+
+export interface AiCoachConfig {
+  description?: string | null;
+  instructions?: Array<{ title: string; content: string }>;
+  knowledge?: Array<{ title: string; content: string }>;
+  faqs?: Array<{ question: string; answer: string }>;
+}
+
 export interface RouteGenerationRequest {
   startLat: number;
   startLng: number;
@@ -42,6 +66,7 @@ export interface CoachingRequest {
   userMessage?: string;
   coachPreferences?: string;
   coachTone?: 'energetic' | 'motivational' | 'instructive' | 'factual' | 'abrupt';
+  aiConfig?: AiCoachConfig;
 }
 
 export interface CoachingResponse {
@@ -171,9 +196,37 @@ export async function getCoachingAdvice(request: CoachingRequest): Promise<Coach
     preferencesSection = `\n\nUser preferences: ${request.coachPreferences}`;
   }
 
-  const coachIdentity = request.coachName && request.coachName !== "AI Coach" 
+  let coachIdentity = request.coachName && request.coachName !== "AI Coach" 
     ? `You are ${request.coachName}, a personalized AI running coach.`
     : "You are an encouraging AI running coach.";
+
+  let aiConfigSection = "";
+  if (request.aiConfig) {
+    if (request.aiConfig.description) {
+      coachIdentity = request.aiConfig.description;
+    }
+    
+    if (request.aiConfig.instructions && request.aiConfig.instructions.length > 0) {
+      aiConfigSection += "\n\nCOACHING INSTRUCTIONS:\n";
+      for (const inst of request.aiConfig.instructions) {
+        aiConfigSection += `- ${inst.title}: ${inst.content}\n`;
+      }
+    }
+    
+    if (request.aiConfig.knowledge && request.aiConfig.knowledge.length > 0) {
+      aiConfigSection += "\n\nKNOWLEDGE BASE:\n";
+      for (const kb of request.aiConfig.knowledge) {
+        aiConfigSection += `- ${kb.title}: ${kb.content}\n`;
+      }
+    }
+    
+    if (request.aiConfig.faqs && request.aiConfig.faqs.length > 0) {
+      aiConfigSection += "\n\nCOMMON QUESTIONS:\n";
+      for (const faq of request.aiConfig.faqs) {
+        aiConfigSection += `Q: ${faq.question}\nA: ${faq.answer}\n\n`;
+      }
+    }
+  }
 
   const toneInstructions: Record<string, string> = {
     energetic: "Be high-energy, enthusiastic, and upbeat. Use exclamation marks and energizing language!",
@@ -185,7 +238,7 @@ export async function getCoachingAdvice(request: CoachingRequest): Promise<Coach
   
   const toneStyle = request.coachTone ? toneInstructions[request.coachTone] : toneInstructions.motivational;
   
-  const prompt = `${coachIdentity} Providing real-time guidance.
+  const prompt = `${coachIdentity} Providing real-time guidance.${aiConfigSection}
 
 COACHING STYLE: ${toneStyle}${userProfileInfo}
 

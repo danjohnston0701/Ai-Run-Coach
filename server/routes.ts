@@ -8,7 +8,7 @@ import {
   insertAiCoachKnowledgeSchema, insertAiCoachFaqSchema
 } from "@shared/schema";
 import { z } from "zod";
-import { generateRoute, getCoachingAdvice, analyzeRunPerformance, generateTTS, type CoachTone, type TTSVoice } from "./openai";
+import { generateRoute, getCoachingAdvice, analyzeRunPerformance, generateTTS, calculateAge, type CoachTone, type TTSVoice, type AiCoachConfig } from "./openai";
 import { generateCircularRoute, generateMultipleRoutes, isGoogleMapsConfigured } from "./routePlanner";
 import { generateAIRoutes } from "./aiRoutePlanner";
 import bcrypt from "bcryptjs";
@@ -495,10 +495,37 @@ export async function registerRoutes(
   // AI Coaching endpoint
   app.post("/api/ai/coaching", async (req, res) => {
     try {
-      const { currentPace, targetPace, heartRate, elapsedTime, distanceCovered, totalDistance, difficulty, userFitnessLevel } = req.body;
+      const { 
+        currentPace, targetPace, heartRate, elapsedTime, distanceCovered, totalDistance, 
+        difficulty, userFitnessLevel, targetTimeSeconds, userName, dateOfBirth,
+        userWeight, userHeight, userGender, desiredFitnessLevel, coachName,
+        userMessage, coachPreferences, coachTone, includeAiConfig
+      } = req.body;
       
       if (!currentPace || !targetPace || elapsedTime === undefined || distanceCovered === undefined || !totalDistance) {
         return res.status(400).json({ error: "Missing required coaching parameters" });
+      }
+
+      const userAge = calculateAge(dateOfBirth);
+
+      let aiConfig: AiCoachConfig | undefined;
+      if (includeAiConfig !== false) {
+        try {
+          const [description, instructions, knowledge, faqs] = await Promise.all([
+            storage.getAiCoachDescription(),
+            storage.getAiCoachInstructions(),
+            storage.getAiCoachKnowledge(),
+            storage.getAiCoachFaqs()
+          ]);
+          aiConfig = {
+            description: description?.content,
+            instructions: instructions.filter(i => i.isActive).map(i => ({ title: i.title, content: i.content })),
+            knowledge: knowledge.filter(k => k.isActive).map(k => ({ title: k.title, content: k.content })),
+            faqs: faqs.filter(f => f.isActive).map(f => ({ question: f.question, answer: f.answer }))
+          };
+        } catch (configErr) {
+          console.warn("Failed to load AI config:", configErr);
+        }
       }
 
       const advice = await getCoachingAdvice({
@@ -509,7 +536,19 @@ export async function registerRoutes(
         distanceCovered,
         totalDistance,
         difficulty: difficulty || "moderate",
-        userFitnessLevel
+        userFitnessLevel,
+        targetTimeSeconds,
+        userName,
+        userAge,
+        userWeight,
+        userHeight,
+        userGender,
+        desiredFitnessLevel,
+        coachName,
+        userMessage,
+        coachPreferences,
+        coachTone,
+        aiConfig
       });
 
       res.json(advice);
