@@ -9,6 +9,7 @@ import {
   Pause, Play, Square, Heart, Map, Share2, Users, Navigation, Volume2, VolumeX, Footprints, Mic, MicOff, MessageCircle 
 } from "lucide-react";
 import type { Friend } from "./Profile";
+import { saveActiveRunSession, loadActiveRunSession, clearActiveRunSession, type ActiveRunSession } from "@/lib/activeRunSession";
 
 import coachAvatar from "@assets/generated_images/glowing_ai_voice_sphere_interface.png";
 import mapBeginner from "@assets/generated_images/dark_mode_map_with_flat_green_route.png";
@@ -183,8 +184,11 @@ export default function RunSession() {
   const stepTimestampsRef = useRef<number[]>([]);
   const lastAccelRef = useRef<number>(0);
   const runMetricsRef = useRef({ time: 0, distance: 0 });
+  const startTimestampRef = useRef<number>(Date.now());
+  const sessionIdRef = useRef<string>(`run-${Date.now()}`);
 
   const searchParams = new URLSearchParams(window.location.search);
+  const isResuming = searchParams.get("resume") === "true";
   const targetDistance = searchParams.get("distance") || "5";
   const levelId = searchParams.get("level") || "beginner";
   const lat = parseFloat(searchParams.get("lat") || "40.7128");
@@ -236,7 +240,40 @@ export default function RunSession() {
         setRoutePoints(points);
       }
     }
-  }, []);
+    
+    if (isResuming) {
+      const savedSession = loadActiveRunSession();
+      if (savedSession) {
+        console.log("Restoring session:", savedSession);
+        setTime(savedSession.elapsedSeconds);
+        setDistance(savedSession.distanceKm);
+        setCadence(savedSession.cadence);
+        setKmSplits(savedSession.kmSplits);
+        setLastKmAnnounced(savedSession.lastKmAnnounced);
+        setAudioEnabled(savedSession.audioEnabled);
+        setAiCoachEnabled(savedSession.aiCoachEnabled);
+        startTimestampRef.current = savedSession.startTimestamp;
+        sessionIdRef.current = savedSession.id;
+        setActive(savedSession.status === 'active');
+        
+        if (savedSession.routePolyline) {
+          setRouteData({
+            id: savedSession.routeId,
+            routeName: savedSession.routeName,
+            polyline: savedSession.routePolyline,
+            waypoints: savedSession.routeWaypoints,
+            actualDistance: parseFloat(savedSession.targetDistance),
+            difficulty: savedSession.levelId as any,
+            startLat: savedSession.startLat,
+            startLng: savedSession.startLng,
+          });
+          setRoutePoints(decodePolyline(savedSession.routePolyline));
+        }
+        
+        toast.success("Run session restored!");
+      }
+    }
+  }, [isResuming]);
 
   const speak = useCallback((text: string, force: boolean = false) => {
     console.log("speak() called with:", text, "audioEnabled:", audioEnabled, "force:", force);
@@ -428,6 +465,37 @@ export default function RunSession() {
     }
     return () => clearInterval(interval);
   }, [active, gpsStatus]);
+
+  useEffect(() => {
+    if (!active && time === 0) return;
+    
+    const saveInterval = setInterval(() => {
+      const session: ActiveRunSession = {
+        id: sessionIdRef.current,
+        startTimestamp: startTimestampRef.current,
+        elapsedSeconds: time,
+        distanceKm: distance,
+        cadence,
+        routeId: routeData?.id || routeId,
+        routeName: routeData?.routeName || routeName,
+        routePolyline: routeData?.polyline || "",
+        routeWaypoints: routeData?.waypoints || [],
+        startLat: lat,
+        startLng: lng,
+        targetDistance,
+        levelId,
+        targetTimeSeconds,
+        audioEnabled,
+        aiCoachEnabled,
+        kmSplits,
+        lastKmAnnounced,
+        status: active ? 'active' : 'paused',
+      };
+      saveActiveRunSession(session);
+    }, 5000);
+    
+    return () => clearInterval(saveInterval);
+  }, [active, time, distance, cadence, routeData, routeId, routeName, lat, lng, targetDistance, levelId, targetTimeSeconds, audioEnabled, aiCoachEnabled, kmSplits, lastKmAnnounced]);
 
   const requestMotionPermission = useCallback(async () => {
     if (!('DeviceMotionEvent' in window)) {
@@ -866,6 +934,7 @@ export default function RunSession() {
 
   const handleStop = () => {
     window.speechSynthesis.cancel();
+    clearActiveRunSession();
     if (time > 0 && distance > 0) {
       saveRunData();
       speak("Run complete! Great job!");
