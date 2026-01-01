@@ -3,6 +3,7 @@ import { db, withRetry } from "./db";
 import {
   users, preRegistrations, friends, routes, runs, liveRunSessions, garminData,
   friendRequests, pushSubscriptions, notifications, routeRatings,
+  aiCoachDescription, aiCoachInstructions, aiCoachKnowledge, aiCoachFaq,
   type User, type InsertUser,
   type PreRegistration, type InsertPreRegistration,
   type Friend, type InsertFriend,
@@ -14,6 +15,10 @@ import {
   type PushSubscription, type InsertPushSubscription,
   type Notification, type InsertNotification,
   type RouteRating, type InsertRouteRating,
+  type AiCoachDescription, type InsertAiCoachDescription,
+  type AiCoachInstruction, type InsertAiCoachInstruction,
+  type AiCoachKnowledge, type InsertAiCoachKnowledge,
+  type AiCoachFaq, type InsertAiCoachFaq,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -73,6 +78,25 @@ export interface IStorage {
   createRouteRating(data: InsertRouteRating): Promise<RouteRating>;
   getUserRouteRatings(userId: string): Promise<RouteRating[]>;
   getTemplateRatings(userId: string): Promise<Array<{ templateName: string; avgRating: number; count: number }>>;
+
+  // AI Coach Configuration
+  getAiCoachDescription(): Promise<AiCoachDescription | undefined>;
+  upsertAiCoachDescription(content: string): Promise<AiCoachDescription>;
+  
+  getAiCoachInstructions(): Promise<AiCoachInstruction[]>;
+  createAiCoachInstruction(data: InsertAiCoachInstruction): Promise<AiCoachInstruction>;
+  updateAiCoachInstruction(id: string, data: Partial<InsertAiCoachInstruction>): Promise<AiCoachInstruction | undefined>;
+  deleteAiCoachInstruction(id: string): Promise<void>;
+  
+  getAiCoachKnowledge(): Promise<AiCoachKnowledge[]>;
+  createAiCoachKnowledge(data: InsertAiCoachKnowledge): Promise<AiCoachKnowledge>;
+  updateAiCoachKnowledge(id: string, data: Partial<InsertAiCoachKnowledge>): Promise<AiCoachKnowledge | undefined>;
+  deleteAiCoachKnowledge(id: string): Promise<void>;
+  
+  getAiCoachFaqs(): Promise<AiCoachFaq[]>;
+  createAiCoachFaq(data: InsertAiCoachFaq): Promise<AiCoachFaq>;
+  updateAiCoachFaq(id: string, data: Partial<InsertAiCoachFaq>): Promise<AiCoachFaq | undefined>;
+  deleteAiCoachFaq(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -458,6 +482,117 @@ export class DatabaseStorage implements IStorage {
       });
       
       return result.sort((a, b) => b.avgRating - a.avgRating);
+    });
+  }
+
+  // AI Coach Configuration
+  async getAiCoachDescription(): Promise<AiCoachDescription | undefined> {
+    return withRetry(async () => {
+      const [desc] = await db.select().from(aiCoachDescription).limit(1);
+      return desc;
+    });
+  }
+
+  async upsertAiCoachDescription(content: string): Promise<AiCoachDescription> {
+    return withRetry(async () => {
+      const existing = await this.getAiCoachDescription();
+      if (existing) {
+        const [updated] = await db.update(aiCoachDescription)
+          .set({ content, updatedAt: new Date() })
+          .where(eq(aiCoachDescription.id, existing.id))
+          .returning();
+        return updated;
+      } else {
+        const [created] = await db.insert(aiCoachDescription).values({ content }).returning();
+        return created;
+      }
+    });
+  }
+
+  async getAiCoachInstructions(): Promise<AiCoachInstruction[]> {
+    return withRetry(async () => {
+      return db.select().from(aiCoachInstructions).orderBy(aiCoachInstructions.displayOrder);
+    });
+  }
+
+  async createAiCoachInstruction(data: InsertAiCoachInstruction): Promise<AiCoachInstruction> {
+    return withRetry(async () => {
+      const [instruction] = await db.insert(aiCoachInstructions).values(data).returning();
+      return instruction;
+    });
+  }
+
+  async updateAiCoachInstruction(id: string, data: Partial<InsertAiCoachInstruction>): Promise<AiCoachInstruction | undefined> {
+    return withRetry(async () => {
+      const [instruction] = await db.update(aiCoachInstructions)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(aiCoachInstructions.id, id))
+        .returning();
+      return instruction;
+    });
+  }
+
+  async deleteAiCoachInstruction(id: string): Promise<void> {
+    return withRetry(async () => {
+      await db.delete(aiCoachInstructions).where(eq(aiCoachInstructions.id, id));
+    });
+  }
+
+  async getAiCoachKnowledge(): Promise<AiCoachKnowledge[]> {
+    return withRetry(async () => {
+      return db.select().from(aiCoachKnowledge).orderBy(aiCoachKnowledge.displayOrder);
+    });
+  }
+
+  async createAiCoachKnowledge(data: InsertAiCoachKnowledge): Promise<AiCoachKnowledge> {
+    return withRetry(async () => {
+      const [knowledge] = await db.insert(aiCoachKnowledge).values(data).returning();
+      return knowledge;
+    });
+  }
+
+  async updateAiCoachKnowledge(id: string, data: Partial<InsertAiCoachKnowledge>): Promise<AiCoachKnowledge | undefined> {
+    return withRetry(async () => {
+      const [knowledge] = await db.update(aiCoachKnowledge)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(aiCoachKnowledge.id, id))
+        .returning();
+      return knowledge;
+    });
+  }
+
+  async deleteAiCoachKnowledge(id: string): Promise<void> {
+    return withRetry(async () => {
+      await db.delete(aiCoachKnowledge).where(eq(aiCoachKnowledge.id, id));
+    });
+  }
+
+  async getAiCoachFaqs(): Promise<AiCoachFaq[]> {
+    return withRetry(async () => {
+      return db.select().from(aiCoachFaq).orderBy(aiCoachFaq.displayOrder);
+    });
+  }
+
+  async createAiCoachFaq(data: InsertAiCoachFaq): Promise<AiCoachFaq> {
+    return withRetry(async () => {
+      const [faq] = await db.insert(aiCoachFaq).values(data).returning();
+      return faq;
+    });
+  }
+
+  async updateAiCoachFaq(id: string, data: Partial<InsertAiCoachFaq>): Promise<AiCoachFaq | undefined> {
+    return withRetry(async () => {
+      const [faq] = await db.update(aiCoachFaq)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(aiCoachFaq.id, id))
+        .returning();
+      return faq;
+    });
+  }
+
+  async deleteAiCoachFaq(id: string): Promise<void> {
+    return withRetry(async () => {
+      await db.delete(aiCoachFaq).where(eq(aiCoachFaq.id, id));
     });
   }
 }

@@ -16,6 +16,7 @@ export const users = pgTable("users", {
   desiredFitnessLevel: text("desired_fitness_level"),
   coachName: text("coach_name").default("AI Coach"),
   profilePic: text("profile_pic"),
+  isAdmin: boolean("is_admin").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -151,6 +152,43 @@ export const routeRatings = pgTable("route_ratings", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const aiCoachDescription = pgTable("ai_coach_description", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  content: text("content").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const aiCoachInstructions = pgTable("ai_coach_instructions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  isActive: boolean("is_active").default(true),
+  displayOrder: integer("display_order").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const aiCoachKnowledge = pgTable("ai_coach_knowledge", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  category: text("category"),
+  isActive: boolean("is_active").default(true),
+  displayOrder: integer("display_order").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const aiCoachFaq = pgTable("ai_coach_faq", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  question: text("question").notNull(),
+  answer: text("answer").notNull(),
+  isActive: boolean("is_active").default(true),
+  displayOrder: integer("display_order").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 export const insertPreRegistrationSchema = createInsertSchema(preRegistrations).omit({ id: true, createdAt: true });
 export const insertFriendSchema = createInsertSchema(friends).omit({ id: true, createdAt: true });
@@ -162,6 +200,10 @@ export const insertFriendRequestSchema = createInsertSchema(friendRequests).omit
 export const insertPushSubscriptionSchema = createInsertSchema(pushSubscriptions).omit({ id: true, createdAt: true, lastUsedAt: true });
 export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
 export const insertRouteRatingSchema = createInsertSchema(routeRatings).omit({ id: true, createdAt: true });
+export const insertAiCoachDescriptionSchema = createInsertSchema(aiCoachDescription).omit({ id: true, updatedAt: true });
+export const insertAiCoachInstructionSchema = createInsertSchema(aiCoachInstructions).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertAiCoachKnowledgeSchema = createInsertSchema(aiCoachKnowledge).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertAiCoachFaqSchema = createInsertSchema(aiCoachFaq).omit({ id: true, createdAt: true, updatedAt: true });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -195,3 +237,15 @@ export type Notification = typeof notifications.$inferSelect;
 
 export type InsertRouteRating = z.infer<typeof insertRouteRatingSchema>;
 export type RouteRating = typeof routeRatings.$inferSelect;
+
+export type InsertAiCoachDescription = z.infer<typeof insertAiCoachDescriptionSchema>;
+export type AiCoachDescription = typeof aiCoachDescription.$inferSelect;
+
+export type InsertAiCoachInstruction = z.infer<typeof insertAiCoachInstructionSchema>;
+export type AiCoachInstruction = typeof aiCoachInstructions.$inferSelect;
+
+export type InsertAiCoachKnowledge = z.infer<typeof insertAiCoachKnowledgeSchema>;
+export type AiCoachKnowledge = typeof aiCoachKnowledge.$inferSelect;
+
+export type InsertAiCoachFaq = z.infer<typeof insertAiCoachFaqSchema>;
+export type AiCoachFaq = typeof aiCoachFaq.$inferSelect;
