@@ -793,6 +793,59 @@ export async function registerRoutes(
     }
   });
 
+  // Route Rating endpoints
+  app.post("/api/route-ratings", async (req, res) => {
+    try {
+      const { userId, runId, rating, templateName, backtrackRatio, routeDistance, startLat, startLng, polylineHash, feedback } = req.body;
+      
+      if (!userId || rating === undefined) {
+        return res.status(400).json({ error: "Missing userId or rating" });
+      }
+
+      if (rating < 1 || rating > 10) {
+        return res.status(400).json({ error: "Rating must be between 1 and 10" });
+      }
+
+      const routeRating = await storage.createRouteRating({
+        userId,
+        runId: runId || null,
+        rating,
+        templateName: templateName || null,
+        backtrackRatio: backtrackRatio || null,
+        routeDistance: routeDistance || null,
+        startLat: startLat || null,
+        startLng: startLng || null,
+        polylineHash: polylineHash || null,
+        feedback: feedback || null,
+      });
+
+      res.status(201).json(routeRating);
+    } catch (error) {
+      console.error("Create route rating error:", error);
+      res.status(500).json({ error: "Failed to save route rating" });
+    }
+  });
+
+  app.get("/api/route-ratings/:userId", async (req, res) => {
+    try {
+      const ratings = await storage.getUserRouteRatings(req.params.userId);
+      res.json(ratings);
+    } catch (error) {
+      console.error("Get route ratings error:", error);
+      res.status(500).json({ error: "Failed to get route ratings" });
+    }
+  });
+
+  app.get("/api/route-ratings/:userId/template-preferences", async (req, res) => {
+    try {
+      const templateRatings = await storage.getTemplateRatings(req.params.userId);
+      res.json(templateRatings);
+    } catch (error) {
+      console.error("Get template ratings error:", error);
+      res.status(500).json({ error: "Failed to get template preferences" });
+    }
+  });
+
   // Friend Request endpoints
   app.post("/api/friend-requests", async (req, res) => {
     try {
