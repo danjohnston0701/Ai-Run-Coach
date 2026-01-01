@@ -28,7 +28,7 @@ pool.on('connect', () => {
   console.log('Database connected successfully');
 });
 
-export const db = drizzle(pool, { schema });
+export const db = drizzle(pool, { schema, logger: true });
 
 export async function withRetry<T>(
   operation: () => Promise<T>,
