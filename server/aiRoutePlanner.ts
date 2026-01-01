@@ -618,14 +618,30 @@ async function getRouteElevation(polyline: string): Promise<{
 }
 
 // Main function: Generate diverse routes
-export async function generateAIRoutes(request: RouteRequest): Promise<MultiRouteResult> {
+export async function generateAIRoutes(
+  request: RouteRequest, 
+  templatePreferences?: Array<{ templateName: string; avgRating: number; count: number }>
+): Promise<MultiRouteResult> {
   const { startLat, startLng, targetDistance } = request;
   
   console.log(`[Route Gen] Generating diverse routes for ${targetDistance}km`);
   
   // Generate all route templates
-  const templates = generateRouteTemplates(startLat, startLng, targetDistance);
+  let templates = generateRouteTemplates(startLat, startLng, targetDistance);
   console.log(`[Route Gen] Created ${templates.length} unique templates`);
+  
+  // Sort templates by user preferences if available
+  if (templatePreferences && templatePreferences.length > 0) {
+    const preferenceMap = new Map(templatePreferences.map(p => [p.templateName, p.avgRating]));
+    
+    templates = templates.sort((a, b) => {
+      const ratingA = preferenceMap.get(a.name) || 5; // Default to neutral
+      const ratingB = preferenceMap.get(b.name) || 5;
+      return ratingB - ratingA; // Higher rated first
+    });
+    
+    console.log(`[Route Gen] Sorted templates by user preferences`);
+  }
   
   // Cache calibrated routes to avoid re-fetching when relaxing thresholds
   const calibratedCache: Map<string, { waypoints: Array<{lat: number; lng: number}>, result: DirectionsResult, backtrackRatio: number }> = new Map();

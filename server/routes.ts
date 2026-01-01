@@ -172,7 +172,7 @@ export async function registerRoutes(
   // Uses AI-powered route planning: Google for area data → OpenAI for waypoint design → Google for final route
   app.post("/api/routes/generate-options", async (req, res) => {
     try {
-      const { startLat, startLng, targetDistance, useAI = true } = req.body;
+      const { startLat, startLng, targetDistance, useAI = true, userId } = req.body;
       
       if (startLat === undefined || startLat === null || 
           startLng === undefined || startLng === null || 
@@ -185,6 +185,19 @@ export async function registerRoutes(
         return res.status(503).json({ error: "Route generation service is temporarily unavailable. Please try again later." });
       }
 
+      // Fetch user's template preferences if userId provided
+      let templatePreferences: Array<{ templateName: string; avgRating: number; count: number }> | undefined;
+      if (userId) {
+        try {
+          templatePreferences = await storage.getTemplateRatings(userId);
+          if (templatePreferences.length > 0) {
+            console.log(`[Route API] Loaded ${templatePreferences.length} template preferences for user`);
+          }
+        } catch (err) {
+          console.log("[Route API] Could not load template preferences");
+        }
+      }
+
       // Use AI-powered route generation by default
       let result;
       if (useAI) {
@@ -193,7 +206,7 @@ export async function registerRoutes(
           startLat: parseFloat(startLat),
           startLng: parseFloat(startLng),
           targetDistance: parseFloat(targetDistance),
-        });
+        }, templatePreferences);
       } else {
         console.log("[Route API] Using geometric route generation (fallback)");
         result = await generateMultipleRoutes({

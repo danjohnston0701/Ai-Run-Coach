@@ -59,6 +59,10 @@ export default function RoutePreview() {
     setError(null);
     setSelectedRoute(null);
     
+    // Get userId for personalized route suggestions
+    const savedProfile = localStorage.getItem("userProfile");
+    const userId = savedProfile ? JSON.parse(savedProfile).id : null;
+    
     try {
       const res = await fetch("/api/routes/generate-options", {
         method: "POST",
@@ -67,6 +71,7 @@ export default function RoutePreview() {
           startLat: lat,
           startLng: lng,
           targetDistance: distance,
+          userId,
         }),
       });
 
