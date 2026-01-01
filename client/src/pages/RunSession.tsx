@@ -296,6 +296,10 @@ export default function RunSession() {
   const sessionIdRef = useRef<string>(`run-${Date.now()}`);
   const lastTerrainCoachingTimeRef = useRef<number>(0);
   const initialAnnouncementMadeRef = useRef<boolean>(false);
+  const navAudioCacheRef = useRef<Map<string, string>>(new Map());
+  const lastNavSpeakTimeRef = useRef<number>(0);
+  const navSpeakQueueRef = useRef<string[]>([]);
+  const isNavSpeakingRef = useRef<boolean>(false);
 
   const searchParams = new URLSearchParams(window.location.search);
   const isResuming = searchParams.get("resume") === "true";
@@ -525,6 +529,86 @@ export default function RunSession() {
     console.log("Fallback device TTS used with voice:", cachedVoiceRef.current?.name || "default");
   }, [getCoachVoice, coachSettings]);
 
+  const playNavAudio = useCallback(async (audioUrl: string, text: string) => {
+    return new Promise<void>((resolve) => {
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+      audio.onended = () => {
+        isNavSpeakingRef.current = false;
+        resolve();
+      };
+      audio.onerror = () => {
+        isNavSpeakingRef.current = false;
+        resolve();
+      };
+      audio.play().catch(() => {
+        isNavSpeakingRef.current = false;
+        resolve();
+      });
+    });
+  }, []);
+
+  const processNavQueue = useCallback(async () => {
+    if (isNavSpeakingRef.current || navSpeakQueueRef.current.length === 0) return;
+    
+    const text = navSpeakQueueRef.current.shift();
+    if (!text) return;
+    
+    isNavSpeakingRef.current = true;
+    
+    // Check cache first
+    const cacheKey = text.toLowerCase().trim();
+    const cachedUrl = navAudioCacheRef.current.get(cacheKey);
+    
+    if (cachedUrl) {
+      console.log("Using cached AI audio for:", text.substring(0, 30));
+      await playNavAudio(cachedUrl, text);
+      processNavQueue();
+      return;
+    }
+    
+    const ttsVoice = getTTSVoice(coachSettings);
+    const prefs = getVoicePreferences(coachSettings);
+    
+    try {
+      const response = await fetch('/api/ai/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text,
+          tone: coachSettings.tone,
+          voice: ttsVoice,
+          speed: prefs.rate
+        })
+      });
+      
+      if (!response.ok) throw new Error('TTS failed');
+      
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      
+      // Cache the audio URL (limit cache to 20 entries)
+      if (navAudioCacheRef.current.size >= 20) {
+        const firstKey = navAudioCacheRef.current.keys().next().value;
+        if (firstKey) {
+          const oldUrl = navAudioCacheRef.current.get(firstKey);
+          if (oldUrl) URL.revokeObjectURL(oldUrl);
+          navAudioCacheRef.current.delete(firstKey);
+        }
+      }
+      navAudioCacheRef.current.set(cacheKey, audioUrl);
+      
+      console.log("Using AI voice for navigation:", text.substring(0, 30));
+      await playNavAudio(audioUrl, text);
+    } catch (error) {
+      console.error('Navigation TTS error, using device fallback:', error);
+      speakWithDeviceTTS(text);
+      isNavSpeakingRef.current = false;
+    }
+    
+    processNavQueue();
+  }, [coachSettings, speakWithDeviceTTS, playNavAudio]);
+
   const speak = useCallback((text: string, force: boolean = false) => {
     console.log("speak() called with:", text, "audioEnabled:", audioEnabled, "force:", force);
     if (!force && !audioEnabled) {
@@ -532,10 +616,18 @@ export default function RunSession() {
       return;
     }
     
-    cleanupAudio();
-    speakWithDeviceTTS(text);
-    console.log("Using device TTS for navigation/directions (cost-saving mode)");
-  }, [audioEnabled, speakWithDeviceTTS, cleanupAudio]);
+    // Throttle navigation speech - minimum 3 seconds between calls
+    const now = Date.now();
+    if (now - lastNavSpeakTimeRef.current < 3000 && !force) {
+      console.log("Navigation speech throttled");
+      return;
+    }
+    lastNavSpeakTimeRef.current = now;
+    
+    // Add to queue and process
+    navSpeakQueueRef.current.push(text);
+    processNavQueue();
+  }, [audioEnabled, processNavQueue]);
 
   useEffect(() => {
     if (!('geolocation' in navigator)) {

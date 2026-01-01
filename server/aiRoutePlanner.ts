@@ -761,18 +761,21 @@ export async function generateAIRoutes(
       console.log(`[Route Gen] Accepted ${template.name}: ${result.distance.toFixed(2)}km, footprint ${footprint.toFixed(2)}km, backtrack ${(cached.backtrackRatio*100).toFixed(0)}%`);
       
       // Assign difficulty based on route characteristics
+      // Easy: low backtrack, no major roads
+      // Moderate: medium backtrack OR major roads
+      // Hard: based on elevation only (handled later)
       let difficulty: "easy" | "moderate" | "hard";
       
-      // Routes with less backtracking are easier, more backtracking means harder
-      if (cached.backtrackRatio <= 0.25) {
+      if (cached.backtrackRatio <= 0.25 && !hasMajorRoads) {
         difficulty = "easy";
-      } else if (cached.backtrackRatio <= 0.40) {
-        difficulty = "moderate";
       } else {
-        difficulty = "hard";
+        difficulty = "moderate";
       }
       
-      if (hasMajorRoads) difficulty = "hard";
+      // Major roads bump to moderate (not hard)
+      if (hasMajorRoads && difficulty === "easy") {
+        difficulty = "moderate";
+      }
       
       candidates.push({
         id: `route-${candidates.length}`,
