@@ -31,6 +31,16 @@ export interface CoachingRequest {
   totalDistance: number;
   difficulty: string;
   userFitnessLevel?: string;
+  targetTimeSeconds?: number;
+  userName?: string;
+  userAge?: number;
+  userWeight?: string;
+  userHeight?: string;
+  userGender?: string;
+  desiredFitnessLevel?: string;
+  coachName?: string;
+  userMessage?: string;
+  coachPreferences?: string;
 }
 
 export interface CoachingResponse {
@@ -129,16 +139,53 @@ function generateDefaultWaypoints(startLat: number, startLng: number, distance: 
 export async function getCoachingAdvice(request: CoachingRequest): Promise<CoachingResponse> {
   const progressPercent = Math.round((request.distanceCovered / request.totalDistance) * 100);
   
-  const prompt = `You are an encouraging AI running coach providing real-time guidance. Based on these stats:
+  let targetTimeInfo = "";
+  if (request.targetTimeSeconds) {
+    const targetMins = Math.floor(request.targetTimeSeconds / 60);
+    const targetSecs = request.targetTimeSeconds % 60;
+    const expectedTimeAtProgress = (request.targetTimeSeconds * (request.distanceCovered / request.totalDistance));
+    const timeDiff = request.elapsedTime - expectedTimeAtProgress;
+    const aheadOrBehind = timeDiff < -10 ? "AHEAD of target" : timeDiff > 10 ? "BEHIND target" : "ON TRACK";
+    targetTimeInfo = `\n- Target finish time: ${targetMins}:${targetSecs.toString().padStart(2, '0')}\n- Time status: ${aheadOrBehind} (${Math.abs(Math.round(timeDiff))}s ${timeDiff < 0 ? 'ahead' : 'behind'})`;
+  }
+
+  let userProfileInfo = "";
+  if (request.userName || request.userAge || request.userWeight || request.userHeight) {
+    userProfileInfo = "\n\nRunner Profile:";
+    if (request.userName) userProfileInfo += `\n- Name: ${request.userName}`;
+    if (request.userAge) userProfileInfo += `\n- Age: ${request.userAge}`;
+    if (request.userGender) userProfileInfo += `\n- Gender: ${request.userGender}`;
+    if (request.userHeight) userProfileInfo += `\n- Height: ${request.userHeight}`;
+    if (request.userWeight) userProfileInfo += `\n- Weight: ${request.userWeight}`;
+    if (request.desiredFitnessLevel) userProfileInfo += `\n- Goal: ${request.desiredFitnessLevel} fitness`;
+  }
+
+  let userMessageSection = "";
+  if (request.userMessage) {
+    userMessageSection = `\n\nThe runner just said: "${request.userMessage}"\nRespond to their message appropriately.`;
+  }
+
+  let preferencesSection = "";
+  if (request.coachPreferences) {
+    preferencesSection = `\n\nUser preferences: ${request.coachPreferences}`;
+  }
+
+  const coachIdentity = request.coachName && request.coachName !== "AI Coach" 
+    ? `You are ${request.coachName}, a personalized AI running coach.`
+    : "You are an encouraging AI running coach.";
+  
+  const prompt = `${coachIdentity} Providing real-time guidance.${userProfileInfo}
+
+Current Run Stats:
 - Current pace: ${request.currentPace}
 - Target pace: ${request.targetPace}
 - Heart rate: ${request.heartRate || "unknown"} bpm
 - Progress: ${request.distanceCovered.toFixed(2)}km of ${request.totalDistance}km (${progressPercent}%)
-- Elapsed time: ${Math.floor(request.elapsedTime / 60)} minutes
+- Elapsed time: ${Math.floor(request.elapsedTime / 60)} minutes ${request.elapsedTime % 60} seconds
 - Difficulty: ${request.difficulty}
-- Fitness level: ${request.userFitnessLevel || "intermediate"}
+- Fitness level: ${request.userFitnessLevel || "intermediate"}${targetTimeInfo}${preferencesSection}${userMessageSection}
 
-Provide brief, motivating coaching advice. Be specific but concise.
+${request.userMessage ? "Respond to the runner's message while providing coaching." : "Provide brief, motivating coaching advice."} ${request.userName ? `Use ${request.userName}'s name occasionally for personalization.` : ""} Be specific but concise.
 
 Respond in JSON format:
 {

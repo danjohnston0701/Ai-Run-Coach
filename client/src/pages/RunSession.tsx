@@ -6,7 +6,7 @@ import { RouteMap } from "@/components/RouteMap";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { 
-  Pause, Play, Square, Heart, Map, Share2, Users, Navigation, Volume2, VolumeX, Footprints, Mic, MicOff 
+  Pause, Play, Square, Heart, Map, Share2, Users, Navigation, Volume2, VolumeX, Footprints, Mic, MicOff, MessageCircle 
 } from "lucide-react";
 import type { Friend } from "./Profile";
 
@@ -163,8 +163,21 @@ export default function RunSession() {
   const [aiCoachEnabled, setAiCoachEnabled] = useState(true);
   const [coachingInterval] = useState(120);
   const [isCoaching, setIsCoaching] = useState(false);
+  const [coachPreferences, setCoachPreferences] = useState("");
+  const [isListening, setIsListening] = useState(false);
+  const [userProfile, setUserProfile] = useState<{
+    name?: string;
+    dob?: string;
+    gender?: string;
+    height?: string;
+    weight?: string;
+    fitnessLevel?: string;
+    desiredFitnessLevel?: string;
+    coachName?: string;
+  } | null>(null);
   
   const positionsRef = useRef<Position[]>([]);
+  const recognitionRef = useRef<any>(null);
   const watchIdRef = useRef<number | null>(null);
   const speechSynthRef = useRef<SpeechSynthesisUtterance | null>(null);
   const stepTimestampsRef = useRef<number[]>([]);
@@ -178,12 +191,40 @@ export default function RunSession() {
   const lng = parseFloat(searchParams.get("lng") || "-74.0060");
   const routeName = searchParams.get("routeName") || "";
   const routeId = searchParams.get("routeId") || "";
+  const targetTimeSeconds = parseInt(searchParams.get("targetTime") || "0");
+
+  const calculateAge = (dob: string): number | undefined => {
+    if (!dob) return undefined;
+    const birthDate = new Date(dob);
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age;
+  };
 
   useEffect(() => {
     const profile = localStorage.getItem("userProfile");
     if (profile) {
       const parsed = JSON.parse(profile);
       setFriends(parsed.friends || []);
+      setUserProfile({
+        name: parsed.name,
+        dob: parsed.dob,
+        gender: parsed.gender,
+        height: parsed.height,
+        weight: parsed.weight,
+        fitnessLevel: parsed.fitnessLevel,
+        desiredFitnessLevel: parsed.desiredFitnessLevel,
+        coachName: parsed.coachName,
+      });
+      
+      const savedPrefs = localStorage.getItem("coachPreferences");
+      if (savedPrefs) {
+        setCoachPreferences(savedPrefs);
+      }
     }
     
     const savedRoute = localStorage.getItem("activeRoute");
@@ -528,17 +569,17 @@ export default function RunSession() {
     window.speechSynthesis.speak(utterance);
   }, []);
 
-  const fetchCoaching = useCallback(async () => {
+  const fetchCoaching = useCallback(async (userMessage?: string) => {
     const { active: isActive, aiCoachEnabled: isEnabled, gpsStatus: gps } = coachingControlRef.current;
     if (!isActive || !isEnabled || gps !== "active") return;
     
     const { time: currentTime, distance: currentDistance } = runMetricsRef.current;
-    if (currentDistance < 0.1) return;
+    if (currentDistance < 0.1 && !userMessage) return;
     
     setIsCoaching(true);
     
     try {
-      const paceSeconds = currentTime / currentDistance;
+      const paceSeconds = currentDistance > 0 ? currentTime / currentDistance : 0;
       const paceMins = Math.floor(paceSeconds / 60);
       const paceSecs = Math.floor(paceSeconds % 60);
       const currentPace = `${paceMins}:${paceSecs.toString().padStart(2, '0')}`;
@@ -559,7 +600,17 @@ export default function RunSession() {
           distanceCovered: currentDistance,
           totalDistance: parseFloat(targetDistance),
           difficulty: levelId,
-          userFitnessLevel: 'intermediate'
+          userFitnessLevel: userProfile?.fitnessLevel || 'intermediate',
+          targetTimeSeconds: targetTimeSeconds > 0 ? targetTimeSeconds : undefined,
+          userName: userProfile?.name,
+          userAge: userProfile?.dob ? calculateAge(userProfile.dob) : undefined,
+          userWeight: userProfile?.weight,
+          userHeight: userProfile?.height,
+          userGender: userProfile?.gender,
+          desiredFitnessLevel: userProfile?.desiredFitnessLevel,
+          coachName: userProfile?.coachName,
+          userMessage: userMessage,
+          coachPreferences: coachPreferences || undefined,
         })
       });
       
@@ -590,7 +641,7 @@ export default function RunSession() {
     } finally {
       setIsCoaching(false);
     }
-  }, [targetDistance, levelId, speakCoaching]);
+  }, [targetDistance, levelId, targetTimeSeconds, userProfile, coachPreferences, speakCoaching]);
 
   useEffect(() => {
     if (!active || !aiCoachEnabled || gpsStatus !== "active") {
@@ -622,6 +673,69 @@ export default function RunSession() {
       }
     };
   }, [active, aiCoachEnabled, gpsStatus, coachingInterval, fetchCoaching]);
+
+  const startListening = useCallback(() => {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      toast.error("Voice input not supported on this device");
+      return;
+    }
+    
+    const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+    
+    recognition.onstart = () => {
+      setIsListening(true);
+      window.speechSynthesis.cancel();
+    };
+    
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      console.log("Voice input:", transcript);
+      
+      const lowerTranscript = transcript.toLowerCase();
+      if (lowerTranscript.includes("don't talk") || lowerTranscript.includes("be quiet") || 
+          lowerTranscript.includes("silent mode") || lowerTranscript.includes("only when i ask")) {
+        const newPref = "Only speak when the runner asks a question. Stay silent otherwise.";
+        setCoachPreferences(newPref);
+        localStorage.setItem("coachPreferences", newPref);
+        speak("Got it. I'll only speak when you ask me something.");
+        toast.success("Coach set to silent mode");
+      } else if (lowerTranscript.includes("talk to me") || lowerTranscript.includes("normal mode") || 
+                 lowerTranscript.includes("coach me") || lowerTranscript.includes("give me feedback")) {
+        setCoachPreferences("");
+        localStorage.removeItem("coachPreferences");
+        speak("Okay! I'll give you regular coaching updates.");
+        toast.success("Regular coaching enabled");
+      } else {
+        fetchCoaching(transcript);
+      }
+    };
+    
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error:", event.error);
+      setIsListening(false);
+      if (event.error === 'not-allowed') {
+        toast.error("Microphone access denied");
+      }
+    };
+    
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+    
+    recognitionRef.current = recognition;
+    recognition.start();
+  }, [speak, fetchCoaching]);
+
+  const stopListening = useCallback(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    }
+  }, []);
 
   const toggleLiveShare = (friend: Friend) => {
     const friendId = friend.email || friend.name;
@@ -895,6 +1009,18 @@ export default function RunSession() {
               data-testid="button-ai-coach-toggle"
             >
               {aiCoachEnabled ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+            </Button>
+            <Button
+              onClick={isListening ? stopListening : startListening}
+              size="icon"
+              className={`h-10 w-10 rounded-xl ${
+                isListening 
+                  ? "bg-red-500 text-white border border-red-400 animate-pulse" 
+                  : "bg-purple-500/20 text-purple-400 border border-purple-500/30"
+              }`}
+              data-testid="button-talk-to-coach"
+            >
+              <MessageCircle className="w-4 h-4" />
             </Button>
             {motionPermission === "unknown" && (
               <Button

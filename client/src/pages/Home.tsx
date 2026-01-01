@@ -539,11 +539,13 @@ export default function Home() {
     console.log("handleMapRun - userLocation state:", userLocation);
     console.log("handleMapRun - using coordinates:", { lat, lng });
     
+    const targetSeconds = parseInt(targetTime.h || "0") * 3600 + parseInt(targetTime.m || "0") * 60 + parseInt(targetTime.s || "0");
     const params = new URLSearchParams({
       distance: distance[0].toString(),
       level: selectedLevel,
       lat: lat.toString(),
       lng: lng.toString(),
+      targetTime: targetSeconds.toString(),
     });
     console.log("Navigating to route preview with params:", { lat, lng, distance: distance[0], level: selectedLevel });
     setLocation(`/route-preview?${params.toString()}`);
@@ -554,11 +556,13 @@ export default function Home() {
     const lat = userLocation?.lat ?? parseFloat(customLat);
     const lng = userLocation?.lng ?? parseFloat(customLng);
     
+    const targetSeconds = parseInt(targetTime.h || "0") * 3600 + parseInt(targetTime.m || "0") * 60 + parseInt(targetTime.s || "0");
     const params = new URLSearchParams({
       distance: distance[0].toString(),
       level: selectedLevel,
       lat: lat.toString(),
       lng: lng.toString(),
+      targetTime: targetSeconds.toString(),
     });
     setLocation(`/run?${params.toString()}`);
   };
