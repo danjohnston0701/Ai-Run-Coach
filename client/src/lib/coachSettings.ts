@@ -66,6 +66,23 @@ export const toneDescriptions: Record<CoachTone, string> = {
   abrupt: 'Short, direct commands',
 };
 
+export type TTSVoice = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'sage' | 'shimmer' | 'ash' | 'coral';
+
+export function getTTSVoice(settings: AiCoachSettings): TTSVoice {
+  const { gender, accent } = settings;
+  
+  const voiceMap: Record<CoachAccent, { male: TTSVoice; female: TTSVoice }> = {
+    british: { male: 'fable', female: 'nova' },
+    australian: { male: 'echo', female: 'shimmer' },
+    american: { male: 'onyx', female: 'alloy' },
+    irish: { male: 'ash', female: 'coral' },
+    scottish: { male: 'echo', female: 'sage' },
+    newzealand: { male: 'onyx', female: 'shimmer' },
+  };
+  
+  return voiceMap[accent][gender];
+}
+
 export function getVoicePreferences(settings: AiCoachSettings): {
   preferredNames: string[];
   langPreferences: string[];

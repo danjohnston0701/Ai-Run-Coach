@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import type { Friend } from "./Profile";
 import { saveActiveRunSession, loadActiveRunSession, clearActiveRunSession, type ActiveRunSession } from "@/lib/activeRunSession";
-import { loadCoachSettings, getVoicePreferences, type AiCoachSettings } from "@/lib/coachSettings";
+import { loadCoachSettings, getVoicePreferences, getTTSVoice, type AiCoachSettings } from "@/lib/coachSettings";
 
 import coachAvatar from "@assets/generated_images/glowing_ai_voice_sphere_interface.png";
 import mapBeginner from "@assets/generated_images/dark_mode_map_with_flat_green_route.png";
@@ -457,14 +457,11 @@ export default function RunSession() {
     return fallback;
   }, [coachSettings]);
 
-  const speak = useCallback((text: string, force: boolean = false) => {
-    console.log("speak() called with:", text, "audioEnabled:", audioEnabled, "force:", force);
-    if (!force && !audioEnabled) {
-      console.log("Speech blocked: audio disabled");
-      return;
-    }
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  
+  const speakWithDeviceTTS = useCallback((text: string) => {
     if (!('speechSynthesis' in window)) {
-      console.log("Speech blocked: speechSynthesis not available");
+      console.log("Device TTS not available");
       return;
     }
     
@@ -474,20 +471,76 @@ export default function RunSession() {
     const voice = getCoachVoice();
     if (voice) {
       utterance.voice = voice;
-      console.log("Using voice:", voice.name, voice.lang);
     }
     
     const prefs = getVoicePreferences(coachSettings);
     utterance.rate = prefs.rate;
     utterance.pitch = prefs.pitch;
     utterance.volume = 1;
-    utterance.onstart = () => console.log("Speech started");
-    utterance.onend = () => console.log("Speech ended");
-    utterance.onerror = (e) => console.log("Speech error:", e);
     speechSynthRef.current = utterance;
     window.speechSynthesis.speak(utterance);
-    console.log("speechSynthesis.speak() called");
-  }, [audioEnabled, getCoachVoice, coachSettings]);
+    console.log("Fallback device TTS used");
+  }, [getCoachVoice, coachSettings]);
+
+  const speak = useCallback(async (text: string, force: boolean = false) => {
+    console.log("speak() called with:", text, "audioEnabled:", audioEnabled, "force:", force);
+    if (!force && !audioEnabled) {
+      console.log("Speech blocked: audio disabled");
+      return;
+    }
+    
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+    }
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    
+    const ttsVoice = getTTSVoice(coachSettings);
+    const prefs = getVoicePreferences(coachSettings);
+    
+    try {
+      console.log(`Calling TTS API: voice=${ttsVoice}, tone=${coachSettings.tone}`);
+      const response = await fetch('/api/ai/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text,
+          tone: coachSettings.tone,
+          voice: ttsVoice,
+          speed: prefs.rate
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`TTS API error: ${response.status}`);
+      }
+      
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+      audio.volume = 1;
+      
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        console.log("OpenAI TTS playback ended");
+      };
+      audio.onerror = (e) => {
+        console.error("Audio playback error:", e);
+        URL.revokeObjectURL(audioUrl);
+        speakWithDeviceTTS(text);
+      };
+      
+      await audio.play();
+      console.log("OpenAI TTS playback started");
+    } catch (error) {
+      console.error("TTS API failed, falling back to device TTS:", error);
+      speakWithDeviceTTS(text);
+    }
+  }, [audioEnabled, coachSettings, speakWithDeviceTTS]);
 
   useEffect(() => {
     if (!('geolocation' in navigator)) {
@@ -844,28 +897,43 @@ export default function RunSession() {
     coachingControlRef.current = { active, aiCoachEnabled, gpsStatus };
   }, [active, aiCoachEnabled, gpsStatus]);
   
-  const speakCoaching = useCallback((text: string) => {
+  const speakCoaching = useCallback(async (text: string) => {
     const { active: isActive, aiCoachEnabled: isEnabled } = coachingControlRef.current;
-    if (!isActive || !isEnabled || !audioEnabledRef.current || !('speechSynthesis' in window)) return;
+    if (!isActive || !isEnabled || !audioEnabledRef.current) return;
     
-    if (window.speechSynthesis.speaking) {
+    if (audioRef.current && !audioRef.current.ended && !audioRef.current.paused) {
       setTimeout(() => speakCoaching(text), 2000);
       return;
     }
     
-    const utterance = new SpeechSynthesisUtterance(text);
-    
-    const voice = getCoachVoice();
-    if (voice) {
-      utterance.voice = voice;
-    }
-    
+    const ttsVoice = getTTSVoice(coachSettings);
     const prefs = getVoicePreferences(coachSettings);
-    utterance.rate = prefs.rate;
-    utterance.pitch = prefs.pitch;
-    utterance.volume = 1;
-    window.speechSynthesis.speak(utterance);
-  }, [getCoachVoice, coachSettings]);
+    
+    try {
+      const response = await fetch('/api/ai/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text,
+          tone: coachSettings.tone,
+          voice: ttsVoice,
+          speed: prefs.rate
+        })
+      });
+      
+      if (!response.ok) throw new Error('TTS failed');
+      
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+      audio.onended = () => URL.revokeObjectURL(audioUrl);
+      await audio.play();
+    } catch (error) {
+      console.error('Coaching TTS error, using fallback:', error);
+      speakWithDeviceTTS(text);
+    }
+  }, [coachSettings, speakWithDeviceTTS]);
 
   const fetchCoaching = useCallback(async (userMessage?: string) => {
     const { active: isActive, aiCoachEnabled: isEnabled, gpsStatus: gps } = coachingControlRef.current;
@@ -996,6 +1064,9 @@ export default function RunSession() {
     
     recognition.onstart = () => {
       setIsListening(true);
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
       if (window.speechSynthesis) {
         window.speechSynthesis.cancel();
       }
@@ -1154,7 +1225,13 @@ export default function RunSession() {
   };
 
   const handleStop = () => {
-    window.speechSynthesis.cancel();
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+    }
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
     clearActiveRunSession();
     if (time > 0 && distance > 0) {
       saveRunData();
