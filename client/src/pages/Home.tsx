@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
-import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X } from "lucide-react";
+import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -13,6 +13,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import type { RunData } from "./RunHistory";
+import { loadActiveRunSession, clearActiveRunSession, type ActiveRunSession } from "@/lib/activeRunSession";
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -177,6 +178,36 @@ export default function Home() {
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
   const [enablingNotifications, setEnablingNotifications] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [activeSession, setActiveSession] = useState<ActiveRunSession | null>(null);
+
+  useEffect(() => {
+    const session = loadActiveRunSession();
+    if (session) {
+      setActiveSession(session);
+    }
+  }, []);
+
+  const handleResumeRun = () => {
+    if (activeSession) {
+      setLocation(`/run?resume=true`);
+    }
+  };
+
+  const handleDiscardSession = () => {
+    clearActiveRunSession();
+    setActiveSession(null);
+    toast.success("Previous run session discarded");
+  };
+
+  const formatTime = (seconds: number): string => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
 
   const { data: unreadCount = 0 } = useQuery<number>({
     queryKey: ['/api/notifications/unread-count', profile?.id],
@@ -569,6 +600,48 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background p-6 pb-24 font-sans text-foreground">
+      {/* Resume Run Banner */}
+      {activeSession && (
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-4 -mx-6 -mt-6 px-6 py-4 bg-gradient-to-r from-primary/20 to-primary/10 border-b border-primary/30"
+        >
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
+                <RotateCcw className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <p className="font-medium text-foreground">Run in progress</p>
+                <p className="text-sm text-muted-foreground">
+                  {formatTime(activeSession.elapsedSeconds)} · {activeSession.distanceKm.toFixed(2)} km
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleDiscardSession}
+                className="text-muted-foreground"
+                data-testid="button-discard-session"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleResumeRun}
+                className="bg-primary text-background hover:bg-primary/90"
+                data-testid="button-resume-run"
+              >
+                Resume
+              </Button>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
       {/* Notification Permission Dialog */}
       <Dialog open={showNotificationPrompt} onOpenChange={setShowNotificationPrompt}>
         <DialogContent className="sm:max-w-md">

@@ -189,13 +189,23 @@ export default function RunSession() {
 
   const searchParams = new URLSearchParams(window.location.search);
   const isResuming = searchParams.get("resume") === "true";
-  const targetDistance = searchParams.get("distance") || "5";
-  const levelId = searchParams.get("level") || "beginner";
-  const lat = parseFloat(searchParams.get("lat") || "40.7128");
-  const lng = parseFloat(searchParams.get("lng") || "-74.0060");
-  const routeName = searchParams.get("routeName") || "";
-  const routeId = searchParams.get("routeId") || "";
-  const targetTimeSeconds = parseInt(searchParams.get("targetTime") || "0");
+  const urlTargetDistance = searchParams.get("distance") || "5";
+  const urlLevelId = searchParams.get("level") || "beginner";
+  const urlLat = parseFloat(searchParams.get("lat") || "40.7128");
+  const urlLng = parseFloat(searchParams.get("lng") || "-74.0060");
+  const urlRouteName = searchParams.get("routeName") || "";
+  const urlRouteId = searchParams.get("routeId") || "";
+  const urlTargetTimeSeconds = parseInt(searchParams.get("targetTime") || "0");
+
+  const sessionMetadataRef = useRef({
+    targetDistance: urlTargetDistance,
+    levelId: urlLevelId,
+    startLat: urlLat,
+    startLng: urlLng,
+    routeName: urlRouteName,
+    routeId: urlRouteId,
+    targetTimeSeconds: urlTargetTimeSeconds,
+  });
 
   const calculateAge = (dob: string): number | undefined => {
     if (!dob) return undefined;
@@ -232,13 +242,22 @@ export default function RunSession() {
     }
     
     const savedRoute = localStorage.getItem("activeRoute");
-    if (savedRoute) {
+    if (savedRoute && !isResuming) {
       const route: RouteData = JSON.parse(savedRoute);
       setRouteData(route);
       if (route.polyline) {
         const points = decodePolyline(route.polyline);
         setRoutePoints(points);
       }
+      sessionMetadataRef.current = {
+        ...sessionMetadataRef.current,
+        routeId: route.id || sessionMetadataRef.current.routeId,
+        routeName: route.routeName || sessionMetadataRef.current.routeName,
+        startLat: route.startLat ?? sessionMetadataRef.current.startLat,
+        startLng: route.startLng ?? sessionMetadataRef.current.startLng,
+        targetDistance: route.actualDistance?.toString() || sessionMetadataRef.current.targetDistance,
+        levelId: route.difficulty || sessionMetadataRef.current.levelId,
+      };
     }
     
     if (isResuming) {
@@ -255,6 +274,16 @@ export default function RunSession() {
         startTimestampRef.current = savedSession.startTimestamp;
         sessionIdRef.current = savedSession.id;
         setActive(savedSession.status === 'active');
+        
+        sessionMetadataRef.current = {
+          targetDistance: savedSession.targetDistance,
+          levelId: savedSession.levelId,
+          startLat: savedSession.startLat,
+          startLng: savedSession.startLng,
+          routeName: savedSession.routeName,
+          routeId: savedSession.routeId,
+          targetTimeSeconds: savedSession.targetTimeSeconds,
+        };
         
         if (savedSession.routePolyline) {
           setRouteData({
@@ -470,21 +499,22 @@ export default function RunSession() {
     if (!active && time === 0) return;
     
     const saveInterval = setInterval(() => {
+      const metadata = sessionMetadataRef.current;
       const session: ActiveRunSession = {
         id: sessionIdRef.current,
         startTimestamp: startTimestampRef.current,
         elapsedSeconds: time,
         distanceKm: distance,
         cadence,
-        routeId: routeData?.id || routeId,
-        routeName: routeData?.routeName || routeName,
+        routeId: routeData?.id || metadata.routeId,
+        routeName: routeData?.routeName || metadata.routeName,
         routePolyline: routeData?.polyline || "",
         routeWaypoints: routeData?.waypoints || [],
-        startLat: lat,
-        startLng: lng,
-        targetDistance,
-        levelId,
-        targetTimeSeconds,
+        startLat: metadata.startLat,
+        startLng: metadata.startLng,
+        targetDistance: metadata.targetDistance,
+        levelId: metadata.levelId,
+        targetTimeSeconds: metadata.targetTimeSeconds,
         audioEnabled,
         aiCoachEnabled,
         kmSplits,
@@ -495,7 +525,7 @@ export default function RunSession() {
     }, 5000);
     
     return () => clearInterval(saveInterval);
-  }, [active, time, distance, cadence, routeData, routeId, routeName, lat, lng, targetDistance, levelId, targetTimeSeconds, audioEnabled, aiCoachEnabled, kmSplits, lastKmAnnounced]);
+  }, [active, time, distance, cadence, routeData, audioEnabled, aiCoachEnabled, kmSplits, lastKmAnnounced]);
 
   const requestMotionPermission = useCallback(async () => {
     if (!('DeviceMotionEvent' in window)) {
@@ -585,7 +615,7 @@ export default function RunSession() {
       const thisKmMins = Math.floor(thisKmTime / 60);
       const thisKmSecs = thisKmTime % 60;
       
-      const targetDistNum = parseFloat(targetDistance);
+      const targetDistNum = parseFloat(sessionMetadataRef.current.targetDistance);
       const remainingKm = targetDistNum - currentKm;
       
       const avgPaceSeconds = time / currentKm;
@@ -615,7 +645,7 @@ export default function RunSession() {
       setMessage(`${currentKm}km - ${thisKmMins}:${thisKmSecs.toString().padStart(2, '0')} split`);
       setLastMessageTime(Date.now());
     }
-  }, [active, gpsStatus, distance, lastKmAnnounced, time, kmSplits, targetDistance, cadence, speak]);
+  }, [active, gpsStatus, distance, lastKmAnnounced, time, kmSplits, cadence, speak]);
 
   const coachingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const audioEnabledRef = useRef(audioEnabled);
@@ -671,18 +701,19 @@ export default function RunSession() {
         'expert': '4:30'
       };
       
+      const metadata = sessionMetadataRef.current;
       const response = await fetch('/api/ai/coaching', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           currentPace,
-          targetPace: targetPaceMap[levelId] || '6:00',
+          targetPace: targetPaceMap[metadata.levelId] || '6:00',
           elapsedTime: currentTime,
           distanceCovered: currentDistance,
-          totalDistance: parseFloat(targetDistance),
-          difficulty: levelId,
+          totalDistance: parseFloat(metadata.targetDistance),
+          difficulty: metadata.levelId,
           userFitnessLevel: userProfile?.fitnessLevel || 'intermediate',
-          targetTimeSeconds: targetTimeSeconds > 0 ? targetTimeSeconds : undefined,
+          targetTimeSeconds: metadata.targetTimeSeconds > 0 ? metadata.targetTimeSeconds : undefined,
           userName: userProfile?.name,
           userAge: userProfile?.dob ? calculateAge(userProfile.dob) : undefined,
           userWeight: userProfile?.weight,
@@ -729,7 +760,7 @@ export default function RunSession() {
     } finally {
       setIsCoaching(false);
     }
-  }, [targetDistance, levelId, targetTimeSeconds, userProfile, coachPreferences, speakCoaching, speak]);
+  }, [userProfile, coachPreferences, speakCoaching, speak]);
 
   useEffect(() => {
     if (!active || !aiCoachEnabled || gpsStatus !== "active") {
@@ -839,7 +870,7 @@ export default function RunSession() {
   };
 
   const getMapImage = () => {
-    switch(levelId) {
+    switch(sessionMetadataRef.current.levelId) {
       case 'expert': return mapExpert;
       case 'moderate': return mapModerate;
       default: return mapBeginner;
@@ -895,7 +926,7 @@ export default function RunSession() {
       
       mapsUrl += `&travelmode=walking`;
     } else {
-      mapsUrl += `&destination=${lat},${lng}`;
+      mapsUrl += `&destination=${sessionMetadataRef.current.startLat},${sessionMetadataRef.current.startLng}`;
       mapsUrl += `&travelmode=walking`;
     }
     
@@ -907,6 +938,7 @@ export default function RunSession() {
     const date = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()}`;
     const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
+    const metadata = sessionMetadataRef.current;
     const runData = {
       id: `run_${Date.now()}`,
       date,
@@ -914,11 +946,11 @@ export default function RunSession() {
       distance,
       totalTime: time,
       avgPace: calculatePace(),
-      difficulty: levelId,
-      lat,
-      lng,
-      routeName,
-      routeId,
+      difficulty: metadata.levelId,
+      lat: metadata.startLat,
+      lng: metadata.startLng,
+      routeName: metadata.routeName,
+      routeId: metadata.routeId,
       gpsTrack: positionsRef.current.slice(0, 500),
       avgCadence: cadence,
       kmSplits: kmSplits,
@@ -955,10 +987,10 @@ export default function RunSession() {
           >
             <div className="h-full rounded-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
               <RouteMap 
-                lat={lat} 
-                lng={lng} 
-                level={levelId as any} 
-                distance={parseFloat(targetDistance)}
+                lat={sessionMetadataRef.current.startLat} 
+                lng={sessionMetadataRef.current.startLng} 
+                level={sessionMetadataRef.current.levelId as any} 
+                distance={parseFloat(sessionMetadataRef.current.targetDistance)}
                 routePolyline={routeData?.polyline}
                 routeWaypoints={routeData?.waypoints}
               />
@@ -1052,7 +1084,7 @@ export default function RunSession() {
         <div className="flex gap-2">
           <div className="bg-card/30 backdrop-blur-md rounded-xl p-3 border border-white/10">
             <div className="text-xs text-muted-foreground uppercase tracking-widest mb-1">Target</div>
-            <div className="text-xl font-display font-bold text-primary">{targetDistance} km</div>
+            <div className="text-xl font-display font-bold text-primary">{sessionMetadataRef.current.targetDistance} km</div>
           </div>
           <div className={`backdrop-blur-md rounded-xl p-3 border flex items-center gap-2 ${
             gpsStatus === "active" ? "bg-green-500/20 border-green-500/30" :
