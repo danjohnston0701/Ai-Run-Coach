@@ -82,8 +82,16 @@ The app supports resuming interrupted runs with the following architecture:
 - **Home**: Run configuration (distance slider, difficulty selection, time target)
 - **Run Session**: Live run tracking with voice visualizer, map view, friend sharing
 - **Run History**: List of completed runs with key metrics
-- **Run Insights**: Detailed post-run analysis with charts and AI feedback
+- **Run Insights**: Detailed post-run analysis with charts, AI feedback, and social sharing
 - **Auth**: Login and pre-registration flows
+
+### Social Media Sharing
+Users can share run summaries to Facebook and Instagram with branded images:
+- **Image Generator**: `client/src/lib/shareImageGenerator.ts` creates branded images using HTML Canvas
+- **Supported Formats**: Post (1:1 square 1080x1080) and Story (9:16 vertical 1080x1920)
+- **Image Content**: Route map visualization, distance, time, pace, difficulty badge, and AI Run Coach branding with logo
+- **Sharing Options**: Facebook, Instagram, native device share (Web Share API), and direct download
+- **Fallback**: Downloads image when Web Share API is unavailable (e.g., desktop browsers)
 
 ## External Dependencies
 
