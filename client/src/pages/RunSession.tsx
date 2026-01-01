@@ -571,7 +571,8 @@ export default function RunSession() {
 
   const fetchCoaching = useCallback(async (userMessage?: string) => {
     const { active: isActive, aiCoachEnabled: isEnabled, gpsStatus: gps } = coachingControlRef.current;
-    if (!isActive || !isEnabled || gps !== "active") return;
+    // Allow user questions even without GPS active
+    if (!userMessage && (!isActive || !isEnabled || gps !== "active")) return;
     
     const { time: currentTime, distance: currentDistance } = runMetricsRef.current;
     if (currentDistance < 0.1 && !userMessage) return;
@@ -865,7 +866,14 @@ export default function RunSession() {
             onClick={() => setShowMap(false)}
           >
             <div className="h-full rounded-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
-              <RouteMap lat={lat} lng={lng} level={levelId as any} distance={parseFloat(targetDistance)} />
+              <RouteMap 
+                lat={lat} 
+                lng={lng} 
+                level={levelId as any} 
+                distance={parseFloat(targetDistance)}
+                routePolyline={routeData?.polyline}
+                routeWaypoints={routeData?.waypoints}
+              />
             </div>
           </motion.div>
         )}
