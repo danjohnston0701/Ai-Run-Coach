@@ -1188,13 +1188,6 @@ export default function Home() {
         </motion.div>
       )}
 
-      {userLocation && (
-        <WeatherWidget 
-          lat={userLocation.lat} 
-          lng={userLocation.lng} 
-          className="mb-6"
-        />
-      )}
 
       <main className="space-y-8">
         <section className="space-y-6">
@@ -1369,6 +1362,15 @@ export default function Home() {
                 <Play className="mr-2 w-5 h-5 fill-current" /> Start Run Without Route
               </Button>
             </motion.div>
+
+            {userLocation && (
+              <WeatherWidget 
+                lat={userLocation.lat} 
+                lng={userLocation.lng} 
+                compact
+                className="justify-center"
+              />
+            )}
 
             <motion.div
               initial={{ opacity: 0, y: 10 }}
