@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Cloud, Sun, CloudRain, Wind, Droplets, ThermometerSun, AlertTriangle, Loader2 } from "lucide-react";
+import { Cloud, Sun, CloudRain, Wind, Droplets, ThermometerSun, AlertTriangle, Loader2, Clock } from "lucide-react";
 import { motion } from "framer-motion";
 
 interface WeatherCondition {
@@ -44,10 +44,30 @@ function getWeatherIcon(condition: string) {
   return <Cloud className="w-6 h-6 text-gray-400" />;
 }
 
+function getCurrentTimeOfDay(): string {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) return "Morning";
+  if (hour >= 12 && hour < 17) return "Afternoon";
+  if (hour >= 17 && hour < 21) return "Evening";
+  return "Night";
+}
+
+function formatCurrentTime(): string {
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 export function WeatherWidget({ lat, lng, compact = false, className = "" }: WeatherWidgetProps) {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentTime, setCurrentTime] = useState(formatCurrentTime());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(formatCurrentTime());
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     async function fetchWeather() {
@@ -94,6 +114,9 @@ export function WeatherWidget({ lat, lng, compact = false, className = "" }: Wea
         className={`flex items-center gap-2 bg-black/30 backdrop-blur-sm rounded-full px-3 py-1.5 ${className}`}
         data-testid="weather-widget-compact"
       >
+        <Clock className="w-4 h-4 text-gray-400" />
+        <span className="text-white font-medium">{currentTime}</span>
+        <span className="text-gray-400">•</span>
         {getWeatherIcon(weather.current.condition)}
         <span className="text-white font-medium">{Math.round(weather.current.temperature)}°</span>
         <span className="text-gray-300 text-sm hidden sm:inline">{weather.current.condition}</span>
@@ -108,6 +131,13 @@ export function WeatherWidget({ lat, lng, compact = false, className = "" }: Wea
       className={`bg-gradient-to-br from-gray-900/90 to-gray-800/90 backdrop-blur-md rounded-2xl p-4 border border-gray-700/50 ${className}`}
       data-testid="weather-widget"
     >
+      <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-700/30">
+        <div className="flex items-center gap-2">
+          <Clock className="w-4 h-4 text-blue-400" />
+          <span className="text-white font-medium">{currentTime}</span>
+        </div>
+        <span className="text-gray-400 text-sm">{getCurrentTimeOfDay()}</span>
+      </div>
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-blue-500/20 rounded-xl">
