@@ -208,32 +208,29 @@ export default function RunInsights() {
     }
   };
 
-  if (!run) return null;
-
   // Check if we have real heart rate data
-  const hasHeartRateData = !!(run as any).heartRateData?.length || !!(run as any).avgHeartRate;
+  const hasHeartRateData = !!(run as any)?.heartRateData?.length || !!(run as any)?.avgHeartRate;
   
   // Get GPS track data for pace gradient map
-  const gpsTrack = (run as any).gpsTrack || [];
+  const gpsTrack = (run as any)?.gpsTrack || [];
   const hasGpsTrack = gpsTrack.length > 1;
   
   // Get real splits data
-  const kmSplits = (run as any).kmSplits || [];
+  const kmSplits = (run as any)?.kmSplits || [];
   
   // Calculate pace data from GPS track for chart
-  const paceChartData = (() => {
-    if (kmSplits.length > 0) {
-      return kmSplits.map((split: any, idx: number) => ({
-        km: idx + 1,
-        pace: split.pace,
-        paceSeconds: split.paceSeconds || 0,
-      }));
-    }
-    return [];
-  })();
+  const paceChartData = useMemo(() => {
+    if (!run || kmSplits.length === 0) return [];
+    return kmSplits.map((split: any, idx: number) => ({
+      km: idx + 1,
+      pace: split.pace,
+      paceSeconds: split.paceSeconds || 0,
+    }));
+  }, [run, kmSplits]);
 
   // Generate chart data with elevation (and heart rate if available)
   const chartData = useMemo(() => {
+    if (!run) return [];
     const data = [];
     const points = Math.max(20, Math.floor(run.distance * 10));
     const baseElev = (run as any).elevationGain || (run.difficulty === "expert" ? 40 : run.difficulty === "moderate" ? 20 : 10);
@@ -266,7 +263,7 @@ export default function RunInsights() {
 
   // Calculate pace gradient segments from GPS track
   const paceGradientSegments = useMemo(() => {
-    if (!hasGpsTrack || gpsTrack.length < 2) return [];
+    if (!run || !hasGpsTrack || gpsTrack.length < 2) return [];
     
     const segments: { positions: [number, number][]; color: string; pace: number }[] = [];
     
@@ -333,7 +330,9 @@ export default function RunInsights() {
     }
     
     return segments;
-  }, [gpsTrack, hasGpsTrack, run.totalTime]);
+  }, [run, gpsTrack, hasGpsTrack]);
+
+  if (!run) return null;
 
   const hrZones = [
     { name: "Zone 5", range: "> 169 bpm", value: 12, color: "#ef4444", label: "Maximum" },
