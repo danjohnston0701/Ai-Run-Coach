@@ -659,7 +659,7 @@ export async function registerRoutes(
       }
 
       res.json({
-        ...weather,
+        current: weather,
         description: getWeatherDescription(weather),
         runningConditions: isGoodRunningWeather(weather)
       });
