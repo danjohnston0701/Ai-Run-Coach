@@ -771,6 +771,67 @@ export async function registerRoutes(
     }
   });
 
+  // AI Run Summary endpoint - generates pre-run briefing
+  app.post("/api/ai/run-summary", async (req, res) => {
+    try {
+      const { 
+        routeName, targetDistance, targetTimeSeconds, difficulty,
+        elevationGain, elevationLoss, elevationProfile, terrainType,
+        weather, coachName, userName, includeAiConfig
+      } = req.body;
+      
+      if (!routeName || !difficulty) {
+        return res.status(400).json({ error: "Missing required parameters: routeName, difficulty" });
+      }
+      
+      const parsedDistance = typeof targetDistance === 'number' ? targetDistance : parseFloat(targetDistance);
+      if (!isFinite(parsedDistance) || parsedDistance <= 0) {
+        return res.status(400).json({ error: "targetDistance must be a positive number" });
+      }
+
+      let aiConfig: AiCoachConfig | undefined;
+      if (includeAiConfig !== false) {
+        try {
+          const [description, instructions, knowledge, faqs] = await Promise.all([
+            storage.getAiCoachDescription(),
+            storage.getAiCoachInstructions(),
+            storage.getAiCoachKnowledge(),
+            storage.getAiCoachFaqs()
+          ]);
+          aiConfig = {
+            description: description?.content,
+            instructions: instructions.filter(i => i.isActive).map(i => ({ title: i.title, content: i.content })),
+            knowledge: knowledge.filter(k => k.isActive).map(k => ({ title: k.title, content: k.content })),
+            faqs: faqs.filter(f => f.isActive).map(f => ({ question: f.question, answer: f.answer }))
+          };
+        } catch (err) {
+          console.log("Could not load AI config for run summary:", err);
+        }
+      }
+
+      const { generateRunSummary } = await import("./openai");
+      const summary = await generateRunSummary({
+        routeName,
+        targetDistance: parsedDistance,
+        targetTimeSeconds,
+        difficulty,
+        elevationGain,
+        elevationLoss,
+        elevationProfile,
+        terrainType,
+        weather,
+        coachName,
+        userName,
+        aiConfig
+      });
+
+      res.json({ summary });
+    } catch (error) {
+      console.error("Run summary error:", error);
+      res.status(500).json({ error: "Failed to generate run summary" });
+    }
+  });
+
   // AI Text-to-Speech endpoint
   app.post("/api/ai/tts", async (req, res) => {
     try {

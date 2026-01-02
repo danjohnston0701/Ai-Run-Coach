@@ -768,17 +768,70 @@ export default function RunSession() {
     }
     
     initialAnnouncementMadeRef.current = true;
-    const targetDist = sessionMetadataRef.current.targetDistance;
     
-    getInitialDirectionAnnouncement(
-      currentPosition.lat,
-      currentPosition.lng,
-      routePoints,
-      targetDist
-    ).then(announcement => {
-      speak(announcement);
-    });
-  }, [gpsStatus, currentPosition, routePoints, isResuming, speak]);
+    const metadata = sessionMetadataRef.current;
+    const targetDistNum = parseFloat(metadata.targetDistance);
+    
+    const speakFallback = () => {
+      getInitialDirectionAnnouncement(
+        currentPosition.lat,
+        currentPosition.lng,
+        routePoints,
+        metadata.targetDistance
+      ).then(announcement => {
+        speak(announcement);
+      });
+    };
+    
+    if (!isFinite(targetDistNum) || targetDistNum <= 0) {
+      speakFallback();
+      return;
+    }
+    
+    const generateAndSpeakSummary = async () => {
+      try {
+        const summaryRequest = {
+          routeName: routeData?.routeName || metadata.routeName || "Your route",
+          targetDistance: targetDistNum,
+          targetTimeSeconds: metadata.targetTimeSeconds,
+          difficulty: routeData?.difficulty || metadata.levelId || "moderate",
+          elevationGain: routeData?.elevation?.gain,
+          elevationLoss: routeData?.elevation?.loss,
+          elevationProfile: routeData?.elevation?.profile,
+          terrainType: undefined,
+          weather: runWeather ? {
+            temperature: runWeather.temperature,
+            humidity: runWeather.humidity,
+            windSpeed: runWeather.windSpeed,
+            conditions: runWeather.condition
+          } : undefined,
+          coachName: userProfile?.coachName,
+          userName: userProfile?.name,
+          includeAiConfig: true
+        };
+        
+        const response = await fetch('/api/ai/run-summary', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(summaryRequest)
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.summary && typeof data.summary === 'string') {
+            speak(data.summary);
+            return;
+          }
+        }
+        speakFallback();
+      } catch (err) {
+        console.warn('Run summary generation failed:', err);
+        speakFallback();
+      }
+    };
+    
+    generateAndSpeakSummary();
+  }, [gpsStatus, currentPosition, routePoints, isResuming, speak, routeData, runWeather, coachSettings, userProfile]);
 
   useEffect(() => {
     if (!active || !currentPosition || routePoints.length < 2) return;

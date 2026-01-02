@@ -498,6 +498,129 @@ Provide a brief, encouraging analysis (2-3 sentences) with one specific improvem
   }
 }
 
+export interface RunSummaryRequest {
+  routeName: string;
+  targetDistance: number;
+  targetTimeSeconds?: number;
+  difficulty: string;
+  elevationGain?: number;
+  elevationLoss?: number;
+  elevationProfile?: Array<{ lat: number; lng: number; elevation: number; distance: number; grade?: number }>;
+  terrainType?: string;
+  weather?: {
+    temperature?: number;
+    humidity?: number;
+    windSpeed?: number;
+    conditions?: string;
+  };
+  coachName?: string;
+  userName?: string;
+  aiConfig?: AiCoachConfig;
+}
+
+export async function generateRunSummary(request: RunSummaryRequest): Promise<string> {
+  const {
+    routeName, targetDistance, targetTimeSeconds, difficulty,
+    elevationGain, elevationLoss, elevationProfile, terrainType,
+    weather, coachName, userName, aiConfig
+  } = request;
+
+  let coachIdentity = coachName ? `You are ${coachName}, an AI running coach` : "You are an AI running coach";
+  let configSection = "";
+  
+  if (aiConfig) {
+    if (aiConfig.description) {
+      coachIdentity = aiConfig.description;
+    }
+    if (aiConfig.knowledge && aiConfig.knowledge.length > 0) {
+      configSection += "\n\nKNOWLEDGE BASE:\n";
+      for (const kb of aiConfig.knowledge) {
+        configSection += `- ${kb.title}: ${kb.content}\n`;
+      }
+    }
+  }
+
+  let terrainAnalysis = "";
+  if (elevationProfile && elevationProfile.length > 0) {
+    const grades = elevationProfile.filter(p => p.grade !== undefined).map(p => p.grade!);
+    const steepUphills = grades.filter(g => g > 5).length;
+    const steepDownhills = grades.filter(g => g < -5).length;
+    const flatSections = grades.filter(g => Math.abs(g) <= 2).length;
+    const totalPoints = grades.length;
+    
+    if (steepUphills > totalPoints * 0.2) {
+      terrainAnalysis += "significant uphill sections, ";
+    } else if (steepUphills > 0) {
+      terrainAnalysis += "some uphill climbs, ";
+    }
+    if (steepDownhills > totalPoints * 0.2) {
+      terrainAnalysis += "notable downhill stretches, ";
+    } else if (steepDownhills > 0) {
+      terrainAnalysis += "some descents, ";
+    }
+    if (flatSections > totalPoints * 0.5) {
+      terrainAnalysis += "mostly flat terrain, ";
+    }
+  }
+
+  let paceGuidance = "";
+  if (targetTimeSeconds && targetDistance > 0) {
+    const targetPaceSecondsPerKm = targetTimeSeconds / targetDistance;
+    const paceMinutes = Math.floor(targetPaceSecondsPerKm / 60);
+    const paceSeconds = Math.round(targetPaceSecondsPerKm % 60);
+    paceGuidance = `Target pace: ${paceMinutes}:${paceSeconds.toString().padStart(2, '0')} per km to finish in ${Math.floor(targetTimeSeconds / 60)} minutes.`;
+  }
+
+  let weatherInfo = "";
+  if (weather) {
+    const parts = [];
+    if (weather.temperature !== undefined) parts.push(`${Math.round(weather.temperature)}°C`);
+    if (weather.conditions) parts.push(weather.conditions.toLowerCase());
+    if (weather.windSpeed && weather.windSpeed > 15) parts.push(`windy at ${Math.round(weather.windSpeed)} km/h`);
+    if (weather.humidity && weather.humidity > 75) parts.push(`humid at ${weather.humidity}%`);
+    if (parts.length > 0) weatherInfo = `Current conditions: ${parts.join(", ")}.`;
+  }
+
+  const prompt = `${coachIdentity}.
+${configSection}
+
+Generate a brief pre-run summary for the runner${userName ? ` named ${userName}` : ""}. This will be spoken aloud and must be under 20 seconds when read (approximately 50-60 words maximum).
+
+Route details:
+- Route: ${routeName}
+- Distance: ${targetDistance.toFixed(1)} km
+- Difficulty: ${difficulty}
+- Elevation gain: ${elevationGain ? Math.round(elevationGain) + "m" : "minimal"}
+- Elevation loss: ${elevationLoss ? Math.round(elevationLoss) + "m" : "minimal"}
+- Terrain analysis: ${terrainAnalysis || "varied terrain"}
+- Surface type: ${terrainType || "mixed surfaces - expect road and trail sections"}
+${paceGuidance}
+${weatherInfo}
+
+Requirements:
+1. Keep it UNDER 60 words - this is critical
+2. Mention the key terrain features (hills, flat sections)
+3. Describe expected surface types (road, gravel, trail, etc.)
+4. If there's a target time, mention the required pace
+5. End with a brief motivational send-off
+6. Sound natural and conversational, not robotic
+7. Do NOT use bullet points or lists - flow naturally`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 120,
+      temperature: 0.7,
+    });
+
+    return response.choices[0]?.message?.content || `Let's tackle this ${targetDistance.toFixed(1)}k run! Stay focused and enjoy the journey.`;
+  } catch (error) {
+    console.error("Run summary generation error:", error);
+    return `Ready for your ${targetDistance.toFixed(1)}k ${difficulty} run! Focus on steady breathing and enjoy the route ahead.`;
+  }
+}
+
 export type CoachTone = 'energetic' | 'motivational' | 'instructive' | 'factual' | 'abrupt';
 export type TTSVoice = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'sage' | 'shimmer' | 'ash' | 'coral';
 
