@@ -437,30 +437,9 @@ export default function Home() {
           }
         }
         
-        // Only use saved location if GPS fails
-        const savedLocation = localStorage.getItem("userGpsLocation");
-        if (savedLocation) {
-          const loc = JSON.parse(savedLocation);
-          console.log("GPS failed, using saved location:", loc);
-          setUserLocation(loc);
-          setCustomLat(loc.lat.toString());
-          setCustomLng(loc.lng.toString());
-          setLocationLoading(false);
-          
-          // Fetch address for saved location
-          try {
-            const res = await fetch(`/api/geocode/reverse?lat=${loc.lat}&lng=${loc.lng}`);
-            const data = await res.json();
-            if (data.address) {
-              setUserAddress(data.address);
-            }
-          } catch (err) {
-            console.log("Failed to fetch address:", err);
-          }
-        } else {
-          setLocationError("Enable location access to get personalized routes");
-          setLocationLoading(false);
-        }
+        // No fallback - require real GPS location
+        setLocationError("Enable location access to get personalized routes");
+        setLocationLoading(false);
       },
       {
         enableHighAccuracy: true,
