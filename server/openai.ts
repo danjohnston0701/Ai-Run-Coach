@@ -81,6 +81,13 @@ export interface CoachingRequest {
   coachTone?: 'energetic' | 'motivational' | 'instructive' | 'factual' | 'abrupt';
   aiConfig?: AiCoachConfig;
   terrain?: TerrainData;
+  // New parameters for smarter coaching
+  recentCoachingTopics?: string[];
+  paceChange?: 'faster' | 'slower' | 'steady';
+  currentKm?: number;
+  progressPercent?: number;
+  milestones?: string[];
+  kmSplitTimes?: number[];
 }
 
 export interface CoachingResponse {
@@ -88,6 +95,7 @@ export interface CoachingResponse {
   encouragement: string;
   paceAdvice: string;
   breathingTip?: string;
+  topic?: string;
 }
 
 export async function generateRoute(request: RouteGenerationRequest): Promise<GeneratedRoute> {
@@ -279,6 +287,55 @@ export async function getCoachingAdvice(request: CoachingRequest): Promise<Coach
 - After hills: Acknowledge effort, guide recovery pace`;
   }
   
+  // New: Build real-time events section
+  let eventsSection = "";
+  if (request.milestones && request.milestones.length > 0) {
+    eventsSection += `\n\nMILESTONE REACHED: ${request.milestones.join(', ')} - Celebrate this achievement!`;
+  }
+  if (request.currentKm && request.currentKm > 0) {
+    eventsSection += `\n- Just completed km ${request.currentKm}`;
+  }
+  if (request.paceChange) {
+    const paceMsg = request.paceChange === 'faster' ? "Runner is speeding up - acknowledge the effort!" :
+                    request.paceChange === 'slower' ? "Pace has dropped - provide gentle encouragement" :
+                    "Pace is steady - maintain the rhythm";
+    eventsSection += `\n- Pace trend: ${paceMsg}`;
+  }
+  
+  // Calculate recent km split info
+  // kmSplitTimes contains cumulative elapsed times when each km was completed
+  // To get per-km duration: duration[n] = kmSplitTimes[n] - kmSplitTimes[n-1]
+  let splitInfo = "";
+  if (request.kmSplitTimes && request.kmSplitTimes.length >= 2) {
+    const splits = request.kmSplitTimes;
+    const n = splits.length;
+    // Calculate duration for last km: time at km N minus time at km N-1
+    const lastKmDuration = splits[n - 1] - splits[n - 2];
+    // Calculate duration for previous km (if we have at least 3 splits)
+    const prevKmDuration = n >= 3 ? splits[n - 2] - splits[n - 3] : splits[n - 2]; // first km duration is just the first split time
+    
+    if (lastKmDuration < prevKmDuration - 5) {
+      splitInfo = `\n- Last km was ${Math.round(prevKmDuration - lastKmDuration)}s faster than previous - great improvement!`;
+    } else if (lastKmDuration > prevKmDuration + 5) {
+      splitInfo = `\n- Last km was ${Math.round(lastKmDuration - prevKmDuration)}s slower - encourage maintaining pace`;
+    }
+  }
+  
+  // Anti-repetition guidance
+  let antiRepetitionSection = "";
+  if (request.recentCoachingTopics && request.recentCoachingTopics.length > 0) {
+    antiRepetitionSection = `\n\nAVOID THESE RECENT TOPICS (don't repeat similar advice):
+${request.recentCoachingTopics.map(t => `- "${t}"`).join('\n')}
+
+Choose a DIFFERENT coaching focus. Vary your vocabulary and approach. Options:
+- Comment on specific metrics (pace, distance, time)
+- Focus on technique (arm swing, foot strike, posture)
+- Mention breathing patterns
+- Celebrate a milestone if one was reached
+- Give mental/motivational tips
+- Discuss pacing strategy`;
+  }
+  
   const prompt = `${coachIdentity} Providing real-time guidance.${aiConfigSection}
 
 COACHING STYLE: ${toneStyle}${userProfileInfo}
@@ -288,18 +345,25 @@ Current Run Stats:
 - Target pace: ${request.targetPace}
 - Heart rate: ${request.heartRate || "unknown"} bpm
 - Progress: ${request.distanceCovered.toFixed(2)}km of ${request.totalDistance}km (${progressPercent}%)
-- Elapsed time: ${Math.floor(request.elapsedTime / 60)} minutes ${request.elapsedTime % 60} seconds
+- Current km: ${request.currentKm || Math.floor(request.distanceCovered)}
+- Elapsed time: ${Math.floor(request.elapsedTime / 60)} minutes ${Math.floor(request.elapsedTime % 60)} seconds
 - Difficulty: ${request.difficulty}
-- Fitness level: ${request.userFitnessLevel || "intermediate"}${targetTimeInfo}${preferencesSection}${terrainSection}${userMessageSection}
+- Fitness level: ${request.userFitnessLevel || "intermediate"}${targetTimeInfo}${preferencesSection}${terrainSection}${eventsSection}${splitInfo}${userMessageSection}${antiRepetitionSection}
 
-${request.terrain?.upcomingTerrain ? "PRIORITIZE terrain coaching - warn about upcoming hills." : ""} ${request.userMessage ? "Respond to the runner's message while providing coaching." : "Provide brief, motivating coaching advice."} ${request.userName ? `Use ${request.userName}'s name occasionally for personalization.` : ""} Be specific but concise.
+${request.milestones && request.milestones.length > 0 ? "PRIORITIZE milestone celebration!" : ""}
+${request.terrain?.upcomingTerrain ? "PRIORITIZE terrain coaching - warn about upcoming hills." : ""} 
+${request.paceChange === 'faster' ? "Acknowledge the speed increase!" : request.paceChange === 'slower' ? "Gently encourage picking up the pace." : ""}
+${request.userMessage ? "Respond to the runner's message while providing coaching." : "Provide brief, motivating coaching advice."} 
+${request.userName ? `Use ${request.userName}'s name occasionally for personalization.` : ""} 
+Be specific but concise. IMPORTANT: Do not repeat similar feedback from recent messages.
 
 Respond in JSON format:
 {
   "message": "Short main coaching message (max 15 words)",
   "encouragement": "Brief encouragement (max 10 words)",
   "paceAdvice": "Specific pace guidance (max 15 words)",
-  "breathingTip": "Quick breathing tip if relevant (max 10 words)"
+  "breathingTip": "Quick breathing tip if relevant (max 10 words)",
+  "topic": "One-word topic of this advice (e.g., 'pace', 'breathing', 'milestone', 'form', 'motivation')"
 }`;
 
   try {

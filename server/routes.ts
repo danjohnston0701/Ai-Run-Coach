@@ -649,7 +649,9 @@ export async function registerRoutes(
         currentPace, targetPace, heartRate, elapsedTime, distanceCovered, totalDistance, 
         difficulty, userFitnessLevel, targetTimeSeconds, userName, dateOfBirth,
         userWeight, userHeight, userGender, desiredFitnessLevel, coachName,
-        userMessage, coachPreferences, coachTone, includeAiConfig
+        userMessage, coachPreferences, coachTone, includeAiConfig,
+        // New parameters for smarter coaching
+        recentCoachingTopics, paceChange, currentKm, progressPercent, milestones, kmSplitTimes, terrain
       } = req.body;
       
       if (!currentPace || !targetPace || elapsedTime === undefined || distanceCovered === undefined || !totalDistance) {
@@ -698,7 +700,15 @@ export async function registerRoutes(
         userMessage,
         coachPreferences,
         coachTone,
-        aiConfig
+        aiConfig,
+        // New parameters for smarter coaching
+        recentCoachingTopics,
+        paceChange,
+        currentKm,
+        progressPercent,
+        milestones,
+        kmSplitTimes,
+        terrain
       });
 
       res.json(advice);

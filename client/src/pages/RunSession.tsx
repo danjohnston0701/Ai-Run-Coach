@@ -247,6 +247,11 @@ export default function RunSession() {
   const [kmSplits, setKmSplits] = useState<number[]>([]);
   const [motionPermission, setMotionPermission] = useState<"unknown" | "granted" | "denied" | "unavailable">("unknown");
   
+  // Track recent coaching messages to avoid repetition
+  const recentCoachingRef = useRef<string[]>([]);
+  const lastProgressMilestoneRef = useRef<number>(0);
+  const lastPaceRef = useRef<number>(0);
+  
   const [aiCoachEnabled, setAiCoachEnabled] = useState(true);
   const [coachSettings, setCoachSettings] = useState<AiCoachSettings>(() => loadCoachSettings());
 
@@ -1156,6 +1161,32 @@ export default function RunSession() {
         }
       }
       
+      // Calculate pace change from previous coaching
+      const currentPaceSeconds = paceSeconds;
+      let paceChange: 'faster' | 'slower' | 'steady' | undefined;
+      if (lastPaceRef.current > 0) {
+        const paceDiff = currentPaceSeconds - lastPaceRef.current;
+        if (paceDiff < -5) paceChange = 'faster';
+        else if (paceDiff > 5) paceChange = 'slower';
+        else paceChange = 'steady';
+      }
+      lastPaceRef.current = currentPaceSeconds;
+      
+      // Calculate progress milestones
+      const totalDistNum = parseFloat(metadata.targetDistance);
+      const progressPercent = totalDistNum > 0 ? Math.round((currentDistance / totalDistNum) * 100) : 0;
+      const currentKm = Math.floor(currentDistance);
+      
+      // Check for milestone events
+      const milestones: string[] = [];
+      const progressMilestones = [25, 50, 75, 90];
+      for (const milestone of progressMilestones) {
+        if (progressPercent >= milestone && lastProgressMilestoneRef.current < milestone) {
+          milestones.push(`${milestone}% complete`);
+          lastProgressMilestoneRef.current = milestone;
+        }
+      }
+      
       const response = await fetch('/api/ai/coaching', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1179,6 +1210,13 @@ export default function RunSession() {
           coachPreferences: coachPreferences || undefined,
           coachTone: coachSettings.tone,
           terrain: terrainData,
+          // New data for smarter coaching
+          recentCoachingTopics: recentCoachingRef.current.slice(-5),
+          paceChange,
+          currentKm,
+          progressPercent,
+          milestones: milestones.length > 0 ? milestones : undefined,
+          kmSplitTimes: kmSplits,
         })
       });
       
@@ -1201,6 +1239,10 @@ export default function RunSession() {
         }
         
         if (coachMessage.trim()) {
+          // Track coaching topic to avoid repetition (extract key theme)
+          const topic = advice.topic || (advice.message ? advice.message.slice(0, 50) : 'general');
+          recentCoachingRef.current = [...recentCoachingRef.current.slice(-4), topic];
+          
           // Use speak() with force=true for user questions to bypass all checks
           if (userMessage) {
             console.log("User question - forcing speech response");
