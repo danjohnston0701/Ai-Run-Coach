@@ -88,6 +88,16 @@ export interface CoachingRequest {
   progressPercent?: number;
   milestones?: string[];
   kmSplitTimes?: number[];
+  // Weather data for weather-aware coaching
+  weather?: {
+    temperature: number;
+    feelsLike: number;
+    humidity: number;
+    windSpeed: number;
+    condition: string;
+    uvIndex: number;
+    precipitationProbability: number;
+  };
 }
 
 export interface CoachingResponse {
@@ -330,6 +340,27 @@ ${request.recentCoachingTopics.map(t => `- "${t}"`).join('\n')}
 Choose a DIFFERENT focus area for this message.`;
   }
   
+  // Weather section for weather-aware coaching
+  let weatherSection = "";
+  if (request.weather) {
+    const w = request.weather;
+    weatherSection = `\n\nWEATHER CONDITIONS:
+- Temperature: ${w.temperature}°C (feels like ${w.feelsLike}°C)
+- Conditions: ${w.condition}
+- Humidity: ${w.humidity}%
+- Wind: ${w.windSpeed} km/h
+- UV Index: ${w.uvIndex}
+- Rain probability: ${w.precipitationProbability}%
+
+WEATHER COACHING TIPS:
+${w.temperature > 25 ? "- Hot conditions: Remind runner to stay hydrated, reduce intensity if needed" : ""}
+${w.temperature < 5 ? "- Cold conditions: Advise on keeping extremities warm, shorter warm-up" : ""}
+${w.humidity > 80 ? "- High humidity: Suggest slower pace, body cooling is less efficient" : ""}
+${w.windSpeed > 25 ? "- Windy conditions: Advise on tucking behind wind, adjusting form" : ""}
+${w.uvIndex > 7 ? "- High UV: Remind about sun protection, find shade when possible" : ""}
+${w.precipitationProbability > 50 ? "- Rain likely: Advise on grip, visibility, staying dry" : ""}`;
+  }
+  
   const prompt = `${coachIdentity} Providing real-time guidance.${aiConfigSection}
 
 COACHING STYLE: ${toneStyle}${userProfileInfo}
@@ -342,7 +373,7 @@ Current Run Stats:
 - Current km: ${request.currentKm || Math.floor(request.distanceCovered)}
 - Elapsed time: ${Math.floor(request.elapsedTime / 60)} minutes ${Math.floor(request.elapsedTime % 60)} seconds
 - Difficulty: ${request.difficulty}
-- Fitness level: ${request.userFitnessLevel || "intermediate"}${targetTimeInfo}${preferencesSection}${terrainSection}${eventsSection}${splitInfo}${userMessageSection}${antiRepetitionSection}
+- Fitness level: ${request.userFitnessLevel || "intermediate"}${targetTimeInfo}${preferencesSection}${terrainSection}${weatherSection}${eventsSection}${splitInfo}${userMessageSection}${antiRepetitionSection}
 
 ${request.milestones && request.milestones.length > 0 ? "PRIORITIZE milestone celebration!" : ""}
 ${request.terrain?.upcomingTerrain ? "PRIORITIZE terrain coaching - warn about upcoming hills." : ""} 

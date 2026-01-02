@@ -17,6 +17,7 @@ import { loadActiveRunSession, clearActiveRunSession, type ActiveRunSession } fr
 import { loadCoachSettings, saveCoachSettings, type AiCoachSettings, type CoachGender, type CoachAccent, type CoachTone, accentLabels, toneLabels, toneDescriptions, defaultSettings } from "@/lib/coachSettings";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { GpsHelpDialog } from "@/components/GpsHelpDialog";
+import { WeatherWidget } from "@/components/WeatherWidget";
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -1185,6 +1186,14 @@ export default function Home() {
           )}
           
         </motion.div>
+      )}
+
+      {userLocation && (
+        <WeatherWidget 
+          lat={userLocation.lat} 
+          lng={userLocation.lng} 
+          className="mb-6"
+        />
       )}
 
       <main className="space-y-8">

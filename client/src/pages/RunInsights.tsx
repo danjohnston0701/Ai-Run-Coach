@@ -25,6 +25,7 @@ import { shareToSocialMedia, downloadShareImage } from "@/lib/shareImageGenerato
 import { MapContainer, TileLayer, Polyline, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
+import { Cloud, Sun, CloudRain, Wind, Droplets, ThermometerSun } from "lucide-react";
 
 // Fix Leaflet default marker icon issue
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -656,6 +657,53 @@ export default function RunInsights() {
             </CardContent>
           </Card>
         </section>
+
+        {/* Weather Conditions */}
+        {(run as any).weatherData && (
+          <Card className="bg-gradient-to-br from-blue-900/30 to-gray-900/30 border-blue-500/20 backdrop-blur-sm">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="p-2 bg-blue-500/20 rounded-lg">
+                  {((run as any).weatherData.condition || '').toLowerCase().includes('rain') ? (
+                    <CloudRain className="w-5 h-5 text-blue-400" />
+                  ) : ((run as any).weatherData.condition || '').toLowerCase().includes('cloud') ? (
+                    <Cloud className="w-5 h-5 text-gray-400" />
+                  ) : (
+                    <Sun className="w-5 h-5 text-yellow-400" />
+                  )}
+                </div>
+                <div>
+                  <div className="text-[10px] text-muted-foreground uppercase tracking-widest">Weather During Run</div>
+                  <div className="text-lg font-display font-bold text-white">
+                    {Math.round((run as any).weatherData.temperature)}°C • {(run as any).weatherData.condition}
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-4 gap-2 pt-3 border-t border-white/10">
+                <div className="text-center">
+                  <ThermometerSun className="w-4 h-4 mx-auto text-orange-400 mb-1" />
+                  <div className="text-[10px] text-muted-foreground">Feels</div>
+                  <div className="text-sm text-white font-medium">{Math.round((run as any).weatherData.feelsLike)}°</div>
+                </div>
+                <div className="text-center">
+                  <Wind className="w-4 h-4 mx-auto text-gray-400 mb-1" />
+                  <div className="text-[10px] text-muted-foreground">Wind</div>
+                  <div className="text-sm text-white font-medium">{Math.round((run as any).weatherData.windSpeed)} km/h</div>
+                </div>
+                <div className="text-center">
+                  <Droplets className="w-4 h-4 mx-auto text-blue-400 mb-1" />
+                  <div className="text-[10px] text-muted-foreground">Humidity</div>
+                  <div className="text-sm text-white font-medium">{(run as any).weatherData.humidity}%</div>
+                </div>
+                <div className="text-center">
+                  <CloudRain className="w-4 h-4 mx-auto text-blue-300 mb-1" />
+                  <div className="text-[10px] text-muted-foreground">Rain</div>
+                  <div className="text-sm text-white font-medium">{(run as any).weatherData.precipitationProbability || 0}%</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Pace Gradient Map Section */}
         {hasGpsTrack && paceGradientSegments.length > 0 && (

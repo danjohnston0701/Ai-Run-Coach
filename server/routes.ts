@@ -13,6 +13,7 @@ import { generateCircularRoute, generateMultipleRoutes, isGoogleMapsConfigured }
 import { generateAIRoutes } from "./aiRoutePlanner";
 import bcrypt from "bcryptjs";
 import { initializePushNotifications, isPushConfigured, getPublicVapidKey, sendFriendRequestNotification, sendFriendAcceptedNotification } from "./pushNotifications";
+import { getCurrentWeather, getFullWeatherData, getWeatherDescription, isGoodRunningWeather, type WeatherCondition, type WeatherData } from "./weather";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -642,6 +643,57 @@ export async function registerRoutes(
     }
   });
 
+  // Weather API endpoints
+  app.get("/api/weather/current", async (req, res) => {
+    try {
+      const { lat, lng } = req.query;
+      
+      if (!lat || !lng) {
+        return res.status(400).json({ error: "Missing lat/lng parameters" });
+      }
+
+      const weather = await getCurrentWeather(parseFloat(lat as string), parseFloat(lng as string));
+      
+      if (!weather) {
+        return res.status(503).json({ error: "Weather service unavailable" });
+      }
+
+      res.json({
+        ...weather,
+        description: getWeatherDescription(weather),
+        runningConditions: isGoodRunningWeather(weather)
+      });
+    } catch (error) {
+      console.error("Weather API error:", error);
+      res.status(500).json({ error: "Failed to fetch weather data" });
+    }
+  });
+
+  app.get("/api/weather/full", async (req, res) => {
+    try {
+      const { lat, lng } = req.query;
+      
+      if (!lat || !lng) {
+        return res.status(400).json({ error: "Missing lat/lng parameters" });
+      }
+
+      const weatherData = await getFullWeatherData(parseFloat(lat as string), parseFloat(lng as string));
+      
+      if (!weatherData) {
+        return res.status(503).json({ error: "Weather service unavailable" });
+      }
+
+      res.json({
+        ...weatherData,
+        description: getWeatherDescription(weatherData.current),
+        runningConditions: isGoodRunningWeather(weatherData.current)
+      });
+    } catch (error) {
+      console.error("Full weather API error:", error);
+      res.status(500).json({ error: "Failed to fetch weather data" });
+    }
+  });
+
   // AI Coaching endpoint
   app.post("/api/ai/coaching", async (req, res) => {
     try {
@@ -651,7 +703,7 @@ export async function registerRoutes(
         userWeight, userHeight, userGender, desiredFitnessLevel, coachName,
         userMessage, coachPreferences, coachTone, includeAiConfig,
         // New parameters for smarter coaching
-        recentCoachingTopics, paceChange, currentKm, progressPercent, milestones, kmSplitTimes, terrain
+        recentCoachingTopics, paceChange, currentKm, progressPercent, milestones, kmSplitTimes, terrain, weather
       } = req.body;
       
       if (!currentPace || !targetPace || elapsedTime === undefined || distanceCovered === undefined || !totalDistance) {
@@ -708,7 +760,8 @@ export async function registerRoutes(
         progressPercent,
         milestones,
         kmSplitTimes,
-        terrain
+        terrain,
+        weather
       });
 
       res.json(advice);

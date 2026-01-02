@@ -77,6 +77,7 @@ export const runs = pgTable("runs", {
   gpsTrack: jsonb("gps_track"),
   heartRateData: jsonb("heart_rate_data"),
   paceData: jsonb("pace_data"),
+  weatherData: jsonb("weather_data"),
   aiInsights: text("ai_insights"),
   aiCoachingNotes: jsonb("ai_coaching_notes"),
   completedAt: timestamp("completed_at").defaultNow(),

@@ -282,6 +282,16 @@ export default function RunSession() {
   const [showPauseConfirmation, setShowPauseConfirmation] = useState(false);
   const [showGpsHelp, setShowGpsHelp] = useState(false);
   const [currentGpsAccuracy, setCurrentGpsAccuracy] = useState<number | undefined>(undefined);
+  const [runWeather, setRunWeather] = useState<{
+    temperature: number;
+    feelsLike: number;
+    humidity: number;
+    windSpeed: number;
+    windDirection: string;
+    condition: string;
+    uvIndex: number;
+    precipitationProbability: number;
+  } | null>(null);
   const [userProfile, setUserProfile] = useState<{
     name?: string;
     dob?: string;
@@ -678,6 +688,16 @@ export default function RunSession() {
         setMessage("GPS locked! Start running.");
         // Clear any previous inaccurate positions when we get first accurate fix
         positionsRef.current = [];
+        
+        // Fetch weather at run start for coaching context
+        fetch(`/api/weather/current?lat=${newPos.lat}&lng=${newPos.lng}`)
+          .then(res => res.ok ? res.json() : null)
+          .then(data => {
+            if (data) {
+              setRunWeather(data);
+            }
+          })
+          .catch(err => console.warn('Weather fetch failed:', err));
       }
       
       if (active && positionsRef.current.length > 0) {
@@ -1217,6 +1237,7 @@ export default function RunSession() {
           progressPercent,
           milestones: milestones.length > 0 ? milestones : undefined,
           kmSplitTimes: kmSplits,
+          weather: runWeather || undefined,
         })
       });
       
@@ -1258,7 +1279,7 @@ export default function RunSession() {
     } finally {
       setIsCoaching(false);
     }
-  }, [userProfile, coachPreferences, speakCoaching, speak, routeData, currentPosition]);
+  }, [userProfile, coachPreferences, speakCoaching, speak, routeData, currentPosition, runWeather, kmSplits, coachSettings]);
 
   useEffect(() => {
     if (!active || !aiCoachEnabled || gpsStatus !== "active") {
@@ -1510,6 +1531,7 @@ export default function RunSession() {
       targetDistance: metadata.targetDistance,
       elevationGain: routeData?.elevation?.gain || 0,
       elevationLoss: routeData?.elevation?.loss || 0,
+      weatherData: runWeather || undefined,
     };
 
     const runHistory = localStorage.getItem("runHistory");
