@@ -974,6 +974,21 @@ export default function Home() {
         </motion.div>
       </header>
 
+      {/* GPS Status Section - Always visible */}
+      {locationLoading && !userLocation && !locationError && (
+        <motion.div 
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-primary/10 border border-primary/30 rounded-lg p-3 mb-6"
+          data-testid="alert-location-loading"
+        >
+          <div className="flex items-center gap-2">
+            <Loader className="w-4 h-4 text-primary animate-spin" />
+            <p className="text-xs text-primary">Acquiring GPS signal...</p>
+          </div>
+        </motion.div>
+      )}
+
       {locationError && !userLocation && (
         <motion.div 
           initial={{ opacity: 0, y: -10 }}
