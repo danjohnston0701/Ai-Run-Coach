@@ -55,6 +55,27 @@ Key data structure (ElevationPoint):
 - `distance`: Cumulative distance from start
 - `grade`: Slope percentage to next point (positive = uphill)
 
+### Weather-Aware Coaching System
+Real-time weather integration for environmental coaching:
+1. **Weather Service**: `server/weather.ts` fetches current conditions from Google Maps Platform Weather API
+2. **API Endpoints**: `/api/weather/current` for current conditions, `/api/weather/full` for comprehensive data with forecasts
+3. **Run Integration**: Weather is fetched when GPS locks during run start and included in coaching requests
+4. **AI Coaching**: Weather conditions (temperature, humidity, wind, UV, precipitation) inform coaching advice
+5. **Data Persistence**: Weather conditions at run start are saved with run data for post-run insights
+
+Weather triggers for coaching advice:
+- Hot conditions (>25°C): Hydration reminders, intensity adjustments
+- Cold conditions (<5°C): Warm-up advice, extremity protection
+- High humidity (>80%): Pace reduction suggestions
+- Windy conditions (>25km/h): Form adjustments, drafting tips
+- High UV (>7): Sun protection reminders
+- Rain likely (>50%): Grip and visibility advice
+
+Key files:
+- `server/weather.ts`: Backend weather service with Google Weather API integration
+- `client/src/components/WeatherWidget.tsx`: Reusable weather display component
+- Weather displayed on Homepage and Run Insights page
+
 ### Data Storage
 - **Database**: PostgreSQL (configured via DATABASE_URL environment variable)
 - **Schema Location**: `shared/schema.ts` - contains tables for users, pre-registrations, friends, routes, runs, live sessions, and Garmin data
