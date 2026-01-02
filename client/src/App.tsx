@@ -39,6 +39,26 @@ function Router() {
     const userProfile = localStorage.getItem("userProfile");
     setHasProfile(!!userProfile);
     setLoading(false);
+    
+    // One-time cleanup: remove dummy/test runs from localStorage
+    const CLEANUP_KEY = "dummyRunsCleanedUp";
+    if (!localStorage.getItem(CLEANUP_KEY)) {
+      const runHistory = localStorage.getItem("runHistory");
+      if (runHistory) {
+        try {
+          const runs = JSON.parse(runHistory);
+          const dummyIds = ["run-1", "run-2", "run-3"];
+          const filteredRuns = runs.filter((run: { id: string }) => !dummyIds.includes(run.id));
+          if (filteredRuns.length !== runs.length) {
+            localStorage.setItem("runHistory", JSON.stringify(filteredRuns));
+            console.log(`Cleaned up ${runs.length - filteredRuns.length} dummy runs from localStorage`);
+          }
+        } catch (e) {
+          console.warn("Failed to cleanup dummy runs:", e);
+        }
+      }
+      localStorage.setItem(CLEANUP_KEY, "true");
+    }
   }, []);
 
   if (loading) {

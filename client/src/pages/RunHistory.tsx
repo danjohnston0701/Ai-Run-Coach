@@ -27,14 +27,81 @@ export interface RunData {
 export default function RunHistory() {
   const [, setLocation] = useLocation();
   const [runs, setRuns] = useState<RunData[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const runHistory = localStorage.getItem("runHistory");
-    if (runHistory) {
-      setRuns(JSON.parse(runHistory).sort((a: RunData, b: RunData) => 
-        new Date(b.date).getTime() - new Date(a.date).getTime()
-      ));
-    }
+    const loadRuns = async () => {
+      setLoading(true);
+      let dbRuns: RunData[] = [];
+      let localRuns: RunData[] = [];
+      
+      // Try to load from database if user is logged in
+      const userProfileStr = localStorage.getItem("userProfile");
+      if (userProfileStr) {
+        try {
+          const userProfile = JSON.parse(userProfileStr);
+          if (userProfile.id) {
+            const response = await fetch(`/api/users/${userProfile.id}/runs`);
+            if (response.ok) {
+              const data = await response.json();
+              dbRuns = data.map((run: any) => ({
+                id: run.id,
+                date: run.completedAt ? new Date(run.completedAt).toLocaleDateString('en-GB') : '',
+                time: run.completedAt ? new Date(run.completedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '',
+                distance: run.distance,
+                totalTime: run.duration,
+                avgPace: run.avgPace || '',
+                difficulty: run.difficulty || 'beginner',
+                lat: run.startLat || 0,
+                lng: run.startLng || 0,
+                avgHeartRate: run.avgHeartRate,
+                maxHeartRate: run.maxHeartRate,
+                calories: run.calories,
+                cadence: run.cadence,
+                gpsTrack: run.gpsTrack,
+                kmSplits: run.paceData,
+                weatherData: run.weatherData,
+                routeName: undefined,
+                routeId: run.routeId,
+              }));
+            }
+          }
+        } catch (err) {
+          console.warn('Failed to load runs from database:', err);
+        }
+      }
+      
+      // Load from localStorage as fallback/supplement
+      const runHistory = localStorage.getItem("runHistory");
+      if (runHistory) {
+        localRuns = JSON.parse(runHistory);
+      }
+      
+      // Merge runs - database runs take priority, include unsynced local runs
+      // If DB is available, use DB runs + any unsynced local runs
+      // If DB is unavailable, fallback to all local runs
+      let finalRuns: RunData[];
+      
+      if (dbRuns.length > 0) {
+        const dbRunIds = new Set(dbRuns.map(r => r.id));
+        const unsyncedLocalRuns = localRuns.filter((r: any) => 
+          !dbRunIds.has(r.id) && !r.dbSynced
+        );
+        finalRuns = [...dbRuns, ...unsyncedLocalRuns];
+      } else {
+        // Offline or no DB runs - use all local runs
+        finalRuns = localRuns;
+      }
+      
+      setRuns(finalRuns.sort((a: RunData, b: RunData) => {
+        const dateA = a.date ? new Date(a.date.split('/').reverse().join('-')).getTime() : 0;
+        const dateB = b.date ? new Date(b.date.split('/').reverse().join('-')).getTime() : 0;
+        return dateB - dateA;
+      }));
+      setLoading(false);
+    };
+    
+    loadRuns();
   }, []);
 
   const getDifficultyBadgeColor = (level: string) => {
@@ -101,7 +168,12 @@ export default function RunHistory() {
         </motion.div>
       )}
 
-      {runs.length === 0 ? (
+      {loading ? (
+        <div className="flex flex-col items-center justify-center min-h-[60vh]">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
+          <p className="text-muted-foreground">Loading your runs...</p>
+        </div>
+      ) : runs.length === 0 ? (
         <div className="flex flex-col items-center justify-center min-h-[60vh]">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}

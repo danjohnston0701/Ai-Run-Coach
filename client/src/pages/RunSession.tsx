@@ -1559,15 +1559,16 @@ export default function RunSession() {
     return url;
   };
 
-  const saveRunData = (): string => {
+  const saveRunData = async (): Promise<string> => {
     const now = new Date();
     const date = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()}`;
     const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
     const metadata = sessionMetadataRef.current;
-    const runId = `run_${Date.now()}`;
-    const runData = {
-      id: runId,
+    const localRunId = `run_${Date.now()}`;
+    
+    const localRunData = {
+      id: localRunId,
       date,
       time: timeStr,
       distance,
@@ -1587,13 +1588,66 @@ export default function RunSession() {
       weatherData: runWeather || undefined,
     };
 
+    // Try to save to database if user is logged in
+    const userProfileStr = localStorage.getItem("userProfile");
+    if (userProfileStr) {
+      try {
+        const userProfile = JSON.parse(userProfileStr);
+        if (userProfile.id) {
+          const dbRunData = {
+            userId: userProfile.id,
+            routeId: metadata.routeId || undefined,
+            distance: distance,
+            duration: time,
+            avgPace: calculatePace(),
+            cadence: cadence || undefined,
+            elevation: routeData?.elevation?.gain || undefined,
+            difficulty: metadata.levelId,
+            startLat: metadata.startLat,
+            startLng: metadata.startLng,
+            gpsTrack: positionsRef.current.slice(0, 500),
+            paceData: kmSplits,
+            weatherData: runWeather || undefined,
+          };
+          
+          const response = await fetch('/api/runs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(dbRunData)
+          });
+          
+          if (response.ok) {
+            const savedRun = await response.json();
+            console.log('Run saved to database:', savedRun.id);
+            
+            // Update localStorage with the DB record so RunInsights can find it
+            const localDataWithDbId = {
+              ...localRunData,
+              id: savedRun.id,
+              dbSynced: true
+            };
+            const runHistory = localStorage.getItem("runHistory");
+            const runs = runHistory ? JSON.parse(runHistory) : [];
+            runs.push(localDataWithDbId);
+            localStorage.setItem("runHistory", JSON.stringify(runs));
+            
+            localStorage.removeItem("activeRoute");
+            return savedRun.id;
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to save run to database, using localStorage:', err);
+      }
+    }
+    
+    // Fallback: save to localStorage only
     const runHistory = localStorage.getItem("runHistory");
     const runs = runHistory ? JSON.parse(runHistory) : [];
-    runs.push(runData);
+    runs.push(localRunData);
     localStorage.setItem("runHistory", JSON.stringify(runs));
     
     localStorage.removeItem("activeRoute");
-    return runId;
+    return localRunId;
   };
 
   const handleStopClick = () => {
@@ -1615,7 +1669,7 @@ export default function RunSession() {
     speak("Run paused. Take a breather.");
   };
 
-  const confirmStop = () => {
+  const confirmStop = async () => {
     setShowExitConfirmation(false);
     if (audioRef.current) {
       audioRef.current.pause();
@@ -1626,7 +1680,7 @@ export default function RunSession() {
     }
     clearActiveRunSession();
     if (time > 0 && distance > 0) {
-      const runId = saveRunData();
+      const runId = await saveRunData();
       speak("Run complete! Great job!");
       setLocation(`/history/${runId}`);
     } else {

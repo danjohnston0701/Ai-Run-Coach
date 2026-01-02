@@ -363,18 +363,51 @@ export default function Home() {
   };
 
   useEffect(() => {
-    const userProfile = localStorage.getItem("userProfile");
-    if (userProfile) {
-      setProfile(JSON.parse(userProfile));
-    }
-
-    const runHistory = localStorage.getItem("runHistory");
-    if (runHistory) {
-      const runs = JSON.parse(runHistory);
-      if (runs.length > 0) {
-        setLastRun(runs[runs.length - 1]);
+    const loadProfileAndRuns = async () => {
+      const userProfileStr = localStorage.getItem("userProfile");
+      if (userProfileStr) {
+        const parsedProfile = JSON.parse(userProfileStr);
+        setProfile(parsedProfile);
+        
+        // Try to load last run from database if user has an ID
+        if (parsedProfile.id) {
+          try {
+            const response = await fetch(`/api/users/${parsedProfile.id}/runs`);
+            if (response.ok) {
+              const runs = await response.json();
+              if (runs.length > 0) {
+                const lastDbRun = runs[0]; // Already sorted by completedAt desc
+                setLastRun({
+                  id: lastDbRun.id,
+                  date: lastDbRun.completedAt ? new Date(lastDbRun.completedAt).toLocaleDateString('en-GB') : '',
+                  time: lastDbRun.completedAt ? new Date(lastDbRun.completedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '',
+                  distance: lastDbRun.distance,
+                  totalTime: lastDbRun.duration,
+                  avgPace: lastDbRun.avgPace || '',
+                  difficulty: lastDbRun.difficulty || 'beginner',
+                  lat: lastDbRun.startLat || 0,
+                  lng: lastDbRun.startLng || 0,
+                });
+                return;
+              }
+            }
+          } catch (err) {
+            console.warn('Failed to load runs from database:', err);
+          }
+        }
       }
-    }
+
+      // Fallback to localStorage
+      const runHistory = localStorage.getItem("runHistory");
+      if (runHistory) {
+        const runs = JSON.parse(runHistory);
+        if (runs.length > 0) {
+          setLastRun(runs[runs.length - 1]);
+        }
+      }
+    };
+    
+    loadProfileAndRuns();
 
     if (!navigator.geolocation) {
       setLocationError("Geolocation not supported");

@@ -64,19 +64,60 @@ export default function RunInsights() {
   const [shareFormat, setShareFormat] = useState<"post" | "story">("post");
 
   useEffect(() => {
-    const runHistory = localStorage.getItem("runHistory");
-    if (runHistory && params?.id) {
-      const runs = JSON.parse(runHistory);
-      const foundRun = runs.find((r: RunData) => r.id === params.id);
-      if (foundRun) {
-        setRun(foundRun);
-        // Check if already rated
-        if (foundRun.rating) {
-          setRouteRating(foundRun.rating);
-          setRatingSubmitted(true);
+    const loadRun = async () => {
+      if (!params?.id) return;
+      
+      // First try localStorage
+      const runHistory = localStorage.getItem("runHistory");
+      if (runHistory) {
+        const runs = JSON.parse(runHistory);
+        const foundRun = runs.find((r: RunData) => r.id === params.id);
+        if (foundRun) {
+          setRun(foundRun);
+          if (foundRun.rating) {
+            setRouteRating(foundRun.rating);
+            setRatingSubmitted(true);
+          }
+          return;
         }
       }
-    }
+      
+      // If not in localStorage, try fetching from API (for UUID-based IDs)
+      try {
+        const response = await fetch(`/api/runs/${params.id}`);
+        if (response.ok) {
+          const dbRun = await response.json();
+          const mappedRun: RunData = {
+            id: dbRun.id,
+            date: dbRun.completedAt ? new Date(dbRun.completedAt).toLocaleDateString('en-GB') : '',
+            time: dbRun.completedAt ? new Date(dbRun.completedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '',
+            distance: dbRun.distance,
+            totalTime: dbRun.duration,
+            avgPace: dbRun.avgPace || '',
+            difficulty: dbRun.difficulty || 'beginner',
+            lat: dbRun.startLat || 0,
+            lng: dbRun.startLng || 0,
+            avgHeartRate: dbRun.avgHeartRate,
+            maxHeartRate: dbRun.maxHeartRate,
+            calories: dbRun.calories,
+            cadence: dbRun.cadence,
+            gpsTrack: dbRun.gpsTrack,
+            kmSplits: dbRun.paceData,
+            weatherData: dbRun.weatherData,
+            routeId: dbRun.routeId,
+          } as any;
+          setRun(mappedRun);
+          if ((mappedRun as any).rating) {
+            setRouteRating((mappedRun as any).rating);
+            setRatingSubmitted(true);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch run from API:', err);
+      }
+    };
+    
+    loadRun();
     
     const shared = localStorage.getItem(`shared_${params?.id}`);
     if (shared) {
