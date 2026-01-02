@@ -322,6 +322,8 @@ export default function RunSession() {
   const lastNavSpeakTimeRef = useRef<number>(0);
   const navSpeakQueueRef = useRef<string[]>([]);
   const isNavSpeakingRef = useRef<boolean>(false);
+  const lastMovementTimeRef = useRef<number>(Date.now());
+  const lastNavInstructionRef = useRef<string>("");
 
   const searchParams = new URLSearchParams(window.location.search);
   const isResuming = searchParams.get("resume") === "true";
@@ -713,17 +715,27 @@ export default function RunSession() {
         
         const timeDiff = (newPos.timestamp - lastPos.timestamp) / 1000;
         const speedKmh = timeDiff > 0 ? (segmentDistance / timeDiff) * 3600 : 0;
+        const speedMs = speedKmh / 3.6;
         
-        const minDist = 0.001;
-        const maxDist = 0.15;
-        const maxSpeed = 35;
+        // Filter settings - tuned to reject GPS drift while accepting real movement
+        const minDist = 0.002; // 2m minimum to filter tiny GPS jitter
+        const maxDist = 0.15;  // 150m max to filter GPS jumps
+        const maxSpeed = 35;   // 35 km/h max (sprinting speed)
         const maxTimeDiff = 30;
         
-        if (segmentDistance > minDist && segmentDistance < maxDist && speedKmh < maxSpeed && timeDiff < maxTimeDiff) {
+        // Require minimum speed of 0.5 m/s (~1.8 km/h) to filter stationary drift
+        // This is slower than walking but faster than GPS jitter
+        const minSpeedMs = 0.5;
+        const isActuallyMoving = speedMs >= minSpeedMs;
+        
+        const isValidSegment = segmentDistance > minDist && segmentDistance < maxDist && speedKmh < maxSpeed && timeDiff < maxTimeDiff;
+        
+        if (isActuallyMoving && isValidSegment) {
           setDistance(d => d + segmentDistance);
+          lastMovementTimeRef.current = Date.now();
           console.log(`Distance updated: +${(segmentDistance * 1000).toFixed(1)}m, speed: ${speedKmh.toFixed(1)}km/h`);
-        } else if (segmentDistance > minDist) {
-          console.log(`Distance skipped: ${(segmentDistance * 1000).toFixed(1)}m, speed: ${speedKmh.toFixed(1)}km/h, timeDiff: ${timeDiff.toFixed(1)}s`);
+        } else if (segmentDistance > 0.003) {
+          console.log(`Distance skipped: ${(segmentDistance * 1000).toFixed(1)}m, speed: ${speedKmh.toFixed(1)}km/h (moving: ${isActuallyMoving}, valid: ${isValidSegment})`);
         }
       }
       
@@ -842,6 +854,10 @@ export default function RunSession() {
     
     const now = Date.now();
     
+    // Check if runner moved in last 15 seconds (based on GPS segment acceptance)
+    const timeSinceLastMove = now - lastMovementTimeRef.current;
+    const isMoving = timeSinceLastMove < 15000;
+    
     let nearestIndex = currentWaypointIndex;
     let nearestDistance = Infinity;
     
@@ -864,7 +880,12 @@ export default function RunSession() {
       }
     }
     
+    // Skip navigation announcements if not moving or too soon after last announcement
     if (now - lastDirectionTime < 8000) return;
+    if (!isMoving) {
+      console.log("Skipping navigation - runner is stationary");
+      return;
+    }
     
     const remainingPoints = routePoints.length - nearestIndex;
     if (remainingPoints < 15 && nearestDistance < 0.1) {
@@ -906,6 +927,12 @@ export default function RunSession() {
       
       if (diff > 25) {
         const instruction = getDirectionInstruction(currentBearing, nextBearing, distToNext);
+        // Skip if same instruction as last time (prevents repetition)
+        if (instruction === lastNavInstructionRef.current) {
+          console.log("Skipping duplicate navigation instruction");
+          return;
+        }
+        lastNavInstructionRef.current = instruction;
         speak(instruction);
         setMessage(instruction);
         setLastDirectionTime(now);
@@ -914,6 +941,12 @@ export default function RunSession() {
         const direction = bearingToCardinal(currentBearing);
         const distMeters = Math.round(distToNext * 1000);
         const instruction = `Continue ${direction} for ${distMeters} meters.`;
+        // Skip if same instruction as last time (prevents repetition)
+        if (instruction === lastNavInstructionRef.current) {
+          console.log("Skipping duplicate navigation instruction");
+          return;
+        }
+        lastNavInstructionRef.current = instruction;
         speak(instruction);
         setMessage(instruction);
         setLastDirectionTime(now);

@@ -581,43 +581,53 @@ export async function generateRunSummary(request: RunSummaryRequest): Promise<st
     if (parts.length > 0) weatherInfo = `Current conditions: ${parts.join(", ")}.`;
   }
 
+  // Build compact terrain hint
+  let terrainHint = "";
+  if (elevationGain && elevationGain > 20) {
+    terrainHint = `${Math.round(elevationGain)}m climb ahead`;
+  } else if (terrainAnalysis && terrainAnalysis.includes("uphill")) {
+    terrainHint = "some hills ahead";
+  } else if (terrainAnalysis && terrainAnalysis.includes("flat")) {
+    terrainHint = "mostly flat";
+  }
+
+  // Build target pace hint
+  let paceHint = "";
+  if (targetTimeSeconds && targetDistance > 0) {
+    const targetPaceSecondsPerKm = targetTimeSeconds / targetDistance;
+    const paceMinutes = Math.floor(targetPaceSecondsPerKm / 60);
+    const paceSecondsRounded = Math.round(targetPaceSecondsPerKm % 60);
+    paceHint = `Aim for ${paceMinutes}:${paceSecondsRounded.toString().padStart(2, '0')} pace.`;
+  }
+
   const prompt = `${coachIdentity}.
 ${configSection}
 
-Generate a brief pre-run summary for the runner${userName ? ` named ${userName}` : ""}. This will be spoken aloud and must be under 20 seconds when read (approximately 50-60 words maximum).
+Generate a VERY SHORT pre-run announcement (MAXIMUM 15-20 words, under 8 seconds when spoken).
 
-Route details:
-- Route: ${routeName}
-- Distance: ${targetDistance.toFixed(1)} km
-- Difficulty: ${difficulty}
-- Elevation gain: ${elevationGain ? Math.round(elevationGain) + "m" : "minimal"}
-- Elevation loss: ${elevationLoss ? Math.round(elevationLoss) + "m" : "minimal"}
-- Terrain analysis: ${terrainAnalysis || "varied terrain"}
-- Surface type: ${terrainType || "mixed surfaces - expect road and trail sections"}
-${paceGuidance}
-${weatherInfo}
+Route: ${targetDistance.toFixed(1)}km ${difficulty}
+${terrainHint ? `Terrain: ${terrainHint}` : ""}
+${paceHint}
 
 Requirements:
-1. Keep it UNDER 60 words - this is critical
-2. Mention the key terrain features (hills, flat sections)
-3. Describe expected surface types (road, gravel, trail, etc.)
-4. If there's a target time, mention the required pace
-5. End with a brief motivational send-off
-6. Sound natural and conversational, not robotic
-7. Do NOT use bullet points or lists - flow naturally`;
+1. STRICT LIMIT: 15-20 words maximum - this is critical
+2. Format: "[Distance]k [terrain note]. [Pace if applicable]. Let's go!"
+3. No greetings, no names, no fluff - get straight to the point
+4. Example: "Five K with some hills. Aim for five-thirty pace. Let's go!"
+5. This plays BEFORE any navigation instructions`;
 
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [{ role: "user", content: prompt }],
-      max_tokens: 120,
+      max_tokens: 50,
       temperature: 0.7,
     });
 
-    return response.choices[0]?.message?.content || `Let's tackle this ${targetDistance.toFixed(1)}k run! Stay focused and enjoy the journey.`;
+    return response.choices[0]?.message?.content || `${targetDistance.toFixed(1)}K ahead. Let's go!`;
   } catch (error) {
     console.error("Run summary generation error:", error);
-    return `Ready for your ${targetDistance.toFixed(1)}k ${difficulty} run! Focus on steady breathing and enjoy the route ahead.`;
+    return `${targetDistance.toFixed(1)}K ${difficulty} run. Let's go!`;
   }
 }
 
