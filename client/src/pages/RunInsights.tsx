@@ -716,7 +716,9 @@ export default function RunInsights() {
                 <div>
                   <div className="text-[10px] text-muted-foreground uppercase tracking-widest">Weather During Run</div>
                   <div className="text-lg font-display font-bold text-white">
-                    {Math.round((run as any).weatherData.temperature)}°C • {(run as any).weatherData.condition}
+                    {typeof (run as any).weatherData.temperature === 'number' && !isNaN((run as any).weatherData.temperature) 
+                      ? `${Math.round((run as any).weatherData.temperature)}°C` 
+                      : '-'} • {(run as any).weatherData.condition || '-'}
                   </div>
                 </div>
               </div>
@@ -724,22 +726,38 @@ export default function RunInsights() {
                 <div className="text-center">
                   <ThermometerSun className="w-4 h-4 mx-auto text-orange-400 mb-1" />
                   <div className="text-[10px] text-muted-foreground">Feels</div>
-                  <div className="text-sm text-white font-medium">{Math.round((run as any).weatherData.feelsLike)}°</div>
+                  <div className="text-sm text-white font-medium">
+                    {typeof (run as any).weatherData.feelsLike === 'number' && !isNaN((run as any).weatherData.feelsLike) 
+                      ? `${Math.round((run as any).weatherData.feelsLike)}°` 
+                      : '-'}
+                  </div>
                 </div>
                 <div className="text-center">
                   <Wind className="w-4 h-4 mx-auto text-gray-400 mb-1" />
                   <div className="text-[10px] text-muted-foreground">Wind</div>
-                  <div className="text-sm text-white font-medium">{Math.round((run as any).weatherData.windSpeed)} km/h</div>
+                  <div className="text-sm text-white font-medium">
+                    {typeof (run as any).weatherData.windSpeed === 'number' && !isNaN((run as any).weatherData.windSpeed) 
+                      ? `${Math.round((run as any).weatherData.windSpeed)} km/h` 
+                      : '-'}
+                  </div>
                 </div>
                 <div className="text-center">
                   <Droplets className="w-4 h-4 mx-auto text-blue-400 mb-1" />
                   <div className="text-[10px] text-muted-foreground">Humidity</div>
-                  <div className="text-sm text-white font-medium">{(run as any).weatherData.humidity}%</div>
+                  <div className="text-sm text-white font-medium">
+                    {typeof (run as any).weatherData.humidity === 'number' && !isNaN((run as any).weatherData.humidity) 
+                      ? `${(run as any).weatherData.humidity}%` 
+                      : '-'}
+                  </div>
                 </div>
                 <div className="text-center">
                   <CloudRain className="w-4 h-4 mx-auto text-blue-300 mb-1" />
                   <div className="text-[10px] text-muted-foreground">Rain</div>
-                  <div className="text-sm text-white font-medium">{(run as any).weatherData.precipitationProbability || 0}%</div>
+                  <div className="text-sm text-white font-medium">
+                    {typeof (run as any).weatherData.precipitationProbability === 'number' && !isNaN((run as any).weatherData.precipitationProbability) 
+                      ? `${(run as any).weatherData.precipitationProbability}%` 
+                      : '0%'}
+                  </div>
                 </div>
               </div>
             </CardContent>

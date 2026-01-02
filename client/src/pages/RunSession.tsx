@@ -324,6 +324,7 @@ export default function RunSession() {
   const isNavSpeakingRef = useRef<boolean>(false);
   const lastMovementTimeRef = useRef<number>(Date.now());
   const lastNavInstructionRef = useRef<string>("");
+  const runStoppedRef = useRef<boolean>(false);
 
   const searchParams = new URLSearchParams(window.location.search);
   const isResuming = searchParams.get("resume") === "true";
@@ -981,6 +982,10 @@ export default function RunSession() {
   }, [active, gpsStatus]);
 
   const saveSessionNow = useCallback(() => {
+    // Don't save if run has been stopped/completed
+    if (runStoppedRef.current) {
+      return;
+    }
     const metadata = sessionMetadataRef.current;
     const session: ActiveRunSession = {
       id: sessionIdRef.current,
@@ -1708,6 +1713,7 @@ export default function RunSession() {
 
   const confirmStop = async () => {
     setShowExitConfirmation(false);
+    runStoppedRef.current = true;
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.src = '';
