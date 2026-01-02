@@ -386,35 +386,54 @@ export default function Home() {
       return;
     }
 
-    // Try to get fresh GPS first, only fall back to saved location if GPS fails
-    navigator.geolocation.getCurrentPosition(
+    // Use watchPosition to get accurate GPS fix (not network-based location)
+    const MAX_ACCURACY = 30; // Only accept positions with ≤30m accuracy
+    let gotAccuratePosition = false;
+    
+    const watchId = navigator.geolocation.watchPosition(
       async (position) => {
-        console.log("GPS location captured:", position.coords.latitude, position.coords.longitude);
-        const loc = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        };
-        setUserLocation(loc);
-        setCustomLat(loc.lat.toString());
-        setCustomLng(loc.lng.toString());
-        // Save fresh GPS to localStorage
-        localStorage.setItem("userGpsLocation", JSON.stringify(loc));
-        setLocationLoading(false);
-        setLocationError("");
+        const accuracy = position.coords.accuracy;
+        console.log(`GPS update: lat=${position.coords.latitude}, lng=${position.coords.longitude}, accuracy=${accuracy.toFixed(1)}m`);
         
-        // Fetch address for the coordinates
-        try {
-          const res = await fetch(`/api/geocode/reverse?lat=${loc.lat}&lng=${loc.lng}`);
-          const data = await res.json();
-          if (data.address) {
-            setUserAddress(data.address);
+        // Reject inaccurate positions (network-based location)
+        if (accuracy > MAX_ACCURACY) {
+          setLocationError(`Refining GPS signal... (${Math.round(accuracy)}m accuracy)`);
+          console.log(`GPS position rejected: accuracy ${accuracy.toFixed(1)}m > ${MAX_ACCURACY}m threshold`);
+          return;
+        }
+        
+        // Got accurate position - stop watching
+        if (!gotAccuratePosition) {
+          gotAccuratePosition = true;
+          navigator.geolocation.clearWatch(watchId);
+          
+          const loc = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          };
+          setUserLocation(loc);
+          setCustomLat(loc.lat.toString());
+          setCustomLng(loc.lng.toString());
+          // Save accurate GPS to localStorage
+          localStorage.setItem("userGpsLocation", JSON.stringify(loc));
+          setLocationLoading(false);
+          setLocationError("");
+          
+          // Fetch address for the coordinates
+          try {
+            const res = await fetch(`/api/geocode/reverse?lat=${loc.lat}&lng=${loc.lng}`);
+            const data = await res.json();
+            if (data.address) {
+              setUserAddress(data.address);
+            }
+          } catch (error) {
+            console.log("Failed to fetch address:", error);
           }
-        } catch (error) {
-          console.log("Failed to fetch address:", error);
         }
       },
       async (error) => {
         console.log("GPS location error:", error.code, error.message);
+        navigator.geolocation.clearWatch(watchId);
         
         // Show toast for permission denied (only once per session)
         if (error.code === 1) {
@@ -443,10 +462,17 @@ export default function Home() {
       },
       {
         enableHighAccuracy: true,
-        timeout: 10000,
+        timeout: 15000,
         maximumAge: 0  // Don't use cached position, get fresh GPS
       }
     );
+    
+    // Cleanup on unmount
+    return () => {
+      if (!gotAccuratePosition) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+    };
   }, []);
 
   // Check for notification permission after login

@@ -637,6 +637,20 @@ export default function RunSession() {
     }
 
     const handlePosition = (position: GeolocationPosition) => {
+      const accuracy = position.coords.accuracy;
+      const MAX_ACCURACY = 30; // Only accept positions with ≤30m accuracy
+      
+      console.log(`GPS update: accuracy=${accuracy.toFixed(1)}m`);
+      
+      // Reject inaccurate positions (network-based location)
+      if (accuracy > MAX_ACCURACY) {
+        if (gpsStatus === "acquiring") {
+          setMessage(`Refining GPS signal... (${Math.round(accuracy)}m accuracy)`);
+        }
+        console.log(`GPS position rejected: accuracy ${accuracy.toFixed(1)}m > ${MAX_ACCURACY}m threshold`);
+        return;
+      }
+      
       const newPos: Position = {
         lat: position.coords.latitude,
         lng: position.coords.longitude,
@@ -648,6 +662,8 @@ export default function RunSession() {
       if (gpsStatus === "acquiring") {
         setGpsStatus("active");
         setMessage("GPS locked! Start running.");
+        // Clear any previous inaccurate positions when we get first accurate fix
+        positionsRef.current = [];
       }
       
       if (active && positionsRef.current.length > 0) {
