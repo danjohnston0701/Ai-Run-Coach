@@ -152,28 +152,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/routes/:id", async (req, res) => {
-    try {
-      const route = await storage.getRoute(req.params.id);
-      if (!route) {
-        return res.status(404).json({ error: "Route not found" });
-      }
-      res.json(route);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to get route" });
-    }
-  });
-
-  app.get("/api/users/:userId/routes", async (req, res) => {
-    try {
-      const routes = await storage.getUserRoutes(req.params.userId);
-      res.json(routes);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to get routes" });
-    }
-  });
-
-  // Get recent routes
+  // Get recent routes - MUST be before :id route
   app.get("/api/routes/recent", async (req, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 4;
@@ -182,6 +161,37 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Failed to get recent routes:", error);
       res.status(500).json({ error: "Failed to get recent routes" });
+    }
+  });
+
+  // Get favorite routes - MUST be before :id route
+  app.get("/api/routes/favorites", async (req, res) => {
+    try {
+      const { userId } = req.query;
+      const routes = await storage.getFavoriteRoutes(userId as string | undefined);
+      res.json(routes);
+    } catch (error) {
+      console.error("Failed to get favorite routes:", error);
+      res.status(500).json({ error: "Failed to get favorite routes" });
+    }
+  });
+
+  // Get routes by location - MUST be before :id route
+  app.get("/api/routes/by-location", async (req, res) => {
+    try {
+      const { lat, lng, radiusKm } = req.query;
+      if (!lat || !lng) {
+        return res.status(400).json({ error: "Missing lat/lng parameters" });
+      }
+      const routes = await storage.getRoutesByLocation(
+        parseFloat(lat as string),
+        parseFloat(lng as string),
+        radiusKm ? parseFloat(radiusKm as string) : 0.5
+      );
+      res.json(routes);
+    } catch (error) {
+      console.error("Failed to get routes by location:", error);
+      res.status(500).json({ error: "Failed to get routes by location" });
     }
   });
 
@@ -200,15 +210,25 @@ export async function registerRoutes(
     }
   });
 
-  // Get favorite routes
-  app.get("/api/routes/favorites", async (req, res) => {
+  // Get single route by ID - MUST be after specific path routes
+  app.get("/api/routes/:id", async (req, res) => {
     try {
-      const { userId } = req.query;
-      const routes = await storage.getFavoriteRoutes(userId as string | undefined);
+      const route = await storage.getRoute(req.params.id);
+      if (!route) {
+        return res.status(404).json({ error: "Route not found" });
+      }
+      res.json(route);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get route" });
+    }
+  });
+
+  app.get("/api/users/:userId/routes", async (req, res) => {
+    try {
+      const routes = await storage.getUserRoutes(req.params.userId);
       res.json(routes);
     } catch (error) {
-      console.error("Failed to get favorite routes:", error);
-      res.status(500).json({ error: "Failed to get favorite routes" });
+      res.status(500).json({ error: "Failed to get routes" });
     }
   });
 
@@ -237,25 +257,6 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Failed to mark route started:", error);
       res.status(500).json({ error: "Failed to mark route started" });
-    }
-  });
-
-  // Get routes by location
-  app.get("/api/routes/by-location", async (req, res) => {
-    try {
-      const { lat, lng, radiusKm } = req.query;
-      if (!lat || !lng) {
-        return res.status(400).json({ error: "Missing lat/lng parameters" });
-      }
-      const routes = await storage.getRoutesByLocation(
-        parseFloat(lat as string),
-        parseFloat(lng as string),
-        radiusKm ? parseFloat(radiusKm as string) : 0.5
-      );
-      res.json(routes);
-    } catch (error) {
-      console.error("Failed to get routes by location:", error);
-      res.status(500).json({ error: "Failed to get routes by location" });
     }
   });
 
