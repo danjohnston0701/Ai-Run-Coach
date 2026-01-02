@@ -1575,6 +1575,64 @@ export async function registerRoutes(
     }
   });
 
+  // Admin endpoint to re-geocode all route locations with street + city format
+  app.post("/api/admin/routes/reprocess-locations", requireAdmin, async (req, res) => {
+    try {
+      const allRoutes = await storage.getAllRoutes();
+      let updated = 0;
+      let failed = 0;
+
+      for (const route of allRoutes) {
+        if (!route.startLat || !route.startLng) {
+          failed++;
+          continue;
+        }
+
+        try {
+          const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${route.startLat},${route.startLng}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+          const geocodeRes = await fetch(geocodeUrl);
+          const geocodeData = await geocodeRes.json();
+          
+          let startLocationLabel = "Unknown Location";
+          if (geocodeData.results && geocodeData.results.length > 0) {
+            const components = geocodeData.results[0].address_components;
+            const streetNumber = components?.find((c: any) => c.types.includes('street_number'))?.long_name;
+            const streetRoute = components?.find((c: any) => c.types.includes('route'))?.long_name;
+            const locality = components?.find((c: any) => c.types.includes('locality'))?.long_name;
+            const sublocality = components?.find((c: any) => c.types.includes('sublocality'))?.long_name;
+            
+            const streetPart = streetNumber && streetRoute ? `${streetNumber} ${streetRoute}` : streetRoute || "";
+            const cityPart = locality || sublocality || "";
+            
+            if (streetPart && cityPart) {
+              startLocationLabel = `${streetPart}, ${cityPart}`;
+            } else if (streetPart) {
+              startLocationLabel = streetPart;
+            } else if (cityPart) {
+              startLocationLabel = cityPart;
+            } else {
+              startLocationLabel = geocodeData.results[0].formatted_address?.split(',').slice(0, 2).join(',') || "Unknown Location";
+            }
+          }
+
+          await storage.updateRoute(route.id, { startLocationLabel });
+          updated++;
+          
+          // Rate limit to avoid hitting Google API limits
+          await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (err) {
+          console.error(`Failed to re-geocode route ${route.id}:`, err);
+          failed++;
+        }
+      }
+
+      res.json({ success: true, updated, failed, total: allRoutes.length });
+    } catch (error) {
+      console.error("Failed to reprocess locations:", error);
+      res.status(500).json({ error: "Failed to reprocess locations" });
+    }
+  });
+
   // Get all AI config (for coaching calls - no admin check)
   app.get("/api/ai-config/all", async (req, res) => {
     try {
