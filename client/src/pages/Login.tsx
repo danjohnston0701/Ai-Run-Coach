@@ -9,6 +9,7 @@ import { motion } from "framer-motion";
 import { ArrowLeft, Mail, Lock, UserPlus, LogIn, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { loadCoachSettingsFromProfile } from "@/lib/coachSettings";
+import { migrateLocalDataToDatabase } from "@/lib/dataMigration";
 
 export default function Auth() {
   const [, setLocation] = useLocation();
@@ -35,6 +36,10 @@ export default function Auth() {
       if (res.ok) {
         const user = await res.json();
         localStorage.setItem("userProfile", JSON.stringify(user));
+        const migrationResult = await migrateLocalDataToDatabase(user.id);
+        if (migrationResult.runs > 0) {
+          toast.success(`Synced ${migrationResult.runs} run${migrationResult.runs > 1 ? 's' : ''} to your account!`);
+        }
         await loadCoachSettingsFromProfile();
         toast.success("Welcome back!");
         window.location.href = "/";

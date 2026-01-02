@@ -3,7 +3,7 @@ import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
-import { Toaster as SonnerToaster } from "sonner";
+import { Toaster as SonnerToaster, toast } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import LandingPage from "@/pages/LandingPage";
@@ -20,6 +20,7 @@ import TermsOfUse from "@/pages/TermsOfUse";
 import Login from "@/pages/Login";
 import AdminAIConfig from "@/pages/AdminAIConfig";
 import Routes from "@/pages/Routes";
+import { migrateLocalDataToDatabase } from "@/lib/dataMigration";
 
 function ScrollToTop() {
   const [location] = useLocation();
@@ -58,6 +59,22 @@ function Router() {
         }
       }
       localStorage.setItem(CLEANUP_KEY, "true");
+    }
+    
+    // Auto-migrate local data to database for logged-in users
+    if (userProfile) {
+      try {
+        const profile = JSON.parse(userProfile);
+        if (profile.id) {
+          migrateLocalDataToDatabase(profile.id).then((result) => {
+            if (result.runs > 0) {
+              toast.success(`Synced ${result.runs} run${result.runs > 1 ? 's' : ''} to your account!`);
+            }
+          });
+        }
+      } catch (e) {
+        console.warn("Failed to trigger data migration:", e);
+      }
     }
   }, []);
 
