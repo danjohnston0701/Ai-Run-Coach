@@ -21,6 +21,7 @@ import type { Friend } from "./Profile";
 import { saveActiveRunSession, loadActiveRunSession, clearActiveRunSession, type ActiveRunSession } from "@/lib/activeRunSession";
 import { loadCoachSettings, getVoicePreferences, getTTSVoice, type AiCoachSettings } from "@/lib/coachSettings";
 import { calculateTerrainData, shouldTriggerTerrainCoaching, type ElevationPoint, type TerrainData } from "@/lib/elevationTracker";
+import { GpsHelpDialog } from "@/components/GpsHelpDialog";
 
 import coachAvatar from "@assets/generated_images/glowing_ai_voice_sphere_interface.png";
 import mapBeginner from "@assets/generated_images/dark_mode_map_with_flat_green_route.png";
@@ -274,6 +275,8 @@ export default function RunSession() {
   const [isListening, setIsListening] = useState(false);
   const [showExitConfirmation, setShowExitConfirmation] = useState(false);
   const [showPauseConfirmation, setShowPauseConfirmation] = useState(false);
+  const [showGpsHelp, setShowGpsHelp] = useState(false);
+  const [currentGpsAccuracy, setCurrentGpsAccuracy] = useState<number | undefined>(undefined);
   const [userProfile, setUserProfile] = useState<{
     name?: string;
     dob?: string;
@@ -642,6 +645,9 @@ export default function RunSession() {
       
       console.log(`GPS update: accuracy=${accuracy.toFixed(1)}m`);
       
+      // Track current accuracy for help dialog
+      setCurrentGpsAccuracy(accuracy);
+      
       // Reject inaccurate positions (network-based location)
       if (accuracy > MAX_ACCURACY) {
         if (gpsStatus === "acquiring") {
@@ -650,6 +656,9 @@ export default function RunSession() {
         console.log(`GPS position rejected: accuracy ${accuracy.toFixed(1)}m > ${MAX_ACCURACY}m threshold`);
         return;
       }
+      
+      // Clear accuracy when we get a good fix
+      setCurrentGpsAccuracy(undefined);
       
       const newPos: Position = {
         lat: position.coords.latitude,
@@ -1704,6 +1713,17 @@ export default function RunSession() {
                   className="mt-4 w-72 bg-card/80 backdrop-blur-xl border border-primary/30 p-3 rounded-2xl text-center shadow-2xl relative z-20"
                 >
                   <p className="text-primary font-medium text-xs leading-relaxed">"{message}"</p>
+                  {currentGpsAccuracy && currentGpsAccuracy > 100 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowGpsHelp(true)}
+                      className="mt-2 text-xs h-7 px-3 border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10"
+                      data-testid="button-gps-help-run"
+                    >
+                      Need Help with GPS?
+                    </Button>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -1836,6 +1856,12 @@ export default function RunSession() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <GpsHelpDialog 
+        open={showGpsHelp} 
+        onClose={() => setShowGpsHelp(false)} 
+        currentAccuracy={currentGpsAccuracy}
+      />
     </div>
   );
 }

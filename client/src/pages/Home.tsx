@@ -16,6 +16,7 @@ import type { RunData } from "./RunHistory";
 import { loadActiveRunSession, clearActiveRunSession, type ActiveRunSession } from "@/lib/activeRunSession";
 import { loadCoachSettings, saveCoachSettings, type AiCoachSettings, type CoachGender, type CoachAccent, type CoachTone, accentLabels, toneLabels, toneDescriptions, defaultSettings } from "@/lib/coachSettings";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { GpsHelpDialog } from "@/components/GpsHelpDialog";
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -184,6 +185,8 @@ export default function Home() {
   const [activeSession, setActiveSession] = useState<ActiveRunSession | null>(null);
   const [coachSettingsOpen, setCoachSettingsOpen] = useState(false);
   const [coachSettings, setCoachSettings] = useState<AiCoachSettings>(defaultSettings);
+  const [showGpsHelp, setShowGpsHelp] = useState(false);
+  const [currentGpsAccuracy, setCurrentGpsAccuracy] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     setCoachSettings(loadCoachSettings());
@@ -395,12 +398,18 @@ export default function Home() {
         const accuracy = position.coords.accuracy;
         console.log(`GPS update: lat=${position.coords.latitude}, lng=${position.coords.longitude}, accuracy=${accuracy.toFixed(1)}m`);
         
+        // Track current accuracy for help dialog
+        setCurrentGpsAccuracy(accuracy);
+        
         // Reject inaccurate positions (network-based location)
         if (accuracy > MAX_ACCURACY) {
           setLocationError(`Refining GPS signal... (${Math.round(accuracy)}m accuracy)`);
           console.log(`GPS position rejected: accuracy ${accuracy.toFixed(1)}m > ${MAX_ACCURACY}m threshold`);
           return;
         }
+        
+        // Clear accuracy when we get a good fix
+        setCurrentGpsAccuracy(undefined);
         
         // Got accurate position - stop watching
         if (!gotAccuratePosition) {
@@ -977,15 +986,28 @@ export default function Home() {
               <MapPin className="w-4 h-4 text-muted-foreground" />
               <p className="text-xs text-muted-foreground">{locationError}</p>
             </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => window.location.reload()}
-              className="text-xs h-7 px-2"
-              data-testid="button-refresh-location"
-            >
-              Refresh & Retry
-            </Button>
+            <div className="flex gap-2">
+              {currentGpsAccuracy && currentGpsAccuracy > 100 && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setShowGpsHelp(true)}
+                  className="text-xs h-7 px-2 border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10"
+                  data-testid="button-gps-help"
+                >
+                  Need Help?
+                </Button>
+              )}
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => window.location.reload()}
+                className="text-xs h-7 px-2"
+                data-testid="button-refresh-location"
+              >
+                Refresh & Retry
+              </Button>
+            </div>
           </div>
 
           {isIOSSafari() && (
@@ -1361,6 +1383,12 @@ export default function Home() {
           <MapPin className="mr-2 w-6 h-6 fill-current" /> {userLocation ? "Map My Run" : "Set Location to Continue"}
         </Button>
       </div>
+
+      <GpsHelpDialog 
+        open={showGpsHelp} 
+        onClose={() => setShowGpsHelp(false)} 
+        currentAccuracy={currentGpsAccuracy}
+      />
     </div>
   );
 }
