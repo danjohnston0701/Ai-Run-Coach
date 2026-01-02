@@ -343,10 +343,21 @@ export default function RunInsights() {
   ];
 
   const formatDuration = (seconds: number) => {
+    if (seconds === undefined || seconds === null || isNaN(seconds)) return '-';
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
+    const secs = Math.floor(seconds % 60);
     return hrs > 0 ? `${hrs}h ${mins}m ${secs}s` : `${mins}m ${secs}s`;
+  };
+  
+  const formatDistance = (dist: number) => {
+    if (dist === undefined || dist === null || isNaN(dist)) return '-';
+    return dist.toFixed(2);
+  };
+  
+  const formatPace = (pace: string | undefined) => {
+    if (!pace || pace.includes('NaN') || pace.includes('undefined')) return '-';
+    return pace;
   };
 
   return (
@@ -632,7 +643,7 @@ export default function RunInsights() {
             <CardContent className="p-4 flex flex-col items-center justify-center text-center">
               <MapPin className="w-4 h-4 text-primary mb-2" />
               <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-1">Distance</div>
-              <div className="text-3xl font-display font-bold text-primary">{run.distance.toFixed(2)}</div>
+              <div className="text-3xl font-display font-bold text-primary">{formatDistance(run.distance)}</div>
               <div className="text-xs text-muted-foreground uppercase">kilometers</div>
             </CardContent>
           </Card>
@@ -810,7 +821,7 @@ export default function RunInsights() {
                       </div>
                       <div className="flex items-center gap-2">
                         <span className={`text-lg font-bold ${isFaster ? 'text-green-500' : isSlower ? 'text-red-400' : 'text-primary'}`}>
-                          {split.pace}
+                          {formatPace(split.pace)}
                         </span>
                         <span className="text-xs text-muted-foreground">/km</span>
                         {isFaster && <TrendingUp className="w-4 h-4 text-green-500" />}
@@ -837,7 +848,7 @@ export default function RunInsights() {
               </div>
             </div>
             <div className="text-right">
-              <div className="text-2xl font-display font-bold text-primary">{(run as any).elevationGain || '--'}</div>
+              <div className="text-2xl font-display font-bold text-primary">{isNaN((run as any).elevationGain) || (run as any).elevationGain === undefined ? '-' : Math.round((run as any).elevationGain)}</div>
               <div className="text-[10px] text-muted-foreground uppercase tracking-widest">Gain (m)</div>
             </div>
           </div>
@@ -945,7 +956,7 @@ export default function RunInsights() {
                   <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Cadence</div>
                 </div>
                 <div className="flex items-baseline gap-1">
-                  <span className="text-3xl font-display font-bold text-primary">{(run as any).avgCadence || '--'}</span>
+                  <span className="text-3xl font-display font-bold text-primary">{isNaN((run as any).avgCadence) || (run as any).avgCadence === undefined ? '-' : Math.round((run as any).avgCadence)}</span>
                   <span className="text-[10px] text-muted-foreground uppercase">spm</span>
                 </div>
                 <p className="text-[9px] text-muted-foreground mt-2 leading-tight">Average steps per minute throughout the session.</p>
@@ -956,7 +967,7 @@ export default function RunInsights() {
                   <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Pace</div>
                 </div>
                 <div className="flex items-baseline gap-1">
-                  <span className="text-3xl font-display font-bold text-primary">{run.avgPace || '--'}</span>
+                  <span className="text-3xl font-display font-bold text-primary">{formatPace(run.avgPace)}</span>
                   <span className="text-[10px] text-muted-foreground uppercase">/km</span>
                 </div>
                 <p className="text-[9px] text-muted-foreground mt-2 leading-tight">Average pace throughout the session.</p>
