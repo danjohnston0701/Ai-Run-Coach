@@ -1443,14 +1443,15 @@ export default function RunSession() {
     return url;
   };
 
-  const saveRunData = () => {
+  const saveRunData = (): string => {
     const now = new Date();
     const date = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()}`;
     const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
     const metadata = sessionMetadataRef.current;
+    const runId = `run_${Date.now()}`;
     const runData = {
-      id: `run_${Date.now()}`,
+      id: runId,
       date,
       time: timeStr,
       distance,
@@ -1464,6 +1465,9 @@ export default function RunSession() {
       gpsTrack: positionsRef.current.slice(0, 500),
       avgCadence: cadence,
       kmSplits: kmSplits,
+      targetDistance: metadata.targetDistance,
+      elevationGain: routeData?.elevation?.gain || 0,
+      elevationLoss: routeData?.elevation?.loss || 0,
     };
 
     const runHistory = localStorage.getItem("runHistory");
@@ -1472,6 +1476,7 @@ export default function RunSession() {
     localStorage.setItem("runHistory", JSON.stringify(runs));
     
     localStorage.removeItem("activeRoute");
+    return runId;
   };
 
   const handleStopClick = () => {
@@ -1504,10 +1509,12 @@ export default function RunSession() {
     }
     clearActiveRunSession();
     if (time > 0 && distance > 0) {
-      saveRunData();
+      const runId = saveRunData();
       speak("Run complete! Great job!");
+      setLocation(`/history/${runId}`);
+    } else {
+      setLocation("/");
     }
-    setLocation("/");
   };
 
   return (

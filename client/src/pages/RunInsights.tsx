@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useLocation, useRoute } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { 
   ArrowLeft, Calendar, TrendingUp, Heart, 
   Activity, Zap as CadenceIcon, Info, Timer, MapPin, Share2, Mail, User as UserIcon, Search, Star,
-  Facebook, Instagram, Download, X
+  Facebook, Instagram, Download, X, Map
 } from "lucide-react";
 import type { Friend } from "./Profile";
 import {
@@ -22,6 +22,29 @@ import {
 } from "recharts";
 import type { RunData } from "./RunHistory";
 import { shareToSocialMedia, downloadShareImage } from "@/lib/shareImageGenerator";
+import { MapContainer, TileLayer, Polyline, useMap } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import L from "leaflet";
+
+// Fix Leaflet default marker icon issue
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
+  iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+});
+
+// Component to fit map bounds to the GPS track
+function FitBoundsToTrack({ positions }: { positions: [number, number][] }) {
+  const map = useMap();
+  useEffect(() => {
+    if (positions.length > 1) {
+      const bounds = L.latLngBounds(positions.map(p => [p[0], p[1]]));
+      map.fitBounds(bounds, { padding: [20, 20] });
+    }
+  }, [positions, map]);
+  return null;
+}
 
 export default function RunInsights() {
   const [, setLocation] = useLocation();
@@ -187,24 +210,130 @@ export default function RunInsights() {
 
   if (!run) return null;
 
-  // Generate simulated chart data
-  const chartData = (() => {
+  // Check if we have real heart rate data
+  const hasHeartRateData = !!(run as any).heartRateData?.length || !!(run as any).avgHeartRate;
+  
+  // Get GPS track data for pace gradient map
+  const gpsTrack = (run as any).gpsTrack || [];
+  const hasGpsTrack = gpsTrack.length > 1;
+  
+  // Get real splits data
+  const kmSplits = (run as any).kmSplits || [];
+  
+  // Calculate pace data from GPS track for chart
+  const paceChartData = (() => {
+    if (kmSplits.length > 0) {
+      return kmSplits.map((split: any, idx: number) => ({
+        km: idx + 1,
+        pace: split.pace,
+        paceSeconds: split.paceSeconds || 0,
+      }));
+    }
+    return [];
+  })();
+
+  // Generate chart data with elevation (and heart rate if available)
+  const chartData = useMemo(() => {
     const data = [];
-    const points = 30;
-    const baseHR = run.avgHeartRate || 155;
-    const baseElev = run.difficulty === "expert" ? 40 : run.difficulty === "moderate" ? 20 : 10;
+    const points = Math.max(20, Math.floor(run.distance * 10));
+    const baseElev = (run as any).elevationGain || (run.difficulty === "expert" ? 40 : run.difficulty === "moderate" ? 20 : 10);
+    const heartRateData = (run as any).heartRateData || [];
+    const baseHR = (run as any).avgHeartRate || 155;
     
     for (let i = 0; i <= points; i++) {
       const dist = (run.distance / points) * i;
+      
+      // Get heart rate from recorded data if available, otherwise simulate
+      let hr: number;
+      if (heartRateData.length > 0) {
+        const hrIdx = Math.floor((i / points) * heartRateData.length);
+        hr = heartRateData[Math.min(hrIdx, heartRateData.length - 1)]?.hr || baseHR;
+      } else if (hasHeartRateData) {
+        // We have avgHeartRate but no detailed data - simulate based on average
+        hr = baseHR - 10 + Math.random() * 20;
+      } else {
+        hr = 0; // No heart rate data
+      }
+      
       data.push({
-        distance: dist.toFixed(2),
-        hr: baseHR - 15 + Math.random() * 30,
-        elevation: baseElev + Math.sin(i / 3) * (baseElev / 1.5) + Math.random() * 3,
-        cadence: 165 + Math.random() * 25
+        distance: parseFloat(dist.toFixed(2)),
+        elevation: baseElev + Math.sin(i / 5) * (baseElev / 2),
+        hr: hr > 0 ? hr : undefined,
       });
     }
     return data;
-  })();
+  }, [run, hasHeartRateData]);
+
+  // Calculate pace gradient segments from GPS track
+  const paceGradientSegments = useMemo(() => {
+    if (!hasGpsTrack || gpsTrack.length < 2) return [];
+    
+    const segments: { positions: [number, number][]; color: string; pace: number }[] = [];
+    
+    // Calculate pace for each segment (group points for smoother visualization)
+    const segmentSize = Math.max(2, Math.floor(gpsTrack.length / 20));
+    
+    // Calculate all segment paces first to find min/max
+    const segmentPaces: number[] = [];
+    for (let i = 0; i < gpsTrack.length - 1; i += segmentSize) {
+      const endIdx = Math.min(i + segmentSize, gpsTrack.length - 1);
+      const startPoint = gpsTrack[i];
+      const endPoint = gpsTrack[endIdx];
+      
+      // Calculate segment distance
+      const lat1 = startPoint.lat * Math.PI / 180;
+      const lat2 = endPoint.lat * Math.PI / 180;
+      const dLat = (endPoint.lat - startPoint.lat) * Math.PI / 180;
+      const dLng = (endPoint.lng - startPoint.lng) * Math.PI / 180;
+      const a = Math.sin(dLat/2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng/2) ** 2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      const distanceKm = 6371 * c;
+      
+      // Calculate time between points (using timestamp if available, else estimate)
+      const timeMs = (endPoint.timestamp || 0) - (startPoint.timestamp || 0);
+      const timeMin = timeMs > 0 ? timeMs / 60000 : (run.totalTime / gpsTrack.length * segmentSize) / 60;
+      
+      // Calculate pace (min/km)
+      const pace = distanceKm > 0.01 ? timeMin / distanceKm : 0;
+      segmentPaces.push(pace);
+    }
+    
+    // Get pace range for color mapping
+    const validPaces = segmentPaces.filter(p => p > 0 && p < 20);
+    if (validPaces.length === 0) return [];
+    
+    const minPace = Math.min(...validPaces);
+    const maxPace = Math.max(...validPaces);
+    const paceRange = maxPace - minPace || 1;
+    
+    // Create colored segments
+    let segmentIdx = 0;
+    for (let i = 0; i < gpsTrack.length - 1; i += segmentSize) {
+      const endIdx = Math.min(i + segmentSize + 1, gpsTrack.length);
+      const segmentPoints: [number, number][] = [];
+      
+      for (let j = i; j < endIdx; j++) {
+        segmentPoints.push([gpsTrack[j].lat, gpsTrack[j].lng]);
+      }
+      
+      const pace = segmentPaces[segmentIdx] || 0;
+      
+      // Color: green (fast) to yellow (medium) to red (slow)
+      const normalizedPace = pace > 0 ? (pace - minPace) / paceRange : 0.5;
+      const hue = 120 - (normalizedPace * 120); // 120=green, 60=yellow, 0=red
+      const color = `hsl(${Math.max(0, Math.min(120, hue))}, 80%, 50%)`;
+      
+      segments.push({
+        positions: segmentPoints,
+        color,
+        pace
+      });
+      
+      segmentIdx++;
+    }
+    
+    return segments;
+  }, [gpsTrack, hasGpsTrack, run.totalTime]);
 
   const hrZones = [
     { name: "Zone 5", range: "> 169 bpm", value: 12, color: "#ef4444", label: "Maximum" },
@@ -518,66 +647,183 @@ export default function RunInsights() {
           </Card>
         </section>
 
+        {/* Pace Gradient Map Section */}
+        {hasGpsTrack && paceGradientSegments.length > 0 && (
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-primary/10 rounded-lg">
+                  <Map className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-display font-bold uppercase tracking-wide">Route Pace</h2>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Speed variation across your run</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 text-[10px]">
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: 'hsl(120, 80%, 50%)' }} />
+                  <span className="text-muted-foreground">Fast</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: 'hsl(60, 80%, 50%)' }} />
+                  <span className="text-muted-foreground">Medium</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: 'hsl(0, 80%, 50%)' }} />
+                  <span className="text-muted-foreground">Slow</span>
+                </div>
+              </div>
+            </div>
+            
+            <Card className="bg-card/30 border-white/5 p-0 overflow-hidden">
+              <div className="h-64 w-full">
+                <MapContainer
+                  center={[gpsTrack[0]?.lat || 0, gpsTrack[0]?.lng || 0]}
+                  zoom={15}
+                  style={{ height: '100%', width: '100%' }}
+                  zoomControl={false}
+                  attributionControl={false}
+                >
+                  <TileLayer
+                    url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                  />
+                  {paceGradientSegments.map((segment, idx) => (
+                    <Polyline
+                      key={idx}
+                      positions={segment.positions}
+                      color={segment.color}
+                      weight={4}
+                      opacity={0.9}
+                    />
+                  ))}
+                  <FitBoundsToTrack positions={gpsTrack.map((p: any) => [p.lat, p.lng] as [number, number])} />
+                </MapContainer>
+              </div>
+            </Card>
+          </section>
+        )}
+
         {/* Heart Rate Section */}
         <section className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="p-2 bg-red-500/10 rounded-lg">
-                <Heart className="w-5 h-5 text-red-500 fill-red-500/20" />
+              <div className={`p-2 rounded-lg ${hasHeartRateData ? 'bg-red-500/10' : 'bg-muted/20'}`}>
+                <Heart className={`w-5 h-5 ${hasHeartRateData ? 'text-red-500 fill-red-500/20' : 'text-muted-foreground/50'}`} />
               </div>
               <div>
-                <h2 className="text-lg font-display font-bold uppercase tracking-wide">Heart Rate</h2>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Intensity over distance</p>
+                <h2 className={`text-lg font-display font-bold uppercase tracking-wide ${!hasHeartRateData ? 'text-muted-foreground/50' : ''}`}>Heart Rate</h2>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                  {hasHeartRateData ? 'Intensity over distance' : 'No heart rate data'}
+                </p>
               </div>
             </div>
-            <div className="text-right">
-              <div className="text-2xl font-display font-bold text-primary">{run.avgHeartRate || 158}</div>
-              <div className="text-[10px] text-muted-foreground uppercase tracking-widest">Avg BPM</div>
-            </div>
+            {hasHeartRateData && (
+              <div className="text-right">
+                <div className="text-2xl font-display font-bold text-primary">{run.avgHeartRate}</div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-widest">Avg BPM</div>
+              </div>
+            )}
           </div>
           
-          <Card className="bg-card/30 border-white/5 p-4 overflow-hidden">
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorHrFull" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.4}/>
-                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff08" />
-                  <XAxis 
-                    dataKey="distance" 
-                    stroke="#ffffff40" 
-                    fontSize={10} 
-                    tickLine={false} 
-                    axisLine={false}
-                    type="number"
-                    domain={[0, 'dataMax']}
-                    ticks={Array.from({ length: Math.ceil(run.distance) + 1 }, (_, i) => i)}
-                    tickFormatter={(val) => Math.round(val).toString()}
-                    label={{ value: 'Distance (km)', position: 'insideBottom', offset: -5, fontSize: 10, fill: '#64748b' }}
-                  />
-                  <YAxis 
-                    stroke="#ffffff40" 
-                    fontSize={10} 
-                    tickLine={false} 
-                    axisLine={false}
-                    domain={['dataMin - 10', 'dataMax + 10']}
-                    tickFormatter={(val) => Math.round(val).toString()}
-                    label={{ value: 'BPM', angle: -90, position: 'insideLeft', offset: 10, fontSize: 10, fill: '#64748b' }}
-                  />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '12px' }}
-                    labelStyle={{ color: '#64748b', marginBottom: '4px' }}
-                  />
-                  <Area type="monotone" dataKey="hr" stroke="#ef4444" fillOpacity={1} fill="url(#colorHrFull)" strokeWidth={3} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
+          {hasHeartRateData ? (
+            <Card className="bg-card/30 border-white/5 p-4 overflow-hidden">
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="colorHrFull" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#ef4444" stopOpacity={0.4}/>
+                        <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff08" />
+                    <XAxis 
+                      dataKey="distance" 
+                      stroke="#ffffff40" 
+                      fontSize={10} 
+                      tickLine={false} 
+                      axisLine={false}
+                      type="number"
+                      domain={[0, 'dataMax']}
+                      ticks={Array.from({ length: Math.ceil(run.distance) + 1 }, (_, i) => i)}
+                      tickFormatter={(val) => Math.round(val).toString()}
+                      label={{ value: 'Distance (km)', position: 'insideBottom', offset: -5, fontSize: 10, fill: '#64748b' }}
+                    />
+                    <YAxis 
+                      stroke="#ffffff40" 
+                      fontSize={10} 
+                      tickLine={false} 
+                      axisLine={false}
+                      domain={['dataMin - 10', 'dataMax + 10']}
+                      tickFormatter={(val) => Math.round(val).toString()}
+                      label={{ value: 'BPM', angle: -90, position: 'insideLeft', offset: 10, fontSize: 10, fill: '#64748b' }}
+                    />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '12px' }}
+                      labelStyle={{ color: '#64748b', marginBottom: '4px' }}
+                    />
+                    <Area type="monotone" dataKey="hr" stroke="#ef4444" fillOpacity={1} fill="url(#colorHrFull)" strokeWidth={3} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </Card>
+          ) : (
+            <Card className="bg-muted/10 border-white/5 p-8 text-center">
+              <Heart className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
+              <p className="text-muted-foreground text-sm">No heart rate data available</p>
+              <p className="text-muted-foreground/60 text-xs mt-1">Connect a heart rate monitor or smartwatch to track your heart rate during runs</p>
+            </Card>
+          )}
         </section>
+
+        {/* Km Splits Section */}
+        {kmSplits.length > 0 && (
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-blue-500/10 rounded-lg">
+                  <Activity className="w-5 h-5 text-blue-500" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-display font-bold uppercase tracking-wide">Km Splits</h2>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Pace per kilometer</p>
+                </div>
+              </div>
+            </div>
+            
+            <Card className="bg-card/30 border-white/5 p-4 overflow-hidden">
+              <div className="space-y-3">
+                {kmSplits.map((split: any, idx: number) => {
+                  const avgPaceSeconds = run.avgPace ? 
+                    parseInt(run.avgPace.split(':')[0]) * 60 + parseInt(run.avgPace.split(':')[1]) : 0;
+                  const splitPaceSeconds = split.paceSeconds || 0;
+                  const isFaster = splitPaceSeconds < avgPaceSeconds;
+                  const isSlower = splitPaceSeconds > avgPaceSeconds + 15;
+                  
+                  return (
+                    <div key={idx} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
+                          <span className="text-xs font-bold text-primary">{idx + 1}</span>
+                        </div>
+                        <span className="text-sm text-muted-foreground">Kilometer {idx + 1}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-lg font-bold ${isFaster ? 'text-green-500' : isSlower ? 'text-red-400' : 'text-primary'}`}>
+                          {split.pace}
+                        </span>
+                        <span className="text-xs text-muted-foreground">/km</span>
+                        {isFaster && <TrendingUp className="w-4 h-4 text-green-500" />}
+                        {isSlower && <TrendingUp className="w-4 h-4 text-red-400 rotate-180" />}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          </section>
+        )}
 
         {/* Elevation Section */}
         <section className="space-y-4">
@@ -592,8 +838,8 @@ export default function RunInsights() {
               </div>
             </div>
             <div className="text-right">
-              <div className="text-2xl font-display font-bold text-primary">74</div>
-              <div className="text-[10px] text-muted-foreground uppercase tracking-widest">Max Meters</div>
+              <div className="text-2xl font-display font-bold text-primary">{(run as any).elevationGain || '--'}</div>
+              <div className="text-[10px] text-muted-foreground uppercase tracking-widest">Gain (m)</div>
             </div>
           </div>
 
@@ -641,30 +887,52 @@ export default function RunInsights() {
 
         {/* Zone Breakdown & Metrics */}
         <section className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {/* HR Zones */}
-          <div className="space-y-4">
-            <h3 className="text-xs font-display font-bold uppercase tracking-widest flex items-center gap-2">
-              <Info className="w-3 h-3 text-primary" /> Heart Rate Zone Breakdown
-            </h3>
-            <div className="space-y-3">
-              {hrZones.map((zone) => (
-                <div key={zone.name} className="space-y-1">
-                  <div className="flex justify-between text-[11px]">
-                    <span className="text-muted-foreground font-medium">{zone.name} <span className="text-[9px] opacity-40 px-1">•</span> {zone.label}</span>
-                    <span className="text-primary font-bold">{zone.value}%</span>
+          {/* HR Zones - Only show if we have heart rate data */}
+          {hasHeartRateData ? (
+            <div className="space-y-4">
+              <h3 className="text-xs font-display font-bold uppercase tracking-widest flex items-center gap-2">
+                <Info className="w-3 h-3 text-primary" /> Heart Rate Zone Breakdown
+              </h3>
+              <div className="space-y-3">
+                {hrZones.map((zone) => (
+                  <div key={zone.name} className="space-y-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-muted-foreground font-medium">{zone.name} <span className="text-[9px] opacity-40 px-1">•</span> {zone.label}</span>
+                      <span className="text-primary font-bold">{zone.value}%</span>
+                    </div>
+                    <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: `${zone.value}%` }}
+                        className="h-full rounded-full"
+                        style={{ backgroundColor: zone.color }}
+                      />
+                    </div>
                   </div>
-                  <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
-                    <motion.div 
-                      initial={{ width: 0 }}
-                      animate={{ width: `${zone.value}%` }}
-                      className="h-full rounded-full"
-                      style={{ backgroundColor: zone.color }}
-                    />
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="space-y-4">
+              <h3 className="text-xs font-display font-bold uppercase tracking-widest flex items-center gap-2 text-muted-foreground/50">
+                <Info className="w-3 h-3" /> Heart Rate Zone Breakdown
+              </h3>
+              <div className="space-y-3 opacity-30">
+                {hrZones.map((zone) => (
+                  <div key={zone.name} className="space-y-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-muted-foreground font-medium">{zone.name} <span className="text-[9px] opacity-40 px-1">•</span> {zone.label}</span>
+                      <span className="text-muted-foreground">--%</span>
+                    </div>
+                    <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full bg-muted/20 w-0" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground/50 italic">No heart rate data recorded</p>
+            </div>
+          )}
 
           {/* Additional Stats */}
           <div className="space-y-4">
@@ -678,7 +946,7 @@ export default function RunInsights() {
                   <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Cadence</div>
                 </div>
                 <div className="flex items-baseline gap-1">
-                  <span className="text-3xl font-display font-bold text-primary">153</span>
+                  <span className="text-3xl font-display font-bold text-primary">{(run as any).avgCadence || '--'}</span>
                   <span className="text-[10px] text-muted-foreground uppercase">spm</span>
                 </div>
                 <p className="text-[9px] text-muted-foreground mt-2 leading-tight">Average steps per minute throughout the session.</p>
@@ -686,13 +954,13 @@ export default function RunInsights() {
               <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
                 <div className="flex items-center gap-2 mb-2">
                   <Activity className="w-4 h-4 text-cyan-400" />
-                  <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Burn</div>
+                  <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Pace</div>
                 </div>
                 <div className="flex items-baseline gap-1">
-                  <span className="text-3xl font-display font-bold text-primary">{run.calories || 485}</span>
-                  <span className="text-[10px] text-muted-foreground uppercase">kcal</span>
+                  <span className="text-3xl font-display font-bold text-primary">{run.avgPace || '--'}</span>
+                  <span className="text-[10px] text-muted-foreground uppercase">/km</span>
                 </div>
-                <p className="text-[9px] text-muted-foreground mt-2 leading-tight">Total active calories burned during this activity.</p>
+                <p className="text-[9px] text-muted-foreground mt-2 leading-tight">Average pace throughout the session.</p>
               </div>
             </div>
           </div>

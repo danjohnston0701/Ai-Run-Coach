@@ -82,7 +82,14 @@ The app supports resuming interrupted runs with the following architecture:
 - **Home**: Run configuration (distance slider, difficulty selection, time target)
 - **Run Session**: Live run tracking with voice visualizer, map view, friend sharing
 - **Run History**: List of completed runs with key metrics
-- **Run Insights**: Detailed post-run analysis with charts, AI feedback, and social sharing
+- **Run Insights**: Detailed post-run analysis with real data display:
+  - Auto-navigation from run completion to insights page
+  - Real distance, time, pace, cadence from actual run data
+  - Pace gradient map showing GPS track with color-coded pace (green=fast, red=slow)
+  - Km splits section showing pace per kilometer with visual indicators
+  - Conditional heart rate display (greyed out with message when no HR data available)
+  - Elevation profile chart with real elevation gain data
+  - Social sharing with branded images for Facebook/Instagram
 - **Auth**: Login and pre-registration flows
 
 ### Social Media Sharing
