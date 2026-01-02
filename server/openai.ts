@@ -321,19 +321,13 @@ export async function getCoachingAdvice(request: CoachingRequest): Promise<Coach
     }
   }
   
-  // Anti-repetition guidance
+  // Anti-repetition guidance - only include dynamic topic list
+  // General variety guidelines are configured in AI Control Centre Knowledge Base
   let antiRepetitionSection = "";
   if (request.recentCoachingTopics && request.recentCoachingTopics.length > 0) {
-    antiRepetitionSection = `\n\nAVOID THESE RECENT TOPICS (don't repeat similar advice):
+    antiRepetitionSection = `\n\nRECENT COACHING TOPICS (avoid repeating these):
 ${request.recentCoachingTopics.map(t => `- "${t}"`).join('\n')}
-
-Choose a DIFFERENT coaching focus. Vary your vocabulary and approach. Options:
-- Comment on specific metrics (pace, distance, time)
-- Focus on technique (arm swing, foot strike, posture)
-- Mention breathing patterns
-- Celebrate a milestone if one was reached
-- Give mental/motivational tips
-- Discuss pacing strategy`;
+Choose a DIFFERENT focus area for this message.`;
   }
   
   const prompt = `${coachIdentity} Providing real-time guidance.${aiConfigSection}
@@ -355,7 +349,7 @@ ${request.terrain?.upcomingTerrain ? "PRIORITIZE terrain coaching - warn about u
 ${request.paceChange === 'faster' ? "Acknowledge the speed increase!" : request.paceChange === 'slower' ? "Gently encourage picking up the pace." : ""}
 ${request.userMessage ? "Respond to the runner's message while providing coaching." : "Provide brief, motivating coaching advice."} 
 ${request.userName ? `Use ${request.userName}'s name occasionally for personalization.` : ""} 
-Be specific but concise. IMPORTANT: Do not repeat similar feedback from recent messages.
+Be specific but concise.
 
 Respond in JSON format:
 {
