@@ -1722,7 +1722,7 @@ export default function RunSession() {
       window.speechSynthesis.cancel();
     }
     clearActiveRunSession();
-    if (time > 0 && distance > 0) {
+    if (time > 0) {
       const runId = await saveRunData();
       speak("Run complete! Great job!");
       setLocation(`/history/${runId}`);
