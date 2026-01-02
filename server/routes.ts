@@ -313,7 +313,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: result.error || "Could not generate routes. Please try a different location or distance." });
       }
 
-      // Get location label for grouping
+      // Get location label for grouping - include street and city
       let startLocationLabel = "Unknown Location";
       try {
         const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${startLat},${startLng}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
@@ -321,10 +321,24 @@ export async function registerRoutes(
         const geocodeData = await geocodeRes.json();
         if (geocodeData.results && geocodeData.results.length > 0) {
           const components = geocodeData.results[0].address_components;
-          const neighborhood = components?.find((c: any) => c.types.includes('neighborhood'))?.long_name;
+          const streetNumber = components?.find((c: any) => c.types.includes('street_number'))?.long_name;
+          const route = components?.find((c: any) => c.types.includes('route'))?.long_name;
           const locality = components?.find((c: any) => c.types.includes('locality'))?.long_name;
           const sublocality = components?.find((c: any) => c.types.includes('sublocality'))?.long_name;
-          startLocationLabel = neighborhood || sublocality || locality || geocodeData.results[0].formatted_address?.split(',')[0] || "Unknown Location";
+          
+          // Build address: street number + street name, city
+          const streetPart = streetNumber && route ? `${streetNumber} ${route}` : route || "";
+          const cityPart = locality || sublocality || "";
+          
+          if (streetPart && cityPart) {
+            startLocationLabel = `${streetPart}, ${cityPart}`;
+          } else if (streetPart) {
+            startLocationLabel = streetPart;
+          } else if (cityPart) {
+            startLocationLabel = cityPart;
+          } else {
+            startLocationLabel = geocodeData.results[0].formatted_address?.split(',').slice(0, 2).join(',') || "Unknown Location";
+          }
         }
       } catch (err) {
         console.log("[Route API] Could not get location label");
