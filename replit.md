@@ -98,6 +98,10 @@ The app uses a hybrid approach for runs and settings:
 2. **Fallback**: localStorage backup when offline or API unavailable
 3. **Sync Indicators**: `dbSynced` flag on localStorage entries tracks sync status
 4. **Merge Logic**: RunHistory merges DB runs with unsynced local runs, avoiding duplicates
+5. **Automatic Migration**: On login and app load, unsynced localStorage data migrates to database via `client/src/lib/dataMigration.ts`
+   - Per-user migration flags prevent duplicate migrations (`dataMigrationCompleted_v1_${userId}`)
+   - Migrates runs and coach settings (gender, accent, tone)
+   - Only marks complete when all operations succeed, allowing retry on failure
 
 ### Session Persistence
 The app supports resuming interrupted runs with the following architecture:
