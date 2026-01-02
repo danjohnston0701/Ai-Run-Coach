@@ -362,43 +362,6 @@ export default function Home() {
     setTargetTime(prev => ({ ...prev, [unit]: cleanValue }));
   };
 
-  // Dummy previous runs for demonstration
-  const dummyRuns: RunData[] = [
-    {
-      id: "run-1",
-      distance: 5.2,
-      time: "14:30",
-      totalTime: 1725,
-      avgPace: "5:32",
-      date: "Dec 18, 2024",
-      difficulty: "beginner",
-      lat: 37.898379,
-      lng: 175.484486,
-    },
-    {
-      id: "run-2",
-      distance: 8.5,
-      time: "08:15",
-      totalTime: 2535,
-      avgPace: "4:58",
-      date: "Dec 15, 2024",
-      difficulty: "moderate",
-      lat: 37.898379,
-      lng: 175.484486,
-    },
-    {
-      id: "run-3",
-      distance: 10.3,
-      time: "17:45",
-      totalTime: 3150,
-      avgPace: "5:06",
-      date: "Dec 12, 2024",
-      difficulty: "expert",
-      lat: 37.898379,
-      lng: 175.484486,
-    },
-  ];
-
   useEffect(() => {
     const userProfile = localStorage.getItem("userProfile");
     if (userProfile) {
@@ -411,10 +374,6 @@ export default function Home() {
       if (runs.length > 0) {
         setLastRun(runs[runs.length - 1]);
       }
-    } else {
-      // Use dummy data if no history exists
-      localStorage.setItem("runHistory", JSON.stringify(dummyRuns));
-      setLastRun(dummyRuns[0]);
     }
 
     if (!navigator.geolocation) {
