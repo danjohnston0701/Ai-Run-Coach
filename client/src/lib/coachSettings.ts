@@ -41,6 +41,62 @@ export function saveCoachSettings(settings: AiCoachSettings): void {
   }
 }
 
+export async function loadCoachSettingsFromProfile(): Promise<AiCoachSettings> {
+  try {
+    const profileStr = localStorage.getItem('userProfile');
+    if (profileStr) {
+      const profile = JSON.parse(profileStr);
+      if (profile.id) {
+        const response = await fetch(`/api/users/${profile.id}`);
+        if (response.ok) {
+          const user = await response.json();
+          const settings: AiCoachSettings = {
+            gender: (user.coachGender as CoachGender) || defaultSettings.gender,
+            accent: (user.coachAccent as CoachAccent) || defaultSettings.accent,
+            tone: (user.coachTone as CoachTone) || defaultSettings.tone,
+          };
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+          return settings;
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load coach settings from profile:', e);
+  }
+  return loadCoachSettings();
+}
+
+export async function saveCoachSettingsToProfile(settings: AiCoachSettings): Promise<boolean> {
+  saveCoachSettings(settings);
+  
+  try {
+    const profileStr = localStorage.getItem('userProfile');
+    if (profileStr) {
+      const profile = JSON.parse(profileStr);
+      if (profile.id) {
+        const response = await fetch(`/api/users/${profile.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            coachGender: settings.gender,
+            coachAccent: settings.accent,
+            coachTone: settings.tone,
+          }),
+        });
+        if (!response.ok) {
+          console.error('Failed to save coach settings to profile:', response.status);
+          return false;
+        }
+        return true;
+      }
+    }
+    return true;
+  } catch (e) {
+    console.error('Failed to save coach settings to profile:', e);
+    return false;
+  }
+}
+
 export const accentLabels: Record<CoachAccent, string> = {
   british: 'British',
   australian: 'Australian',

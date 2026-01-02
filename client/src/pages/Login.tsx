@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { motion } from "framer-motion";
 import { ArrowLeft, Mail, Lock, UserPlus, LogIn, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
+import { loadCoachSettingsFromProfile } from "@/lib/coachSettings";
 
 export default function Auth() {
   const [, setLocation] = useLocation();
@@ -34,6 +35,7 @@ export default function Auth() {
       if (res.ok) {
         const user = await res.json();
         localStorage.setItem("userProfile", JSON.stringify(user));
+        await loadCoachSettingsFromProfile();
         toast.success("Welcome back!");
         window.location.href = "/";
       } else {

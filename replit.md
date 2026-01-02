@@ -80,7 +80,24 @@ Key files:
 - **Database**: PostgreSQL (configured via DATABASE_URL environment variable)
 - **Schema Location**: `shared/schema.ts` - contains tables for users, pre-registrations, friends, routes, runs, live sessions, and Garmin data
 - **Migrations**: Drizzle Kit with migrations output to `./migrations`
-- **Client-side Storage**: localStorage for user profile and run history (interim solution)
+
+#### Database-Synced Data (Primary Storage)
+- **User Accounts**: Full user profile including personal info, fitness settings, and coach voice preferences
+- **Coach Settings**: Voice gender, accent, and tone stored in users table (coachGender, coachAccent, coachTone columns)
+- **Completed Runs**: All run data synced to database with localStorage fallback for offline access
+- **Routes & Favorites**: Generated routes persisted with favorite status and last-used timestamps
+
+#### Local-Only Storage (Session/Cache Data)
+- **Active Run Session**: Temporary session data for resuming interrupted runs (12-hour expiration)
+- **GPS Location Cache**: Cached user location for faster startup
+- **UI Preferences**: Notification prompts, temporary selections
+
+#### Hybrid Storage Pattern
+The app uses a hybrid approach for runs and settings:
+1. **Primary**: Data saved to PostgreSQL via API
+2. **Fallback**: localStorage backup when offline or API unavailable
+3. **Sync Indicators**: `dbSynced` flag on localStorage entries tracks sync status
+4. **Merge Logic**: RunHistory merges DB runs with unsynced local runs, avoiding duplicates
 
 ### Session Persistence
 The app supports resuming interrupted runs with the following architecture:

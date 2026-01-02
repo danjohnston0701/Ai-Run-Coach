@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import type { Friend } from "./Profile";
 import { saveActiveRunSession, loadActiveRunSession, clearActiveRunSession, type ActiveRunSession } from "@/lib/activeRunSession";
-import { loadCoachSettings, getVoicePreferences, getTTSVoice, type AiCoachSettings } from "@/lib/coachSettings";
+import { loadCoachSettings, loadCoachSettingsFromProfile, getVoicePreferences, getTTSVoice, type AiCoachSettings } from "@/lib/coachSettings";
 import { calculateTerrainData, shouldTriggerTerrainCoaching, type ElevationPoint, type TerrainData } from "@/lib/elevationTracker";
 import { GpsHelpDialog } from "@/components/GpsHelpDialog";
 
@@ -254,6 +254,10 @@ export default function RunSession() {
   
   const [aiCoachEnabled, setAiCoachEnabled] = useState(true);
   const [coachSettings, setCoachSettings] = useState<AiCoachSettings>(() => loadCoachSettings());
+  
+  useEffect(() => {
+    loadCoachSettingsFromProfile().then(setCoachSettings);
+  }, []);
 
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {

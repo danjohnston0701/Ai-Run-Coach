@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import type { RunData } from "./RunHistory";
 import { loadActiveRunSession, clearActiveRunSession, type ActiveRunSession } from "@/lib/activeRunSession";
-import { loadCoachSettings, saveCoachSettings, type AiCoachSettings, type CoachGender, type CoachAccent, type CoachTone, accentLabels, toneLabels, toneDescriptions, defaultSettings } from "@/lib/coachSettings";
+import { loadCoachSettings, saveCoachSettingsToProfile, loadCoachSettingsFromProfile, type AiCoachSettings, type CoachGender, type CoachAccent, type CoachTone, accentLabels, toneLabels, toneDescriptions, defaultSettings } from "@/lib/coachSettings";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { GpsHelpDialog } from "@/components/GpsHelpDialog";
 import { WeatherWidget } from "@/components/WeatherWidget";
@@ -223,7 +223,7 @@ export default function Home() {
   const [currentGpsAccuracy, setCurrentGpsAccuracy] = useState<number | undefined>(undefined);
 
   useEffect(() => {
-    setCoachSettings(loadCoachSettings());
+    loadCoachSettingsFromProfile().then(setCoachSettings);
   }, []);
 
   useEffect(() => {
@@ -877,10 +877,14 @@ export default function Home() {
               Cancel
             </Button>
             <Button
-              onClick={() => {
-                saveCoachSettings(coachSettings);
+              onClick={async () => {
+                const success = await saveCoachSettingsToProfile(coachSettings);
                 setCoachSettingsOpen(false);
-                toast.success("Coach settings saved!");
+                if (success) {
+                  toast.success("Coach settings saved!");
+                } else {
+                  toast.error("Settings saved locally, but couldn't sync to your account. They'll sync when you're back online.");
+                }
               }}
               data-testid="button-save-coach-settings"
             >
