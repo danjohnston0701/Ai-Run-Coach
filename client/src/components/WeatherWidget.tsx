@@ -28,6 +28,7 @@ interface WeatherWidgetProps {
   lng: number;
   compact?: boolean;
   className?: string;
+  onClick?: () => void;
 }
 
 function getWeatherIcon(condition: string) {
@@ -56,7 +57,7 @@ function formatCurrentTime(): string {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-export function WeatherWidget({ lat, lng, compact = false, className = "" }: WeatherWidgetProps) {
+export function WeatherWidget({ lat, lng, compact = false, className = "", onClick }: WeatherWidgetProps) {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -111,8 +112,9 @@ export function WeatherWidget({ lat, lng, compact = false, className = "" }: Wea
       <motion.div 
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        className={`flex items-center gap-2 bg-black/30 backdrop-blur-sm rounded-full px-3 py-1.5 ${className}`}
+        className={`flex items-center gap-2 bg-black/30 backdrop-blur-sm rounded-full px-3 py-1.5 ${onClick ? 'cursor-pointer hover:bg-black/40 transition-colors' : ''} ${className}`}
         data-testid="weather-widget-compact"
+        onClick={onClick}
       >
         <Clock className="w-4 h-4 text-gray-400" />
         <span className="text-white font-medium">{currentTime}</span>

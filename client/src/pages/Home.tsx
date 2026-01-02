@@ -219,6 +219,7 @@ export default function Home() {
   const [coachSettingsOpen, setCoachSettingsOpen] = useState(false);
   const [coachSettings, setCoachSettings] = useState<AiCoachSettings>(defaultSettings);
   const [showGpsHelp, setShowGpsHelp] = useState(false);
+  const [showWeatherModal, setShowWeatherModal] = useState(false);
   const [currentGpsAccuracy, setCurrentGpsAccuracy] = useState<number | undefined>(undefined);
 
   useEffect(() => {
@@ -1108,6 +1109,17 @@ export default function Home() {
       )}
 
       {userLocation && (
+        <div className="flex justify-center mb-4">
+          <WeatherWidget 
+            lat={userLocation.lat} 
+            lng={userLocation.lng} 
+            compact
+            onClick={() => setShowWeatherModal(true)}
+          />
+        </div>
+      )}
+
+      {userLocation && (
         <motion.div 
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1363,15 +1375,6 @@ export default function Home() {
               </Button>
             </motion.div>
 
-            {userLocation && (
-              <WeatherWidget 
-                lat={userLocation.lat} 
-                lng={userLocation.lng} 
-                compact
-                className="justify-center"
-              />
-            )}
-
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -1447,6 +1450,21 @@ export default function Home() {
         onClose={() => setShowGpsHelp(false)} 
         currentAccuracy={currentGpsAccuracy}
       />
+
+      {showWeatherModal && userLocation && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setShowWeatherModal(false)}
+        >
+          <div onClick={(e) => e.stopPropagation()}>
+            <WeatherWidget 
+              lat={userLocation.lat} 
+              lng={userLocation.lng} 
+              className="max-w-sm"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
