@@ -99,14 +99,33 @@ async function registerPushSubscription(userId: string): Promise<PushResult> {
     console.log('[Push] Got push subscription');
 
     console.log('[Push] Saving subscription to server...');
-    const saveRes = await fetch('/api/push/subscribe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, subscription: subscription.toJSON() }),
-    });
-    
-    if (!saveRes.ok) {
-      console.error('[Push] Failed to save subscription to server');
+    try {
+      const saveRes = await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, subscription: subscription.toJSON() }),
+      });
+      
+      if (!saveRes.ok) {
+        console.error('[Push] Failed to save subscription to server');
+        return { success: false, error: 'failed' };
+      }
+    } catch (fetchError) {
+      // Network error - but subscription might have been saved
+      // Verify by checking subscription status
+      console.warn('[Push] Network error saving subscription, verifying status...');
+      try {
+        const verifyRes = await fetch(`/api/push/subscription-status?userId=${userId}`);
+        if (verifyRes.ok) {
+          const { hasSubscription } = await verifyRes.json();
+          if (hasSubscription) {
+            console.log('[Push] Subscription was saved despite network error');
+            return { success: true };
+          }
+        }
+      } catch (verifyError) {
+        // Ignore verify errors
+      }
       return { success: false, error: 'failed' };
     }
 
@@ -114,6 +133,19 @@ async function registerPushSubscription(userId: string): Promise<PushResult> {
     return { success: true };
   } catch (error) {
     console.error('[Push] Registration failed:', error);
+    // Before failing, verify if subscription was actually saved
+    try {
+      const verifyRes = await fetch(`/api/push/subscription-status?userId=${userId}`);
+      if (verifyRes.ok) {
+        const { hasSubscription } = await verifyRes.json();
+        if (hasSubscription) {
+          console.log('[Push] Subscription exists despite error, treating as success');
+          return { success: true };
+        }
+      }
+    } catch (verifyError) {
+      // Ignore verify errors
+    }
     return { success: false, error: 'failed' };
   }
 }
