@@ -30,17 +30,17 @@ export default function PrivacyPolicy() {
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">1. Who we are</h3>
             <p>
-              This Privacy Policy explains how runcoach.live trading as Run Coach Ai (“we”, “us”) collects, uses, and discloses information when you use our Run Coach Ai application and when you connect third party fitness accounts, specifically and limited to Garmin Connect, Apple Fitness +, Samsung Health and Strava applications and programs.
+              This Privacy Policy explains how airuncoach.live trading as Ai Run Coach (“we”, “us”) collects, uses, and discloses information when you use our Run Coach Ai application and when you connect third party fitness accounts, specifically and limited to Garmin Connect, Apple Fitness +, Samsung Health and Strava applications and programs.
             </p>
             <p>
               If you have questions, you can contact us at:<br />
-              <span className="text-primary font-medium">Email: support@runcoach.live</span>
+              <span className="text-primary font-medium">Email: support@airuncoach.live</span>
             </p>
           </div>
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">2. What data we receive</h3>
-            <p>When you connect your account to AI Run Coach, the provider may share the following categories of data with us, depending on your permissions and device:</p>
+            <p>When you connect your account to Ai Run Coach, the provider may share the following categories of data with us, depending on your permissions and device:</p>
             <ul className="list-disc pl-5 space-y-2">
               <li><strong>Activity data:</strong> workout type (e.g., run), start time, duration, distance, pace, cadence, lap and split information, GPS route points, elevation.</li>
               <li><strong>Physiological data:</strong> heart rate, heart-rate zones, calories.</li>
@@ -51,7 +51,7 @@ export default function PrivacyPolicy() {
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">3. How we use your data</h3>
-            <p>We use your activity data only to provide and improve the AI Run Coach service, including:</p>
+            <p>We use your activity data only to provide and improve the Ai Run Coach service, including:</p>
             <ul className="list-disc pl-5 space-y-2">
               <li>Generating real-time and post-run coaching feedback (e.g., pace and heart-rate guidance).</li>
               <li>Creating summaries of your runs, progress reports, and personalized training suggestions.</li>
@@ -73,7 +73,7 @@ export default function PrivacyPolicy() {
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">5. Retention</h3>
-            <p>We keep your Garmin activity data only for as long as necessary to provide the AI Run Coach service and for legitimate business or legal purposes.</p>
+            <p>We keep your device activity data only for as long as necessary to provide the Ai Run Coach service and for legitimate business or legal purposes.</p>
             <p>If you disconnect your fitness devices or delete your account, we will stop receiving new data and will delete or irreversibly anonymize stored data within a reasonable period.</p>
           </div>
 
@@ -94,7 +94,7 @@ export default function PrivacyPolicy() {
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">8. Children</h3>
-            <p>AI Run Coach is not directed at children under 16. If you believe a child under 16 has provided us data, please contact us for deletion.</p>
+            <p>Ai Run Coach is not directed at children under 16. If you believe a child under 16 has provided us data, please contact us for deletion.</p>
           </div>
 
           <div className="space-y-4 pb-20">
