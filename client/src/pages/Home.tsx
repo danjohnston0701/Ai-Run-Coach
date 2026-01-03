@@ -18,6 +18,7 @@ import { loadCoachSettings, saveCoachSettingsToProfile, loadCoachSettingsFromPro
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { GpsHelpDialog } from "@/components/GpsHelpDialog";
 import { WeatherWidget } from "@/components/WeatherWidget";
+import { useSubscription, hasActiveSubscription } from "@/hooks/useSubscription";
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -222,6 +223,10 @@ export default function Home() {
   const [showWeatherModal, setShowWeatherModal] = useState(false);
   const [currentGpsAccuracy, setCurrentGpsAccuracy] = useState<number | undefined>(undefined);
   const [aiCoachEnabled, setAiCoachEnabled] = useState(true);
+
+  // Subscription check for paywall
+  const { data: subscriptionData } = useSubscription(profile?.id || null);
+  const isSubscribed = hasActiveSubscription(subscriptionData);
 
   useEffect(() => {
     loadCoachSettingsFromProfile().then(setCoachSettings);
@@ -685,6 +690,13 @@ export default function Home() {
   };
 
   const handleMapRun = () => {
+    // Check subscription before allowing route generation
+    if (!isSubscribed) {
+      toast.error("Subscribe to access route generation");
+      setLocation("/pricing");
+      return;
+    }
+    
     // Use GPS location if available, otherwise use custom coordinates
     const lat = userLocation?.lat ?? parseFloat(customLat);
     const lng = userLocation?.lng ?? parseFloat(customLng);

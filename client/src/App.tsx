@@ -20,6 +20,8 @@ import TermsOfUse from "@/pages/TermsOfUse";
 import Login from "@/pages/Login";
 import AdminAIConfig from "@/pages/AdminAIConfig";
 import Routes from "@/pages/Routes";
+import Pricing from "@/pages/Pricing";
+import SubscriptionSuccess from "@/pages/SubscriptionSuccess";
 import { migrateLocalDataToDatabase } from "@/lib/dataMigration";
 
 function ScrollToTop() {
@@ -105,6 +107,8 @@ function Router() {
           <Route path="/notifications" component={Notifications} />
           <Route path="/admin/ai-config" component={AdminAIConfig} />
           <Route path="/routes" component={Routes} />
+          <Route path="/pricing" component={Pricing} />
+          <Route path="/subscription/success" component={SubscriptionSuccess} />
         </>
       )}
       <Route component={NotFound} />

@@ -273,6 +273,28 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Missing required parameters" });
       }
 
+      // Server-side subscription check for defense in depth
+      if (userId) {
+        const user = await storage.getUser(userId);
+        if (user && !user.subscriptionStatus) {
+          // Check Stripe for active subscription
+          try {
+            const { stripeService } = await import("./stripeService");
+            if (user.stripeCustomerId) {
+              const subscriptions = await stripeService.getCustomerSubscriptions(user.stripeCustomerId);
+              if (subscriptions.length === 0) {
+                return res.status(403).json({ error: "Active subscription required to generate routes" });
+              }
+            } else {
+              return res.status(403).json({ error: "Active subscription required to generate routes" });
+            }
+          } catch (stripeError) {
+            console.warn("Could not verify subscription:", stripeError);
+            // Allow through if Stripe check fails - rely on client-side check
+          }
+        }
+      }
+
       if (!isGoogleMapsConfigured()) {
         console.error("Google Maps API key not configured");
         return res.status(503).json({ error: "Route generation service is temporarily unavailable. Please try again later." });
