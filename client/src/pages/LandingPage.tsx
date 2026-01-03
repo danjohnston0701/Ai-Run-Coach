@@ -91,19 +91,20 @@ export default function LandingPage() {
             className="flex flex-col sm:flex-row items-center justify-center gap-4"
           >
             <Button 
+              variant="outline" 
               size="lg" 
-              className="h-16 px-10 text-xl font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] group"
+              className="h-12 px-8 text-base font-display uppercase tracking-widest rounded-full border-primary/50 hover:bg-primary/10 hover:border-primary group"
               onClick={() => setLocation("/login")}
             >
-              Pre-register for launch Updates
-              <ArrowRight className="ml-2 w-6 h-6 group-hover:translate-x-1 transition-transform" />
+              Login / Register
+              <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </Button>
             <Button 
               variant="outline" 
               size="lg" 
-              className="h-16 px-10 text-xl font-display uppercase tracking-widest border-white/10 hover:bg-white/5"
+              className="h-12 px-8 text-base font-display uppercase tracking-widest rounded-full border-white/10 hover:bg-white/5"
             >
-              Watch Video
+              Watch Demo
             </Button>
           </motion.div>
         </div>
@@ -151,11 +152,13 @@ export default function LandingPage() {
           <h2 className="text-5xl font-display font-black uppercase tracking-tighter">Ready to evolve?</h2>
           <p className="text-muted-foreground text-lg">Join thousands of runners using AI to break their personal bests.</p>
           <Button 
+            variant="outline"
             size="lg" 
-            className="h-16 px-12 text-xl font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_40px_rgba(6,182,212,0.5)]"
+            className="h-12 px-8 text-base font-display uppercase tracking-widest rounded-full border-primary/50 hover:bg-primary/10 hover:border-primary"
             onClick={() => setLocation("/login")}
           >
-            Pre-Register Today
+            Login / Register
+            <ArrowRight className="ml-2 w-5 h-5" />
           </Button>
         </div>
       </section>
