@@ -323,6 +323,18 @@ export default function RunSession() {
   } | null>(null);
   
   const positionsRef = useRef<Position[]>([]);
+  
+  // GPS drift filter: sliding window buffer
+  interface WindowSegment {
+    lat: number;
+    lng: number;
+    timestamp: number;
+    accuracy: number;
+    deltaDist: number;
+    bearing: number;
+  }
+  const windowBufferRef = useRef<WindowSegment[]>([]);
+  const bufferedDistanceRef = useRef(0);
   const recognitionRef = useRef<any>(null);
   const watchIdRef = useRef<number | null>(null);
   const speechSynthRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -743,25 +755,68 @@ export default function RunSession() {
         const speedKmh = timeDiff > 0 ? (segmentDistance / timeDiff) * 3600 : 0;
         const speedMs = speedKmh / 3.6;
         
-        // Filter settings - tuned to reject GPS drift while accepting real movement
-        const minDist = 0.005; // 5m minimum to filter GPS jitter (increased from 2m)
-        const maxDist = 0.15;  // 150m max to filter GPS jumps
-        const maxSpeed = 35;   // 35 km/h max (sprinting speed)
-        const maxTimeDiff = 30;
+        // GPS DRIFT FILTER with sliding window
+        const accuracy = position.coords.accuracy;
+        const distanceMeters = segmentDistance * 1000;
         
-        // Require minimum speed of 1.0 m/s (~3.6 km/h) to filter stationary drift
-        // This is slow walking pace - anything slower is likely GPS jitter
-        const minSpeedMs = 1.0;
-        const isActuallyMoving = speedMs >= minSpeedMs;
+        // Per-segment filters: reject bad samples
+        if (accuracy > 20 || timeDiff > 8 || distanceMeters < 1 || distanceMeters > 50 || speedMs > 8) {
+          return;
+        }
         
-        const isValidSegment = segmentDistance > minDist && segmentDistance < maxDist && speedKmh < maxSpeed && timeDiff < maxTimeDiff;
+        // Add to window buffer
+        const now = Date.now();
+        windowBufferRef.current.push({
+          lat: newPos.lat,
+          lng: newPos.lng,
+          timestamp: now,
+          accuracy,
+          deltaDist: segmentDistance,
+          bearing: getBearing(lastPos.lat, lastPos.lng, newPos.lat, newPos.lng)
+        });
         
-        if (isActuallyMoving && isValidSegment) {
-          setDistance(d => d + segmentDistance);
+        // Keep 15 second window
+        windowBufferRef.current = windowBufferRef.current.filter(s => now - s.timestamp < 15000);
+        bufferedDistanceRef.current += segmentDistance;
+        
+        const buffer = windowBufferRef.current;
+        if (buffer.length < 4) return; // Need at least 4 samples
+        
+        // Calculate window metrics
+        const first = buffer[0];
+        const last = buffer[buffer.length - 1];
+        const elapsedTime = (last.timestamp - first.timestamp) / 1000;
+        const totalPath = buffer.reduce((sum, s) => sum + s.deltaDist, 0);
+        const netDisplacement = haversineDistance(first.lat, first.lng, last.lat, last.lng);
+        
+        // KEY: Net displacement must exceed GPS accuracy significantly
+        // This is the critical check - real movement goes somewhere, drift oscillates
+        const avgAccuracy = buffer.reduce((sum, s) => sum + s.accuracy, 0) / buffer.length;
+        const netExceedsAccuracy = netDisplacement * 1000 > avgAccuracy * 1.5; // Net > 1.5x accuracy
+        
+        // Speed check
+        const meanSpeed = elapsedTime > 0 ? (totalPath * 1000) / elapsedTime : 0;
+        const hasMinSpeed = meanSpeed >= 0.8; // 0.8 m/s minimum
+        
+        // Efficiency check (less strict)
+        const efficiency = totalPath > 0.001 ? netDisplacement / totalPath : 0;
+        const hasMinEfficiency = efficiency >= 0.3; // 30% minimum
+        
+        // Time check
+        const hasEnoughTime = elapsedTime >= 5;
+        
+        if (hasEnoughTime && hasMinSpeed && hasMinEfficiency && netExceedsAccuracy) {
+          // Commit buffered distance
+          setDistance(d => d + bufferedDistanceRef.current);
           lastMovementTimeRef.current = Date.now();
-          console.log(`Distance updated: +${(segmentDistance * 1000).toFixed(1)}m, speed: ${speedKmh.toFixed(1)}km/h`);
-        } else if (segmentDistance > 0.003) {
-          console.log(`Distance skipped: ${(segmentDistance * 1000).toFixed(1)}m, speed: ${speedKmh.toFixed(1)}km/h (moving: ${isActuallyMoving}, valid: ${isValidSegment})`);
+          console.log(`+${(bufferedDistanceRef.current * 1000).toFixed(0)}m confirmed (net=${(netDisplacement * 1000).toFixed(0)}m, acc=${avgAccuracy.toFixed(0)}m, eff=${(efficiency * 100).toFixed(0)}%)`);
+          windowBufferRef.current = [];
+          bufferedDistanceRef.current = 0;
+        } else if (elapsedTime >= 25) {
+          // Timeout - purge as drift
+          console.log(`Drift purged: ${(bufferedDistanceRef.current * 1000).toFixed(0)}m (net=${(netDisplacement * 1000).toFixed(0)}m < ${(avgAccuracy * 1.5).toFixed(0)}m threshold)`);
+          windowBufferRef.current = [];
+          bufferedDistanceRef.current = 0;
         }
       }
       
@@ -2002,8 +2057,8 @@ export default function RunSession() {
           </div>
           <div>
              <div className="text-muted-foreground text-[8px] uppercase tracking-wider">Cadence</div>
-             <div className={`text-base font-display font-bold ${cadence >= 165 && cadence <= 185 ? 'text-green-400' : cadence > 0 ? 'text-yellow-400' : ''}`}>
-               {cadence > 0 ? cadence : '--'}
+             <div className={`text-base font-display font-bold ${cadence >= 165 && cadence <= 185 ? 'text-green-400' : cadence >= 60 ? 'text-yellow-400' : ''}`}>
+               {cadence >= 60 ? cadence : '--'}
              </div>
              <div className="text-[8px] text-muted-foreground">spm</div>
           </div>
