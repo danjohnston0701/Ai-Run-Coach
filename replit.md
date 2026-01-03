@@ -128,6 +128,34 @@ The app supports resuming interrupted runs with the following architecture:
 - **Resume Flow**: Home page displays a resume banner when an active session exists, allowing users to continue where they left off
 - **Metadata Tracking**: sessionMetadataRef in RunSession tracks route parameters (targetDistance, levelId, startLat/Lng, routeName, routeId) separately from real-time GPS tracking
 
+### Subscription & Payment System
+Stripe integration for subscription-based access to premium features:
+
+1. **Subscription Tiers**: 
+   - Basic ($4.99/mo): AI route generation, GPS tracking, run history
+   - Pro ($9.99/mo): All Basic features + real-time AI coaching, live sharing, advanced analytics
+
+2. **Architecture**:
+   - `server/stripeClient.ts`: Stripe SDK initialization using Replit connection API
+   - `server/stripeService.ts`: Service layer for Stripe operations (customers, subscriptions, checkout)
+   - `server/webhookHandlers.ts`: Webhook processing for subscription events
+
+3. **Paywall Implementation**:
+   - Client-side: `useSubscription` hook checks subscription status, redirects to pricing page
+   - Server-side: `/api/routes/generate-options` validates subscription before route generation
+   - Defense in depth: Both client and server enforce subscription requirements
+
+4. **User Schema Fields**:
+   - `stripeCustomerId`: Stripe customer ID for the user
+   - `stripeSubscriptionId`: Active subscription ID
+   - `subscriptionTier`: Current tier (basic/pro)
+   - `subscriptionStatus`: Subscription state (active/trialing/cancelled)
+
+Key files:
+- `client/src/pages/Pricing.tsx`: Plan selection and checkout flow
+- `client/src/pages/SubscriptionSuccess.tsx`: Post-checkout success page
+- `client/src/hooks/useSubscription.ts`: Subscription status hook
+
 ### Key Design Patterns
 - **Monorepo Structure**: Client code in `/client`, server in `/server`, shared types in `/shared`
 - **Path Aliases**: `@/` for client src, `@shared/` for shared code, `@assets/` for attached assets
@@ -164,6 +192,7 @@ Users can share run summaries to Facebook and Instagram with branded images:
 - **OpenAI API**: Powers AI coaching advice, route waypoint design, and run performance analysis (requires `OPENAI_API_KEY`)
 - **Google Maps API**: Provides Places API (parks/POIs), Directions API (walking routes), and Elevation API (terrain data) for route generation (requires `GOOGLE_MAPS_API_KEY`)
 - **OpenStreetMap**: Tile provider for Leaflet maps (no API key required)
+- **Stripe**: Payment processing for subscriptions (configured via Replit Connector)
 
 ### Database
 - **PostgreSQL**: Primary database (requires `DATABASE_URL` environment variable)

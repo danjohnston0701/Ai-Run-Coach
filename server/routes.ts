@@ -276,21 +276,27 @@ export async function registerRoutes(
       // Server-side subscription check for defense in depth
       if (userId) {
         const user = await storage.getUser(userId);
-        if (user && !user.subscriptionStatus) {
-          // Check Stripe for active subscription
-          try {
-            const { stripeService } = await import("./stripeService");
-            if (user.stripeCustomerId) {
-              const subscriptions = await stripeService.getCustomerSubscriptions(user.stripeCustomerId);
-              if (subscriptions.length === 0) {
+        if (user) {
+          // If user has active subscription status stored, allow through
+          if (user.subscriptionStatus === 'active' || user.subscriptionStatus === 'trialing') {
+            // Subscription is valid, continue
+          } else {
+            // Check Stripe for active subscription
+            try {
+              const { stripeService } = await import("./stripeService");
+              if (user.stripeCustomerId) {
+                const subscriptions = await stripeService.getCustomerSubscriptions(user.stripeCustomerId);
+                if (subscriptions.length === 0) {
+                  return res.status(403).json({ error: "Active subscription required to generate routes" });
+                }
+              } else {
                 return res.status(403).json({ error: "Active subscription required to generate routes" });
               }
-            } else {
-              return res.status(403).json({ error: "Active subscription required to generate routes" });
+            } catch (stripeError) {
+              console.error("Could not verify subscription:", stripeError);
+              // Fail securely - don't allow through if we can't verify subscription
+              return res.status(503).json({ error: "Could not verify subscription status. Please try again." });
             }
-          } catch (stripeError) {
-            console.warn("Could not verify subscription:", stripeError);
-            // Allow through if Stripe check fails - rely on client-side check
           }
         }
       }
