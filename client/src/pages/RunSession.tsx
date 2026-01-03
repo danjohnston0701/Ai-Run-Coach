@@ -668,17 +668,27 @@ export default function RunSession() {
     processNavQueue();
   }, [coachSettings, speakWithDeviceTTS, playNavAudio, aiCoachEnabled]);
 
-  const speak = useCallback((text: string, force: boolean = false) => {
-    console.log("speak() called with:", text, "audioEnabled:", audioEnabled, "force:", force);
+  // Domain types: 'coach' (AI coaching), 'nav' (navigation), 'system' (run control)
+  // When aiCoachEnabled is OFF, 'coach' domain is blocked, others continue
+  const speak = useCallback((text: string, options: { force?: boolean; domain?: 'coach' | 'nav' | 'system' } = {}) => {
+    const { force = false, domain = 'coach' } = options;
+    console.log("speak() called with:", text.substring(0, 40), "domain:", domain, "aiCoachEnabled:", aiCoachEnabled);
+    
+    // Block coaching speech when AI coach is disabled (unless forced)
+    if (!force && domain === 'coach' && !aiCoachEnabled) {
+      console.log("Speech blocked: AI coach disabled");
+      return;
+    }
+    
     if (!force && !audioEnabled) {
       console.log("Speech blocked: audio disabled");
       return;
     }
     
-    // Throttle navigation speech - minimum 3 seconds between calls
+    // Throttle speech - minimum 3 seconds between calls (except forced)
     const now = Date.now();
     if (now - lastNavSpeakTimeRef.current < 3000 && !force) {
-      console.log("Navigation speech throttled");
+      console.log("Speech throttled");
       return;
     }
     lastNavSpeakTimeRef.current = now;
@@ -686,7 +696,7 @@ export default function RunSession() {
     // Add to queue and process
     navSpeakQueueRef.current.push(text);
     processNavQueue();
-  }, [audioEnabled, processNavQueue]);
+  }, [audioEnabled, aiCoachEnabled, processNavQueue]);
 
   useEffect(() => {
     if (!('geolocation' in navigator)) {
@@ -857,7 +867,7 @@ export default function RunSession() {
     if (gpsStatus !== "active" || !currentPosition || initialAnnouncementMadeRef.current) return;
     if (isResuming) {
       initialAnnouncementMadeRef.current = true;
-      speak("Welcome back! Resuming your run.");
+      speak("Welcome back! Resuming your run.", { domain: 'system' });
       return;
     }
     
@@ -873,7 +883,7 @@ export default function RunSession() {
         routePoints,
         metadata.targetDistance
       ).then(announcement => {
-        speak(announcement);
+        speak(announcement, { domain: 'coach' });
       });
     };
     
@@ -913,7 +923,7 @@ export default function RunSession() {
         if (response.ok) {
           const data = await response.json();
           if (data.summary && typeof data.summary === 'string') {
-            speak(data.summary);
+            speak(data.summary, { domain: 'coach' });
             return;
           }
         }
@@ -967,7 +977,7 @@ export default function RunSession() {
     
     const remainingPoints = routePoints.length - nearestIndex;
     if (remainingPoints < 15 && nearestDistance < 0.1) {
-      speak("You're approaching the finish. Great job!");
+      speak("You're approaching the finish. Great job!", { domain: 'coach' });
       setMessage("Almost there! Finish strong!");
       setLastDirectionTime(now);
       setLastMessageTime(now);
@@ -980,7 +990,7 @@ export default function RunSession() {
       const direction = bearingToCardinal(bearing);
       const distMeters = Math.round(nearestDistance * 1000);
       const instruction = `You're ${distMeters} meters off route. Head ${direction} to get back on track.`;
-      speak(instruction);
+      speak(instruction, { domain: 'nav' });
       setMessage(instruction);
       setLastDirectionTime(now);
       setLastMessageTime(now);
@@ -1011,7 +1021,7 @@ export default function RunSession() {
           return;
         }
         lastNavInstructionRef.current = instruction;
-        speak(instruction);
+        speak(instruction, { domain: 'nav' });
         setMessage(instruction);
         setLastDirectionTime(now);
         setLastMessageTime(now);
@@ -1025,7 +1035,7 @@ export default function RunSession() {
           return;
         }
         lastNavInstructionRef.current = instruction;
-        speak(instruction);
+        speak(instruction, { domain: 'nav' });
         setMessage(instruction);
         setLastDirectionTime(now);
         setLastMessageTime(now);
@@ -1040,7 +1050,7 @@ export default function RunSession() {
       if (Date.now() - lastMessageTime > 30000 && gpsStatus === "active") {
         const randomMsg = COACH_MESSAGES[Math.floor(Math.random() * COACH_MESSAGES.length)];
         setMessage(randomMsg);
-        speak(randomMsg);
+        speak(randomMsg, { domain: 'coach' });
         setLastMessageTime(Date.now());
       }
     }, 20000);
@@ -1257,7 +1267,7 @@ export default function RunSession() {
       
       announcement += motivation;
       
-      speak(announcement);
+      speak(announcement, { domain: 'coach' });
       setMessage(`${currentKm}km - ${thisKmMins}:${thisKmSecs.toString().padStart(2, '0')} split`);
       setLastMessageTime(Date.now());
     }
@@ -1452,7 +1462,7 @@ export default function RunSession() {
           // Use speak() with force=true for user questions to bypass all checks
           if (userMessage) {
             console.log("User question - forcing speech response");
-            speak(coachMessage.trim(), true);
+            speak(coachMessage.trim(), { force: true, domain: 'coach' });
           } else {
             speakCoaching(coachMessage.trim());
           }
@@ -1529,13 +1539,13 @@ export default function RunSession() {
         const newPref = "Only speak when the runner asks a question. Stay silent otherwise.";
         setCoachPreferences(newPref);
         localStorage.setItem("coachPreferences", newPref);
-        speak("Got it. I'll only speak when you ask me something.");
+        speak("Got it. I'll only speak when you ask me something.", { domain: 'system' });
         toast.success("Coach set to silent mode");
       } else if (lowerTranscript.includes("talk to me") || lowerTranscript.includes("normal mode") || 
                  lowerTranscript.includes("coach me") || lowerTranscript.includes("give me feedback")) {
         setCoachPreferences("");
         localStorage.removeItem("coachPreferences");
-        speak("Okay! I'll give you regular coaching updates.");
+        speak("Okay! I'll give you regular coaching updates.", { domain: 'system' });
         toast.success("Regular coaching enabled");
       } else {
         fetchCoaching(transcript);
@@ -1783,14 +1793,14 @@ export default function RunSession() {
       setShowPauseConfirmation(true);
     } else {
       setActive(true);
-      speak("Let's go! Run resumed.");
+      speak("Let's go! Run resumed.", { domain: 'system' });
     }
   };
 
   const confirmPause = () => {
     setShowPauseConfirmation(false);
     setActive(false);
-    speak("Run paused. Take a breather.");
+    speak("Run paused. Take a breather.", { domain: 'system' });
   };
 
   const confirmStop = async () => {
@@ -1806,7 +1816,7 @@ export default function RunSession() {
     clearActiveRunSession();
     if (time > 0 && distance > 0) {
       const runId = await saveRunData();
-      speak("Run complete! Great job!");
+      speak("Run complete! Great job!", { domain: 'system' });
       setLocation(`/history/${runId}`);
     } else {
       setLocation("/");
