@@ -24,7 +24,6 @@ import { calculateTerrainData, shouldTriggerTerrainCoaching, type ElevationPoint
 import { GpsHelpDialog } from "@/components/GpsHelpDialog";
 
 import coachAvatar from "@assets/generated_images/glowing_ai_voice_sphere_interface.png";
-import appLogo from "@assets/generated_images/modern_minimalist_fitness_app_logo.png";
 
 interface RouteData {
   id: string;
@@ -1816,10 +1815,6 @@ export default function RunSession() {
 
   return (
     <div className="h-screen w-full bg-background text-foreground flex flex-col relative overflow-hidden font-sans select-none">
-      <div className="absolute inset-0 z-0 flex items-center justify-center opacity-10">
-        <img src={appLogo} className="w-64 h-64 object-contain" alt="AI Run Coach" />
-      </div>
-
       <AnimatePresence>
         {showShareModal && (
           <motion.div 
@@ -1989,46 +1984,8 @@ export default function RunSession() {
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-4">
-        <div className="relative flex flex-col items-center">
-           <div className={`absolute inset-0 bg-primary/20 blur-3xl rounded-full transition-all duration-1000 ${active ? 'scale-110 opacity-100' : 'scale-90 opacity-50'}`} />
-           <img 
-              src={coachAvatar} 
-              className="w-28 h-28 rounded-full border-2 border-primary/20 shadow-[0_0_30px_rgba(6,182,212,0.3)] object-cover relative z-10"
-              alt="AI Coach"
-            />
-            
-            <AnimatePresence>
-              {message && (
-                <motion.div 
-                  initial={{ opacity: 0, y: 5, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -5, scale: 0.95 }}
-                  className="mt-2 w-64 bg-card/80 backdrop-blur-xl border border-primary/30 px-3 py-2 rounded-xl text-center shadow-2xl relative z-20"
-                >
-                  <p className="text-primary font-medium text-xs leading-relaxed">"{message}"</p>
-                  {currentGpsAccuracy && currentGpsAccuracy > 100 && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowGpsHelp(true)}
-                      className="mt-1.5 text-[10px] h-6 px-3 border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10"
-                      data-testid="button-gps-help-run"
-                    >
-                      GPS Help
-                    </Button>
-                  )}
-                </motion.div>
-              )}
-            </AnimatePresence>
-        </div>
-        
-        <div className="mt-2">
-          <VoiceVisualizer isActive={active && !!message} />
-        </div>
-      </div>
-
-      <div className="relative z-10 bg-card/40 backdrop-blur-xl border-t border-white/10 rounded-t-xl p-2 pb-3 mt-auto flex-shrink-0">
+      {/* Stats and Controls - TOP section */}
+      <div className="relative z-10 bg-card/40 backdrop-blur-xl border-b border-white/10 rounded-b-xl p-2 flex-shrink-0">
         <div className="grid grid-cols-4 gap-1 mb-2 text-center">
           <div>
             <div className="text-muted-foreground text-[8px] uppercase tracking-wider">Time</div>
@@ -2086,6 +2043,46 @@ export default function RunSession() {
           >
             <Navigation className="w-3 h-3" />
           </Button>
+        </div>
+      </div>
+
+      {/* AI Coach - BOTTOM section */}
+      <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-4">
+        <div className="relative flex flex-col items-center">
+           <div className={`absolute inset-0 bg-primary/20 blur-3xl rounded-full transition-all duration-1000 ${active ? 'scale-110 opacity-100' : 'scale-90 opacity-50'}`} />
+           <img 
+              src={coachAvatar} 
+              className="w-28 h-28 rounded-full border-2 border-primary/20 shadow-[0_0_30px_rgba(6,182,212,0.3)] object-cover relative z-10"
+              alt="AI Coach"
+            />
+            
+            <AnimatePresence>
+              {message && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 5, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -5, scale: 0.95 }}
+                  className="mt-2 w-64 bg-card/80 backdrop-blur-xl border border-primary/30 px-3 py-2 rounded-xl text-center shadow-2xl relative z-20"
+                >
+                  <p className="text-primary font-medium text-xs leading-relaxed">"{message}"</p>
+                  {currentGpsAccuracy && currentGpsAccuracy > 100 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowGpsHelp(true)}
+                      className="mt-1.5 text-[10px] h-6 px-3 border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10"
+                      data-testid="button-gps-help-run"
+                    >
+                      GPS Help
+                    </Button>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+        </div>
+        
+        <div className="mt-2">
+          <VoiceVisualizer isActive={active && !!message} />
         </div>
       </div>
 
