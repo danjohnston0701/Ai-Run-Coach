@@ -1852,8 +1852,8 @@ export default function RunSession() {
         )}
       </AnimatePresence>
 
-      <div className="relative z-10 p-3 flex justify-between items-start">
-        <div className="flex gap-2 items-center">
+      <div className="relative z-10 p-2 flex justify-between items-start">
+        <div className="flex flex-col gap-1">
           <div className={`backdrop-blur-md rounded-lg px-2 py-1 border flex items-center gap-1.5 ${
             gpsStatus === "active" ? "bg-green-500/20 border-green-500/30" :
             gpsStatus === "error" ? "bg-red-500/20 border-red-500/30" :
@@ -1866,6 +1866,20 @@ export default function RunSession() {
             }`} />
             <span className="text-[10px] font-bold uppercase">
               {gpsStatus === "active" ? "GPS" : gpsStatus === "error" ? "!" : "..."}
+            </span>
+          </div>
+          <div 
+            onClick={() => setAiCoachEnabled(!aiCoachEnabled)}
+            className={`backdrop-blur-md rounded-lg px-2 py-1 border flex items-center gap-1.5 cursor-pointer transition-colors ${
+              aiCoachEnabled 
+                ? "bg-blue-500/20 border-blue-500/30" 
+                : "bg-white/10 border-white/10"
+            }`}
+            data-testid="button-ai-coach-toggle"
+          >
+            {aiCoachEnabled ? <Mic className="w-3 h-3 text-blue-400" /> : <MicOff className="w-3 h-3 text-muted-foreground" />}
+            <span className={`text-[10px] font-bold uppercase ${aiCoachEnabled ? 'text-blue-400' : 'text-muted-foreground'}`}>
+              Coach {aiCoachEnabled ? 'On' : 'Off'}
             </span>
           </div>
           {sharedWith.length > 0 && (
@@ -1882,95 +1896,82 @@ export default function RunSession() {
             </motion.div>
           )}
         </div>
-        <div className="flex flex-wrap gap-1.5 justify-end max-w-[200px]">
+        <div className="flex gap-1.5">
           <Button
             onClick={() => setAudioEnabled(!audioEnabled)}
             size="icon"
-            className={`h-8 w-8 rounded-lg ${audioEnabled ? "bg-primary text-background" : "bg-white/10 text-muted-foreground"}`}
+            className={`h-7 w-7 rounded-lg ${audioEnabled ? "bg-primary text-background" : "bg-white/10 text-muted-foreground"}`}
             data-testid="button-audio-toggle"
           >
-            {audioEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
-          </Button>
-          <Button
-            onClick={() => setAiCoachEnabled(!aiCoachEnabled)}
-            size="icon"
-            className={`h-8 w-8 rounded-lg ${
-              aiCoachEnabled 
-                ? "bg-blue-500 text-white border border-blue-400" 
-                : "bg-white/10 text-muted-foreground"
-            } ${isCoaching ? "animate-pulse" : ""}`}
-            data-testid="button-ai-coach-toggle"
-          >
-            {aiCoachEnabled ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
+            {audioEnabled ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
           </Button>
           <Button
             onClick={isListening ? stopListening : startListening}
             size="icon"
-            className={`h-8 w-8 rounded-lg ${
+            className={`h-7 w-7 rounded-lg ${
               isListening 
                 ? "bg-red-500 text-white border border-red-400 animate-pulse" 
                 : "bg-purple-500/20 text-purple-400 border border-purple-500/30"
             }`}
             data-testid="button-talk-to-coach"
           >
-            <MessageCircle className="w-3.5 h-3.5" />
+            <MessageCircle className="w-3 h-3" />
           </Button>
           {(motionPermission === "unknown" || motionPermission === "denied") && typeof (DeviceMotionEvent as any).requestPermission === 'function' && (
             <Button
               onClick={requestMotionPermission}
               size="icon"
-              className={`h-8 w-8 rounded-lg ${
+              className={`h-7 w-7 rounded-lg ${
                 motionPermission === "denied" 
                   ? "bg-red-500/20 text-red-400 border border-red-500/30"
                   : "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30"
               }`}
               data-testid="button-enable-cadence"
-              title={motionPermission === "denied" ? "Cadence disabled - tap to retry" : "Enable cadence tracking"}
             >
-              <Footprints className="w-3.5 h-3.5" />
+              <Footprints className="w-3 h-3" />
             </Button>
           )}
           <Button
             onClick={() => setShowShareModal(true)}
             size="icon"
-            className={`h-8 w-8 rounded-lg ${
+            className={`h-7 w-7 rounded-lg ${
               sharedWith.length > 0 
                 ? "bg-green-500 text-white border border-green-300" 
                 : "bg-primary text-background hover:bg-primary/90"
             }`}
           >
-            <Share2 className="w-3.5 h-3.5" />
+            <Share2 className="w-3 h-3" />
           </Button>
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-4 min-h-0 py-1">
-        <div className="relative mb-1 flex-shrink-1 min-h-0 flex flex-col items-center">
+      <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-4 min-h-0 overflow-hidden">
+        <div className="relative flex-shrink-0 flex flex-col items-center">
            <div className={`absolute inset-0 bg-primary/20 blur-3xl rounded-full transition-all duration-1000 ${active ? 'scale-110 opacity-100' : 'scale-90 opacity-50'}`} />
            <img 
               src={coachAvatar} 
-              className="w-24 h-24 sm:w-32 sm:h-32 rounded-full border-4 border-primary/20 shadow-[0_0_50px_rgba(6,182,212,0.3)] object-cover relative z-10 transition-all duration-500"
+              className="w-20 h-20 rounded-full border-2 border-primary/20 shadow-[0_0_30px_rgba(6,182,212,0.3)] object-cover relative z-10"
               alt="AI Coach"
             />
             
             <AnimatePresence>
               {message && (
                 <motion.div 
-                  initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                  initial={{ opacity: 0, y: 5, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -5, scale: 0.9 }}
-                  className="mt-2 w-64 bg-card/80 backdrop-blur-xl border border-primary/30 p-2 rounded-xl text-center shadow-2xl relative z-20"
+                  exit={{ opacity: 0, y: -5, scale: 0.95 }}
+                  className="mt-1.5 w-56 bg-card/80 backdrop-blur-xl border border-primary/30 px-2 py-1.5 rounded-lg text-center shadow-2xl relative z-20"
                 >
-                  <p className="text-primary font-medium text-[11px] leading-relaxed">"{message}"</p>
+                  <p className="text-primary font-medium text-[10px] leading-tight">"{message}"</p>
                   {currentGpsAccuracy && currentGpsAccuracy > 100 && (
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => setShowGpsHelp(true)}
-                      className="mt-2 text-xs h-7 px-3 border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10"
+                      className="mt-1 text-[9px] h-5 px-2 border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10"
                       data-testid="button-gps-help-run"
                     >
-                      Need Help with GPS?
+                      GPS Help
                     </Button>
                   )}
                 </motion.div>
@@ -1978,68 +1979,68 @@ export default function RunSession() {
             </AnimatePresence>
         </div>
         
-        <div className="mt-1">
+        <div className="mt-1 scale-75">
           <VoiceVisualizer isActive={active && !!message} />
         </div>
       </div>
 
-      <div className="relative z-10 bg-card/40 backdrop-blur-xl border-t border-white/10 rounded-t-2xl p-3 pb-4 mt-auto flex-shrink-0">
-        <div className="grid grid-cols-4 gap-1 mb-3 text-center">
+      <div className="relative z-10 bg-card/40 backdrop-blur-xl border-t border-white/10 rounded-t-xl p-2 pb-3 mt-auto flex-shrink-0">
+        <div className="grid grid-cols-4 gap-1 mb-2 text-center">
           <div>
-            <div className="text-muted-foreground text-[9px] uppercase tracking-wider">Time</div>
-            <div className="text-lg font-display font-bold">{formatTime(time)}</div>
+            <div className="text-muted-foreground text-[8px] uppercase tracking-wider">Time</div>
+            <div className="text-base font-display font-bold">{formatTime(time)}</div>
           </div>
           <div className="border-x border-white/10">
-             <div className="text-muted-foreground text-[9px] uppercase tracking-wider">Distance</div>
-             <div className="text-lg font-display font-bold">{distance.toFixed(2)}</div>
-             <div className="text-[9px] text-muted-foreground">km</div>
+             <div className="text-muted-foreground text-[8px] uppercase tracking-wider">Distance</div>
+             <div className="text-base font-display font-bold">{distance.toFixed(2)}</div>
+             <div className="text-[8px] text-muted-foreground">km</div>
           </div>
           <div className="border-r border-white/10">
-             <div className="text-muted-foreground text-[9px] uppercase tracking-wider">Pace</div>
-             <div className="text-lg font-display font-bold">{calculatePace()}</div>
-             <div className="text-[9px] text-muted-foreground">/km</div>
+             <div className="text-muted-foreground text-[8px] uppercase tracking-wider">Pace</div>
+             <div className="text-base font-display font-bold">{calculatePace()}</div>
+             <div className="text-[8px] text-muted-foreground">/km</div>
           </div>
           <div>
-             <div className="text-muted-foreground text-[9px] uppercase tracking-wider">Cadence</div>
-             <div className={`text-lg font-display font-bold ${cadence >= 165 && cadence <= 185 ? 'text-green-400' : cadence > 0 ? 'text-yellow-400' : ''}`}>
+             <div className="text-muted-foreground text-[8px] uppercase tracking-wider">Cadence</div>
+             <div className={`text-base font-display font-bold ${cadence >= 165 && cadence <= 185 ? 'text-green-400' : cadence > 0 ? 'text-yellow-400' : ''}`}>
                {cadence > 0 ? cadence : '--'}
              </div>
-             <div className="text-[9px] text-muted-foreground">spm</div>
+             <div className="text-[8px] text-muted-foreground">spm</div>
           </div>
         </div>
 
-        <div className="flex items-center justify-center gap-3">
+        <div className="flex items-center justify-center gap-2">
           <Button 
             variant="outline" 
             size="icon" 
-            className="w-10 h-10 rounded-full border-white/10 hover:bg-white/10 hover:border-white/20"
+            className="w-9 h-9 rounded-full border-white/10 hover:bg-white/10 hover:border-white/20"
             onClick={handleStopClick}
             data-testid="button-stop"
           >
-            <Square className="w-3.5 h-3.5 fill-foreground" />
+            <Square className="w-3 h-3 fill-foreground" />
           </Button>
           
           <Button 
             size="icon" 
-            className={`w-14 h-14 rounded-full transition-transform active:scale-95 ${
+            className={`w-12 h-12 rounded-full transition-transform active:scale-95 ${
               active 
-                ? "bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)]" 
-                : "bg-green-500 text-white hover:bg-green-600 shadow-[0_0_30px_rgba(34,197,94,0.4)]"
+                ? "bg-primary text-background hover:bg-primary/90 shadow-[0_0_20px_rgba(6,182,212,0.4)]" 
+                : "bg-green-500 text-white hover:bg-green-600 shadow-[0_0_20px_rgba(34,197,94,0.4)]"
             }`}
             onClick={handlePauseClick}
             data-testid="button-toggle-play"
           >
-            {active ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-1" />}
+            {active ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
           </Button>
           
           <Button 
             variant="outline" 
             size="icon" 
-            className="w-10 h-10 rounded-full border-primary/50 bg-primary/10 hover:bg-primary/20 text-primary"
+            className="w-9 h-9 rounded-full border-primary/50 bg-primary/10 hover:bg-primary/20 text-primary"
             onClick={openGoogleMapsNavigation}
             data-testid="button-google-navigation"
           >
-            <Navigation className="w-3.5 h-3.5" />
+            <Navigation className="w-3 h-3" />
           </Button>
         </div>
       </div>
