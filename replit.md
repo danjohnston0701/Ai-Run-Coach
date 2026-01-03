@@ -76,6 +76,22 @@ Key files:
 - `client/src/components/WeatherWidget.tsx`: Reusable weather display component
 - Weather displayed on Homepage and Run Insights page
 
+### AI Coach Toggle System
+Users can enable/disable the AI Coach before and during runs:
+1. **Toggle Locations**: Available on Home page (before "Start Run Without Route") and RoutePreview page (before "Start Run" after selecting a route)
+2. **Default State**: AI Coach is ON by default
+3. **Parameter Passing**: Toggle state passed via URL param `aiCoach=on/off` to RunSession
+4. **Session Persistence**: Toggle state saved with active run session, restored on resume
+5. **Behavior When OFF**:
+   - No data sent to OpenAI API (no coaching advice requests)
+   - Route navigation audio uses device's built-in text-to-speech (Web Speech API) instead of OpenAI TTS
+   - Periodic coaching cycles are skipped entirely
+
+Key files:
+- `client/src/pages/Home.tsx`: AI Coach toggle in session options section
+- `client/src/pages/RoutePreview.tsx`: AI Coach toggle above Start Run button
+- `client/src/pages/RunSession.tsx`: processNavQueue checks aiCoachEnabled before calling OpenAI
+
 ### Data Storage
 - **Database**: PostgreSQL (configured via DATABASE_URL environment variable)
 - **Schema Location**: `shared/schema.ts` - contains tables for users, pre-registrations, friends, routes, runs, live sessions, and Garmin data
