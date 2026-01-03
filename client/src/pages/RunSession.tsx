@@ -744,14 +744,14 @@ export default function RunSession() {
         const speedMs = speedKmh / 3.6;
         
         // Filter settings - tuned to reject GPS drift while accepting real movement
-        const minDist = 0.002; // 2m minimum to filter tiny GPS jitter
+        const minDist = 0.005; // 5m minimum to filter GPS jitter (increased from 2m)
         const maxDist = 0.15;  // 150m max to filter GPS jumps
         const maxSpeed = 35;   // 35 km/h max (sprinting speed)
         const maxTimeDiff = 30;
         
-        // Require minimum speed of 0.5 m/s (~1.8 km/h) to filter stationary drift
-        // This is slower than walking but faster than GPS jitter
-        const minSpeedMs = 0.5;
+        // Require minimum speed of 1.0 m/s (~3.6 km/h) to filter stationary drift
+        // This is slow walking pace - anything slower is likely GPS jitter
+        const minSpeedMs = 1.0;
         const isActuallyMoving = speedMs >= minSpeedMs;
         
         const isValidSegment = segmentDistance > minDist && segmentDistance < maxDist && speedKmh < maxSpeed && timeDiff < maxTimeDiff;
@@ -1839,114 +1839,99 @@ export default function RunSession() {
         )}
       </AnimatePresence>
 
-      <div className="relative z-10 p-6 flex justify-between items-start">
-        <div className="flex gap-2">
-          <div className="bg-card/30 backdrop-blur-md rounded-xl p-3 border border-white/10">
-            <div className="text-xs text-muted-foreground uppercase tracking-widest mb-1">Target</div>
-            <div className="text-xl font-display font-bold text-primary">{sessionMetadataRef.current.targetDistance} km</div>
-          </div>
-          <div className={`backdrop-blur-md rounded-xl p-3 border flex items-center gap-2 ${
+      <div className="relative z-10 p-3 flex justify-between items-start">
+        <div className="flex gap-2 items-center">
+          <div className={`backdrop-blur-md rounded-lg px-2 py-1 border flex items-center gap-1.5 ${
             gpsStatus === "active" ? "bg-green-500/20 border-green-500/30" :
             gpsStatus === "error" ? "bg-red-500/20 border-red-500/30" :
             "bg-yellow-500/20 border-yellow-500/30"
           }`}>
-            <div className={`w-2 h-2 rounded-full ${
+            <div className={`w-1.5 h-1.5 rounded-full ${
               gpsStatus === "active" ? "bg-green-500 animate-pulse" :
               gpsStatus === "error" ? "bg-red-500" :
               "bg-yellow-500 animate-pulse"
             }`} />
-            <span className="text-xs font-bold uppercase">
-              {gpsStatus === "active" ? "GPS" : gpsStatus === "error" ? "No GPS" : "..."}
+            <span className="text-[10px] font-bold uppercase">
+              {gpsStatus === "active" ? "GPS" : gpsStatus === "error" ? "!" : "..."}
             </span>
           </div>
           {sharedWith.length > 0 && (
             <motion.div 
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
-              className="bg-primary/20 backdrop-blur-md rounded-xl p-3 border border-primary/30 flex items-center gap-2"
+              className="bg-primary/20 backdrop-blur-md rounded-lg px-2 py-1 border border-primary/30 flex items-center gap-1.5"
             >
-              <span className="relative flex h-2 w-2">
+              <span className="relative flex h-1.5 w-1.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary"></span>
               </span>
-              <div className="text-[10px] font-display font-bold text-primary uppercase text-xs">Sharing Live</div>
+              <span className="text-[10px] font-display font-bold text-primary uppercase">Live</span>
             </motion.div>
           )}
         </div>
-        <div className="flex flex-col items-end gap-2">
-          <div className="bg-destructive/20 backdrop-blur-md rounded-xl p-3 border border-destructive/30 flex items-center gap-2">
-            <Heart className="w-4 h-4 text-red-500 animate-pulse" />
-            <div className="text-xl font-display font-bold text-white">-- <span className="text-xs font-sans font-normal text-muted-foreground">BPM</span></div>
-          </div>
-          <div className="flex gap-2">
+        <div className="flex flex-wrap gap-1.5 justify-end max-w-[200px]">
+          <Button
+            onClick={() => setAudioEnabled(!audioEnabled)}
+            size="icon"
+            className={`h-8 w-8 rounded-lg ${audioEnabled ? "bg-primary text-background" : "bg-white/10 text-muted-foreground"}`}
+            data-testid="button-audio-toggle"
+          >
+            {audioEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+          </Button>
+          <Button
+            onClick={() => setAiCoachEnabled(!aiCoachEnabled)}
+            size="icon"
+            className={`h-8 w-8 rounded-lg ${
+              aiCoachEnabled 
+                ? "bg-blue-500 text-white border border-blue-400" 
+                : "bg-white/10 text-muted-foreground"
+            } ${isCoaching ? "animate-pulse" : ""}`}
+            data-testid="button-ai-coach-toggle"
+          >
+            {aiCoachEnabled ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
+          </Button>
+          <Button
+            onClick={isListening ? stopListening : startListening}
+            size="icon"
+            className={`h-8 w-8 rounded-lg ${
+              isListening 
+                ? "bg-red-500 text-white border border-red-400 animate-pulse" 
+                : "bg-purple-500/20 text-purple-400 border border-purple-500/30"
+            }`}
+            data-testid="button-talk-to-coach"
+          >
+            <MessageCircle className="w-3.5 h-3.5" />
+          </Button>
+          {motionPermission === "unknown" && (
             <Button
-              onClick={() => setAudioEnabled(!audioEnabled)}
+              onClick={requestMotionPermission}
               size="icon"
-              className={`h-10 w-10 rounded-xl ${audioEnabled ? "bg-primary text-background" : "bg-white/10 text-muted-foreground"}`}
-              data-testid="button-audio-toggle"
+              className="h-8 w-8 rounded-lg bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 animate-pulse"
+              data-testid="button-enable-cadence"
             >
-              {audioEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+              <Footprints className="w-3.5 h-3.5" />
             </Button>
-            <Button
-              onClick={() => setAiCoachEnabled(!aiCoachEnabled)}
-              size="icon"
-              className={`h-10 w-10 rounded-xl ${
-                aiCoachEnabled 
-                  ? "bg-blue-500 text-white border border-blue-400" 
-                  : "bg-white/10 text-muted-foreground"
-              } ${isCoaching ? "animate-pulse" : ""}`}
-              data-testid="button-ai-coach-toggle"
-            >
-              {aiCoachEnabled ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
-            </Button>
-            <Button
-              onClick={isListening ? stopListening : startListening}
-              size="icon"
-              className={`h-10 w-10 rounded-xl ${
-                isListening 
-                  ? "bg-red-500 text-white border border-red-400 animate-pulse" 
-                  : "bg-purple-500/20 text-purple-400 border border-purple-500/30"
-              }`}
-              data-testid="button-talk-to-coach"
-            >
-              <MessageCircle className="w-4 h-4" />
-            </Button>
-            {motionPermission === "unknown" && (
-              <Button
-                onClick={requestMotionPermission}
-                size="icon"
-                className="h-10 w-10 rounded-xl bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 animate-pulse"
-                data-testid="button-enable-cadence"
-              >
-                <Footprints className="w-4 h-4" />
-              </Button>
-            )}
-            {motionPermission === "granted" && (
-              <div className="h-10 w-10 rounded-xl bg-green-500/20 text-green-400 border border-green-500/30 flex items-center justify-center">
-                <Footprints className="w-4 h-4" />
-              </div>
-            )}
-            <Button
-              onClick={() => setShowShareModal(true)}
-              className={`h-10 px-4 rounded-xl font-display text-[10px] uppercase tracking-widest transition-all ${
-                sharedWith.length > 0 
-                  ? "bg-green-500 text-white border-2 border-green-300 shadow-[0_0_15px_rgba(34,197,94,0.5)]" 
-                  : "bg-primary text-background hover:bg-primary/90"
-              }`}
-            >
-              <Share2 className="w-3 h-3 mr-2" />
-              Share
-            </Button>
-          </div>
+          )}
+          <Button
+            onClick={() => setShowShareModal(true)}
+            size="icon"
+            className={`h-8 w-8 rounded-lg ${
+              sharedWith.length > 0 
+                ? "bg-green-500 text-white border border-green-300" 
+                : "bg-primary text-background hover:bg-primary/90"
+            }`}
+          >
+            <Share2 className="w-3.5 h-3.5" />
+          </Button>
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-6 min-h-0 py-2">
-        <div className="relative mb-2 flex-shrink-1 min-h-0 flex flex-col items-center">
+      <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-4 min-h-0 py-1">
+        <div className="relative mb-1 flex-shrink-1 min-h-0 flex flex-col items-center">
            <div className={`absolute inset-0 bg-primary/20 blur-3xl rounded-full transition-all duration-1000 ${active ? 'scale-110 opacity-100' : 'scale-90 opacity-50'}`} />
            <img 
               src={coachAvatar} 
-              className="w-32 h-32 sm:w-48 sm:h-48 md:w-64 md:h-64 rounded-full border-4 border-primary/20 shadow-[0_0_50px_rgba(6,182,212,0.3)] object-cover relative z-10 transition-all duration-500"
+              className="w-24 h-24 sm:w-32 sm:h-32 rounded-full border-4 border-primary/20 shadow-[0_0_50px_rgba(6,182,212,0.3)] object-cover relative z-10 transition-all duration-500"
               alt="AI Coach"
             />
             
@@ -1956,9 +1941,9 @@ export default function RunSession() {
                   initial={{ opacity: 0, y: 10, scale: 0.9 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -5, scale: 0.9 }}
-                  className="mt-4 w-72 bg-card/80 backdrop-blur-xl border border-primary/30 p-3 rounded-2xl text-center shadow-2xl relative z-20"
+                  className="mt-2 w-64 bg-card/80 backdrop-blur-xl border border-primary/30 p-2 rounded-xl text-center shadow-2xl relative z-20"
                 >
-                  <p className="text-primary font-medium text-xs leading-relaxed">"{message}"</p>
+                  <p className="text-primary font-medium text-[11px] leading-relaxed">"{message}"</p>
                   {currentGpsAccuracy && currentGpsAccuracy > 100 && (
                     <Button
                       variant="outline"
@@ -1980,32 +1965,32 @@ export default function RunSession() {
         </div>
       </div>
 
-      <div className="relative z-10 bg-card/40 backdrop-blur-xl border-t border-white/10 rounded-t-3xl p-4 pb-6 mt-auto flex-shrink-0">
-        <div className="grid grid-cols-4 gap-2 mb-4 text-center">
+      <div className="relative z-10 bg-card/40 backdrop-blur-xl border-t border-white/10 rounded-t-2xl p-3 pb-4 mt-auto flex-shrink-0">
+        <div className="grid grid-cols-4 gap-1 mb-3 text-center">
           <div>
-            <div className="text-muted-foreground text-[10px] uppercase tracking-wider mb-0.5">Time</div>
-            <div className="text-xl font-display font-bold">{formatTime(time)}</div>
+            <div className="text-muted-foreground text-[9px] uppercase tracking-wider">Time</div>
+            <div className="text-lg font-display font-bold">{formatTime(time)}</div>
           </div>
           <div className="border-x border-white/10">
-             <div className="text-muted-foreground text-[10px] uppercase tracking-wider mb-0.5">Distance</div>
-             <div className="text-xl font-display font-bold">{distance.toFixed(2)}</div>
-             <div className="text-[10px] text-muted-foreground">km</div>
+             <div className="text-muted-foreground text-[9px] uppercase tracking-wider">Distance</div>
+             <div className="text-lg font-display font-bold">{distance.toFixed(2)}</div>
+             <div className="text-[9px] text-muted-foreground">km</div>
           </div>
           <div className="border-r border-white/10">
-             <div className="text-muted-foreground text-[10px] uppercase tracking-wider mb-0.5">Pace</div>
-             <div className="text-xl font-display font-bold">{calculatePace()}</div>
-             <div className="text-[10px] text-muted-foreground">/km</div>
+             <div className="text-muted-foreground text-[9px] uppercase tracking-wider">Pace</div>
+             <div className="text-lg font-display font-bold">{calculatePace()}</div>
+             <div className="text-[9px] text-muted-foreground">/km</div>
           </div>
           <div>
-             <div className="text-muted-foreground text-[10px] uppercase tracking-wider mb-0.5">Cadence</div>
-             <div className={`text-xl font-display font-bold ${cadence >= 165 && cadence <= 185 ? 'text-green-400' : cadence > 0 ? 'text-yellow-400' : ''}`}>
+             <div className="text-muted-foreground text-[9px] uppercase tracking-wider">Cadence</div>
+             <div className={`text-lg font-display font-bold ${cadence >= 165 && cadence <= 185 ? 'text-green-400' : cadence > 0 ? 'text-yellow-400' : ''}`}>
                {cadence > 0 ? cadence : '--'}
              </div>
-             <div className="text-[10px] text-muted-foreground">spm</div>
+             <div className="text-[9px] text-muted-foreground">spm</div>
           </div>
         </div>
 
-        <div className="flex items-center justify-center gap-4">
+        <div className="flex items-center justify-center gap-3">
           <Button 
             variant="outline" 
             size="icon" 
