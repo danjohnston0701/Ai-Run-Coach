@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
-import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, Settings } from "lucide-react";
+import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, MicOff, Settings } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -221,6 +221,7 @@ export default function Home() {
   const [showGpsHelp, setShowGpsHelp] = useState(false);
   const [showWeatherModal, setShowWeatherModal] = useState(false);
   const [currentGpsAccuracy, setCurrentGpsAccuracy] = useState<number | undefined>(undefined);
+  const [aiCoachEnabled, setAiCoachEnabled] = useState(true);
 
   useEffect(() => {
     loadCoachSettingsFromProfile().then(setCoachSettings);
@@ -715,6 +716,7 @@ export default function Home() {
       lat: lat.toString(),
       lng: lng.toString(),
       targetTime: targetSeconds.toString(),
+      aiCoach: aiCoachEnabled ? "on" : "off",
     });
     setLocation(`/run?${params.toString()}`);
   };
@@ -1342,6 +1344,38 @@ export default function Home() {
               className="space-y-3"
               data-testid="card-session-options"
             >
+              <Card className="bg-card/50 border-white/10">
+                <CardContent className="p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {aiCoachEnabled ? (
+                        <Mic className="w-4 h-4 text-primary" />
+                      ) : (
+                        <MicOff className="w-4 h-4 text-muted-foreground" />
+                      )}
+                      <Label htmlFor="ai-coach-home" className="text-sm font-medium">
+                        AI Coach
+                      </Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs ${aiCoachEnabled ? 'text-primary' : 'text-muted-foreground'}`}>
+                        {aiCoachEnabled ? 'On' : 'Off'}
+                      </span>
+                      <Switch
+                        id="ai-coach-home"
+                        checked={aiCoachEnabled}
+                        onCheckedChange={setAiCoachEnabled}
+                        data-testid="switch-ai-coach-home"
+                      />
+                    </div>
+                  </div>
+                  {!aiCoachEnabled && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Route directions will use your device's voice instead
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
               <Button 
                 size="lg" 
                 className={`w-full h-12 text-lg font-display uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${

@@ -3,7 +3,9 @@ import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
-import { ArrowLeft, Play, Loader2, RefreshCw, Route, TrendingUp } from "lucide-react";
+import { ArrowLeft, Play, Loader2, RefreshCw, Route, TrendingUp, Mic, MicOff } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import GoogleMapsRoute from "@/components/GoogleMapsRoute";
 
 interface RouteCandidate {
@@ -43,6 +45,7 @@ export default function RoutePreview() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [coachName, setCoachName] = useState("Your AI Coach");
+  const [aiCoachEnabled, setAiCoachEnabled] = useState(true);
 
   useEffect(() => {
     const savedProfile = localStorage.getItem("userProfile");
@@ -116,6 +119,7 @@ export default function RoutePreview() {
       lng: lng.toString(),
       routeId: selectedRoute.id,
       routeName: selectedRoute.routeName,
+      aiCoach: aiCoachEnabled ? "on" : "off",
     });
     setLocation(`/run?${runParams.toString()}`);
   };
@@ -271,7 +275,39 @@ export default function RoutePreview() {
         </motion.div>
       )}
 
-      <div className="fixed bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-background via-background to-transparent z-50">
+      <div className="fixed bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-background via-background to-transparent z-50 space-y-3">
+        <Card className="bg-card/80 backdrop-blur-sm border-white/10">
+          <CardContent className="p-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {aiCoachEnabled ? (
+                  <Mic className="w-4 h-4 text-primary" />
+                ) : (
+                  <MicOff className="w-4 h-4 text-muted-foreground" />
+                )}
+                <Label htmlFor="ai-coach-toggle" className="text-sm font-medium">
+                  AI Coach
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-xs ${aiCoachEnabled ? 'text-primary' : 'text-muted-foreground'}`}>
+                  {aiCoachEnabled ? 'On' : 'Off'}
+                </span>
+                <Switch
+                  id="ai-coach-toggle"
+                  checked={aiCoachEnabled}
+                  onCheckedChange={setAiCoachEnabled}
+                  data-testid="switch-ai-coach"
+                />
+              </div>
+            </div>
+            {!aiCoachEnabled && (
+              <p className="text-xs text-muted-foreground mt-2">
+                Route directions will use your device's voice instead
+              </p>
+            )}
+          </CardContent>
+        </Card>
         <Button 
           size="lg" 
           className="w-full h-16 text-xl font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-all disabled:opacity-50"

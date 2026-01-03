@@ -252,7 +252,22 @@ export default function RunSession() {
   const lastProgressMilestoneRef = useRef<number>(0);
   const lastPaceRef = useRef<number>(0);
   
-  const [aiCoachEnabled, setAiCoachEnabled] = useState(true);
+  const [aiCoachEnabled, setAiCoachEnabled] = useState(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const isResuming = urlParams.get("resume") === "true";
+    
+    // If resuming, try to get from saved session first
+    if (isResuming) {
+      const savedSession = loadActiveRunSession();
+      if (savedSession) {
+        return savedSession.aiCoachEnabled;
+      }
+    }
+    
+    // Otherwise use URL param (defaults to ON if not "off")
+    const aiCoachParam = urlParams.get("aiCoach");
+    return aiCoachParam !== "off";
+  });
   const [coachSettings, setCoachSettings] = useState<AiCoachSettings>(() => loadCoachSettings());
   
   useEffect(() => {
@@ -335,6 +350,7 @@ export default function RunSession() {
   const urlRouteName = searchParams.get("routeName") || "";
   const urlRouteId = searchParams.get("routeId") || "";
   const urlTargetTimeSeconds = parseInt(searchParams.get("targetTime") || "0");
+  const urlAiCoach = searchParams.get("aiCoach");
 
   const sessionMetadataRef = useRef({
     targetDistance: urlTargetDistance,
@@ -581,6 +597,15 @@ export default function RunSession() {
     
     isNavSpeakingRef.current = true;
     
+    // If AI Coach is disabled, use device TTS directly for all speech
+    if (!aiCoachEnabled) {
+      console.log("AI Coach disabled - using device TTS for:", text.substring(0, 30));
+      speakWithDeviceTTS(text);
+      isNavSpeakingRef.current = false;
+      processNavQueue();
+      return;
+    }
+    
     // Check cache first
     const cacheKey = text.toLowerCase().trim();
     const cachedUrl = navAudioCacheRef.current.get(cacheKey);
@@ -632,7 +657,7 @@ export default function RunSession() {
     }
     
     processNavQueue();
-  }, [coachSettings, speakWithDeviceTTS, playNavAudio]);
+  }, [coachSettings, speakWithDeviceTTS, playNavAudio, aiCoachEnabled]);
 
   const speak = useCallback((text: string, force: boolean = false) => {
     console.log("speak() called with:", text, "audioEnabled:", audioEnabled, "force:", force);
