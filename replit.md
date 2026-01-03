@@ -129,32 +129,50 @@ The app supports resuming interrupted runs with the following architecture:
 - **Metadata Tracking**: sessionMetadataRef in RunSession tracks route parameters (targetDistance, levelId, startLat/Lng, routeName, routeId) separately from real-time GPS tracking
 
 ### Subscription & Payment System
-Stripe integration for subscription-based access to premium features:
+Stripe integration for entitlement-based access to premium features (NZD pricing):
 
-1. **Subscription Tiers**: 
-   - Basic ($4.99/mo): AI route generation, GPS tracking, run history
-   - Pro ($9.99/mo): All Basic features + real-time AI coaching, live sharing, advanced analytics
+1. **Pricing Plans**: 
+   - Early Bird 30-Day Trial ($4.99 NZD one-time): Full access for 30 days
+   - Standard Subscription ($14.99 NZD/month): Ongoing monthly subscription
+   - Free Trial Coupon: 30 days access without payment (admin-created coupons)
 
-2. **Architecture**:
+2. **Free vs Premium Features**:
+   - Free: GPS run tracking, manual runs, run history
+   - Premium: AI-powered route generation, real-time AI voice coaching
+
+3. **Entitlement System**:
+   - `server/entitlements.ts`: Centralized `hasPremiumAccess()` helper
+   - Three entitlement types: "subscription", "one_time", "coupon"
+   - Expiration-based access for one-time and coupon entitlements
+
+4. **Architecture**:
    - `server/stripeClient.ts`: Stripe SDK initialization using Replit connection API
-   - `server/stripeService.ts`: Service layer for Stripe operations (customers, subscriptions, checkout)
-   - `server/webhookHandlers.ts`: Webhook processing for subscription events
+   - `server/stripeService.ts`: Service layer supporting both 'payment' and 'subscription' modes
+   - `/api/stripe/complete-checkout`: Sets entitlements after successful payment (validates session metadata for security)
 
-3. **Paywall Implementation**:
-   - Client-side: `useSubscription` hook checks subscription status, redirects to pricing page
-   - Server-side: `/api/routes/generate-options` validates subscription before route generation
-   - Defense in depth: Both client and server enforce subscription requirements
+5. **Coupon System**:
+   - `coupon_codes` table: Code, duration, max redemptions, active status
+   - `user_coupons` table: User-coupon relationships with expiry dates
+   - `/api/coupons/redeem`: Validates and redeems coupon codes
+   - `/api/admin/coupons`: Admin endpoints for coupon management
 
-4. **User Schema Fields**:
-   - `stripeCustomerId`: Stripe customer ID for the user
-   - `stripeSubscriptionId`: Active subscription ID
-   - `subscriptionTier`: Current tier (basic/pro)
+6. **Paywall Implementation**:
+   - Client-side: `useEntitlement` hook checks premium access via `/api/entitlement/:userId`
+   - Server-side: `/api/routes/generate-options` uses `hasPremiumAccess()` for defense in depth
+   - AI Coach: Automatically disabled for non-premium users starting free runs
+
+7. **User Schema Fields**:
+   - `stripeCustomerId`: Stripe customer ID
+   - `stripeSubscriptionId`: Active subscription ID (for monthly subscribers)
+   - `subscriptionTier`: Current tier (early_bird/standard)
    - `subscriptionStatus`: Subscription state (active/trialing/cancelled)
+   - `entitlementType`: Type of access (subscription/one_time/coupon)
+   - `entitlementExpiresAt`: Expiration date for time-limited access
 
 Key files:
-- `client/src/pages/Pricing.tsx`: Plan selection and checkout flow
-- `client/src/pages/SubscriptionSuccess.tsx`: Post-checkout success page
-- `client/src/hooks/useSubscription.ts`: Subscription status hook
+- `client/src/pages/Pricing.tsx`: Plan selection, checkout flow, and coupon redemption
+- `client/src/pages/SubscriptionSuccess.tsx`: Post-checkout entitlement activation
+- `client/src/hooks/useSubscription.ts`: Entitlement status hooks (`useEntitlement`, `hasPremiumAccess`)
 
 ### Key Design Patterns
 - **Monorepo Structure**: Client code in `/client`, server in `/server`, shared types in `/shared`

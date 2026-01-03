@@ -273,30 +273,16 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Missing required parameters" });
       }
 
-      // Server-side subscription check for defense in depth
+      // Server-side entitlement check for defense in depth
       if (userId) {
         const user = await storage.getUser(userId);
         if (user) {
-          // If user has active subscription status stored, allow through
-          if (user.subscriptionStatus === 'active' || user.subscriptionStatus === 'trialing') {
-            // Subscription is valid, continue
-          } else {
-            // Check Stripe for active subscription
-            try {
-              const { stripeService } = await import("./stripeService");
-              if (user.stripeCustomerId) {
-                const subscriptions = await stripeService.getCustomerSubscriptions(user.stripeCustomerId);
-                if (subscriptions.length === 0) {
-                  return res.status(403).json({ error: "Active subscription required to generate routes" });
-                }
-              } else {
-                return res.status(403).json({ error: "Active subscription required to generate routes" });
-              }
-            } catch (stripeError) {
-              console.error("Could not verify subscription:", stripeError);
-              // Fail securely - don't allow through if we can't verify subscription
-              return res.status(503).json({ error: "Could not verify subscription status. Please try again." });
-            }
+          const { hasPremiumAccess } = await import("./entitlements");
+          if (!hasPremiumAccess(user)) {
+            return res.status(403).json({ 
+              error: "Premium access required to generate AI routes",
+              code: "PREMIUM_REQUIRED"
+            });
           }
         }
       }
@@ -2008,7 +1994,7 @@ export async function registerRoutes(
 
   app.post("/api/stripe/create-checkout-session", async (req, res) => {
     try {
-      const { priceId, userId } = req.body;
+      const { priceId, userId, mode = 'subscription' } = req.body;
       if (!priceId || !userId) {
         return res.status(400).json({ error: "Missing priceId or userId" });
       }
@@ -2038,13 +2024,87 @@ export async function registerRoutes(
         priceId,
         `${baseUrl}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
         `${baseUrl}/pricing`,
-        userId
+        userId,
+        mode as 'subscription' | 'payment'
       );
 
       res.json({ sessionUrl: session.url });
     } catch (error) {
       console.error("Failed to create checkout session:", error);
       res.status(500).json({ error: "Failed to create checkout session" });
+    }
+  });
+
+  // Complete checkout and set entitlements
+  app.post("/api/stripe/complete-checkout", async (req, res) => {
+    try {
+      const { sessionId, userId } = req.body;
+      if (!sessionId || !userId) {
+        return res.status(400).json({ error: "Missing sessionId or userId" });
+      }
+
+      const { stripeService } = await import("./stripeService");
+      const session = await stripeService.getCheckoutSession(sessionId);
+
+      // Security: Validate userId matches the session metadata
+      const sessionUserId = session.metadata?.userId;
+      if (!sessionUserId || sessionUserId !== userId) {
+        console.error("userId mismatch:", { sessionUserId, requestUserId: userId });
+        return res.status(403).json({ error: "Session does not match user" });
+      }
+
+      const user = await storage.getUser(sessionUserId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      if (session.payment_status !== 'paid') {
+        return res.status(400).json({ error: "Payment not completed" });
+      }
+
+      // Determine entitlement based on mode
+      if (session.mode === 'payment') {
+        // One-time payment (Early Bird) - 30 days access
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + 30);
+        
+        await storage.updateUserEntitlement(sessionUserId, "one_time", expiresAt);
+        await storage.updateUser(sessionUserId, {
+          subscriptionTier: "early_bird",
+          subscriptionStatus: "active",
+        });
+        
+        console.log(`[Checkout] Early Bird entitlement granted to user ${sessionUserId}, expires: ${expiresAt.toISOString()}`);
+        
+        res.json({ 
+          success: true, 
+          entitlementType: "one_time",
+          expiresAt,
+          tier: "early_bird"
+        });
+      } else if (session.mode === 'subscription') {
+        // Subscription - ongoing access
+        const subscription = session.subscription;
+        await storage.updateUser(sessionUserId, {
+          stripeSubscriptionId: typeof subscription === 'string' ? subscription : subscription?.toString(),
+          subscriptionTier: "standard",
+          subscriptionStatus: "active",
+          entitlementType: "subscription",
+        });
+        
+        console.log(`[Checkout] Standard subscription granted to user ${sessionUserId}`);
+        
+        res.json({ 
+          success: true, 
+          entitlementType: "subscription",
+          tier: "standard"
+        });
+      } else {
+        res.status(400).json({ error: "Unknown checkout mode" });
+      }
+    } catch (error) {
+      console.error("Failed to complete checkout:", error);
+      res.status(500).json({ error: "Failed to complete checkout" });
     }
   });
 
@@ -2104,6 +2164,119 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Failed to get subscription:", error);
       res.status(500).json({ error: "Failed to get subscription" });
+    }
+  });
+
+  // Coupon redemption
+  app.post("/api/coupons/redeem", async (req, res) => {
+    try {
+      const { userId, code } = req.body;
+      if (!userId || !code) {
+        return res.status(400).json({ error: "Missing userId or code" });
+      }
+
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const coupon = await storage.getCouponByCode(code);
+      if (!coupon) {
+        return res.status(404).json({ error: "Invalid coupon code" });
+      }
+
+      if (!coupon.isActive) {
+        return res.status(400).json({ error: "This coupon is no longer active" });
+      }
+
+      if (coupon.expiresAt && new Date(coupon.expiresAt) < new Date()) {
+        return res.status(400).json({ error: "This coupon has expired" });
+      }
+
+      if (coupon.maxRedemptions && (coupon.currentRedemptions || 0) >= coupon.maxRedemptions) {
+        return res.status(400).json({ error: "This coupon has reached its maximum redemptions" });
+      }
+
+      const existingRedemption = await storage.getUserCoupon(userId, coupon.id);
+      if (existingRedemption) {
+        return res.status(400).json({ error: "You have already redeemed this coupon" });
+      }
+
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + coupon.durationDays);
+
+      await storage.createUserCoupon({
+        userId,
+        couponId: coupon.id,
+        expiresAt,
+        status: "active",
+      });
+
+      await storage.incrementCouponRedemptions(coupon.id);
+
+      await storage.updateUserEntitlement(userId, "coupon", expiresAt);
+
+      res.json({ 
+        success: true, 
+        message: `Coupon redeemed! You have ${coupon.durationDays} days of premium access.`,
+        expiresAt 
+      });
+    } catch (error) {
+      console.error("Coupon redemption error:", error);
+      res.status(500).json({ error: "Failed to redeem coupon" });
+    }
+  });
+
+  // Get entitlement status
+  app.get("/api/entitlement/:userId", async (req, res) => {
+    try {
+      const user = await storage.getUser(req.params.userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const { checkEntitlementStatus } = await import("./entitlements");
+      const status = checkEntitlementStatus(user);
+      
+      res.json(status);
+    } catch (error) {
+      console.error("Failed to check entitlement:", error);
+      res.status(500).json({ error: "Failed to check entitlement" });
+    }
+  });
+
+  // Admin: Create coupon
+  app.post("/api/admin/coupons", async (req, res) => {
+    try {
+      const { userId, ...couponData } = req.body;
+      
+      const user = await storage.getUser(userId);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const coupon = await storage.createCoupon(couponData);
+      res.json(coupon);
+    } catch (error) {
+      console.error("Failed to create coupon:", error);
+      res.status(500).json({ error: "Failed to create coupon" });
+    }
+  });
+
+  // Admin: List coupons
+  app.get("/api/admin/coupons", async (req, res) => {
+    try {
+      const userId = req.query.userId as string;
+      const user = await storage.getUser(userId);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const coupons = await storage.getAllCoupons();
+      res.json(coupons);
+    } catch (error) {
+      console.error("Failed to get coupons:", error);
+      res.status(500).json({ error: "Failed to get coupons" });
     }
   });
 

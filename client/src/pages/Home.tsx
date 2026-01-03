@@ -18,7 +18,7 @@ import { loadCoachSettings, saveCoachSettingsToProfile, loadCoachSettingsFromPro
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { GpsHelpDialog } from "@/components/GpsHelpDialog";
 import { WeatherWidget } from "@/components/WeatherWidget";
-import { useSubscription, hasActiveSubscription } from "@/hooks/useSubscription";
+import { useEntitlement, hasPremiumAccess } from "@/hooks/useSubscription";
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -224,9 +224,9 @@ export default function Home() {
   const [currentGpsAccuracy, setCurrentGpsAccuracy] = useState<number | undefined>(undefined);
   const [aiCoachEnabled, setAiCoachEnabled] = useState(true);
 
-  // Subscription check for paywall
-  const { data: subscriptionData } = useSubscription(profile?.id || null);
-  const isSubscribed = hasActiveSubscription(subscriptionData);
+  // Entitlement check for paywall (premium features only)
+  const { data: entitlementData } = useEntitlement(profile?.id || null);
+  const isPremiumUser = hasPremiumAccess(entitlementData);
 
   useEffect(() => {
     loadCoachSettingsFromProfile().then(setCoachSettings);
@@ -690,9 +690,9 @@ export default function Home() {
   };
 
   const handleMapRun = () => {
-    // Check subscription before allowing route generation
-    if (!isSubscribed) {
-      toast.error("Subscribe to access route generation");
+    // Check premium access before allowing AI route generation
+    if (!isPremiumUser) {
+      toast.error("Premium access required for AI route generation");
       setLocation("/pricing");
       return;
     }
@@ -721,6 +721,15 @@ export default function Home() {
     const lat = userLocation?.lat ?? parseFloat(customLat);
     const lng = userLocation?.lng ?? parseFloat(customLng);
     
+    // AI coach requires premium access
+    const canUseAiCoach = isPremiumUser && aiCoachEnabled;
+    if (!isPremiumUser && aiCoachEnabled) {
+      toast("AI Coach is a premium feature. Starting run without AI coaching.", {
+        description: "Upgrade to get real-time voice coaching",
+        action: { label: "View Plans", onClick: () => setLocation("/pricing") },
+      });
+    }
+    
     const targetSeconds = parseInt(targetTime.h || "0") * 3600 + parseInt(targetTime.m || "0") * 60 + parseInt(targetTime.s || "0");
     const params = new URLSearchParams({
       distance: distance[0].toString(),
@@ -728,7 +737,7 @@ export default function Home() {
       lat: lat.toString(),
       lng: lng.toString(),
       targetTime: targetSeconds.toString(),
-      aiCoach: aiCoachEnabled ? "on" : "off",
+      aiCoach: canUseAiCoach ? "on" : "off",
     });
     setLocation(`/run?${params.toString()}`);
   };

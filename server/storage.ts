@@ -4,6 +4,7 @@ import {
   users, preRegistrations, friends, routes, runs, liveRunSessions, garminData,
   friendRequests, pushSubscriptions, notifications, routeRatings,
   aiCoachDescription, aiCoachInstructions, aiCoachKnowledge, aiCoachFaq,
+  couponCodes, userCoupons,
   type User, type InsertUser,
   type PreRegistration, type InsertPreRegistration,
   type Friend, type InsertFriend,
@@ -19,6 +20,8 @@ import {
   type AiCoachInstruction, type InsertAiCoachInstruction,
   type AiCoachKnowledge, type InsertAiCoachKnowledge,
   type AiCoachFaq, type InsertAiCoachFaq,
+  type CouponCode, type InsertCouponCode,
+  type UserCoupon, type InsertUserCoupon,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -104,6 +107,22 @@ export interface IStorage {
   createAiCoachFaq(data: InsertAiCoachFaq): Promise<AiCoachFaq>;
   updateAiCoachFaq(id: string, data: Partial<InsertAiCoachFaq>): Promise<AiCoachFaq | undefined>;
   deleteAiCoachFaq(id: string): Promise<void>;
+
+  // Coupon Management
+  getCouponByCode(code: string): Promise<CouponCode | undefined>;
+  getCoupon(id: string): Promise<CouponCode | undefined>;
+  getAllCoupons(): Promise<CouponCode[]>;
+  createCoupon(data: InsertCouponCode): Promise<CouponCode>;
+  updateCoupon(id: string, data: Partial<InsertCouponCode>): Promise<CouponCode | undefined>;
+  incrementCouponRedemptions(id: string): Promise<void>;
+
+  // User Coupons
+  getUserCoupon(userId: string, couponId: string): Promise<UserCoupon | undefined>;
+  getUserActiveCoupon(userId: string): Promise<UserCoupon | undefined>;
+  createUserCoupon(data: InsertUserCoupon): Promise<UserCoupon>;
+
+  // Entitlement checking
+  updateUserEntitlement(userId: string, entitlementType: string, expiresAt: Date): Promise<User | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -681,6 +700,103 @@ export class DatabaseStorage implements IStorage {
   async deleteAiCoachFaq(id: string): Promise<void> {
     return withRetry(async () => {
       await db.delete(aiCoachFaq).where(eq(aiCoachFaq.id, id));
+    });
+  }
+
+  // Coupon Management
+  async getCouponByCode(code: string): Promise<CouponCode | undefined> {
+    return withRetry(async () => {
+      const [coupon] = await db.select().from(couponCodes)
+        .where(eq(couponCodes.code, code.toUpperCase().trim()));
+      return coupon;
+    });
+  }
+
+  async getCoupon(id: string): Promise<CouponCode | undefined> {
+    return withRetry(async () => {
+      const [coupon] = await db.select().from(couponCodes)
+        .where(eq(couponCodes.id, id));
+      return coupon;
+    });
+  }
+
+  async getAllCoupons(): Promise<CouponCode[]> {
+    return withRetry(async () => {
+      return db.select().from(couponCodes).orderBy(desc(couponCodes.createdAt));
+    });
+  }
+
+  async createCoupon(data: InsertCouponCode): Promise<CouponCode> {
+    return withRetry(async () => {
+      const [coupon] = await db.insert(couponCodes).values({
+        ...data,
+        code: data.code.toUpperCase().trim(),
+      }).returning();
+      return coupon;
+    });
+  }
+
+  async updateCoupon(id: string, data: Partial<InsertCouponCode>): Promise<CouponCode | undefined> {
+    return withRetry(async () => {
+      const updateData = { ...data };
+      if (updateData.code) {
+        updateData.code = updateData.code.toUpperCase().trim();
+      }
+      const [coupon] = await db.update(couponCodes)
+        .set(updateData)
+        .where(eq(couponCodes.id, id))
+        .returning();
+      return coupon;
+    });
+  }
+
+  async incrementCouponRedemptions(id: string): Promise<void> {
+    return withRetry(async () => {
+      await db.update(couponCodes)
+        .set({ currentRedemptions: sql`${couponCodes.currentRedemptions} + 1` })
+        .where(eq(couponCodes.id, id));
+    });
+  }
+
+  // User Coupons
+  async getUserCoupon(userId: string, couponId: string): Promise<UserCoupon | undefined> {
+    return withRetry(async () => {
+      const [userCoupon] = await db.select().from(userCoupons)
+        .where(and(
+          eq(userCoupons.userId, userId),
+          eq(userCoupons.couponId, couponId)
+        ));
+      return userCoupon;
+    });
+  }
+
+  async getUserActiveCoupon(userId: string): Promise<UserCoupon | undefined> {
+    return withRetry(async () => {
+      const [userCoupon] = await db.select().from(userCoupons)
+        .where(and(
+          eq(userCoupons.userId, userId),
+          eq(userCoupons.status, 'active')
+        ))
+        .orderBy(desc(userCoupons.expiresAt));
+      return userCoupon;
+    });
+  }
+
+  async createUserCoupon(data: InsertUserCoupon): Promise<UserCoupon> {
+    return withRetry(async () => {
+      const [userCoupon] = await db.insert(userCoupons).values(data).returning();
+      return userCoupon;
+    });
+  }
+
+  // Entitlement Management
+  async updateUserEntitlement(userId: string, entitlementType: string, expiresAt: Date): Promise<User | undefined> {
+    return withRetry(async () => {
+      const [user] = await db.update(users)
+        .set({ entitlementType, entitlementExpiresAt: expiresAt })
+        .where(eq(users.id, userId))
+        .returning();
+      return user;
     });
   }
 }
