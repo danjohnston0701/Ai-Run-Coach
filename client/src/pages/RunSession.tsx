@@ -2040,12 +2040,13 @@ export default function RunSession() {
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-4 min-h-0 overflow-hidden">
+      {/* AI Coach section - compact height */}
+      <div className="flex flex-col items-center justify-center relative z-10 px-4 py-4">
         <div className="relative flex-shrink-0 flex flex-col items-center">
-           <div className={`absolute inset-0 bg-primary/20 blur-3xl rounded-full transition-all duration-1000 ${active ? 'scale-110 opacity-100' : 'scale-90 opacity-50'}`} />
+           <div className={`absolute inset-0 bg-primary/20 blur-2xl rounded-full transition-all duration-1000 ${active ? 'scale-110 opacity-100' : 'scale-90 opacity-50'}`} />
            <img 
               src={coachAvatar} 
-              className="w-20 h-20 rounded-full border-2 border-primary/20 shadow-[0_0_30px_rgba(6,182,212,0.3)] object-cover relative z-10"
+              className="w-16 h-16 rounded-full border-2 border-primary/20 shadow-[0_0_20px_rgba(6,182,212,0.3)] object-cover relative z-10"
               alt="AI Coach"
             />
             
@@ -2055,15 +2056,15 @@ export default function RunSession() {
                   initial={{ opacity: 0, y: 5, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -5, scale: 0.95 }}
-                  className="mt-1.5 w-56 bg-card/80 backdrop-blur-xl border border-primary/30 px-2 py-1.5 rounded-lg text-center shadow-2xl relative z-20"
+                  className="mt-1 w-52 bg-card/80 backdrop-blur-xl border border-primary/30 px-2 py-1 rounded-lg text-center shadow-2xl relative z-20"
                 >
-                  <p className="text-primary font-medium text-[10px] leading-tight">"{message}"</p>
+                  <p className="text-primary font-medium text-[9px] leading-tight">"{message}"</p>
                   {currentGpsAccuracy && currentGpsAccuracy > 100 && (
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => setShowGpsHelp(true)}
-                      className="mt-1 text-[9px] h-5 px-2 border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10"
+                      className="mt-1 text-[8px] h-4 px-2 border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10"
                       data-testid="button-gps-help-run"
                     >
                       GPS Help
@@ -2074,7 +2075,7 @@ export default function RunSession() {
             </AnimatePresence>
         </div>
         
-        <div className="mt-1 scale-75">
+        <div className="mt-1 scale-60 origin-top">
           <VoiceVisualizer isActive={active && !!message} />
         </div>
       </div>
