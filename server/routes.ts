@@ -1955,6 +1955,157 @@ export async function registerRoutes(
     }
   });
 
+  // Stripe subscription routes
+  app.get("/api/stripe/products", async (req, res) => {
+    try {
+      const { stripeService } = await import("./stripeService");
+      const productsWithPrices = await stripeService.listProductsWithPrices();
+      
+      // Group by product
+      const productMap = new Map<string, any>();
+      for (const row of productsWithPrices) {
+        const productId = row.product_id as string;
+        if (!productMap.has(productId)) {
+          productMap.set(productId, {
+            id: productId,
+            name: row.product_name,
+            description: row.product_description,
+            active: row.product_active,
+            metadata: row.product_metadata,
+            prices: [],
+          });
+        }
+        if (row.price_id) {
+          productMap.get(productId)!.prices.push({
+            id: row.price_id,
+            unitAmount: row.unit_amount,
+            currency: row.currency,
+            recurring: row.recurring,
+            active: row.price_active,
+            metadata: row.price_metadata,
+          });
+        }
+      }
+      
+      res.json(Array.from(productMap.values()));
+    } catch (error) {
+      console.error("Failed to get products:", error);
+      res.status(500).json({ error: "Failed to get products" });
+    }
+  });
+
+  app.get("/api/stripe/publishable-key", async (_req, res) => {
+    try {
+      const { getStripePublishableKey } = await import("./stripeClient");
+      const key = await getStripePublishableKey();
+      res.json({ publishableKey: key });
+    } catch (error) {
+      console.error("Failed to get publishable key:", error);
+      res.status(500).json({ error: "Failed to get publishable key" });
+    }
+  });
+
+  app.post("/api/stripe/create-checkout-session", async (req, res) => {
+    try {
+      const { priceId, userId } = req.body;
+      if (!priceId || !userId) {
+        return res.status(400).json({ error: "Missing priceId or userId" });
+      }
+
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const { stripeService } = await import("./stripeService");
+
+      // Get or create Stripe customer
+      let customerId = user.stripeCustomerId;
+      if (!customerId) {
+        const customer = await stripeService.createCustomer(user.email, userId, user.name);
+        customerId = customer.id;
+        await storage.updateUser(userId, { stripeCustomerId: customerId });
+      }
+
+      // Create checkout session
+      const baseUrl = process.env.REPLIT_DEV_DOMAIN 
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+        : `https://${process.env.REPLIT_DOMAINS?.split(',')[0] || 'localhost:5000'}`;
+      
+      const session = await stripeService.createCheckoutSession(
+        customerId,
+        priceId,
+        `${baseUrl}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
+        `${baseUrl}/pricing`,
+        userId
+      );
+
+      res.json({ sessionUrl: session.url });
+    } catch (error) {
+      console.error("Failed to create checkout session:", error);
+      res.status(500).json({ error: "Failed to create checkout session" });
+    }
+  });
+
+  app.post("/api/stripe/create-portal-session", async (req, res) => {
+    try {
+      const { userId } = req.body;
+      if (!userId) {
+        return res.status(400).json({ error: "Missing userId" });
+      }
+
+      const user = await storage.getUser(userId);
+      if (!user || !user.stripeCustomerId) {
+        return res.status(404).json({ error: "No subscription found" });
+      }
+
+      const { stripeService } = await import("./stripeService");
+
+      const baseUrl = process.env.REPLIT_DEV_DOMAIN 
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+        : `https://${process.env.REPLIT_DOMAINS?.split(',')[0] || 'localhost:5000'}`;
+
+      const session = await stripeService.createCustomerPortalSession(
+        user.stripeCustomerId,
+        `${baseUrl}/home`
+      );
+
+      res.json({ portalUrl: session.url });
+    } catch (error) {
+      console.error("Failed to create portal session:", error);
+      res.status(500).json({ error: "Failed to create portal session" });
+    }
+  });
+
+  app.get("/api/stripe/subscription/:userId", async (req, res) => {
+    try {
+      const user = await storage.getUser(req.params.userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      if (!user.stripeCustomerId) {
+        return res.json({ subscription: null, tier: null, status: null });
+      }
+
+      const { stripeService } = await import("./stripeService");
+      const subscriptions = await stripeService.getCustomerSubscriptions(user.stripeCustomerId);
+      
+      if (subscriptions.length === 0) {
+        return res.json({ subscription: null, tier: user.subscriptionTier, status: user.subscriptionStatus });
+      }
+
+      res.json({ 
+        subscription: subscriptions[0], 
+        tier: user.subscriptionTier,
+        status: user.subscriptionStatus
+      });
+    } catch (error) {
+      console.error("Failed to get subscription:", error);
+      res.status(500).json({ error: "Failed to get subscription" });
+    }
+  });
+
   // Get all AI config (for coaching calls - no admin check)
   app.get("/api/ai-config/all", async (req, res) => {
     try {

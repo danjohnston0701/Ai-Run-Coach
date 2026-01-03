@@ -20,6 +20,10 @@ export const users = pgTable("users", {
   coachTone: text("coach_tone").default("energetic"),
   profilePic: text("profile_pic"),
   isAdmin: boolean("is_admin").default(false),
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  subscriptionTier: text("subscription_tier"),
+  subscriptionStatus: text("subscription_status"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
