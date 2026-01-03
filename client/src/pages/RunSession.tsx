@@ -1089,19 +1089,32 @@ export default function RunSession() {
         const response = await (DeviceMotionEvent as any).requestPermission();
         if (response === 'granted') {
           setMotionPermission("granted");
-          toast.success("Motion tracking enabled!");
+          toast.success("Cadence tracking enabled");
         } else {
           setMotionPermission("denied");
-          toast.error("Motion permission denied");
+          toast.error("Cadence tracking denied - tap footprints icon to retry");
         }
       } catch (err) {
         console.error("Motion permission error:", err);
         setMotionPermission("denied");
+        toast.error("Cadence unavailable on this device");
       }
     } else {
       setMotionPermission("granted");
     }
   }, []);
+
+  // Auto-enable cadence detection when GPS locks (only for non-iOS devices)
+  // iOS requires user gesture to request permission, so we keep a button for those
+  useEffect(() => {
+    if (gpsStatus === "active" && motionPermission === "unknown") {
+      // Check if this platform requires a user gesture (iOS Safari)
+      const requiresUserGesture = typeof (DeviceMotionEvent as any).requestPermission === 'function';
+      if (!requiresUserGesture) {
+        requestMotionPermission();
+      }
+    }
+  }, [gpsStatus, motionPermission, requestMotionPermission]);
 
   useEffect(() => {
     if (!active || motionPermission !== "granted") return;
@@ -1902,12 +1915,17 @@ export default function RunSession() {
           >
             <MessageCircle className="w-3.5 h-3.5" />
           </Button>
-          {motionPermission === "unknown" && (
+          {(motionPermission === "unknown" || motionPermission === "denied") && typeof (DeviceMotionEvent as any).requestPermission === 'function' && (
             <Button
               onClick={requestMotionPermission}
               size="icon"
-              className="h-8 w-8 rounded-lg bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 animate-pulse"
+              className={`h-8 w-8 rounded-lg ${
+                motionPermission === "denied" 
+                  ? "bg-red-500/20 text-red-400 border border-red-500/30"
+                  : "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30"
+              }`}
               data-testid="button-enable-cadence"
+              title={motionPermission === "denied" ? "Cadence disabled - tap to retry" : "Enable cadence tracking"}
             >
               <Footprints className="w-3.5 h-3.5" />
             </Button>
