@@ -24,9 +24,7 @@ import { calculateTerrainData, shouldTriggerTerrainCoaching, type ElevationPoint
 import { GpsHelpDialog } from "@/components/GpsHelpDialog";
 
 import coachAvatar from "@assets/generated_images/glowing_ai_voice_sphere_interface.png";
-import mapBeginner from "@assets/generated_images/dark_mode_map_with_flat_green_route.png";
-import mapModerate from "@assets/generated_images/dark_mode_map_with_yellow_moderate_route.png";
-import mapExpert from "@assets/generated_images/dark_mode_map_with_red_expert_route.png";
+import appLogo from "@assets/generated_images/modern_minimalist_fitness_app_logo.png";
 
 interface RouteData {
   id: string;
@@ -1579,14 +1577,6 @@ export default function RunSession() {
     }
   };
 
-  const getMapImage = () => {
-    switch(sessionMetadataRef.current.levelId) {
-      case 'expert': return mapExpert;
-      case 'moderate': return mapModerate;
-      default: return mapBeginner;
-    }
-  };
-
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -1826,9 +1816,8 @@ export default function RunSession() {
 
   return (
     <div className="h-screen w-full bg-background text-foreground flex flex-col relative overflow-hidden font-sans select-none">
-      <div className="absolute inset-0 z-0 opacity-20">
-        <img src={getMapImage()} className="w-full h-full object-cover" alt="Map Route" />
-        <div className="absolute inset-0 bg-gradient-to-b from-background via-transparent to-background" />
+      <div className="absolute inset-0 z-0 flex items-center justify-center opacity-10">
+        <img src={appLogo} className="w-64 h-64 object-contain" alt="AI Run Coach" />
       </div>
 
       <AnimatePresence>
@@ -2000,12 +1989,12 @@ export default function RunSession() {
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-4 min-h-0 overflow-hidden">
-        <div className="relative flex-shrink-0 flex flex-col items-center">
+      <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-4">
+        <div className="relative flex flex-col items-center">
            <div className={`absolute inset-0 bg-primary/20 blur-3xl rounded-full transition-all duration-1000 ${active ? 'scale-110 opacity-100' : 'scale-90 opacity-50'}`} />
            <img 
               src={coachAvatar} 
-              className="w-20 h-20 rounded-full border-2 border-primary/20 shadow-[0_0_30px_rgba(6,182,212,0.3)] object-cover relative z-10"
+              className="w-28 h-28 rounded-full border-2 border-primary/20 shadow-[0_0_30px_rgba(6,182,212,0.3)] object-cover relative z-10"
               alt="AI Coach"
             />
             
@@ -2015,15 +2004,15 @@ export default function RunSession() {
                   initial={{ opacity: 0, y: 5, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -5, scale: 0.95 }}
-                  className="mt-1.5 w-56 bg-card/80 backdrop-blur-xl border border-primary/30 px-2 py-1.5 rounded-lg text-center shadow-2xl relative z-20"
+                  className="mt-2 w-64 bg-card/80 backdrop-blur-xl border border-primary/30 px-3 py-2 rounded-xl text-center shadow-2xl relative z-20"
                 >
-                  <p className="text-primary font-medium text-[10px] leading-tight">"{message}"</p>
+                  <p className="text-primary font-medium text-xs leading-relaxed">"{message}"</p>
                   {currentGpsAccuracy && currentGpsAccuracy > 100 && (
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => setShowGpsHelp(true)}
-                      className="mt-1 text-[9px] h-5 px-2 border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10"
+                      className="mt-1.5 text-[10px] h-6 px-3 border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10"
                       data-testid="button-gps-help-run"
                     >
                       GPS Help
@@ -2034,7 +2023,7 @@ export default function RunSession() {
             </AnimatePresence>
         </div>
         
-        <div className="mt-1 scale-75">
+        <div className="mt-2">
           <VoiceVisualizer isActive={active && !!message} />
         </div>
       </div>
