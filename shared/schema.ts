@@ -24,7 +24,31 @@ export const users = pgTable("users", {
   stripeSubscriptionId: text("stripe_subscription_id"),
   subscriptionTier: text("subscription_tier"),
   subscriptionStatus: text("subscription_status"),
+  entitlementType: text("entitlement_type"),
+  entitlementExpiresAt: timestamp("entitlement_expires_at"),
   createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const couponCodes = pgTable("coupon_codes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  code: text("code").notNull().unique(),
+  name: text("name").notNull(),
+  durationDays: integer("duration_days").notNull().default(30),
+  maxRedemptions: integer("max_redemptions"),
+  currentRedemptions: integer("current_redemptions").default(0),
+  requiresPayment: boolean("requires_payment").default(false),
+  isActive: boolean("is_active").default(true),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const userCoupons = pgTable("user_coupons", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  couponId: varchar("coupon_id").notNull().references(() => couponCodes.id),
+  redeemedAt: timestamp("redeemed_at").defaultNow(),
+  expiresAt: timestamp("expires_at").notNull(),
+  status: text("status").default("active"),
 });
 
 export const preRegistrations = pgTable("pre_registrations", {
@@ -219,6 +243,8 @@ export const insertAiCoachDescriptionSchema = createInsertSchema(aiCoachDescript
 export const insertAiCoachInstructionSchema = createInsertSchema(aiCoachInstructions).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertAiCoachKnowledgeSchema = createInsertSchema(aiCoachKnowledge).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertAiCoachFaqSchema = createInsertSchema(aiCoachFaq).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertCouponCodeSchema = createInsertSchema(couponCodes).omit({ id: true, createdAt: true, currentRedemptions: true });
+export const insertUserCouponSchema = createInsertSchema(userCoupons).omit({ id: true, redeemedAt: true });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -264,3 +290,9 @@ export type AiCoachKnowledge = typeof aiCoachKnowledge.$inferSelect;
 
 export type InsertAiCoachFaq = z.infer<typeof insertAiCoachFaqSchema>;
 export type AiCoachFaq = typeof aiCoachFaq.$inferSelect;
+
+export type InsertCouponCode = z.infer<typeof insertCouponCodeSchema>;
+export type CouponCode = typeof couponCodes.$inferSelect;
+
+export type InsertUserCoupon = z.infer<typeof insertUserCouponSchema>;
+export type UserCoupon = typeof userCoupons.$inferSelect;
