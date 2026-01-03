@@ -1959,35 +1959,8 @@ export async function registerRoutes(
   app.get("/api/stripe/products", async (req, res) => {
     try {
       const { stripeService } = await import("./stripeService");
-      const productsWithPrices = await stripeService.listProductsWithPrices();
-      
-      // Group by product
-      const productMap = new Map<string, any>();
-      for (const row of productsWithPrices) {
-        const productId = row.product_id as string;
-        if (!productMap.has(productId)) {
-          productMap.set(productId, {
-            id: productId,
-            name: row.product_name,
-            description: row.product_description,
-            active: row.product_active,
-            metadata: row.product_metadata,
-            prices: [],
-          });
-        }
-        if (row.price_id) {
-          productMap.get(productId)!.prices.push({
-            id: row.price_id,
-            unitAmount: row.unit_amount,
-            currency: row.currency,
-            recurring: row.recurring,
-            active: row.price_active,
-            metadata: row.price_metadata,
-          });
-        }
-      }
-      
-      res.json(Array.from(productMap.values()));
+      const products = await stripeService.listProductsWithPrices();
+      res.json(products);
     } catch (error) {
       console.error("Failed to get products:", error);
       res.status(500).json({ error: "Failed to get products" });
