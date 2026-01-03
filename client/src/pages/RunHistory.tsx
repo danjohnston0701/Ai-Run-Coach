@@ -5,8 +5,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
 import { 
-  ArrowLeft, Calendar, Route, ArrowRight
+  ArrowLeft, Calendar, Route, ArrowRight, BarChart3, ChevronDown, ChevronUp
 } from "lucide-react";
+import WeatherImpactAnalysis from "@/components/WeatherImpactAnalysis";
 
 export interface RunData {
   id: string;
@@ -28,6 +29,8 @@ export default function RunHistory() {
   const [, setLocation] = useLocation();
   const [runs, setRuns] = useState<RunData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [showWeatherAnalysis, setShowWeatherAnalysis] = useState(false);
 
   useEffect(() => {
     const loadRuns = async () => {
@@ -41,6 +44,7 @@ export default function RunHistory() {
         try {
           const userProfile = JSON.parse(userProfileStr);
           if (userProfile.id) {
+            setUserId(userProfile.id);
             const response = await fetch(`/api/users/${userProfile.id}/runs`);
             if (response.ok) {
               const data = await response.json();
@@ -148,7 +152,7 @@ export default function RunHistory() {
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="grid grid-cols-3 gap-4 mb-8"
+          className="grid grid-cols-3 gap-4 mb-6"
           data-testid="stats-summary"
         >
           <Card className="bg-card/50 border-white/10 overflow-hidden relative group text-center p-3">
@@ -165,6 +169,42 @@ export default function RunHistory() {
             <div className="text-2xl font-display font-bold text-primary">{Math.floor(totalStats.totalTime / 3600)}h</div>
             <div className="text-[10px] text-muted-foreground uppercase tracking-tighter">Total</div>
           </Card>
+        </motion.div>
+      )}
+
+      {userId && runs.length >= 3 && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-6"
+        >
+          <Button
+            variant="outline"
+            onClick={() => setShowWeatherAnalysis(!showWeatherAnalysis)}
+            className="w-full justify-between border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 text-white mb-3"
+            data-testid="button-toggle-weather-analysis"
+          >
+            <div className="flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-blue-400" />
+              <span className="font-display uppercase tracking-wider text-sm">Weather Impact Analysis</span>
+            </div>
+            {showWeatherAnalysis ? (
+              <ChevronUp className="w-4 h-4" />
+            ) : (
+              <ChevronDown className="w-4 h-4" />
+            )}
+          </Button>
+          
+          {showWeatherAnalysis && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              <WeatherImpactAnalysis userId={userId} />
+            </motion.div>
+          )}
         </motion.div>
       )}
 

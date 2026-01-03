@@ -481,6 +481,204 @@ export async function registerRoutes(
     }
   });
 
+  // Weather Impact Analysis endpoint
+  app.get("/api/users/:userId/weather-impact", async (req, res) => {
+    try {
+      const runs = await storage.getUserRuns(req.params.userId);
+      
+      // Filter runs that have weather data
+      const runsWithWeather = runs.filter(run => run.weatherData && run.duration > 0 && run.distance > 0);
+      
+      if (runsWithWeather.length < 3) {
+        return res.json({
+          hasEnoughData: false,
+          message: "Need at least 3 runs with weather data for analysis",
+          runsAnalyzed: runsWithWeather.length
+        });
+      }
+
+      // Calculate pace in seconds per km for each run
+      const runMetrics = runsWithWeather.map(run => {
+        const weather = run.weatherData as any;
+        const paceSecondsPerKm = run.duration / run.distance;
+        return {
+          id: run.id,
+          date: run.completedAt,
+          distance: run.distance,
+          duration: run.duration,
+          paceSecondsPerKm,
+          temperature: weather?.temperature ?? null,
+          humidity: weather?.humidity ?? null,
+          windSpeed: weather?.windSpeed ?? null,
+          condition: weather?.condition ?? null,
+          feelsLike: weather?.feelsLike ?? null,
+        };
+      });
+
+      // Calculate average pace
+      const avgPace = runMetrics.reduce((sum, r) => sum + r.paceSecondsPerKm, 0) / runMetrics.length;
+
+      // Group runs by temperature ranges
+      const tempRanges = {
+        cold: { min: -20, max: 10, label: "Cold (<10°C)", runs: [] as typeof runMetrics },
+        mild: { min: 10, max: 20, label: "Mild (10-20°C)", runs: [] as typeof runMetrics },
+        warm: { min: 20, max: 30, label: "Warm (20-30°C)", runs: [] as typeof runMetrics },
+        hot: { min: 30, max: 50, label: "Hot (>30°C)", runs: [] as typeof runMetrics },
+      };
+
+      runMetrics.forEach(run => {
+        if (run.temperature !== null) {
+          if (run.temperature < 10) tempRanges.cold.runs.push(run);
+          else if (run.temperature < 20) tempRanges.mild.runs.push(run);
+          else if (run.temperature < 30) tempRanges.warm.runs.push(run);
+          else tempRanges.hot.runs.push(run);
+        }
+      });
+
+      // Calculate average pace per temperature range
+      const temperatureAnalysis = Object.entries(tempRanges).map(([key, range]) => ({
+        range: key,
+        label: range.label,
+        avgPace: range.runs.length > 0 
+          ? range.runs.reduce((sum, r) => sum + r.paceSecondsPerKm, 0) / range.runs.length 
+          : null,
+        runCount: range.runs.length,
+        paceVsAvg: range.runs.length > 0 
+          ? ((range.runs.reduce((sum, r) => sum + r.paceSecondsPerKm, 0) / range.runs.length) - avgPace) / avgPace * 100
+          : null,
+      })).filter(t => t.runCount > 0);
+
+      // Group runs by humidity ranges
+      const humidityRanges = {
+        low: { min: 0, max: 40, label: "Low (<40%)", runs: [] as typeof runMetrics },
+        medium: { min: 40, max: 70, label: "Medium (40-70%)", runs: [] as typeof runMetrics },
+        high: { min: 70, max: 100, label: "High (>70%)", runs: [] as typeof runMetrics },
+      };
+
+      runMetrics.forEach(run => {
+        if (run.humidity !== null) {
+          if (run.humidity < 40) humidityRanges.low.runs.push(run);
+          else if (run.humidity < 70) humidityRanges.medium.runs.push(run);
+          else humidityRanges.high.runs.push(run);
+        }
+      });
+
+      const humidityAnalysis = Object.entries(humidityRanges).map(([key, range]) => ({
+        range: key,
+        label: range.label,
+        avgPace: range.runs.length > 0 
+          ? range.runs.reduce((sum, r) => sum + r.paceSecondsPerKm, 0) / range.runs.length 
+          : null,
+        runCount: range.runs.length,
+        paceVsAvg: range.runs.length > 0 
+          ? ((range.runs.reduce((sum, r) => sum + r.paceSecondsPerKm, 0) / range.runs.length) - avgPace) / avgPace * 100
+          : null,
+      })).filter(h => h.runCount > 0);
+
+      // Group runs by wind speed
+      const windRanges = {
+        calm: { min: 0, max: 10, label: "Calm (<10 km/h)", runs: [] as typeof runMetrics },
+        breezy: { min: 10, max: 25, label: "Breezy (10-25 km/h)", runs: [] as typeof runMetrics },
+        windy: { min: 25, max: 100, label: "Windy (>25 km/h)", runs: [] as typeof runMetrics },
+      };
+
+      runMetrics.forEach(run => {
+        if (run.windSpeed !== null) {
+          if (run.windSpeed < 10) windRanges.calm.runs.push(run);
+          else if (run.windSpeed < 25) windRanges.breezy.runs.push(run);
+          else windRanges.windy.runs.push(run);
+        }
+      });
+
+      const windAnalysis = Object.entries(windRanges).map(([key, range]) => ({
+        range: key,
+        label: range.label,
+        avgPace: range.runs.length > 0 
+          ? range.runs.reduce((sum, r) => sum + r.paceSecondsPerKm, 0) / range.runs.length 
+          : null,
+        runCount: range.runs.length,
+        paceVsAvg: range.runs.length > 0 
+          ? ((range.runs.reduce((sum, r) => sum + r.paceSecondsPerKm, 0) / range.runs.length) - avgPace) / avgPace * 100
+          : null,
+      })).filter(w => w.runCount > 0);
+
+      // Group by weather condition
+      const conditionGroups: Record<string, typeof runMetrics> = {};
+      runMetrics.forEach(run => {
+        if (run.condition) {
+          const condition = run.condition.toLowerCase();
+          let category = "clear";
+          if (condition.includes("rain") || condition.includes("drizzle") || condition.includes("shower")) {
+            category = "rainy";
+          } else if (condition.includes("cloud") || condition.includes("overcast")) {
+            category = "cloudy";
+          } else if (condition.includes("sun") || condition.includes("clear")) {
+            category = "sunny";
+          }
+          if (!conditionGroups[category]) conditionGroups[category] = [];
+          conditionGroups[category].push(run);
+        }
+      });
+
+      const conditionAnalysis = Object.entries(conditionGroups).map(([condition, conditionRuns]) => ({
+        condition: condition.charAt(0).toUpperCase() + condition.slice(1),
+        avgPace: conditionRuns.reduce((sum, r) => sum + r.paceSecondsPerKm, 0) / conditionRuns.length,
+        runCount: conditionRuns.length,
+        paceVsAvg: ((conditionRuns.reduce((sum, r) => sum + r.paceSecondsPerKm, 0) / conditionRuns.length) - avgPace) / avgPace * 100,
+      }));
+
+      // Find best and worst conditions - include condition analysis
+      const allAnalysis = [
+        ...temperatureAnalysis.map(t => ({ ...t, type: 'temperature', displayLabel: t.label })),
+        ...humidityAnalysis.map(h => ({ ...h, type: 'humidity', displayLabel: h.label })),
+        ...windAnalysis.map(w => ({ ...w, type: 'wind', displayLabel: w.label })),
+        ...conditionAnalysis.map(c => ({ 
+          ...c, 
+          type: 'condition', 
+          displayLabel: `${c.condition} weather`,
+          label: c.condition,
+        })),
+      ].filter(a => a.runCount >= 2 && a.paceVsAvg !== null);
+
+      const bestCondition = allAnalysis.length > 0 
+        ? allAnalysis.reduce((best, current) => 
+            (current.paceVsAvg !== null && (best.paceVsAvg === null || current.paceVsAvg < best.paceVsAvg)) ? current : best
+          )
+        : null;
+
+      const worstCondition = allAnalysis.length > 0 
+        ? allAnalysis.reduce((worst, current) => 
+            (current.paceVsAvg !== null && (worst.paceVsAvg === null || current.paceVsAvg > worst.paceVsAvg)) ? current : worst
+          )
+        : null;
+
+      res.json({
+        hasEnoughData: true,
+        runsAnalyzed: runsWithWeather.length,
+        overallAvgPace: avgPace,
+        temperatureAnalysis,
+        humidityAnalysis,
+        windAnalysis,
+        conditionAnalysis,
+        insights: {
+          bestCondition: bestCondition ? {
+            label: bestCondition.displayLabel || bestCondition.label,
+            type: bestCondition.type,
+            improvement: bestCondition.paceVsAvg ? Math.abs(bestCondition.paceVsAvg).toFixed(1) : null,
+          } : null,
+          worstCondition: worstCondition ? {
+            label: worstCondition.displayLabel || worstCondition.label,
+            type: worstCondition.type,
+            slowdown: worstCondition.paceVsAvg ? Math.abs(worstCondition.paceVsAvg).toFixed(1) : null,
+          } : null,
+        },
+      });
+    } catch (error) {
+      console.error("Weather impact analysis error:", error);
+      res.status(500).json({ error: "Failed to analyze weather impact" });
+    }
+  });
+
   // Live session endpoints
   app.post("/api/live-sessions", async (req, res) => {
     try {
