@@ -24,9 +24,8 @@ import { calculateTerrainData, shouldTriggerTerrainCoaching, type ElevationPoint
 import { GpsHelpDialog } from "@/components/GpsHelpDialog";
 
 import coachAvatar from "@assets/generated_images/glowing_ai_voice_sphere_interface.png";
-import mapBeginner from "@assets/generated_images/dark_mode_map_with_flat_green_route.png";
-import mapModerate from "@assets/generated_images/dark_mode_map_with_yellow_moderate_route.png";
-import mapExpert from "@assets/generated_images/dark_mode_map_with_red_expert_route.png";
+import { MapContainer, TileLayer, Polyline } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
 
 interface RouteData {
   id: string;
@@ -233,6 +232,12 @@ export default function RunSession() {
   const [friends, setFriends] = useState<Friend[]>([]);
   const [sharedWith, setSharedWith] = useState<string[]>([]);
   const [, setLocation] = useLocation();
+  const [isClientMounted, setIsClientMounted] = useState(false);
+  
+  // Ensure Leaflet only renders on client
+  useEffect(() => {
+    setIsClientMounted(true);
+  }, []);
   
   const [currentPosition, setCurrentPosition] = useState<Position | null>(null);
   const [gpsStatus, setGpsStatus] = useState<"acquiring" | "active" | "error">("acquiring");
@@ -1579,13 +1584,16 @@ export default function RunSession() {
     }
   };
 
-  const getMapImage = () => {
-    switch(sessionMetadataRef.current.levelId) {
-      case 'expert': return mapExpert;
-      case 'moderate': return mapModerate;
-      default: return mapBeginner;
+  // Get route coordinates for map display
+  const getMapRouteCoords = (): Array<[number, number]> => {
+    if (routeData?.polyline) {
+      const decoded = decodePolyline(routeData.polyline);
+      return decoded.map(p => [p.lat, p.lng] as [number, number]);
     }
+    return [];
   };
+  
+  const hasRoute = !!routeData?.polyline;
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -1824,11 +1832,43 @@ export default function RunSession() {
     }
   };
 
+  const mapRouteCoords = getMapRouteCoords();
+  const mapCenter: [number, number] = mapRouteCoords.length > 0 
+    ? mapRouteCoords[Math.floor(mapRouteCoords.length / 2)]
+    : [currentPosition?.lat || 0, currentPosition?.lng || 0];
+
   return (
     <div className="h-screen w-full bg-background text-foreground flex flex-col relative overflow-hidden font-sans select-none">
-      <div className="absolute inset-0 z-0 opacity-20">
-        <img src={getMapImage()} className="w-full h-full object-cover" alt="Map Route" />
-        <div className="absolute inset-0 bg-gradient-to-b from-background via-transparent to-background" />
+      {/* Background: Route map or blank */}
+      <div className="absolute inset-0 z-0">
+        {isClientMounted && hasRoute && mapRouteCoords.length > 0 ? (
+          <>
+            <MapContainer
+              center={mapCenter}
+              zoom={14}
+              style={{ height: '100%', width: '100%' }}
+              zoomControl={false}
+              attributionControl={false}
+              dragging={false}
+              scrollWheelZoom={false}
+              doubleClickZoom={false}
+              touchZoom={false}
+            >
+              <TileLayer
+                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+              />
+              <Polyline
+                positions={mapRouteCoords}
+                color={sessionMetadataRef.current.levelId === 'expert' ? '#ef4444' : sessionMetadataRef.current.levelId === 'moderate' ? '#eab308' : '#22c55e'}
+                weight={4}
+                opacity={0.8}
+              />
+            </MapContainer>
+            <div className="absolute inset-0 bg-gradient-to-b from-background/80 via-background/40 to-background/80 pointer-events-none" />
+          </>
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-b from-background via-background/95 to-background" />
+        )}
       </div>
 
       <AnimatePresence>
@@ -2039,36 +2079,35 @@ export default function RunSession() {
         </div>
       </div>
 
-      <div className="relative z-10 bg-card/40 backdrop-blur-xl border-t border-white/10 rounded-t-xl p-2 pb-3 mt-auto flex-shrink-0">
-        <div className="grid grid-cols-4 gap-1 mb-2 text-center">
-          <div>
-            <div className="text-muted-foreground text-[8px] uppercase tracking-wider">Time</div>
-            <div className="text-base font-display font-bold">{formatTime(time)}</div>
-          </div>
-          <div className="border-x border-white/10">
-             <div className="text-muted-foreground text-[8px] uppercase tracking-wider">Distance</div>
-             <div className="text-base font-display font-bold">{distance.toFixed(2)}</div>
-             <div className="text-[8px] text-muted-foreground">km</div>
-          </div>
-          <div className="border-r border-white/10">
-             <div className="text-muted-foreground text-[8px] uppercase tracking-wider">Pace</div>
-             <div className="text-base font-display font-bold">{calculatePace()}</div>
-             <div className="text-[8px] text-muted-foreground">/km</div>
-          </div>
-          <div>
-             <div className="text-muted-foreground text-[8px] uppercase tracking-wider">Cadence</div>
-             <div className={`text-base font-display font-bold ${cadence >= 165 && cadence <= 185 ? 'text-green-400' : cadence >= 60 ? 'text-yellow-400' : ''}`}>
-               {cadence >= 60 ? cadence : '--'}
-             </div>
-             <div className="text-[8px] text-muted-foreground">spm</div>
+      <div className="relative z-10 bg-card/40 backdrop-blur-xl border-t border-white/10 rounded-t-xl p-2 pb-2 mt-auto flex-shrink-0">
+        <div className="flex items-center justify-between mb-2">
+          <div className="grid grid-cols-4 gap-1 text-center flex-1">
+            <div>
+              <div className="text-muted-foreground text-[7px] uppercase tracking-wider">Time</div>
+              <div className="text-sm font-display font-bold">{formatTime(time)}</div>
+            </div>
+            <div className="border-x border-white/10">
+               <div className="text-muted-foreground text-[7px] uppercase tracking-wider">Distance</div>
+               <div className="text-sm font-display font-bold">{distance.toFixed(2)}<span className="text-[7px] text-muted-foreground ml-0.5">km</span></div>
+            </div>
+            <div className="border-r border-white/10">
+               <div className="text-muted-foreground text-[7px] uppercase tracking-wider">Pace</div>
+               <div className="text-sm font-display font-bold">{calculatePace()}<span className="text-[7px] text-muted-foreground ml-0.5">/km</span></div>
+            </div>
+            <div>
+               <div className="text-muted-foreground text-[7px] uppercase tracking-wider">Cadence</div>
+               <div className={`text-sm font-display font-bold ${cadence >= 165 && cadence <= 185 ? 'text-green-400' : cadence >= 60 ? 'text-yellow-400' : ''}`}>
+                 {cadence >= 60 ? cadence : '--'}<span className="text-[7px] text-muted-foreground ml-0.5">spm</span>
+               </div>
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center justify-center gap-2">
+        <div className="flex items-center justify-center gap-3">
           <Button 
             variant="outline" 
             size="icon" 
-            className="w-9 h-9 rounded-full border-white/10 hover:bg-white/10 hover:border-white/20"
+            className="w-8 h-8 rounded-full border-white/10 hover:bg-white/10 hover:border-white/20"
             onClick={handleStopClick}
             data-testid="button-stop"
           >
@@ -2077,7 +2116,7 @@ export default function RunSession() {
           
           <Button 
             size="icon" 
-            className={`w-12 h-12 rounded-full transition-transform active:scale-95 ${
+            className={`w-11 h-11 rounded-full transition-transform active:scale-95 ${
               active 
                 ? "bg-primary text-background hover:bg-primary/90 shadow-[0_0_20px_rgba(6,182,212,0.4)]" 
                 : "bg-green-500 text-white hover:bg-green-600 shadow-[0_0_20px_rgba(34,197,94,0.4)]"
@@ -2091,7 +2130,7 @@ export default function RunSession() {
           <Button 
             variant="outline" 
             size="icon" 
-            className="w-9 h-9 rounded-full border-primary/50 bg-primary/10 hover:bg-primary/20 text-primary"
+            className="w-8 h-8 rounded-full border-primary/50 bg-primary/10 hover:bg-primary/20 text-primary"
             onClick={openGoogleMapsNavigation}
             data-testid="button-google-navigation"
           >
