@@ -766,8 +766,8 @@ export default function RunSession() {
         const accuracy = position.coords.accuracy;
         const distanceMeters = segmentDistance * 1000;
         
-        // Per-segment filters: reject bad samples
-        if (accuracy > 20 || timeDiff > 8 || distanceMeters < 1 || distanceMeters > 50 || speedMs > 8) {
+        // Per-segment filters: reject bad samples (loosened for real-world GPS)
+        if (accuracy > 25 || timeDiff > 10 || distanceMeters < 0.5 || distanceMeters > 60 || speedMs > 10) {
           return;
         }
         
@@ -796,18 +796,18 @@ export default function RunSession() {
         const totalPath = buffer.reduce((sum, s) => sum + s.deltaDist, 0);
         const netDisplacement = haversineDistance(first.lat, first.lng, last.lat, last.lng);
         
-        // KEY: Net displacement must exceed GPS accuracy significantly
+        // KEY: Net displacement must exceed GPS accuracy
         // This is the critical check - real movement goes somewhere, drift oscillates
         const avgAccuracy = buffer.reduce((sum, s) => sum + s.accuracy, 0) / buffer.length;
-        const netExceedsAccuracy = netDisplacement * 1000 > avgAccuracy * 1.5; // Net > 1.5x accuracy
+        const netExceedsAccuracy = netDisplacement * 1000 > avgAccuracy * 0.8; // Net > 0.8x accuracy (loosened)
         
-        // Speed check
+        // Speed check (loosened for walking/slow jogging)
         const meanSpeed = elapsedTime > 0 ? (totalPath * 1000) / elapsedTime : 0;
-        const hasMinSpeed = meanSpeed >= 0.8; // 0.8 m/s minimum
+        const hasMinSpeed = meanSpeed >= 0.5; // 0.5 m/s minimum (walking pace)
         
-        // Efficiency check (less strict)
+        // Efficiency check (loosened for winding paths)
         const efficiency = totalPath > 0.001 ? netDisplacement / totalPath : 0;
-        const hasMinEfficiency = efficiency >= 0.3; // 30% minimum
+        const hasMinEfficiency = efficiency >= 0.2; // 20% minimum
         
         // Time check
         const hasEnoughTime = elapsedTime >= 5;
