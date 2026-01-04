@@ -782,12 +782,12 @@ export default function RunSession() {
           bearing: getBearing(lastPos.lat, lastPos.lng, newPos.lat, newPos.lng)
         });
         
-        // Keep 15 second window
-        windowBufferRef.current = windowBufferRef.current.filter(s => now - s.timestamp < 15000);
+        // Keep 20 second window (increased for slower GPS updates)
+        windowBufferRef.current = windowBufferRef.current.filter(s => now - s.timestamp < 20000);
         bufferedDistanceRef.current += segmentDistance;
         
         const buffer = windowBufferRef.current;
-        if (buffer.length < 4) return; // Need at least 4 samples
+        if (buffer.length < 2) return; // Need at least 2 samples (reduced from 4)
         
         // Calculate window metrics
         const first = buffer[0];
@@ -796,21 +796,20 @@ export default function RunSession() {
         const totalPath = buffer.reduce((sum, s) => sum + s.deltaDist, 0);
         const netDisplacement = haversineDistance(first.lat, first.lng, last.lat, last.lng);
         
-        // KEY: Net displacement must exceed GPS accuracy
-        // This is the critical check - real movement goes somewhere, drift oscillates
+        // KEY: Net displacement must exceed GPS accuracy (very loosened)
         const avgAccuracy = buffer.reduce((sum, s) => sum + s.accuracy, 0) / buffer.length;
-        const netExceedsAccuracy = netDisplacement * 1000 > avgAccuracy * 0.8; // Net > 0.8x accuracy (loosened)
+        const netExceedsAccuracy = netDisplacement * 1000 > avgAccuracy * 0.5; // Net > 0.5x accuracy (very loose)
         
-        // Speed check (loosened for walking/slow jogging)
+        // Speed check (very loose - accept any movement)
         const meanSpeed = elapsedTime > 0 ? (totalPath * 1000) / elapsedTime : 0;
-        const hasMinSpeed = meanSpeed >= 0.5; // 0.5 m/s minimum (walking pace)
+        const hasMinSpeed = meanSpeed >= 0.3; // 0.3 m/s minimum (slow walk)
         
-        // Efficiency check (loosened for winding paths)
+        // Efficiency check (very loose for any path shape)
         const efficiency = totalPath > 0.001 ? netDisplacement / totalPath : 0;
-        const hasMinEfficiency = efficiency >= 0.2; // 20% minimum
+        const hasMinEfficiency = efficiency >= 0.1; // 10% minimum (very loose)
         
-        // Time check
-        const hasEnoughTime = elapsedTime >= 5;
+        // Time check (reduced)
+        const hasEnoughTime = elapsedTime >= 2;
         
         if (hasEnoughTime && hasMinSpeed && hasMinEfficiency && netExceedsAccuracy) {
           // Commit buffered distance
@@ -819,9 +818,14 @@ export default function RunSession() {
           console.log(`+${(bufferedDistanceRef.current * 1000).toFixed(0)}m confirmed (net=${(netDisplacement * 1000).toFixed(0)}m, acc=${avgAccuracy.toFixed(0)}m, eff=${(efficiency * 100).toFixed(0)}%)`);
           windowBufferRef.current = [];
           bufferedDistanceRef.current = 0;
-        } else if (elapsedTime >= 25) {
+        } else {
+          // Log why distance wasn't committed (for debugging)
+          console.log(`Pending: ${(bufferedDistanceRef.current * 1000).toFixed(0)}m, time=${elapsedTime.toFixed(1)}s, speed=${meanSpeed.toFixed(2)}m/s, eff=${(efficiency * 100).toFixed(0)}%, net=${(netDisplacement * 1000).toFixed(0)}m vs ${(avgAccuracy * 0.5).toFixed(0)}m threshold`);
+        }
+        
+        if (elapsedTime >= 30) {
           // Timeout - purge as drift
-          console.log(`Drift purged: ${(bufferedDistanceRef.current * 1000).toFixed(0)}m (net=${(netDisplacement * 1000).toFixed(0)}m < ${(avgAccuracy * 1.5).toFixed(0)}m threshold)`);
+          console.log(`Drift purged: ${(bufferedDistanceRef.current * 1000).toFixed(0)}m (net=${(netDisplacement * 1000).toFixed(0)}m < ${(avgAccuracy * 0.5).toFixed(0)}m threshold)`);
           windowBufferRef.current = [];
           bufferedDistanceRef.current = 0;
         }
