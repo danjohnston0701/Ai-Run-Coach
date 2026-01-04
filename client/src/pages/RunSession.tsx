@@ -759,76 +759,40 @@ export default function RunSession() {
         );
         
         const timeDiff = (newPos.timestamp - lastPos.timestamp) / 1000;
-        const speedKmh = timeDiff > 0 ? (segmentDistance / timeDiff) * 3600 : 0;
-        const speedMs = speedKmh / 3.6;
-        
-        // GPS DRIFT FILTER with sliding window
         const accuracy = position.coords.accuracy;
         const distanceMeters = segmentDistance * 1000;
+        const speedMs = timeDiff > 0 ? distanceMeters / timeDiff : 0;
         
-        // Per-segment filters: reject bad samples (loosened for real-world GPS)
-        if (accuracy > 25 || timeDiff > 10 || distanceMeters < 0.5 || distanceMeters > 60 || speedMs > 10) {
+        // SIMPLE GPS FILTER - just basic sanity checks
+        // Only reject truly impossible values
+        const isBadAccuracy = accuracy > 50; // Very loose - accept up to 50m accuracy
+        const isTooFast = speedMs > 15; // > 54 km/h is impossible for running
+        const isTooFar = distanceMeters > 100; // > 100m in one update is a GPS jump
+        const isTooSmall = distanceMeters < 0.1; // < 10cm is noise
+        
+        console.log(`GPS: ${distanceMeters.toFixed(1)}m, acc=${accuracy.toFixed(0)}m, speed=${speedMs.toFixed(1)}m/s, timeDiff=${timeDiff.toFixed(1)}s`);
+        
+        if (isBadAccuracy) {
+          console.log(`Rejected: bad accuracy (${accuracy.toFixed(0)}m > 50m)`);
+          return;
+        }
+        if (isTooFast) {
+          console.log(`Rejected: too fast (${speedMs.toFixed(1)}m/s > 15m/s)`);
+          return;
+        }
+        if (isTooFar) {
+          console.log(`Rejected: GPS jump (${distanceMeters.toFixed(0)}m > 100m)`);
+          return;
+        }
+        if (isTooSmall) {
+          console.log(`Rejected: too small (${distanceMeters.toFixed(1)}m < 0.1m)`);
           return;
         }
         
-        // Add to window buffer
-        const now = Date.now();
-        windowBufferRef.current.push({
-          lat: newPos.lat,
-          lng: newPos.lng,
-          timestamp: now,
-          accuracy,
-          deltaDist: segmentDistance,
-          bearing: getBearing(lastPos.lat, lastPos.lng, newPos.lat, newPos.lng)
-        });
-        
-        // Keep 20 second window (increased for slower GPS updates)
-        windowBufferRef.current = windowBufferRef.current.filter(s => now - s.timestamp < 20000);
-        bufferedDistanceRef.current += segmentDistance;
-        
-        const buffer = windowBufferRef.current;
-        if (buffer.length < 2) return; // Need at least 2 samples (reduced from 4)
-        
-        // Calculate window metrics
-        const first = buffer[0];
-        const last = buffer[buffer.length - 1];
-        const elapsedTime = (last.timestamp - first.timestamp) / 1000;
-        const totalPath = buffer.reduce((sum, s) => sum + s.deltaDist, 0);
-        const netDisplacement = haversineDistance(first.lat, first.lng, last.lat, last.lng);
-        
-        // KEY: Net displacement must exceed GPS accuracy (very loosened)
-        const avgAccuracy = buffer.reduce((sum, s) => sum + s.accuracy, 0) / buffer.length;
-        const netExceedsAccuracy = netDisplacement * 1000 > avgAccuracy * 0.5; // Net > 0.5x accuracy (very loose)
-        
-        // Speed check (very loose - accept any movement)
-        const meanSpeed = elapsedTime > 0 ? (totalPath * 1000) / elapsedTime : 0;
-        const hasMinSpeed = meanSpeed >= 0.3; // 0.3 m/s minimum (slow walk)
-        
-        // Efficiency check (very loose for any path shape)
-        const efficiency = totalPath > 0.001 ? netDisplacement / totalPath : 0;
-        const hasMinEfficiency = efficiency >= 0.1; // 10% minimum (very loose)
-        
-        // Time check (reduced)
-        const hasEnoughTime = elapsedTime >= 2;
-        
-        if (hasEnoughTime && hasMinSpeed && hasMinEfficiency && netExceedsAccuracy) {
-          // Commit buffered distance
-          setDistance(d => d + bufferedDistanceRef.current);
-          lastMovementTimeRef.current = Date.now();
-          console.log(`+${(bufferedDistanceRef.current * 1000).toFixed(0)}m confirmed (net=${(netDisplacement * 1000).toFixed(0)}m, acc=${avgAccuracy.toFixed(0)}m, eff=${(efficiency * 100).toFixed(0)}%)`);
-          windowBufferRef.current = [];
-          bufferedDistanceRef.current = 0;
-        } else {
-          // Log why distance wasn't committed (for debugging)
-          console.log(`Pending: ${(bufferedDistanceRef.current * 1000).toFixed(0)}m, time=${elapsedTime.toFixed(1)}s, speed=${meanSpeed.toFixed(2)}m/s, eff=${(efficiency * 100).toFixed(0)}%, net=${(netDisplacement * 1000).toFixed(0)}m vs ${(avgAccuracy * 0.5).toFixed(0)}m threshold`);
-        }
-        
-        if (elapsedTime >= 30) {
-          // Timeout - purge as drift
-          console.log(`Drift purged: ${(bufferedDistanceRef.current * 1000).toFixed(0)}m (net=${(netDisplacement * 1000).toFixed(0)}m < ${(avgAccuracy * 0.5).toFixed(0)}m threshold)`);
-          windowBufferRef.current = [];
-          bufferedDistanceRef.current = 0;
-        }
+        // Accept the distance!
+        setDistance(d => d + segmentDistance);
+        lastMovementTimeRef.current = Date.now();
+        console.log(`+${distanceMeters.toFixed(0)}m ADDED`);
       }
       
       positionsRef.current.push(newPos);
