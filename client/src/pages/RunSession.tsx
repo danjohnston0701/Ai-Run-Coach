@@ -767,8 +767,7 @@ export default function RunSession() {
         const distanceMeters = segmentDistance * 1000;
         
         // Per-segment filters: reject bad samples
-        // Relaxed for walking: accuracy up to 35m, min distance 0.5m
-        if (accuracy > 35 || timeDiff > 10 || distanceMeters < 0.5 || distanceMeters > 60 || speedMs > 10) {
+        if (accuracy > 20 || timeDiff > 8 || distanceMeters < 1 || distanceMeters > 50 || speedMs > 8) {
           return;
         }
         
@@ -797,18 +796,18 @@ export default function RunSession() {
         const totalPath = buffer.reduce((sum, s) => sum + s.deltaDist, 0);
         const netDisplacement = haversineDistance(first.lat, first.lng, last.lat, last.lng);
         
-        // KEY: Net displacement must exceed GPS accuracy
+        // KEY: Net displacement must exceed GPS accuracy significantly
         // This is the critical check - real movement goes somewhere, drift oscillates
         const avgAccuracy = buffer.reduce((sum, s) => sum + s.accuracy, 0) / buffer.length;
-        const netExceedsAccuracy = netDisplacement * 1000 > avgAccuracy; // Net > accuracy (relaxed from 1.5x)
+        const netExceedsAccuracy = netDisplacement * 1000 > avgAccuracy * 1.5; // Net > 1.5x accuracy
         
-        // Speed check - relaxed for walking pace
+        // Speed check
         const meanSpeed = elapsedTime > 0 ? (totalPath * 1000) / elapsedTime : 0;
-        const hasMinSpeed = meanSpeed >= 0.5; // 0.5 m/s minimum (about 20 min/km pace)
+        const hasMinSpeed = meanSpeed >= 0.8; // 0.8 m/s minimum
         
-        // Efficiency check - relaxed for wandering paths
+        // Efficiency check (less strict)
         const efficiency = totalPath > 0.001 ? netDisplacement / totalPath : 0;
-        const hasMinEfficiency = efficiency >= 0.2; // 20% minimum (very relaxed for loops)
+        const hasMinEfficiency = efficiency >= 0.3; // 30% minimum
         
         // Time check
         const hasEnoughTime = elapsedTime >= 5;

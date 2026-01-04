@@ -1969,8 +1969,14 @@ export async function registerRoutes(
     }
   });
 
-  // Stripe subscription routes
+  // Stripe subscription routes (disabled in production)
+  const isProduction = process.env.REPLIT_DEPLOYMENT === '1';
+  const isStripeEnabled = !isProduction;
+
   app.get("/api/stripe/products", async (req, res) => {
+    if (!isStripeEnabled) {
+      return res.json([]);
+    }
     try {
       const { stripeService } = await import("./stripeService");
       const products = await stripeService.listProductsWithPrices();
@@ -1982,6 +1988,9 @@ export async function registerRoutes(
   });
 
   app.get("/api/stripe/publishable-key", async (_req, res) => {
+    if (!isStripeEnabled) {
+      return res.status(503).json({ error: "Payments disabled" });
+    }
     try {
       const { getStripePublishableKey } = await import("./stripeClient");
       const key = await getStripePublishableKey();
@@ -1993,6 +2002,9 @@ export async function registerRoutes(
   });
 
   app.post("/api/stripe/create-checkout-session", async (req, res) => {
+    if (!isStripeEnabled) {
+      return res.status(503).json({ error: "Payments disabled" });
+    }
     try {
       const { priceId, userId, mode = 'subscription' } = req.body;
       if (!priceId || !userId) {
@@ -2037,6 +2049,9 @@ export async function registerRoutes(
 
   // Complete checkout and set entitlements
   app.post("/api/stripe/complete-checkout", async (req, res) => {
+    if (!isStripeEnabled) {
+      return res.status(503).json({ error: "Payments disabled" });
+    }
     try {
       const { sessionId, userId } = req.body;
       if (!sessionId || !userId) {
@@ -2109,6 +2124,9 @@ export async function registerRoutes(
   });
 
   app.post("/api/stripe/create-portal-session", async (req, res) => {
+    if (!isStripeEnabled) {
+      return res.status(503).json({ error: "Payments disabled" });
+    }
     try {
       const { userId } = req.body;
       if (!userId) {
@@ -2139,6 +2157,9 @@ export async function registerRoutes(
   });
 
   app.get("/api/stripe/subscription/:userId", async (req, res) => {
+    if (!isStripeEnabled) {
+      return res.json({ subscription: null, tier: null, status: null });
+    }
     try {
       const user = await storage.getUser(req.params.userId);
       if (!user) {

@@ -12,22 +12,30 @@ declare module "http" {
   }
 }
 
-// Stripe webhook endpoint - MUST be before express.json() to receive raw body
-app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), async (req, res) => {
-  try {
-    const signature = req.headers["stripe-signature"] as string;
-    if (!signature) {
-      return res.status(400).send("Missing stripe-signature header");
-    }
+// Check if Stripe is enabled (disabled in production for now)
+const isProduction = process.env.REPLIT_DEPLOYMENT === '1';
+const isStripeEnabled = !isProduction; // Stripe disabled in production
 
-    const { WebhookHandlers } = await import("./webhookHandlers");
-    await WebhookHandlers.processWebhook(req.body, signature);
-    res.json({ received: true });
-  } catch (error) {
-    console.error("Stripe webhook error:", error);
-    res.status(400).send(`Webhook Error: ${error instanceof Error ? error.message : "Unknown error"}`);
-  }
-});
+// Stripe webhook endpoint - MUST be before express.json() to receive raw body
+if (isStripeEnabled) {
+  app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+    try {
+      const signature = req.headers["stripe-signature"] as string;
+      if (!signature) {
+        return res.status(400).send("Missing stripe-signature header");
+      }
+
+      const { WebhookHandlers } = await import("./webhookHandlers");
+      await WebhookHandlers.processWebhook(req.body, signature);
+      res.json({ received: true });
+    } catch (error) {
+      console.error("Stripe webhook error:", error);
+      res.status(400).send(`Webhook Error: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  });
+} else {
+  console.log("[Stripe] Payments disabled in production");
+}
 
 app.use(
   express.json({
