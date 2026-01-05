@@ -698,6 +698,9 @@ export default function RunSession() {
     processNavQueue();
   }, [audioEnabled, aiCoachEnabled, processNavQueue]);
 
+  // Ref to store last accepted position for distance calculation
+  const lastAcceptedPosRef = useRef<Position | null>(null);
+  
   useEffect(() => {
     if (!('geolocation' in navigator)) {
       setGpsStatus("error");
@@ -707,99 +710,95 @@ export default function RunSession() {
 
     const handlePosition = (position: GeolocationPosition) => {
       const accuracy = position.coords.accuracy;
-      const MAX_ACCURACY = 30; // Only accept positions with ≤30m accuracy
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+      const timestamp = position.timestamp;
       
-      console.log(`GPS update: accuracy=${accuracy.toFixed(1)}m`);
+      console.log(`[GPS] Raw: lat=${lat.toFixed(6)}, lng=${lng.toFixed(6)}, acc=${accuracy.toFixed(1)}m, active=${active}, positions=${positionsRef.current.length}`);
       
       // Track current accuracy for help dialog
       setCurrentGpsAccuracy(accuracy);
       
-      // Reject inaccurate positions (network-based location)
-      if (accuracy > MAX_ACCURACY) {
-        if (gpsStatus === "acquiring") {
-          setMessage(`Refining GPS signal... (${Math.round(accuracy)}m accuracy)`);
-        }
-        console.log(`GPS position rejected: accuracy ${accuracy.toFixed(1)}m > ${MAX_ACCURACY}m threshold`);
+      // Only require accuracy for initial lock, then accept anything reasonable
+      if (gpsStatus === "acquiring" && accuracy > 30) {
+        setMessage(`Refining GPS signal... (${Math.round(accuracy)}m accuracy)`);
+        console.log(`[GPS] Acquiring: waiting for better accuracy`);
         return;
       }
       
-      // Clear accuracy when we get a good fix
-      setCurrentGpsAccuracy(undefined);
-      
-      const newPos: Position = {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-        timestamp: position.timestamp
-      };
-      
+      const newPos: Position = { lat, lng, timestamp };
       setCurrentPosition(newPos);
       
+      // First accurate fix - GPS locked!
       if (gpsStatus === "acquiring") {
+        console.log(`[GPS] LOCKED! Setting status to active`);
         setGpsStatus("active");
         setMessage("GPS locked! Start running.");
-        // Clear any previous inaccurate positions when we get first accurate fix
-        positionsRef.current = [];
+        setCurrentGpsAccuracy(undefined);
+        positionsRef.current = [newPos];
+        lastAcceptedPosRef.current = newPos;
         
-        // Fetch weather at run start for coaching context
-        fetch(`/api/weather/current?lat=${newPos.lat}&lng=${newPos.lng}`)
+        // Fetch weather
+        fetch(`/api/weather/current?lat=${lat}&lng=${lng}`)
           .then(res => res.ok ? res.json() : null)
-          .then(data => {
-            if (data) {
-              setRunWeather(data);
-            }
-          })
+          .then(data => { if (data) setRunWeather(data); })
           .catch(err => console.warn('Weather fetch failed:', err));
+        return;
       }
       
-      if (active && positionsRef.current.length > 0) {
-        const lastPos = positionsRef.current[positionsRef.current.length - 1];
-        const segmentDistance = haversineDistance(
-          lastPos.lat, lastPos.lng,
-          newPos.lat, newPos.lng
-        );
-        
-        const timeDiff = (newPos.timestamp - lastPos.timestamp) / 1000;
-        const accuracy = position.coords.accuracy;
-        const distanceMeters = segmentDistance * 1000;
-        const speedMs = timeDiff > 0 ? distanceMeters / timeDiff : 0;
-        
-        // SIMPLE GPS FILTER - just basic sanity checks
-        // Only reject truly impossible values
-        const isBadAccuracy = accuracy > 50; // Very loose - accept up to 50m accuracy
-        const isTooFast = speedMs > 15; // > 54 km/h is impossible for running
-        const isTooFar = distanceMeters > 100; // > 100m in one update is a GPS jump
-        const isTooSmall = distanceMeters < 0.1; // < 10cm is noise
-        
-        console.log(`GPS: ${distanceMeters.toFixed(1)}m, acc=${accuracy.toFixed(0)}m, speed=${speedMs.toFixed(1)}m/s, timeDiff=${timeDiff.toFixed(1)}s`);
-        
-        if (isBadAccuracy) {
-          console.log(`Rejected: bad accuracy (${accuracy.toFixed(0)}m > 50m)`);
-          return;
-        }
-        if (isTooFast) {
-          console.log(`Rejected: too fast (${speedMs.toFixed(1)}m/s > 15m/s)`);
-          return;
-        }
-        if (isTooFar) {
-          console.log(`Rejected: GPS jump (${distanceMeters.toFixed(0)}m > 100m)`);
-          return;
-        }
-        if (isTooSmall) {
-          console.log(`Rejected: too small (${distanceMeters.toFixed(1)}m < 0.1m)`);
-          return;
-        }
-        
-        // Accept the distance!
-        setDistance(d => d + segmentDistance);
-        lastMovementTimeRef.current = Date.now();
-        console.log(`+${distanceMeters.toFixed(0)}m ADDED`);
+      // Distance tracking - MINIMAL FILTERING
+      const lastPos = lastAcceptedPosRef.current;
+      if (!lastPos) {
+        console.log(`[GPS] No last position, storing this one`);
+        lastAcceptedPosRef.current = newPos;
+        positionsRef.current.push(newPos);
+        return;
       }
       
+      // Calculate distance in METERS
+      const distanceKm = haversineDistance(lastPos.lat, lastPos.lng, lat, lng);
+      const distanceM = distanceKm * 1000;
+      const timeDiffSec = (timestamp - lastPos.timestamp) / 1000;
+      const speedMps = timeDiffSec > 0 ? distanceM / timeDiffSec : 0;
+      const speedKmh = speedMps * 3.6;
+      
+      console.log(`[GPS] Delta: ${distanceM.toFixed(1)}m in ${timeDiffSec.toFixed(1)}s = ${speedKmh.toFixed(1)}km/h, active=${active}`);
+      
+      // MINIMAL REJECTION - only reject truly impossible values
+      if (distanceM < 1) {
+        // Less than 1 meter - too small to count, but update position
+        console.log(`[GPS] Too small (${distanceM.toFixed(1)}m < 1m), skipping`);
+        return;
+      }
+      
+      if (speedKmh > 50) {
+        // Over 50 km/h is definitely a GPS jump, reject completely
+        console.log(`[GPS] Speed too high (${speedKmh.toFixed(1)}km/h > 50km/h), GPS jump`);
+        return;
+      }
+      
+      if (accuracy > 100) {
+        // Very bad accuracy, reject
+        console.log(`[GPS] Accuracy too bad (${accuracy.toFixed(0)}m > 100m), rejecting`);
+        return;
+      }
+      
+      // ACCEPT THE DISTANCE!
+      console.log(`[GPS] *** ADDING ${distanceM.toFixed(1)}m (${distanceKm.toFixed(4)}km) ***`);
+      setDistance(prev => {
+        const newDist = prev + distanceKm;
+        console.log(`[GPS] Distance updated: ${prev.toFixed(3)}km -> ${newDist.toFixed(3)}km`);
+        return newDist;
+      });
+      
+      // Update refs
+      lastAcceptedPosRef.current = newPos;
       positionsRef.current.push(newPos);
+      lastMovementTimeRef.current = Date.now();
     };
 
     const handleError = (error: GeolocationPositionError) => {
-      console.error("GPS Error:", error);
+      console.error("[GPS] Error:", error.code, error.message);
       setGpsStatus("error");
       switch (error.code) {
         case error.PERMISSION_DENIED:
@@ -814,22 +813,24 @@ export default function RunSession() {
       }
     };
 
+    console.log(`[GPS] Starting watchPosition`);
     watchIdRef.current = navigator.geolocation.watchPosition(
       handlePosition,
       handleError,
       {
         enableHighAccuracy: true,
-        maximumAge: 1000,
-        timeout: 10000
+        maximumAge: 0,      // Always get fresh position
+        timeout: 15000      // 15 second timeout
       }
     );
 
     return () => {
       if (watchIdRef.current !== null) {
+        console.log(`[GPS] Stopping watchPosition`);
         navigator.geolocation.clearWatch(watchIdRef.current);
       }
     };
-  }, [active, gpsStatus, speak]);
+  }, [gpsStatus]);
 
   useEffect(() => {
     if (gpsStatus !== "active" || !currentPosition || initialAnnouncementMadeRef.current) return;
