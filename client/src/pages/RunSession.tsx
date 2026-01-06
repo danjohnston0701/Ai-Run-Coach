@@ -954,7 +954,7 @@ export default function RunSession() {
     
     const remainingPoints = routePoints.length - nearestIndex;
     if (remainingPoints < 15 && nearestDistance < 0.1) {
-      speak("You're approaching the finish. Great job!", { domain: 'coach' });
+      speak("You're approaching the finish. Let's push. Great job!", { domain: 'coach' });
       setMessage("Almost there! Finish strong!");
       setLastDirectionTime(now);
       setLastMessageTime(now);

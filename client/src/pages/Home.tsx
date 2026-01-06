@@ -290,12 +290,14 @@ export default function Home() {
   }
 
   const { data: recentRoutes = [], isLoading: routesLoading } = useQuery<RecentRoute[]>({
-    queryKey: ['/api/routes/recent'],
+    queryKey: ['/api/routes/recent', profile?.id],
     queryFn: async () => {
-      const res = await fetch('/api/routes/recent?limit=4');
+      if (!profile?.id) return [];
+      const res = await fetch(`/api/routes/recent?limit=4&userId=${profile.id}`);
       if (!res.ok) return [];
       return res.json();
     },
+    enabled: !!profile?.id,
     staleTime: 60000,
   });
 

@@ -42,7 +42,7 @@ export interface IStorage {
   getRoute(id: string): Promise<Route | undefined>;
   updateRoute(id: string, data: Partial<InsertRoute>): Promise<Route | undefined>;
   getUserRoutes(userId: string): Promise<Route[]>;
-  getRecentRoutes(limit?: number): Promise<Route[]>;
+  getRecentRoutes(limit?: number, userId?: string): Promise<Route[]>;
   getAllRoutes(filters?: { difficulty?: string; userId?: string }): Promise<Route[]>;
   toggleRouteFavorite(id: string): Promise<Route | undefined>;
   getFavoriteRoutes(userId?: string): Promise<Route[]>;
@@ -211,8 +211,14 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(routes).where(eq(routes.userId, userId)).orderBy(desc(routes.createdAt));
   }
 
-  async getRecentRoutes(limit: number = 4): Promise<Route[]> {
+  async getRecentRoutes(limit: number = 4, userId?: string): Promise<Route[]> {
     return withRetry(async () => {
+      if (userId) {
+        return db.select().from(routes)
+          .where(eq(routes.userId, userId))
+          .orderBy(desc(routes.createdAt))
+          .limit(limit);
+      }
       return db.select().from(routes).orderBy(desc(routes.createdAt)).limit(limit);
     });
   }

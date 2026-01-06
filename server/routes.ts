@@ -157,7 +157,8 @@ export async function registerRoutes(
   app.get("/api/routes/recent", async (req, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 4;
-      const routes = await storage.getRecentRoutes(limit);
+      const userId = req.query.userId as string | undefined;
+      const routes = await storage.getRecentRoutes(limit, userId);
       res.json(routes);
     } catch (error) {
       console.error("Failed to get recent routes:", error);
