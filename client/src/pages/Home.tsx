@@ -405,14 +405,18 @@ export default function Home() {
         }
       }
 
-      // Fallback to localStorage
-      const runHistory = localStorage.getItem("runHistory");
-      if (runHistory) {
-        const runs = JSON.parse(runHistory);
-        if (runs.length > 0) {
-          setLastRun(runs[runs.length - 1]);
+      // Fallback to localStorage only if user is NOT logged in (guest mode)
+      // For logged-in users, the database is the source of truth
+      if (!userProfileStr) {
+        const runHistory = localStorage.getItem("runHistory");
+        if (runHistory) {
+          const runs = JSON.parse(runHistory);
+          if (runs.length > 0) {
+            setLastRun(runs[runs.length - 1]);
+          }
         }
       }
+      // If user is logged in but has no DB runs, lastRun stays null (new user)
     };
     
     loadProfileAndRuns();
