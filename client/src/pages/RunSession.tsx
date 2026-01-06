@@ -128,9 +128,9 @@ function getDirectionInstruction(currentBearing: number, nextBearing: number, di
 const COACH_MESSAGES = [
   "Good pace. Keep your breathing steady.",
   "You're doing great! Stay focused.",
-  "Heart rate is optimal. Keep it up.",
-  "Relax your shoulders. Form looks good.",
-  "Focus on your rhythm. In, two, three. Out, two, three."
+  "Keep your head up, you're doing great.",
+  "Relax your shoulders, rememberto use your arms.",
+  "Focus on your breathing. In, two, three.... Out, two, three."
 ];
 
 const MOTIVATIONAL_MESSAGES = [
@@ -146,7 +146,7 @@ const MOTIVATIONAL_MESSAGES = [
 
 function getCadenceFeedback(cadence: number): string {
   if (cadence < 150) return "Try to pick up your step frequency.";
-  if (cadence < 165) return "Good rhythm, try slightly quicker steps.";
+  if (cadence < 165) return "Good step rhythm, try slightly quicker steps.";
   if (cadence >= 165 && cadence <= 185) return "Perfect cadence!";
   if (cadence > 185) return "Great turnover, stay relaxed.";
   return "";
@@ -1977,21 +1977,21 @@ export default function RunSession() {
       <div className="relative z-10 bg-card/40 backdrop-blur-xl border-b border-white/10 rounded-b-xl p-2 flex-shrink-0">
         <div className="grid grid-cols-4 gap-1 mb-2 text-center">
           <div>
-            <div className="text-muted-foreground text-[8px] uppercase tracking-wider">Time</div>
+            <div className="text-muted-foreground text-[12px] uppercase tracking-wider">Time</div>
             <div className="text-base font-display font-bold">{formatTime(time)}</div>
           </div>
           <div className="border-x border-white/10">
-             <div className="text-muted-foreground text-[8px] uppercase tracking-wider">Distance</div>
+             <div className="text-muted-foreground text-[12px] uppercase tracking-wider">Distance</div>
              <div className="text-base font-display font-bold">{distance.toFixed(2)}</div>
              <div className="text-[8px] text-muted-foreground">km</div>
           </div>
           <div className="border-r border-white/10">
-             <div className="text-muted-foreground text-[8px] uppercase tracking-wider">Pace</div>
+             <div className="text-muted-foreground text-[12px] uppercase tracking-wider">Pace</div>
              <div className="text-base font-display font-bold">{calculatePace()}</div>
              <div className="text-[8px] text-muted-foreground">/km</div>
           </div>
           <div>
-             <div className="text-muted-foreground text-[8px] uppercase tracking-wider">Cadence</div>
+             <div className="text-muted-foreground text-[12px] uppercase tracking-wider">Cadence</div>
              <div className={`text-base font-display font-bold ${cadence >= 165 && cadence <= 185 ? 'text-green-400' : cadence >= 60 ? 'text-yellow-400' : ''}`}>
                {cadence >= 60 ? cadence : '--'}
              </div>
