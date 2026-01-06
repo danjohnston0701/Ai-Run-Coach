@@ -79,7 +79,7 @@ export default function LandingPage() {
             <h1 className="text-6xl md:text-8xl font-display font-black uppercase tracking-tighter leading-none mb-6">
               <br/> Ai Run <span className="text-primary text-glow-lg">Coach</span>
             </h1>
-            <p className="text-xl md:text-2xl text-muted-foreground font-medium max-w-2xl mx-auto leading-relaxed">
+            <p className="text-xl md:text-2xl text-white font-medium max-w-2xl mx-auto leading-relaxed">
               Experience the world's most advanced AI-powered running companion. Real-time coaching, smart routing, social sharing and run analysis.
             </p>
           </motion.div>
@@ -114,7 +114,7 @@ export default function LandingPage() {
       <section className="py-32 px-6 max-w-7xl mx-auto">
         <div className="text-center mb-20 space-y-4">
           <h2 className="text-4xl md:text-5xl font-display font-bold uppercase tracking-tight">Unleash your potential with your personalized Ai Coach</h2>
-          <p className="text-muted-foreground max-w-xl mx-auto">Our features are designed to push you further, safer, and smarter.</p>
+          <p className="text-muted-foreground max-w-xl mx-auto">Connect your smart watch and your Ai Run Coach will help to push you further, safer, and smarter.</p>
         </div>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
