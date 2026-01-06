@@ -1679,6 +1679,22 @@ export default function RunSession() {
     const localRunId = `run_${Date.now()}`;
     
     console.log('[Save] runWeather at save time:', runWeather);
+    
+    // Convert cumulative split times to pace objects for each km
+    const formattedKmSplits = kmSplits.map((cumulativeTime, idx) => {
+      const prevTime = idx > 0 ? kmSplits[idx - 1] : 0;
+      const kmTime = cumulativeTime - prevTime;
+      const paceMinutes = Math.floor(kmTime / 60);
+      const paceSeconds = Math.floor(kmTime % 60);
+      return {
+        km: idx + 1,
+        pace: `${paceMinutes}:${paceSeconds.toString().padStart(2, '0')}`,
+        paceSeconds: kmTime,
+        cumulativeTime: cumulativeTime
+      };
+    });
+    console.log('[Save] formattedKmSplits:', formattedKmSplits);
+    
     const localRunData = {
       id: localRunId,
       date,
@@ -1693,7 +1709,7 @@ export default function RunSession() {
       routeId: metadata.routeId,
       gpsTrack: positionsRef.current.slice(0, 500),
       avgCadence: cadence,
-      kmSplits: kmSplits,
+      kmSplits: formattedKmSplits,
       targetDistance: metadata.targetDistance,
       elevationGain: routeData?.elevation?.gain || 0,
       elevationLoss: routeData?.elevation?.loss || 0,
@@ -1719,7 +1735,7 @@ export default function RunSession() {
             startLat: metadata.startLat,
             startLng: metadata.startLng,
             gpsTrack: positionsRef.current.slice(0, 500),
-            paceData: kmSplits,
+            paceData: formattedKmSplits,
             weatherData: runWeather || undefined,
           };
           
