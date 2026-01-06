@@ -747,7 +747,8 @@ export default function RunSession() {
           })
           .then(data => { 
             console.log('[Weather] Weather data received:', data);
-            if (data) setRunWeather(data); 
+            // API returns { current: {...} } but we need the flat data
+            if (data?.current) setRunWeather(data.current); 
           })
           .catch(err => console.warn('[Weather] Weather fetch failed:', err));
         return;
