@@ -469,6 +469,11 @@ export async function registerRoutes(
       if (!run) {
         return res.status(404).json({ error: "Run not found" });
       }
+      // Verify the requesting user owns this run
+      const requestingUserId = req.query.userId as string;
+      if (requestingUserId && run.userId !== requestingUserId) {
+        return res.status(403).json({ error: "Not authorized to view this run" });
+      }
       res.json(run);
     } catch (error) {
       res.status(500).json({ error: "Failed to get run" });

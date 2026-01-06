@@ -84,7 +84,10 @@ export default function RunInsights() {
       
       // If not in localStorage, try fetching from API (for UUID-based IDs)
       try {
-        const response = await fetch(`/api/runs/${params.id}`);
+        const profile = localStorage.getItem("userProfile");
+        const userId = profile ? JSON.parse(profile).id : null;
+        const url = userId ? `/api/runs/${params.id}?userId=${userId}` : `/api/runs/${params.id}`;
+        const response = await fetch(url);
         if (response.ok) {
           const dbRun = await response.json();
           const mappedRun: RunData = {
