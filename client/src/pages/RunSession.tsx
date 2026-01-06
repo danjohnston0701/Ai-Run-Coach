@@ -739,10 +739,17 @@ export default function RunSession() {
         lastAcceptedPosRef.current = newPos;
         
         // Fetch weather
+        console.log('[Weather] Fetching weather for location:', lat, lng);
         fetch(`/api/weather/current?lat=${lat}&lng=${lng}`)
-          .then(res => res.ok ? res.json() : null)
-          .then(data => { if (data) setRunWeather(data); })
-          .catch(err => console.warn('Weather fetch failed:', err));
+          .then(res => {
+            console.log('[Weather] Response status:', res.status);
+            return res.ok ? res.json() : null;
+          })
+          .then(data => { 
+            console.log('[Weather] Weather data received:', data);
+            if (data) setRunWeather(data); 
+          })
+          .catch(err => console.warn('[Weather] Weather fetch failed:', err));
         return;
       }
       
@@ -1670,6 +1677,7 @@ export default function RunSession() {
     const metadata = sessionMetadataRef.current;
     const localRunId = `run_${Date.now()}`;
     
+    console.log('[Save] runWeather at save time:', runWeather);
     const localRunData = {
       id: localRunId,
       date,
@@ -1690,6 +1698,7 @@ export default function RunSession() {
       elevationLoss: routeData?.elevation?.loss || 0,
       weatherData: runWeather || undefined,
     };
+    console.log('[Save] localRunData.weatherData:', localRunData.weatherData);
 
     // Try to save to database if user is logged in
     const userProfileStr = localStorage.getItem("userProfile");
