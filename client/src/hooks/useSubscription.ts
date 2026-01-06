@@ -58,8 +58,9 @@ export function getSubscriptionTier(data: SubscriptionData | undefined): string 
 }
 
 export function hasPremiumAccess(entitlement: EntitlementStatus | undefined): boolean {
-  if (!entitlement) return false;
-  return entitlement.hasPremiumAccess;
+  // TEMPORARILY DISABLED - All users have premium access
+  // To reactivate: if (!entitlement) return false; return entitlement.hasPremiumAccess;
+  return true;
 }
 
 export function getEntitlementLabel(entitlement: EntitlementStatus | undefined): string {

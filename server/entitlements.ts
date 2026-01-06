@@ -40,5 +40,7 @@ export function checkEntitlementStatus(user: User): EntitlementStatus {
 }
 
 export function hasPremiumAccess(user: User): boolean {
-  return checkEntitlementStatus(user).hasPremiumAccess;
+  // TEMPORARILY DISABLED - All users have premium access
+  // To reactivate: return checkEntitlementStatus(user).hasPremiumAccess;
+  return true;
 }
