@@ -27,6 +27,10 @@ interface RouteCandidate {
     loss: number;
     maxElevation: number;
     minElevation: number;
+    maxInclinePercent?: number;
+    maxInclineDegrees?: number;
+    maxDeclinePercent?: number;
+    maxDeclineDegrees?: number;
     profile?: ElevationPoint[];
   };
   aiReasoning?: string;
@@ -588,6 +592,10 @@ async function getRouteElevation(polyline: string): Promise<{
   loss: number;
   maxElevation: number;
   minElevation: number;
+  maxInclinePercent?: number;
+  maxInclineDegrees?: number;
+  maxDeclinePercent?: number;
+  maxDeclineDegrees?: number;
   profile?: ElevationPoint[];
 } | undefined> {
   if (!GOOGLE_MAPS_API_KEY) return undefined;
@@ -652,11 +660,53 @@ async function getRouteElevation(polyline: string): Promise<{
         });
       }
       
+      // Calculate max incline and decline by iterating consecutive profile points
+      // and calculating the actual slope between them
+      let maxInclinePercent = 0;
+      let maxDeclinePercent = 0;
+      
+      for (let i = 0; i < profile.length - 1; i++) {
+        const current = profile[i];
+        const next = profile[i + 1];
+        
+        // Calculate horizontal distance between consecutive points
+        const horizontalDistance = next.distance - current.distance;
+        
+        // Skip very short segments (less than 10m) to avoid noise
+        if (horizontalDistance < 10) continue;
+        
+        // Calculate elevation change
+        const elevationChange = next.elevation - current.elevation;
+        
+        // Calculate grade as percentage
+        const gradePercent = (elevationChange / horizontalDistance) * 100;
+        
+        // Track max incline (positive) and max decline (negative as absolute)
+        if (gradePercent > maxInclinePercent) {
+          maxInclinePercent = gradePercent;
+        }
+        if (gradePercent < 0 && Math.abs(gradePercent) > maxDeclinePercent) {
+          maxDeclinePercent = Math.abs(gradePercent);
+        }
+      }
+      
+      // Round to 1 decimal place
+      maxInclinePercent = Math.round(maxInclinePercent * 10) / 10;
+      maxDeclinePercent = Math.round(maxDeclinePercent * 10) / 10;
+      
+      // Convert to degrees: degrees = atan(percent/100) * (180/PI)
+      const maxInclineDegrees = Math.round(Math.atan(maxInclinePercent / 100) * (180 / Math.PI) * 10) / 10;
+      const maxDeclineDegrees = Math.round(Math.atan(maxDeclinePercent / 100) * (180 / Math.PI) * 10) / 10;
+      
       return {
         gain: Math.round(gain),
         loss: Math.round(loss),
         maxElevation: Math.round(Math.max(...elevations)),
         minElevation: Math.round(Math.min(...elevations)),
+        maxInclinePercent,
+        maxInclineDegrees,
+        maxDeclinePercent,
+        maxDeclineDegrees,
         profile,
       };
     }

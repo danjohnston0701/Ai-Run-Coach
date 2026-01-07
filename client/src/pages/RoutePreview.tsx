@@ -3,7 +3,7 @@ import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
-import { ArrowLeft, Play, Loader2, RefreshCw, Route, TrendingUp, Mic, MicOff } from "lucide-react";
+import { ArrowLeft, Play, Loader2, RefreshCw, Route, TrendingUp, TrendingDown, Mic, MicOff } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import GoogleMapsRoute from "@/components/GoogleMapsRoute";
@@ -25,6 +25,10 @@ interface RouteCandidate {
     loss: number;
     maxElevation: number;
     minElevation: number;
+    maxInclinePercent?: number;
+    maxInclineDegrees?: number;
+    maxDeclinePercent?: number;
+    maxDeclineDegrees?: number;
   };
   aiReasoning?: string;
 }
@@ -183,6 +187,22 @@ export default function RoutePreview() {
                 </div>
               )}
             </div>
+            {route.elevation && (route.elevation.maxInclinePercent || route.elevation.maxDeclinePercent) && (
+              <div className="flex items-center gap-3 mt-2 text-xs">
+                {route.elevation.maxInclinePercent !== undefined && route.elevation.maxInclinePercent > 0 && (
+                  <div className="flex items-center gap-1 text-green-400">
+                    <TrendingUp className="w-3 h-3" />
+                    <span>Max incline: {route.elevation.maxInclinePercent}% ({route.elevation.maxInclineDegrees}°)</span>
+                  </div>
+                )}
+                {route.elevation.maxDeclinePercent !== undefined && route.elevation.maxDeclinePercent > 0 && (
+                  <div className="flex items-center gap-1 text-orange-400">
+                    <TrendingDown className="w-3 h-3" />
+                    <span>Max decline: {route.elevation.maxDeclinePercent}% ({route.elevation.maxDeclineDegrees}°)</span>
+                  </div>
+                )}
+              </div>
+            )}
             {route.hasMajorRoads && (
               <p className="text-xs text-muted-foreground mt-1">Includes major roads</p>
             )}
