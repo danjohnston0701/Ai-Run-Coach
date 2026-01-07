@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { ArrowLeft, Save, User, Camera, Upload, UserPlus, X, Users, Check, Bell, BellOff, Clock, Loader2, Pencil } from "lucide-react";
+import { ArrowLeft, Save, User, Camera, Upload, UserPlus, X, Users, Check, Bell, BellOff, Clock, Loader2, Pencil, Ruler } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -28,6 +28,9 @@ interface ProfileData {
   coachName: string;
   profilePic?: string;
   friends?: Friend[];
+  distanceMinKm?: number;
+  distanceMaxKm?: number;
+  distanceDecimalsEnabled?: boolean;
 }
 
 interface FriendRequest {
@@ -471,6 +474,9 @@ export default function Profile() {
             desiredFitnessLevel: profile.desiredFitnessLevel,
             coachName: profile.coachName,
             profilePic: profile.profilePic,
+            distanceMinKm: profile.distanceMinKm,
+            distanceMaxKm: profile.distanceMaxKm,
+            distanceDecimalsEnabled: profile.distanceDecimalsEnabled,
           }),
         });
         if (res.ok) {
@@ -835,6 +841,94 @@ export default function Profile() {
                 data-testid="input-coach-name"
               />
             </div>
+          </div>
+
+          <div className="space-y-4 bg-card/50 p-6 rounded-2xl border border-white/5">
+            <div className="flex items-center gap-3 mb-4">
+              <Ruler className="w-5 h-5 text-primary" />
+              <h2 className="text-lg font-display font-bold uppercase tracking-wide">Distance Scale</h2>
+            </div>
+
+            <p className="text-xs text-muted-foreground mb-4">
+              Customize the distance slider range on the home screen. Default is 0-50km.
+            </p>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-1.5 ml-1">
+                  Minimum (km)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="999"
+                  step={profile.distanceDecimalsEnabled ? "0.1" : "1"}
+                  value={profile.distanceMinKm ?? 0}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value) || 0;
+                    setProfile(prev => prev ? { ...prev, distanceMinKm: val } : null);
+                  }}
+                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors"
+                  data-testid="input-distance-min"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-1.5 ml-1">
+                  Maximum (km)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="1000"
+                  step={profile.distanceDecimalsEnabled ? "0.1" : "1"}
+                  value={profile.distanceMaxKm ?? 50}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value) || 50;
+                    setProfile(prev => prev ? { ...prev, distanceMaxKm: val } : null);
+                  }}
+                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors"
+                  data-testid="input-distance-max"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between p-3 bg-white/5 rounded-lg mt-4">
+              <div>
+                <p className="text-sm font-medium">Enable Decimals</p>
+                <p className="text-[10px] text-muted-foreground">Show 1 decimal place (e.g., 3.2km). Max range limited to 20km when enabled.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const newEnabled = !profile.distanceDecimalsEnabled;
+                  const minKm = profile.distanceMinKm ?? 0;
+                  const maxKm = profile.distanceMaxKm ?? 50;
+                  
+                  if (newEnabled && (maxKm - minKm) > 20) {
+                    toast.error("With decimals enabled, max range is 20km. Please adjust your min/max first.");
+                    return;
+                  }
+                  
+                  setProfile(prev => prev ? { ...prev, distanceDecimalsEnabled: newEnabled } : null);
+                }}
+                className={`relative w-12 h-6 rounded-full transition-colors ${
+                  profile.distanceDecimalsEnabled ? 'bg-primary' : 'bg-white/20'
+                }`}
+                data-testid="toggle-decimals"
+              >
+                <span 
+                  className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                    profile.distanceDecimalsEnabled ? 'left-7' : 'left-1'
+                  }`} 
+                />
+              </button>
+            </div>
+
+            {profile.distanceDecimalsEnabled && (profile.distanceMaxKm ?? 50) - (profile.distanceMinKm ?? 0) > 20 && (
+              <p className="text-xs text-amber-400 mt-2">
+                Warning: Range exceeds 20km. Please reduce to enable decimals.
+              </p>
+            )}
           </div>
 
           <div className="space-y-4 bg-card/50 p-6 rounded-2xl border border-white/5">

@@ -192,6 +192,9 @@ interface UserProfile {
   coachName: string;
   profilePic?: string;
   isAdmin?: boolean;
+  distanceMinKm?: number;
+  distanceMaxKm?: number;
+  distanceDecimalsEnabled?: boolean;
 }
 
 export default function Home() {
@@ -369,6 +372,17 @@ export default function Home() {
     const cleanValue = value.replace(/\D/g, '').slice(0, 2);
     setTargetTime(prev => ({ ...prev, [unit]: cleanValue }));
   };
+
+  // Initialize distance slider when profile loads with user's preferences
+  useEffect(() => {
+    if (profile) {
+      const minKm = profile.distanceMinKm ?? 0;
+      const maxKm = profile.distanceMaxKm ?? 50;
+      // Set initial distance to a reasonable starting point within the user's range
+      const initialDistance = Math.max(minKm, Math.min(5, maxKm));
+      setDistance([initialDistance]);
+    }
+  }, [profile?.distanceMinKm, profile?.distanceMaxKm]);
 
   useEffect(() => {
     const loadProfileAndRuns = async () => {
@@ -1231,12 +1245,16 @@ export default function Home() {
           <div className="space-y-4">
             <div className="flex justify-between items-end">
               <h2 className="text-xl font-display uppercase tracking-wide">Target Distance</h2>
-              <span className="text-4xl font-bold font-display text-primary">{distance} <span className="text-lg text-muted-foreground">km</span></span>
+              <span className="text-4xl font-bold font-display text-primary">
+                {profile?.distanceDecimalsEnabled ? distance[0].toFixed(1) : distance[0]} 
+                <span className="text-lg text-muted-foreground"> km</span>
+              </span>
             </div>
             <Slider
-              defaultValue={[5]}
-              max={42}
-              step={1}
+              defaultValue={[profile?.distanceMinKm ?? 0]}
+              min={profile?.distanceMinKm ?? 0}
+              max={profile?.distanceMaxKm ?? 50}
+              step={profile?.distanceDecimalsEnabled ? 0.1 : 1}
               value={distance}
               onValueChange={setDistance}
               className="py-4"
