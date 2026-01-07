@@ -859,14 +859,24 @@ export default function Profile() {
                   Minimum (km)
                 </label>
                 <input
-                  type="number"
-                  min="0"
-                  max="999"
-                  step={profile.distanceDecimalsEnabled ? "0.1" : "1"}
-                  value={profile.distanceMinKm ?? 0}
+                  type="text"
+                  inputMode="decimal"
+                  value={profile.distanceMinKm ?? ""}
                   onChange={(e) => {
-                    const val = parseFloat(e.target.value) || 0;
-                    setProfile(prev => prev ? { ...prev, distanceMinKm: val } : null);
+                    const raw = e.target.value;
+                    if (raw === "" || raw === ".") {
+                      setProfile(prev => prev ? { ...prev, distanceMinKm: undefined } : null);
+                    } else {
+                      const val = parseFloat(raw);
+                      if (!isNaN(val)) {
+                        setProfile(prev => prev ? { ...prev, distanceMinKm: val } : null);
+                      }
+                    }
+                  }}
+                  onBlur={(e) => {
+                    if (e.target.value === "" || isNaN(parseFloat(e.target.value))) {
+                      setProfile(prev => prev ? { ...prev, distanceMinKm: 0 } : null);
+                    }
                   }}
                   className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors"
                   data-testid="input-distance-min"
@@ -877,14 +887,24 @@ export default function Profile() {
                   Maximum (km)
                 </label>
                 <input
-                  type="number"
-                  min="1"
-                  max="1000"
-                  step={profile.distanceDecimalsEnabled ? "0.1" : "1"}
-                  value={profile.distanceMaxKm ?? 50}
+                  type="text"
+                  inputMode="decimal"
+                  value={profile.distanceMaxKm ?? ""}
                   onChange={(e) => {
-                    const val = parseFloat(e.target.value) || 50;
-                    setProfile(prev => prev ? { ...prev, distanceMaxKm: val } : null);
+                    const raw = e.target.value;
+                    if (raw === "" || raw === ".") {
+                      setProfile(prev => prev ? { ...prev, distanceMaxKm: undefined } : null);
+                    } else {
+                      const val = parseFloat(raw);
+                      if (!isNaN(val)) {
+                        setProfile(prev => prev ? { ...prev, distanceMaxKm: val } : null);
+                      }
+                    }
+                  }}
+                  onBlur={(e) => {
+                    if (e.target.value === "" || isNaN(parseFloat(e.target.value))) {
+                      setProfile(prev => prev ? { ...prev, distanceMaxKm: 50 } : null);
+                    }
                   }}
                   className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-foreground focus:outline-none focus:border-primary transition-colors"
                   data-testid="input-distance-max"
