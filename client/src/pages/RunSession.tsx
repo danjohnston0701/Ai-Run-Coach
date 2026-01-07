@@ -1739,6 +1739,7 @@ export default function RunSession() {
             weatherData: runWeather || undefined,
           };
           
+          console.log('[Save] Attempting to save run to database for userId:', userProfile.id);
           const response = await fetch('/api/runs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1747,7 +1748,7 @@ export default function RunSession() {
           
           if (response.ok) {
             const savedRun = await response.json();
-            console.log('Run saved to database:', savedRun.id);
+            console.log('[Save] Run saved to database successfully:', savedRun.id);
             
             // Update localStorage with the DB record so RunInsights can find it
             const localDataWithDbId = {
@@ -1762,10 +1763,13 @@ export default function RunSession() {
             
             localStorage.removeItem("activeRoute");
             return savedRun.id;
+          } else {
+            const errorText = await response.text();
+            console.error('[Save] Database save failed with status:', response.status, 'Error:', errorText);
           }
         }
       } catch (err) {
-        console.warn('Failed to save run to database, using localStorage:', err);
+        console.error('[Save] Failed to save run to database, using localStorage:', err);
       }
     }
     
