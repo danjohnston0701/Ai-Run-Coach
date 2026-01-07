@@ -52,13 +52,25 @@ interface Position {
 }
 
 // Map component that follows runner position
-function FollowRunner({ position }: { position: { lat: number; lng: number } | null }) {
+function FollowRunner({ position, enabled }: { position: { lat: number; lng: number } | null; enabled: boolean }) {
   const map = useMap();
   useEffect(() => {
-    if (position) {
-      map.setView([position.lat, position.lng], map.getZoom(), { animate: true });
+    if (position && enabled) {
+      map.setView([position.lat, position.lng], 17, { animate: true });
     }
-  }, [map, position]);
+  }, [map, position, enabled]);
+  return null;
+}
+
+// Map component that fits bounds to show the full route
+function FitBoundsToRoute({ routePoints, enabled }: { routePoints: Array<{ lat: number; lng: number }>; enabled: boolean }) {
+  const map = useMap();
+  useEffect(() => {
+    if (enabled && routePoints.length > 1) {
+      const bounds = routePoints.map(p => [p.lat, p.lng] as [number, number]);
+      map.fitBounds(bounds, { padding: [20, 20] });
+    }
+  }, [map, routePoints, enabled]);
   return null;
 }
 
@@ -241,6 +253,7 @@ export default function RunSession() {
   const [lastMessageTime, setLastMessageTime] = useState(0);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showNavMap, setShowNavMap] = useState(false);
+  const [mapFollowRunner, setMapFollowRunner] = useState(true);
   const [nextTurnInstruction, setNextTurnInstruction] = useState<string | null>(null);
   const [friends, setFriends] = useState<Friend[]>([]);
   const [sharedWith, setSharedWith] = useState<string[]>([]);
@@ -973,8 +986,12 @@ export default function RunSession() {
     const finishPoint = routePoints[routePoints.length - 1];
     const distanceToFinish = haversineDistance(currentPosition.lat, currentPosition.lng, finishPoint.lat, finishPoint.lng);
     
-    // Only announce approaching finish once, when within 50 meters
-    if (distanceToFinish < 0.05 && !finishAnnouncedRef.current) {
+    // Calculate progress through the route (must be at least 85% through before announcing finish)
+    const routeProgress = nearestIndex / routePoints.length;
+    
+    // Only announce approaching finish once, when within 50 meters AND runner has completed at least 85% of route
+    // This prevents false triggers on loop routes where start and finish are the same location
+    if (distanceToFinish < 0.05 && routeProgress > 0.85 && !finishAnnouncedRef.current) {
       finishAnnouncedRef.current = true;
       speak("You're approaching the finish. Let's push to the end. Great job!", { domain: 'coach' });
       setMessage("Almost there! Finish strong!");
@@ -1120,8 +1137,15 @@ export default function RunSession() {
           else if (turnDir < -20) turnLabel = "Bear left";
           
           if (turnLabel) {
-            setNextTurnInstruction(`${turnLabel} in ${distToTurnMeters}m`);
             foundTurn = true;
+            // Fetch street name for better instruction
+            getStreetName(afterPoint.lat, afterPoint.lng).then(streetName => {
+              if (streetName) {
+                setNextTurnInstruction(`In ${distToTurnMeters}m ${turnLabel.toLowerCase()} on ${streetName}`);
+              } else {
+                setNextTurnInstruction(`${turnLabel} in ${distToTurnMeters}m`);
+              }
+            });
           }
         } else if (distToTurnMeters > 200) {
           // Turn exists but too far away
@@ -2205,9 +2229,9 @@ export default function RunSession() {
                       currentPosition?.lat || routePoints[0]?.lat || 0,
                       currentPosition?.lng || routePoints[0]?.lng || 0
                     ]}
-                    zoom={17}
+                    zoom={15}
                     style={{ height: '100%', width: '100%' }}
-                    zoomControl={false}
+                    zoomControl={true}
                     attributionControl={false}
                   >
                     <TileLayer
@@ -2234,16 +2258,26 @@ export default function RunSession() {
                         pathOptions={{ fillColor: '#3b82f6', fillOpacity: 1, color: '#fff', weight: 3 }}
                       />
                     )}
-                    {/* Follow runner */}
-                    {currentPosition && <FollowRunner position={currentPosition} />}
+                    {/* Map view mode - follow runner or show full route */}
+                    <FollowRunner position={currentPosition} enabled={mapFollowRunner} />
+                    <FitBoundsToRoute routePoints={routePoints} enabled={!mapFollowRunner} />
                   </MapContainer>
+                  
+                  {/* Map view toggle button */}
+                  <button
+                    onClick={() => setMapFollowRunner(!mapFollowRunner)}
+                    className="absolute bottom-2 right-2 bg-card/90 backdrop-blur-md rounded-lg px-2 py-1 border border-white/20 z-[1000] text-[10px] font-medium"
+                    data-testid="button-toggle-map-view"
+                  >
+                    {mapFollowRunner ? 'Show Full Route' : 'Follow Me'}
+                  </button>
                   
                   {/* Upcoming instruction overlay */}
                   {nextTurnInstruction && (
-                    <div className="absolute top-2 left-2 right-2 bg-card/90 backdrop-blur-md rounded-lg p-2 border border-primary/30 z-[1000]">
+                    <div className="absolute top-2 left-2 right-12 bg-card/90 backdrop-blur-md rounded-lg p-2 border border-primary/30 z-[1000]">
                       <div className="flex items-center gap-2">
                         <Navigation2 className="w-4 h-4 text-primary flex-shrink-0" />
-                        <p className="text-xs text-foreground truncate">{nextTurnInstruction}</p>
+                        <p className="text-xs text-foreground">{nextTurnInstruction}</p>
                       </div>
                     </div>
                   )}
