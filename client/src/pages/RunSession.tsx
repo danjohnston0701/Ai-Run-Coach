@@ -5,7 +5,7 @@ import { VoiceVisualizer } from "@/components/VoiceVisualizer";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { 
-  Pause, Play, Square, Heart, Share2, Users, Navigation, Volume2, VolumeX, Footprints, Mic, MicOff, MessageCircle, AlertTriangle, Map, ChevronUp, ChevronDown, Navigation2
+  Pause, Play, Square, Heart, Share2, Users, Navigation, Volume2, VolumeX, Footprints, Mic, MicOff, MessageCircle, AlertTriangle, Map as MapIcon, ChevronUp, ChevronDown, Navigation2
 } from "lucide-react";
 import { MapContainer, TileLayer, Polyline, CircleMarker, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -2182,7 +2182,7 @@ export default function RunSession() {
             data-testid="button-toggle-nav-map"
           >
             <div className="flex items-center gap-2">
-              <Map className="w-4 h-4 text-primary" />
+              <MapIcon className="w-4 h-4 text-primary" />
               <span className="text-xs font-display font-bold uppercase tracking-wide">
                 {showNavMap ? 'Hide Map' : 'Show Map'}
               </span>
