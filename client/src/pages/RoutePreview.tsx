@@ -3,7 +3,7 @@ import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
-import { ArrowLeft, Play, Loader2, RefreshCw, Route, TrendingUp, TrendingDown, Mic, MicOff } from "lucide-react";
+import { ArrowLeft, Play, Loader2, RefreshCw, Route, TrendingUp, TrendingDown, Mic, MicOff, Brain, Sparkles, MapPin } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import GoogleMapsRoute from "@/components/GoogleMapsRoute";
@@ -187,18 +187,18 @@ export default function RoutePreview() {
                 </div>
               )}
             </div>
-            {route.elevation && (route.elevation.maxInclinePercent || route.elevation.maxDeclinePercent) && (
+            {route.elevation && (route.elevation.maxInclineDegrees || route.elevation.maxDeclineDegrees) && (
               <div className="flex items-center gap-3 mt-2 text-xs">
-                {route.elevation.maxInclinePercent !== undefined && route.elevation.maxInclinePercent > 0 && (
+                {route.elevation.maxInclineDegrees !== undefined && route.elevation.maxInclineDegrees > 0 && (
                   <div className="flex items-center gap-1 text-green-400">
                     <TrendingUp className="w-3 h-3" />
-                    <span>Max incline: {route.elevation.maxInclinePercent}% ({route.elevation.maxInclineDegrees}°)</span>
+                    <span>Steepest climb: {route.elevation.maxInclineDegrees}°</span>
                   </div>
                 )}
-                {route.elevation.maxDeclinePercent !== undefined && route.elevation.maxDeclinePercent > 0 && (
+                {route.elevation.maxDeclineDegrees !== undefined && route.elevation.maxDeclineDegrees > 0 && (
                   <div className="flex items-center gap-1 text-orange-400">
                     <TrendingDown className="w-3 h-3" />
-                    <span>Max decline: {route.elevation.maxDeclinePercent}% ({route.elevation.maxDeclineDegrees}°)</span>
+                    <span>Steepest descent: {route.elevation.maxDeclineDegrees}°</span>
                   </div>
                 )}
               </div>
@@ -249,11 +249,69 @@ export default function RoutePreview() {
         <motion.div 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="flex flex-col items-center justify-center py-20"
+          className="flex flex-col items-center justify-center py-16"
         >
-          <Loader2 className="w-12 h-12 animate-spin text-primary mb-4" />
-          <p className="text-muted-foreground">{coachName} is generating your personalized route options</p>
-          <p className="text-xs text-muted-foreground/60 mt-2">Analyzing terrain, parks, and roads to find the perfect routes for you</p>
+          <div className="relative mb-8">
+            <motion.div
+              animate={{ 
+                scale: [1, 1.1, 1],
+                opacity: [0.5, 1, 0.5]
+              }}
+              transition={{ 
+                duration: 2,
+                repeat: Infinity,
+                ease: "easeInOut"
+              }}
+              className="absolute inset-0 bg-primary/20 rounded-full blur-xl"
+              style={{ width: 120, height: 120, left: -10, top: -10 }}
+            />
+            <div className="relative w-24 h-24 rounded-full bg-gradient-to-br from-primary/30 to-primary/10 border-2 border-primary/30 flex items-center justify-center">
+              <motion.div
+                animate={{ rotate: 360 }}
+                transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+                className="absolute inset-0 rounded-full border-2 border-transparent border-t-primary/50"
+              />
+              <Brain className="w-10 h-10 text-primary" />
+              <motion.div
+                animate={{ scale: [1, 1.2, 1], opacity: [1, 0.5, 1] }}
+                transition={{ duration: 1.5, repeat: Infinity }}
+                className="absolute -top-1 -right-1"
+              >
+                <Sparkles className="w-5 h-5 text-yellow-400" />
+              </motion.div>
+            </div>
+          </div>
+          
+          <motion.p
+            animate={{ opacity: [0.7, 1, 0.7] }}
+            transition={{ duration: 2, repeat: Infinity }}
+            className="text-lg font-medium text-foreground mb-2"
+          >
+            {coachName} is thinking...
+          </motion.p>
+          
+          <div className="flex items-center gap-2 text-muted-foreground text-sm mb-4">
+            <MapPin className="w-4 h-4 text-primary" />
+            <span>Analyzing terrain and finding the best routes</span>
+          </div>
+          
+          <div className="flex items-center gap-1">
+            {[0, 1, 2].map((i) => (
+              <motion.div
+                key={i}
+                animate={{ 
+                  y: [0, -8, 0],
+                  opacity: [0.3, 1, 0.3]
+                }}
+                transition={{ 
+                  duration: 0.8,
+                  repeat: Infinity,
+                  delay: i * 0.2
+                }}
+                className="w-2 h-2 rounded-full bg-primary"
+              />
+            ))}
+          </div>
         </motion.div>
       )}
 
