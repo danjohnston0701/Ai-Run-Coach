@@ -925,7 +925,7 @@ export default function Profile() {
                   const maxKm = profile.distanceMaxKm ?? 50;
                   
                   if (newEnabled && (maxKm - minKm) > 20) {
-                    toast.error("With decimals enabled, max range is 20km. Please adjust your min/max first.");
+                    toast.error("With decimals enabled, the Maximum range between the Min and Max distance must be within 20km. Please adjust your min/max. then enable.");
                     return;
                   }
                   
