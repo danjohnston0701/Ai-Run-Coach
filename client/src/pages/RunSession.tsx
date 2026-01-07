@@ -5,8 +5,10 @@ import { VoiceVisualizer } from "@/components/VoiceVisualizer";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { 
-  Pause, Play, Square, Heart, Share2, Users, Navigation, Volume2, VolumeX, Footprints, Mic, MicOff, MessageCircle, AlertTriangle
+  Pause, Play, Square, Heart, Share2, Users, Navigation, Volume2, VolumeX, Footprints, Mic, MicOff, MessageCircle, AlertTriangle, Map, ChevronUp, ChevronDown, Navigation2
 } from "lucide-react";
+import { MapContainer, TileLayer, Polyline, CircleMarker, useMap } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -47,6 +49,17 @@ interface Position {
   lat: number;
   lng: number;
   timestamp: number;
+}
+
+// Map component that follows runner position
+function FollowRunner({ position }: { position: { lat: number; lng: number } | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (position) {
+      map.setView([position.lat, position.lng], map.getZoom(), { animate: true });
+    }
+  }, [map, position]);
+  return null;
 }
 
 function decodePolyline(encoded: string): Array<{ lat: number; lng: number }> {
@@ -227,6 +240,8 @@ export default function RunSession() {
   const [message, setMessage] = useState("Acquiring GPS signal...");
   const [lastMessageTime, setLastMessageTime] = useState(0);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showNavMap, setShowNavMap] = useState(false);
+  const [nextTurnInstruction, setNextTurnInstruction] = useState<string | null>(null);
   const [friends, setFriends] = useState<Friend[]>([]);
   const [sharedWith, setSharedWith] = useState<string[]>([]);
   const [, setLocation] = useLocation();
@@ -349,6 +364,8 @@ export default function RunSession() {
   const lastMovementTimeRef = useRef<number>(Date.now());
   const lastNavInstructionRef = useRef<string>("");
   const runStoppedRef = useRef<boolean>(false);
+  const finishAnnouncedRef = useRef<boolean>(false);
+  const lastTurnAnnouncedIndexRef = useRef<number>(-1);
 
   const searchParams = new URLSearchParams(window.location.search);
   const isResuming = searchParams.get("resume") === "true";
@@ -952,9 +969,14 @@ export default function RunSession() {
       return;
     }
     
-    const remainingPoints = routePoints.length - nearestIndex;
-    if (remainingPoints < 15 && nearestDistance < 0.1) {
-      speak("You're approaching the finish. Let's push. Great job!", { domain: 'coach' });
+    // Calculate distance to finish line (last point on route)
+    const finishPoint = routePoints[routePoints.length - 1];
+    const distanceToFinish = haversineDistance(currentPosition.lat, currentPosition.lng, finishPoint.lat, finishPoint.lng);
+    
+    // Only announce approaching finish once, when within 50 meters
+    if (distanceToFinish < 0.05 && !finishAnnouncedRef.current) {
+      finishAnnouncedRef.current = true;
+      speak("You're approaching the finish. Let's push to the end. Great job!", { domain: 'coach' });
       setMessage("Almost there! Finish strong!");
       setLastDirectionTime(now);
       setLastMessageTime(now);
@@ -963,62 +985,158 @@ export default function RunSession() {
     
     if (nearestDistance > 0.15) {
       const nearestPoint = routePoints[nearestIndex];
-      const bearing = getBearing(currentPosition.lat, currentPosition.lng, nearestPoint.lat, nearestPoint.lng);
-      const direction = bearingToCardinal(bearing);
       const distMeters = Math.round(nearestDistance * 1000);
-      const instruction = `You're ${distMeters} meters off route. Head ${direction} to get back on track.`;
-      speak(instruction, { domain: 'nav' });
-      setMessage(instruction);
-      setLastDirectionTime(now);
-      setLastMessageTime(now);
+      
+      // Try to get street name for the point to return to
+      getStreetName(nearestPoint.lat, nearestPoint.lng).then(streetName => {
+        const instruction = streetName 
+          ? `You're ${distMeters} meters off route. Head towards ${streetName} to get back on track.`
+          : `You're ${distMeters} meters off route. Check your map to get back on track.`;
+        speak(instruction, { domain: 'nav' });
+        setMessage(instruction);
+        setLastDirectionTime(Date.now());
+        setLastMessageTime(Date.now());
+      });
       return;
     }
     
+    // Find the next significant turn point (where bearing changes > 25 degrees)
     const lookAheadPoints = Math.min(Math.max(20, Math.floor(routePoints.length * 0.03)), 60);
-    const lookAhead = Math.min(nearestIndex + lookAheadPoints, routePoints.length - 1);
     
-    if (lookAhead > nearestIndex + 5) {
-      const currentPoint = routePoints[nearestIndex];
-      const nextPoint = routePoints[lookAhead];
-      const distToNext = haversineDistance(currentPosition.lat, currentPosition.lng, nextPoint.lat, nextPoint.lng);
+    // Search for the next turn within reasonable range
+    for (let searchIdx = nearestIndex + 5; searchIdx < Math.min(nearestIndex + 150, routePoints.length - 5); searchIdx++) {
+      const turnPoint = routePoints[searchIdx];
+      const beforePoint = routePoints[Math.max(0, searchIdx - 5)];
+      const afterPoint = routePoints[Math.min(routePoints.length - 1, searchIdx + 5)];
       
-      const currentBearing = getBearing(currentPoint.lat, currentPoint.lng, nextPoint.lat, nextPoint.lng);
+      const bearingBefore = getBearing(beforePoint.lat, beforePoint.lng, turnPoint.lat, turnPoint.lng);
+      const bearingAfter = getBearing(turnPoint.lat, turnPoint.lng, afterPoint.lat, afterPoint.lng);
+      const bearingDiff = Math.abs(((bearingAfter - bearingBefore + 540) % 360) - 180);
       
-      const futureLookAhead = Math.min(lookAhead + lookAheadPoints, routePoints.length - 1);
-      const futurePoint = routePoints[futureLookAhead];
-      const nextBearing = getBearing(nextPoint.lat, nextPoint.lng, futurePoint.lat, futurePoint.lng);
-      
-      const diff = Math.abs(((nextBearing - currentBearing + 540) % 360) - 180);
-      
-      if (diff > 25) {
-        const instruction = getDirectionInstruction(currentBearing, nextBearing, distToNext);
-        // Skip if same instruction as last time (prevents repetition)
-        if (instruction === lastNavInstructionRef.current) {
-          console.log("Skipping duplicate navigation instruction");
-          return;
+      // This is a significant turn
+      if (bearingDiff > 25) {
+        const distToTurn = haversineDistance(currentPosition.lat, currentPosition.lng, turnPoint.lat, turnPoint.lng);
+        const distToTurnMeters = distToTurn * 1000;
+        
+        // Only announce when within 10 meters of the turn (approaching)
+        // or when very close (at the turn - within 5m)
+        if (distToTurnMeters <= 10 && distToTurnMeters > 5) {
+          // Check if we already announced this turn
+          if (lastTurnAnnouncedIndexRef.current === searchIdx) {
+            break; // Already announced approaching this turn
+          }
+          
+          // Determine turn direction
+          const turnDir = ((bearingAfter - bearingBefore + 540) % 360) - 180;
+          let turnInstruction = "";
+          if (turnDir > 70) {
+            turnInstruction = "Turn right";
+          } else if (turnDir > 20) {
+            turnInstruction = "Bear right";
+          } else if (turnDir < -70) {
+            turnInstruction = "Turn left";
+          } else if (turnDir < -20) {
+            turnInstruction = "Bear left";
+          }
+          
+          if (turnInstruction) {
+            // Try to get street name for better instruction
+            getStreetName(afterPoint.lat, afterPoint.lng).then(streetName => {
+              const instruction = streetName 
+                ? `${turnInstruction} onto ${streetName}` 
+                : `${turnInstruction} ahead`;
+              
+              lastTurnAnnouncedIndexRef.current = searchIdx;
+              speak(instruction, { domain: 'nav' });
+              setMessage(instruction);
+              setNextTurnInstruction(instruction);
+              setLastDirectionTime(Date.now());
+              setLastMessageTime(Date.now());
+            });
+          }
+          break;
+        } else if (distToTurnMeters <= 5) {
+          // At the turn - give confirmation
+          if (lastTurnAnnouncedIndexRef.current !== searchIdx + 1000) { // Use offset to track "at turn" separately
+            const turnDir = ((bearingAfter - bearingBefore + 540) % 360) - 180;
+            let confirmInstruction = turnDir > 0 ? "Turn right now" : "Turn left now";
+            
+            lastTurnAnnouncedIndexRef.current = searchIdx + 1000;
+            speak(confirmInstruction, { domain: 'nav' });
+            setMessage(confirmInstruction);
+            setNextTurnInstruction(null); // Clear after turn is executed
+            setLastDirectionTime(now);
+            setLastMessageTime(now);
+          }
+          break;
         }
-        lastNavInstructionRef.current = instruction;
-        speak(instruction, { domain: 'nav' });
-        setMessage(instruction);
-        setLastDirectionTime(now);
-        setLastMessageTime(now);
-      } else if (distToNext > 0.08 && distToNext < 0.3) {
-        const direction = bearingToCardinal(currentBearing);
-        const distMeters = Math.round(distToNext * 1000);
-        const instruction = `Continue ${direction} for ${distMeters} meters.`;
-        // Skip if same instruction as last time (prevents repetition)
-        if (instruction === lastNavInstructionRef.current) {
-          console.log("Skipping duplicate navigation instruction");
-          return;
-        }
-        lastNavInstructionRef.current = instruction;
-        speak(instruction, { domain: 'nav' });
-        setMessage(instruction);
-        setLastDirectionTime(now);
-        setLastMessageTime(now);
+        
+        // Found the next turn but not close enough yet - stop searching
+        break;
       }
     }
   }, [active, currentPosition, routePoints, currentWaypointIndex, lastDirectionTime, speak]);
+
+  // Pre-compute next turn for map display (runs more frequently, doesn't trigger audio)
+  useEffect(() => {
+    if (!currentPosition || routePoints.length < 3) return;
+    
+    // Find nearest point on route
+    let nearestIndex = 0;
+    let nearestDist = Infinity;
+    for (let i = 0; i < routePoints.length; i++) {
+      const d = haversineDistance(currentPosition.lat, currentPosition.lng, routePoints[i].lat, routePoints[i].lng);
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearestIndex = i;
+      }
+    }
+    
+    // Look ahead for the next significant turn
+    const lookAheadMax = Math.min(nearestIndex + 80, routePoints.length - 2);
+    let foundTurn = false;
+    
+    for (let searchIdx = nearestIndex + 1; searchIdx < lookAheadMax; searchIdx++) {
+      const prevPoint = routePoints[searchIdx - 1];
+      const turnPoint = routePoints[searchIdx];
+      const afterIdx = Math.min(searchIdx + 3, routePoints.length - 1);
+      const afterPoint = routePoints[afterIdx];
+      
+      const bearingBefore = getBearing(prevPoint.lat, prevPoint.lng, turnPoint.lat, turnPoint.lng);
+      const bearingAfter = getBearing(turnPoint.lat, turnPoint.lng, afterPoint.lat, afterPoint.lng);
+      let bearingDiff = Math.abs(((bearingAfter - bearingBefore + 540) % 360) - 180);
+      
+      if (bearingDiff > 25) {
+        const distToTurn = haversineDistance(currentPosition.lat, currentPosition.lng, turnPoint.lat, turnPoint.lng);
+        const distToTurnMeters = Math.round(distToTurn * 1000);
+        
+        // Show upcoming turn on map if within 200m
+        if (distToTurnMeters <= 200 && distToTurnMeters > 10) {
+          const turnDir = ((bearingAfter - bearingBefore + 540) % 360) - 180;
+          let turnLabel = "";
+          if (turnDir > 70) turnLabel = "Turn right";
+          else if (turnDir > 20) turnLabel = "Bear right";
+          else if (turnDir < -70) turnLabel = "Turn left";
+          else if (turnDir < -20) turnLabel = "Bear left";
+          
+          if (turnLabel) {
+            setNextTurnInstruction(`${turnLabel} in ${distToTurnMeters}m`);
+            foundTurn = true;
+          }
+        } else if (distToTurnMeters > 200) {
+          // Turn exists but too far away
+          foundTurn = true; // Still counts as finding a turn, just not displayable
+          setNextTurnInstruction(null);
+        }
+        break;
+      }
+    }
+    
+    // Clear instruction if no turns found ahead
+    if (!foundTurn) {
+      setNextTurnInstruction(null);
+    }
+  }, [currentPosition, routePoints]);
 
   useEffect(() => {
     if (!active) return;
@@ -2054,6 +2172,87 @@ export default function RunSession() {
           </Button>
         </div>
       </div>
+
+      {/* Navigation Map - Collapsible */}
+      {routePoints.length > 0 && (
+        <div className="relative z-10 bg-card/40 backdrop-blur-xl border-b border-white/10 mx-2 rounded-xl overflow-hidden">
+          <button
+            onClick={() => setShowNavMap(!showNavMap)}
+            className="w-full flex items-center justify-between p-2 hover:bg-white/5 transition-colors"
+            data-testid="button-toggle-nav-map"
+          >
+            <div className="flex items-center gap-2">
+              <Map className="w-4 h-4 text-primary" />
+              <span className="text-xs font-display font-bold uppercase tracking-wide">
+                {showNavMap ? 'Hide Map' : 'Show Map'}
+              </span>
+            </div>
+            {showNavMap ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+          </button>
+          
+          <AnimatePresence>
+            {showNavMap && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 200, opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="h-[200px] w-full relative">
+                  <MapContainer
+                    center={[
+                      currentPosition?.lat || routePoints[0]?.lat || 0,
+                      currentPosition?.lng || routePoints[0]?.lng || 0
+                    ]}
+                    zoom={17}
+                    style={{ height: '100%', width: '100%' }}
+                    zoomControl={false}
+                    attributionControl={false}
+                  >
+                    <TileLayer
+                      url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                    />
+                    {/* Route line */}
+                    <Polyline
+                      positions={routePoints.map(p => [p.lat, p.lng] as [number, number])}
+                      color="hsl(var(--primary))"
+                      weight={4}
+                      opacity={0.7}
+                    />
+                    {/* Start/End marker */}
+                    <CircleMarker
+                      center={[routePoints[0]?.lat || 0, routePoints[0]?.lng || 0]}
+                      radius={8}
+                      pathOptions={{ fillColor: '#22c55e', fillOpacity: 1, color: '#fff', weight: 2 }}
+                    />
+                    {/* Current position marker */}
+                    {currentPosition && (
+                      <CircleMarker
+                        center={[currentPosition.lat, currentPosition.lng]}
+                        radius={10}
+                        pathOptions={{ fillColor: '#3b82f6', fillOpacity: 1, color: '#fff', weight: 3 }}
+                      />
+                    )}
+                    {/* Follow runner */}
+                    {currentPosition && <FollowRunner position={currentPosition} />}
+                  </MapContainer>
+                  
+                  {/* Upcoming instruction overlay */}
+                  {nextTurnInstruction && (
+                    <div className="absolute top-2 left-2 right-2 bg-card/90 backdrop-blur-md rounded-lg p-2 border border-primary/30 z-[1000]">
+                      <div className="flex items-center gap-2">
+                        <Navigation2 className="w-4 h-4 text-primary flex-shrink-0" />
+                        <p className="text-xs text-foreground truncate">{nextTurnInstruction}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
 
       {/* AI Coach - BOTTOM section */}
       <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-4">
