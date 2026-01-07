@@ -2237,19 +2237,50 @@ export default function RunSession() {
                     <TileLayer
                       url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
                     />
-                    {/* Route line */}
-                    <Polyline
-                      positions={routePoints.map(p => [p.lat, p.lng] as [number, number])}
-                      color="#06b6d4"
-                      weight={4}
-                      opacity={0.9}
-                    />
-                    {/* Start/End marker */}
+                    {/* Route line - color gradient from green (start) to red (finish) */}
+                    {routePoints.length > 1 && (() => {
+                      // Create segments with gradient colors
+                      const segments = [];
+                      const totalSegments = Math.min(routePoints.length - 1, 50); // Limit for performance
+                      const step = Math.max(1, Math.floor((routePoints.length - 1) / totalSegments));
+                      
+                      for (let i = 0; i < routePoints.length - 1; i += step) {
+                        const progress = i / (routePoints.length - 1);
+                        // Interpolate from green (#22c55e) to red (#ef4444)
+                        const r = Math.round(34 + progress * (239 - 34));
+                        const g = Math.round(197 - progress * (197 - 68));
+                        const b = Math.round(94 - progress * (94 - 68));
+                        const color = `rgb(${r},${g},${b})`;
+                        
+                        const endIdx = Math.min(i + step, routePoints.length - 1);
+                        const segmentPoints = routePoints.slice(i, endIdx + 1).map(p => [p.lat, p.lng] as [number, number]);
+                        
+                        segments.push(
+                          <Polyline
+                            key={`route-segment-${i}`}
+                            positions={segmentPoints}
+                            color={color}
+                            weight={5}
+                            opacity={0.9}
+                          />
+                        );
+                      }
+                      return segments;
+                    })()}
+                    {/* Start marker (green) */}
                     <CircleMarker
                       center={[routePoints[0]?.lat || 0, routePoints[0]?.lng || 0]}
                       radius={8}
                       pathOptions={{ fillColor: '#22c55e', fillOpacity: 1, color: '#fff', weight: 2 }}
                     />
+                    {/* End marker (red) */}
+                    {routePoints.length > 1 && (
+                      <CircleMarker
+                        center={[routePoints[routePoints.length - 1]?.lat || 0, routePoints[routePoints.length - 1]?.lng || 0]}
+                        radius={8}
+                        pathOptions={{ fillColor: '#ef4444', fillOpacity: 1, color: '#fff', weight: 2 }}
+                      />
+                    )}
                     {/* Current position marker */}
                     {currentPosition && (
                       <CircleMarker
