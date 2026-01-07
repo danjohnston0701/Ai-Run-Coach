@@ -2240,9 +2240,9 @@ export default function RunSession() {
                     {/* Route line */}
                     <Polyline
                       positions={routePoints.map(p => [p.lat, p.lng] as [number, number])}
-                      color="hsl(var(--primary))"
+                      color="#06b6d4"
                       weight={4}
-                      opacity={0.7}
+                      opacity={0.9}
                     />
                     {/* Start/End marker */}
                     <CircleMarker
