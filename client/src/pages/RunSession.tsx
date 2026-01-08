@@ -417,6 +417,7 @@ export default function RunSession() {
   const stepTimestampsRef = useRef<number[]>([]);
   const lastAccelRef = useRef<number>(0);
   const runMetricsRef = useRef({ time: 0, distance: 0 });
+  const currentPositionRef = useRef<Position | null>(null);
   const startTimestampRef = useRef<number>(Date.now());
   const sessionIdRef = useRef<string>(`run-${Date.now()}`);
   const lastTerrainCoachingTimeRef = useRef<number>(0);
@@ -1829,6 +1830,45 @@ export default function RunSession() {
       }
     };
   }, [active, aiCoachEnabled, gpsStatus, coachingInterval, fetchCoaching]);
+
+  // Keep position ref in sync for use in intervals
+  useEffect(() => {
+    currentPositionRef.current = currentPosition;
+  }, [currentPosition]);
+
+  // Proactive terrain coaching - check periodically for significant hills
+  useEffect(() => {
+    if (!active || !aiCoachEnabled || gpsStatus !== "active") return;
+    
+    const elevationProfile = routeData?.elevation?.profile;
+    const elevationGain = routeData?.elevation?.gain;
+    const elevationLoss = routeData?.elevation?.loss;
+    if (!elevationProfile || elevationProfile.length < 2) return;
+    
+    // Check terrain every 10 seconds while running
+    const terrainCheckInterval = setInterval(() => {
+      const { distance: currentDistance } = runMetricsRef.current;
+      const pos = currentPositionRef.current;
+      if (currentDistance < 0.1 || !pos) return;
+      
+      const terrainData = calculateTerrainData(
+        pos.lat,
+        pos.lng,
+        currentDistance * 1000,
+        elevationProfile,
+        elevationGain,
+        elevationLoss
+      );
+      
+      if (shouldTriggerTerrainCoaching(terrainData, lastTerrainCoachingTimeRef.current, 45000)) {
+        console.log("Terrain coaching triggered:", terrainData);
+        lastTerrainCoachingTimeRef.current = Date.now();
+        fetchCoaching();
+      }
+    }, 10000);
+    
+    return () => clearInterval(terrainCheckInterval);
+  }, [active, aiCoachEnabled, gpsStatus, routeData?.elevation?.profile, routeData?.elevation?.gain, routeData?.elevation?.loss, fetchCoaching]);
 
   const startListening = useCallback(() => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {

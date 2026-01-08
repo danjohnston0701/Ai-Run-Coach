@@ -290,10 +290,20 @@ export async function getCoachingAdvice(request: CoachingRequest): Promise<Coach
       terrainSection += `\n- Route elevation gain: ${request.terrain.totalElevationGain}m`;
     }
     
-    terrainSection += `\n\nHILL COACHING PRIORITIES:
+    // Determine current hill state for prioritized coaching
+    const currentlyOnSteepHill = Math.abs(request.terrain.currentGrade || 0) >= 5;
+    const approachingSteepHill = request.terrain.upcomingTerrain && Math.abs(request.terrain.upcomingTerrain.grade) >= 5;
+    
+    if (currentlyOnSteepHill || approachingSteepHill) {
+      terrainSection += `\n\n**PRIORITY: HILL COACHING REQUIRED**
+${currentlyOnSteepHill ? `Runner is currently on a ${request.terrain.currentGrade! > 0 ? 'UPHILL' : 'DOWNHILL'} section. Focus your advice on technique for this terrain.` : ''}
+${approachingSteepHill ? `WARN the runner about the upcoming ${request.terrain.upcomingTerrain!.description}!` : ''}`;
+    }
+    
+    terrainSection += `\n\nHILL COACHING GUIDELINES:
 - For upcoming hills: Warn 100-200m ahead, advise on pace conservation
-- On steep uphills (>5%): Suggest shorter strides, lean forward slightly, maintain cadence
-- On downhills: Control pace, light braking with legs, don't overstride
+- On steep uphills (>5%): Suggest shorter strides, lean forward slightly, maintain cadence over speed
+- On downhills: Control pace, quick light steps, don't overstride
 - After hills: Acknowledge effort, guide recovery pace`;
   }
   
@@ -388,7 +398,7 @@ Respond in JSON format:
   "encouragement": "Brief encouragement (max 10 words)",
   "paceAdvice": "Specific pace guidance (max 15 words)",
   "breathingTip": "Quick breathing tip if relevant (max 10 words)",
-  "topic": "One-word topic of this advice (e.g., 'pace', 'breathing', 'milestone', 'form', 'motivation')"
+  "topic": "One-word topic of this advice (e.g., 'pace', 'breathing', 'milestone', 'form', 'motivation', 'terrain', 'uphill', 'downhill')"
 }`;
 
   try {
