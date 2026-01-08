@@ -1021,10 +1021,11 @@ export default function RunSession() {
     const lookAheadPoints = Math.min(Math.max(20, Math.floor(routePoints.length * 0.03)), 60);
     
     // Search for the next turn within reasonable range
-    for (let searchIdx = nearestIndex + 5; searchIdx < Math.min(nearestIndex + 150, routePoints.length - 5); searchIdx++) {
+    for (let searchIdx = nearestIndex + 2; searchIdx < Math.min(nearestIndex + 150, routePoints.length - 2); searchIdx++) {
       const turnPoint = routePoints[searchIdx];
-      const beforePoint = routePoints[Math.max(0, searchIdx - 5)];
-      const afterPoint = routePoints[Math.min(routePoints.length - 1, searchIdx + 5)];
+      // Use adjacent points (±1) for accurate turn direction - not ±5 which can span different streets
+      const beforePoint = routePoints[Math.max(0, searchIdx - 1)];
+      const afterPoint = routePoints[Math.min(routePoints.length - 1, searchIdx + 1)];
       
       const bearingBefore = getBearing(beforePoint.lat, beforePoint.lng, turnPoint.lat, turnPoint.lng);
       const bearingAfter = getBearing(turnPoint.lat, turnPoint.lng, afterPoint.lat, afterPoint.lng);
@@ -1057,9 +1058,8 @@ export default function RunSession() {
           }
           
           if (turnInstruction) {
-            // Get street name at a point just after the turn (1-2 points ahead, not 5)
-            const streetLookupIdx = Math.min(searchIdx + 2, routePoints.length - 1);
-            const streetLookupPoint = routePoints[streetLookupIdx];
+            // Get street name at the afterPoint (searchIdx + 1) - the street we're turning onto
+            const streetLookupPoint = afterPoint;
             
             getStreetName(streetLookupPoint.lat, streetLookupPoint.lng).then(streetName => {
               const instruction = streetName 
@@ -1117,10 +1117,10 @@ export default function RunSession() {
     let foundTurn = false;
     
     for (let searchIdx = nearestIndex + 1; searchIdx < lookAheadMax; searchIdx++) {
-      const prevPoint = routePoints[searchIdx - 1];
+      // Use adjacent points (±1) for accurate turn direction - consistent with audio navigation
+      const prevPoint = routePoints[Math.max(0, searchIdx - 1)];
       const turnPoint = routePoints[searchIdx];
-      const afterIdx = Math.min(searchIdx + 3, routePoints.length - 1);
-      const afterPoint = routePoints[afterIdx];
+      const afterPoint = routePoints[Math.min(routePoints.length - 1, searchIdx + 1)];
       
       const bearingBefore = getBearing(prevPoint.lat, prevPoint.lng, turnPoint.lat, turnPoint.lng);
       const bearingAfter = getBearing(turnPoint.lat, turnPoint.lng, afterPoint.lat, afterPoint.lng);
@@ -1141,9 +1141,8 @@ export default function RunSession() {
           
           if (turnLabel) {
             foundTurn = true;
-            // Fetch street name at a point just after the turn (1-2 points ahead)
-            const streetLookupIdx = Math.min(searchIdx + 2, routePoints.length - 1);
-            const streetLookupPoint = routePoints[streetLookupIdx];
+            // Fetch street name at the afterPoint - the street we're turning onto
+            const streetLookupPoint = afterPoint;
             
             getStreetName(streetLookupPoint.lat, streetLookupPoint.lng).then(streetName => {
               if (streetName) {
