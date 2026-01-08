@@ -2369,6 +2369,33 @@ export async function registerRoutes(
     }
   });
 
+  // Admin endpoint to send test push notification
+  app.post("/api/admin/test-push/:userId", requireAdmin, async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const subscription = await storage.getPushSubscription(userId);
+      
+      if (!subscription) {
+        return res.status(404).json({ error: "No push subscription found for this user" });
+      }
+      
+      const { sendPushNotification } = await import("./pushNotifications");
+      
+      await sendPushNotification(subscription, {
+        title: "Test Notification",
+        body: "This is a test push notification from AI Run Coach!",
+        icon: "/icons/icon-192x192.png",
+        tag: "test-notification",
+        data: { type: "test" }
+      });
+      
+      res.json({ success: true, message: "Test notification sent!" });
+    } catch (error: any) {
+      console.error("Failed to send test push:", error);
+      res.status(500).json({ error: error.message || "Failed to send test notification" });
+    }
+  });
+
   // Admin endpoint to re-geocode all route locations with street + city format
   app.post("/api/admin/routes/reprocess-locations", requireAdmin, async (req, res) => {
     try {
