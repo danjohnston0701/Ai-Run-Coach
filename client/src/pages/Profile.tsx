@@ -579,6 +579,34 @@ export default function Profile() {
         animate={{ opacity: 1, y: 0 }}
         className="max-w-md mx-auto w-full"
       >
+        {/* Runner ID - Top of Profile */}
+        <div className="mb-6 px-4 py-4 bg-gradient-to-r from-primary/20 to-primary/10 rounded-2xl border border-primary/30">
+          <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-2 text-center font-bold">Your Runner ID</p>
+          {profile.userCode ? (
+            <div className="flex items-center justify-center gap-3">
+              <span className="text-3xl font-mono font-bold text-primary tracking-widest" data-testid="text-user-code-top">
+                {profile.userCode}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(profile.userCode || '');
+                  toast.success('Runner ID copied!');
+                }}
+                className="p-2 rounded-lg bg-primary/20 hover:bg-primary/30 transition-colors"
+                data-testid="button-copy-user-code-top"
+              >
+                <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </button>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center">Loading...</p>
+          )}
+          <p className="text-[9px] text-muted-foreground text-center mt-2">Share this ID with friends so they can find you</p>
+        </div>
+
         <div className="flex flex-col items-center mb-8">
           <div className="relative group">
             <div 
@@ -647,31 +675,6 @@ export default function Profile() {
           >
             Update Profile Photo
           </button>
-          
-          {profile.userCode && (
-            <div className="mt-4 px-4 py-3 bg-primary/10 rounded-xl border border-primary/20">
-              <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-1">Your Runner ID</p>
-              <div className="flex items-center justify-center gap-2">
-                <span className="text-2xl font-mono font-bold text-primary tracking-wider" data-testid="text-user-code">
-                  {profile.userCode}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(profile.userCode || '');
-                    toast.success('Runner ID copied to clipboard!');
-                  }}
-                  className="p-1.5 rounded-lg bg-primary/20 hover:bg-primary/30 transition-colors"
-                  data-testid="button-copy-user-code"
-                >
-                  <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                  </svg>
-                </button>
-              </div>
-              <p className="text-[9px] text-muted-foreground text-center mt-1">Share this ID with friends so they can find you</p>
-            </div>
-          )}
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6 pb-24">
