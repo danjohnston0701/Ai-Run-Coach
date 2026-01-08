@@ -1057,8 +1057,11 @@ export default function RunSession() {
           }
           
           if (turnInstruction) {
-            // Try to get street name for better instruction
-            getStreetName(afterPoint.lat, afterPoint.lng).then(streetName => {
+            // Get street name at a point just after the turn (1-2 points ahead, not 5)
+            const streetLookupIdx = Math.min(searchIdx + 2, routePoints.length - 1);
+            const streetLookupPoint = routePoints[streetLookupIdx];
+            
+            getStreetName(streetLookupPoint.lat, streetLookupPoint.lng).then(streetName => {
               const instruction = streetName 
                 ? `${turnInstruction} onto ${streetName}` 
                 : `${turnInstruction} ahead`;
@@ -1138,8 +1141,11 @@ export default function RunSession() {
           
           if (turnLabel) {
             foundTurn = true;
-            // Fetch street name for better instruction
-            getStreetName(afterPoint.lat, afterPoint.lng).then(streetName => {
+            // Fetch street name at a point just after the turn (1-2 points ahead)
+            const streetLookupIdx = Math.min(searchIdx + 2, routePoints.length - 1);
+            const streetLookupPoint = routePoints[streetLookupIdx];
+            
+            getStreetName(streetLookupPoint.lat, streetLookupPoint.lng).then(streetName => {
               if (streetName) {
                 setNextTurnInstruction(`In ${distToTurnMeters}m ${turnLabel.toLowerCase()} on ${streetName}`);
               } else {
