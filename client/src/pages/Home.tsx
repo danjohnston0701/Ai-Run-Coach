@@ -231,6 +231,25 @@ export default function Home() {
   const [selectedFreeRunFriends, setSelectedFreeRunFriends] = useState<string[]>([]);
   const [creatingFreeRunGroup, setCreatingFreeRunGroup] = useState(false);
   const [freeRunGroupCreated, setFreeRunGroupCreated] = useState<{ id: string; inviteToken: string } | null>(null);
+  const [processingInvite, setProcessingInvite] = useState<string | null>(null);
+
+  interface PendingGroupInvite {
+    id: string;
+    groupRunId: string;
+    invitationStatus: string;
+    groupRun: {
+      id: string;
+      title?: string;
+      routeId?: string;
+      targetDistance?: number;
+      inviteToken: string;
+    };
+    host?: {
+      id: string;
+      name: string;
+      profilePic?: string;
+    };
+  }
 
   // Entitlement check for paywall (premium features only)
   const { data: entitlementData } = useEntitlement(profile?.id || null);
@@ -282,6 +301,67 @@ export default function Home() {
     refetchInterval: 30000,
     staleTime: 0,
   });
+
+  const { data: pendingInvites = [], refetch: refetchInvites } = useQuery<PendingGroupInvite[]>({
+    queryKey: ['/api/group-runs/invites/pending', profile?.id],
+    queryFn: async () => {
+      if (!profile?.id) return [];
+      const res = await fetch(`/api/group-runs/invites/pending/${profile.id}`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!profile?.id,
+    refetchInterval: 15000,
+    staleTime: 0,
+  });
+
+  const handleAcceptGroupInvite = async (invite: PendingGroupInvite) => {
+    if (!profile?.id || processingInvite) return;
+    setProcessingInvite(invite.id);
+    try {
+      const res = await fetch(`/api/group-runs/invites/${invite.id}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: profile.id }),
+      });
+      if (!res.ok) throw new Error('Failed to accept invite');
+      const data = await res.json();
+      toast.success('Group run invite accepted!');
+      refetchInvites();
+      // Navigate to run session with group run info
+      const params = new URLSearchParams({
+        groupRunId: invite.groupRunId,
+        paused: 'true',
+      });
+      if (data.route) {
+        params.set('routeId', data.route.id);
+      }
+      setLocation(`/run?${params.toString()}`);
+    } catch (err) {
+      toast.error('Failed to accept invite');
+    } finally {
+      setProcessingInvite(null);
+    }
+  };
+
+  const handleDeclineGroupInvite = async (invite: PendingGroupInvite) => {
+    if (!profile?.id || processingInvite) return;
+    setProcessingInvite(invite.id);
+    try {
+      const res = await fetch(`/api/group-runs/invites/${invite.id}/decline`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: profile.id }),
+      });
+      if (!res.ok) throw new Error('Failed to decline invite');
+      toast.success('Group run invite declined');
+      refetchInvites();
+    } catch (err) {
+      toast.error('Failed to decline invite');
+    } finally {
+      setProcessingInvite(null);
+    }
+  };
 
   interface RecentRoute {
     id: string;
@@ -903,6 +983,55 @@ export default function Home() {
           </div>
         </motion.div>
       )}
+
+      {/* Group Run Invite Banner */}
+      <AnimatePresence>
+        {pendingInvites.length > 0 && pendingInvites.map((invite) => (
+          <motion.div
+            key={invite.id}
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className={`mb-4 ${!activeSession ? '-mx-6 -mt-6' : '-mx-6'} px-6 py-4 bg-gradient-to-r from-purple-500/20 to-purple-400/10 border-b border-purple-400/30`}
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center">
+                  <Users className="w-5 h-5 text-purple-400" />
+                </div>
+                <div>
+                  <p className="font-medium text-foreground">Group Run Invite</p>
+                  <p className="text-sm text-muted-foreground">
+                    {invite.host?.name || 'A friend'} invited you
+                    {invite.groupRun.targetDistance ? ` · ${invite.groupRun.targetDistance.toFixed(1)} km` : ''}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleDeclineGroupInvite(invite)}
+                  disabled={processingInvite === invite.id}
+                  className="text-muted-foreground"
+                  data-testid={`button-decline-invite-${invite.id}`}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => handleAcceptGroupInvite(invite)}
+                  disabled={processingInvite === invite.id}
+                  className="bg-purple-500 text-white hover:bg-purple-600"
+                  data-testid={`button-accept-invite-${invite.id}`}
+                >
+                  {processingInvite === invite.id ? 'Joining...' : 'Join'}
+                </Button>
+              </div>
+            </div>
+          </motion.div>
+        ))}
+      </AnimatePresence>
 
       {/* Notification Permission Dialog */}
       <Dialog open={showNotificationPrompt} onOpenChange={setShowNotificationPrompt}>
