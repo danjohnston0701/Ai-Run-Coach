@@ -22,7 +22,7 @@ import {
 import type { Friend } from "./Profile";
 import { saveActiveRunSession, loadActiveRunSession, clearActiveRunSession, type ActiveRunSession } from "@/lib/activeRunSession";
 import { loadCoachSettings, loadCoachSettingsFromProfile, getVoicePreferences, getTTSVoice, type AiCoachSettings } from "@/lib/coachSettings";
-import { calculateTerrainData, shouldTriggerTerrainCoaching, type ElevationPoint, type TerrainData } from "@/lib/elevationTracker";
+import { calculateTerrainData, shouldTriggerTerrainCoaching, type ElevationPoint, type TerrainData, type TerrainDirection } from "@/lib/elevationTracker";
 import { GpsHelpDialog } from "@/components/GpsHelpDialog";
 
 import coachAvatar from "@assets/generated_images/glowing_ai_voice_sphere_interface.png";
@@ -420,7 +420,8 @@ export default function RunSession() {
   const currentPositionRef = useRef<Position | null>(null);
   const startTimestampRef = useRef<number>(Date.now());
   const sessionIdRef = useRef<string>(`run-${Date.now()}`);
-  const lastTerrainCoachingTimeRef = useRef<number>(0);
+  const lastUphillCoachingTimeRef = useRef<number>(0);
+  const lastDownhillCoachingTimeRef = useRef<number>(0);
   const initialAnnouncementMadeRef = useRef<boolean>(false);
   const navAudioCacheRef = useRef<Map<string, string>>(new Map());
   const lastNavSpeakTimeRef = useRef<number>(0);
@@ -1695,9 +1696,6 @@ export default function RunSession() {
           routeData.elevation.loss
         );
         
-        if (terrainData?.upcomingTerrain) {
-          lastTerrainCoachingTimeRef.current = Date.now();
-        }
       }
       
       // Calculate pace change from previous coaching
@@ -1860,9 +1858,19 @@ export default function RunSession() {
         elevationLoss
       );
       
-      if (shouldTriggerTerrainCoaching(terrainData, lastTerrainCoachingTimeRef.current, 180000)) {
-        console.log("Terrain coaching triggered:", terrainData);
-        lastTerrainCoachingTimeRef.current = Date.now();
+      const terrainDirection = shouldTriggerTerrainCoaching(
+        terrainData, 
+        lastUphillCoachingTimeRef.current, 
+        lastDownhillCoachingTimeRef.current, 
+        180000
+      );
+      if (terrainDirection) {
+        console.log(`Terrain coaching triggered (${terrainDirection}):`, terrainData);
+        if (terrainDirection === 'uphill') {
+          lastUphillCoachingTimeRef.current = Date.now();
+        } else {
+          lastDownhillCoachingTimeRef.current = Date.now();
+        }
         fetchCoaching();
       }
     }, 10000);

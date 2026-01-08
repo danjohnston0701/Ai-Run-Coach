@@ -109,23 +109,44 @@ export function calculateTerrainData(
   return terrain;
 }
 
+export type TerrainDirection = 'uphill' | 'downhill' | null;
+
+export function getTerrainDirection(terrain: TerrainData | undefined): TerrainDirection {
+  if (!terrain) return null;
+  
+  // Check upcoming terrain first (warning ahead)
+  if (terrain.upcomingTerrain && Math.abs(terrain.upcomingTerrain.grade) >= 5) {
+    return terrain.upcomingTerrain.grade > 0 ? 'uphill' : 'downhill';
+  }
+  
+  // Check current grade
+  if (terrain.currentGrade !== undefined && Math.abs(terrain.currentGrade) >= 6) {
+    return terrain.currentGrade > 0 ? 'uphill' : 'downhill';
+  }
+  
+  return null;
+}
+
 export function shouldTriggerTerrainCoaching(
   terrain: TerrainData | undefined,
-  lastTerrainCoachingTime: number,
+  lastUphillCoachingTime: number,
+  lastDownhillCoachingTime: number,
   minIntervalMs: number = 30000
-): boolean {
-  if (!terrain) return false;
+): TerrainDirection {
+  if (!terrain) return null;
   
   const now = Date.now();
-  if (now - lastTerrainCoachingTime < minIntervalMs) return false;
+  const direction = getTerrainDirection(terrain);
   
-  if (terrain.upcomingTerrain && Math.abs(terrain.upcomingTerrain.grade) >= 5) {
-    return true;
+  if (!direction) return null;
+  
+  // Check cooldown based on direction
+  if (direction === 'uphill' && now - lastUphillCoachingTime < minIntervalMs) {
+    return null;
+  }
+  if (direction === 'downhill' && now - lastDownhillCoachingTime < minIntervalMs) {
+    return null;
   }
   
-  if (terrain.currentGrade !== undefined && Math.abs(terrain.currentGrade) >= 6) {
-    return true;
-  }
-  
-  return false;
+  return direction;
 }
