@@ -206,6 +206,20 @@ export default function Profile() {
       if ('Notification' in window) {
         setNotificationsEnabled(Notification.permission === 'granted');
       }
+      
+      // Fetch userCode from database if not in localStorage
+      if (parsed.id && !parsed.userCode) {
+        fetch(`/api/users/${parsed.id}`)
+          .then(res => res.ok ? res.json() : null)
+          .then(userData => {
+            if (userData?.userCode) {
+              const updatedProfile = { ...parsed, userCode: userData.userCode };
+              setProfile(updatedProfile);
+              localStorage.setItem("userProfile", JSON.stringify(updatedProfile));
+            }
+          })
+          .catch(() => {});
+      }
     } else {
       setLocation("/");
     }
