@@ -1430,11 +1430,23 @@ export default function RunSession() {
         announcement += `${remainingKm.toFixed(1)} kilometers to go. `;
       }
       
-      // Provide cadence coaching at 10%, 45%, and 75% of target distance
-      const km10Percent = Math.max(1, Math.ceil(targetDistNum * 0.10));
-      const km45Percent = Math.ceil(targetDistNum * 0.45);
-      const km75Percent = Math.ceil(targetDistNum * 0.75);
-      const shouldGiveCadenceCoaching = currentKm === km10Percent || currentKm === km45Percent || currentKm === km75Percent;
+      // Cadence coaching frequency depends on run type:
+      // - With AI-generated route: at 10%, 45%, 75% of target distance
+      // - Without route (free run): every ~1.5km (at km 1, 3, 4, 6, 7, 9, etc.)
+      const hasRoute = routePoints.length > 0;
+      let shouldGiveCadenceCoaching = false;
+      
+      if (hasRoute && targetDistNum > 0) {
+        // Percentage-based for route runs
+        const km10Percent = Math.max(1, Math.ceil(targetDistNum * 0.10));
+        const km45Percent = Math.ceil(targetDistNum * 0.45);
+        const km75Percent = Math.ceil(targetDistNum * 0.75);
+        shouldGiveCadenceCoaching = currentKm === km10Percent || currentKm === km45Percent || currentKm === km75Percent;
+      } else {
+        // Every ~1.5km for free runs (at km 1, then every 2km: 1, 3, 5, 7, 9...)
+        shouldGiveCadenceCoaching = currentKm === 1 || (currentKm > 1 && currentKm % 2 === 1);
+      }
+      
       if (cadence > 0 && shouldGiveCadenceCoaching) {
         // Use full AI cadence coaching advice if available, otherwise fall back to static feedback
         const cadenceFeedback = cadenceAnalysis?.coachingAdvice || getCadenceFeedback(cadence);
@@ -1449,7 +1461,7 @@ export default function RunSession() {
       setMessage(`${currentKm}km - ${thisKmMins}:${thisKmSecs.toString().padStart(2, '0')} split`);
       setLastMessageTime(Date.now());
     }
-  }, [active, gpsStatus, distance, lastKmAnnounced, time, kmSplits, cadence, cadenceAnalysis, speak]);
+  }, [active, gpsStatus, distance, lastKmAnnounced, time, kmSplits, cadence, cadenceAnalysis, speak, routePoints]);
 
   // Fetch AI cadence analysis periodically during runs
   useEffect(() => {
