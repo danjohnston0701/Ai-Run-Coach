@@ -1532,6 +1532,34 @@ export async function registerRoutes(
     }
   });
 
+  // Start a group run (host only)
+  app.post("/api/group-runs/:id/start", async (req, res) => {
+    try {
+      const { userId } = req.body;
+      const groupRun = await storage.getGroupRun(req.params.id);
+      
+      if (!groupRun) {
+        return res.status(404).json({ error: "Group run not found" });
+      }
+      
+      // Verify the user is the host
+      if (groupRun.hostUserId !== userId) {
+        return res.status(403).json({ error: "Only the host can start the group run" });
+      }
+      
+      // Update group run status to active
+      const updated = await storage.updateGroupRun(req.params.id, {
+        status: 'active',
+        actualStartAt: new Date(),
+      });
+      
+      res.json(updated);
+    } catch (error) {
+      console.error("Start group run error:", error);
+      res.status(500).json({ error: "Failed to start group run" });
+    }
+  });
+
   app.get("/api/group-runs/token/:token", async (req, res) => {
     try {
       const groupRun = await storage.getGroupRunByToken(req.params.token);

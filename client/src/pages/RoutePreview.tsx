@@ -234,6 +234,7 @@ export default function RoutePreview() {
       routeName: selectedRoute.routeName,
       aiCoach: aiCoachEnabled ? "on" : "off",
       groupRunId: groupRunCreated.id,
+      waiting: "true",
     });
     setLocation(`/run?${runParams.toString()}`);
   };

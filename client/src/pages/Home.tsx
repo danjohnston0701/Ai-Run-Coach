@@ -328,13 +328,26 @@ export default function Home() {
       const data = await res.json();
       toast.success('Group run invite accepted!');
       refetchInvites();
-      // Navigate to run session with group run info
+      // Navigate to run session waiting room with group run info
       const params = new URLSearchParams({
         groupRunId: invite.groupRunId,
-        paused: 'true',
+        waiting: 'true',
       });
       if (data.route) {
         params.set('routeId', data.route.id);
+        // Also store route data in localStorage for RunSession to pick up
+        if (data.route.polyline) {
+          localStorage.setItem("activeRoute", JSON.stringify({
+            id: data.route.id,
+            routeName: data.route.name || 'Group Run Route',
+            difficulty: data.route.difficulty || 'moderate',
+            actualDistance: data.route.distance || invite.groupRun.targetDistance,
+            polyline: data.route.polyline,
+            waypoints: data.route.waypoints || [],
+            startLat: data.route.startLat,
+            startLng: data.route.startLng,
+          }));
+        }
       }
       setLocation(`/run?${params.toString()}`);
     } catch (err) {

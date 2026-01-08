@@ -5,7 +5,7 @@ import { VoiceVisualizer } from "@/components/VoiceVisualizer";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { 
-  Pause, Play, Square, Heart, Share2, Users, Navigation, Volume2, VolumeX, Footprints, Mic, MicOff, MessageCircle, AlertTriangle, Map as MapIcon, ChevronUp, ChevronDown, Navigation2
+  Pause, Play, Square, Heart, Share2, Users, Navigation, Volume2, VolumeX, Footprints, Mic, MicOff, MessageCircle, AlertTriangle, Map as MapIcon, ChevronUp, ChevronDown, Navigation2, Check, Loader
 } from "lucide-react";
 import { MapContainer, TileLayer, Polyline, CircleMarker, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -442,9 +442,12 @@ export default function RunSession() {
   const urlTargetTimeSeconds = parseInt(searchParams.get("targetTime") || "0");
   const urlAiCoach = searchParams.get("aiCoach");
   const urlGroupRunId = searchParams.get("groupRunId") || "";
+  const urlWaitingForParticipants = searchParams.get("waiting") === "true";
 
-  const [groupRunParticipants, setGroupRunParticipants] = useState<{id: string; userId: string; userName: string; role: string}[]>([]);
+  const [groupRunParticipants, setGroupRunParticipants] = useState<{id: string; userId: string; userName: string; role: string; invitationStatus: string}[]>([]);
   const [isGroupRun, setIsGroupRun] = useState(!!urlGroupRunId);
+  const [waitingForParticipants, setWaitingForParticipants] = useState(urlWaitingForParticipants);
+  const [isHost, setIsHost] = useState(false);
 
   const sessionMetadataRef = useRef({
     targetDistance: urlTargetDistance,
@@ -637,21 +640,69 @@ export default function RunSession() {
     };
   }, [cleanupAudio]);
 
-  useEffect(() => {
-    if (urlGroupRunId) {
-      fetch(`/api/group-runs/${urlGroupRunId}/participants`)
-        .then(res => res.json())
-        .then(data => {
-          setGroupRunParticipants(data.map((p: any) => ({
-            id: p.id,
-            userId: p.userId,
-            userName: p.userName || 'Runner',
-            role: p.role,
-          })));
-        })
-        .catch(err => console.error("Failed to load group run participants:", err));
+  const fetchGroupRunParticipants = useCallback(async () => {
+    if (!urlGroupRunId) return;
+    try {
+      const res = await fetch(`/api/group-runs/${urlGroupRunId}/participants`);
+      if (res.ok) {
+        const data = await res.json();
+        const profile = localStorage.getItem("userProfile");
+        const userId = profile ? JSON.parse(profile).id : null;
+        
+        setGroupRunParticipants(data.map((p: any) => ({
+          id: p.id,
+          userId: p.userId,
+          userName: p.userName || 'Runner',
+          role: p.role,
+          invitationStatus: p.invitationStatus || 'pending',
+        })));
+        
+        // Check if current user is the host
+        const hostParticipant = data.find((p: any) => p.role === 'host');
+        if (hostParticipant && userId && hostParticipant.userId === userId) {
+          setIsHost(true);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load group run participants:", err);
     }
   }, [urlGroupRunId]);
+
+  useEffect(() => {
+    fetchGroupRunParticipants();
+  }, [fetchGroupRunParticipants]);
+
+  // Poll for participant updates and group run status while waiting
+  useEffect(() => {
+    if (!urlGroupRunId || !waitingForParticipants) return;
+    
+    const fetchGroupRunStatus = async () => {
+      try {
+        const res = await fetch(`/api/group-runs/${urlGroupRunId}`);
+        if (res.ok) {
+          const groupRun = await res.json();
+          // If host has started the run, dismiss the waiting overlay
+          if (groupRun.status === 'active') {
+            setWaitingForParticipants(false);
+            setActive(true);
+            speak("Group run started! Let's go!", { domain: 'system' });
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch group run status:", err);
+      }
+    };
+    
+    const interval = setInterval(() => {
+      fetchGroupRunParticipants();
+      fetchGroupRunStatus();
+    }, 3000);
+    
+    // Initial fetch
+    fetchGroupRunStatus();
+    
+    return () => clearInterval(interval);
+  }, [urlGroupRunId, waitingForParticipants, fetchGroupRunParticipants]);
   
   const speakWithDeviceTTS = useCallback((text: string) => {
     if (!('speechSynthesis' in window)) {
@@ -2135,8 +2186,124 @@ export default function RunSession() {
     }
   };
 
+  const acceptedParticipants = groupRunParticipants.filter(p => p.invitationStatus === 'accepted');
+  const pendingParticipants = groupRunParticipants.filter(p => p.invitationStatus === 'pending');
+
+  const handleStartGroupRun = async () => {
+    try {
+      const profile = localStorage.getItem("userProfile");
+      const userId = profile ? JSON.parse(profile).id : null;
+      
+      if (!userId) {
+        toast.error("User profile not found");
+        return;
+      }
+      
+      // Call API to start the group run
+      const res = await fetch(`/api/group-runs/${urlGroupRunId}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      });
+      
+      if (!res.ok) {
+        const error = await res.json();
+        toast.error(error.error || "Failed to start group run");
+        return;
+      }
+      
+      setWaitingForParticipants(false);
+      setActive(true);
+      speak("Group run started! Let's go!", { domain: 'system' });
+    } catch (err) {
+      console.error("Failed to start group run:", err);
+      toast.error("Failed to start group run");
+    }
+  };
+
   return (
     <div className="h-screen w-full bg-background text-foreground flex flex-col relative overflow-hidden font-sans select-none">
+      {/* Group Run Waiting Room */}
+      <AnimatePresence>
+        {waitingForParticipants && isGroupRun && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-background"
+          >
+            <div className="w-full max-w-md p-6 space-y-6 text-center">
+              <div className="space-y-2">
+                <Users className="w-16 h-16 text-purple-400 mx-auto mb-4" />
+                <h1 className="text-3xl font-display font-bold uppercase tracking-wider text-primary">
+                  Waiting Room
+                </h1>
+                <p className="text-muted-foreground">
+                  {isHost ? "Waiting for friends to join..." : "Waiting for host to start..."}
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <div className="bg-card/50 border border-white/10 rounded-2xl p-4">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground mb-3">
+                    Ready ({acceptedParticipants.length})
+                  </h3>
+                  <div className="space-y-2">
+                    {acceptedParticipants.map((p) => (
+                      <div key={p.id} className="flex items-center gap-3 p-2 bg-green-500/10 rounded-lg">
+                        <div className="w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center">
+                          <Check className="w-4 h-4 text-green-400" />
+                        </div>
+                        <span className="font-medium">{p.userName}</span>
+                        {p.role === 'host' && (
+                          <span className="text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full">Host</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {pendingParticipants.length > 0 && (
+                  <div className="bg-card/50 border border-white/10 rounded-2xl p-4">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground mb-3">
+                      Waiting ({pendingParticipants.length})
+                    </h3>
+                    <div className="space-y-2">
+                      {pendingParticipants.map((p) => (
+                        <div key={p.id} className="flex items-center gap-3 p-2 bg-yellow-500/10 rounded-lg">
+                          <div className="w-8 h-8 rounded-full bg-yellow-500/20 flex items-center justify-center">
+                            <Loader className="w-4 h-4 text-yellow-400 animate-spin" />
+                          </div>
+                          <span className="font-medium text-muted-foreground">{p.userName}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-4">
+                {isHost ? (
+                  <Button
+                    onClick={handleStartGroupRun}
+                    className="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-4 text-lg"
+                    data-testid="button-start-group-run"
+                  >
+                    <Play className="w-5 h-5 mr-2" />
+                    Start Run ({acceptedParticipants.length} Ready)
+                  </Button>
+                ) : (
+                  <div className="flex items-center justify-center gap-3 p-4 bg-purple-500/10 rounded-2xl">
+                    <Loader className="w-5 h-5 text-purple-400 animate-spin" />
+                    <span className="text-purple-400 font-medium">Waiting for host to start...</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {showShareModal && (
           <motion.div 
