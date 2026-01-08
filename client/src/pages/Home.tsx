@@ -836,13 +836,13 @@ export default function Home() {
 
   useEffect(() => {
     if (profile?.id && showFreeRunGroupModal) {
-      fetch(`/api/friends/${profile.id}`)
+      fetch(`/api/users/${profile.id}/friends`)
         .then(res => res.json())
         .then(data => {
           const friendList = data.map((f: any) => ({
             id: f.friendId,
-            name: f.friendName || 'Unknown',
-            profilePic: f.friendProfilePic,
+            name: f.name || 'Unknown',
+            profilePic: f.profilePic,
           }));
           setFreeRunFriends(friendList);
         })

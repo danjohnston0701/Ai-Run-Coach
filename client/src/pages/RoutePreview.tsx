@@ -80,13 +80,13 @@ export default function RoutePreview() {
 
   useEffect(() => {
     if (userId && showGroupRunModal) {
-      fetch(`/api/friends/${userId}`)
+      fetch(`/api/users/${userId}/friends`)
         .then(res => res.json())
         .then(data => {
           const friendList = data.map((f: any) => ({
             id: f.friendId,
-            name: f.friendName || 'Unknown',
-            profilePic: f.friendProfilePic,
+            name: f.name || 'Unknown',
+            profilePic: f.profilePic,
           }));
           setFriends(friendList);
         })
