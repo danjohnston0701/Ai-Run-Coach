@@ -1010,10 +1010,15 @@ export default function Profile() {
                 <p className="text-[10px] text-muted-foreground">Get notified when friends add you</p>
               </div>
               {notificationsEnabled ? (
-                <div className="flex items-center gap-2 text-green-500">
+                <button
+                  type="button"
+                  onClick={handleEnableNotifications}
+                  className="flex items-center gap-2 text-green-500 hover:opacity-80 transition-opacity"
+                  data-testid="button-refresh-notifications"
+                >
                   <Bell className="w-4 h-4" />
                   <span className="text-xs font-bold">ON</span>
-                </div>
+                </button>
               ) : (
                 <Button
                   type="button"
