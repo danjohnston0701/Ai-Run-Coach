@@ -501,6 +501,25 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/runs/:id", async (req, res) => {
+    try {
+      const run = await storage.getRun(req.params.id);
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+      // Verify the requesting user owns this run
+      const requestingUserId = req.query.userId as string;
+      if (requestingUserId && run.userId !== requestingUserId) {
+        return res.status(403).json({ error: "Not authorized to delete this run" });
+      }
+      await storage.deleteRun(req.params.id);
+      res.json({ success: true, message: "Run deleted successfully" });
+    } catch (error) {
+      console.error("Delete run error:", error);
+      res.status(500).json({ error: "Failed to delete run" });
+    }
+  });
+
   // Weather Impact Analysis endpoint
   app.get("/api/users/:userId/weather-impact", async (req, res) => {
     try {

@@ -335,6 +335,11 @@ export class DatabaseStorage implements IStorage {
     return run;
   }
 
+  async deleteRun(id: string): Promise<boolean> {
+    const result = await db.delete(runs).where(eq(runs.id, id));
+    return true;
+  }
+
   async createLiveSession(data: InsertLiveRunSession): Promise<LiveRunSession> {
     const [session] = await db.insert(liveRunSessions).values(data).returning();
     return session;

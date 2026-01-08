@@ -8,8 +8,18 @@ import { toast } from "sonner";
 import { 
   ArrowLeft, Calendar, TrendingUp, Heart, 
   Activity, Zap as CadenceIcon, Info, Timer, MapPin, Share2, Mail, User as UserIcon, Search, Star,
-  Facebook, Instagram, Download, X, Map, Users, Trophy, Medal, Award
+  Facebook, Instagram, Download, X, Map, Users, Trophy, Medal, Award, Trash2
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { Friend } from "./Profile";
 import {
   AreaChart,
@@ -99,6 +109,8 @@ export default function RunInsights() {
     coachingAdvice: string;
   } | null>(null);
   const [isLoadingCadenceAnalysis, setIsLoadingCadenceAnalysis] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     const loadRun = async () => {
@@ -313,6 +325,41 @@ export default function RunInsights() {
     } catch (error) {
       console.error("Failed to submit rating:", error);
       toast.error("Failed to save rating");
+    }
+  };
+
+  const handleDeleteRun = async () => {
+    if (!run || !params?.id) return;
+    
+    setIsDeleting(true);
+    try {
+      const profile = localStorage.getItem("userProfile");
+      const userId = profile ? JSON.parse(profile).id : null;
+      
+      // Delete from database
+      const url = userId ? `/api/runs/${params.id}?userId=${userId}` : `/api/runs/${params.id}`;
+      const response = await fetch(url, { method: "DELETE" });
+      
+      if (!response.ok) {
+        throw new Error("Failed to delete run from server");
+      }
+      
+      // Also remove from localStorage
+      const runHistory = localStorage.getItem("runHistory");
+      if (runHistory) {
+        const runs = JSON.parse(runHistory);
+        const updatedRuns = runs.filter((r: RunData) => r.id !== params.id);
+        localStorage.setItem("runHistory", JSON.stringify(updatedRuns));
+      }
+      
+      toast.success("Run deleted successfully");
+      setLocation("/history");
+    } catch (error) {
+      console.error("Failed to delete run:", error);
+      toast.error("Failed to delete run");
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
     }
   };
 
@@ -1408,8 +1455,43 @@ export default function RunInsights() {
               </div>
             </div>
           )}
+
+          {/* Delete Run Section */}
+          <div className="mt-8 pt-6 border-t border-white/10">
+            <Button
+              variant="outline"
+              className="w-full border-red-500/30 text-red-400 hover:bg-red-500/10 hover:border-red-500/50"
+              onClick={() => setShowDeleteConfirm(true)}
+              data-testid="button-delete-run"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete This Run
+            </Button>
+          </div>
         </section>
       </main>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent className="bg-card border-white/10">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Run?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this run record from your history. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteRun}
+              disabled={isDeleting}
+              className="bg-red-500 hover:bg-red-600 text-white"
+            >
+              {isDeleting ? "Deleting..." : "Delete Run"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

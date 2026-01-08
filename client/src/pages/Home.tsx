@@ -1687,7 +1687,7 @@ export default function Home() {
                   disabled={!userLocation}
                   data-testid="button-start-session"
                 >
-                  <Play className="mr-2 w-5 h-5 fill-current" /> Free Run
+                  <Play className="mr-2 w-5 h-5 fill-current" /> Run without Route
                 </Button>
                 <Button 
                   size="lg" 
@@ -1837,7 +1837,7 @@ export default function Home() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">Run Type</p>
-                        <p className="font-bold">Free Run (No Route)</p>
+                        <p className="font-bold">Run without Route</p>
                       </div>
                       <div className="px-2 py-1 rounded-full text-xs font-bold uppercase bg-primary/20 text-primary">
                         {distance[0]}km target
