@@ -5,6 +5,7 @@ import { z } from "zod";
 
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userCode: text("user_code").unique(),
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
   name: text("name").notNull(),
@@ -269,7 +270,7 @@ export const groupRunParticipants = pgTable("group_run_participants", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
+export const insertUserSchema = createInsertSchema(users).omit({ id: true, userCode: true, createdAt: true });
 export const insertPreRegistrationSchema = createInsertSchema(preRegistrations).omit({ id: true, createdAt: true });
 export const insertFriendSchema = createInsertSchema(friends).omit({ id: true, createdAt: true });
 export const insertRouteSchema = createInsertSchema(routes).omit({ id: true, createdAt: true });

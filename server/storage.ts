@@ -1,4 +1,5 @@
 import { eq, and, desc, or, sql } from "drizzle-orm";
+import { randomInt } from "crypto";
 import { db, withRetry } from "./db";
 import {
   users, preRegistrations, friends, routes, runs, liveRunSessions, garminData,
@@ -31,7 +32,7 @@ export interface IStorage {
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, data: Partial<InsertUser>): Promise<User | undefined>;
-  searchUsers(query: string): Promise<Array<{ id: string; name: string; email: string }>>;
+  searchUsers(query: string): Promise<Array<{ id: string; name: string; userCode: string | null }>>;
 
   createPreRegistration(data: InsertPreRegistration): Promise<PreRegistration>;
   getPreRegistrations(): Promise<PreRegistration[]>;
@@ -165,9 +166,59 @@ export class DatabaseStorage implements IStorage {
 
   async createUser(data: InsertUser): Promise<User> {
     return withRetry(async () => {
-      const [user] = await db.insert(users).values(data).returning();
-      return user;
+      const maxRetries = 10;
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        const userCode = this.generateUserCode();
+        try {
+          const [user] = await db.insert(users).values({ ...data, userCode }).returning();
+          return user;
+        } catch (error: any) {
+          if (error?.code === '23505' && error?.constraint?.includes('user_code')) {
+            continue;
+          }
+          throw error;
+        }
+      }
+      throw new Error('Failed to generate unique user code after maximum retries');
     });
+  }
+
+  private generateUserCode(): string {
+    const randomNum = randomInt(0, 100000000);
+    return randomNum.toString().padStart(8, '0');
+  }
+
+  async backfillUserCodes(): Promise<number> {
+    const usersWithoutCode = await db.select().from(users).where(sql`user_code IS NULL`);
+    let updated = 0;
+    const failed: string[] = [];
+    
+    for (const user of usersWithoutCode) {
+      const maxRetries = 10;
+      let success = false;
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        const userCode = this.generateUserCode();
+        try {
+          await db.update(users).set({ userCode }).where(eq(users.id, user.id));
+          updated++;
+          success = true;
+          break;
+        } catch (error: any) {
+          if (error?.code === '23505' && attempt < maxRetries - 1) {
+            continue;
+          }
+          console.error(`Failed to backfill userCode for user ${user.id}:`, error);
+        }
+      }
+      if (!success) {
+        failed.push(user.id);
+      }
+    }
+    
+    if (failed.length > 0) {
+      console.error(`Failed to backfill ${failed.length} users:`, failed);
+    }
+    return updated;
   }
 
   async updateUser(id: string, data: Partial<InsertUser>): Promise<User | undefined> {
@@ -175,18 +226,18 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async searchUsers(query: string): Promise<Array<{ id: string; name: string; email: string }>> {
+  async searchUsers(query: string): Promise<Array<{ id: string; name: string; userCode: string | null }>> {
     return withRetry(async () => {
       const allUsers = await db.select({
         id: users.id,
         name: users.name,
-        email: users.email,
+        userCode: users.userCode,
       }).from(users);
       
       const lowerQuery = query.toLowerCase();
       return allUsers.filter(u => 
         (u.name && u.name.toLowerCase().includes(lowerQuery)) || 
-        (u.email && u.email.toLowerCase().includes(lowerQuery))
+        (u.userCode && u.userCode.includes(query))
       );
     });
   }

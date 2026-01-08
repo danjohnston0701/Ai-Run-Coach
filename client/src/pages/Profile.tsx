@@ -11,12 +11,13 @@ const FITNESS_LEVELS = ["Unfit", "Casual", "Athletic", "Very Fit", "Elite"];
 
 export interface Friend {
   name: string;
-  email?: string;
+  userCode?: string;
   friendId?: string;
 }
 
 interface ProfileData {
   id?: string;
+  userCode?: string;
   email?: string;
   name: string;
   dob: string;
@@ -39,16 +40,16 @@ interface FriendRequest {
   addresseeId: string;
   status: string;
   requesterName?: string;
-  requesterEmail?: string;
+  requesterUserCode?: string;
   addresseeName?: string;
-  addresseeEmail?: string;
+  addresseeUserCode?: string;
   createdAt: string;
 }
 
 interface SearchUser {
   id: string;
   name: string;
-  email: string;
+  userCode: string | null;
 }
 
 function isIOSSafari() {
@@ -249,7 +250,7 @@ export default function Profile() {
     if (profile && dbFriends.length > 0) {
       const friendsList = dbFriends.map((f: any) => ({
         name: f.name,
-        email: f.email,
+        userCode: f.userCode,
         friendId: f.friendId,
       }));
       
@@ -286,12 +287,12 @@ export default function Profile() {
   });
 
   const respondMutation = useMutation({
-    mutationFn: async ({ requestId, action, requesterName, requesterEmail }: { requestId: string; action: 'accept' | 'reject'; requesterName?: string; requesterEmail?: string }) => {
+    mutationFn: async ({ requestId, action, requesterName }: { requestId: string; action: 'accept' | 'reject'; requesterName?: string }) => {
       const res = await apiRequest('POST', `/api/friend-requests/${requestId}/respond`, {
         action,
         userId: profile?.id,
       });
-      return { response: await res.json(), requesterName, requesterEmail, action };
+      return { response: await res.json(), requesterName, action };
     },
     onSuccess: ({ action }) => {
       toast.success(action === 'accept' ? 'Friend added!' : 'Request declined');
@@ -340,7 +341,7 @@ export default function Profile() {
           const users = await res.json();
           const filtered = users.filter((u: SearchUser) => 
             u.id !== profile?.id && 
-            !profile?.friends?.some(f => f.email === u.email) &&
+            !profile?.friends?.some(f => f.friendId === u.id) &&
             !outgoingRequests.some((r: FriendRequest) => r.addresseeId === u.id)
           );
           setSearchResults(filtered);
@@ -646,6 +647,31 @@ export default function Profile() {
           >
             Update Profile Photo
           </button>
+          
+          {profile.userCode && (
+            <div className="mt-4 px-4 py-3 bg-primary/10 rounded-xl border border-primary/20">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-1">Your Runner ID</p>
+              <div className="flex items-center justify-center gap-2">
+                <span className="text-2xl font-mono font-bold text-primary tracking-wider" data-testid="text-user-code">
+                  {profile.userCode}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(profile.userCode || '');
+                    toast.success('Runner ID copied to clipboard!');
+                  }}
+                  className="p-1.5 rounded-lg bg-primary/20 hover:bg-primary/30 transition-colors"
+                  data-testid="button-copy-user-code"
+                >
+                  <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                </button>
+              </div>
+              <p className="text-[9px] text-muted-foreground text-center mt-1">Share this ID with friends so they can find you</p>
+            </div>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6 pb-24">
@@ -1009,7 +1035,7 @@ export default function Profile() {
                     <div key={request.id} className="flex items-center justify-between p-3 bg-amber-500/10 rounded-lg border border-amber-500/20" data-testid={`request-incoming-${request.id}`}>
                       <div>
                         <p className="text-sm font-medium text-foreground">{request.requesterName}</p>
-                        <p className="text-[10px] text-muted-foreground">{request.requesterEmail}</p>
+                        {request.requesterUserCode && <p className="text-[10px] text-muted-foreground font-mono">ID: {request.requesterUserCode}</p>}
                       </div>
                       <div className="flex gap-2">
                         <Button
@@ -1018,8 +1044,7 @@ export default function Profile() {
                           onClick={() => respondMutation.mutate({ 
                             requestId: request.id, 
                             action: 'accept',
-                            requesterName: request.requesterName,
-                            requesterEmail: request.requesterEmail
+                            requesterName: request.requesterName
                           })}
                           disabled={respondMutation.isPending}
                           className="h-7 px-2 bg-green-500/20 hover:bg-green-500/30 text-green-500"
@@ -1054,7 +1079,7 @@ export default function Profile() {
                     <div key={request.id} className="flex items-center justify-between p-3 bg-blue-500/10 rounded-lg border border-blue-500/20" data-testid={`request-outgoing-${request.id}`}>
                       <div>
                         <p className="text-sm font-medium text-foreground">{request.addresseeName}</p>
-                        <p className="text-[10px] text-muted-foreground">{request.addresseeEmail}</p>
+                        {request.addresseeUserCode && <p className="text-[10px] text-muted-foreground font-mono">ID: {request.addresseeUserCode}</p>}
                       </div>
                       <Button
                         type="button"
@@ -1079,7 +1104,7 @@ export default function Profile() {
                   <div key={idx} className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5" data-testid={`friend-${idx}`}>
                     <div>
                       <p className="text-sm font-medium text-foreground">{friend.name}</p>
-                      {friend.email && <p className="text-[10px] text-muted-foreground">{friend.email}</p>}
+                      {friend.userCode && <p className="text-[10px] text-muted-foreground font-mono">ID: {friend.userCode}</p>}
                     </div>
                     <button
                       type="button"
@@ -1114,7 +1139,7 @@ export default function Profile() {
                           e.preventDefault();
                         }
                       }}
-                      placeholder="Search name or email..."
+                      placeholder="Search by name or Runner ID..."
                       className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-foreground text-sm focus:outline-none focus:border-primary transition-colors"
                       autoFocus
                       data-testid="input-search-friend"
@@ -1137,7 +1162,7 @@ export default function Profile() {
                         >
                           <div>
                             <p className="text-xs font-medium text-foreground">{user.name}</p>
-                            <p className="text-[10px] text-muted-foreground">{user.email}</p>
+                            <p className="text-[10px] text-muted-foreground font-mono">ID: {user.userCode || 'N/A'}</p>
                           </div>
                           <Button 
                             size="sm" 

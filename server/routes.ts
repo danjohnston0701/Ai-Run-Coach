@@ -786,7 +786,7 @@ export async function registerRoutes(
           return {
             id: record.id,
             name: friendUser?.name || 'Unknown',
-            email: friendUser?.email || '',
+            userCode: friendUser?.userCode || null,
             friendId: record.friendId,
             profilePic: friendUser?.profilePic || null,
           };
@@ -1958,7 +1958,7 @@ export async function registerRoutes(
           return {
             ...request,
             requesterName: requester?.name || 'Unknown',
-            requesterEmail: requester?.email || '',
+            requesterUserCode: requester?.userCode || null,
             requesterProfilePic: requester?.profilePic || null,
           };
         })
@@ -1984,7 +1984,7 @@ export async function registerRoutes(
           return {
             ...request,
             addresseeName: addressee?.name || 'Unknown',
-            addresseeEmail: addressee?.email || '',
+            addresseeUserCode: addressee?.userCode || null,
             addresseeProfilePic: addressee?.profilePic || null,
           };
         })
@@ -2355,6 +2355,17 @@ export async function registerRoutes(
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete FAQ" });
+    }
+  });
+
+  // Admin endpoint to backfill user codes for existing users
+  app.post("/api/admin/backfill-user-codes", requireAdmin, async (req, res) => {
+    try {
+      const updated = await storage.backfillUserCodes();
+      res.json({ success: true, updated });
+    } catch (error) {
+      console.error("Failed to backfill user codes:", error);
+      res.status(500).json({ error: "Failed to backfill user codes" });
     }
   });
 
