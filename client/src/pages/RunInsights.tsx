@@ -683,21 +683,37 @@ export default function RunInsights() {
 
       <main className="space-y-8">
         {/* Key Stats Grid */}
-        <section className="grid grid-cols-2 gap-4">
+        <section className="grid grid-cols-2 gap-3">
           <Card className="bg-card/30 border-white/5 backdrop-blur-sm">
-            <CardContent className="p-4 flex flex-col items-center justify-center text-center">
-              <MapPin className="w-4 h-4 text-primary mb-2" />
+            <CardContent className="p-3 flex flex-col items-center justify-center text-center">
+              <MapPin className="w-4 h-4 text-primary mb-1" />
               <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-1">Distance</div>
-              <div className="text-3xl font-display font-bold text-primary">{formatDistance(run.distance)}</div>
-              <div className="text-xs text-muted-foreground uppercase">kilometers</div>
+              <div className="text-2xl font-display font-bold text-primary">{formatDistance(run.distance)}</div>
+              <div className="text-[10px] text-muted-foreground uppercase">km</div>
             </CardContent>
           </Card>
           <Card className="bg-card/30 border-white/5 backdrop-blur-sm">
-            <CardContent className="p-4 flex flex-col items-center justify-center text-center">
-              <Timer className="w-4 h-4 text-primary mb-2" />
+            <CardContent className="p-3 flex flex-col items-center justify-center text-center">
+              <Timer className="w-4 h-4 text-primary mb-1" />
               <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-1">Time</div>
               <div className="text-2xl font-display font-bold text-primary">{formatDuration(run.totalTime)}</div>
-              <div className="text-xs text-muted-foreground uppercase">duration</div>
+              <div className="text-[10px] text-muted-foreground uppercase">duration</div>
+            </CardContent>
+          </Card>
+          <Card className="bg-card/30 border-white/5 backdrop-blur-sm">
+            <CardContent className="p-3 flex flex-col items-center justify-center text-center">
+              <TrendingUp className="w-4 h-4 text-primary mb-1" />
+              <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-1">Avg Pace</div>
+              <div className="text-2xl font-display font-bold text-primary">{formatPace(run.avgPace)}</div>
+              <div className="text-[10px] text-muted-foreground uppercase">/km</div>
+            </CardContent>
+          </Card>
+          <Card className="bg-card/30 border-white/5 backdrop-blur-sm">
+            <CardContent className="p-3 flex flex-col items-center justify-center text-center">
+              <CadenceIcon className="w-4 h-4 text-primary mb-1" />
+              <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-1">Avg Cadence</div>
+              <div className="text-2xl font-display font-bold text-primary">{run.cadence && run.cadence > 0 ? run.cadence : '--'}</div>
+              <div className="text-[10px] text-muted-foreground uppercase">spm</div>
             </CardContent>
           </Card>
         </section>
