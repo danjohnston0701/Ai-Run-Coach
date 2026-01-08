@@ -260,6 +260,10 @@ export const groupRunParticipants = pgTable("group_run_participants", {
   role: text("role").notNull().default("participant"),
   invitationStatus: text("invitation_status").notNull().default("pending"),
   runId: varchar("run_id").references(() => runs.id),
+  inviteExpiresAt: timestamp("invite_expires_at"),
+  acceptedAt: timestamp("accepted_at"),
+  declinedAt: timestamp("declined_at"),
+  readyToStart: boolean("ready_to_start").default(false),
   joinedAt: timestamp("joined_at"),
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -283,7 +287,7 @@ export const insertAiCoachFaqSchema = createInsertSchema(aiCoachFaq).omit({ id: 
 export const insertCouponCodeSchema = createInsertSchema(couponCodes).omit({ id: true, createdAt: true, currentRedemptions: true });
 export const insertUserCouponSchema = createInsertSchema(userCoupons).omit({ id: true, redeemedAt: true });
 export const insertGroupRunSchema = createInsertSchema(groupRuns).omit({ id: true, createdAt: true, startedAt: true, completedAt: true });
-export const insertGroupRunParticipantSchema = createInsertSchema(groupRunParticipants).omit({ id: true, createdAt: true, joinedAt: true, completedAt: true });
+export const insertGroupRunParticipantSchema = createInsertSchema(groupRunParticipants).omit({ id: true, createdAt: true, joinedAt: true, completedAt: true, acceptedAt: true, declinedAt: true });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;

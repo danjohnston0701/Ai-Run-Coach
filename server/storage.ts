@@ -140,6 +140,12 @@ export interface IStorage {
   updateGroupRunParticipant(id: string, data: Partial<InsertGroupRunParticipant>): Promise<GroupRunParticipant | undefined>;
   getGroupRunsByParticipant(userId: string): Promise<GroupRun[]>;
   getGroupRunSummary(groupRunId: string): Promise<{ groupRun: GroupRun; participants: Array<GroupRunParticipant & { user?: User; run?: Run }> }>;
+  
+  // Group Run Invite Management
+  getPendingGroupRunInvites(userId: string): Promise<Array<GroupRunParticipant & { groupRun: GroupRun; host?: User }>>;
+  acceptGroupRunInvite(participantId: string): Promise<GroupRunParticipant | undefined>;
+  declineGroupRunInvite(participantId: string): Promise<GroupRunParticipant | undefined>;
+  getGroupRunParticipantCounts(groupRunId: string): Promise<{ total: number; pending: number; accepted: number; declined: number; ready: number }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -936,6 +942,70 @@ export class DatabaseStorage implements IStorage {
       }));
       
       return { groupRun, participants: enrichedParticipants };
+    });
+  }
+
+  async getPendingGroupRunInvites(userId: string): Promise<Array<GroupRunParticipant & { groupRun: GroupRun; host?: User }>> {
+    return withRetry(async () => {
+      const pendingInvites = await db.select().from(groupRunParticipants)
+        .where(and(
+          eq(groupRunParticipants.userId, userId),
+          eq(groupRunParticipants.invitationStatus, 'pending'),
+          eq(groupRunParticipants.role, 'participant')
+        ));
+      
+      const enrichedInvites = await Promise.all(pendingInvites.map(async (invite) => {
+        const [groupRun] = await db.select().from(groupRuns).where(eq(groupRuns.id, invite.groupRunId));
+        let host: User | undefined;
+        if (groupRun) {
+          const [h] = await db.select().from(users).where(eq(users.id, groupRun.hostUserId));
+          host = h;
+        }
+        return { ...invite, groupRun: groupRun!, host };
+      }));
+      
+      return enrichedInvites.filter(i => i.groupRun && i.groupRun.status === 'pending');
+    });
+  }
+
+  async acceptGroupRunInvite(participantId: string): Promise<GroupRunParticipant | undefined> {
+    return withRetry(async () => {
+      const [participant] = await db.update(groupRunParticipants)
+        .set({ 
+          invitationStatus: 'accepted',
+          acceptedAt: new Date()
+        })
+        .where(eq(groupRunParticipants.id, participantId))
+        .returning();
+      return participant;
+    });
+  }
+
+  async declineGroupRunInvite(participantId: string): Promise<GroupRunParticipant | undefined> {
+    return withRetry(async () => {
+      const [participant] = await db.update(groupRunParticipants)
+        .set({ 
+          invitationStatus: 'declined',
+          declinedAt: new Date()
+        })
+        .where(eq(groupRunParticipants.id, participantId))
+        .returning();
+      return participant;
+    });
+  }
+
+  async getGroupRunParticipantCounts(groupRunId: string): Promise<{ total: number; pending: number; accepted: number; declined: number; ready: number }> {
+    return withRetry(async () => {
+      const participants = await db.select().from(groupRunParticipants)
+        .where(eq(groupRunParticipants.groupRunId, groupRunId));
+      
+      return {
+        total: participants.length,
+        pending: participants.filter(p => p.invitationStatus === 'pending').length,
+        accepted: participants.filter(p => p.invitationStatus === 'accepted').length,
+        declined: participants.filter(p => p.invitationStatus === 'declined').length,
+        ready: participants.filter(p => p.readyToStart === true).length
+      };
     });
   }
 }
