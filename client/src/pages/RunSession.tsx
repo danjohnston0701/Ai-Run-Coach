@@ -1860,7 +1860,7 @@ export default function RunSession() {
         elevationLoss
       );
       
-      if (shouldTriggerTerrainCoaching(terrainData, lastTerrainCoachingTimeRef.current, 45000)) {
+      if (shouldTriggerTerrainCoaching(terrainData, lastTerrainCoachingTimeRef.current, 180000)) {
         console.log("Terrain coaching triggered:", terrainData);
         lastTerrainCoachingTimeRef.current = Date.now();
         fetchCoaching();
