@@ -291,7 +291,7 @@ export default function RunSession() {
   const [message, setMessage] = useState("Acquiring GPS signal...");
   const [lastMessageTime, setLastMessageTime] = useState(0);
   const [showShareModal, setShowShareModal] = useState(false);
-  const [showNavMap, setShowNavMap] = useState(false);
+  const [showNavMap, setShowNavMap] = useState(true);
   const [mapFollowRunner, setMapFollowRunner] = useState(true);
   const [nextTurnInstruction, setNextTurnInstruction] = useState<string | null>(null);
   const [friends, setFriends] = useState<Friend[]>([]);
@@ -2225,16 +2225,6 @@ export default function RunSession() {
           >
             {active ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
           </Button>
-          
-          <Button 
-            variant="outline" 
-            size="icon" 
-            className="w-9 h-9 rounded-full border-primary/50 bg-primary/10 hover:bg-primary/20 text-primary"
-            onClick={openGoogleMapsNavigation}
-            data-testid="button-google-navigation"
-          >
-            <Navigation className="w-3 h-3" />
-          </Button>
         </div>
       </div>
 
@@ -2335,18 +2325,18 @@ export default function RunSession() {
                     <FitBoundsToRoute routePoints={routePoints} enabled={!mapFollowRunner} />
                   </MapContainer>
                   
-                  {/* Map view toggle button */}
+                  {/* Map view toggle button - top right */}
                   <button
                     onClick={() => setMapFollowRunner(!mapFollowRunner)}
-                    className="absolute bottom-2 right-2 bg-card/90 backdrop-blur-md rounded-lg px-2 py-1 border border-white/20 z-[1000] text-[10px] font-medium"
+                    className="absolute top-2 right-2 bg-card/90 backdrop-blur-md rounded-lg px-2 py-1 border border-white/20 z-[1000] text-[10px] font-medium"
                     data-testid="button-toggle-map-view"
                   >
                     {mapFollowRunner ? 'Show Full Route' : 'Follow Me'}
                   </button>
                   
-                  {/* Upcoming instruction overlay */}
+                  {/* Upcoming instruction overlay - bottom left */}
                   {nextTurnInstruction && (
-                    <div className="absolute top-2 left-2 right-12 bg-card/90 backdrop-blur-md rounded-lg p-2 border border-primary/30 z-[1000]">
+                    <div className="absolute bottom-2 left-2 right-2 bg-card/90 backdrop-blur-md rounded-lg p-2 border border-primary/30 z-[1000]">
                       <div className="flex items-center gap-2">
                         <Navigation2 className="w-4 h-4 text-primary flex-shrink-0" />
                         <p className="text-xs text-foreground">{nextTurnInstruction}</p>
