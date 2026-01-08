@@ -49,6 +49,7 @@ export interface GeneratedRoute {
 export interface TerrainData {
   currentAltitude?: number;
   currentGrade?: number;
+  previousGrade?: number;
   upcomingTerrain?: {
     distanceAhead: number;
     grade: number;
@@ -293,8 +294,15 @@ export async function getCoachingAdvice(request: CoachingRequest): Promise<Coach
     // Determine current hill state for prioritized coaching
     const currentlyOnSteepHill = Math.abs(request.terrain.currentGrade || 0) >= 5;
     const approachingSteepHill = request.terrain.upcomingTerrain && Math.abs(request.terrain.upcomingTerrain.grade) >= 5;
+    const justReachedHillCrest = request.terrain.currentGrade !== undefined && 
+                                  request.terrain.currentGrade < 2 && 
+                                  request.terrain.previousGrade !== undefined && 
+                                  request.terrain.previousGrade >= 5;
     
-    if (currentlyOnSteepHill || approachingSteepHill) {
+    if (justReachedHillCrest) {
+      terrainSection += `\n\n**PRIORITY: HILL CREST REACHED!**
+The runner just conquered a steep climb! Acknowledge their effort with genuine encouragement. Celebrate reaching the top before discussing what's ahead.`;
+    } else if (currentlyOnSteepHill || approachingSteepHill) {
       terrainSection += `\n\n**PRIORITY: HILL COACHING REQUIRED**
 ${currentlyOnSteepHill ? `Runner is currently on a ${request.terrain.currentGrade! > 0 ? 'UPHILL' : 'DOWNHILL'} section. Focus your advice on technique for this terrain.` : ''}
 ${approachingSteepHill ? `WARN the runner about the upcoming ${request.terrain.upcomingTerrain!.description}!` : ''}`;

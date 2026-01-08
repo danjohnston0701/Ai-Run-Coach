@@ -110,6 +110,7 @@ export function calculateTerrainData(
 }
 
 export type TerrainDirection = 'uphill' | 'downhill' | null;
+export type TerrainEvent = 'uphill' | 'downhill' | 'hill_crest' | null;
 
 export function getTerrainDirection(terrain: TerrainData | undefined): TerrainDirection {
   if (!terrain) return null;
@@ -127,15 +128,39 @@ export function getTerrainDirection(terrain: TerrainData | undefined): TerrainDi
   return null;
 }
 
+export function detectHillCrest(
+  terrain: TerrainData | undefined,
+  previousGrade: number | null
+): boolean {
+  if (!terrain || previousGrade === null) return false;
+  
+  const currentGrade = terrain.currentGrade ?? 0;
+  
+  // Hill crest: was on moderate/steep uphill (5%+), now flat or downhill (<2%)
+  if (previousGrade >= 5 && currentGrade < 2) {
+    return true;
+  }
+  
+  return false;
+}
+
 export function shouldTriggerTerrainCoaching(
   terrain: TerrainData | undefined,
   lastUphillCoachingTime: number,
   lastDownhillCoachingTime: number,
+  lastHillCrestTime: number,
+  previousGrade: number | null,
   minIntervalMs: number = 30000
-): TerrainDirection {
+): TerrainEvent {
   if (!terrain) return null;
   
   const now = Date.now();
+  
+  // Check for hill crest first (reaching top of a climb)
+  if (detectHillCrest(terrain, previousGrade) && now - lastHillCrestTime >= minIntervalMs) {
+    return 'hill_crest';
+  }
+  
   const direction = getTerrainDirection(terrain);
   
   if (!direction) return null;

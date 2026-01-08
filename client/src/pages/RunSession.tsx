@@ -22,7 +22,7 @@ import {
 import type { Friend } from "./Profile";
 import { saveActiveRunSession, loadActiveRunSession, clearActiveRunSession, type ActiveRunSession } from "@/lib/activeRunSession";
 import { loadCoachSettings, loadCoachSettingsFromProfile, getVoicePreferences, getTTSVoice, type AiCoachSettings } from "@/lib/coachSettings";
-import { calculateTerrainData, shouldTriggerTerrainCoaching, type ElevationPoint, type TerrainData, type TerrainDirection } from "@/lib/elevationTracker";
+import { calculateTerrainData, shouldTriggerTerrainCoaching, type ElevationPoint, type TerrainData, type TerrainEvent } from "@/lib/elevationTracker";
 import { GpsHelpDialog } from "@/components/GpsHelpDialog";
 
 import coachAvatar from "@assets/generated_images/glowing_ai_voice_sphere_interface.png";
@@ -422,6 +422,8 @@ export default function RunSession() {
   const sessionIdRef = useRef<string>(`run-${Date.now()}`);
   const lastUphillCoachingTimeRef = useRef<number>(0);
   const lastDownhillCoachingTimeRef = useRef<number>(0);
+  const lastHillCrestTimeRef = useRef<number>(0);
+  const previousGradeRef = useRef<number | null>(null);
   const initialAnnouncementMadeRef = useRef<boolean>(false);
   const navAudioCacheRef = useRef<Map<string, string>>(new Map());
   const lastNavSpeakTimeRef = useRef<number>(0);
@@ -1746,7 +1748,7 @@ export default function RunSession() {
           userMessage: userMessage,
           coachPreferences: coachPreferences || undefined,
           coachTone: coachSettings.tone,
-          terrain: terrainData,
+          terrain: terrainData ? { ...terrainData, previousGrade: previousGradeRef.current ?? undefined } : undefined,
           // New data for smarter coaching
           recentCoachingTopics: recentCoachingRef.current.slice(-5),
           paceChange,
@@ -1858,18 +1860,26 @@ export default function RunSession() {
         elevationLoss
       );
       
-      const terrainDirection = shouldTriggerTerrainCoaching(
+      const terrainEvent = shouldTriggerTerrainCoaching(
         terrainData, 
         lastUphillCoachingTimeRef.current, 
-        lastDownhillCoachingTimeRef.current, 
+        lastDownhillCoachingTimeRef.current,
+        lastHillCrestTimeRef.current,
+        previousGradeRef.current,
         180000
       );
-      if (terrainDirection) {
-        console.log(`Terrain coaching triggered (${terrainDirection}):`, terrainData);
-        if (terrainDirection === 'uphill') {
+      
+      // Update previous grade for next check
+      previousGradeRef.current = terrainData?.currentGrade ?? null;
+      
+      if (terrainEvent) {
+        console.log(`Terrain coaching triggered (${terrainEvent}):`, terrainData);
+        if (terrainEvent === 'uphill') {
           lastUphillCoachingTimeRef.current = Date.now();
-        } else {
+        } else if (terrainEvent === 'downhill') {
           lastDownhillCoachingTimeRef.current = Date.now();
+        } else if (terrainEvent === 'hill_crest') {
+          lastHillCrestTimeRef.current = Date.now();
         }
         fetchCoaching();
       }
