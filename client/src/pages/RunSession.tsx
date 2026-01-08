@@ -1431,8 +1431,8 @@ export default function RunSession() {
       }
       
       if (cadence > 0) {
-        // Use AI cadence analysis if available, otherwise fall back to static feedback
-        const cadenceFeedback = cadenceAnalysis?.shortAdvice || getCadenceFeedback(cadence);
+        // Use full AI cadence coaching advice if available, otherwise fall back to static feedback
+        const cadenceFeedback = cadenceAnalysis?.coachingAdvice || getCadenceFeedback(cadence);
         if (cadenceFeedback) {
           announcement += `Cadence: ${cadence} steps per minute. ${cadenceFeedback} `;
         }
