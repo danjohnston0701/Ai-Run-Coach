@@ -1,233 +1,72 @@
 # AI Run Coach
 
 ## Overview
-
-AI Run Coach is a mobile-first web application that provides AI-powered running coaching, route mapping, and session tracking. The app helps runners plan routes based on difficulty level, receive real-time voice coaching during runs, and analyze their performance with detailed insights. Key features include target distance/time settings, GPS route mapping, live run sharing with friends, and integration with OpenAI for personalized coaching advice.
+AI Run Coach is a mobile-first web application designed to empower runners with personalized AI-powered coaching, intelligent route planning, and comprehensive performance tracking. The platform's core purpose is to enhance the running experience by offering dynamic route generation based on difficulty and terrain, real-time voice coaching during runs, and in-depth post-run analysis. The project aims to provide a competitive edge in the fitness technology market by leveraging advanced AI for a highly personalized and adaptive coaching experience, ultimately helping users achieve their fitness goals and improve their running performance.
 
 ## User Preferences
-
 Preferred communication style: Simple, everyday language.
 
 ## System Architecture
 
-### Frontend Architecture
+### Core Design Principles
+The application follows a monorepo structure with `/client` for the frontend, `/server` for the backend, and `/shared` for common types and utilities. Path aliases (`@/`, `@shared/`, `@assets/`) are used for organized imports. A centralized API client handles requests and error management. Components are designed with a focus on composition and accessibility.
+
+### Frontend
 - **Framework**: React 18 with TypeScript
-- **Routing**: Wouter (lightweight React router)
-- **Styling**: Tailwind CSS v4 with custom theme variables for dark mode design
-- **UI Components**: shadcn/ui component library (New York style) with Radix UI primitives
-- **State Management**: TanStack React Query for server state, localStorage for user profile persistence
-- **Animations**: Framer Motion for smooth transitions and micro-interactions
-- **Maps**: Leaflet for route visualization
-- **Charts**: Recharts for run performance graphs
-- **Build Tool**: Vite with React plugin
+- **Routing**: Wouter
+- **Styling**: Tailwind CSS v4 with custom dark mode theme, complemented by shadcn/ui (New York style) and Radix UI primitives.
+- **State Management**: TanStack React Query for server state, localStorage for client-side persistence.
+- **Visuals**: Framer Motion for animations, Leaflet for maps, Recharts for data visualization.
+- **Build**: Vite.
 
-### Backend Architecture
-- **Runtime**: Node.js with Express.js
-- **Language**: TypeScript with ESM modules
-- **API Structure**: RESTful endpoints under `/api` prefix
-- **Authentication**: Password hashing with bcryptjs, session-based auth planned
-- **Database ORM**: Drizzle ORM with PostgreSQL dialect
-- **AI Integration**: OpenAI API for coaching advice and route generation
+### Backend
+- **Runtime**: Node.js with Express.js (TypeScript, ESM modules).
+- **API**: RESTful endpoints under `/api`.
+- **Authentication**: bcryptjs for password hashing; session-based auth is planned.
+- **Database ORM**: Drizzle ORM with PostgreSQL dialect.
+- **AI Integration**: OpenAI API for coaching and route generation.
 
-### AI-Powered Route Planning System
-The route generation uses a hybrid AI approach:
-1. **Area Data Collection**: Google Places API retrieves nearby parks, Google Elevation API samples terrain
-2. **AI Waypoint Design**: OpenAI analyzes area data and designs optimal waypoints based on target distance, difficulty level (easy/moderate/hard), and terrain preferences
-3. **Route Generation**: Google Directions API creates final walking routes from AI-designed waypoints
-4. **Elevation Analysis**: Route elevation gain/loss is calculated and displayed on route cards
-5. **Elevation Profiles**: Full elevation profile with lat/lng, elevation, distance, and grade stored for each route
+### AI-Powered Systems
+- **AI-Powered Route Planning**: Generates routes using a hybrid AI approach. It collects area data (Google Places, Google Elevation), designs optimal waypoints with OpenAI based on user preferences (distance, difficulty, terrain), and then uses Google Directions API to create the final route. Elevation profiles are analyzed and stored.
+- **Hill-Awareness Coaching**: Provides real-time, terrain-aware coaching by tracking elevation profiles and proactively triggering advice for significant hills (5%+ grade) using OpenAI.
+- **Weather-Aware Coaching**: Integrates with Google Maps Platform Weather API to fetch current and forecasted weather conditions. This data informs AI coaching advice, providing relevant guidance based on temperature, humidity, wind, UV, and precipitation.
+- **AI Coach Toggle**: Users can enable/disable the AI Coach. When disabled, no data is sent to OpenAI, and navigation audio defaults to the device's built-in text-to-speech.
 
-Key files:
-- `server/aiRoutePlanner.ts`: Core AI route planning logic with elevation profiling
-- `server/routePlanner.ts`: Fallback geometric route generation
-- Endpoint: `POST /api/routes/generate-options` (generates 9 routes: 3 easy, 3 moderate, 3 hard)
-
-### Hill-Awareness Coaching System
-Real-time terrain-aware coaching during runs:
-1. **Elevation Tracking**: Routes store detailed elevation profiles with grade calculations for each segment
-2. **Terrain Detection**: `client/src/lib/elevationTracker.ts` calculates current grade and upcoming terrain changes within 200m
-3. **AI Integration**: Coaching endpoint receives terrain data (current altitude, grade, upcoming hills) and prioritizes hill guidance
-4. **Knowledge Base**: Hill-specific coaching knowledge includes technique tips, pacing strategies, breathing advice, and mental approaches
-
-Key data structure (ElevationPoint):
-- `lat/lng`: GPS coordinates
-- `elevation`: Altitude in meters
-- `distance`: Cumulative distance from start
-- `grade`: Slope percentage to next point (positive = uphill)
-
-### Weather-Aware Coaching System
-Real-time weather integration for environmental coaching:
-1. **Weather Service**: `server/weather.ts` fetches current conditions from Google Maps Platform Weather API
-2. **API Endpoints**: `/api/weather/current` for current conditions, `/api/weather/full` for comprehensive data with forecasts
-3. **Run Integration**: Weather is fetched when GPS locks during run start and included in coaching requests
-4. **AI Coaching**: Weather conditions (temperature, humidity, wind, UV, precipitation) inform coaching advice
-5. **Data Persistence**: Weather conditions at run start are saved with run data for post-run insights
-
-Weather triggers for coaching advice:
-- Hot conditions (>25°C): Hydration reminders, intensity adjustments
-- Cold conditions (<5°C): Warm-up advice, extremity protection
-- High humidity (>80%): Pace reduction suggestions
-- Windy conditions (>25km/h): Form adjustments, drafting tips
-- High UV (>7): Sun protection reminders
-- Rain likely (>50%): Grip and visibility advice
-
-Key files:
-- `server/weather.ts`: Backend weather service with Google Weather API integration
-- `client/src/components/WeatherWidget.tsx`: Reusable weather display component
-- Weather displayed on Homepage and Run Insights page
-
-### AI Coach Toggle System
-Users can enable/disable the AI Coach before and during runs:
-1. **Toggle Locations**: Available on Home page (before "Start Run Without Route") and RoutePreview page (before "Start Run" after selecting a route)
-2. **Default State**: AI Coach is ON by default
-3. **Parameter Passing**: Toggle state passed via URL param `aiCoach=on/off` to RunSession
-4. **Session Persistence**: Toggle state saved with active run session, restored on resume
-5. **Behavior When OFF**:
-   - No data sent to OpenAI API (no coaching advice requests)
-   - Route navigation audio uses device's built-in text-to-speech (Web Speech API) instead of OpenAI TTS
-   - Periodic coaching cycles are skipped entirely
-
-Key files:
-- `client/src/pages/Home.tsx`: AI Coach toggle in session options section
-- `client/src/pages/RoutePreview.tsx`: AI Coach toggle above Start Run button
-- `client/src/pages/RunSession.tsx`: processNavQueue checks aiCoachEnabled before calling OpenAI
-
-### Data Storage
-- **Database**: PostgreSQL (configured via DATABASE_URL environment variable)
-- **Schema Location**: `shared/schema.ts` - contains tables for users, pre-registrations, friends, routes, runs, live sessions, and Garmin data
-- **Migrations**: Drizzle Kit with migrations output to `./migrations`
-
-#### Database-Synced Data (Primary Storage)
-- **User Accounts**: Full user profile including personal info, fitness settings, and coach voice preferences
-- **Coach Settings**: Voice gender, accent, and tone stored in users table (coachGender, coachAccent, coachTone columns)
-- **Completed Runs**: All run data synced to database with localStorage fallback for offline access
-- **Routes & Favorites**: Generated routes persisted with favorite status and last-used timestamps
-
-#### Local-Only Storage (Session/Cache Data)
-- **Active Run Session**: Temporary session data for resuming interrupted runs (12-hour expiration)
-- **GPS Location Cache**: Cached user location for faster startup
-- **UI Preferences**: Notification prompts, temporary selections
-
-#### Hybrid Storage Pattern
-The app uses a hybrid approach for runs and settings:
-1. **Primary**: Data saved to PostgreSQL via API
-2. **Fallback**: localStorage backup when offline or API unavailable
-3. **Sync Indicators**: `dbSynced` flag on localStorage entries tracks sync status
-4. **Merge Logic**: RunHistory merges DB runs with unsynced local runs, avoiding duplicates
-5. **Automatic Migration**: On login and app load, unsynced localStorage data migrates to database via `client/src/lib/dataMigration.ts`
-   - Per-user migration flags prevent duplicate migrations (`dataMigrationCompleted_v1_${userId}`)
-   - Migrates runs and coach settings (gender, accent, tone)
-   - Only marks complete when all operations succeed, allowing retry on failure
-
-### Session Persistence
-The app supports resuming interrupted runs with the following architecture:
-- **Active Session Storage**: `client/src/lib/activeRunSession.ts` provides save/load/clear functions using localStorage
-- **Session Data**: Captures elapsed time, distance, cadence, splits, route data, audio settings, and run metadata
-- **Auto-save**: RunSession saves state every 5 seconds during active runs
-- **12-hour Expiration**: Sessions older than 12 hours are automatically cleared
-- **Resume Flow**: Home page displays a resume banner when an active session exists, allowing users to continue where they left off
-- **Metadata Tracking**: sessionMetadataRef in RunSession tracks route parameters (targetDistance, levelId, startLat/Lng, routeName, routeId) separately from real-time GPS tracking
+### Data Management
+- **Primary Storage**: PostgreSQL database for user accounts, coach settings, completed runs, routes, and favorites.
+- **Local Storage**: Used for temporary session data (active run, GPS cache, UI preferences) and as an offline fallback for runs and settings.
+- **Hybrid Storage Pattern**: Implements a `dbSynced` flag and automatic migration of unsynced local data to the database upon login or app load.
+- **Session Persistence**: Active run sessions are auto-saved every 5 seconds to local storage with a 12-hour expiration, allowing users to resume interrupted runs.
 
 ### Subscription & Payment System
-Stripe integration for entitlement-based access to premium features (NZD pricing):
+- **Provider**: Stripe for payment processing.
+- **Plans**: Early Bird 30-Day Trial and Standard Monthly Subscription.
+- **Entitlement System**: Manages access to premium features (AI route generation, AI voice coaching) based on subscription, one-time payments, or coupon redemptions.
+- **Coupon System**: Allows for admin-created, redeemable coupons for free access.
+- **Paywall**: Enforced both client-side via hooks and server-side for defense in depth.
 
-1. **Pricing Plans**: 
-   - Early Bird 30-Day Trial ($4.99 NZD one-time): Full access for 30 days
-   - Standard Subscription ($14.99 NZD/month): Ongoing monthly subscription
-   - Free Trial Coupon: 30 days access without payment (admin-created coupons)
-
-2. **Free vs Premium Features**:
-   - Free: GPS run tracking, manual runs, run history
-   - Premium: AI-powered route generation, real-time AI voice coaching
-
-3. **Entitlement System**:
-   - `server/entitlements.ts`: Centralized `hasPremiumAccess()` helper
-   - Three entitlement types: "subscription", "one_time", "coupon"
-   - Expiration-based access for one-time and coupon entitlements
-
-4. **Architecture**:
-   - `server/stripeClient.ts`: Stripe SDK initialization using Replit connection API
-   - `server/stripeService.ts`: Service layer supporting both 'payment' and 'subscription' modes
-   - `/api/stripe/complete-checkout`: Sets entitlements after successful payment (validates session metadata for security)
-
-5. **Coupon System**:
-   - `coupon_codes` table: Code, duration, max redemptions, active status
-   - `user_coupons` table: User-coupon relationships with expiry dates
-   - `/api/coupons/redeem`: Validates and redeems coupon codes
-   - `/api/admin/coupons`: Admin endpoints for coupon management
-
-6. **Paywall Implementation**:
-   - Client-side: `useEntitlement` hook checks premium access via `/api/entitlement/:userId`
-   - Server-side: `/api/routes/generate-options` uses `hasPremiumAccess()` for defense in depth
-   - AI Coach: Automatically disabled for non-premium users starting free runs
-
-7. **User Schema Fields**:
-   - `stripeCustomerId`: Stripe customer ID
-   - `stripeSubscriptionId`: Active subscription ID (for monthly subscribers)
-   - `subscriptionTier`: Current tier (early_bird/standard)
-   - `subscriptionStatus`: Subscription state (active/trialing/cancelled)
-   - `entitlementType`: Type of access (subscription/one_time/coupon)
-   - `entitlementExpiresAt`: Expiration date for time-limited access
-
-Key files:
-- `client/src/pages/Pricing.tsx`: Plan selection, checkout flow, and coupon redemption
-- `client/src/pages/SubscriptionSuccess.tsx`: Post-checkout entitlement activation
-- `client/src/hooks/useSubscription.ts`: Entitlement status hooks (`useEntitlement`, `hasPremiumAccess`)
-
-### Key Design Patterns
-- **Monorepo Structure**: Client code in `/client`, server in `/server`, shared types in `/shared`
-- **Path Aliases**: `@/` for client src, `@shared/` for shared code, `@assets/` for attached assets
-- **API Client**: Centralized fetch wrapper in `queryClient.ts` with error handling
-- **Component Composition**: shadcn/ui pattern with composable, accessible components
-
-### Pages and Features
-- **Landing Page**: Marketing page with feature highlights for new users
-- **Profile Setup**: Onboarding flow collecting fitness level, goals, coach name preference
-- **Home**: Run configuration (distance slider, difficulty selection, time target)
-- **Run Session**: Live run tracking with voice visualizer, map view, friend sharing
-- **Run History**: List of completed runs with key metrics
-- **Run Insights**: Detailed post-run analysis with real data display:
-  - Auto-navigation from run completion to insights page
-  - Real distance, time, pace, cadence from actual run data
-  - Pace gradient map showing GPS track with color-coded pace (green=fast, red=slow)
-  - Km splits section showing pace per kilometer with visual indicators
-  - Conditional heart rate display (greyed out with message when no HR data available)
-  - Elevation profile chart with real elevation gain data
-  - Social sharing with branded images for Facebook/Instagram
-- **Auth**: Login and pre-registration flows
-
-### Social Media Sharing
-Users can share run summaries to Facebook and Instagram with branded images:
-- **Image Generator**: `client/src/lib/shareImageGenerator.ts` creates branded images using HTML Canvas
-- **Supported Formats**: Post (1:1 square 1080x1080) and Story (9:16 vertical 1080x1920)
-- **Image Content**: Route map visualization, distance, time, pace, difficulty badge, and AI Run Coach branding with logo
-- **Sharing Options**: Facebook, Instagram, native device share (Web Share API), and direct download
-- **Fallback**: Downloads image when Web Share API is unavailable (e.g., desktop browsers)
+### User Interface & Features
+- **Pages**: Landing Page, Profile Setup (onboarding), Home (run configuration), Run Session (live tracking), Run History, Run Insights (detailed post-run analysis), Authentication (Login, Pre-registration), Pricing.
+- **Run Insights**: Displays real-time data, pace gradient maps, km splits, conditional heart rate, and elevation profiles.
+- **Social Sharing**: Generates branded images for Facebook/Instagram sharing with run summaries (map, distance, time, pace, difficulty, branding) using HTML Canvas.
 
 ## External Dependencies
 
 ### Third-Party Services
-- **OpenAI API**: Powers AI coaching advice, route waypoint design, and run performance analysis (requires `OPENAI_API_KEY`)
-- **Google Maps API**: Provides Places API (parks/POIs), Directions API (walking routes), and Elevation API (terrain data) for route generation (requires `GOOGLE_MAPS_API_KEY`)
-- **OpenStreetMap**: Tile provider for Leaflet maps (no API key required)
-- **Stripe**: Payment processing for subscriptions (configured via Replit Connector)
+- **OpenAI API**: For AI coaching, route waypoint design, and performance analysis.
+- **Google Maps Platform**: Includes Places API, Directions API, and Elevation API for route generation and weather.
+- **OpenStreetMap**: Map tile provider for Leaflet.
+- **Stripe**: Payment processing for subscriptions.
 
 ### Database
-- **PostgreSQL**: Primary database (requires `DATABASE_URL` environment variable)
-- **connect-pg-simple**: Session storage in PostgreSQL (configured but not fully implemented)
+- **PostgreSQL**: Primary data store.
 
 ### Key NPM Packages
-- **drizzle-orm / drizzle-kit**: Database ORM and migration tooling
-- **openai**: Official OpenAI SDK for AI features
-- **bcryptjs**: Password hashing
-- **zod / drizzle-zod**: Schema validation and type generation
-- **leaflet**: Interactive maps
-- **recharts**: Data visualization
-- **framer-motion**: Animations
-- **sonner**: Toast notifications
-
-### Development Tools
-- **Vite**: Development server and build tool
-- **tsx**: TypeScript execution for server
-- **esbuild**: Server bundling for production
-- **Replit plugins**: Dev banner, cartographer, runtime error overlay
+- **drizzle-orm / drizzle-kit**: ORM and migration.
+- **openai**: OpenAI SDK.
+- **bcryptjs**: Password hashing.
+- **zod / drizzle-zod**: Schema validation.
+- **leaflet**: Maps.
+- **recharts**: Charts.
+- **framer-motion**: Animations.
+- **sonner**: Notifications.
