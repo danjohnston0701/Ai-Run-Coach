@@ -129,6 +129,45 @@ function getBearing(lat1: number, lng1: number, lat2: number, lng2: number): num
   return (bearing + 360) % 360;
 }
 
+// Calculate signed turn angle using vector cross/dot product
+// Returns positive for RIGHT turns, negative for LEFT turns
+function getSignedTurnAngle(
+  beforePoint: { lat: number; lng: number },
+  turnPoint: { lat: number; lng: number },
+  afterPoint: { lat: number; lng: number }
+): number {
+  // Convert to local plane vectors (approximate for small distances)
+  // vIn: vector from beforePoint to turnPoint
+  const vInX = turnPoint.lng - beforePoint.lng;
+  const vInY = turnPoint.lat - beforePoint.lat;
+  // vOut: vector from turnPoint to afterPoint
+  const vOutX = afterPoint.lng - turnPoint.lng;
+  const vOutY = afterPoint.lat - turnPoint.lat;
+  
+  // Normalize vectors
+  const vInLen = Math.sqrt(vInX * vInX + vInY * vInY);
+  const vOutLen = Math.sqrt(vOutX * vOutX + vOutY * vOutY);
+  
+  if (vInLen === 0 || vOutLen === 0) return 0;
+  
+  const vInNormX = vInX / vInLen;
+  const vInNormY = vInY / vInLen;
+  const vOutNormX = vOutX / vOutLen;
+  const vOutNormY = vOutY / vOutLen;
+  
+  // Cross product gives sin of angle (sign indicates direction)
+  // Positive cross = right turn, negative cross = left turn
+  const cross = vInNormX * vOutNormY - vInNormY * vOutNormX;
+  // Dot product gives cos of angle
+  const dot = vInNormX * vOutNormX + vInNormY * vOutNormY;
+  
+  // atan2(sin, cos) gives signed angle in radians
+  const angleRad = Math.atan2(cross, dot);
+  const angleDeg = angleRad * (180 / Math.PI);
+  
+  return angleDeg;
+}
+
 function getDirectionInstruction(currentBearing: number, nextBearing: number, distanceToWaypoint: number): string {
   const diff = ((nextBearing - currentBearing + 540) % 360) - 180;
   const distanceMeters = Math.round(distanceToWaypoint * 1000);
@@ -1023,16 +1062,15 @@ export default function RunSession() {
     // Search for the next turn within reasonable range
     for (let searchIdx = nearestIndex + 2; searchIdx < Math.min(nearestIndex + 150, routePoints.length - 2); searchIdx++) {
       const turnPoint = routePoints[searchIdx];
-      // Use adjacent points (±1) for accurate turn direction - not ±5 which can span different streets
       const beforePoint = routePoints[Math.max(0, searchIdx - 1)];
       const afterPoint = routePoints[Math.min(routePoints.length - 1, searchIdx + 1)];
       
-      const bearingBefore = getBearing(beforePoint.lat, beforePoint.lng, turnPoint.lat, turnPoint.lng);
-      const bearingAfter = getBearing(turnPoint.lat, turnPoint.lng, afterPoint.lat, afterPoint.lng);
-      const bearingDiff = Math.abs(((bearingAfter - bearingBefore + 540) % 360) - 180);
+      // Use signed turn angle for accurate left/right detection
+      const turnAngle = getSignedTurnAngle(beforePoint, turnPoint, afterPoint);
+      const absTurnAngle = Math.abs(turnAngle);
       
-      // This is a significant turn
-      if (bearingDiff > 25) {
+      // This is a significant turn (> 25 degrees)
+      if (absTurnAngle > 25) {
         const distToTurn = haversineDistance(currentPosition.lat, currentPosition.lng, turnPoint.lat, turnPoint.lng);
         const distToTurnMeters = distToTurn * 1000;
         
@@ -1044,21 +1082,21 @@ export default function RunSession() {
             break; // Already announced approaching this turn
           }
           
-          // Determine turn direction
-          const turnDir = ((bearingAfter - bearingBefore + 540) % 360) - 180;
+          // Determine turn direction using signed angle
+          // Positive = right turn, Negative = left turn
           let turnInstruction = "";
-          if (turnDir > 70) {
+          if (turnAngle > 70) {
             turnInstruction = "Turn right";
-          } else if (turnDir > 20) {
+          } else if (turnAngle > 20) {
             turnInstruction = "Bear right";
-          } else if (turnDir < -70) {
+          } else if (turnAngle < -70) {
             turnInstruction = "Turn left";
-          } else if (turnDir < -20) {
+          } else if (turnAngle < -20) {
             turnInstruction = "Bear left";
           }
           
           if (turnInstruction) {
-            // Get street name at the afterPoint (searchIdx + 1) - the street we're turning onto
+            // Get street name at the afterPoint - the street we're turning onto
             const streetLookupPoint = afterPoint;
             
             getStreetName(streetLookupPoint.lat, streetLookupPoint.lng).then(streetName => {
@@ -1076,10 +1114,9 @@ export default function RunSession() {
           }
           break;
         } else if (distToTurnMeters <= 5) {
-          // At the turn - give confirmation
-          if (lastTurnAnnouncedIndexRef.current !== searchIdx + 1000) { // Use offset to track "at turn" separately
-            const turnDir = ((bearingAfter - bearingBefore + 540) % 360) - 180;
-            let confirmInstruction = turnDir > 0 ? "Turn right now" : "Turn left now";
+          // At the turn - give confirmation using signed angle
+          if (lastTurnAnnouncedIndexRef.current !== searchIdx + 1000) {
+            let confirmInstruction = turnAngle > 0 ? "Turn right now" : "Turn left now";
             
             lastTurnAnnouncedIndexRef.current = searchIdx + 1000;
             speak(confirmInstruction, { domain: 'nav' });
@@ -1117,27 +1154,26 @@ export default function RunSession() {
     let foundTurn = false;
     
     for (let searchIdx = nearestIndex + 1; searchIdx < lookAheadMax; searchIdx++) {
-      // Use adjacent points (±1) for accurate turn direction - consistent with audio navigation
       const prevPoint = routePoints[Math.max(0, searchIdx - 1)];
       const turnPoint = routePoints[searchIdx];
       const afterPoint = routePoints[Math.min(routePoints.length - 1, searchIdx + 1)];
       
-      const bearingBefore = getBearing(prevPoint.lat, prevPoint.lng, turnPoint.lat, turnPoint.lng);
-      const bearingAfter = getBearing(turnPoint.lat, turnPoint.lng, afterPoint.lat, afterPoint.lng);
-      let bearingDiff = Math.abs(((bearingAfter - bearingBefore + 540) % 360) - 180);
+      // Use signed turn angle for accurate left/right detection
+      const turnAngle = getSignedTurnAngle(prevPoint, turnPoint, afterPoint);
+      const absTurnAngle = Math.abs(turnAngle);
       
-      if (bearingDiff > 25) {
+      if (absTurnAngle > 25) {
         const distToTurn = haversineDistance(currentPosition.lat, currentPosition.lng, turnPoint.lat, turnPoint.lng);
         const distToTurnMeters = Math.round(distToTurn * 1000);
         
         // Show upcoming turn on map if within 200m
         if (distToTurnMeters <= 200 && distToTurnMeters > 10) {
-          const turnDir = ((bearingAfter - bearingBefore + 540) % 360) - 180;
+          // Use signed angle: positive = right, negative = left
           let turnLabel = "";
-          if (turnDir > 70) turnLabel = "Turn right";
-          else if (turnDir > 20) turnLabel = "Bear right";
-          else if (turnDir < -70) turnLabel = "Turn left";
-          else if (turnDir < -20) turnLabel = "Bear left";
+          if (turnAngle > 70) turnLabel = "Turn right";
+          else if (turnAngle > 20) turnLabel = "Bear right";
+          else if (turnAngle < -70) turnLabel = "Turn left";
+          else if (turnAngle < -20) turnLabel = "Bear left";
           
           if (turnLabel) {
             foundTurn = true;
