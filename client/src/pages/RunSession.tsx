@@ -1430,7 +1430,9 @@ export default function RunSession() {
         announcement += `${remainingKm.toFixed(1)} kilometers to go. `;
       }
       
-      if (cadence > 0) {
+      // Only provide cadence coaching every 2-3 km to avoid repetition (at km 2, 5, 8, etc.)
+      const shouldGiveCadenceCoaching = currentKm === 2 || (currentKm > 2 && (currentKm - 2) % 3 === 0);
+      if (cadence > 0 && shouldGiveCadenceCoaching) {
         // Use full AI cadence coaching advice if available, otherwise fall back to static feedback
         const cadenceFeedback = cadenceAnalysis?.coachingAdvice || getCadenceFeedback(cadence);
         if (cadenceFeedback) {
