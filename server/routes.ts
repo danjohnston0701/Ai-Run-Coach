@@ -12,7 +12,7 @@ import { generateRoute, getCoachingAdvice, analyzeRunPerformance, generateTTS, c
 import { generateCircularRoute, generateMultipleRoutes, isGoogleMapsConfigured } from "./routePlanner";
 import { generateAIRoutes } from "./aiRoutePlanner";
 import bcrypt from "bcryptjs";
-import { initializePushNotifications, isPushConfigured, getPublicVapidKey, sendFriendRequestNotification, sendFriendAcceptedNotification } from "./pushNotifications";
+import { initializePushNotifications, isPushConfigured, getPublicVapidKey, sendFriendRequestNotification, sendFriendAcceptedNotification, sendGroupRunInviteNotification, sendGroupRunAcceptedNotification } from "./pushNotifications";
 import { getCurrentWeather, getFullWeatherData, getWeatherDescription, isGoodRunningWeather, type WeatherCondition, type WeatherData } from "./weather";
 
 export async function registerRoutes(
@@ -1580,27 +1580,48 @@ export async function registerRoutes(
       
       const invitedParticipants = [];
       
+      // Get host info and route name for notifications
+      const host = await storage.getUser(groupRun.hostUserId);
+      let routeName: string | undefined;
+      if (groupRun.routeId) {
+        const route = await storage.getRoute(groupRun.routeId);
+        routeName = route?.name || groupRun.title || undefined;
+      }
+      
       for (const friendId of friendIds) {
         // Check if already a participant
         const existing = await storage.getGroupRunParticipant(groupRun.id, friendId);
         if (existing) continue;
+        
+        // Set invite expiry (24 hours from now)
+        const inviteExpiresAt = new Date();
+        inviteExpiresAt.setHours(inviteExpiresAt.getHours() + 24);
         
         const participant = await storage.addGroupRunParticipant({
           groupRunId: groupRun.id,
           userId: friendId,
           role: 'participant',
           invitationStatus: 'pending',
+          inviteExpiresAt,
         });
         
-        // Send notification to invited friend
-        const host = await storage.getUser(groupRun.hostUserId);
+        // Send in-app notification to invited friend
         await storage.createNotification({
           userId: friendId,
           type: 'group_run_invite',
           title: 'Group Run Invitation',
           message: `${host?.name || 'A friend'} invited you to join a group run!`,
-          data: { groupRunId: groupRun.id, inviteToken: groupRun.inviteToken },
+          data: { groupRunId: groupRun.id, inviteToken: groupRun.inviteToken, participantId: participant.id },
         });
+        
+        // Send push notification to invited friend
+        await sendGroupRunInviteNotification(
+          friendId,
+          host?.name || 'A friend',
+          groupRun.id,
+          groupRun.inviteToken,
+          routeName
+        );
         
         invitedParticipants.push(participant);
       }
@@ -1719,6 +1740,111 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Complete group run error:", error);
       res.status(500).json({ error: "Failed to update participant run" });
+    }
+  });
+
+  // Get pending group run invites for a user
+  app.get("/api/group-runs/invites/pending/:userId", async (req, res) => {
+    try {
+      const invites = await storage.getPendingGroupRunInvites(req.params.userId);
+      res.json(invites);
+    } catch (error) {
+      console.error("Get pending invites error:", error);
+      res.status(500).json({ error: "Failed to get pending invites" });
+    }
+  });
+
+  // Accept a group run invite
+  app.post("/api/group-runs/invites/:participantId/accept", async (req, res) => {
+    try {
+      const { userId } = req.body;
+      
+      // Verify the participant belongs to this user
+      const participant = (await storage.getPendingGroupRunInvites(userId))
+        .find(p => p.id === req.params.participantId);
+      
+      if (!participant || participant.userId !== userId) {
+        return res.status(403).json({ error: "You can only accept your own invites" });
+      }
+      
+      const updated = await storage.acceptGroupRunInvite(req.params.participantId);
+      
+      // Get the group run details to return
+      const groupRun = await storage.getGroupRun(participant.groupRunId);
+      
+      // Notify the host that someone accepted
+      if (groupRun) {
+        const acceptingUser = await storage.getUser(userId);
+        await sendGroupRunAcceptedNotification(
+          groupRun.hostUserId,
+          acceptingUser?.name || 'A friend',
+          groupRun.id
+        );
+      }
+      
+      // Get route info if available
+      let route = null;
+      if (groupRun?.routeId) {
+        route = await storage.getRoute(groupRun.routeId);
+      }
+      
+      res.json({ participant: updated, groupRun, route });
+    } catch (error) {
+      console.error("Accept invite error:", error);
+      res.status(500).json({ error: "Failed to accept invite" });
+    }
+  });
+
+  // Decline a group run invite
+  app.post("/api/group-runs/invites/:participantId/decline", async (req, res) => {
+    try {
+      const { userId } = req.body;
+      
+      // Verify the participant belongs to this user
+      const participant = (await storage.getPendingGroupRunInvites(userId))
+        .find(p => p.id === req.params.participantId);
+      
+      if (!participant || participant.userId !== userId) {
+        return res.status(403).json({ error: "You can only decline your own invites" });
+      }
+      
+      const updated = await storage.declineGroupRunInvite(req.params.participantId);
+      res.json(updated);
+    } catch (error) {
+      console.error("Decline invite error:", error);
+      res.status(500).json({ error: "Failed to decline invite" });
+    }
+  });
+
+  // Get participant counts for a group run
+  app.get("/api/group-runs/:id/counts", async (req, res) => {
+    try {
+      const counts = await storage.getGroupRunParticipantCounts(req.params.id);
+      res.json(counts);
+    } catch (error) {
+      console.error("Get participant counts error:", error);
+      res.status(500).json({ error: "Failed to get participant counts" });
+    }
+  });
+
+  // Mark participant as ready to start
+  app.post("/api/group-runs/:id/ready", async (req, res) => {
+    try {
+      const { userId, ready } = req.body;
+      
+      const participant = await storage.getGroupRunParticipant(req.params.id, userId);
+      if (!participant) {
+        return res.status(404).json({ error: "Participant not found" });
+      }
+      
+      const updated = await storage.updateGroupRunParticipant(participant.id, {
+        readyToStart: ready ?? true
+      });
+      
+      res.json(updated);
+    } catch (error) {
+      console.error("Mark ready error:", error);
+      res.status(500).json({ error: "Failed to mark participant ready" });
     }
   });
 

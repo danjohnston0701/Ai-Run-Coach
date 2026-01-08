@@ -167,3 +167,61 @@ export async function sendFriendAcceptedNotification(
     data: { type: 'friend-accepted' },
   });
 }
+
+export async function sendGroupRunInviteNotification(
+  inviteeId: string,
+  hostName: string,
+  groupRunId: string,
+  inviteToken: string,
+  routeName?: string
+): Promise<boolean> {
+  const message = routeName 
+    ? `${hostName} invited you to join a group run on "${routeName}"!`
+    : `${hostName} invited you to join a group run!`;
+
+  // Send push notification if configured
+  return sendPushNotification(inviteeId, {
+    title: 'Group Run Invitation',
+    body: message,
+    icon: '/favicon.ico',
+    tag: `group-run-invite-${groupRunId}`,
+    data: { 
+      type: 'group-run-invite',
+      groupRunId,
+      inviteToken,
+      url: '/'
+    },
+    actions: [
+      { action: 'accept', title: 'View Invite' },
+    ],
+  });
+}
+
+export async function sendGroupRunAcceptedNotification(
+  hostId: string,
+  participantName: string,
+  groupRunId: string
+): Promise<boolean> {
+  // Create notification record in database
+  try {
+    await storage.createNotification({
+      userId: hostId,
+      type: 'group_run_accepted',
+      title: 'Group Run: Friend Joined',
+      message: `${participantName} accepted your group run invitation!`,
+      read: false,
+      data: JSON.stringify({ type: 'group-run-accepted', groupRunId }),
+    });
+  } catch (error) {
+    console.error('[Notification] Failed to create notification record:', error);
+  }
+
+  // Send push notification
+  return sendPushNotification(hostId, {
+    title: 'Group Run: Friend Joined',
+    body: `${participantName} accepted your group run invitation!`,
+    icon: '/favicon.ico',
+    tag: `group-run-accepted-${groupRunId}`,
+    data: { type: 'group-run-accepted', groupRunId },
+  });
+}
