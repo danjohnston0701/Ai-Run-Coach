@@ -2246,10 +2246,10 @@ export default function RunSession() {
                       
                       for (let i = 0; i < routePoints.length - 1; i += step) {
                         const progress = i / (routePoints.length - 1);
-                        // Interpolate from green (#22c55e) to red (#ef4444)
-                        const r = Math.round(34 + progress * (239 - 34));
-                        const g = Math.round(197 - progress * (197 - 68));
-                        const b = Math.round(94 - progress * (94 - 68));
+                        // Interpolate from blue (#3b82f6) to green (#22c55e)
+                        const r = Math.round(59 + progress * (34 - 59));
+                        const g = Math.round(130 + progress * (197 - 130));
+                        const b = Math.round(246 + progress * (94 - 246));
                         const color = `rgb(${r},${g},${b})`;
                         
                         const endIdx = Math.min(i + step, routePoints.length - 1);
@@ -2267,18 +2267,18 @@ export default function RunSession() {
                       }
                       return segments;
                     })()}
-                    {/* Start marker (green) */}
+                    {/* Start marker (blue) */}
                     <CircleMarker
                       center={[routePoints[0]?.lat || 0, routePoints[0]?.lng || 0]}
                       radius={8}
-                      pathOptions={{ fillColor: '#22c55e', fillOpacity: 1, color: '#fff', weight: 2 }}
+                      pathOptions={{ fillColor: '#3b82f6', fillOpacity: 1, color: '#fff', weight: 2 }}
                     />
-                    {/* End marker (red) */}
+                    {/* End marker (green) */}
                     {routePoints.length > 1 && (
                       <CircleMarker
                         center={[routePoints[routePoints.length - 1]?.lat || 0, routePoints[routePoints.length - 1]?.lng || 0]}
                         radius={8}
-                        pathOptions={{ fillColor: '#ef4444', fillOpacity: 1, color: '#fff', weight: 2 }}
+                        pathOptions={{ fillColor: '#22c55e', fillOpacity: 1, color: '#fff', weight: 2 }}
                       />
                     )}
                     {/* Current position marker */}
