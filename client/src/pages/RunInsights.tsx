@@ -62,6 +62,14 @@ export default function RunInsights() {
   const [showSocialShareModal, setShowSocialShareModal] = useState(false);
   const [isGeneratingShare, setIsGeneratingShare] = useState(false);
   const [shareFormat, setShareFormat] = useState<"post" | "story">("post");
+  const [cadenceAnalysis, setCadenceAnalysis] = useState<{
+    idealCadenceMin: number;
+    idealCadenceMax: number;
+    strideAssessment: string;
+    shortAdvice: string;
+    coachingAdvice: string;
+  } | null>(null);
+  const [isLoadingCadenceAnalysis, setIsLoadingCadenceAnalysis] = useState(false);
 
   useEffect(() => {
     const loadRun = async () => {
@@ -133,6 +141,69 @@ export default function RunInsights() {
       setFriends(parsed.friends || []);
     }
   }, [params?.id]);
+
+  // Fetch AI cadence analysis when run is loaded
+  useEffect(() => {
+    if (!run) return;
+    
+    const avgCadence = (run as any).avgCadence || run.cadence;
+    if (!avgCadence || avgCadence < 60) return;
+    
+    // Get user profile for height
+    const profile = localStorage.getItem("userProfile");
+    if (!profile) return;
+    
+    const userProfile = JSON.parse(profile);
+    const heightStr = userProfile.height;
+    if (!heightStr) return;
+    
+    const heightCm = parseFloat(String(heightStr).replace(/[^0-9.]/g, ''));
+    if (isNaN(heightCm) || heightCm < 100 || heightCm > 250) return;
+    
+    // Calculate pace (min/km)
+    const avgPaceStr = run.avgPace || '';
+    let paceMinPerKm = 0;
+    const paceParts = avgPaceStr.split(':');
+    if (paceParts.length === 2) {
+      paceMinPerKm = parseInt(paceParts[0]) + parseInt(paceParts[1]) / 60;
+    }
+    if (paceMinPerKm <= 0 || paceMinPerKm > 20) return;
+    
+    // Calculate age if DOB available
+    let userAge: number | undefined;
+    if (userProfile.dob) {
+      const birthDate = new Date(userProfile.dob);
+      const today = new Date();
+      userAge = today.getFullYear() - birthDate.getFullYear();
+      const monthDiff = today.getMonth() - birthDate.getMonth();
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+        userAge--;
+      }
+    }
+    
+    setIsLoadingCadenceAnalysis(true);
+    
+    fetch('/api/ai/analyze-cadence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        heightCm,
+        paceMinPerKm,
+        cadenceSpm: avgCadence,
+        distanceKm: run.distance,
+        userFitnessLevel: userProfile.fitnessLevel,
+        userAge
+      })
+    })
+    .then(res => res.ok ? res.json() : null)
+    .then(data => {
+      if (data) {
+        setCadenceAnalysis(data);
+      }
+    })
+    .catch(err => console.error('Cadence analysis error:', err))
+    .finally(() => setIsLoadingCadenceAnalysis(false));
+  }, [run]);
 
   const submitRating = async (rating: number) => {
     if (!run || ratingSubmitted) return;
@@ -1082,10 +1153,34 @@ export default function RunInsights() {
                   <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Cadence</div>
                 </div>
                 <div className="flex items-baseline gap-1">
-                  <span className="text-3xl font-display font-bold text-primary">{isNaN((run as any).avgCadence) || (run as any).avgCadence === undefined ? '-' : Math.round((run as any).avgCadence)}</span>
+                  {(() => {
+                    const avgCadence = (run as any).avgCadence;
+                    const cadenceValue = isNaN(avgCadence) || avgCadence === undefined ? null : Math.round(avgCadence);
+                    const isInIdealRange = cadenceAnalysis && cadenceValue && 
+                      cadenceValue >= cadenceAnalysis.idealCadenceMin && 
+                      cadenceValue <= cadenceAnalysis.idealCadenceMax;
+                    return (
+                      <span className={`text-3xl font-display font-bold ${
+                        isInIdealRange ? 'text-green-400' : cadenceValue ? 'text-yellow-400' : 'text-primary'
+                      }`}>
+                        {cadenceValue ?? '-'}
+                      </span>
+                    );
+                  })()}
                   <span className="text-[10px] text-muted-foreground uppercase">spm</span>
                 </div>
-                <p className="text-[9px] text-muted-foreground mt-2 leading-tight">Average steps per minute throughout the session.</p>
+                {isLoadingCadenceAnalysis ? (
+                  <p className="text-[9px] text-muted-foreground mt-2 leading-tight animate-pulse">Analyzing your cadence...</p>
+                ) : cadenceAnalysis ? (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-[9px] text-muted-foreground leading-tight">
+                      Ideal range: <span className="text-primary font-medium">{cadenceAnalysis.idealCadenceMin}-{cadenceAnalysis.idealCadenceMax} spm</span>
+                    </p>
+                    <p className="text-[9px] text-muted-foreground leading-tight">{cadenceAnalysis.strideAssessment}</p>
+                  </div>
+                ) : (
+                  <p className="text-[9px] text-muted-foreground mt-2 leading-tight">Average steps per minute throughout the session.</p>
+                )}
               </div>
               <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
                 <div className="flex items-center gap-2 mb-2">
@@ -1100,6 +1195,18 @@ export default function RunInsights() {
               </div>
             </div>
           </div>
+
+          {/* AI Cadence Coach Advice */}
+          {cadenceAnalysis && cadenceAnalysis.coachingAdvice && (
+            <div className="space-y-4">
+              <h3 className="text-xs font-display font-bold uppercase tracking-widest flex items-center gap-2">
+                <CadenceIcon className="w-3 h-3 text-orange-400" /> AI Cadence Coach
+              </h3>
+              <div className="bg-gradient-to-br from-orange-500/10 to-orange-500/5 rounded-2xl p-4 border border-orange-500/20">
+                <p className="text-sm text-foreground/90 leading-relaxed">{cadenceAnalysis.coachingAdvice}</p>
+              </div>
+            </div>
+          )}
 
           {/* Route Rating */}
           {(run as any).routeName && (

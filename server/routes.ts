@@ -8,7 +8,7 @@ import {
   insertAiCoachKnowledgeSchema, insertAiCoachFaqSchema
 } from "@shared/schema";
 import { z } from "zod";
-import { generateRoute, getCoachingAdvice, analyzeRunPerformance, generateTTS, calculateAge, type CoachTone, type TTSVoice, type AiCoachConfig } from "./openai";
+import { generateRoute, getCoachingAdvice, analyzeRunPerformance, generateTTS, calculateAge, analyzeCadence, type CoachTone, type TTSVoice, type AiCoachConfig } from "./openai";
 import { generateCircularRoute, generateMultipleRoutes, isGoogleMapsConfigured } from "./routePlanner";
 import { generateAIRoutes } from "./aiRoutePlanner";
 import bcrypt from "bcryptjs";
@@ -1086,6 +1086,31 @@ export async function registerRoutes(
     } catch (error) {
       console.error("TTS error:", error);
       res.status(500).json({ error: "Failed to generate speech" });
+    }
+  });
+
+  // AI Cadence Analysis endpoint
+  app.post("/api/ai/analyze-cadence", async (req, res) => {
+    try {
+      const { heightCm, paceMinPerKm, cadenceSpm, distanceKm, userFitnessLevel, userAge } = req.body;
+      
+      if (!heightCm || !paceMinPerKm || !cadenceSpm) {
+        return res.status(400).json({ error: "Missing required data: heightCm, paceMinPerKm, cadenceSpm" });
+      }
+
+      const analysis = await analyzeCadence({
+        heightCm: parseFloat(heightCm),
+        paceMinPerKm: parseFloat(paceMinPerKm),
+        cadenceSpm: parseFloat(cadenceSpm),
+        distanceKm: distanceKm ? parseFloat(distanceKm) : undefined,
+        userFitnessLevel,
+        userAge: userAge ? parseInt(userAge) : undefined
+      });
+
+      res.json(analysis);
+    } catch (error) {
+      console.error("Cadence analysis error:", error);
+      res.status(500).json({ error: "Failed to analyze cadence" });
     }
   });
 

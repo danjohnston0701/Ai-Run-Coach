@@ -710,4 +710,104 @@ export async function generateTTS(request: TTSRequest): Promise<Buffer> {
   }
 }
 
+// Cadence analysis interfaces and function
+export interface CadenceAnalysisRequest {
+  heightCm: number;
+  paceMinPerKm: number;
+  cadenceSpm: number;
+  distanceKm?: number;
+  userFitnessLevel?: string;
+  userAge?: number;
+}
+
+export interface CadenceAnalysisResponse {
+  idealCadenceMin: number;
+  idealCadenceMax: number;
+  strideAssessment: 'optimal' | 'overstriding' | 'understriding' | 'unknown';
+  estimatedStrideLengthCm: number;
+  idealStrideLengthCm: number;
+  coachingAdvice: string;
+  shortAdvice: string; // For real-time TTS
+  confidence: 'high' | 'medium' | 'low';
+}
+
+export async function analyzeCadence(request: CadenceAnalysisRequest): Promise<CadenceAnalysisResponse> {
+  const systemPrompt = `You are an expert running biomechanics coach. Analyze the runner's cadence and provide personalized feedback.
+
+BIOMECHANICS KNOWLEDGE:
+- Optimal cadence varies by runner height, pace, and fitness level
+- Taller runners typically have lower optimal cadence (160-175 spm)
+- Shorter runners typically have higher optimal cadence (175-190 spm)
+- Faster paces require higher cadence
+- Stride length (cm) = (speed in m/min) / cadence * 100
+- Overstriding: landing with foot too far ahead, causes braking force
+- Understriding: too many small steps, inefficient energy use
+
+CALCULATION FORMULAS:
+- Speed (m/min) = 1000 / paceMinPerKm
+- Current stride length (cm) = (speed m/min / cadenceSpm) * 100
+- Height-based ideal stride: approximately 40-45% of height at easy pace, up to 50% at fast pace
+- Ideal cadence = speed (m/min) / (ideal stride length in meters)
+
+RESPONSE REQUIREMENTS:
+Return ONLY valid JSON with this exact structure:
+{
+  "idealCadenceMin": number,
+  "idealCadenceMax": number,
+  "strideAssessment": "optimal" | "overstriding" | "understriding" | "unknown",
+  "estimatedStrideLengthCm": number,
+  "idealStrideLengthCm": number,
+  "coachingAdvice": "string with 2-3 sentences of detailed advice",
+  "shortAdvice": "string with max 15 words for voice coaching",
+  "confidence": "high" | "medium" | "low"
+}`;
+
+  const userPrompt = `Analyze this runner's cadence:
+- Height: ${request.heightCm} cm
+- Current pace: ${request.paceMinPerKm} min/km
+- Current cadence: ${request.cadenceSpm} steps per minute
+- Distance run: ${request.distanceKm || 'unknown'} km
+- Fitness level: ${request.userFitnessLevel || 'intermediate'}
+- Age: ${request.userAge || 'unknown'}
+
+Calculate their ideal cadence range, assess if they're overstriding or understriding, and provide personalized coaching advice.`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+      temperature: 0.3,
+      response_format: { type: "json_object" }
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error("No response from OpenAI");
+    }
+
+    const analysis = JSON.parse(content) as CadenceAnalysisResponse;
+    return analysis;
+  } catch (error) {
+    console.error("Cadence analysis error:", error);
+    // Return a sensible fallback
+    const speedMperMin = 1000 / request.paceMinPerKm;
+    const currentStrideLength = (speedMperMin / request.cadenceSpm) * 100;
+    const idealStrideLength = request.heightCm * 0.42; // 42% of height as baseline
+    
+    return {
+      idealCadenceMin: 165,
+      idealCadenceMax: 180,
+      strideAssessment: 'unknown',
+      estimatedStrideLengthCm: Math.round(currentStrideLength),
+      idealStrideLengthCm: Math.round(idealStrideLength),
+      coachingAdvice: "Focus on a comfortable rhythm. Aim for quick, light steps.",
+      shortAdvice: "Maintain a steady, comfortable rhythm.",
+      confidence: 'low'
+    };
+  }
+}
+
 export { openai };

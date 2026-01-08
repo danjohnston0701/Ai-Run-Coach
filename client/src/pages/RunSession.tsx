@@ -208,6 +208,7 @@ const MOTIVATIONAL_MESSAGES = [
   "Fantastic effort!"
 ];
 
+// Legacy static feedback - kept as fallback
 function getCadenceFeedback(cadence: number): string {
   if (cadence < 150) return "Try to pick up your step frequency.";
   if (cadence < 165) return "Good step rhythm, try slightly quicker steps.";
@@ -310,6 +311,17 @@ export default function RunSession() {
   const [lastKmAnnounced, setLastKmAnnounced] = useState(0);
   const [kmSplits, setKmSplits] = useState<number[]>([]);
   const [motionPermission, setMotionPermission] = useState<"unknown" | "granted" | "denied" | "unavailable">("unknown");
+  
+  // AI Cadence Analysis state
+  const [cadenceAnalysis, setCadenceAnalysis] = useState<{
+    idealCadenceMin: number;
+    idealCadenceMax: number;
+    strideAssessment: string;
+    shortAdvice: string;
+    coachingAdvice: string;
+  } | null>(null);
+  const lastCadenceAnalysisRef = useRef<number>(0);
+  const cadenceAnalysisPendingRef = useRef<boolean>(false);
   
   // Track recent coaching messages to avoid repetition
   const recentCoachingRef = useRef<string[]>([]);
@@ -1419,7 +1431,8 @@ export default function RunSession() {
       }
       
       if (cadence > 0) {
-        const cadenceFeedback = getCadenceFeedback(cadence);
+        // Use AI cadence analysis if available, otherwise fall back to static feedback
+        const cadenceFeedback = cadenceAnalysis?.shortAdvice || getCadenceFeedback(cadence);
         if (cadenceFeedback) {
           announcement += `Cadence: ${cadence} steps per minute. ${cadenceFeedback} `;
         }
@@ -1431,7 +1444,69 @@ export default function RunSession() {
       setMessage(`${currentKm}km - ${thisKmMins}:${thisKmSecs.toString().padStart(2, '0')} split`);
       setLastMessageTime(Date.now());
     }
-  }, [active, gpsStatus, distance, lastKmAnnounced, time, kmSplits, cadence, speak]);
+  }, [active, gpsStatus, distance, lastKmAnnounced, time, kmSplits, cadence, cadenceAnalysis, speak]);
+
+  // Fetch AI cadence analysis periodically during runs
+  useEffect(() => {
+    const now = Date.now();
+    // Throttle to once per 30 seconds minimum - check FIRST before any validation
+    if (now - lastCadenceAnalysisRef.current < 30000) return;
+    
+    if (!active || gpsStatus !== "active" || cadence < 60) {
+      // Update timestamp even on early return to prevent rapid re-runs
+      lastCadenceAnalysisRef.current = now;
+      return;
+    }
+    
+    if (cadenceAnalysisPendingRef.current) return;
+    
+    // Calculate current pace (min/km)
+    const paceMinPerKm = distance > 0.05 ? time / 60 / distance : 0;
+    if (paceMinPerKm <= 0 || paceMinPerKm > 20) {
+      lastCadenceAnalysisRef.current = now;
+      return; // Invalid pace
+    }
+    
+    // Get user height from profile
+    const heightStr = userProfile?.height;
+    if (!heightStr) {
+      lastCadenceAnalysisRef.current = now;
+      return;
+    }
+    
+    // Parse height (could be "175cm" or "175")
+    const heightCm = parseFloat(heightStr.replace(/[^0-9.]/g, ''));
+    if (isNaN(heightCm) || heightCm < 100 || heightCm > 250) {
+      lastCadenceAnalysisRef.current = now;
+      return;
+    }
+    
+    cadenceAnalysisPendingRef.current = true;
+    lastCadenceAnalysisRef.current = now;
+    
+    fetch('/api/ai/analyze-cadence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        heightCm,
+        paceMinPerKm,
+        cadenceSpm: cadence,
+        distanceKm: distance,
+        userFitnessLevel: userProfile?.fitnessLevel,
+        userAge: userProfile?.dob ? calculateAge(userProfile.dob) : undefined
+      })
+    })
+    .then(res => res.ok ? res.json() : null)
+    .then(data => {
+      if (data) {
+        setCadenceAnalysis(data);
+      }
+    })
+    .catch(err => console.error('Cadence analysis error:', err))
+    .finally(() => {
+      cadenceAnalysisPendingRef.current = false;
+    });
+  }, [active, gpsStatus, cadence, distance, time, userProfile]);
 
   const coachingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const audioEnabledRef = useRef(audioEnabled);
@@ -2195,10 +2270,20 @@ export default function RunSession() {
           </div>
           <div>
              <div className="text-muted-foreground text-[12px] uppercase tracking-wider">Cadence</div>
-             <div className={`text-base font-display font-bold ${cadence >= 165 && cadence <= 185 ? 'text-green-400' : cadence >= 60 ? 'text-yellow-400' : ''}`}>
+             <div className={`text-base font-display font-bold ${
+               cadence >= 60 
+                 ? (cadenceAnalysis 
+                     ? (cadence >= cadenceAnalysis.idealCadenceMin && cadence <= cadenceAnalysis.idealCadenceMax 
+                         ? 'text-green-400' 
+                         : 'text-yellow-400')
+                     : (cadence >= 165 && cadence <= 185 ? 'text-green-400' : 'text-yellow-400'))
+                 : ''
+             }`}>
                {cadence >= 60 ? cadence : '--'}
              </div>
-             <div className="text-[8px] text-muted-foreground">spm</div>
+             <div className="text-[8px] text-muted-foreground">
+               {cadenceAnalysis ? `ideal: ${cadenceAnalysis.idealCadenceMin}-${cadenceAnalysis.idealCadenceMax}` : 'spm'}
+             </div>
           </div>
         </div>
 
