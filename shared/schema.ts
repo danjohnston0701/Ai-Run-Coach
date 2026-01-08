@@ -101,6 +101,7 @@ export const runs = pgTable("runs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
   routeId: varchar("route_id").references(() => routes.id),
+  groupRunId: varchar("group_run_id"),
   distance: real("distance").notNull(),
   duration: integer("duration").notNull(),
   avgPace: text("avg_pace"),
@@ -235,6 +236,35 @@ export const aiCoachFaq = pgTable("ai_coach_faq", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const groupRuns = pgTable("group_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  hostUserId: varchar("host_user_id").notNull().references(() => users.id),
+  routeId: varchar("route_id").references(() => routes.id),
+  mode: text("mode").notNull().default("route"),
+  title: text("title"),
+  description: text("description"),
+  targetDistance: real("target_distance"),
+  targetPace: text("target_pace"),
+  inviteToken: text("invite_token").notNull().unique(),
+  status: text("status").notNull().default("pending"),
+  plannedStartAt: timestamp("planned_start_at"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const groupRunParticipants = pgTable("group_run_participants", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  groupRunId: varchar("group_run_id").notNull().references(() => groupRuns.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  role: text("role").notNull().default("participant"),
+  invitationStatus: text("invitation_status").notNull().default("pending"),
+  runId: varchar("run_id").references(() => runs.id),
+  joinedAt: timestamp("joined_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 export const insertPreRegistrationSchema = createInsertSchema(preRegistrations).omit({ id: true, createdAt: true });
 export const insertFriendSchema = createInsertSchema(friends).omit({ id: true, createdAt: true });
@@ -252,6 +282,8 @@ export const insertAiCoachKnowledgeSchema = createInsertSchema(aiCoachKnowledge)
 export const insertAiCoachFaqSchema = createInsertSchema(aiCoachFaq).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertCouponCodeSchema = createInsertSchema(couponCodes).omit({ id: true, createdAt: true, currentRedemptions: true });
 export const insertUserCouponSchema = createInsertSchema(userCoupons).omit({ id: true, redeemedAt: true });
+export const insertGroupRunSchema = createInsertSchema(groupRuns).omit({ id: true, createdAt: true, startedAt: true, completedAt: true });
+export const insertGroupRunParticipantSchema = createInsertSchema(groupRunParticipants).omit({ id: true, createdAt: true, joinedAt: true, completedAt: true });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -303,3 +335,9 @@ export type CouponCode = typeof couponCodes.$inferSelect;
 
 export type InsertUserCoupon = z.infer<typeof insertUserCouponSchema>;
 export type UserCoupon = typeof userCoupons.$inferSelect;
+
+export type InsertGroupRun = z.infer<typeof insertGroupRunSchema>;
+export type GroupRun = typeof groupRuns.$inferSelect;
+
+export type InsertGroupRunParticipant = z.infer<typeof insertGroupRunParticipantSchema>;
+export type GroupRunParticipant = typeof groupRunParticipants.$inferSelect;

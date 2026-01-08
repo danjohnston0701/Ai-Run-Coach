@@ -2,11 +2,19 @@ import { useState, useEffect } from "react";
 import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { motion } from "framer-motion";
-import { ArrowLeft, Play, Loader2, RefreshCw, Route, TrendingUp, TrendingDown, Mic, MicOff, Brain, Sparkles, MapPin } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { ArrowLeft, Play, Loader2, RefreshCw, Route, TrendingUp, TrendingDown, Mic, MicOff, Brain, Sparkles, MapPin, Users, X, Check, Copy, Share2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 import GoogleMapsRoute from "@/components/GoogleMapsRoute";
+
+interface Friend {
+  id: string;
+  name: string;
+  email?: string;
+  profilePic?: string;
+}
 
 interface RouteCandidate {
   id: string;
@@ -50,6 +58,12 @@ export default function RoutePreview() {
   const [error, setError] = useState<string | null>(null);
   const [coachName, setCoachName] = useState("Your AI Coach");
   const [aiCoachEnabled, setAiCoachEnabled] = useState(true);
+  const [showGroupRunModal, setShowGroupRunModal] = useState(false);
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
+  const [creatingGroupRun, setCreatingGroupRun] = useState(false);
+  const [groupRunCreated, setGroupRunCreated] = useState<{ id: string; inviteToken: string } | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
     const savedProfile = localStorage.getItem("userProfile");
@@ -58,8 +72,27 @@ export default function RoutePreview() {
       if (parsed.coachName) {
         setCoachName(parsed.coachName);
       }
+      if (parsed.id) {
+        setUserId(parsed.id);
+      }
     }
   }, []);
+
+  useEffect(() => {
+    if (userId && showGroupRunModal) {
+      fetch(`/api/friends/${userId}`)
+        .then(res => res.json())
+        .then(data => {
+          const friendList = data.map((f: any) => ({
+            id: f.friendId,
+            name: f.friendName || 'Unknown',
+            profilePic: f.friendProfilePic,
+          }));
+          setFriends(friendList);
+        })
+        .catch(err => console.error("Failed to load friends:", err));
+    }
+  }, [userId, showGroupRunModal]);
 
   const generateRoutes = async () => {
     setLoading(true);
@@ -126,6 +159,91 @@ export default function RoutePreview() {
       aiCoach: aiCoachEnabled ? "on" : "off",
     });
     setLocation(`/run?${runParams.toString()}`);
+  };
+
+  const handleCreateGroupRun = async () => {
+    if (!selectedRoute || !userId) return;
+    
+    setCreatingGroupRun(true);
+    try {
+      const res = await fetch("/api/group-runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hostUserId: userId,
+          routeId: selectedRoute.id,
+          mode: "route",
+          title: `${selectedRoute.actualDistance.toFixed(1)}km ${selectedRoute.difficulty} run`,
+          targetDistance: selectedRoute.actualDistance,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to create group run");
+      }
+
+      const groupRun = await res.json();
+      setGroupRunCreated({ id: groupRun.id, inviteToken: groupRun.inviteToken });
+
+      if (selectedFriends.length > 0) {
+        await fetch(`/api/group-runs/${groupRun.id}/invite`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId,
+            friendIds: selectedFriends,
+          }),
+        });
+        toast.success(`Invited ${selectedFriends.length} friend${selectedFriends.length > 1 ? 's' : ''} to join!`);
+      }
+    } catch (err) {
+      console.error("Failed to create group run:", err);
+      toast.error("Failed to create group run");
+    } finally {
+      setCreatingGroupRun(false);
+    }
+  };
+
+  const handleCopyInviteLink = () => {
+    if (!groupRunCreated) return;
+    const link = `${window.location.origin}/join-run?token=${groupRunCreated.inviteToken}`;
+    navigator.clipboard.writeText(link);
+    toast.success("Invite link copied to clipboard!");
+  };
+
+  const handleStartGroupRun = () => {
+    if (!selectedRoute || !groupRunCreated) return;
+    
+    localStorage.setItem("activeRoute", JSON.stringify({
+      id: selectedRoute.id,
+      routeName: selectedRoute.routeName,
+      difficulty: selectedRoute.difficulty,
+      actualDistance: selectedRoute.actualDistance,
+      polyline: selectedRoute.polyline,
+      waypoints: selectedRoute.waypoints || [],
+      startLat: lat,
+      startLng: lng,
+    }));
+    
+    const runParams = new URLSearchParams({
+      distance: distance.toString(),
+      level: selectedRoute.difficulty,
+      lat: lat.toString(),
+      lng: lng.toString(),
+      routeId: selectedRoute.id,
+      routeName: selectedRoute.routeName,
+      aiCoach: aiCoachEnabled ? "on" : "off",
+      groupRunId: groupRunCreated.id,
+    });
+    setLocation(`/run?${runParams.toString()}`);
+  };
+
+  const toggleFriendSelection = (friendId: string) => {
+    setSelectedFriends(prev => 
+      prev.includes(friendId) 
+        ? prev.filter(id => id !== friendId)
+        : [...prev, friendId]
+    );
   };
 
   const easyRoutes = routes.filter(r => r.difficulty === "easy");
@@ -386,17 +504,179 @@ export default function RoutePreview() {
             )}
           </CardContent>
         </Card>
-        <Button 
-          size="lg" 
-          className="w-full h-16 text-xl font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-all disabled:opacity-50"
-          onClick={handleStartRun}
-          disabled={!selectedRoute || loading}
-          data-testid="button-start-run"
-        >
-          <Play className="mr-2 w-6 h-6 fill-current" /> 
-          {selectedRoute ? `Start ${selectedRoute.actualDistance.toFixed(1)}km Run` : 'Select a Route'}
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            size="lg" 
+            className="flex-1 h-16 text-lg font-display uppercase tracking-widest bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-all disabled:opacity-50"
+            onClick={handleStartRun}
+            disabled={!selectedRoute || loading}
+            data-testid="button-start-run"
+          >
+            <Play className="mr-2 w-5 h-5 fill-current" /> 
+            {selectedRoute ? `Start Run` : 'Select a Route'}
+          </Button>
+          <Button 
+            size="lg" 
+            variant="outline"
+            className="h-16 px-4 border-primary/50 text-primary hover:bg-primary/10"
+            onClick={() => setShowGroupRunModal(true)}
+            disabled={!selectedRoute || loading || !userId}
+            data-testid="button-run-with-friends"
+          >
+            <Users className="w-5 h-5" />
+          </Button>
+        </div>
       </div>
+
+      <AnimatePresence>
+        {showGroupRunModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 z-[100] flex items-end sm:items-center justify-center"
+            onClick={() => !creatingGroupRun && setShowGroupRunModal(false)}
+          >
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-2xl p-6 max-h-[80vh] overflow-y-auto"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-display uppercase tracking-wider">
+                  {groupRunCreated ? "Group Run Created!" : "Run with Friends"}
+                </h2>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setShowGroupRunModal(false);
+                    setGroupRunCreated(null);
+                    setSelectedFriends([]);
+                  }}
+                  disabled={creatingGroupRun}
+                >
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+
+              {!groupRunCreated ? (
+                <>
+                  {selectedRoute && (
+                    <div className="bg-white/5 rounded-lg p-4 mb-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-muted-foreground">Selected Route</p>
+                          <p className="font-bold">{selectedRoute.actualDistance.toFixed(1)}km {selectedRoute.difficulty}</p>
+                        </div>
+                        <div className={`px-2 py-1 rounded-full text-xs font-bold uppercase ${getDifficultyColor(selectedRoute.difficulty).bg} ${getDifficultyColor(selectedRoute.difficulty).text}`}>
+                          {selectedRoute.difficulty}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mb-4">
+                    <h3 className="text-sm font-medium text-muted-foreground mb-3">Invite Friends</h3>
+                    {friends.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-4">
+                        No friends yet. Add friends to invite them to group runs!
+                      </p>
+                    ) : (
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {friends.map(friend => (
+                          <div
+                            key={friend.id}
+                            className={`flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors ${
+                              selectedFriends.includes(friend.id) 
+                                ? 'bg-primary/20 border border-primary/50' 
+                                : 'bg-white/5 hover:bg-white/10'
+                            }`}
+                            onClick={() => toggleFriendSelection(friend.id)}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">
+                                {friend.name.charAt(0).toUpperCase()}
+                              </div>
+                              <span>{friend.name}</span>
+                            </div>
+                            {selectedFriends.includes(friend.id) && (
+                              <Check className="w-5 h-5 text-primary" />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-muted-foreground mb-4">
+                    You can also share an invite link after creating the group run
+                  </p>
+
+                  <Button
+                    className="w-full h-12 font-display uppercase tracking-wider"
+                    onClick={handleCreateGroupRun}
+                    disabled={creatingGroupRun}
+                  >
+                    {creatingGroupRun ? (
+                      <>
+                        <Loader2 className="mr-2 w-4 h-4 animate-spin" />
+                        Creating...
+                      </>
+                    ) : (
+                      <>
+                        <Users className="mr-2 w-4 h-4" />
+                        Create Group Run
+                      </>
+                    )}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 mb-4">
+                    <div className="flex items-center gap-2 text-green-400 mb-2">
+                      <Check className="w-5 h-5" />
+                      <span className="font-medium">Group Run Created!</span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Share the invite code with friends or start running now
+                    </p>
+                  </div>
+
+                  <div className="bg-white/5 rounded-lg p-4 mb-4">
+                    <p className="text-xs text-muted-foreground mb-2">Invite Code</p>
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-2xl font-bold tracking-widest text-primary">
+                        {groupRunCreated.inviteToken}
+                      </span>
+                      <Button variant="ghost" size="sm" onClick={handleCopyInviteLink}>
+                        <Copy className="w-4 h-4 mr-2" />
+                        Copy Link
+                      </Button>
+                    </div>
+                  </div>
+
+                  {selectedFriends.length > 0 && (
+                    <p className="text-sm text-muted-foreground mb-4 text-center">
+                      {selectedFriends.length} friend{selectedFriends.length > 1 ? 's' : ''} invited
+                    </p>
+                  )}
+
+                  <Button
+                    className="w-full h-12 font-display uppercase tracking-wider bg-primary text-background"
+                    onClick={handleStartGroupRun}
+                  >
+                    <Play className="mr-2 w-4 h-4 fill-current" />
+                    Start Group Run
+                  </Button>
+                </>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

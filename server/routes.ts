@@ -1479,6 +1479,249 @@ export async function registerRoutes(
     }
   });
 
+  // Group Run endpoints
+  app.post("/api/group-runs", async (req, res) => {
+    try {
+      const { hostUserId, routeId, mode, title, description, targetDistance, targetPace, plannedStartAt } = req.body;
+      
+      if (!hostUserId) {
+        return res.status(400).json({ error: "Missing hostUserId" });
+      }
+      
+      // Generate unique invite token
+      const inviteToken = Math.random().toString(36).substring(2, 8).toUpperCase();
+      
+      const groupRun = await storage.createGroupRun({
+        hostUserId,
+        routeId: routeId || null,
+        mode: mode || (routeId ? 'route' : 'free'),
+        title: title || null,
+        description: description || null,
+        targetDistance: targetDistance || null,
+        targetPace: targetPace || null,
+        inviteToken,
+        status: 'pending',
+        plannedStartAt: plannedStartAt ? new Date(plannedStartAt) : null,
+      });
+      
+      // Add host as participant with 'host' role
+      await storage.addGroupRunParticipant({
+        groupRunId: groupRun.id,
+        userId: hostUserId,
+        role: 'host',
+        invitationStatus: 'accepted',
+      });
+      
+      res.status(201).json(groupRun);
+    } catch (error) {
+      console.error("Create group run error:", error);
+      res.status(500).json({ error: "Failed to create group run" });
+    }
+  });
+
+  app.get("/api/group-runs/:id", async (req, res) => {
+    try {
+      const groupRun = await storage.getGroupRun(req.params.id);
+      if (!groupRun) {
+        return res.status(404).json({ error: "Group run not found" });
+      }
+      res.json(groupRun);
+    } catch (error) {
+      console.error("Get group run error:", error);
+      res.status(500).json({ error: "Failed to get group run" });
+    }
+  });
+
+  app.get("/api/group-runs/token/:token", async (req, res) => {
+    try {
+      const groupRun = await storage.getGroupRunByToken(req.params.token);
+      if (!groupRun) {
+        return res.status(404).json({ error: "Group run not found" });
+      }
+      res.json(groupRun);
+    } catch (error) {
+      console.error("Get group run by token error:", error);
+      res.status(500).json({ error: "Failed to get group run" });
+    }
+  });
+
+  app.get("/api/group-runs/user/:userId", async (req, res) => {
+    try {
+      const hostedRuns = await storage.getUserGroupRuns(req.params.userId);
+      const participantRuns = await storage.getGroupRunsByParticipant(req.params.userId);
+      
+      // Combine and dedupe
+      const allRuns = [...hostedRuns];
+      for (const run of participantRuns) {
+        if (!allRuns.find(r => r.id === run.id)) {
+          allRuns.push(run);
+        }
+      }
+      
+      res.json(allRuns);
+    } catch (error) {
+      console.error("Get user group runs error:", error);
+      res.status(500).json({ error: "Failed to get group runs" });
+    }
+  });
+
+  app.post("/api/group-runs/:id/invite", async (req, res) => {
+    try {
+      const { userId, friendIds } = req.body;
+      const groupRun = await storage.getGroupRun(req.params.id);
+      
+      if (!groupRun) {
+        return res.status(404).json({ error: "Group run not found" });
+      }
+      
+      if (groupRun.hostUserId !== userId) {
+        return res.status(403).json({ error: "Only the host can invite participants" });
+      }
+      
+      const invitedParticipants = [];
+      
+      for (const friendId of friendIds) {
+        // Check if already a participant
+        const existing = await storage.getGroupRunParticipant(groupRun.id, friendId);
+        if (existing) continue;
+        
+        const participant = await storage.addGroupRunParticipant({
+          groupRunId: groupRun.id,
+          userId: friendId,
+          role: 'participant',
+          invitationStatus: 'pending',
+        });
+        
+        // Send notification to invited friend
+        const host = await storage.getUser(groupRun.hostUserId);
+        await storage.createNotification({
+          userId: friendId,
+          type: 'group_run_invite',
+          title: 'Group Run Invitation',
+          message: `${host?.name || 'A friend'} invited you to join a group run!`,
+          data: { groupRunId: groupRun.id, inviteToken: groupRun.inviteToken },
+        });
+        
+        invitedParticipants.push(participant);
+      }
+      
+      res.json({ invited: invitedParticipants.length });
+    } catch (error) {
+      console.error("Invite to group run error:", error);
+      res.status(500).json({ error: "Failed to invite participants" });
+    }
+  });
+
+  app.post("/api/group-runs/:id/join", async (req, res) => {
+    try {
+      const { userId } = req.body;
+      const groupRun = await storage.getGroupRun(req.params.id);
+      
+      if (!groupRun) {
+        return res.status(404).json({ error: "Group run not found" });
+      }
+      
+      // Check if already a participant
+      let participant = await storage.getGroupRunParticipant(groupRun.id, userId);
+      
+      if (participant) {
+        // Update status to accepted
+        participant = await storage.updateGroupRunParticipant(participant.id, {
+          invitationStatus: 'accepted',
+        });
+      } else {
+        // Add as new participant
+        participant = await storage.addGroupRunParticipant({
+          groupRunId: groupRun.id,
+          userId,
+          role: 'participant',
+          invitationStatus: 'accepted',
+        });
+      }
+      
+      res.json(participant);
+    } catch (error) {
+      console.error("Join group run error:", error);
+      res.status(500).json({ error: "Failed to join group run" });
+    }
+  });
+
+  app.get("/api/group-runs/:id/participants", async (req, res) => {
+    try {
+      const participants = await storage.getGroupRunParticipants(req.params.id);
+      
+      // Enrich with user info
+      const enrichedParticipants = await Promise.all(
+        participants.map(async (p) => {
+          const user = await storage.getUser(p.userId);
+          return {
+            ...p,
+            userName: user?.name || 'Unknown',
+            userProfilePic: user?.profilePic,
+          };
+        })
+      );
+      
+      res.json(enrichedParticipants);
+    } catch (error) {
+      console.error("Get group run participants error:", error);
+      res.status(500).json({ error: "Failed to get participants" });
+    }
+  });
+
+  app.get("/api/group-runs/:id/summary", async (req, res) => {
+    try {
+      const userId = req.query.userId as string;
+      const groupRun = await storage.getGroupRun(req.params.id);
+      if (!groupRun) {
+        return res.status(404).json({ error: "Group run not found" });
+      }
+      
+      // Verify the user is either the host or a participant
+      if (userId) {
+        const isHost = groupRun.hostUserId === userId;
+        const participant = await storage.getGroupRunParticipant(groupRun.id, userId);
+        if (!isHost && !participant) {
+          return res.status(403).json({ error: "You are not a participant in this group run" });
+        }
+      }
+      
+      const summary = await storage.getGroupRunSummary(req.params.id);
+      
+      // Get route info if available
+      let route = null;
+      if (summary.groupRun.routeId) {
+        route = await storage.getRoute(summary.groupRun.routeId);
+      }
+      
+      res.json({ ...summary, route });
+    } catch (error) {
+      console.error("Get group run summary error:", error);
+      res.status(500).json({ error: "Failed to get group run summary" });
+    }
+  });
+
+  app.post("/api/group-runs/:id/complete-run", async (req, res) => {
+    try {
+      const { userId, runId } = req.body;
+      
+      const participant = await storage.getGroupRunParticipant(req.params.id, userId);
+      if (!participant) {
+        return res.status(404).json({ error: "Participant not found" });
+      }
+      
+      const updated = await storage.updateGroupRunParticipant(participant.id, {
+        runId,
+        invitationStatus: 'completed',
+      });
+      
+      res.json(updated);
+    } catch (error) {
+      console.error("Complete group run error:", error);
+      res.status(500).json({ error: "Failed to update participant run" });
+    }
+  });
+
   // Friend Request endpoints
   app.post("/api/friend-requests", async (req, res) => {
     try {

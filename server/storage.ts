@@ -4,7 +4,7 @@ import {
   users, preRegistrations, friends, routes, runs, liveRunSessions, garminData,
   friendRequests, pushSubscriptions, notifications, routeRatings,
   aiCoachDescription, aiCoachInstructions, aiCoachKnowledge, aiCoachFaq,
-  couponCodes, userCoupons,
+  couponCodes, userCoupons, groupRuns, groupRunParticipants,
   type User, type InsertUser,
   type PreRegistration, type InsertPreRegistration,
   type Friend, type InsertFriend,
@@ -22,6 +22,8 @@ import {
   type AiCoachFaq, type InsertAiCoachFaq,
   type CouponCode, type InsertCouponCode,
   type UserCoupon, type InsertUserCoupon,
+  type GroupRun, type InsertGroupRun,
+  type GroupRunParticipant, type InsertGroupRunParticipant,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -123,6 +125,21 @@ export interface IStorage {
 
   // Entitlement checking
   updateUserEntitlement(userId: string, entitlementType: string, expiresAt: Date): Promise<User | undefined>;
+
+  // Group Runs
+  createGroupRun(data: InsertGroupRun): Promise<GroupRun>;
+  getGroupRun(id: string): Promise<GroupRun | undefined>;
+  getGroupRunByToken(token: string): Promise<GroupRun | undefined>;
+  getUserGroupRuns(userId: string): Promise<GroupRun[]>;
+  updateGroupRun(id: string, data: Partial<InsertGroupRun>): Promise<GroupRun | undefined>;
+  
+  // Group Run Participants
+  addGroupRunParticipant(data: InsertGroupRunParticipant): Promise<GroupRunParticipant>;
+  getGroupRunParticipants(groupRunId: string): Promise<GroupRunParticipant[]>;
+  getGroupRunParticipant(groupRunId: string, userId: string): Promise<GroupRunParticipant | undefined>;
+  updateGroupRunParticipant(id: string, data: Partial<InsertGroupRunParticipant>): Promise<GroupRunParticipant | undefined>;
+  getGroupRunsByParticipant(userId: string): Promise<GroupRun[]>;
+  getGroupRunSummary(groupRunId: string): Promise<{ groupRun: GroupRun; participants: Array<GroupRunParticipant & { user?: User; run?: Run }> }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -803,6 +820,122 @@ export class DatabaseStorage implements IStorage {
         .where(eq(users.id, userId))
         .returning();
       return user;
+    });
+  }
+
+  // Group Runs
+  async createGroupRun(data: InsertGroupRun): Promise<GroupRun> {
+    return withRetry(async () => {
+      const [groupRun] = await db.insert(groupRuns).values(data).returning();
+      return groupRun;
+    });
+  }
+
+  async getGroupRun(id: string): Promise<GroupRun | undefined> {
+    return withRetry(async () => {
+      const [groupRun] = await db.select().from(groupRuns).where(eq(groupRuns.id, id));
+      return groupRun;
+    });
+  }
+
+  async getGroupRunByToken(token: string): Promise<GroupRun | undefined> {
+    return withRetry(async () => {
+      const [groupRun] = await db.select().from(groupRuns).where(eq(groupRuns.inviteToken, token));
+      return groupRun;
+    });
+  }
+
+  async getUserGroupRuns(userId: string): Promise<GroupRun[]> {
+    return withRetry(async () => {
+      return await db.select().from(groupRuns)
+        .where(eq(groupRuns.hostUserId, userId))
+        .orderBy(desc(groupRuns.createdAt));
+    });
+  }
+
+  async updateGroupRun(id: string, data: Partial<InsertGroupRun>): Promise<GroupRun | undefined> {
+    return withRetry(async () => {
+      const [groupRun] = await db.update(groupRuns).set(data).where(eq(groupRuns.id, id)).returning();
+      return groupRun;
+    });
+  }
+
+  // Group Run Participants
+  async addGroupRunParticipant(data: InsertGroupRunParticipant): Promise<GroupRunParticipant> {
+    return withRetry(async () => {
+      const [participant] = await db.insert(groupRunParticipants).values(data).returning();
+      return participant;
+    });
+  }
+
+  async getGroupRunParticipants(groupRunId: string): Promise<GroupRunParticipant[]> {
+    return withRetry(async () => {
+      return await db.select().from(groupRunParticipants)
+        .where(eq(groupRunParticipants.groupRunId, groupRunId));
+    });
+  }
+
+  async getGroupRunParticipant(groupRunId: string, userId: string): Promise<GroupRunParticipant | undefined> {
+    return withRetry(async () => {
+      const [participant] = await db.select().from(groupRunParticipants)
+        .where(and(
+          eq(groupRunParticipants.groupRunId, groupRunId),
+          eq(groupRunParticipants.userId, userId)
+        ));
+      return participant;
+    });
+  }
+
+  async updateGroupRunParticipant(id: string, data: Partial<InsertGroupRunParticipant>): Promise<GroupRunParticipant | undefined> {
+    return withRetry(async () => {
+      const [participant] = await db.update(groupRunParticipants)
+        .set(data)
+        .where(eq(groupRunParticipants.id, id))
+        .returning();
+      return participant;
+    });
+  }
+
+  async getGroupRunsByParticipant(userId: string): Promise<GroupRun[]> {
+    return withRetry(async () => {
+      const participations = await db.select().from(groupRunParticipants)
+        .where(eq(groupRunParticipants.userId, userId));
+      
+      if (participations.length === 0) return [];
+      
+      const groupRunIds = participations.map(p => p.groupRunId);
+      const result: GroupRun[] = [];
+      
+      for (const gid of groupRunIds) {
+        const [gr] = await db.select().from(groupRuns).where(eq(groupRuns.id, gid));
+        if (gr) result.push(gr);
+      }
+      
+      return result.sort((a, b) => 
+        new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()
+      );
+    });
+  }
+
+  async getGroupRunSummary(groupRunId: string): Promise<{ groupRun: GroupRun; participants: Array<GroupRunParticipant & { user?: User; run?: Run }> }> {
+    return withRetry(async () => {
+      const [groupRun] = await db.select().from(groupRuns).where(eq(groupRuns.id, groupRunId));
+      if (!groupRun) throw new Error("Group run not found");
+      
+      const participants = await db.select().from(groupRunParticipants)
+        .where(eq(groupRunParticipants.groupRunId, groupRunId));
+      
+      const enrichedParticipants = await Promise.all(participants.map(async (p) => {
+        const [user] = await db.select().from(users).where(eq(users.id, p.userId));
+        let run: Run | undefined;
+        if (p.runId) {
+          const [r] = await db.select().from(runs).where(eq(runs.id, p.runId));
+          run = r;
+        }
+        return { ...p, user, run };
+      }));
+      
+      return { groupRun, participants: enrichedParticipants };
     });
   }
 }

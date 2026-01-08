@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useLocation, useRoute } from "wouter";
+import { useLocation, useRoute, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { 
   ArrowLeft, Calendar, TrendingUp, Heart, 
   Activity, Zap as CadenceIcon, Info, Timer, MapPin, Share2, Mail, User as UserIcon, Search, Star,
-  Facebook, Instagram, Download, X, Map
+  Facebook, Instagram, Download, X, Map, Users, Trophy, Medal, Award
 } from "lucide-react";
 import type { Friend } from "./Profile";
 import {
@@ -47,10 +47,39 @@ function FitBoundsToTrack({ positions }: { positions: [number, number][] }) {
   return null;
 }
 
+interface GroupRunParticipant {
+  id: string;
+  userId: string;
+  userName: string;
+  role: string;
+  runId?: string;
+  run?: {
+    distance: number;
+    duration: number;
+    avgPace: string;
+    cadence?: number;
+  };
+}
+
+interface GroupRunSummary {
+  groupRun: {
+    id: string;
+    title: string;
+    mode: string;
+    status: string;
+  };
+  participants: GroupRunParticipant[];
+}
+
 export default function RunInsights() {
   const [, setLocation] = useLocation();
   const [match, params] = useRoute("/history/:id");
+  const searchString = useSearch();
+  const searchParams = new URLSearchParams(searchString);
+  const groupRunId = searchParams.get("groupRunId");
+  
   const [run, setRun] = useState<RunData | null>(null);
+  const [groupRunSummary, setGroupRunSummary] = useState<GroupRunSummary | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareEmail, setShareEmail] = useState("");
   const [sharedWith, setSharedWith] = useState<string[]>([]);
@@ -204,6 +233,41 @@ export default function RunInsights() {
     .catch(err => console.error('Cadence analysis error:', err))
     .finally(() => setIsLoadingCadenceAnalysis(false));
   }, [run]);
+
+  useEffect(() => {
+    if (!groupRunId) return;
+    
+    const profile = localStorage.getItem("userProfile");
+    const userId = profile ? JSON.parse(profile).id : null;
+    const url = userId 
+      ? `/api/group-runs/${groupRunId}/summary?userId=${userId}`
+      : `/api/group-runs/${groupRunId}/summary`;
+    
+    fetch(url)
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch');
+        return res.json();
+      })
+      .then(data => {
+        setGroupRunSummary(data);
+      })
+      .catch(err => console.error('Failed to fetch group run summary:', err));
+  }, [groupRunId]);
+
+  const sortedParticipants = useMemo(() => {
+    if (!groupRunSummary?.participants) return [];
+    
+    return [...groupRunSummary.participants]
+      .filter(p => p.run)
+      .sort((a, b) => {
+        if (!a.run || !b.run) return 0;
+        const paceA = a.run.avgPace?.split(':').map(Number) || [99, 99];
+        const paceB = b.run.avgPace?.split(':').map(Number) || [99, 99];
+        const totalA = paceA[0] * 60 + (paceA[1] || 0);
+        const totalB = paceB[0] * 60 + (paceB[1] || 0);
+        return totalA - totalB;
+      });
+  }, [groupRunSummary?.participants]);
 
   const submitRating = async (rating: number) => {
     if (!run || ratingSubmitted) return;
@@ -522,6 +586,80 @@ export default function RunInsights() {
           </Badge>
         </div>
       </header>
+
+      {/* Group Run Comparison Section */}
+      {groupRunSummary && sortedParticipants.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-6"
+        >
+          <Card className="bg-gradient-to-br from-purple-500/10 to-primary/10 border-purple-500/30">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-4">
+                <Users className="w-5 h-5 text-purple-400" />
+                <h2 className="text-lg font-display font-bold uppercase tracking-wider text-purple-400">
+                  Group Run Results
+                </h2>
+              </div>
+              
+              <div className="space-y-3">
+                {sortedParticipants.map((participant, idx) => {
+                  const profile = localStorage.getItem("userProfile");
+                  const currentUserId = profile ? JSON.parse(profile).id : null;
+                  const isCurrentUser = participant.userId === currentUserId;
+                  const RankIcon = idx === 0 ? Trophy : idx === 1 ? Medal : idx === 2 ? Award : null;
+                  const rankColor = idx === 0 ? 'text-yellow-400' : idx === 1 ? 'text-gray-400' : idx === 2 ? 'text-amber-600' : 'text-muted-foreground';
+                  
+                  return (
+                    <div 
+                      key={participant.id}
+                      className={`flex items-center justify-between p-3 rounded-lg ${
+                        isCurrentUser 
+                          ? 'bg-primary/20 border border-primary/50' 
+                          : 'bg-white/5 border border-white/10'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                          idx < 3 ? 'bg-white/10' : 'bg-white/5'
+                        }`}>
+                          {RankIcon ? (
+                            <RankIcon className={`w-4 h-4 ${rankColor}`} />
+                          ) : (
+                            <span className="text-sm font-bold text-muted-foreground">{idx + 1}</span>
+                          )}
+                        </div>
+                        <div>
+                          <p className={`font-medium ${isCurrentUser ? 'text-primary' : ''}`}>
+                            {participant.userName}
+                            {isCurrentUser && <span className="text-xs ml-1">(You)</span>}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {participant.run?.distance?.toFixed(2) || '-'} km
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-lg font-bold ${idx === 0 ? 'text-yellow-400' : isCurrentUser ? 'text-primary' : ''}`}>
+                          {participant.run?.avgPace || '-'}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground uppercase">/km</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              
+              {groupRunSummary.participants.filter(p => !p.run).length > 0 && (
+                <p className="text-xs text-muted-foreground mt-3 text-center">
+                  {groupRunSummary.participants.filter(p => !p.run).length} participant(s) haven't completed yet
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
 
       {/* Share Modal */}
       <AnimatePresence>

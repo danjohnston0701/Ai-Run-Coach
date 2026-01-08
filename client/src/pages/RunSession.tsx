@@ -441,6 +441,10 @@ export default function RunSession() {
   const urlRouteId = searchParams.get("routeId") || "";
   const urlTargetTimeSeconds = parseInt(searchParams.get("targetTime") || "0");
   const urlAiCoach = searchParams.get("aiCoach");
+  const urlGroupRunId = searchParams.get("groupRunId") || "";
+
+  const [groupRunParticipants, setGroupRunParticipants] = useState<{id: string; userId: string; userName: string; role: string}[]>([]);
+  const [isGroupRun, setIsGroupRun] = useState(!!urlGroupRunId);
 
   const sessionMetadataRef = useRef({
     targetDistance: urlTargetDistance,
@@ -632,6 +636,22 @@ export default function RunSession() {
       cleanupAudio();
     };
   }, [cleanupAudio]);
+
+  useEffect(() => {
+    if (urlGroupRunId) {
+      fetch(`/api/group-runs/${urlGroupRunId}/participants`)
+        .then(res => res.json())
+        .then(data => {
+          setGroupRunParticipants(data.map((p: any) => ({
+            id: p.id,
+            userId: p.userId,
+            userName: p.userName || 'Runner',
+            role: p.role,
+          })));
+        })
+        .catch(err => console.error("Failed to load group run participants:", err));
+    }
+  }, [urlGroupRunId]);
   
   const speakWithDeviceTTS = useCallback((text: string) => {
     if (!('speechSynthesis' in window)) {
@@ -2090,8 +2110,26 @@ export default function RunSession() {
     clearActiveRunSession();
     if (time > 0 && distance > 0) {
       const runId = await saveRunData();
+      
+      if (urlGroupRunId && userProfile?.name) {
+        const profile = localStorage.getItem("userProfile");
+        const userId = profile ? JSON.parse(profile).id : null;
+        if (userId) {
+          try {
+            await fetch(`/api/group-runs/${urlGroupRunId}/complete-run`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId, runId }),
+            });
+          } catch (err) {
+            console.error("Failed to link run to group:", err);
+          }
+        }
+      }
+      
       speak("Run complete! Great job!", { domain: 'system' });
-      setLocation(`/history/${runId}`);
+      const insightsParams = urlGroupRunId ? `?groupRunId=${urlGroupRunId}` : '';
+      setLocation(`/history/${runId}${insightsParams}`);
     } else {
       setLocation("/");
     }
@@ -2216,6 +2254,18 @@ export default function RunSession() {
                 <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary"></span>
               </span>
               <span className="text-[10px] font-display font-bold text-primary uppercase">Live</span>
+            </motion.div>
+          )}
+          {isGroupRun && (
+            <motion.div 
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="bg-purple-500/20 backdrop-blur-md rounded-lg px-2 py-1 border border-purple-500/30 flex items-center gap-1.5"
+            >
+              <Users className="w-3 h-3 text-purple-400" />
+              <span className="text-[10px] font-display font-bold text-purple-400 uppercase">
+                Group ({groupRunParticipants.length})
+              </span>
             </motion.div>
           )}
         </div>

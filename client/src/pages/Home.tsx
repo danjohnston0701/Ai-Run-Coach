@@ -4,8 +4,8 @@ import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { motion } from "framer-motion";
-import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, MicOff, Settings } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, MicOff, Settings, Users, Check, Copy } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -226,6 +226,11 @@ export default function Home() {
   const [showWeatherModal, setShowWeatherModal] = useState(false);
   const [currentGpsAccuracy, setCurrentGpsAccuracy] = useState<number | undefined>(undefined);
   const [aiCoachEnabled, setAiCoachEnabled] = useState(true);
+  const [showFreeRunGroupModal, setShowFreeRunGroupModal] = useState(false);
+  const [freeRunFriends, setFreeRunFriends] = useState<{id: string; name: string; profilePic?: string}[]>([]);
+  const [selectedFreeRunFriends, setSelectedFreeRunFriends] = useState<string[]>([]);
+  const [creatingFreeRunGroup, setCreatingFreeRunGroup] = useState(false);
+  const [freeRunGroupCreated, setFreeRunGroupCreated] = useState<{ id: string; inviteToken: string } | null>(null);
 
   // Entitlement check for paywall (premium features only)
   const { data: entitlementData } = useEntitlement(profile?.id || null);
@@ -734,6 +739,99 @@ export default function Home() {
     });
     console.log("Navigating to route preview with params:", { lat, lng, distance: distance[0], level: selectedLevel });
     setLocation(`/route-preview?${params.toString()}`);
+  };
+
+  useEffect(() => {
+    if (profile?.id && showFreeRunGroupModal) {
+      fetch(`/api/friends/${profile.id}`)
+        .then(res => res.json())
+        .then(data => {
+          const friendList = data.map((f: any) => ({
+            id: f.friendId,
+            name: f.friendName || 'Unknown',
+            profilePic: f.friendProfilePic,
+          }));
+          setFreeRunFriends(friendList);
+        })
+        .catch(err => console.error("Failed to load friends:", err));
+    }
+  }, [profile?.id, showFreeRunGroupModal]);
+
+  const handleCreateFreeRunGroup = async () => {
+    if (!profile?.id || !userLocation) return;
+    
+    setCreatingFreeRunGroup(true);
+    try {
+      const res = await fetch("/api/group-runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hostUserId: profile.id,
+          mode: "free",
+          title: "Free Group Run",
+          targetDistance: distance[0],
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to create group run");
+      }
+
+      const groupRun = await res.json();
+      setFreeRunGroupCreated({ id: groupRun.id, inviteToken: groupRun.inviteToken });
+
+      if (selectedFreeRunFriends.length > 0) {
+        await fetch(`/api/group-runs/${groupRun.id}/invite`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: profile.id,
+            friendIds: selectedFreeRunFriends,
+          }),
+        });
+        toast.success(`Invited ${selectedFreeRunFriends.length} friend${selectedFreeRunFriends.length > 1 ? 's' : ''} to join!`);
+      }
+    } catch (err) {
+      console.error("Failed to create group run:", err);
+      toast.error("Failed to create group run");
+    } finally {
+      setCreatingFreeRunGroup(false);
+    }
+  };
+
+  const handleCopyFreeRunInviteLink = () => {
+    if (!freeRunGroupCreated) return;
+    const link = `${window.location.origin}/join-run?token=${freeRunGroupCreated.inviteToken}`;
+    navigator.clipboard.writeText(link);
+    toast.success("Invite link copied to clipboard!");
+  };
+
+  const handleStartFreeRunGroup = () => {
+    if (!freeRunGroupCreated || !userLocation) return;
+    
+    const lat = userLocation.lat;
+    const lng = userLocation.lng;
+    
+    const canUseAiCoach = isPremiumUser && aiCoachEnabled;
+    const targetSeconds = parseInt(targetTime.h || "0") * 3600 + parseInt(targetTime.m || "0") * 60 + parseInt(targetTime.s || "0");
+    const params = new URLSearchParams({
+      distance: distance[0].toString(),
+      level: selectedLevel,
+      lat: lat.toString(),
+      lng: lng.toString(),
+      targetTime: targetSeconds.toString(),
+      aiCoach: canUseAiCoach ? "on" : "off",
+      groupRunId: freeRunGroupCreated.id,
+    });
+    setLocation(`/run?${params.toString()}`);
+  };
+
+  const toggleFreeRunFriendSelection = (friendId: string) => {
+    setSelectedFreeRunFriends(prev => 
+      prev.includes(friendId) 
+        ? prev.filter(id => id !== friendId)
+        : [...prev, friendId]
+    );
   };
 
   const handleStartSession = () => {
@@ -1434,20 +1532,36 @@ export default function Home() {
               >
                 <MapPin className="mr-2 w-5 h-5 fill-current" /> Map My Run
               </Button>
-              <Button 
-                size="lg" 
-                variant="outline"
-                className={`w-full h-12 text-lg font-display uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
-                  userLocation 
-                    ? "border-white/20 hover:bg-white/10" 
-                    : "border-muted/20 text-muted-foreground cursor-not-allowed"
-                }`}
-                onClick={handleStartSession}
-                disabled={!userLocation}
-                data-testid="button-start-session"
-              >
-                <Play className="mr-2 w-5 h-5 fill-current" /> Start Run Without Route
-              </Button>
+              <div className="flex gap-2">
+                <Button 
+                  size="lg" 
+                  variant="outline"
+                  className={`flex-1 h-12 text-base font-display uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
+                    userLocation 
+                      ? "border-white/20 hover:bg-white/10" 
+                      : "border-muted/20 text-muted-foreground cursor-not-allowed"
+                  }`}
+                  onClick={handleStartSession}
+                  disabled={!userLocation}
+                  data-testid="button-start-session"
+                >
+                  <Play className="mr-2 w-5 h-5 fill-current" /> Free Run
+                </Button>
+                <Button 
+                  size="lg" 
+                  variant="outline"
+                  className={`h-12 px-4 ${
+                    userLocation 
+                      ? "border-primary/50 text-primary hover:bg-primary/10" 
+                      : "border-muted/20 text-muted-foreground cursor-not-allowed"
+                  }`}
+                  onClick={() => setShowFreeRunGroupModal(true)}
+                  disabled={!userLocation || !profile?.id}
+                  data-testid="button-free-run-with-friends"
+                >
+                  <Users className="w-5 h-5" />
+                </Button>
+              </div>
             </motion.div>
 
             <motion.div
@@ -1540,6 +1654,154 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      <AnimatePresence>
+        {showFreeRunGroupModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 z-[100] flex items-end sm:items-center justify-center"
+            onClick={() => !creatingFreeRunGroup && setShowFreeRunGroupModal(false)}
+          >
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-2xl p-6 max-h-[80vh] overflow-y-auto"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-display uppercase tracking-wider">
+                  {freeRunGroupCreated ? "Group Run Created!" : "Run with Friends"}
+                </h2>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setShowFreeRunGroupModal(false);
+                    setFreeRunGroupCreated(null);
+                    setSelectedFreeRunFriends([]);
+                  }}
+                  disabled={creatingFreeRunGroup}
+                >
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+
+              {!freeRunGroupCreated ? (
+                <>
+                  <div className="bg-white/5 rounded-lg p-4 mb-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Run Type</p>
+                        <p className="font-bold">Free Run (No Route)</p>
+                      </div>
+                      <div className="px-2 py-1 rounded-full text-xs font-bold uppercase bg-primary/20 text-primary">
+                        {distance[0]}km target
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <h3 className="text-sm font-medium text-muted-foreground mb-3">Invite Friends</h3>
+                    {freeRunFriends.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-4">
+                        No friends yet. Add friends to invite them to group runs!
+                      </p>
+                    ) : (
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {freeRunFriends.map(friend => (
+                          <div
+                            key={friend.id}
+                            className={`flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors ${
+                              selectedFreeRunFriends.includes(friend.id) 
+                                ? 'bg-primary/20 border border-primary/50' 
+                                : 'bg-white/5 hover:bg-white/10'
+                            }`}
+                            onClick={() => toggleFreeRunFriendSelection(friend.id)}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">
+                                {friend.name.charAt(0).toUpperCase()}
+                              </div>
+                              <span>{friend.name}</span>
+                            </div>
+                            {selectedFreeRunFriends.includes(friend.id) && (
+                              <Check className="w-5 h-5 text-primary" />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-muted-foreground mb-4">
+                    You can also share an invite link after creating the group run
+                  </p>
+
+                  <Button
+                    className="w-full h-12 font-display uppercase tracking-wider"
+                    onClick={handleCreateFreeRunGroup}
+                    disabled={creatingFreeRunGroup}
+                  >
+                    {creatingFreeRunGroup ? (
+                      <>
+                        <Loader className="mr-2 w-4 h-4 animate-spin" />
+                        Creating...
+                      </>
+                    ) : (
+                      <>
+                        <Users className="mr-2 w-4 h-4" />
+                        Create Group Run
+                      </>
+                    )}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 mb-4">
+                    <div className="flex items-center gap-2 text-green-400 mb-2">
+                      <Check className="w-5 h-5" />
+                      <span className="font-medium">Group Run Created!</span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Share the invite code with friends or start running now
+                    </p>
+                  </div>
+
+                  <div className="bg-white/5 rounded-lg p-4 mb-4">
+                    <p className="text-xs text-muted-foreground mb-2">Invite Code</p>
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-2xl font-bold tracking-widest text-primary">
+                        {freeRunGroupCreated.inviteToken}
+                      </span>
+                      <Button variant="ghost" size="sm" onClick={handleCopyFreeRunInviteLink}>
+                        <Copy className="w-4 h-4 mr-2" />
+                        Copy Link
+                      </Button>
+                    </div>
+                  </div>
+
+                  {selectedFreeRunFriends.length > 0 && (
+                    <p className="text-sm text-muted-foreground mb-4 text-center">
+                      {selectedFreeRunFriends.length} friend{selectedFreeRunFriends.length > 1 ? 's' : ''} invited
+                    </p>
+                  )}
+
+                  <Button
+                    className="w-full h-12 font-display uppercase tracking-wider bg-primary text-background"
+                    onClick={handleStartFreeRunGroup}
+                  >
+                    <Play className="mr-2 w-4 h-4 fill-current" />
+                    Start Group Run
+                  </Button>
+                </>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
