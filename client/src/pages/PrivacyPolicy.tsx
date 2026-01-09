@@ -25,7 +25,7 @@ export default function PrivacyPolicy() {
         <section className="space-y-6 text-muted-foreground leading-relaxed">
           <div className="p-6 bg-card/50 border border-white/10 rounded-2xl">
             <h2 className="text-foreground font-bold uppercase tracking-wider mb-2">Privacy Policy for AI Run Coach</h2>
-            <p className="text-sm italic">Last updated: 3 January 2026</p>
+            <p className="text-sm italic">Last updated: 9 January 2026</p>
           </div>
 
           <div className="space-y-4">
