@@ -3,6 +3,71 @@ import OpenAI from "openai";
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// Place types that are good for running routes
+const RUNNING_PLACE_TYPES = ['park', 'natural_feature', 'campground', 'stadium', 'tourist_attraction'];
+
+interface NearbyPlace {
+  lat: number;
+  lng: number;
+  name: string;
+  type: string;
+}
+
+// Find nearby parks, trails, and natural areas using Google Places API
+async function findNearbyTrailAnchors(lat: number, lng: number, radiusKm: number): Promise<NearbyPlace[]> {
+  if (!GOOGLE_MAPS_API_KEY) return [];
+  
+  const places: NearbyPlace[] = [];
+  const radiusMeters = Math.min(radiusKm * 1000, 50000); // Max 50km radius
+  
+  try {
+    // Search for parks and natural features
+    for (const placeType of RUNNING_PLACE_TYPES) {
+      const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radiusMeters}&type=${placeType}&key=${GOOGLE_MAPS_API_KEY}`;
+      
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      if (data.status === 'OK' && data.results) {
+        for (const result of data.results.slice(0, 5)) { // Top 5 per type
+          places.push({
+            lat: result.geometry.location.lat,
+            lng: result.geometry.location.lng,
+            name: result.name,
+            type: placeType
+          });
+        }
+      }
+    }
+    
+    // Also search for "walking trail" and "river walk" by keyword
+    const keywordSearches = ['walking trail', 'river walk', 'nature reserve', 'domain'];
+    for (const keyword of keywordSearches) {
+      const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radiusMeters}&keyword=${encodeURIComponent(keyword)}&key=${GOOGLE_MAPS_API_KEY}`;
+      
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      if (data.status === 'OK' && data.results) {
+        for (const result of data.results.slice(0, 3)) {
+          places.push({
+            lat: result.geometry.location.lat,
+            lng: result.geometry.location.lng,
+            name: result.name,
+            type: keyword
+          });
+        }
+      }
+    }
+    
+    console.log(`[Route Gen] Found ${places.length} nearby trail anchors`);
+    return places;
+  } catch (error) {
+    console.error('[Route Gen] Error fetching nearby places:', error);
+    return [];
+  }
+}
+
 interface RouteRequest {
   startLat: number;
   startLng: number;
@@ -183,15 +248,46 @@ function calculateRouteOverlap(polyline1: string, polyline2: string): number {
 }
 
 // Detect backtracking - returns percentage of route that doubles back on itself (0-1)
+// Excludes first/last 300m to allow legitimate shared access streets
 function calculateBacktrackRatio(polyline: string): number {
   const points = decodePolyline(polyline);
   if (points.length < 10) return 0;
   
+  // Calculate cumulative distances to find 300m cutoffs
+  const distances: number[] = [0];
+  for (let i = 1; i < points.length; i++) {
+    distances.push(distances[i-1] + getDistanceKm(points[i-1], points[i]));
+  }
+  const totalDistance = distances[distances.length - 1];
+  const excludeDistance = 0.3; // 300m in km
+  
+  // Find start/end indices to exclude (skip first and last 300m)
+  let startIdx = 0;
+  let endIdx = points.length - 1;
+  for (let i = 0; i < distances.length; i++) {
+    if (distances[i] >= excludeDistance) {
+      startIdx = i;
+      break;
+    }
+  }
+  for (let i = distances.length - 1; i >= 0; i--) {
+    if (totalDistance - distances[i] >= excludeDistance) {
+      endIdx = i;
+      break;
+    }
+  }
+  
+  // If route too short to have middle section, analyze full route
+  if (endIdx <= startIdx + 5) {
+    startIdx = 0;
+    endIdx = points.length - 1;
+  }
+  
   const gridSize = 0.0003; // ~30m grid for finer detection
   const directedSegments: string[] = [];
   
-  // Create directed segments (A->B is different from B->A)
-  for (let i = 0; i < points.length - 1; i++) {
+  // Create directed segments only for middle portion
+  for (let i = startIdx; i < endIdx; i++) {
     const g1 = `${Math.round(points[i].lat / gridSize)},${Math.round(points[i].lng / gridSize)}`;
     const g2 = `${Math.round(points[i+1].lat / gridSize)},${Math.round(points[i+1].lng / gridSize)}`;
     if (g1 !== g2) {
@@ -850,6 +946,60 @@ async function getRouteElevation(polyline: string): Promise<{
   return undefined;
 }
 
+// Generate trail-based templates using nearby parks/trails as waypoint anchors
+function generateTrailBasedTemplates(
+  startLat: number, 
+  startLng: number, 
+  targetDistance: number,
+  places: NearbyPlace[]
+): Array<{ name: string; waypoints: Array<{ lat: number; lng: number }>; optimize: boolean }> {
+  const templates: Array<{ name: string; waypoints: Array<{ lat: number; lng: number }>; optimize: boolean }> = [];
+  const baseRadius = targetDistance / 4; // Approximate radius for loop
+  
+  // Filter places within reasonable distance
+  const nearbyPlaces = places.filter(p => {
+    const dist = getDistanceKm({ lat: startLat, lng: startLng }, { lat: p.lat, lng: p.lng });
+    return dist > 0.2 && dist < baseRadius * 2; // Between 200m and 2x radius
+  });
+  
+  if (nearbyPlaces.length < 2) return templates;
+  
+  // Create templates using 2-4 nearby places as waypoints
+  for (let i = 0; i < Math.min(nearbyPlaces.length, 5); i++) {
+    for (let j = i + 1; j < Math.min(nearbyPlaces.length, 6); j++) {
+      const place1 = nearbyPlaces[i];
+      const place2 = nearbyPlaces[j];
+      
+      // Simple 2-waypoint loop through two places
+      templates.push({
+        name: `trail-${place1.name.slice(0,15)}-${place2.name.slice(0,15)}`,
+        waypoints: [
+          { lat: place1.lat, lng: place1.lng },
+          { lat: place2.lat, lng: place2.lng }
+        ],
+        optimize: false
+      });
+      
+      // Add a third point if available
+      if (j + 1 < nearbyPlaces.length) {
+        const place3 = nearbyPlaces[j + 1];
+        templates.push({
+          name: `trail-3pt-${place1.name.slice(0,10)}-${place2.name.slice(0,10)}`,
+          waypoints: [
+            { lat: place1.lat, lng: place1.lng },
+            { lat: place2.lat, lng: place2.lng },
+            { lat: place3.lat, lng: place3.lng }
+          ],
+          optimize: false
+        });
+      }
+    }
+  }
+  
+  console.log(`[Route Gen] Generated ${templates.length} trail-based templates from ${nearbyPlaces.length} nearby places`);
+  return templates;
+}
+
 // Main function: Generate diverse routes
 export async function generateAIRoutes(
   request: RouteRequest, 
@@ -859,9 +1009,17 @@ export async function generateAIRoutes(
   
   console.log(`[Route Gen] Generating diverse routes for ${targetDistance}km`);
   
-  // Generate all route templates
+  // Fetch nearby trail anchors (parks, walking paths, natural features)
+  const nearbyPlaces = await findNearbyTrailAnchors(startLat, startLng, targetDistance);
+  
+  // Generate all route templates (geometric + trail-based)
   let templates = generateRouteTemplates(startLat, startLng, targetDistance);
-  console.log(`[Route Gen] Created ${templates.length} unique templates`);
+  
+  // Add trail-based templates that use actual parks/trails as waypoints
+  const trailTemplates = generateTrailBasedTemplates(startLat, startLng, targetDistance, nearbyPlaces);
+  templates = [...trailTemplates, ...templates]; // Prioritize trail templates
+  
+  console.log(`[Route Gen] Created ${templates.length} unique templates (${trailTemplates.length} trail-based)`);
   
   // Sort templates by user preferences if available
   if (templatePreferences && templatePreferences.length > 0) {
@@ -988,6 +1146,69 @@ export async function generateAIRoutes(
       });
       
       acceptedPolylines.push(result.polyline);
+    }
+  }
+  
+  // Adaptive fallback: if fewer than 3 routes, try relaxed thresholds
+  if (candidates.length < 3) {
+    console.log(`[Route Gen] Only ${candidates.length} routes passed strict filters, trying relaxed thresholds...`);
+    
+    const relaxedBacktrackThresholds = [0.30, 0.35, 0.40];
+    const relaxedAngularSpread = 120; // Lower from 150 to 120
+    
+    for (const maxBacktrack of relaxedBacktrackThresholds) {
+      if (candidates.length >= 3) break;
+      
+      console.log(`[Route Gen] Fallback: backtrack ${(maxBacktrack*100).toFixed(0)}%, angular ${relaxedAngularSpread}°`);
+      
+      for (const template of templates) {
+        if (candidates.length >= 3) break;
+        
+        const cached = calibratedCache.get(template.name);
+        if (!cached) continue;
+        
+        // Skip if already accepted
+        if (acceptedPolylines.includes(cached.result.polyline)) continue;
+        
+        // Relaxed checks
+        if (cached.backtrackRatio > maxBacktrack) continue;
+        if (cached.angularSpread < relaxedAngularSpread) continue;
+        
+        const { waypoints, result } = cached;
+        
+        // Still check for similarity
+        let tooSimilar = false;
+        for (const existingPolyline of acceptedPolylines) {
+          const overlap = calculateRouteOverlap(result.polyline, existingPolyline);
+          if (overlap > 0.4) {
+            tooSimilar = true;
+            break;
+          }
+        }
+        if (tooSimilar) continue;
+        
+        const footprint = getRouteFootprint(result.polyline);
+        const hasMajorRoads = containsMajorRoads(result.instructions);
+        
+        console.log(`[Route Gen] Fallback accepted ${template.name}: ${result.distance.toFixed(2)}km, backtrack ${(cached.backtrackRatio*100).toFixed(0)}%`);
+        
+        candidates.push({
+          id: `route-${candidates.length}`,
+          waypoints,
+          actualDistance: result.distance,
+          duration: result.duration,
+          polyline: result.polyline,
+          routeName: `${result.distance.toFixed(1)}km moderate - ${template.name}`,
+          difficulty: "moderate", // Fallback routes are moderate by default
+          difficultyScore: Math.round(cached.backtrackRatio * 100),
+          hasMajorRoads,
+          uniquenessScore: 1,
+          deadEndCount: 0,
+          aiReasoning: template.name,
+        });
+        
+        acceptedPolylines.push(result.polyline);
+      }
     }
   }
   
