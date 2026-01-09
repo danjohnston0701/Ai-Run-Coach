@@ -49,6 +49,8 @@ interface Position {
   lat: number;
   lng: number;
   timestamp: number;
+  altitude?: number;
+  altitudeAccuracy?: number;
 }
 
 // Downsample GPS track to max points while preserving route shape
@@ -896,8 +898,10 @@ export default function RunSession() {
       const lat = position.coords.latitude;
       const lng = position.coords.longitude;
       const timestamp = position.timestamp;
+      const altitude = position.coords.altitude ?? undefined;
+      const altitudeAccuracy = position.coords.altitudeAccuracy ?? undefined;
       
-      console.log(`[GPS] Raw: lat=${lat.toFixed(6)}, lng=${lng.toFixed(6)}, acc=${accuracy.toFixed(1)}m, active=${active}, positions=${positionsRef.current.length}`);
+      console.log(`[GPS] Raw: lat=${lat.toFixed(6)}, lng=${lng.toFixed(6)}, acc=${accuracy.toFixed(1)}m, alt=${altitude?.toFixed(1) ?? 'N/A'}m, active=${active}, positions=${positionsRef.current.length}`);
       
       // Track current accuracy for help dialog
       setCurrentGpsAccuracy(accuracy);
@@ -909,7 +913,7 @@ export default function RunSession() {
         return;
       }
       
-      const newPos: Position = { lat, lng, timestamp };
+      const newPos: Position = { lat, lng, timestamp, altitude, altitudeAccuracy };
       setCurrentPosition(newPos);
       
       // First accurate fix - GPS locked!

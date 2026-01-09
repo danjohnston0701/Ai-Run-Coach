@@ -8,8 +8,9 @@ import { toast } from "sonner";
 import { 
   ArrowLeft, Calendar, TrendingUp, Heart, 
   Activity, Zap as CadenceIcon, Info, Timer, MapPin, Share2, Mail, User as UserIcon, Search, Star,
-  Facebook, Instagram, Download, X, Map, Users, Trophy, Medal, Award, Trash2, Brain, CheckCircle, Target, Lightbulb, AlertTriangle, Sparkles
+  Facebook, Instagram, Download, X, Map, Users, Trophy, Medal, Award, Trash2, Brain, CheckCircle, Target, Lightbulb, AlertTriangle, Sparkles, Footprints
 } from "lucide-react";
+import { TelemetryChartSection, type TelemetryDataPoint } from "@/components/TelemetryChartSection";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -121,6 +122,14 @@ export default function RunInsights() {
   } | null>(null);
   const [isLoadingAiAnalysis, setIsLoadingAiAnalysis] = useState(false);
   const [aiAnalysisError, setAiAnalysisError] = useState<string | null>(null);
+  const [telemetryData, setTelemetryData] = useState<{
+    dataPoints: TelemetryDataPoint[];
+    paceStats?: { min: number; max: number; avg: number };
+    elevationProfile?: { totalGain: number; totalLoss: number; maxGrade: number; hillCount: number };
+    cadenceStats?: { min: number; max: number; avg: number };
+    distance?: number;
+    duration?: number;
+  } | null>(null);
 
   useEffect(() => {
     const loadRun = async () => {
@@ -198,6 +207,31 @@ export default function RunInsights() {
       const parsed = JSON.parse(profile);
       setFriends(parsed.friends || []);
     }
+  }, [params?.id]);
+
+  // Fetch telemetry data for charts
+  useEffect(() => {
+    if (!params?.id) return;
+    
+    const fetchTelemetry = async () => {
+      try {
+        const response = await fetch(`/api/runs/${params.id}/telemetry`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.telemetry) {
+            setTelemetryData({
+              ...data.telemetry,
+              distance: data.distance,
+              duration: data.duration
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch telemetry:', err);
+      }
+    };
+    
+    fetchTelemetry();
   }, [params?.id]);
 
   // Fetch AI cadence analysis when run is loaded
@@ -1350,78 +1384,75 @@ export default function RunInsights() {
           </section>
         )}
 
-        {/* Heart Rate Section */}
-        <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className={`p-2 rounded-lg ${hasHeartRateData ? 'bg-red-500/10' : 'bg-muted/20'}`}>
-                <Heart className={`w-5 h-5 ${hasHeartRateData ? 'text-red-500 fill-red-500/20' : 'text-muted-foreground/50'}`} />
-              </div>
-              <div>
-                <h2 className={`text-lg font-display font-bold uppercase tracking-wide ${!hasHeartRateData ? 'text-muted-foreground/50' : ''}`}>Heart Rate</h2>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                  {hasHeartRateData ? 'Intensity over distance' : 'No heart rate data'}
-                </p>
-              </div>
-            </div>
-            {hasHeartRateData && (
-              <div className="text-right">
-                <div className="text-2xl font-display font-bold text-primary">{run.avgHeartRate}</div>
-                <div className="text-[10px] text-muted-foreground uppercase tracking-widest">Avg BPM</div>
-              </div>
+        {/* Performance Charts Section - Collapsible */}
+        {run && telemetryData && telemetryData.dataPoints && telemetryData.dataPoints.length > 0 && (
+          <section className="space-y-3">
+            <h2 className="text-lg font-display font-bold uppercase tracking-wide flex items-center gap-2">
+              <Activity className="w-5 h-5 text-primary" /> Performance Charts
+            </h2>
+            
+            {/* Pace Chart */}
+            <TelemetryChartSection
+              metric="pace"
+              icon={<Activity className="w-5 h-5 text-blue-400" />}
+              dataPoints={telemetryData.dataPoints}
+              stats={telemetryData.paceStats ? {
+                avg: telemetryData.paceStats.avg,
+                min: telemetryData.paceStats.min,
+                max: telemetryData.paceStats.min  // Best pace is min for pace
+              } : undefined}
+              defaultOpen={true}
+              totalDistance={telemetryData.distance || run.distance || 1}
+              totalDuration={telemetryData.duration || run.totalTime || 600}
+            />
+            
+            {/* Heart Rate Chart */}
+            {telemetryData.dataPoints.some(p => p.heartRate !== undefined) && (
+              <TelemetryChartSection
+                metric="heartRate"
+                icon={<Heart className="w-5 h-5 text-red-500" />}
+                dataPoints={telemetryData.dataPoints}
+                stats={run.avgHeartRate ? {
+                  avg: run.avgHeartRate,
+                  max: run.maxHeartRate
+                } : undefined}
+                defaultOpen={false}
+                totalDistance={telemetryData.distance || run.distance || 1}
+                totalDuration={telemetryData.duration || run.totalTime || 600}
+              />
             )}
-          </div>
-          
-          {hasHeartRateData ? (
-            <Card className="bg-card/30 border-white/5 p-4 overflow-hidden">
-              <div className="h-64 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorHrFull" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#ef4444" stopOpacity={0.4}/>
-                        <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff08" />
-                    <XAxis 
-                      dataKey="distance" 
-                      stroke="#ffffff40" 
-                      fontSize={10} 
-                      tickLine={false} 
-                      axisLine={false}
-                      type="number"
-                      domain={[0, 'dataMax']}
-                      ticks={Array.from({ length: Math.ceil(run.distance) + 1 }, (_, i) => i)}
-                      tickFormatter={(val) => Math.round(val).toString()}
-                      label={{ value: 'Distance (km)', position: 'insideBottom', offset: -5, fontSize: 10, fill: '#64748b' }}
-                    />
-                    <YAxis 
-                      stroke="#ffffff40" 
-                      fontSize={10} 
-                      tickLine={false} 
-                      axisLine={false}
-                      domain={['dataMin - 10', 'dataMax + 10']}
-                      tickFormatter={(val) => Math.round(val).toString()}
-                      label={{ value: 'BPM', angle: -90, position: 'insideLeft', offset: 10, fontSize: 10, fill: '#64748b' }}
-                    />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '12px' }}
-                      labelStyle={{ color: '#64748b', marginBottom: '4px' }}
-                    />
-                    <Area type="monotone" dataKey="hr" stroke="#ef4444" fillOpacity={1} fill="url(#colorHrFull)" strokeWidth={3} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </Card>
-          ) : (
-            <Card className="bg-muted/10 border-white/5 p-8 text-center">
-              <Heart className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
-              <p className="text-muted-foreground text-sm">No heart rate data available</p>
-              <p className="text-muted-foreground/60 text-xs mt-1">Connect a heart rate monitor or smartwatch to track your heart rate during runs</p>
-            </Card>
-          )}
-        </section>
+            
+            {/* Elevation Chart */}
+            {telemetryData.dataPoints.some(p => p.elevation !== undefined) && (
+              <TelemetryChartSection
+                metric="elevation"
+                icon={<TrendingUp className="w-5 h-5 text-green-500" />}
+                dataPoints={telemetryData.dataPoints}
+                stats={telemetryData.elevationProfile ? {
+                  min: 0,  // We'll show gain instead
+                  max: telemetryData.elevationProfile.totalGain,
+                  avg: telemetryData.elevationProfile.totalGain
+                } : undefined}
+                defaultOpen={false}
+                totalDistance={telemetryData.distance || run.distance || 1}
+                totalDuration={telemetryData.duration || run.totalTime || 600}
+              />
+            )}
+            
+            {/* Cadence Chart */}
+            {telemetryData.dataPoints.some(p => p.cadence !== undefined) && (
+              <TelemetryChartSection
+                metric="cadence"
+                icon={<Footprints className="w-5 h-5 text-yellow-500" />}
+                dataPoints={telemetryData.dataPoints}
+                stats={telemetryData.cadenceStats}
+                defaultOpen={false}
+                totalDistance={telemetryData.distance || run.distance || 1}
+                totalDuration={telemetryData.duration || run.totalTime || 600}
+              />
+            )}
+          </section>
+        )}
 
         {/* Km Splits Section */}
         {kmSplits.length > 0 && (
@@ -1470,71 +1501,6 @@ export default function RunInsights() {
             </Card>
           </section>
         )}
-
-        {/* Elevation Section */}
-        <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="p-2 bg-green-500/10 rounded-lg">
-                <TrendingUp className="w-5 h-5 text-green-500" />
-              </div>
-              <div>
-                <h2 className="text-lg font-display font-bold uppercase tracking-wide">Elevation</h2>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Terrain profile</p>
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-2xl font-display font-bold text-primary">{isNaN((run as any).elevationGain) || (run as any).elevationGain === undefined ? '-' : Math.round((run as any).elevationGain)}</div>
-              <div className="text-[10px] text-muted-foreground uppercase tracking-widest">Gain (m)</div>
-            </div>
-          </div>
-
-          <Card className="bg-card/30 border-white/5 p-4 overflow-hidden">
-            <div className="h-48 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorElevFull" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4}/>
-                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff08" />
-                  <XAxis 
-                    dataKey="distance" 
-                    stroke="#ffffff40" 
-                    fontSize={10} 
-                    tickLine={false} 
-                    axisLine={false}
-                    type="number"
-                    domain={[0, 'dataMax']}
-                    ticks={Array.from({ length: Math.ceil(run.distance) + 1 }, (_, i) => i)}
-                    tickFormatter={(val) => Math.round(val).toString()}
-                    label={{ value: 'Distance (km)', position: 'insideBottom', offset: -5, fontSize: 10, fill: '#64748b' }}
-                  />
-                  <YAxis 
-                    stroke="#ffffff40" 
-                    fontSize={10} 
-                    tickLine={false} 
-                    axisLine={false}
-                    tickFormatter={(val) => Math.round(val).toString()}
-                    label={{ value: 'Elevation (m)', angle: -90, position: 'insideLeft', offset: 10, fontSize: 10, fill: '#64748b' }}
-                  />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '12px' }}
-                    labelStyle={{ color: '#64748b', marginBottom: '4px' }}
-                    formatter={(value: number, name: string) => [
-                      `${value.toFixed(1)} m`,
-                      name === 'elevation' ? 'Elevation' : name
-                    ]}
-                    labelFormatter={(label: number) => `${label.toFixed(1)} km`}
-                  />
-                  <Area type="monotone" dataKey="elevation" stroke="#22c55e" fillOpacity={1} fill="url(#colorElevFull)" strokeWidth={3} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
-        </section>
 
         {/* Zone Breakdown & Metrics */}
         <section className="grid grid-cols-1 md:grid-cols-2 gap-8">

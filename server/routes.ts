@@ -600,6 +600,40 @@ export async function registerRoutes(
     }
   });
 
+  // Get telemetry data for a run (for charts)
+  app.get("/api/runs/:id/telemetry", async (req, res) => {
+    try {
+      const run = await storage.getRun(req.params.id);
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+      
+      const gpsTrack = run.gpsTrack as Array<{ lat: number; lng: number; timestamp?: number; altitude?: number; altitudeAccuracy?: number; heartRate?: number; cadence?: number }> | null;
+      const paceData = run.paceData as Array<{ km: number; pace: string; paceSeconds: number; cumulativeTime: number }> | null;
+      
+      if (!gpsTrack || gpsTrack.length < 5) {
+        return res.json({ telemetry: null, message: "Insufficient GPS data for telemetry" });
+      }
+      
+      // Get elevation profile from route if available
+      let elevationProfile: Array<{ distance: number; elevation: number; grade?: number }> | undefined;
+      if (run.routeId) {
+        const route = await storage.getRoute(run.routeId);
+        if (route?.elevation && typeof route.elevation === 'object' && 'profile' in route.elevation) {
+          elevationProfile = (route.elevation as any).profile;
+        }
+      }
+      
+      const { buildTelemetrySummary } = await import('./openai');
+      const telemetry = buildTelemetrySummary(gpsTrack, paceData || undefined, elevationProfile);
+      
+      res.json({ telemetry, distance: run.distance, duration: run.duration });
+    } catch (error) {
+      console.error("Telemetry fetch error:", error);
+      res.status(500).json({ error: "Failed to get run telemetry" });
+    }
+  });
+
   app.get("/api/users/:userId/runs", async (req, res) => {
     try {
       const runs = await storage.getUserRuns(req.params.userId);

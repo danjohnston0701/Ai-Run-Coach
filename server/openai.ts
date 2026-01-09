@@ -967,6 +967,7 @@ export interface TelemetryDataPoint {
   pace?: number;     // seconds per km at this point
   heartRate?: number;
   elevation?: number;
+  cadence?: number;  // steps per minute
   timestamp?: number; // seconds from start
 }
 
@@ -1006,11 +1007,16 @@ export interface TelemetrySummary {
     maxGrade: number;
     hillCount: number;
   };
+  cadenceStats?: {
+    min: number;
+    max: number;
+    avg: number;
+  };
 }
 
 // Build telemetry summary from raw run data
 export function buildTelemetrySummary(
-  gpsTrack: Array<{ lat: number; lng: number; timestamp?: number; pace?: number; heartRate?: number; elevation?: number }>,
+  gpsTrack: Array<{ lat: number; lng: number; timestamp?: number; pace?: number; heartRate?: number; elevation?: number; altitude?: number; altitudeAccuracy?: number; cadence?: number }>,
   kmSplits?: Array<{ km: number; pace: string; paceSeconds: number; cumulativeTime: number }>,
   elevationProfile?: Array<{ distance: number; elevation: number; grade?: number }>,
   targetSampleCount: number = 40
@@ -1018,6 +1024,57 @@ export function buildTelemetrySummary(
   if (!gpsTrack || gpsTrack.length < 5) {
     return null;
   }
+  
+  // Build elevation from GPS altitude if no route elevation profile exists
+  // Apply smoothing to reduce GPS altitude jitter
+  let gpsElevationProfile: Array<{ distance: number; elevation: number; grade?: number }> | undefined;
+  const altitudePoints = gpsTrack.filter(p => p.altitude !== undefined && (p.altitudeAccuracy === undefined || p.altitudeAccuracy < 30));
+  
+  if (!elevationProfile && altitudePoints.length >= 10) {
+    // Calculate cumulative distances for altitude points
+    let cumulativeDist = 0;
+    const rawElevations: Array<{ distance: number; elevation: number }> = [];
+    
+    for (let i = 0; i < gpsTrack.length; i++) {
+      if (i > 0) {
+        const prev = gpsTrack[i - 1];
+        const curr = gpsTrack[i];
+        cumulativeDist += haversineDistance(prev.lat, prev.lng, curr.lat, curr.lng);
+      }
+      
+      if (gpsTrack[i].altitude !== undefined && (gpsTrack[i].altitudeAccuracy === undefined || gpsTrack[i].altitudeAccuracy! < 30)) {
+        rawElevations.push({ distance: cumulativeDist, elevation: gpsTrack[i].altitude! });
+      }
+    }
+    
+    // Apply exponential smoothing to reduce jitter
+    if (rawElevations.length >= 5) {
+      const smoothed: typeof rawElevations = [];
+      const alpha = 0.3; // Smoothing factor (lower = more smoothing)
+      let smoothedElev = rawElevations[0].elevation;
+      
+      for (const point of rawElevations) {
+        smoothedElev = alpha * point.elevation + (1 - alpha) * smoothedElev;
+        smoothed.push({ distance: point.distance, elevation: Math.round(smoothedElev) });
+      }
+      
+      // Calculate grades
+      gpsElevationProfile = smoothed.map((point, i) => {
+        let grade = 0;
+        if (i > 0) {
+          const distDiff = (point.distance - smoothed[i - 1].distance) * 1000; // meters
+          const elevDiff = point.elevation - smoothed[i - 1].elevation;
+          if (distDiff > 5) { // Avoid division by tiny distances
+            grade = Math.round((elevDiff / distDiff) * 100 * 10) / 10; // Percent grade
+          }
+        }
+        return { ...point, grade };
+      });
+    }
+  }
+  
+  // Use GPS-derived elevation if route elevation profile is not available
+  const effectiveElevationProfile = elevationProfile || gpsElevationProfile;
 
   // Calculate distances and derive pace from GPS timestamps
   const pointsWithDistance: Array<{
@@ -1028,6 +1085,7 @@ export function buildTelemetrySummary(
     derivedPace?: number;  // Seconds per km derived from GPS
     heartRate?: number;
     elevation?: number;
+    cadence?: number;
   }> = [];
   
   // Pre-normalize all timestamps upfront to avoid baseline drift
@@ -1075,7 +1133,8 @@ export function buildTelemetrySummary(
       timestamp: normalizedTimestamps[i],
       derivedPace,
       heartRate: curr.heartRate,
-      elevation: curr.elevation
+      elevation: curr.elevation,
+      cadence: curr.cadence
     });
   }
 
@@ -1105,6 +1164,7 @@ export function buildTelemetrySummary(
       pace: smoothedPace,
       heartRate: point.heartRate,
       elevation: point.elevation,
+      cadence: point.cadence,
       timestamp: point.timestamp !== undefined ? Math.round(point.timestamp) : undefined
     });
   }
@@ -1119,6 +1179,7 @@ export function buildTelemetrySummary(
         pace: lastPoint.derivedPace,
         heartRate: lastPoint.heartRate,
         elevation: lastPoint.elevation,
+        cadence: lastPoint.cadence,
         timestamp: lastPoint.timestamp !== undefined ? Math.round(lastPoint.timestamp) : undefined
       });
     }
@@ -1234,21 +1295,21 @@ export function buildTelemetrySummary(
     }
   }
 
-  // Analyze elevation profile
+  // Analyze elevation profile (use GPS-derived if no route profile)
   let elevationStats: TelemetrySummary['elevationProfile'] | undefined;
-  if (elevationProfile && elevationProfile.length > 0) {
+  if (effectiveElevationProfile && effectiveElevationProfile.length > 0) {
     let totalGain = 0;
     let totalLoss = 0;
     let maxGrade = 0;
     let hillCount = 0;
     let inHill = false;
     
-    for (let i = 1; i < elevationProfile.length; i++) {
-      const elevChange = elevationProfile[i].elevation - elevationProfile[i - 1].elevation;
+    for (let i = 1; i < effectiveElevationProfile.length; i++) {
+      const elevChange = effectiveElevationProfile[i].elevation - effectiveElevationProfile[i - 1].elevation;
       if (elevChange > 0) totalGain += elevChange;
       if (elevChange < 0) totalLoss += Math.abs(elevChange);
       
-      const grade = elevationProfile[i].grade || 0;
+      const grade = effectiveElevationProfile[i].grade || 0;
       if (Math.abs(grade) > Math.abs(maxGrade)) maxGrade = grade;
       
       // Count hills (grade > 4%)
@@ -1275,6 +1336,36 @@ export function buildTelemetrySummary(
         description: `Route included ${hillCount} significant hill${hillCount > 1 ? 's' : ''} (max grade: ${Math.abs(maxGrade).toFixed(1)}%)`
       });
     }
+    
+    // Populate elevation in sampled points from effective elevation profile
+    sampledPoints.forEach(point => {
+      if (point.elevation === undefined) {
+        // Find nearest elevation point by distance
+        let nearestElev: number | undefined;
+        let minDistDiff = Infinity;
+        for (const ep of effectiveElevationProfile) {
+          const distDiff = Math.abs(ep.distance - point.distance);
+          if (distDiff < minDistDiff) {
+            minDistDiff = distDiff;
+            nearestElev = ep.elevation;
+          }
+        }
+        if (nearestElev !== undefined) {
+          point.elevation = nearestElev;
+        }
+      }
+    });
+  }
+
+  // Calculate cadence stats
+  let cadenceStats: TelemetrySummary['cadenceStats'] | undefined;
+  const cadenceValues = sampledPoints.filter(p => p.cadence !== undefined && p.cadence > 0).map(p => p.cadence!);
+  if (cadenceValues.length > 0) {
+    cadenceStats = {
+      min: Math.min(...cadenceValues),
+      max: Math.max(...cadenceValues),
+      avg: Math.round(cadenceValues.reduce((a, b) => a + b, 0) / cadenceValues.length)
+    };
   }
 
   return {
@@ -1282,7 +1373,8 @@ export function buildTelemetrySummary(
     trends,
     keyEvents,
     paceStats,
-    elevationProfile: elevationStats
+    elevationProfile: elevationStats,
+    cadenceStats
   };
 }
 
