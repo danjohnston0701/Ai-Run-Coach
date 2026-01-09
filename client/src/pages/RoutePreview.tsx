@@ -3,7 +3,7 @@ import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Play, Loader2, RefreshCw, Route, TrendingUp, TrendingDown, Mic, MicOff, Brain, Sparkles, MapPin, Users, X, Check, Copy, Share2 } from "lucide-react";
+import { ArrowLeft, Play, Loader2, RefreshCw, Route, TrendingUp, TrendingDown, Mic, MicOff, Brain, Sparkles, MapPin, Users, X, Check, Copy, Share2, Timer } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
@@ -51,6 +51,25 @@ export default function RoutePreview() {
   const lngParam = params.get("lng");
   const lat = parseFloat(latParam || "-36.1316");
   const lng = parseFloat(lngParam || "174.5755");
+  const targetTimeSeconds = parseInt(params.get("targetTime") || "0");
+  const targetTimeEnabled = params.get("targetTimeEnabled") === "on";
+  
+  const paceSecondsPerKm = targetTimeEnabled && distance > 0 ? targetTimeSeconds / distance : 0;
+  
+  const formatTargetTime = (seconds: number): string => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    if (hrs > 0) {
+      return `${hrs}h ${mins}m ${secs}s`;
+    }
+    return `${mins}m ${secs}s`;
+  };
+  
+  const calculateAdjustedTargetTime = (actualDistance: number): number => {
+    if (!targetTimeEnabled || paceSecondsPerKm === 0) return 0;
+    return Math.round(paceSecondsPerKm * actualDistance);
+  };
 
   const [routes, setRoutes] = useState<RouteCandidate[]>([]);
   const [selectedRoute, setSelectedRoute] = useState<RouteCandidate | null>(null);
@@ -306,6 +325,14 @@ export default function RoutePreview() {
                 </div>
               )}
             </div>
+            {targetTimeEnabled && (
+              <div className="flex items-center gap-1 mt-2 text-primary">
+                <Timer className="w-4 h-4" />
+                <span className="text-sm font-medium">
+                  Target: {formatTargetTime(calculateAdjustedTargetTime(route.actualDistance))}
+                </span>
+              </div>
+            )}
             {route.elevation && (route.elevation.maxInclineDegrees || route.elevation.maxDeclineDegrees) && (
               <div className="flex items-center gap-3 mt-2 text-xs">
                 {route.elevation.maxInclineDegrees !== undefined && route.elevation.maxInclineDegrees > 0 && (
