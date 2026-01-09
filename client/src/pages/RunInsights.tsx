@@ -33,9 +33,9 @@ import {
 } from "recharts";
 import type { RunData } from "./RunHistory";
 import { shareToSocialMedia, downloadShareImage } from "@/lib/shareImageGenerator";
-import { MapContainer, TileLayer, Polyline, useMap } from "react-leaflet";
-import "leaflet/dist/leaflet.css";
+import { MapContainer, TileLayer, Polyline, useMap, CircleMarker } from "react-leaflet";
 import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { Cloud, Sun, CloudRain, Wind, Droplets, ThermometerSun } from "lucide-react";
 
 // Fix Leaflet default marker icon issue
@@ -607,8 +607,8 @@ export default function RunInsights() {
     
     const segments: { positions: [number, number][]; color: string; pace: number }[] = [];
     
-    // Calculate pace for each segment (group points for smoother visualization)
-    const segmentSize = Math.max(2, Math.floor(gpsTrack.length / 20));
+    // Calculate pace for each segment (finer segmentation for better visualization)
+    const segmentSize = Math.max(2, Math.floor(gpsTrack.length / 50));
     
     // Calculate all segment paces first to find min/max
     const segmentPaces: number[] = [];
@@ -655,10 +655,30 @@ export default function RunInsights() {
       
       const pace = segmentPaces[segmentIdx] || 0;
       
-      // Color: green (fast) to yellow (medium) to red (slow)
+      // Garmin-style color: blue (slower) → green → yellow → orange → red (faster)
+      // normalizedPace: 0 = fastest, 1 = slowest
       const normalizedPace = pace > 0 ? (pace - minPace) / paceRange : 0.5;
-      const hue = 120 - (normalizedPace * 120); // 120=green, 60=yellow, 0=red
-      const color = `hsl(${Math.max(0, Math.min(120, hue))}, 80%, 50%)`;
+      
+      // Multi-stop gradient: faster (0) = red/orange, slower (1) = blue
+      // Color stops: 0=red, 0.25=orange, 0.5=yellow, 0.75=green, 1=blue
+      let color: string;
+      if (normalizedPace <= 0.25) {
+        // Red to orange (fastest)
+        const t = normalizedPace / 0.25;
+        color = `rgb(${Math.round(239 + (249 - 239) * t)}, ${Math.round(68 + (115 - 68) * t)}, ${Math.round(68 + (22 - 68) * t)})`;
+      } else if (normalizedPace <= 0.5) {
+        // Orange to yellow
+        const t = (normalizedPace - 0.25) / 0.25;
+        color = `rgb(${Math.round(249 + (234 - 249) * t)}, ${Math.round(115 + (179 - 115) * t)}, ${Math.round(22 + (8 - 22) * t)})`;
+      } else if (normalizedPace <= 0.75) {
+        // Yellow to green
+        const t = (normalizedPace - 0.5) / 0.25;
+        color = `rgb(${Math.round(234 + (34 - 234) * t)}, ${Math.round(179 + (197 - 179) * t)}, ${Math.round(8 + (94 - 8) * t)})`;
+      } else {
+        // Green to blue (slowest)
+        const t = (normalizedPace - 0.75) / 0.25;
+        color = `rgb(${Math.round(34 + (59 - 34) * t)}, ${Math.round(197 + (130 - 197) * t)}, ${Math.round(94 + (246 - 94) * t)})`;
+      }
       
       segments.push({
         positions: segmentPoints,
@@ -1327,37 +1347,21 @@ export default function RunInsights() {
           </Card>
         )}
 
-        {/* Pace Gradient Map Section */}
+        {/* Pace Gradient Map Section - Garmin Style */}
         {hasGpsTrack && paceGradientSegments.length > 0 && (
           <section className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-primary/10 rounded-lg">
-                  <Map className="w-5 h-5 text-primary" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-display font-bold uppercase tracking-wide">Route Pace</h2>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Speed variation across your run</p>
-                </div>
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <Map className="w-5 h-5 text-primary" />
               </div>
-              <div className="flex items-center gap-3 text-[10px]">
-                <div className="flex items-center gap-1">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: 'hsl(120, 80%, 50%)' }} />
-                  <span className="text-muted-foreground">Fast</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: 'hsl(60, 80%, 50%)' }} />
-                  <span className="text-muted-foreground">Medium</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: 'hsl(0, 80%, 50%)' }} />
-                  <span className="text-muted-foreground">Slow</span>
-                </div>
+              <div>
+                <h2 className="text-lg font-display font-bold uppercase tracking-wide">Route Pace</h2>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Speed variation across your run</p>
               </div>
             </div>
             
-            <Card className="bg-card/30 border-white/5 p-0 overflow-hidden">
-              <div className="h-64 w-full">
+            <Card className="bg-card/30 border-white/5 p-0 overflow-hidden relative">
+              <div className="h-72 w-full">
                 <MapContainer
                   center={[gpsTrack[0]?.lat || 0, gpsTrack[0]?.lng || 0]}
                   zoom={15}
@@ -1373,12 +1377,46 @@ export default function RunInsights() {
                       key={idx}
                       positions={segment.positions}
                       color={segment.color}
-                      weight={4}
-                      opacity={0.9}
+                      weight={5}
+                      opacity={0.95}
                     />
                   ))}
+                  {/* Start marker - green */}
+                  {gpsTrack.length > 0 && (
+                    <CircleMarker
+                      center={[gpsTrack[0].lat, gpsTrack[0].lng]}
+                      radius={10}
+                      fillColor="#22c55e"
+                      fillOpacity={1}
+                      color="#ffffff"
+                      weight={3}
+                    />
+                  )}
+                  {/* Finish marker - red checkered */}
+                  {gpsTrack.length > 1 && (
+                    <CircleMarker
+                      center={[gpsTrack[gpsTrack.length - 1].lat, gpsTrack[gpsTrack.length - 1].lng]}
+                      radius={10}
+                      fillColor="#ef4444"
+                      fillOpacity={1}
+                      color="#ffffff"
+                      weight={3}
+                    />
+                  )}
                   <FitBoundsToTrack positions={gpsTrack.map((p: any) => [p.lat, p.lng] as [number, number])} />
                 </MapContainer>
+              </div>
+              
+              {/* Garmin-style horizontal gradient legend */}
+              <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-sm rounded-full px-4 py-2 flex items-center gap-2 shadow-lg">
+                <span className="text-xs font-medium text-gray-600">Slower</span>
+                <div 
+                  className="w-32 h-3 rounded-full"
+                  style={{
+                    background: 'linear-gradient(to right, #3b82f6, #22c55e, #eab308, #f97316, #ef4444)'
+                  }}
+                />
+                <span className="text-xs font-medium text-gray-600">Faster</span>
               </div>
             </Card>
           </section>
