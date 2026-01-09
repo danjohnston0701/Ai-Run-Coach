@@ -962,6 +962,7 @@ export default function Home() {
         lat: lat.toString(),
         lng: lng.toString(),
         targetTime: targetSeconds.toString(),
+        targetTimeEnabled: preRunTimeEnabled ? "on" : "off",
         liveTracking: preRunLiveTracking ? "on" : "off",
       });
       setLocation(`/route-preview?${params.toString()}`);
