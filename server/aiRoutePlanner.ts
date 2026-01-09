@@ -68,6 +68,160 @@ async function findNearbyTrailAnchors(lat: number, lng: number, radiusKm: number
   }
 }
 
+interface AIWaypointSuggestion {
+  waypoints: Array<{ lat: number; lng: number; reason: string }>;
+  routeName: string;
+  description: string;
+}
+
+// Validate that coordinates are valid numbers within reasonable bounds
+function isValidCoordinate(lat: number, lng: number): boolean {
+  return (
+    typeof lat === 'number' && 
+    typeof lng === 'number' && 
+    !isNaN(lat) && 
+    !isNaN(lng) && 
+    lat >= -90 && lat <= 90 && 
+    lng >= -180 && lng <= 180
+  );
+}
+
+// Validate AI waypoints are within reasonable distance from start
+function validateAIWaypoints(
+  waypoints: Array<{ lat: number; lng: number; reason: string }>,
+  startLat: number,
+  startLng: number,
+  maxDistanceKm: number
+): Array<{ lat: number; lng: number; reason: string }> {
+  return waypoints.filter(wp => {
+    if (!isValidCoordinate(wp.lat, wp.lng)) {
+      console.log(`[Route Gen] Invalid AI waypoint coords: ${wp.lat}, ${wp.lng}`);
+      return false;
+    }
+    const dist = getDistanceKm({ lat: startLat, lng: startLng }, { lat: wp.lat, lng: wp.lng });
+    if (dist > maxDistanceKm) {
+      console.log(`[Route Gen] AI waypoint too far: ${dist.toFixed(2)}km from start`);
+      return false;
+    }
+    return true;
+  });
+}
+
+// Use OpenAI to intelligently design waypoints based on local geography
+async function designWaypointsWithAI(
+  startLat: number,
+  startLng: number,
+  targetDistance: number,
+  nearbyPlaces: NearbyPlace[]
+): Promise<AIWaypointSuggestion[]> {
+  if (!process.env.OPENAI_API_KEY) {
+    console.log('[Route Gen] No OpenAI API key, skipping AI waypoint design');
+    return [];
+  }
+
+  // Build context about the area
+  const placeDescriptions = nearbyPlaces.slice(0, 20).map(p => 
+    `- ${p.name} (${p.type}) at ${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`
+  ).join('\n');
+
+  const baseRadius = targetDistance / 4; // Approximate radius for loop
+
+  const prompt = `You are a running route designer. Design 3 diverse running loop routes.
+
+START LOCATION: ${startLat.toFixed(6)}, ${startLng.toFixed(6)}
+TARGET DISTANCE: ${targetDistance}km
+APPROXIMATE LOOP RADIUS: ${baseRadius.toFixed(2)}km (waypoints should be within ${(baseRadius * 2).toFixed(2)}km of start)
+
+NEARBY POINTS OF INTEREST:
+${placeDescriptions || 'No specific landmarks found'}
+
+GEOGRAPHIC CONTEXT:
+- Consider rivers, streams, and waterways as scenic route elements
+- Rural/farmland roads can offer quiet, scenic running with open views
+- Look for connecting paths between parks and natural areas
+- Residential streets can connect trail segments
+
+DESIGN RULES:
+1. Each route must be a LOOP that returns to the start point
+2. Prioritize trails, parks, river walks, and domains as waypoints when available
+3. Include scenic areas like rivers, farmland, and nature reserves for variety
+4. Create 3 DIFFERENT routes going in different directions (e.g., north loop, riverside loop, park circuit)
+5. Use 3-5 waypoints per route to create genuine loops (not out-and-back)
+6. Place waypoints at actual landmarks or logical turning points
+7. Spread waypoints around the start point to create a circuit shape
+8. ALL waypoint coordinates must be NUMERIC and within ${(baseRadius * 2).toFixed(2)}km of start
+
+Return ONLY valid JSON in this exact format:
+{
+  "routes": [
+    {
+      "routeName": "Descriptive Name",
+      "description": "Brief description of the route character",
+      "waypoints": [
+        {"lat": 0.000000, "lng": 0.000000, "reason": "Why this waypoint"}
+      ]
+    }
+  ]
+}`;
+
+  try {
+    console.log('[Route Gen] Asking OpenAI to design intelligent waypoints...');
+    
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You are a running route designer. Return only valid JSON, no markdown." },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.7,
+      max_tokens: 1500
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      console.log('[Route Gen] No response from OpenAI');
+      return [];
+    }
+
+    // Parse JSON response
+    const cleanedContent = content.replace(/```json\n?|\n?```/g, '').trim();
+    const parsed = JSON.parse(cleanedContent);
+
+    if (!parsed.routes || !Array.isArray(parsed.routes)) {
+      console.log('[Route Gen] Invalid OpenAI response format');
+      return [];
+    }
+
+    const maxWaypointDistance = targetDistance; // Waypoints shouldn't be further than target distance
+    
+    const suggestions: AIWaypointSuggestion[] = (parsed.routes as any[])
+      .map((route) => {
+        const rawWaypoints = (route.waypoints || []).map((wp: any) => ({
+          lat: parseFloat(wp.lat),
+          lng: parseFloat(wp.lng),
+          reason: wp.reason || ''
+        }));
+        
+        // Validate and filter waypoints
+        const validWaypoints = validateAIWaypoints(rawWaypoints, startLat, startLng, maxWaypointDistance);
+        
+        return {
+          routeName: route.routeName || 'AI Route',
+          description: route.description || '',
+          waypoints: validWaypoints
+        };
+      })
+      .filter(suggestion => suggestion.waypoints.length >= 2); // Need at least 2 valid waypoints
+
+    console.log(`[Route Gen] OpenAI designed ${suggestions.length} valid route suggestions`);
+    return suggestions;
+
+  } catch (error) {
+    console.error('[Route Gen] OpenAI waypoint design error:', error);
+    return [];
+  }
+}
+
 interface RouteRequest {
   startLat: number;
   startLng: number;
@@ -1012,14 +1166,39 @@ export async function generateAIRoutes(
   // Fetch nearby trail anchors (parks, walking paths, natural features)
   const nearbyPlaces = await findNearbyTrailAnchors(startLat, startLng, targetDistance);
   
-  // Generate all route templates (geometric + trail-based)
+  // Use OpenAI to intelligently design routes based on local geography
+  const aiSuggestions = await designWaypointsWithAI(startLat, startLng, targetDistance, nearbyPlaces);
+  
+  // Store AI reasoning for later attachment to RouteCandidate
+  const aiReasoningMap = new Map<string, string>();
+  
+  // Convert AI suggestions to templates (highest priority)
+  const aiTemplates: Array<{ name: string; waypoints: Array<{ lat: number; lng: number }>; optimize: boolean }> = 
+    aiSuggestions.map(suggestion => {
+      const templateName = `AI: ${suggestion.routeName}`;
+      const reasoning = [
+        suggestion.description,
+        ...suggestion.waypoints.map(wp => wp.reason).filter(Boolean)
+      ].join('. ');
+      aiReasoningMap.set(templateName, reasoning);
+      
+      return {
+        name: templateName,
+        waypoints: suggestion.waypoints.map(wp => ({ lat: wp.lat, lng: wp.lng })),
+        optimize: false
+      };
+    });
+  
+  // Generate geometric route templates as fallback
   let templates = generateRouteTemplates(startLat, startLng, targetDistance);
   
   // Add trail-based templates that use actual parks/trails as waypoints
   const trailTemplates = generateTrailBasedTemplates(startLat, startLng, targetDistance, nearbyPlaces);
-  templates = [...trailTemplates, ...templates]; // Prioritize trail templates
   
-  console.log(`[Route Gen] Created ${templates.length} unique templates (${trailTemplates.length} trail-based)`);
+  // Prioritize: AI-designed > trail-based > geometric
+  templates = [...aiTemplates, ...trailTemplates, ...templates];
+  
+  console.log(`[Route Gen] Created ${templates.length} unique templates (${aiTemplates.length} AI-designed, ${trailTemplates.length} trail-based)`);
   
   // Sort templates by user preferences if available
   if (templatePreferences && templatePreferences.length > 0) {
@@ -1142,7 +1321,7 @@ export async function generateAIRoutes(
         hasMajorRoads,
         uniquenessScore: uniqueRatio,
         deadEndCount: 0,
-        aiReasoning: template.name,
+        aiReasoning: aiReasoningMap.get(template.name) || template.name,
       });
       
       acceptedPolylines.push(result.polyline);
@@ -1204,7 +1383,7 @@ export async function generateAIRoutes(
           hasMajorRoads,
           uniquenessScore: 1,
           deadEndCount: 0,
-          aiReasoning: template.name,
+          aiReasoning: aiReasoningMap.get(template.name) || template.name,
         });
         
         acceptedPolylines.push(result.polyline);
