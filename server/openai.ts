@@ -962,6 +962,13 @@ Calculate their ideal cadence range, assess if they're overstriding or understri
 }
 
 // Run Analysis Types
+export interface KmSplit {
+  km: number;
+  pace: string;
+  paceSeconds: number;
+  cumulativeTime: number;
+}
+
 export interface RunAnalysisRequest {
   run: {
     id: string;
@@ -973,14 +980,17 @@ export interface RunAnalysisRequest {
     calories?: number;
     cadence?: number;
     difficulty?: string;
-    kmSplits?: number[];
+    kmSplits?: KmSplit[];
     elevationGain?: number;
     elevationLoss?: number;
     weatherData?: {
       temperature?: number;
+      feelsLike?: number;
       humidity?: number;
       windSpeed?: number;
       condition?: string;
+      uvIndex?: number;
+      precipitationProbability?: number;
     };
   };
   user: {
@@ -1011,10 +1021,22 @@ export interface RunAnalysisResponse {
 export async function generateComprehensiveRunAnalysis(request: RunAnalysisRequest): Promise<RunAnalysisResponse> {
   const { run, user, previousRuns = [] } = request;
   
-  // Format km splits for analysis
-  const splitsInfo = run.kmSplits && run.kmSplits.length > 0
-    ? `Km splits (seconds): ${run.kmSplits.join(', ')}`
-    : 'No km split data available';
+  // Format km splits for analysis - now properly parsing the object structure
+  let splitsInfo = 'No km split data available';
+  if (run.kmSplits && run.kmSplits.length > 0) {
+    const splitsTable = run.kmSplits.map(split => 
+      `  Km ${split.km}: ${split.pace} (${split.paceSeconds}s)`
+    ).join('\n');
+    
+    // Calculate pacing analysis
+    const paceTimes = run.kmSplits.map(s => s.paceSeconds);
+    const fastestKm = Math.min(...paceTimes);
+    const slowestKm = Math.max(...paceTimes);
+    const avgSplitTime = paceTimes.reduce((a, b) => a + b, 0) / paceTimes.length;
+    const variation = ((slowestKm - fastestKm) / avgSplitTime * 100).toFixed(1);
+    
+    splitsInfo = `KM SPLITS:\n${splitsTable}\n  Fastest: ${Math.floor(fastestKm / 60)}:${(fastestKm % 60).toString().padStart(2, '0')}/km\n  Slowest: ${Math.floor(slowestKm / 60)}:${(slowestKm % 60).toString().padStart(2, '0')}/km\n  Pace variation: ${variation}%`;
+  }
   
   // Format previous runs for comparison
   const previousRunsInfo = previousRuns.length > 0
@@ -1068,10 +1090,14 @@ ${run.elevationLoss ? `- Elevation loss: ${run.elevationLoss}m` : ''}
 ${splitsInfo}
 
 ${run.weatherData ? `WEATHER CONDITIONS:
-- Temperature: ${run.weatherData.temperature}°C
-- Humidity: ${run.weatherData.humidity}%
-- Wind: ${run.weatherData.windSpeed} km/h
-- Conditions: ${run.weatherData.condition}` : ''}
+- Temperature: ${run.weatherData.temperature !== undefined ? `${run.weatherData.temperature}°C` : 'Unknown'}
+- Feels like: ${run.weatherData.feelsLike !== undefined ? `${run.weatherData.feelsLike}°C` : 'Unknown'}
+- Humidity: ${run.weatherData.humidity !== undefined ? `${run.weatherData.humidity}%` : 'Unknown'}
+- Wind: ${run.weatherData.windSpeed !== undefined ? `${run.weatherData.windSpeed} km/h` : 'Unknown'}
+- UV Index: ${run.weatherData.uvIndex !== undefined ? run.weatherData.uvIndex : 'Unknown'}
+- Precipitation chance: ${run.weatherData.precipitationProbability !== undefined ? `${run.weatherData.precipitationProbability}%` : 'Unknown'}
+- Conditions: ${run.weatherData.condition || 'Unknown'}
+(Consider how these conditions may have impacted the runner's performance)` : ''}
 
 ${previousRunsInfo}
 

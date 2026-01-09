@@ -561,7 +561,7 @@ export async function registerRoutes(
           calories: run.calories || undefined,
           cadence: run.cadence || undefined,
           difficulty: run.difficulty || undefined,
-          kmSplits: run.paceData as number[] || undefined,
+          kmSplits: run.paceData as any || undefined,
           elevationGain,
           elevationLoss,
           weatherData: run.weatherData as any || undefined
