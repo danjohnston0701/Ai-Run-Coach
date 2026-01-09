@@ -323,6 +323,7 @@ export default function RunSession() {
   
   const [currentPosition, setCurrentPosition] = useState<Position | null>(null);
   const [gpsStatus, setGpsStatus] = useState<"acquiring" | "active" | "error">("acquiring");
+  const [gpsRestartKey, setGpsRestartKey] = useState(0); // Increment to force GPS restart
   const [routeData, setRouteData] = useState<RouteData | null>(null);
   const [routePoints, setRoutePoints] = useState<Array<{ lat: number; lng: number }>>([]);
   const [currentWaypointIndex, setCurrentWaypointIndex] = useState(0);
@@ -452,6 +453,9 @@ export default function RunSession() {
   const navSpeakQueueRef = useRef<string[]>([]);
   const isNavSpeakingRef = useRef<boolean>(false);
   const lastMovementTimeRef = useRef<number>(Date.now());
+  const lastGpsFixTimeRef = useRef<number>(Date.now());
+  const gpsTimeoutAttempts = useRef<number>(0); // For handleError timeout retries
+  const watchdogRecoveryAttempts = useRef<number>(0); // For watchdog stall recovery
   const lastNavInstructionRef = useRef<string>("");
   const runStoppedRef = useRef<boolean>(false);
   const finishAnnouncedRef = useRef<boolean>(false);
@@ -982,20 +986,32 @@ export default function RunSession() {
       lastAcceptedPosRef.current = newPos;
       positionsRef.current.push(newPos);
       lastMovementTimeRef.current = Date.now();
+      lastGpsFixTimeRef.current = Date.now();
+      gpsTimeoutAttempts.current = 0; // Reset timeout counter on successful fix
+      watchdogRecoveryAttempts.current = 0; // Reset watchdog counter on successful fix
     };
 
     const handleError = (error: GeolocationPositionError) => {
       console.error("[GPS] Error:", error.code, error.message);
-      setGpsStatus("error");
+      
       switch (error.code) {
         case error.PERMISSION_DENIED:
+          setGpsStatus("error");
           setMessage("Please enable location access");
           break;
         case error.POSITION_UNAVAILABLE:
-          setMessage("GPS signal unavailable");
+          // Don't immediately set to error - may be temporary
+          // watchPosition will automatically retry
+          console.log("[GPS] Position unavailable, waiting for retry...");
+          setMessage("GPS signal weak - reconnecting...");
           break;
         case error.TIMEOUT:
-          setMessage("GPS timeout - trying again...");
+          // Timeouts are common on mobile - watchPosition will automatically retry
+          gpsTimeoutAttempts.current++;
+          console.log(`[GPS] Timeout ${gpsTimeoutAttempts.current} - watchPosition will retry`);
+          setMessage("GPS signal weak - reconnecting...");
+          // Note: We never set gpsStatus to "error" for timeouts
+          // The watchdog will handle severe stalls via restart
           break;
       }
     };
@@ -1017,6 +1033,52 @@ export default function RunSession() {
         navigator.geolocation.clearWatch(watchIdRef.current);
       }
     };
+  }, [gpsStatus, gpsRestartKey]); // Include gpsRestartKey to allow forced restarts
+
+  // GPS Watchdog: Monitor for stale GPS and attempt recovery
+  // Track last restart time separately to avoid false positives
+  const lastRecoveryAttemptTimeRef = useRef<number>(0);
+  
+  useEffect(() => {
+    // Run watchdog at all times to allow recovery during both acquisition and active run
+    // Only skip if gpsStatus is "error" due to permission denied (user must fix manually)
+    
+    const watchdogInterval = setInterval(() => {
+      const timeSinceLastFix = Date.now() - lastGpsFixTimeRef.current;
+      const timeSinceLastRecovery = Date.now() - lastRecoveryAttemptTimeRef.current;
+      
+      // If no GPS fix for 30 seconds, warn user and potentially recover
+      if (timeSinceLastFix > 30000 && gpsStatus !== "error") {
+        console.warn(`[GPS Watchdog] No fix for ${Math.round(timeSinceLastFix / 1000)}s - GPS may be stale`);
+        
+        if (timeSinceLastFix > 60000 && timeSinceLastRecovery > 45000) {
+          // Severe GPS stall - attempt recovery by restarting the watchPosition
+          // Only attempt if we haven't tried in the last 45 seconds
+          if (watchdogRecoveryAttempts.current < 5) {
+            watchdogRecoveryAttempts.current++;
+            lastRecoveryAttemptTimeRef.current = Date.now();
+            console.log(`[GPS Watchdog] Attempting recovery via restart (attempt ${watchdogRecoveryAttempts.current}/5)`);
+            setMessage(`Reconnecting GPS... (attempt ${watchdogRecoveryAttempts.current})`);
+            // Increment restart key to trigger the main GPS useEffect to restart
+            setGpsRestartKey(prev => prev + 1);
+          } else {
+            setMessage("GPS signal lost - try moving to open area");
+          }
+        } else {
+          setMessage("GPS signal weak - keep phone visible");
+        }
+      } else if (timeSinceLastFix < 10000 && gpsStatus === "active") {
+        // GPS is working (we got a real fix in last 10 seconds)
+        // Clear warning and reset recovery counter
+        if (watchdogRecoveryAttempts.current > 0) {
+          console.log("[GPS Watchdog] GPS recovered successfully after restart");
+          watchdogRecoveryAttempts.current = 0;
+        }
+        setMessage("");
+      }
+    }, 10000); // Check every 10 seconds
+    
+    return () => clearInterval(watchdogInterval);
   }, [gpsStatus]);
 
   useEffect(() => {
