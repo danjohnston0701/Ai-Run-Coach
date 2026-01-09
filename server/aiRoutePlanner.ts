@@ -225,6 +225,47 @@ function isGoodLoop(polyline: string, maxBacktrackRatio: number = 0.25): boolean
   return backtrackRatio <= maxBacktrackRatio;
 }
 
+// Calculate angular spread of route from start point - returns degrees covered (0-360)
+// A true circuit should cover at least 240 degrees around the start point
+function calculateAngularSpread(polyline: string, startLat: number, startLng: number): number {
+  const points = decodePolyline(polyline);
+  if (points.length < 5) return 0;
+  
+  // Calculate bearing from start to each point
+  const bearings: number[] = [];
+  for (const point of points) {
+    const dLat = point.lat - startLat;
+    const dLng = point.lng - startLng;
+    if (Math.abs(dLat) < 0.0001 && Math.abs(dLng) < 0.0001) continue; // Skip points at start
+    
+    const bearing = Math.atan2(dLng, dLat) * 180 / Math.PI;
+    const normalizedBearing = ((bearing % 360) + 360) % 360;
+    bearings.push(normalizedBearing);
+  }
+  
+  if (bearings.length < 3) return 0;
+  
+  // Find the angular span by looking at unique 30-degree sectors covered
+  const sectors = new Set<number>();
+  for (const bearing of bearings) {
+    sectors.add(Math.floor(bearing / 30));
+  }
+  
+  // Each sector is 30 degrees, so multiply by 30
+  return sectors.size * 30;
+}
+
+// Check if route is a genuine circuit (good angular coverage, low backtracking)
+function isGenuineCircuit(polyline: string, startLat: number, startLng: number): { valid: boolean; backtrackRatio: number; angularSpread: number } {
+  const backtrackRatio = calculateBacktrackRatio(polyline);
+  const angularSpread = calculateAngularSpread(polyline, startLat, startLng);
+  
+  // Require at least 180 degrees coverage and max 35% backtracking for a valid circuit
+  const valid = angularSpread >= 180 && backtrackRatio <= 0.35;
+  
+  return { valid, backtrackRatio, angularSpread };
+}
+
 // Check for major roads
 const MAJOR_ROAD_KEYWORDS = ['highway', 'hwy', 'motorway', 'expressway', 'freeway', 'interstate', 'turnpike'];
 
@@ -836,7 +877,7 @@ export async function generateAIRoutes(
   }
   
   // Cache calibrated routes to avoid re-fetching when relaxing thresholds
-  const calibratedCache: Map<string, { waypoints: Array<{lat: number; lng: number}>, result: DirectionsResult, backtrackRatio: number }> = new Map();
+  const calibratedCache: Map<string, { waypoints: Array<{lat: number; lng: number}>, result: DirectionsResult, backtrackRatio: number, angularSpread: number }> = new Map();
   
   // First pass: calibrate all templates
   for (const template of templates) {
@@ -850,20 +891,22 @@ export async function generateAIRoutes(
     
     if (calibrated) {
       const backtrackRatio = calculateBacktrackRatio(calibrated.result.polyline);
+      const angularSpread = calculateAngularSpread(calibrated.result.polyline, startLat, startLng);
       calibratedCache.set(template.name, { 
         waypoints: calibrated.waypoints, 
         result: calibrated.result,
-        backtrackRatio
+        backtrackRatio,
+        angularSpread
       });
-      console.log(`[Route Gen] Calibrated ${template.name}: ${calibrated.result.distance.toFixed(2)}km, backtrack ${(backtrackRatio*100).toFixed(0)}%`);
+      console.log(`[Route Gen] Calibrated ${template.name}: ${calibrated.result.distance.toFixed(2)}km, backtrack ${(backtrackRatio*100).toFixed(0)}%, spread ${angularSpread}°`);
     } else {
       console.log(`[Route Gen] Template ${template.name} failed calibration`);
     }
   }
   
   // Progressive relaxation: try increasingly lenient thresholds
-  // Tightened thresholds to avoid back-and-forth routes - max 40% backtracking
-  const backtrackThresholds = [0.15, 0.25, 0.35, 0.40];
+  // Strict thresholds to enforce genuine circuit loops - max 25% backtracking
+  const backtrackThresholds = [0.10, 0.15, 0.20, 0.25];
   
   const candidates: RouteCandidate[] = [];
   const acceptedPolylines: string[] = [];
@@ -884,6 +927,12 @@ export async function generateAIRoutes(
       
       // Check backtrack threshold for this pass
       if (cached.backtrackRatio > maxBacktrack) continue;
+      
+      // Require minimum angular spread for genuine circuit (at least 150 degrees)
+      if (cached.angularSpread < 150) {
+        console.log(`[Route Gen] Rejected ${template.name}: angular spread ${cached.angularSpread}° too narrow`);
+        continue;
+      }
       
       const { waypoints, result } = cached;
       
