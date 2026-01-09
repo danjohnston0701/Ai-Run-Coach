@@ -130,14 +130,32 @@ export default function GoogleMapsRoute({
         
         const decodedPath = window.google.maps.geometry.encoding.decodePath(polyline);
         
-        new window.google.maps.Polyline({
-          path: decodedPath,
-          geodesic: true,
-          strokeColor: "#a855f7",
-          strokeOpacity: 0.9,
-          strokeWeight: 5,
-          map,
-        });
+        // Create gradient segments from blue (start) to green (finish)
+        const totalPoints = decodedPath.length;
+        const numSegments = Math.min(totalPoints - 1, 100); // Limit segments for performance
+        const step = Math.max(1, Math.floor((totalPoints - 1) / numSegments));
+        
+        for (let i = 0; i < totalPoints - 1; i += step) {
+          const endIdx = Math.min(i + step, totalPoints - 1);
+          const progress = i / (totalPoints - 1);
+          
+          // Interpolate from blue (#3b82f6) to green (#22c55e)
+          const r = Math.round(59 + progress * (34 - 59));
+          const g = Math.round(130 + progress * (197 - 130));
+          const b = Math.round(246 + progress * (94 - 246));
+          const color = `rgb(${r},${g},${b})`;
+          
+          const segmentPath = decodedPath.slice(i, endIdx + 1);
+          
+          new window.google.maps.Polyline({
+            path: segmentPath,
+            geodesic: true,
+            strokeColor: color,
+            strokeOpacity: 0.9,
+            strokeWeight: 5,
+            map,
+          });
+        }
         
         const bounds = new window.google.maps.LatLngBounds();
         decodedPath.forEach((point: any) => bounds.extend(point));
