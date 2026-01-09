@@ -485,6 +485,21 @@ export default function RoutePreview() {
           <DifficultySection title="Moderate Routes" routeList={moderateRoutes} color="text-yellow-400" />
           <DifficultySection title="Hard Routes" routeList={hardRoutes} color="text-red-400" />
 
+          {/* Route color legend */}
+          <div className="flex items-center justify-center gap-4 py-3 px-4 bg-card/50 rounded-lg border border-white/10">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded-full bg-[#3b82f6]" />
+              <span className="text-sm text-muted-foreground">Start</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-12 h-1 rounded-full bg-gradient-to-r from-[#3b82f6] to-[#22c55e]" />
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded-full bg-[#22c55e]" />
+              <span className="text-sm text-muted-foreground">Finish</span>
+            </div>
+          </div>
+
           <div className="pt-4">
             <Button 
               variant="outline" 
