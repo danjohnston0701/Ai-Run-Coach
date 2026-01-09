@@ -47,7 +47,7 @@ The application follows a monorepo structure with `/client` for the frontend, `/
 
 ### User Interface & Features
 - **Pages**: Landing Page, Profile Setup (onboarding), Home (run configuration), Run Session (live tracking), Run History, Run Insights (detailed post-run analysis), Authentication (Login, Pre-registration), Pricing.
-- **Run Insights**: Displays real-time data, pace gradient maps, km splits, conditional heart rate, and elevation profiles.
+- **Run Insights**: Displays real-time data, pace gradient maps, km splits, conditional heart rate, and elevation profiles. Features Garmin-style expandable performance charts (pace, heart rate, elevation, cadence) with time/distance toggle and brand color styling.
 - **AI Run Analysis**: Post-run feature that generates comprehensive AI coaching insights including highlights, struggles, personal bests, demographic comparison, and actionable tips. Analysis is cached in the database for instant retrieval on return visits.
 - **Social Sharing**: Generates branded images for Facebook/Instagram sharing with run summaries (map, distance, time, pace, difficulty, branding) using HTML Canvas.
 
