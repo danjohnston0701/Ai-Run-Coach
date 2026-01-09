@@ -540,16 +540,26 @@ export async function registerRoutes(
       // Get the route for elevation data
       let elevationGain: number | undefined;
       let elevationLoss: number | undefined;
+      let elevationProfile: any[] | undefined;
       if (run.routeId) {
         const route = await storage.getRoute(run.routeId);
         if (route) {
           elevationGain = route.elevationGain || undefined;
           elevationLoss = route.elevationLoss || undefined;
+          elevationProfile = route.elevationProfile as any[] || undefined;
         }
       }
       
+      // Build telemetry summary from GPS track and other data
+      const { generateComprehensiveRunAnalysis, buildTelemetrySummary } = await import('./openai');
+      const telemetrySummary = buildTelemetrySummary(
+        run.gpsTrack as any[] || [],
+        run.paceData as any[] || undefined,
+        elevationProfile,
+        40 // Target 40 data points for cost efficiency
+      );
+      
       // Prepare analysis request
-      const { generateComprehensiveRunAnalysis } = await import('./openai');
       const analysis = await generateComprehensiveRunAnalysis({
         run: {
           id: runId,
@@ -564,7 +574,8 @@ export async function registerRoutes(
           kmSplits: run.paceData as any || undefined,
           elevationGain,
           elevationLoss,
-          weatherData: run.weatherData as any || undefined
+          weatherData: run.weatherData as any || undefined,
+          telemetry: telemetrySummary || undefined
         },
         user: {
           age: userAge,

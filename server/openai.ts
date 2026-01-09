@@ -961,6 +961,343 @@ Calculate their ideal cadence range, assess if they're overstriding or understri
   }
 }
 
+// Telemetry Summary Types for AI Analysis
+export interface TelemetryDataPoint {
+  distance: number;  // km from start
+  pace?: number;     // seconds per km at this point
+  heartRate?: number;
+  elevation?: number;
+  timestamp?: number; // seconds from start
+}
+
+export interface TrendMetrics {
+  paceTrend: 'speeding_up' | 'slowing_down' | 'steady' | 'variable';
+  paceChangePercent: number;  // positive = slowed down, negative = sped up
+  hrDrift?: number;           // HR increase over run (bpm)
+  hrRecoveryPoints?: number;  // times HR dropped significantly
+  elevationCorrelation?: 'strong' | 'moderate' | 'weak' | 'none';  // how much elevation affects pace
+}
+
+export interface KeyEvent {
+  type: 'hill_climb' | 'hill_descent' | 'pace_spike' | 'pace_drop' | 'hr_spike' | 'strong_finish' | 'fade';
+  distanceKm: number;
+  description: string;
+}
+
+export interface TelemetrySummary {
+  dataPoints: TelemetryDataPoint[];  // Downsampled to ~30-50 points
+  trends: TrendMetrics;
+  keyEvents: KeyEvent[];
+  paceStats: {
+    min: number;
+    max: number;
+    avg: number;
+    stdDev: number;
+  };
+  hrStats?: {
+    min: number;
+    max: number;
+    avg: number;
+    zones?: { zone: string; percent: number }[];
+  };
+  elevationProfile?: {
+    totalGain: number;
+    totalLoss: number;
+    maxGrade: number;
+    hillCount: number;
+  };
+}
+
+// Build telemetry summary from raw run data
+export function buildTelemetrySummary(
+  gpsTrack: Array<{ lat: number; lng: number; timestamp?: number; pace?: number; heartRate?: number; elevation?: number }>,
+  kmSplits?: Array<{ km: number; pace: string; paceSeconds: number; cumulativeTime: number }>,
+  elevationProfile?: Array<{ distance: number; elevation: number; grade?: number }>,
+  targetSampleCount: number = 40
+): TelemetrySummary | null {
+  if (!gpsTrack || gpsTrack.length < 5) {
+    return null;
+  }
+
+  // Calculate distances and derive pace from GPS timestamps
+  const pointsWithDistance: Array<{
+    lat: number;
+    lng: number;
+    distance: number;
+    timestamp?: number;
+    derivedPace?: number;  // Seconds per km derived from GPS
+    heartRate?: number;
+    elevation?: number;
+  }> = [];
+  
+  // Pre-normalize all timestamps upfront to avoid baseline drift
+  const firstTs = gpsTrack.find(p => p.timestamp !== undefined)?.timestamp;
+  const normalizedTimestamps: (number | undefined)[] = gpsTrack.map(p => {
+    if (p.timestamp === undefined || firstTs === undefined) return undefined;
+    // Detect milliseconds (timestamps > 1e12 are likely ms since epoch)
+    const rawTs = p.timestamp > 1e12 ? p.timestamp / 1000 : p.timestamp;
+    const rawFirst = firstTs > 1e12 ? firstTs / 1000 : firstTs;
+    return rawTs - rawFirst;
+  });
+  
+  let totalDistance = 0;
+  for (let i = 0; i < gpsTrack.length; i++) {
+    const curr = gpsTrack[i];
+    let derivedPace: number | undefined;
+    
+    if (i > 0) {
+      const prev = gpsTrack[i - 1];
+      const segmentDist = haversineDistance(prev.lat, prev.lng, curr.lat, curr.lng);
+      totalDistance += segmentDist;
+      
+      // Calculate pace from GPS timestamps if available
+      const prevTs = normalizedTimestamps[i - 1];
+      const currTs = normalizedTimestamps[i];
+      if (prevTs !== undefined && currTs !== undefined) {
+        const timeDiff = currTs - prevTs;
+        
+        // Only calculate pace for reasonable segments (avoid GPS jitter)
+        // Segment should be > 2m (0.002 km) for 1Hz GPS samples (~3-5m between points)
+        // and have reasonable velocity (0.5 - 8 m/s for running = 2:05 - 33:20/km pace)
+        if (segmentDist > 0.002 && timeDiff > 0) {  // > 2m
+          const velocity = (segmentDist * 1000) / timeDiff;  // m/s
+          if (velocity >= 0.5 && velocity <= 8) {  // Valid running pace range
+            derivedPace = timeDiff / segmentDist;  // seconds per km
+          }
+        }
+      }
+    }
+    
+    pointsWithDistance.push({
+      lat: curr.lat,
+      lng: curr.lng,
+      distance: totalDistance,
+      timestamp: normalizedTimestamps[i],
+      derivedPace,
+      heartRate: curr.heartRate,
+      elevation: curr.elevation
+    });
+  }
+
+  // Downsample to target count with smoothed pace (rolling median of 3)
+  const step = Math.max(1, Math.floor(pointsWithDistance.length / targetSampleCount));
+  const sampledPoints: TelemetryDataPoint[] = [];
+  
+  for (let i = 0; i < pointsWithDistance.length; i += step) {
+    const point = pointsWithDistance[i];
+    
+    // Apply rolling median for pace smoothing (look at adjacent points)
+    let smoothedPace: number | undefined;
+    const paceWindow: number[] = [];
+    for (let j = Math.max(0, i - 1); j <= Math.min(pointsWithDistance.length - 1, i + 1); j++) {
+      const pace = pointsWithDistance[j].derivedPace;
+      if (pace !== undefined) {
+        paceWindow.push(pace);
+      }
+    }
+    if (paceWindow.length > 0) {
+      paceWindow.sort((a, b) => a - b);
+      smoothedPace = paceWindow[Math.floor(paceWindow.length / 2)];  // Median
+    }
+    
+    sampledPoints.push({
+      distance: Math.round(point.distance * 100) / 100,
+      pace: smoothedPace,
+      heartRate: point.heartRate,
+      elevation: point.elevation,
+      timestamp: point.timestamp !== undefined ? Math.round(point.timestamp) : undefined
+    });
+  }
+  
+  // Ensure we include the last point
+  if (sampledPoints.length > 0 && pointsWithDistance.length > 0) {
+    const lastPoint = pointsWithDistance[pointsWithDistance.length - 1];
+    const lastSampled = sampledPoints[sampledPoints.length - 1];
+    if (Math.abs(lastSampled.distance - lastPoint.distance) > 0.01) {
+      sampledPoints.push({
+        distance: Math.round(lastPoint.distance * 100) / 100,
+        pace: lastPoint.derivedPace,
+        heartRate: lastPoint.heartRate,
+        elevation: lastPoint.elevation,
+        timestamp: lastPoint.timestamp !== undefined ? Math.round(lastPoint.timestamp) : undefined
+      });
+    }
+  }
+  
+  // Fallback: if GPS-derived pace is sparse, interpolate from km splits
+  const paceCount = sampledPoints.filter(p => p.pace !== undefined).length;
+  if (paceCount < sampledPoints.length * 0.3 && kmSplits && kmSplits.length > 0) {
+    // Map km split paces to sampled points based on distance
+    sampledPoints.forEach(point => {
+      if (point.pace === undefined) {
+        const km = Math.floor(point.distance);
+        const split = kmSplits.find(s => s.km === km + 1) || kmSplits[kmSplits.length - 1];
+        if (split) {
+          point.pace = split.paceSeconds;
+        }
+      }
+    });
+  }
+
+  // Calculate pace stats - prefer km splits but fall back to GPS-derived pace
+  let paceStats = { min: 0, max: 0, avg: 0, stdDev: 0 };
+  if (kmSplits && kmSplits.length > 0) {
+    const paceTimes = kmSplits.map(s => s.paceSeconds);
+    paceStats.min = Math.min(...paceTimes);
+    paceStats.max = Math.max(...paceTimes);
+    paceStats.avg = paceTimes.reduce((a, b) => a + b, 0) / paceTimes.length;
+    const variance = paceTimes.reduce((sum, p) => sum + Math.pow(p - paceStats.avg, 2), 0) / paceTimes.length;
+    paceStats.stdDev = Math.sqrt(variance);
+  } else {
+    // Fallback: calculate stats from GPS-derived pace in sampled points
+    const gpsePaceTimes = sampledPoints.filter(p => p.pace !== undefined && p.pace > 0).map(p => p.pace!);
+    if (gpsePaceTimes.length > 0) {
+      paceStats.min = Math.min(...gpsePaceTimes);
+      paceStats.max = Math.max(...gpsePaceTimes);
+      paceStats.avg = gpsePaceTimes.reduce((a, b) => a + b, 0) / gpsePaceTimes.length;
+      const variance = gpsePaceTimes.reduce((sum, p) => sum + Math.pow(p - paceStats.avg, 2), 0) / gpsePaceTimes.length;
+      paceStats.stdDev = Math.sqrt(variance);
+    }
+  }
+
+  // Analyze pace trend
+  let trends: TrendMetrics = {
+    paceTrend: 'steady',
+    paceChangePercent: 0
+  };
+  
+  if (kmSplits && kmSplits.length >= 2) {
+    const firstHalf = kmSplits.slice(0, Math.floor(kmSplits.length / 2));
+    const secondHalf = kmSplits.slice(Math.floor(kmSplits.length / 2));
+    
+    const firstHalfAvg = firstHalf.reduce((a, b) => a + b.paceSeconds, 0) / firstHalf.length;
+    const secondHalfAvg = secondHalf.reduce((a, b) => a + b.paceSeconds, 0) / secondHalf.length;
+    
+    const changePercent = ((secondHalfAvg - firstHalfAvg) / firstHalfAvg) * 100;
+    trends.paceChangePercent = Math.round(changePercent * 10) / 10;
+    
+    if (changePercent > 5) {
+      trends.paceTrend = 'slowing_down';
+    } else if (changePercent < -5) {
+      trends.paceTrend = 'speeding_up';
+    } else if (paceStats.stdDev / paceStats.avg > 0.15) {
+      trends.paceTrend = 'variable';
+    } else {
+      trends.paceTrend = 'steady';
+    }
+  }
+
+  // Identify key events from km splits
+  const keyEvents: KeyEvent[] = [];
+  
+  if (kmSplits && kmSplits.length >= 3) {
+    // Find significant pace changes
+    for (let i = 1; i < kmSplits.length; i++) {
+      const prev = kmSplits[i - 1].paceSeconds;
+      const curr = kmSplits[i].paceSeconds;
+      const changePercent = ((curr - prev) / prev) * 100;
+      
+      if (changePercent > 15) {
+        keyEvents.push({
+          type: 'pace_drop',
+          distanceKm: kmSplits[i].km,
+          description: `Pace slowed ${Math.round(changePercent)}% at km ${kmSplits[i].km}`
+        });
+      } else if (changePercent < -15) {
+        keyEvents.push({
+          type: 'pace_spike',
+          distanceKm: kmSplits[i].km,
+          description: `Pace increased ${Math.round(Math.abs(changePercent))}% at km ${kmSplits[i].km}`
+        });
+      }
+    }
+    
+    // Check for strong finish or fade
+    if (kmSplits.length >= 3) {
+      const lastKm = kmSplits[kmSplits.length - 1].paceSeconds;
+      const avgExcludingLast = kmSplits.slice(0, -1).reduce((a, b) => a + b.paceSeconds, 0) / (kmSplits.length - 1);
+      const lastKmChange = ((lastKm - avgExcludingLast) / avgExcludingLast) * 100;
+      
+      if (lastKmChange < -10) {
+        keyEvents.push({
+          type: 'strong_finish',
+          distanceKm: kmSplits[kmSplits.length - 1].km,
+          description: `Strong finish - final km was ${Math.round(Math.abs(lastKmChange))}% faster than average`
+        });
+      } else if (lastKmChange > 15) {
+        keyEvents.push({
+          type: 'fade',
+          distanceKm: kmSplits[kmSplits.length - 1].km,
+          description: `Faded at the end - final km was ${Math.round(lastKmChange)}% slower than average`
+        });
+      }
+    }
+  }
+
+  // Analyze elevation profile
+  let elevationStats: TelemetrySummary['elevationProfile'] | undefined;
+  if (elevationProfile && elevationProfile.length > 0) {
+    let totalGain = 0;
+    let totalLoss = 0;
+    let maxGrade = 0;
+    let hillCount = 0;
+    let inHill = false;
+    
+    for (let i = 1; i < elevationProfile.length; i++) {
+      const elevChange = elevationProfile[i].elevation - elevationProfile[i - 1].elevation;
+      if (elevChange > 0) totalGain += elevChange;
+      if (elevChange < 0) totalLoss += Math.abs(elevChange);
+      
+      const grade = elevationProfile[i].grade || 0;
+      if (Math.abs(grade) > Math.abs(maxGrade)) maxGrade = grade;
+      
+      // Count hills (grade > 4%)
+      if (Math.abs(grade) > 4 && !inHill) {
+        hillCount++;
+        inHill = true;
+      } else if (Math.abs(grade) <= 2) {
+        inHill = false;
+      }
+    }
+    
+    elevationStats = {
+      totalGain: Math.round(totalGain),
+      totalLoss: Math.round(totalLoss),
+      maxGrade: Math.round(maxGrade * 10) / 10,
+      hillCount
+    };
+    
+    // Add hill events
+    if (hillCount > 0) {
+      keyEvents.push({
+        type: 'hill_climb',
+        distanceKm: 0,
+        description: `Route included ${hillCount} significant hill${hillCount > 1 ? 's' : ''} (max grade: ${Math.abs(maxGrade).toFixed(1)}%)`
+      });
+    }
+  }
+
+  return {
+    dataPoints: sampledPoints,
+    trends,
+    keyEvents,
+    paceStats,
+    elevationProfile: elevationStats
+  };
+}
+
+// Helper: Haversine distance between two points (returns km)
+function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // Earth radius in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 // Run Analysis Types
 export interface KmSplit {
   km: number;
@@ -992,6 +1329,7 @@ export interface RunAnalysisRequest {
       uvIndex?: number;
       precipitationProbability?: number;
     };
+    telemetry?: TelemetrySummary;
   };
   user: {
     age?: number;
@@ -1044,6 +1382,77 @@ export async function generateComprehensiveRunAnalysis(request: RunAnalysisReque
         `  ${i + 1}. ${pr.distance.toFixed(2)}km in ${Math.floor(pr.duration / 60)}:${(pr.duration % 60).toString().padStart(2, '0')} (pace: ${pr.avgPace})`
       ).join('\n')}`
     : 'No previous runs on this route';
+  
+  // Format telemetry summary for trend analysis
+  let telemetryInfo = '';
+  if (run.telemetry) {
+    const t = run.telemetry;
+    
+    // Pace trends
+    const paceTrendDesc = {
+      'speeding_up': 'Runner sped up throughout (negative split)',
+      'slowing_down': 'Runner slowed down throughout (positive split)', 
+      'steady': 'Pace was consistent throughout',
+      'variable': 'Pace varied significantly throughout'
+    };
+    
+    telemetryInfo = `\nPERFORMANCE TRENDS:
+- Pacing pattern: ${paceTrendDesc[t.trends.paceTrend]} (${t.trends.paceChangePercent > 0 ? '+' : ''}${t.trends.paceChangePercent}% change first to second half)`;
+
+    // Only show pace stats if we have valid data (not zeros)
+    if (t.paceStats.min > 0 && t.paceStats.max > 0) {
+      telemetryInfo += `
+- Pace range: ${Math.floor(t.paceStats.min / 60)}:${(Math.round(t.paceStats.min) % 60).toString().padStart(2, '0')} to ${Math.floor(t.paceStats.max / 60)}:${(Math.round(t.paceStats.max) % 60).toString().padStart(2, '0')}/km
+- Pace consistency: ${t.paceStats.stdDev < 15 ? 'Very consistent' : t.paceStats.stdDev < 30 ? 'Moderately consistent' : 'Highly variable'} (±${Math.round(t.paceStats.stdDev)}s)`;
+    }
+
+    // Include downsampled data points for trend visualization (compact format)
+    if (t.dataPoints && t.dataPoints.length > 0) {
+      // Format data points as compact arrays for the AI to analyze trends
+      const distancePoints = t.dataPoints.map(p => p.distance.toFixed(2)).join(',');
+      const pacePoints = t.dataPoints.filter(p => p.pace !== undefined && p.pace > 0).map(p => {
+        const mins = Math.floor(p.pace! / 60);
+        const secs = Math.round(p.pace! % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+      }).join(',');
+      const elevationPoints = t.dataPoints.filter(p => p.elevation !== undefined).map(p => Math.round(p.elevation!)).join(',');
+      const hrPoints = t.dataPoints.filter(p => p.heartRate !== undefined).map(p => p.heartRate).join(',');
+      const timestampPoints = t.dataPoints.filter(p => p.timestamp !== undefined).map(p => {
+        const mins = Math.floor(p.timestamp! / 60);
+        const secs = Math.round(p.timestamp! % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+      }).join(',');
+      
+      telemetryInfo += `\n\nSAMPLED DATA THROUGHOUT RUN (${t.dataPoints.length} points):`;
+      telemetryInfo += `\n- Distance markers (km): [${distancePoints}]`;
+      if (timestampPoints.length > 0) {
+        telemetryInfo += `\n- Time at each point (min:sec): [${timestampPoints}]`;
+      }
+      if (pacePoints.length > 0) {
+        telemetryInfo += `\n- Pace at each point (min:sec/km): [${pacePoints}]`;
+      }
+      if (elevationPoints.length > 0) {
+        telemetryInfo += `\n- Elevation at each point (m): [${elevationPoints}]`;
+      }
+      if (hrPoints.length > 0) {
+        telemetryInfo += `\n- Heart rate at each point (bpm): [${hrPoints}]`;
+      }
+    }
+
+    if (t.elevationProfile) {
+      telemetryInfo += `\n\nELEVATION ANALYSIS:
+- Total climb: ${t.elevationProfile.totalGain}m gain, ${t.elevationProfile.totalLoss}m loss
+- Maximum grade: ${t.elevationProfile.maxGrade}%
+- Significant hills: ${t.elevationProfile.hillCount}`;
+    }
+    
+    if (t.keyEvents && t.keyEvents.length > 0) {
+      telemetryInfo += `\n\nKEY EVENTS DURING RUN:`;
+      t.keyEvents.forEach(event => {
+        telemetryInfo += `\n- ${event.description}`;
+      });
+    }
+  }
   
   const systemPrompt = `You are an elite running coach with decades of experience coaching athletes from beginners to Olympians. 
 Your role is to provide a comprehensive, personalized analysis of a completed run.
@@ -1098,10 +1507,11 @@ ${run.weatherData ? `WEATHER CONDITIONS:
 - Precipitation chance: ${run.weatherData.precipitationProbability !== undefined ? `${run.weatherData.precipitationProbability}%` : 'Unknown'}
 - Conditions: ${run.weatherData.condition || 'Unknown'}
 (Consider how these conditions may have impacted the runner's performance)` : ''}
+${telemetryInfo}
 
 ${previousRunsInfo}
 
-Provide your elite coaching analysis.`;
+Provide your elite coaching analysis. Pay special attention to pacing patterns, elevation impact, and any key events that occurred during the run.`;
 
   try {
     const response = await openai.chat.completions.create({
