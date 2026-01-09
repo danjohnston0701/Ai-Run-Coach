@@ -299,8 +299,8 @@ function generateRouteTemplates(
   
   // Base radius for target distance - use larger multiplier for genuine circuit loops
   // Previously: targetDistance / (2 * Math.PI) = ~1.6km for 10km (too small, creates linear routes)
-  // Now: targetDistance / 2.5 = 4km for 10km (creates much bigger geographic footprint)
-  const baseRadius = targetDistance / 2.5;
+  // Now: targetDistance / 2.0 = 5km for 10km (creates much bigger geographic footprint for variety)
+  const baseRadius = targetDistance / 2.0;
   
   const templates: Array<{ name: string; waypoints: Array<{ lat: number; lng: number }>; optimize: boolean }> = [];
   
@@ -524,10 +524,10 @@ async function calibrateRoute(
   const origin = { lat: startLat, lng: startLng };
   
   // Calculate center and scale factor for waypoints
-  // Increased maxScale to allow bigger geographic coverage for genuine loops
+  // Expanded scale range for more variety in route sizes and geographic coverage
   let scale = 1.0;
-  let minScale = 0.3;
-  let maxScale = 7.5;
+  let minScale = 0.2;
+  let maxScale = 12.0;
   
   let bestResult: { waypoints: Array<{ lat: number; lng: number }>; result: DirectionsResult } | null = null;
   let bestError = Infinity;
