@@ -480,6 +480,115 @@ export async function registerRoutes(
     }
   });
 
+  // Generate AI analysis for a run
+  app.post("/api/runs/:id/analysis", async (req, res) => {
+    try {
+      const runId = req.params.id;
+      const { userId } = req.body;
+      
+      if (!userId) {
+        return res.status(400).json({ error: "userId is required" });
+      }
+      
+      // Get the run
+      const run = await storage.getRun(runId);
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+      
+      // Verify ownership
+      if (run.userId !== userId) {
+        return res.status(403).json({ error: "Not authorized to analyze this run" });
+      }
+      
+      // Check if we already have AI analysis stored
+      if (run.aiCoachingNotes && typeof run.aiCoachingNotes === 'object') {
+        const notes = run.aiCoachingNotes as any;
+        if (notes.highlights && notes.coachingTips) {
+          return res.json(notes);
+        }
+      }
+      
+      // Get user profile (excluding sensitive data)
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      // Calculate age from DOB if available
+      let userAge: number | undefined;
+      if (user.dob) {
+        const { calculateAge } = await import('./openai');
+        userAge = calculateAge(user.dob);
+      }
+      
+      // Get previous runs on the same route for comparison
+      let previousRuns: any[] = [];
+      if (run.routeId) {
+        const routeRuns = await storage.getUserRunsByRoute(userId, run.routeId, 10);
+        // Filter out the current run
+        previousRuns = routeRuns
+          .filter(r => r.id !== runId)
+          .map(r => ({
+            distance: r.distance,
+            duration: r.duration,
+            avgPace: r.avgPace || '',
+            completedAt: r.completedAt?.toISOString()
+          }));
+      }
+      
+      // Get the route for elevation data
+      let elevationGain: number | undefined;
+      let elevationLoss: number | undefined;
+      if (run.routeId) {
+        const route = await storage.getRoute(run.routeId);
+        if (route) {
+          elevationGain = route.elevationGain || undefined;
+          elevationLoss = route.elevationLoss || undefined;
+        }
+      }
+      
+      // Prepare analysis request
+      const { generateComprehensiveRunAnalysis } = await import('./openai');
+      const analysis = await generateComprehensiveRunAnalysis({
+        run: {
+          id: runId,
+          distance: run.distance,
+          duration: run.duration,
+          avgPace: run.avgPace || '',
+          avgHeartRate: run.avgHeartRate || undefined,
+          maxHeartRate: run.maxHeartRate || undefined,
+          calories: run.calories || undefined,
+          cadence: run.cadence || undefined,
+          difficulty: run.difficulty || undefined,
+          kmSplits: run.paceData as number[] || undefined,
+          elevationGain,
+          elevationLoss,
+          weatherData: run.weatherData as any || undefined
+        },
+        user: {
+          age: userAge,
+          gender: user.gender || undefined,
+          height: user.height || undefined,
+          weight: user.weight || undefined,
+          fitnessLevel: user.fitnessLevel || undefined,
+          desiredFitnessLevel: user.desiredFitnessLevel || undefined
+        },
+        previousRuns
+      });
+      
+      // Store the analysis for future retrieval
+      await storage.updateRun(runId, {
+        aiCoachingNotes: analysis as any
+      });
+      
+      res.json(analysis);
+    } catch (error) {
+      console.error("Run analysis error:", error);
+      res.status(500).json({ error: "Failed to generate run analysis" });
+    }
+  });
+
   app.get("/api/users/:userId/runs", async (req, res) => {
     try {
       const runs = await storage.getUserRuns(req.params.userId);

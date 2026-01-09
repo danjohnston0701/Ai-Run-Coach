@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { 
   ArrowLeft, Calendar, TrendingUp, Heart, 
   Activity, Zap as CadenceIcon, Info, Timer, MapPin, Share2, Mail, User as UserIcon, Search, Star,
-  Facebook, Instagram, Download, X, Map, Users, Trophy, Medal, Award, Trash2
+  Facebook, Instagram, Download, X, Map, Users, Trophy, Medal, Award, Trash2, Brain, CheckCircle, Target, Lightbulb, AlertTriangle, Sparkles
 } from "lucide-react";
 import {
   AlertDialog,
@@ -111,6 +111,16 @@ export default function RunInsights() {
   const [isLoadingCadenceAnalysis, setIsLoadingCadenceAnalysis] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [aiAnalysis, setAiAnalysis] = useState<{
+    highlights: string[];
+    struggles: string[];
+    personalBests: string[];
+    demographicComparison: string;
+    coachingTips: string[];
+    overallAssessment: string;
+  } | null>(null);
+  const [isLoadingAiAnalysis, setIsLoadingAiAnalysis] = useState(false);
+  const [aiAnalysisError, setAiAnalysisError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadRun = async () => {
@@ -162,6 +172,13 @@ export default function RunInsights() {
           if ((mappedRun as any).rating) {
             setRouteRating((mappedRun as any).rating);
             setRatingSubmitted(true);
+          }
+          // Hydrate cached AI analysis if available
+          if (dbRun.aiCoachingNotes && typeof dbRun.aiCoachingNotes === 'object') {
+            const notes = dbRun.aiCoachingNotes;
+            if (notes.highlights && notes.coachingTips) {
+              setAiAnalysis(notes);
+            }
           }
         }
       } catch (err) {
@@ -360,6 +377,44 @@ export default function RunInsights() {
     } finally {
       setIsDeleting(false);
       setShowDeleteConfirm(false);
+    }
+  };
+
+  const generateAiAnalysis = async () => {
+    if (!run || !params?.id) return;
+    
+    setIsLoadingAiAnalysis(true);
+    setAiAnalysisError(null);
+    
+    try {
+      const profile = localStorage.getItem("userProfile");
+      const userId = profile ? JSON.parse(profile).id : null;
+      
+      if (!userId) {
+        setAiAnalysisError("Please log in to generate AI analysis");
+        return;
+      }
+      
+      const response = await fetch(`/api/runs/${params.id}/analysis`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to generate analysis");
+      }
+      
+      const analysis = await response.json();
+      setAiAnalysis(analysis);
+      toast.success("AI analysis generated!");
+    } catch (error) {
+      console.error("Failed to generate AI analysis:", error);
+      setAiAnalysisError(error instanceof Error ? error.message : "Failed to generate analysis");
+      toast.error("Failed to generate AI analysis");
+    } finally {
+      setIsLoadingAiAnalysis(false);
     }
   };
 
@@ -996,6 +1051,181 @@ export default function RunInsights() {
               <div className="text-[10px] text-muted-foreground uppercase">spm</div>
             </CardContent>
           </Card>
+        </section>
+
+        {/* AI Run Analysis Section */}
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-gradient-to-br from-purple-500/20 to-blue-500/20 rounded-lg">
+                <Brain className="w-5 h-5 text-purple-400" />
+              </div>
+              <div>
+                <h2 className="text-lg font-display font-bold uppercase tracking-wide">AI Coach Analysis</h2>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Elite coaching insights for this run</p>
+              </div>
+            </div>
+          </div>
+
+          {!aiAnalysis && !isLoadingAiAnalysis && (
+            <Card className="bg-gradient-to-br from-purple-900/20 to-blue-900/20 border-purple-500/20 backdrop-blur-sm">
+              <CardContent className="p-6 text-center space-y-4">
+                <div className="p-4 bg-purple-500/10 rounded-full w-fit mx-auto">
+                  <Sparkles className="w-8 h-8 text-purple-400" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-display font-bold text-white mb-2">Get Personalized Coaching</h3>
+                  <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+                    Our AI coach will analyze your run data, compare it to your history, and provide expert tips tailored to your fitness goals.
+                  </p>
+                </div>
+                {aiAnalysisError && (
+                  <div className="flex items-center justify-center gap-2 text-red-400 text-sm">
+                    <AlertTriangle className="w-4 h-4" />
+                    {aiAnalysisError}
+                  </div>
+                )}
+                <Button
+                  onClick={generateAiAnalysis}
+                  disabled={isLoadingAiAnalysis}
+                  className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-bold px-8"
+                  data-testid="button-generate-ai-analysis"
+                >
+                  <Brain className="w-4 h-4 mr-2" />
+                  Generate AI Run Analysis
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {isLoadingAiAnalysis && (
+            <Card className="bg-gradient-to-br from-purple-900/20 to-blue-900/20 border-purple-500/20 backdrop-blur-sm">
+              <CardContent className="p-6 text-center space-y-4">
+                <div className="animate-pulse space-y-4">
+                  <div className="p-4 bg-purple-500/20 rounded-full w-fit mx-auto animate-spin">
+                    <Brain className="w-8 h-8 text-purple-400" />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="h-4 bg-white/10 rounded w-3/4 mx-auto" />
+                    <div className="h-4 bg-white/10 rounded w-1/2 mx-auto" />
+                  </div>
+                  <p className="text-sm text-muted-foreground">Analyzing your performance data...</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {aiAnalysis && (
+            <div className="space-y-4">
+              {/* Overall Assessment */}
+              <Card className="bg-gradient-to-br from-purple-900/30 to-blue-900/30 border-purple-500/20 backdrop-blur-sm">
+                <CardContent className="p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-purple-500/20 rounded-lg shrink-0">
+                      <Brain className="w-5 h-5 text-purple-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-display font-bold text-white mb-2">Overall Assessment</h3>
+                      <p className="text-sm text-white/90 leading-relaxed">{aiAnalysis.overallAssessment}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Highlights */}
+              {aiAnalysis.highlights.length > 0 && (
+                <Card className="bg-card/30 border-green-500/20 backdrop-blur-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <CheckCircle className="w-4 h-4 text-green-400" />
+                      <h3 className="text-sm font-display font-bold text-green-400 uppercase tracking-wide">What You Did Well</h3>
+                    </div>
+                    <ul className="space-y-2">
+                      {aiAnalysis.highlights.map((highlight, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-white/80">
+                          <span className="text-green-400 shrink-0 mt-1">•</span>
+                          {highlight}
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Struggles */}
+              {aiAnalysis.struggles.length > 0 && (
+                <Card className="bg-card/30 border-yellow-500/20 backdrop-blur-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Target className="w-4 h-4 text-yellow-400" />
+                      <h3 className="text-sm font-display font-bold text-yellow-400 uppercase tracking-wide">Areas to Improve</h3>
+                    </div>
+                    <ul className="space-y-2">
+                      {aiAnalysis.struggles.map((struggle, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-white/80">
+                          <span className="text-yellow-400 shrink-0 mt-1">•</span>
+                          {struggle}
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Personal Bests */}
+              {aiAnalysis.personalBests.length > 0 && (
+                <Card className="bg-card/30 border-primary/20 backdrop-blur-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Trophy className="w-4 h-4 text-primary" />
+                      <h3 className="text-sm font-display font-bold text-primary uppercase tracking-wide">Achievements</h3>
+                    </div>
+                    <ul className="space-y-2">
+                      {aiAnalysis.personalBests.map((pb, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-white/80">
+                          <span className="text-primary shrink-0 mt-1">★</span>
+                          {pb}
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Demographic Comparison */}
+              {aiAnalysis.demographicComparison && (
+                <Card className="bg-card/30 border-blue-500/20 backdrop-blur-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Users className="w-4 h-4 text-blue-400" />
+                      <h3 className="text-sm font-display font-bold text-blue-400 uppercase tracking-wide">How You Compare</h3>
+                    </div>
+                    <p className="text-sm text-white/80">{aiAnalysis.demographicComparison}</p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Coaching Tips */}
+              {aiAnalysis.coachingTips.length > 0 && (
+                <Card className="bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20 backdrop-blur-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Lightbulb className="w-4 h-4 text-primary" />
+                      <h3 className="text-sm font-display font-bold text-primary uppercase tracking-wide">Coaching Tips</h3>
+                    </div>
+                    <ul className="space-y-3">
+                      {aiAnalysis.coachingTips.map((tip, i) => (
+                        <li key={i} className="flex items-start gap-3 text-sm text-white/90 bg-white/5 rounded-lg p-3">
+                          <span className="text-primary font-bold shrink-0">{i + 1}.</span>
+                          {tip}
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
         </section>
 
         {/* Weather Conditions */}

@@ -961,4 +961,156 @@ Calculate their ideal cadence range, assess if they're overstriding or understri
   }
 }
 
+// Run Analysis Types
+export interface RunAnalysisRequest {
+  run: {
+    id: string;
+    distance: number;
+    duration: number;
+    avgPace: string;
+    avgHeartRate?: number;
+    maxHeartRate?: number;
+    calories?: number;
+    cadence?: number;
+    difficulty?: string;
+    kmSplits?: number[];
+    elevationGain?: number;
+    elevationLoss?: number;
+    weatherData?: {
+      temperature?: number;
+      humidity?: number;
+      windSpeed?: number;
+      condition?: string;
+    };
+  };
+  user: {
+    age?: number;
+    gender?: string;
+    height?: string;
+    weight?: string;
+    fitnessLevel?: string;
+    desiredFitnessLevel?: string;
+  };
+  previousRuns?: Array<{
+    distance: number;
+    duration: number;
+    avgPace: string;
+    completedAt?: string;
+  }>;
+}
+
+export interface RunAnalysisResponse {
+  highlights: string[];
+  struggles: string[];
+  personalBests: string[];
+  demographicComparison: string;
+  coachingTips: string[];
+  overallAssessment: string;
+}
+
+export async function generateComprehensiveRunAnalysis(request: RunAnalysisRequest): Promise<RunAnalysisResponse> {
+  const { run, user, previousRuns = [] } = request;
+  
+  // Format km splits for analysis
+  const splitsInfo = run.kmSplits && run.kmSplits.length > 0
+    ? `Km splits (seconds): ${run.kmSplits.join(', ')}`
+    : 'No km split data available';
+  
+  // Format previous runs for comparison
+  const previousRunsInfo = previousRuns.length > 0
+    ? `Previous runs on this route:\n${previousRuns.slice(0, 5).map((pr, i) => 
+        `  ${i + 1}. ${pr.distance.toFixed(2)}km in ${Math.floor(pr.duration / 60)}:${(pr.duration % 60).toString().padStart(2, '0')} (pace: ${pr.avgPace})`
+      ).join('\n')}`
+    : 'No previous runs on this route';
+  
+  const systemPrompt = `You are an elite running coach with decades of experience coaching athletes from beginners to Olympians. 
+Your role is to provide a comprehensive, personalized analysis of a completed run.
+
+ANALYSIS APPROACH:
+1. Be encouraging but honest - highlight genuine achievements while identifying areas for improvement
+2. Use the runner's profile (age, fitness level, goals) to personalize all advice
+3. Compare to appropriate demographic benchmarks (age group, gender, fitness level)
+4. If previous runs exist, identify trends and personal bests
+5. Provide actionable, specific coaching tips
+
+RESPONSE FORMAT:
+Return ONLY valid JSON with this exact structure:
+{
+  "highlights": ["2-4 specific things the runner did well, with data to back it up"],
+  "struggles": ["1-3 areas where the runner struggled, be constructive not critical"],
+  "personalBests": ["Any PBs or notable achievements from this run or compared to history"],
+  "demographicComparison": "1-2 sentences comparing to others in their age/fitness group",
+  "coachingTips": ["3-5 specific, actionable tips for improvement"],
+  "overallAssessment": "2-3 sentence summary of the run and next steps"
+}`;
+
+  const userPrompt = `Analyze this run and provide elite coaching feedback:
+
+RUNNER PROFILE:
+- Age: ${user.age || 'Unknown'}
+- Gender: ${user.gender || 'Unknown'}
+- Height: ${user.height || 'Unknown'}
+- Weight: ${user.weight || 'Unknown'}
+- Current fitness level: ${user.fitnessLevel || 'Unknown'}
+- Goal fitness level: ${user.desiredFitnessLevel || 'Unknown'}
+
+RUN DATA:
+- Distance: ${run.distance.toFixed(2)} km
+- Duration: ${Math.floor(run.duration / 60)}:${(run.duration % 60).toString().padStart(2, '0')}
+- Average pace: ${run.avgPace}
+- Difficulty: ${run.difficulty || 'Unknown'}
+${run.avgHeartRate ? `- Average heart rate: ${run.avgHeartRate} bpm` : ''}
+${run.maxHeartRate ? `- Max heart rate: ${run.maxHeartRate} bpm` : ''}
+${run.cadence ? `- Average cadence: ${run.cadence} spm` : ''}
+${run.calories ? `- Calories: ${run.calories}` : ''}
+${run.elevationGain ? `- Elevation gain: ${run.elevationGain}m` : ''}
+${run.elevationLoss ? `- Elevation loss: ${run.elevationLoss}m` : ''}
+${splitsInfo}
+
+${run.weatherData ? `WEATHER CONDITIONS:
+- Temperature: ${run.weatherData.temperature}°C
+- Humidity: ${run.weatherData.humidity}%
+- Wind: ${run.weatherData.windSpeed} km/h
+- Conditions: ${run.weatherData.condition}` : ''}
+
+${previousRunsInfo}
+
+Provide your elite coaching analysis.`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+      temperature: 0.7,
+      response_format: { type: "json_object" }
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error("No response from OpenAI");
+    }
+
+    const analysis = JSON.parse(content) as RunAnalysisResponse;
+    return analysis;
+  } catch (error) {
+    console.error("Run analysis error:", error);
+    // Return a sensible fallback
+    return {
+      highlights: [`Completed a ${run.distance.toFixed(2)}km run - great effort!`],
+      struggles: ["Unable to generate detailed analysis at this time."],
+      personalBests: [],
+      demographicComparison: "Keep running consistently to build your performance history.",
+      coachingTips: [
+        "Focus on maintaining a consistent pace throughout your runs.",
+        "Pay attention to your breathing and keep it rhythmic.",
+        "Stay hydrated before, during, and after your runs."
+      ],
+      overallAssessment: "Good effort completing this run. Keep building consistency and the improvements will follow."
+    };
+  }
+}
+
 export { openai };

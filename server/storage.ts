@@ -55,6 +55,7 @@ export interface IStorage {
   createRun(data: InsertRun): Promise<Run>;
   getRun(id: string): Promise<Run | undefined>;
   getUserRuns(userId: string): Promise<Run[]>;
+  getUserRunsByRoute(userId: string, routeId: string, limit?: number): Promise<Run[]>;
   updateRun(id: string, data: Partial<InsertRun>): Promise<Run | undefined>;
 
   createLiveSession(data: InsertLiveRunSession): Promise<LiveRunSession>;
@@ -379,6 +380,13 @@ export class DatabaseStorage implements IStorage {
 
   async getUserRuns(userId: string): Promise<Run[]> {
     return db.select().from(runs).where(eq(runs.userId, userId)).orderBy(desc(runs.completedAt));
+  }
+
+  async getUserRunsByRoute(userId: string, routeId: string, limit: number = 10): Promise<Run[]> {
+    return db.select().from(runs)
+      .where(and(eq(runs.userId, userId), eq(runs.routeId, routeId)))
+      .orderBy(desc(runs.completedAt))
+      .limit(limit);
   }
 
   async updateRun(id: string, data: Partial<InsertRun>): Promise<Run | undefined> {
