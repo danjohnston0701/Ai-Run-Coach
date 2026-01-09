@@ -509,6 +509,98 @@ function generateRouteTemplates(
     ]
   });
   
+  // Template 19: Octagon - 8 waypoints for guaranteed circuit loop
+  templates.push({
+    name: "Octagon Circuit",
+    optimize: false,
+    waypoints: [
+      projectPoint(startLat, startLng, 0, baseRadius * 1.0),
+      projectPoint(startLat, startLng, 45, baseRadius * 1.0),
+      projectPoint(startLat, startLng, 90, baseRadius * 1.0),
+      projectPoint(startLat, startLng, 135, baseRadius * 1.0),
+      projectPoint(startLat, startLng, 180, baseRadius * 1.0),
+      projectPoint(startLat, startLng, 225, baseRadius * 1.0),
+      projectPoint(startLat, startLng, 270, baseRadius * 1.0),
+      projectPoint(startLat, startLng, 315, baseRadius * 1.0),
+    ]
+  });
+  
+  // Template 20: Large octagon - more spread out
+  templates.push({
+    name: "Large Octagon",
+    optimize: false,
+    waypoints: [
+      projectPoint(startLat, startLng, 0, baseRadius * 1.4),
+      projectPoint(startLat, startLng, 45, baseRadius * 1.4),
+      projectPoint(startLat, startLng, 90, baseRadius * 1.4),
+      projectPoint(startLat, startLng, 135, baseRadius * 1.4),
+      projectPoint(startLat, startLng, 180, baseRadius * 1.4),
+      projectPoint(startLat, startLng, 225, baseRadius * 1.4),
+      projectPoint(startLat, startLng, 270, baseRadius * 1.4),
+      projectPoint(startLat, startLng, 315, baseRadius * 1.4),
+    ]
+  });
+  
+  // Template 21: Wide north-south circuit with 6 points
+  templates.push({
+    name: "North-South Circuit",
+    optimize: false,
+    waypoints: [
+      projectPoint(startLat, startLng, 350, baseRadius * 1.3),
+      projectPoint(startLat, startLng, 30, baseRadius * 1.0),
+      projectPoint(startLat, startLng, 90, baseRadius * 0.8),
+      projectPoint(startLat, startLng, 170, baseRadius * 1.3),
+      projectPoint(startLat, startLng, 210, baseRadius * 1.0),
+      projectPoint(startLat, startLng, 270, baseRadius * 0.8),
+    ]
+  });
+  
+  // Template 22: Wide east-west circuit with 6 points
+  templates.push({
+    name: "East-West Circuit",
+    optimize: false,
+    waypoints: [
+      projectPoint(startLat, startLng, 80, baseRadius * 1.3),
+      projectPoint(startLat, startLng, 120, baseRadius * 1.0),
+      projectPoint(startLat, startLng, 180, baseRadius * 0.8),
+      projectPoint(startLat, startLng, 260, baseRadius * 1.3),
+      projectPoint(startLat, startLng, 300, baseRadius * 1.0),
+      projectPoint(startLat, startLng, 0, baseRadius * 0.8),
+    ]
+  });
+  
+  // Template 23: Cloverleaf pattern - forces roads in all directions
+  templates.push({
+    name: "Cloverleaf",
+    optimize: false,
+    waypoints: [
+      projectPoint(startLat, startLng, 0, baseRadius * 1.5),
+      projectPoint(startLat, startLng, 45, baseRadius * 0.6),
+      projectPoint(startLat, startLng, 90, baseRadius * 1.5),
+      projectPoint(startLat, startLng, 135, baseRadius * 0.6),
+      projectPoint(startLat, startLng, 180, baseRadius * 1.5),
+      projectPoint(startLat, startLng, 225, baseRadius * 0.6),
+      projectPoint(startLat, startLng, 270, baseRadius * 1.5),
+      projectPoint(startLat, startLng, 315, baseRadius * 0.6),
+    ]
+  });
+  
+  // Template 24: Diamond with extended corners
+  templates.push({
+    name: "Diamond Extended",
+    optimize: false,
+    waypoints: [
+      projectPoint(startLat, startLng, 0, baseRadius * 1.8),
+      projectPoint(startLat, startLng, 45, baseRadius * 0.9),
+      projectPoint(startLat, startLng, 90, baseRadius * 1.8),
+      projectPoint(startLat, startLng, 135, baseRadius * 0.9),
+      projectPoint(startLat, startLng, 180, baseRadius * 1.8),
+      projectPoint(startLat, startLng, 225, baseRadius * 0.9),
+      projectPoint(startLat, startLng, 270, baseRadius * 1.8),
+      projectPoint(startLat, startLng, 315, baseRadius * 0.9),
+    ]
+  });
+  
   return templates;
 }
 
@@ -770,7 +862,8 @@ export async function generateAIRoutes(
   }
   
   // Progressive relaxation: try increasingly lenient thresholds
-  const backtrackThresholds = [0.25, 0.40, 0.55, 0.70];
+  // Tightened thresholds to avoid back-and-forth routes - max 40% backtracking
+  const backtrackThresholds = [0.15, 0.25, 0.35, 0.40];
   
   const candidates: RouteCandidate[] = [];
   const acceptedPolylines: string[] = [];
