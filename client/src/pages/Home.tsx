@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "framer-motion";
-import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, MicOff, Settings, Users, Check, Copy } from "lucide-react";
+import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, MicOff, Settings, Users, Check, Copy, Radio } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -232,6 +232,12 @@ export default function Home() {
   const [creatingFreeRunGroup, setCreatingFreeRunGroup] = useState(false);
   const [freeRunGroupCreated, setFreeRunGroupCreated] = useState<{ id: string; inviteToken: string } | null>(null);
   const [processingInvite, setProcessingInvite] = useState<string | null>(null);
+  const [showPreRunModal, setShowPreRunModal] = useState(false);
+  const [preRunDistanceEnabled, setPreRunDistanceEnabled] = useState(true);
+  const [preRunTimeEnabled, setPreRunTimeEnabled] = useState(false);
+  const [preRunLiveTracking, setPreRunLiveTracking] = useState(false);
+  const [preRunDistance, setPreRunDistance] = useState([5]);
+  const [preRunTime, setPreRunTime] = useState({ h: "0", m: "30", s: "00" });
 
   interface PendingGroupInvite {
     id: string;
@@ -928,6 +934,21 @@ export default function Home() {
   };
 
   const handleStartSession = () => {
+    // Initialize pre-run modal with current homepage settings
+    setPreRunDistanceEnabled(true);
+    setPreRunTimeEnabled(targetTimeActive);
+    setPreRunDistance(distance);
+    setPreRunTime(targetTime);
+    setPreRunLiveTracking(false);
+    setShowPreRunModal(true);
+  };
+
+  const handlePreRunTimeChange = (unit: 'h' | 'm' | 's', value: string) => {
+    const cleanValue = value.replace(/\D/g, '').slice(0, 2);
+    setPreRunTime(prev => ({ ...prev, [unit]: cleanValue }));
+  };
+
+  const handleConfirmPreRun = () => {
     // Use GPS location if available, otherwise use custom coordinates
     const lat = userLocation?.lat ?? parseFloat(customLat);
     const lng = userLocation?.lng ?? parseFloat(customLng);
@@ -941,15 +962,23 @@ export default function Home() {
       });
     }
     
-    const targetSeconds = parseInt(targetTime.h || "0") * 3600 + parseInt(targetTime.m || "0") * 60 + parseInt(targetTime.s || "0");
+    // Calculate target values based on pre-run settings
+    const finalDistance = preRunDistanceEnabled ? preRunDistance[0] : 0;
+    const targetSeconds = preRunTimeEnabled 
+      ? parseInt(preRunTime.h || "0") * 3600 + parseInt(preRunTime.m || "0") * 60 + parseInt(preRunTime.s || "0")
+      : 0;
+    
     const params = new URLSearchParams({
-      distance: distance[0].toString(),
+      distance: finalDistance.toString(),
       level: selectedLevel,
       lat: lat.toString(),
       lng: lng.toString(),
       targetTime: targetSeconds.toString(),
       aiCoach: canUseAiCoach ? "on" : "off",
+      liveTracking: preRunLiveTracking ? "on" : "off",
     });
+    
+    setShowPreRunModal(false);
     setLocation(`/run?${params.toString()}`);
   };
 
@@ -1503,19 +1532,31 @@ export default function Home() {
           </div>
 
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Timer className={`w-5 h-5 ${targetTimeActive ? "text-primary" : "text-muted-foreground/40"}`} />
-                <h2 className={`text-xl font-display uppercase tracking-wide transition-opacity ${targetTimeActive ? "opacity-100" : "opacity-40"}`}>Target Time</h2>
+            <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${targetTimeActive ? "bg-primary/20" : "bg-white/10"}`}>
+                  <Timer className={`w-5 h-5 ${targetTimeActive ? "text-primary" : "text-foreground/60"}`} />
+                </div>
+                <div>
+                  <h2 className={`text-lg font-display uppercase tracking-wide transition-colors ${targetTimeActive ? "text-foreground" : "text-foreground/60"}`}>Target Time</h2>
+                  <p className="text-xs text-muted-foreground">{targetTimeActive ? "Set your goal time" : "Tap to enable"}</p>
+                </div>
               </div>
-              <Switch 
-                checked={targetTimeActive} 
-                onCheckedChange={setTargetTimeActive}
+              <button
+                type="button"
+                onClick={() => setTargetTimeActive(!targetTimeActive)}
+                className={`px-4 py-2 rounded-full text-sm font-bold uppercase tracking-wide transition-all ${
+                  targetTimeActive 
+                    ? "bg-primary text-background shadow-lg shadow-primary/30" 
+                    : "bg-white/20 text-foreground border-2 border-dashed border-white/30 hover:border-primary/50 hover:bg-white/30"
+                }`}
                 data-testid="switch-target-time"
-              />
+              >
+                {targetTimeActive ? "ON" : "OFF"}
+              </button>
             </div>
             
-            <div className={`flex items-center gap-4 transition-all duration-300 ${targetTimeActive ? "opacity-100" : "opacity-30 pointer-events-none grayscale"}`}>
+            <div className={`flex items-center gap-4 transition-all duration-300 ${targetTimeActive ? "opacity-100" : "opacity-40 pointer-events-none"}`}>
               <div className="flex-1 space-y-1">
                 <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Hours</Label>
                 <input
@@ -1796,6 +1837,223 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      <AnimatePresence>
+        {showPreRunModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 z-[100] flex items-end sm:items-center justify-center"
+            onClick={() => setShowPreRunModal(false)}
+          >
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-2xl p-6 max-h-[85vh] overflow-y-auto"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-xl font-display uppercase tracking-wider">Run Setup</h2>
+                  <p className="text-sm text-muted-foreground">Configure your run settings</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowPreRunModal(false)}
+                >
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+
+              <div className="space-y-4">
+                {/* Target Distance */}
+                <div className="bg-white/5 rounded-xl p-4 border border-white/10">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${preRunDistanceEnabled ? "bg-primary/20" : "bg-white/10"}`}>
+                        <MapPin className={`w-5 h-5 ${preRunDistanceEnabled ? "text-primary" : "text-foreground/60"}`} />
+                      </div>
+                      <div>
+                        <h3 className="font-medium">Target Distance</h3>
+                        <p className="text-xs text-muted-foreground">{preRunDistanceEnabled ? `${preRunDistance[0]} km goal` : "No distance goal"}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPreRunDistanceEnabled(!preRunDistanceEnabled)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold uppercase transition-all ${
+                        preRunDistanceEnabled 
+                          ? "bg-primary text-background" 
+                          : "bg-white/20 text-foreground border border-dashed border-white/30"
+                      }`}
+                    >
+                      {preRunDistanceEnabled ? "ON" : "OFF"}
+                    </button>
+                  </div>
+                  {preRunDistanceEnabled && (
+                    <div className="mt-3">
+                      <Slider
+                        min={profile?.distanceMinKm ?? 0}
+                        max={profile?.distanceMaxKm ?? 50}
+                        step={profile?.distanceDecimalsEnabled ? 0.1 : 1}
+                        value={preRunDistance}
+                        onValueChange={setPreRunDistance}
+                        className="py-2"
+                      />
+                      <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                        <span>{profile?.distanceMinKm ?? 0} km</span>
+                        <span className="text-primary font-bold">{preRunDistance[0]} km</span>
+                        <span>{profile?.distanceMaxKm ?? 50} km</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Target Time */}
+                <div className="bg-white/5 rounded-xl p-4 border border-white/10">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${preRunTimeEnabled ? "bg-primary/20" : "bg-white/10"}`}>
+                        <Timer className={`w-5 h-5 ${preRunTimeEnabled ? "text-primary" : "text-foreground/60"}`} />
+                      </div>
+                      <div>
+                        <h3 className="font-medium">Target Time</h3>
+                        <p className="text-xs text-muted-foreground">
+                          {preRunTimeEnabled 
+                            ? `${preRunTime.h || "0"}h ${preRunTime.m || "0"}m ${preRunTime.s || "0"}s goal`
+                            : "No time goal"
+                          }
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPreRunTimeEnabled(!preRunTimeEnabled)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold uppercase transition-all ${
+                        preRunTimeEnabled 
+                          ? "bg-primary text-background" 
+                          : "bg-white/20 text-foreground border border-dashed border-white/30"
+                      }`}
+                    >
+                      {preRunTimeEnabled ? "ON" : "OFF"}
+                    </button>
+                  </div>
+                  {preRunTimeEnabled && (
+                    <div className="flex items-center gap-3 mt-3">
+                      <div className="flex-1 space-y-1">
+                        <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Hours</Label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={preRunTime.h}
+                          onChange={(e) => handlePreRunTimeChange('h', e.target.value)}
+                          className="w-full bg-white/10 border border-white/20 rounded-lg h-10 text-center font-display text-lg text-primary focus:border-primary/50 outline-none"
+                          placeholder="0"
+                        />
+                      </div>
+                      <div className="pt-5 font-display text-lg text-muted-foreground">:</div>
+                      <div className="flex-1 space-y-1">
+                        <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Min</Label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={preRunTime.m}
+                          onChange={(e) => handlePreRunTimeChange('m', e.target.value)}
+                          className="w-full bg-white/10 border border-white/20 rounded-lg h-10 text-center font-display text-lg text-primary focus:border-primary/50 outline-none"
+                          placeholder="30"
+                        />
+                      </div>
+                      <div className="pt-5 font-display text-lg text-muted-foreground">:</div>
+                      <div className="flex-1 space-y-1">
+                        <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Sec</Label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={preRunTime.s}
+                          onChange={(e) => handlePreRunTimeChange('s', e.target.value)}
+                          className="w-full bg-white/10 border border-white/20 rounded-lg h-10 text-center font-display text-lg text-primary focus:border-primary/50 outline-none"
+                          placeholder="00"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Live Tracking */}
+                <div className="bg-white/5 rounded-xl p-4 border border-white/10">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${preRunLiveTracking ? "bg-green-500/20" : "bg-white/10"}`}>
+                        <Radio className={`w-5 h-5 ${preRunLiveTracking ? "text-green-400" : "text-foreground/60"}`} />
+                      </div>
+                      <div>
+                        <h3 className="font-medium">Live Tracking</h3>
+                        <p className="text-xs text-muted-foreground">Share your location with friends</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPreRunLiveTracking(!preRunLiveTracking)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold uppercase transition-all ${
+                        preRunLiveTracking 
+                          ? "bg-green-500 text-background" 
+                          : "bg-white/20 text-foreground border border-dashed border-white/30"
+                      }`}
+                    >
+                      {preRunLiveTracking ? "ON" : "OFF"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Invite Friends */}
+                <div 
+                  className="bg-white/5 rounded-xl p-4 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors"
+                  onClick={() => {
+                    setShowPreRunModal(false);
+                    setShowFreeRunGroupModal(true);
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full flex items-center justify-center bg-purple-500/20">
+                        <Users className="w-5 h-5 text-purple-400" />
+                      </div>
+                      <div>
+                        <h3 className="font-medium">Run with Friends</h3>
+                        <p className="text-xs text-muted-foreground">Create a group run and invite friends</p>
+                      </div>
+                    </div>
+                    <ArrowRight className="w-5 h-5 text-muted-foreground" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-3">
+                <Button
+                  className="w-full h-12 font-display uppercase tracking-wider bg-primary text-background"
+                  onClick={handleConfirmPreRun}
+                >
+                  <Play className="mr-2 w-5 h-5 fill-current" />
+                  Start Run
+                </Button>
+                <p className="text-xs text-center text-muted-foreground">
+                  {!preRunDistanceEnabled && !preRunTimeEnabled 
+                    ? "Free run - no targets set"
+                    : preRunDistanceEnabled && preRunTimeEnabled
+                    ? `${preRunDistance[0]} km in ${preRunTime.h || "0"}h ${preRunTime.m || "0"}m`
+                    : preRunDistanceEnabled
+                    ? `Target: ${preRunDistance[0]} km`
+                    : `Target: ${preRunTime.h || "0"}h ${preRunTime.m || "0"}m ${preRunTime.s || "0"}s`
+                  }
+                </p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showFreeRunGroupModal && (
