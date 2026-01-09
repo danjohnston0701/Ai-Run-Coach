@@ -459,31 +459,55 @@ export default function RunInsights() {
   const chartData = useMemo(() => {
     if (!run) return [];
     const data = [];
-    const points = Math.max(20, Math.floor(run.distance * 10));
-    const baseElev = (run as any).elevationGain || (run.difficulty === "expert" ? 40 : run.difficulty === "moderate" ? 20 : 10);
+    
+    // Use real elevation profile from route if available
+    const elevationProfile = (run as any).elevationProfile || [];
     const heartRateData = (run as any).heartRateData || [];
     const baseHR = (run as any).avgHeartRate || 155;
     
-    for (let i = 0; i <= points; i++) {
-      const dist = (run.distance / points) * i;
-      
-      // Get heart rate from recorded data if available, otherwise simulate
-      let hr: number;
-      if (heartRateData.length > 0) {
-        const hrIdx = Math.floor((i / points) * heartRateData.length);
-        hr = heartRateData[Math.min(hrIdx, heartRateData.length - 1)]?.hr || baseHR;
-      } else if (hasHeartRateData) {
-        // We have avgHeartRate but no detailed data - simulate based on average
-        hr = baseHR - 10 + Math.random() * 20;
-      } else {
-        hr = 0; // No heart rate data
+    if (elevationProfile.length > 0) {
+      // Use real elevation data
+      for (let i = 0; i < elevationProfile.length; i++) {
+        const point = elevationProfile[i];
+        const distKm = (point.distance || 0) / 1000;
+        
+        // Get heart rate from recorded data if available
+        let hr: number = 0;
+        if (heartRateData.length > 0) {
+          const hrIdx = Math.floor((i / elevationProfile.length) * heartRateData.length);
+          hr = heartRateData[Math.min(hrIdx, heartRateData.length - 1)]?.hr || baseHR;
+        } else if (hasHeartRateData) {
+          hr = baseHR - 10 + Math.random() * 20;
+        }
+        
+        data.push({
+          distance: parseFloat(distKm.toFixed(2)),
+          elevation: point.elevation || 0,
+          hr: hr > 0 ? hr : undefined,
+        });
       }
+    } else {
+      // Fallback: generate points based on distance with flat elevation
+      const points = Math.max(20, Math.floor(run.distance * 10));
+      const baseElev = (run as any).elevationGain || 10;
       
-      data.push({
-        distance: parseFloat(dist.toFixed(2)),
-        elevation: baseElev + Math.sin(i / 5) * (baseElev / 2),
-        hr: hr > 0 ? hr : undefined,
-      });
+      for (let i = 0; i <= points; i++) {
+        const dist = (run.distance / points) * i;
+        
+        let hr: number = 0;
+        if (heartRateData.length > 0) {
+          const hrIdx = Math.floor((i / points) * heartRateData.length);
+          hr = heartRateData[Math.min(hrIdx, heartRateData.length - 1)]?.hr || baseHR;
+        } else if (hasHeartRateData) {
+          hr = baseHR - 10 + Math.random() * 20;
+        }
+        
+        data.push({
+          distance: parseFloat(dist.toFixed(2)),
+          elevation: baseElev,
+          hr: hr > 0 ? hr : undefined,
+        });
+      }
     }
     return data;
   }, [run, hasHeartRateData]);
@@ -968,7 +992,7 @@ export default function RunInsights() {
             <CardContent className="p-3 flex flex-col items-center justify-center text-center">
               <CadenceIcon className="w-4 h-4 text-primary mb-1" />
               <div className="text-[10px] text-muted-foreground uppercase tracking-widest mb-1">Avg Cadence</div>
-              <div className="text-2xl font-display font-bold text-primary">{run.cadence && run.cadence > 0 ? run.cadence : '--'}</div>
+              <div className="text-2xl font-display font-bold text-primary">{((run as any).avgCadence || run.cadence) && ((run as any).avgCadence || run.cadence) > 0 ? Math.round((run as any).avgCadence || run.cadence) : '--'}</div>
               <div className="text-[10px] text-muted-foreground uppercase">spm</div>
             </CardContent>
           </Card>
@@ -1269,6 +1293,11 @@ export default function RunInsights() {
                   <Tooltip 
                     contentStyle={{ backgroundColor: '#09090b', border: '1px solid #ffffff10', borderRadius: '12px', fontSize: '12px' }}
                     labelStyle={{ color: '#64748b', marginBottom: '4px' }}
+                    formatter={(value: number, name: string) => [
+                      `${value.toFixed(1)} m`,
+                      name === 'elevation' ? 'Elevation' : name
+                    ]}
+                    labelFormatter={(label: number) => `${label.toFixed(1)} km`}
                   />
                   <Area type="monotone" dataKey="elevation" stroke="#22c55e" fillOpacity={1} fill="url(#colorElevFull)" strokeWidth={3} />
                 </AreaChart>
