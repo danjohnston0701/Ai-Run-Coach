@@ -31,7 +31,7 @@ export default function PrivacyPolicy() {
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">1. Who We Are</h3>
             <p>
-              This Privacy Policy explains how airuncoach.live trading as AI Run Coach ("we", "us", "our") collects, uses, stores, and protects your personal information when you use our AI Run Coach application ("the App").
+              This Privacy Policy explains how airuncoach.live, trading as AI Run Coach ("we", "us", "our"), collects, uses, stores, and protects your personal information when you use the AI Run Coach application ("the App").
             </p>
             <p>
               We act as the data controller for your personal information. If you have questions or wish to exercise your rights, contact us at:
@@ -44,7 +44,7 @@ export default function PrivacyPolicy() {
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">2. What Data We Collect</h3>
-            <p>We collect the following categories of personal data:</p>
+            <p>We collect the following categories of personal data.</p>
             
             <h4 className="font-bold text-foreground mt-4">Account Information</h4>
             <ul className="list-disc pl-5 space-y-2">
@@ -64,13 +64,16 @@ export default function PrivacyPolicy() {
             </ul>
 
             <h4 className="font-bold text-foreground mt-4">Connected Services Data</h4>
-            <p>When you connect third-party fitness accounts (Garmin Connect, Apple Health, Samsung Health, Strava), we may receive:</p>
+            <p>When you connect third-party fitness accounts (such as Garmin Connect, Apple Health, Samsung Health, Strava), we may receive:</p>
             <ul className="list-disc pl-5 space-y-2">
               <li>Historical workout data</li>
               <li>Device identifiers and activity IDs</li>
               <li>Real-time workout metrics (if supported)</li>
             </ul>
             <p className="text-sm italic">We do not receive your third-party account passwords or payment information.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Fitness Account Data</h4>
+            <p>When you connect your fitness account, we receive activity details such as distance, duration, pace, elevation, route information, and heart rate where available, as provided by your connected device or service.</p>
 
             <h4 className="font-bold text-foreground mt-4">Third-Party Data Attribution and Branding</h4>
             <p>When data is received from connected third-party devices and services:</p>
