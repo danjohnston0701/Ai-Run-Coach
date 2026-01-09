@@ -51,6 +51,27 @@ interface Position {
   timestamp: number;
 }
 
+// Downsample GPS track to max points while preserving route shape
+// Uses Ramer-Douglas-Peucker-like approach: keep start, end, and evenly distributed points
+function downsampleGpsTrack(positions: Position[], maxPoints: number = 1000): Position[] {
+  if (positions.length <= maxPoints) return positions;
+  
+  const result: Position[] = [];
+  const step = (positions.length - 1) / (maxPoints - 1);
+  
+  for (let i = 0; i < maxPoints; i++) {
+    const idx = Math.min(Math.round(i * step), positions.length - 1);
+    result.push(positions[idx]);
+  }
+  
+  // Always include the last point for accurate end position
+  if (result[result.length - 1] !== positions[positions.length - 1]) {
+    result[result.length - 1] = positions[positions.length - 1];
+  }
+  
+  return result;
+}
+
 // Map component that follows runner position
 function FollowRunner({ position, enabled }: { position: { lat: number; lng: number } | null; enabled: boolean }) {
   const map = useMap();
@@ -2116,7 +2137,7 @@ export default function RunSession() {
       lng: metadata.startLng,
       routeName: metadata.routeName,
       routeId: metadata.routeId,
-      gpsTrack: positionsRef.current.slice(0, 500),
+      gpsTrack: downsampleGpsTrack(positionsRef.current, 1000),
       avgCadence: cadence,
       kmSplits: formattedKmSplits,
       targetDistance: metadata.targetDistance,
@@ -2125,6 +2146,7 @@ export default function RunSession() {
       weatherData: runWeather || undefined,
     };
     console.log('[Save] localRunData.weatherData:', localRunData.weatherData);
+    console.log('[Save] GPS points recorded:', positionsRef.current.length, 'saved:', localRunData.gpsTrack.length);
 
     // Try to save to database if user is logged in
     const userProfileStr = localStorage.getItem("userProfile");
@@ -2143,7 +2165,7 @@ export default function RunSession() {
             difficulty: metadata.levelId,
             startLat: metadata.startLat,
             startLng: metadata.startLng,
-            gpsTrack: positionsRef.current.slice(0, 500),
+            gpsTrack: downsampleGpsTrack(positionsRef.current, 1000),
             paceData: formattedKmSplits,
             weatherData: runWeather || undefined,
           };
