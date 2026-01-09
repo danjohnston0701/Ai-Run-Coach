@@ -286,7 +286,8 @@ async function getInitialDirectionAnnouncement(
 }
 
 export default function RunSession() {
-  const [active, setActive] = useState(true);
+  const [runStarted, setRunStarted] = useState(false);
+  const [active, setActive] = useState(false);
   const [time, setTime] = useState(0);
   const [distance, setDistance] = useState(0);
   const [message, setMessage] = useState("Acquiring GPS signal...");
@@ -530,6 +531,7 @@ export default function RunSession() {
         startTimestampRef.current = savedSession.startTimestamp;
         sessionIdRef.current = savedSession.id;
         setActive(savedSession.status === 'active');
+        setRunStarted(true); // Resumed sessions are already started
         
         sessionMetadataRef.current = {
           targetDistance: savedSession.targetDistance,
@@ -889,7 +891,7 @@ export default function RunSession() {
       if (gpsStatus === "acquiring") {
         console.log(`[GPS] LOCKED! Setting status to active`);
         setGpsStatus("active");
-        setMessage("GPS locked! Start running.");
+        setMessage("GPS locked! Tap 'Start Run' when you're ready.");
         setCurrentGpsAccuracy(undefined);
         positionsRef.current = [newPos];
         lastAcceptedPosRef.current = newPos;
@@ -1016,7 +1018,8 @@ export default function RunSession() {
         routePoints,
         metadata.targetDistance
       ).then(announcement => {
-        speak(announcement, { domain: 'coach' });
+        const announcementWithPrompt = announcement + " Tap Start Run when you're ready.";
+        speak(announcementWithPrompt, { domain: 'coach' });
       });
     };
     
@@ -1056,7 +1059,9 @@ export default function RunSession() {
         if (response.ok) {
           const data = await response.json();
           if (data.summary && typeof data.summary === 'string') {
-            speak(data.summary, { domain: 'coach' });
+            // Add prompt to click Start Run at the end
+            const summaryWithPrompt = data.summary + " When you're ready, tap the Start Run button to begin your session.";
+            speak(summaryWithPrompt, { domain: 'coach' });
             return;
           }
         }
@@ -1957,12 +1962,12 @@ export default function RunSession() {
   }, []);
 
   const toggleLiveShare = (friend: Friend) => {
-    const friendId = friend.email || friend.name;
-    if (sharedWith.includes(friendId)) {
-      setSharedWith(prev => prev.filter(id => id !== friendId));
+    const uniqueId = friend.friendId || friend.name;
+    if (sharedWith.includes(uniqueId)) {
+      setSharedWith(prev => prev.filter(id => id !== uniqueId));
       toast.info(`Stopped live sharing with ${friend.name}`);
     } else {
-      setSharedWith(prev => [...prev, friendId]);
+      setSharedWith(prev => [...prev, uniqueId]);
       toast.success(`Now sharing live location & route with ${friend.name}!`);
     }
   };
@@ -2187,6 +2192,13 @@ export default function RunSession() {
     return localRunId;
   };
 
+  const handleStartRun = () => {
+    setRunStarted(true);
+    setActive(true);
+    // Announce run start
+    speak("Let's go! Your run has started. Good luck!", { domain: 'system' });
+  };
+
   const handleStopClick = () => {
     setShowExitConfirmation(true);
   };
@@ -2388,7 +2400,7 @@ export default function RunSession() {
                 {friends.length > 0 ? (
                   <div className="grid grid-cols-1 gap-2">
                     {friends.map((friend, idx) => {
-                      const isShared = sharedWith.includes(friend.email || friend.name);
+                      const isShared = sharedWith.includes(friend.friendId || friend.name);
                       return (
                         <button
                           key={idx}
@@ -2580,28 +2592,42 @@ export default function RunSession() {
         </div>
 
         <div className="flex items-center justify-center gap-2">
-          <Button 
-            variant="outline" 
-            size="icon" 
-            className="w-9 h-9 rounded-full border-white/10 hover:bg-white/10 hover:border-white/20"
-            onClick={handleStopClick}
-            data-testid="button-stop"
-          >
-            <Square className="w-3 h-3 fill-foreground" />
-          </Button>
-          
-          <Button 
-            size="icon" 
-            className={`w-12 h-12 rounded-full transition-transform active:scale-95 ${
-              active 
-                ? "bg-primary text-background hover:bg-primary/90 shadow-[0_0_20px_rgba(6,182,212,0.4)]" 
-                : "bg-green-500 text-white hover:bg-green-600 shadow-[0_0_20px_rgba(34,197,94,0.4)]"
-            }`}
-            onClick={handlePauseClick}
-            data-testid="button-toggle-play"
-          >
-            {active ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
-          </Button>
+          {!runStarted ? (
+            <Button 
+              size="lg"
+              className="h-14 px-10 rounded-full bg-green-500 text-white hover:bg-green-600 shadow-[0_0_30px_rgba(34,197,94,0.5)] font-display uppercase tracking-widest text-lg transition-transform active:scale-95"
+              onClick={handleStartRun}
+              data-testid="button-start-run"
+            >
+              <Play className="w-5 h-5 mr-2 fill-current" />
+              Start Run
+            </Button>
+          ) : (
+            <>
+              <Button 
+                variant="outline" 
+                size="icon" 
+                className="w-9 h-9 rounded-full border-white/10 hover:bg-white/10 hover:border-white/20"
+                onClick={handleStopClick}
+                data-testid="button-stop"
+              >
+                <Square className="w-3 h-3 fill-foreground" />
+              </Button>
+              
+              <Button 
+                size="icon" 
+                className={`w-12 h-12 rounded-full transition-transform active:scale-95 ${
+                  active 
+                    ? "bg-primary text-background hover:bg-primary/90 shadow-[0_0_20px_rgba(6,182,212,0.4)]" 
+                    : "bg-green-500 text-white hover:bg-green-600 shadow-[0_0_20px_rgba(34,197,94,0.4)]"
+                }`}
+                onClick={handlePauseClick}
+                data-testid="button-toggle-play"
+              >
+                {active ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+              </Button>
+            </>
+          )}
         </div>
       </div>
 

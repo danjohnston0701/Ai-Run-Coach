@@ -238,6 +238,7 @@ export default function Home() {
   const [preRunLiveTracking, setPreRunLiveTracking] = useState(false);
   const [preRunDistance, setPreRunDistance] = useState([5]);
   const [preRunTime, setPreRunTime] = useState({ h: "0", m: "30", s: "00" });
+  const [preRunMode, setPreRunMode] = useState<"freerun" | "mapmyrun">("freerun");
 
   interface PendingGroupInvite {
     id: string;
@@ -813,33 +814,6 @@ export default function Home() {
     );
   };
 
-  const handleMapRun = () => {
-    // Check premium access before allowing AI route generation
-    if (!isPremiumUser) {
-      toast.error("Premium access required for AI route generation");
-      setLocation("/pricing");
-      return;
-    }
-    
-    // Use GPS location if available, otherwise use custom coordinates
-    const lat = userLocation?.lat ?? parseFloat(customLat);
-    const lng = userLocation?.lng ?? parseFloat(customLng);
-    
-    console.log("handleMapRun - userLocation state:", userLocation);
-    console.log("handleMapRun - using coordinates:", { lat, lng });
-    
-    const targetSeconds = parseInt(targetTime.h || "0") * 3600 + parseInt(targetTime.m || "0") * 60 + parseInt(targetTime.s || "0");
-    const params = new URLSearchParams({
-      distance: distance[0].toString(),
-      level: selectedLevel,
-      lat: lat.toString(),
-      lng: lng.toString(),
-      targetTime: targetSeconds.toString(),
-    });
-    console.log("Navigating to route preview with params:", { lat, lng, distance: distance[0], level: selectedLevel });
-    setLocation(`/route-preview?${params.toString()}`);
-  };
-
   useEffect(() => {
     if (profile?.id && showFreeRunGroupModal) {
       fetch(`/api/users/${profile.id}/friends`)
@@ -935,6 +909,25 @@ export default function Home() {
 
   const handleStartSession = () => {
     // Initialize pre-run modal with current homepage settings
+    setPreRunMode("freerun");
+    setPreRunDistanceEnabled(true);
+    setPreRunTimeEnabled(targetTimeActive);
+    setPreRunDistance(distance);
+    setPreRunTime(targetTime);
+    setPreRunLiveTracking(false);
+    setShowPreRunModal(true);
+  };
+
+  const handleMapRunClick = () => {
+    // Check premium access before allowing AI route generation
+    if (!isPremiumUser) {
+      toast.error("Premium access required for AI route generation");
+      setLocation("/pricing");
+      return;
+    }
+    
+    // Initialize pre-run modal with current homepage settings for Map My Run
+    setPreRunMode("mapmyrun");
     setPreRunDistanceEnabled(true);
     setPreRunTimeEnabled(targetTimeActive);
     setPreRunDistance(distance);
@@ -953,33 +946,46 @@ export default function Home() {
     const lat = userLocation?.lat ?? parseFloat(customLat);
     const lng = userLocation?.lng ?? parseFloat(customLng);
     
-    // AI coach requires premium access
-    const canUseAiCoach = isPremiumUser && aiCoachEnabled;
-    if (!isPremiumUser && aiCoachEnabled) {
-      toast("AI Coach is a premium feature. Starting run without AI coaching.", {
-        description: "Upgrade to get real-time voice coaching",
-        action: { label: "View Plans", onClick: () => setLocation("/pricing") },
-      });
-    }
-    
     // Calculate target values based on pre-run settings
     const finalDistance = preRunDistanceEnabled ? preRunDistance[0] : 0;
     const targetSeconds = preRunTimeEnabled 
       ? parseInt(preRunTime.h || "0") * 3600 + parseInt(preRunTime.m || "0") * 60 + parseInt(preRunTime.s || "0")
       : 0;
     
-    const params = new URLSearchParams({
-      distance: finalDistance.toString(),
-      level: selectedLevel,
-      lat: lat.toString(),
-      lng: lng.toString(),
-      targetTime: targetSeconds.toString(),
-      aiCoach: canUseAiCoach ? "on" : "off",
-      liveTracking: preRunLiveTracking ? "on" : "off",
-    });
-    
     setShowPreRunModal(false);
-    setLocation(`/run?${params.toString()}`);
+    
+    if (preRunMode === "mapmyrun") {
+      // Navigate to route preview for Map My Run
+      const params = new URLSearchParams({
+        distance: finalDistance.toString(),
+        level: selectedLevel,
+        lat: lat.toString(),
+        lng: lng.toString(),
+        targetTime: targetSeconds.toString(),
+        liveTracking: preRunLiveTracking ? "on" : "off",
+      });
+      setLocation(`/route-preview?${params.toString()}`);
+    } else {
+      // Start free run session
+      const canUseAiCoach = isPremiumUser && aiCoachEnabled;
+      if (!isPremiumUser && aiCoachEnabled) {
+        toast("AI Coach is a premium feature. Starting run without AI coaching.", {
+          description: "Upgrade to get real-time voice coaching",
+          action: { label: "View Plans", onClick: () => setLocation("/pricing") },
+        });
+      }
+      
+      const params = new URLSearchParams({
+        distance: finalDistance.toString(),
+        level: selectedLevel,
+        lat: lat.toString(),
+        lng: lng.toString(),
+        targetTime: targetSeconds.toString(),
+        aiCoach: canUseAiCoach ? "on" : "off",
+        liveTracking: preRunLiveTracking ? "on" : "off",
+      });
+      setLocation(`/run?${params.toString()}`);
+    }
   };
 
   return (
@@ -1709,7 +1715,7 @@ export default function Home() {
                     ? "bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)]" 
                     : "bg-muted text-muted-foreground cursor-not-allowed"
                 }`}
-                onClick={handleMapRun}
+                onClick={handleMapRunClick}
                 disabled={!userLocation}
                 data-testid="button-map-run"
               >
@@ -1793,7 +1799,7 @@ export default function Home() {
               ? "bg-primary text-background hover:bg-primary/90 shadow-[0_0_30px_rgba(6,182,212,0.4)]" 
               : "bg-muted text-muted-foreground cursor-not-allowed"
           }`}
-          onClick={handleMapRun}
+          onClick={handleMapRunClick}
           disabled={!userLocation}
           data-testid="button-map-my-run"
         >
@@ -1840,8 +1846,12 @@ export default function Home() {
             >
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h2 className="text-xl font-display uppercase tracking-wider">Run Setup</h2>
-                  <p className="text-sm text-muted-foreground">Configure your run settings</p>
+                  <h2 className="text-xl font-display uppercase tracking-wider">
+                    {preRunMode === "mapmyrun" ? "Map My Run Setup" : "Run Setup"}
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    {preRunMode === "mapmyrun" ? "Configure your AI-generated route" : "Configure your run settings"}
+                  </p>
                 </div>
                 <Button
                   variant="ghost"
@@ -2020,8 +2030,17 @@ export default function Home() {
                   className="w-full h-12 font-display uppercase tracking-wider bg-primary text-background"
                   onClick={handleConfirmPreRun}
                 >
-                  <Play className="mr-2 w-5 h-5 fill-current" />
-                  Start Run
+                  {preRunMode === "mapmyrun" ? (
+                    <>
+                      <MapPin className="mr-2 w-5 h-5 fill-current" />
+                      Generate Route
+                    </>
+                  ) : (
+                    <>
+                      <Play className="mr-2 w-5 h-5 fill-current" />
+                      Start Run
+                    </>
+                  )}
                 </Button>
                 <p className="text-xs text-center text-muted-foreground">
                   {!preRunDistanceEnabled && !preRunTimeEnabled 
