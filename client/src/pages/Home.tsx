@@ -1715,36 +1715,20 @@ export default function Home() {
               >
                 <MapPin className="mr-2 w-5 h-5 fill-current" /> Map My Run
               </Button>
-              <div className="flex gap-2">
-                <Button 
-                  size="lg" 
-                  variant="outline"
-                  className={`flex-1 h-12 text-base font-display uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
-                    userLocation 
-                      ? "border-white/20 hover:bg-white/10" 
-                      : "border-muted/20 text-muted-foreground cursor-not-allowed"
-                  }`}
-                  onClick={handleStartSession}
-                  disabled={!userLocation}
-                  data-testid="button-start-session"
-                >
-                  <Play className="mr-2 w-5 h-5 fill-current" /> Run without Route
-                </Button>
-                <Button 
-                  size="lg" 
-                  variant="outline"
-                  className={`h-12 px-4 ${
-                    userLocation 
-                      ? "border-primary/50 text-primary hover:bg-primary/10" 
-                      : "border-muted/20 text-muted-foreground cursor-not-allowed"
-                  }`}
-                  onClick={() => setShowFreeRunGroupModal(true)}
-                  disabled={!userLocation || !profile?.id}
-                  data-testid="button-free-run-with-friends"
-                >
-                  <Users className="w-5 h-5" />
-                </Button>
-              </div>
+              <Button 
+                size="lg" 
+                variant="outline"
+                className={`w-full h-12 text-base font-display uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
+                  userLocation 
+                    ? "border-white/20 hover:bg-white/10" 
+                    : "border-muted/20 text-muted-foreground cursor-not-allowed"
+                }`}
+                onClick={handleStartSession}
+                disabled={!userLocation}
+                data-testid="button-start-session"
+              >
+                <Play className="mr-2 w-5 h-5 fill-current" /> Run without Route
+              </Button>
             </motion.div>
 
             <motion.div
