@@ -28,6 +28,103 @@ export interface AiCoachConfig {
   faqs?: Array<{ question: string; answer: string }>;
 }
 
+// Elite coaching cues organized by professional technique categories
+export const ELITE_COACHING_TIPS: Record<string, string[]> = {
+  "posture_alignment": [
+    "Keep your posture tall and proud; imagine a string gently lifting the top of your head.",
+    "Run with your ears, shoulders, hips, and ankles roughly in one line.",
+    "Stay tall through your hips; avoid collapsing or bending at the waist as you tire.",
+    "Lean very slightly forward from the ankles, not from the hips, letting gravity help you move.",
+    "Keep your chin level and your neck relaxed; avoid letting your head drop forward."
+  ],
+  "arms_upper_body": [
+    "Relax your shoulders and let them drop away from your ears.",
+    "Keep your arms close to your sides with a gentle bend at the elbows.",
+    "Let your arms swing forward and back, not across your body.",
+    "Keep your hands soft, as if gently holding something you don't want to crush.",
+    "When tension builds, briefly shake out your hands and arms, then settle back into rhythm."
+  ],
+  "breathing_relaxation": [
+    "Breathe from your belly, letting the abdomen expand rather than lifting the chest.",
+    "Settle into a steady, rhythmic breathing pattern that feels sustainable.",
+    "Use your exhale to release tension from your shoulders and face.",
+    "Let your breath guide your effort — calm, controlled breathing supports smooth running.",
+    "If you feel stressed, take a deeper, slower breath and gently reset your rhythm."
+  ],
+  "stride_foot_strike": [
+    "Aim for smooth, light steps that land softly on the ground.",
+    "Let your foot land roughly under your body instead of reaching out in front.",
+    "Think 'quick and elastic,' lifting the foot up and through instead of pushing long and hard.",
+    "Focus on gliding forward — avoid bounding or overstriding.",
+    "Use the ground to push you forward, not upward; channel your force into forward motion."
+  ],
+  "core_hips_mindset": [
+    "Lightly engage your core to keep your torso stable as your legs and arms move.",
+    "Let the movement start from your hips, driving you calmly forward.",
+    "When you tire, come back to basics: tall posture, relaxed shoulders, smooth steps.",
+    "Stay present in this section of the run — one controlled stride at a time.",
+    "Run with quiet confidence; efficient, relaxed form is your biggest advantage today."
+  ]
+};
+
+// Select an appropriate coaching category based on run context
+export function selectCoachingCategory(request: {
+  paceChange?: 'faster' | 'slower' | 'steady';
+  progressPercent?: number;
+  recentCoachingTopics?: string[];
+  terrain?: TerrainData;
+}): string {
+  const categories = Object.keys(ELITE_COACHING_TIPS);
+  const recentTopics = request.recentCoachingTopics || [];
+  
+  // Context-based category selection
+  let preferredCategory: string | null = null;
+  
+  // If pace is slowing or struggling, focus on breathing/relaxation
+  if (request.paceChange === 'slower') {
+    preferredCategory = 'breathing_relaxation';
+  }
+  // If on a hill (terrain grade), focus on posture or core
+  else if (request.terrain?.currentGrade && Math.abs(request.terrain.currentGrade) > 3) {
+    preferredCategory = request.terrain.currentGrade > 0 ? 'core_hips_mindset' : 'stride_foot_strike';
+  }
+  // Early in run (first 20%), focus on posture and form
+  else if (request.progressPercent !== undefined && request.progressPercent < 20) {
+    preferredCategory = 'posture_alignment';
+  }
+  // Mid-run, mix between arms and stride
+  else if (request.progressPercent !== undefined && request.progressPercent < 70) {
+    preferredCategory = Math.random() > 0.5 ? 'arms_upper_body' : 'stride_foot_strike';
+  }
+  // Late in run (70%+), focus on mindset and core
+  else if (request.progressPercent !== undefined && request.progressPercent >= 70) {
+    preferredCategory = 'core_hips_mindset';
+  }
+  
+  // Avoid repeating recent topics
+  if (preferredCategory && !recentTopics.includes(preferredCategory)) {
+    return preferredCategory;
+  }
+  
+  // Pick a category not recently used
+  const availableCategories = categories.filter(c => !recentTopics.slice(-2).includes(c));
+  if (availableCategories.length > 0) {
+    return availableCategories[Math.floor(Math.random() * availableCategories.length)];
+  }
+  
+  // Fallback to random
+  return categories[Math.floor(Math.random() * categories.length)];
+}
+
+// Get a random tip from a specific category
+export function getEliteCoachingTip(category: string): string {
+  const tips = ELITE_COACHING_TIPS[category];
+  if (!tips || tips.length === 0) {
+    return "Focus on maintaining good form and steady breathing.";
+  }
+  return tips[Math.floor(Math.random() * tips.length)];
+}
+
 export interface RouteGenerationRequest {
   startLat: number;
   startLng: number;
@@ -379,7 +476,21 @@ ${w.uvIndex > 7 ? "- High UV: Remind about sun protection, find shade when possi
 ${w.precipitationProbability > 50 ? "- Rain likely: Advise on grip, visibility, staying dry" : ""}`;
   }
   
-  const prompt = `${coachIdentity} Providing real-time guidance.${aiConfigSection}
+  // Select an elite coaching tip based on current run context
+  const selectedCategory = selectCoachingCategory({
+    paceChange: request.paceChange,
+    progressPercent,
+    recentCoachingTopics: request.recentCoachingTopics,
+    terrain: request.terrain
+  });
+  const eliteTip = getEliteCoachingTip(selectedCategory);
+  
+  const eliteCoachingSection = `\n\nELITE TECHNIQUE CUE (use this in your coaching):
+Category: ${selectedCategory.replace(/_/g, ' ')}
+Cue: "${eliteTip}"
+Incorporate this technique cue naturally into your coaching message when appropriate.`;
+  
+  const prompt = `${coachIdentity} Providing real-time guidance.${aiConfigSection}${eliteCoachingSection}
 
 COACHING STYLE: ${toneStyle}${userProfileInfo}
 
@@ -429,34 +540,56 @@ Respond in JSON format:
   }
 }
 
+// Map elite categories to existing topic taxonomy
+const CATEGORY_TO_TOPIC: Record<string, string> = {
+  "posture_alignment": "form",
+  "arms_upper_body": "form",
+  "breathing_relaxation": "breathing",
+  "stride_foot_strike": "form",
+  "core_hips_mindset": "motivation"
+};
+
 function getDefaultCoachingAdvice(request: CoachingRequest, progressPercent: number): CoachingResponse {
+  // Select category-appropriate elite tip for fallback messages
+  const category = selectCoachingCategory({ 
+    progressPercent, 
+    paceChange: request.paceChange,
+    terrain: request.terrain 
+  });
+  const topic = CATEGORY_TO_TOPIC[category] || "form";
+  
+  // Keep messages concise (max 15 words) - these are fallback only
   if (progressPercent < 25) {
     return {
-      message: "Great start! Find your rhythm and settle into a comfortable pace.",
+      message: "Great start! Focus on tall posture and relaxed shoulders.",
       encouragement: "You've got this!",
       paceAdvice: "Focus on a steady, sustainable pace for now.",
-      breathingTip: "Breathe in through your nose, out through your mouth."
+      breathingTip: "Settle into rhythmic breathing.",
+      topic
     };
   } else if (progressPercent < 50) {
     return {
-      message: "You're warming up nicely. Keep that momentum going!",
+      message: "Keep that momentum! Arms relaxed, steps light and quick.",
       encouragement: "Almost halfway there!",
       paceAdvice: "Maintain your current effort level.",
-      breathingTip: "Stay relaxed, keep shoulders down."
+      breathingTip: "Stay relaxed, keep shoulders down.",
+      topic
     };
   } else if (progressPercent < 75) {
     return {
-      message: "Past the halfway point! Strong work, keep pushing.",
+      message: "Strong work! Stay tall through your hips, smooth strides.",
       encouragement: "You're doing amazing!",
       paceAdvice: "Hold steady, you can pick it up soon.",
-      breathingTip: "Deep, rhythmic breaths."
+      breathingTip: "Deep, rhythmic breaths.",
+      topic
     };
   } else {
     return {
-      message: "Final stretch! Give it everything you've got!",
+      message: "Final stretch! Quiet confidence, one stride at a time.",
       encouragement: "Finish strong!",
       paceAdvice: "Push the pace if you can, the end is near!",
-      breathingTip: "Power through, you're almost there!"
+      breathingTip: "Power through, you're almost there!",
+      topic
     };
   }
 }
