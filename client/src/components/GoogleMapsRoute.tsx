@@ -20,6 +20,7 @@ declare global {
   interface Window {
     google: any;
     initGoogleMaps: () => void;
+    googleMapsLoading: Promise<void> | null;
   }
 }
 
@@ -43,28 +44,50 @@ export default function GoogleMapsRoute({
 
     async function loadGoogleMaps() {
       try {
+        if (window.google?.maps) {
+          if (isMounted) {
+            setTimeout(() => initMap(), 50);
+          }
+          return;
+        }
+
+        if (window.googleMapsLoading) {
+          try {
+            await window.googleMapsLoading;
+            if (isMounted) {
+              setTimeout(() => initMap(), 50);
+            }
+            return;
+          } catch {
+            window.googleMapsLoading = null;
+          }
+        }
+
         const res = await fetch("/api/config/maps-key");
         if (!res.ok) {
           throw new Error("Failed to get Google Maps API key");
         }
         const { apiKey } = await res.json();
 
-        if (window.google?.maps) {
-          if (isMounted) initMap();
-          return;
-        }
+        window.googleMapsLoading = new Promise<void>((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry,places,routes`;
+          script.async = true;
+          script.defer = true;
+          script.onload = () => {
+            resolve();
+          };
+          script.onerror = () => {
+            window.googleMapsLoading = null;
+            reject(new Error("Failed to load Google Maps"));
+          };
+          document.head.appendChild(script);
+        });
 
-        const script = document.createElement("script");
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry,places,routes`;
-        script.async = true;
-        script.defer = true;
-        script.onload = () => {
-          if (isMounted) initMap();
-        };
-        script.onerror = () => {
-          if (isMounted) setError("Failed to load Google Maps");
-        };
-        document.head.appendChild(script);
+        await window.googleMapsLoading;
+        if (isMounted) {
+          setTimeout(() => initMap(), 50);
+        }
       } catch (err) {
         if (isMounted) setError("Failed to initialize map");
       }
