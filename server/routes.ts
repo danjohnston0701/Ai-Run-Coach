@@ -1031,6 +1031,55 @@ export async function registerRoutes(
     }
   });
 
+  app.put("/api/live-sessions/sync", async (req, res) => {
+    try {
+      const { sessionKey, userId, distanceKm, elapsedSeconds, currentPace, cadence, difficulty, gpsTrack, kmSplits, routeId } = req.body;
+      if (!sessionKey || typeof sessionKey !== 'string') {
+        return res.status(400).json({ error: "sessionKey is required" });
+      }
+      if (!userId || typeof userId !== 'string') {
+        return res.status(400).json({ error: "userId is required" });
+      }
+      
+      const session = await storage.upsertLiveSession(sessionKey, userId, {
+        distanceCovered: typeof distanceKm === 'number' ? distanceKm : 0,
+        elapsedTime: typeof elapsedSeconds === 'number' ? elapsedSeconds : 0,
+        currentPace: typeof currentPace === 'string' ? currentPace : null,
+        cadence: typeof cadence === 'number' ? cadence : null,
+        difficulty: typeof difficulty === 'string' ? difficulty : 'beginner',
+        gpsTrack: Array.isArray(gpsTrack) ? gpsTrack : [],
+        kmSplits: Array.isArray(kmSplits) ? kmSplits : [],
+        routeId: typeof routeId === 'string' ? routeId : null,
+      });
+      res.json(session);
+    } catch (error) {
+      console.error("Failed to sync live session:", error);
+      res.status(500).json({ error: "Failed to sync session" });
+    }
+  });
+
+  app.post("/api/live-sessions/end-by-key", async (req, res) => {
+    try {
+      const { sessionKey, userId } = req.body;
+      if (!sessionKey || !userId) {
+        return res.status(400).json({ error: "sessionKey and userId are required" });
+      }
+      await storage.endLiveSessionByKey(sessionKey, userId);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to end session" });
+    }
+  });
+
+  app.get("/api/live-sessions/recoverable/:userId", async (req, res) => {
+    try {
+      const session = await storage.getRecoverableLiveSession(req.params.userId);
+      res.json(session || null);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to check for recoverable session" });
+    }
+  });
+
   // Friends endpoints
   app.get("/api/users/:userId/friends", async (req, res) => {
     try {

@@ -151,6 +151,7 @@ export const goals = pgTable("goals", {
 
 export const liveRunSessions = pgTable("live_run_sessions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionKey: text("session_key"),
   userId: varchar("user_id").notNull().references(() => users.id),
   routeId: varchar("route_id").references(() => routes.id),
   isActive: boolean("is_active").default(true),
@@ -160,8 +161,13 @@ export const liveRunSessions = pgTable("live_run_sessions", {
   currentHeartRate: integer("current_heart_rate"),
   elapsedTime: integer("elapsed_time").default(0),
   distanceCovered: real("distance_covered").default(0),
+  difficulty: text("difficulty"),
+  cadence: integer("cadence"),
+  gpsTrack: jsonb("gps_track"),
+  kmSplits: jsonb("km_splits"),
   sharedWithFriends: boolean("shared_with_friends").default(false),
   startedAt: timestamp("started_at").defaultNow(),
+  lastSyncedAt: timestamp("last_synced_at").defaultNow(),
 });
 
 export const garminData = pgTable("garmin_data", {

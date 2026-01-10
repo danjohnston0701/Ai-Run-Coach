@@ -63,8 +63,21 @@ export interface IStorage {
   createLiveSession(data: InsertLiveRunSession): Promise<LiveRunSession>;
   getLiveSession(id: string): Promise<LiveRunSession | undefined>;
   getActiveLiveSession(userId: string): Promise<LiveRunSession | undefined>;
+  getLiveSessionByKey(sessionKey: string, userId: string): Promise<LiveRunSession | undefined>;
+  getRecoverableLiveSession(userId: string): Promise<LiveRunSession | undefined>;
+  upsertLiveSession(sessionKey: string, userId: string, data: {
+    distanceCovered?: number | null;
+    elapsedTime?: number | null;
+    currentPace?: string | null;
+    cadence?: number | null;
+    difficulty?: string | null;
+    gpsTrack?: any;
+    kmSplits?: any;
+    routeId?: string | null;
+  }): Promise<LiveRunSession>;
   updateLiveSession(id: string, data: Partial<InsertLiveRunSession>): Promise<LiveRunSession | undefined>;
   endLiveSession(id: string): Promise<void>;
+  endLiveSessionByKey(sessionKey: string, userId: string): Promise<void>;
 
   saveGarminData(data: InsertGarminData): Promise<GarminData>;
   getUserGarminData(userId: string): Promise<GarminData[]>;
@@ -441,6 +454,77 @@ export class DatabaseStorage implements IStorage {
 
   async endLiveSession(id: string): Promise<void> {
     await db.update(liveRunSessions).set({ isActive: false }).where(eq(liveRunSessions.id, id));
+  }
+
+  async getLiveSessionByKey(sessionKey: string, userId: string): Promise<LiveRunSession | undefined> {
+    const [session] = await db.select().from(liveRunSessions).where(
+      and(eq(liveRunSessions.sessionKey, sessionKey), eq(liveRunSessions.userId, userId))
+    );
+    return session;
+  }
+
+  async getRecoverableLiveSession(userId: string): Promise<LiveRunSession | undefined> {
+    const [session] = await db.select().from(liveRunSessions).where(
+      and(
+        eq(liveRunSessions.userId, userId),
+        eq(liveRunSessions.isActive, true),
+        sql`${liveRunSessions.distanceCovered} > 0.1`
+      )
+    ).orderBy(desc(liveRunSessions.lastSyncedAt));
+    return session;
+  }
+
+  async upsertLiveSession(sessionKey: string, userId: string, data: {
+    distanceCovered?: number | null;
+    elapsedTime?: number | null;
+    currentPace?: string | null;
+    cadence?: number | null;
+    difficulty?: string | null;
+    gpsTrack?: any;
+    kmSplits?: any;
+    routeId?: string | null;
+  }): Promise<LiveRunSession> {
+    const existing = await this.getLiveSessionByKey(sessionKey, userId);
+    if (existing) {
+      const [updated] = await db.update(liveRunSessions)
+        .set({
+          distanceCovered: data.distanceCovered ?? existing.distanceCovered ?? 0,
+          elapsedTime: data.elapsedTime ?? existing.elapsedTime ?? 0,
+          currentPace: data.currentPace ?? existing.currentPace,
+          cadence: data.cadence ?? existing.cadence,
+          difficulty: data.difficulty ?? existing.difficulty,
+          gpsTrack: data.gpsTrack ?? existing.gpsTrack,
+          kmSplits: data.kmSplits ?? existing.kmSplits,
+          routeId: data.routeId ?? existing.routeId,
+          lastSyncedAt: new Date(),
+        })
+        .where(eq(liveRunSessions.id, existing.id))
+        .returning();
+      return updated;
+    } else {
+      const [session] = await db.insert(liveRunSessions)
+        .values({
+          sessionKey,
+          userId,
+          isActive: true,
+          distanceCovered: data.distanceCovered ?? 0,
+          elapsedTime: data.elapsedTime ?? 0,
+          currentPace: data.currentPace ?? null,
+          cadence: data.cadence ?? null,
+          difficulty: data.difficulty ?? 'beginner',
+          gpsTrack: data.gpsTrack ?? [],
+          kmSplits: data.kmSplits ?? [],
+          routeId: data.routeId ?? null,
+        })
+        .returning();
+      return session;
+    }
+  }
+
+  async endLiveSessionByKey(sessionKey: string, userId: string): Promise<void> {
+    await db.update(liveRunSessions)
+      .set({ isActive: false })
+      .where(and(eq(liveRunSessions.sessionKey, sessionKey), eq(liveRunSessions.userId, userId)));
   }
 
   async saveGarminData(data: InsertGarminData): Promise<GarminData> {

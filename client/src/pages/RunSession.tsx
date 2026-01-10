@@ -1481,6 +1481,50 @@ export default function RunSession() {
     saveActiveRunSession(session);
   }, [active, time, distance, cadence, routeData, audioEnabled, aiCoachEnabled, kmSplits, lastKmAnnounced]);
 
+  const syncToDatabase = useCallback(async () => {
+    if (runStoppedRef.current) return;
+    if (distance < 0.1) return;
+    
+    try {
+      const profile = localStorage.getItem('userProfile');
+      const userId = profile ? JSON.parse(profile).id : null;
+      if (!userId) return;
+
+      const gpsTrack = positionsRef.current.slice(-500).map(p => ({
+        lat: p.lat,
+        lng: p.lng,
+        timestamp: p.timestamp,
+      }));
+
+      const paceSecondsPerKm = distance > 0.1 ? time / distance : 0;
+      let currentPace: string | null = null;
+      if (paceSecondsPerKm > 0 && isFinite(paceSecondsPerKm)) {
+        const mins = Math.floor(paceSecondsPerKm / 60);
+        const secs = Math.floor(paceSecondsPerKm % 60);
+        currentPace = `${mins}'${secs.toString().padStart(2, '0')}"`;
+      }
+
+      await fetch('/api/live-sessions/sync', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionKey: sessionIdRef.current,
+          userId,
+          distanceKm: distance,
+          elapsedSeconds: time,
+          currentPace,
+          cadence: cadence || null,
+          difficulty: routeData?.difficulty || sessionMetadataRef.current.levelId || 'beginner',
+          gpsTrack: gpsTrack.length > 0 ? gpsTrack : [],
+          kmSplits: kmSplits.length > 0 ? kmSplits : [],
+          routeId: routeData?.id || sessionMetadataRef.current.routeId || null,
+        }),
+      });
+    } catch (err) {
+      console.log('Background sync failed (will retry):', err);
+    }
+  }, [distance, time, cadence, routeData, kmSplits]);
+
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (time > 0 || distance > 0) {
@@ -1501,14 +1545,17 @@ export default function RunSession() {
     if (!active && time === 0) return;
     
     const saveInterval = setInterval(saveSessionNow, 5000);
+    const dbSyncInterval = setInterval(syncToDatabase, 30000);
     
     const handleBeforeUnload = () => {
       saveSessionNow();
+      syncToDatabase();
     };
     
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
         saveSessionNow();
+        syncToDatabase();
       }
     };
     
@@ -1517,11 +1564,12 @@ export default function RunSession() {
     
     return () => {
       clearInterval(saveInterval);
+      clearInterval(dbSyncInterval);
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       saveSessionNow();
     };
-  }, [active, time, saveSessionNow]);
+  }, [active, time, saveSessionNow, syncToDatabase]);
 
   const requestMotionPermission = useCallback(async () => {
     if (!('DeviceMotionEvent' in window)) {
