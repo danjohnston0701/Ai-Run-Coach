@@ -2329,6 +2329,7 @@ export default function RunSession() {
             gpsTrack: downsampleGpsTrack(positionsRef.current, 1000),
             paceData: formattedKmSplits,
             weatherData: runWeather || undefined,
+            sessionKey: sessionIdRef.current,
           };
           
           console.log('[Save] Attempting to save run to database for userId:', userProfile.id);

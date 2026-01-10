@@ -452,8 +452,19 @@ export async function registerRoutes(
   // Runs endpoints
   app.post("/api/runs", async (req, res) => {
     try {
-      const data = insertRunSchema.parse(req.body);
+      const { sessionKey, ...runData } = req.body;
+      const data = insertRunSchema.parse(runData);
       const run = await storage.createRun(data);
+      
+      // Link any AI coaching logs from this session to the completed run
+      if (sessionKey && run.id) {
+        try {
+          await storage.updateAiCoachingLogsRunId(sessionKey, run.id);
+        } catch (logErr) {
+          console.warn("Failed to link coaching logs to run:", logErr);
+        }
+      }
+      
       res.status(201).json(run);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -734,6 +745,36 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Telemetry fetch error:", error);
       res.status(500).json({ error: "Failed to get run telemetry" });
+    }
+  });
+
+  // Get AI coaching logs for a run (admin only)
+  app.get("/api/runs/:id/coaching-logs", async (req, res) => {
+    try {
+      const runId = req.params.id;
+      const userId = req.query.userId as string;
+      
+      if (!userId) {
+        return res.status(400).json({ error: "userId required" });
+      }
+      
+      // Verify user is admin
+      const user = await storage.getUser(userId);
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      
+      // Get the run to verify it exists
+      const run = await storage.getRun(runId);
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+      
+      const logs = await storage.getAiCoachingLogsByRun(runId);
+      res.json(logs);
+    } catch (error) {
+      console.error("Get coaching logs error:", error);
+      res.status(500).json({ error: "Failed to get coaching logs" });
     }
   });
 
