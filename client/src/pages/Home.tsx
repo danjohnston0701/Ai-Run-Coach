@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "framer-motion";
-import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, MicOff, Settings, Users, Check, Copy, Radio } from "lucide-react";
+import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, MicOff, Settings, Users, Check, Copy, Radio, Target } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -18,6 +18,7 @@ import { loadCoachSettings, saveCoachSettingsToProfile, loadCoachSettingsFromPro
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { GpsHelpDialog } from "@/components/GpsHelpDialog";
 import { WeatherWidget } from "@/components/WeatherWidget";
+import { GoalWidget } from "@/components/GoalWidget";
 import { useEntitlement, hasPremiumAccess } from "@/hooks/useSubscription";
 
 function urlBase64ToUint8Array(base64String: string) {
@@ -1275,6 +1276,17 @@ export default function Home() {
                 <button
                   onClick={() => {
                     setMenuOpen(false);
+                    setLocation("/goals");
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left"
+                  data-testid="menu-goals"
+                >
+                  <Target className="w-5 h-5 text-primary" />
+                  <span className="font-medium">Goals</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
                     setCoachSettingsOpen(true);
                   }}
                   className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left"
@@ -1322,6 +1334,9 @@ export default function Home() {
           )}
         </motion.div>
       </header>
+
+      {/* Goal Widget */}
+      {profile && <GoalWidget userId={profile.id} />}
 
       {/* GPS Status Section - Always visible */}
       {locationLoading && !userLocation && !locationError && (
