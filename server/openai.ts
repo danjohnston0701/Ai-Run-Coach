@@ -1,7 +1,12 @@
 import OpenAI from "openai";
 
+// Check if OpenAI API key is configured
+if (!process.env.OPENAI_API_KEY) {
+  console.warn('[OpenAI] WARNING: OPENAI_API_KEY is not set. AI features will not work.');
+}
+
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY || '',
 });
 
 export function calculateAge(dateOfBirth: string | Date | null | undefined): number | undefined {
@@ -1730,6 +1735,14 @@ IMPORTANT: You MUST include a "goalProgress" field in your response analyzing go
 Provide your elite coaching analysis. Pay special attention to pacing patterns, elevation impact, and any key events that occurred during the run.`;
 
   try {
+    // Check API key before making request
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('[OpenAI] generateComprehensiveRunAnalysis: OPENAI_API_KEY is not set');
+      throw new Error('OpenAI API key is not configured');
+    }
+    
+    console.log('[OpenAI] Generating comprehensive run analysis...');
+    
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -1744,11 +1757,13 @@ Provide your elite coaching analysis. Pay special attention to pacing patterns, 
     if (!content) {
       throw new Error("No response from OpenAI");
     }
+    
+    console.log('[OpenAI] Analysis generated successfully');
 
     const analysis = JSON.parse(content) as RunAnalysisResponse;
     return analysis;
-  } catch (error) {
-    console.error("Run analysis error:", error);
+  } catch (error: any) {
+    console.error("[OpenAI] Run analysis error:", error?.message || error);
     // Return a sensible fallback
     return {
       highlights: [`Completed a ${run.distance.toFixed(2)}km run - great effort!`],
