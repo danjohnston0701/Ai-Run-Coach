@@ -201,6 +201,18 @@ export interface CoachingRequest {
     uvIndex: number;
     precipitationProbability: number;
   };
+  // User's active goals for goal-aware coaching
+  goals?: Array<{
+    type: string;
+    title: string;
+    description?: string | null;
+    targetDate?: string | null;
+    distanceTarget?: string | null;
+    timeTargetSeconds?: number | null;
+    eventName?: string | null;
+    weeklyRunTarget?: number | null;
+    progressPercent?: number | null;
+  }>;
 }
 
 export interface CoachingResponse {
@@ -481,6 +493,46 @@ ${w.uvIndex > 7 ? "- High UV: Remind about sun protection, find shade when possi
 ${w.precipitationProbability > 50 ? "- Rain likely: Advise on grip, visibility, staying dry" : ""}`;
   }
   
+  // Goals section for goal-aware coaching
+  let goalsSection = "";
+  if (request.goals && request.goals.length > 0) {
+    goalsSection = "\n\nRUNNER'S ACTIVE GOALS:";
+    for (const goal of request.goals) {
+      goalsSection += `\n- ${goal.title} (${goal.type.replace(/_/g, ' ')})`;
+      if (goal.description) {
+        goalsSection += `: ${goal.description}`;
+      }
+      if (goal.targetDate) {
+        const daysLeft = Math.ceil((new Date(goal.targetDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+        if (daysLeft > 0) {
+          goalsSection += ` - ${daysLeft} days until target date`;
+        } else if (daysLeft === 0) {
+          goalsSection += ` - TARGET DATE IS TODAY!`;
+        }
+      }
+      if (goal.eventName) {
+        goalsSection += ` (Event: ${goal.eventName})`;
+      }
+      if (goal.distanceTarget) {
+        goalsSection += ` - Target: ${goal.distanceTarget}`;
+      }
+      if (goal.timeTargetSeconds) {
+        const mins = Math.floor(goal.timeTargetSeconds / 60);
+        const secs = goal.timeTargetSeconds % 60;
+        goalsSection += ` - Target time: ${mins}:${String(secs).padStart(2, '0')}`;
+      }
+      if (goal.progressPercent !== null && goal.progressPercent !== undefined && goal.progressPercent > 0) {
+        goalsSection += ` (${goal.progressPercent}% progress)`;
+      }
+    }
+    goalsSection += `\n\nGOAL-AWARE COACHING GUIDELINES:
+- Reference the runner's goals occasionally to keep them motivated
+- If training for an event, remind them how this run contributes to their preparation
+- For time/distance goals, relate current performance to their target
+- For consistency goals, acknowledge their commitment to regular running
+- Don't mention goals in every message - use naturally when relevant`;
+  }
+  
   // Select an elite coaching tip based on current run context
   const selectedCategory = selectCoachingCategory({
     paceChange: request.paceChange,
@@ -508,7 +560,7 @@ Current Run Stats:
 - Current km: ${request.currentKm || Math.floor(request.distanceCovered)}
 - Elapsed time: ${Math.floor(request.elapsedTime / 60)} minutes ${Math.floor(request.elapsedTime % 60)} seconds
 - Difficulty: ${request.difficulty}
-- Fitness level: ${request.userFitnessLevel || "intermediate"}${targetTimeInfo}${preferencesSection}${terrainSection}${weatherSection}${eventsSection}${splitInfo}${userMessageSection}${antiRepetitionSection}
+- Fitness level: ${request.userFitnessLevel || "intermediate"}${targetTimeInfo}${preferencesSection}${terrainSection}${weatherSection}${goalsSection}${eventsSection}${splitInfo}${userMessageSection}${antiRepetitionSection}
 
 ${request.milestones && request.milestones.length > 0 ? "PRIORITIZE milestone celebration!" : ""}
 ${request.terrain?.upcomingTerrain ? "PRIORITIZE terrain coaching - warn about upcoming hills." : ""} 
@@ -1443,6 +1495,17 @@ export interface RunAnalysisRequest {
     avgPace: string;
     completedAt?: string;
   }>;
+  goals?: Array<{
+    type: string;
+    title: string;
+    description?: string | null;
+    targetDate?: string | null;
+    distanceTarget?: string | null;
+    timeTargetSeconds?: number | null;
+    eventName?: string | null;
+    weeklyRunTarget?: number | null;
+    progressPercent?: number | null;
+  }>;
 }
 
 export interface RunAnalysisResponse {
@@ -1454,10 +1517,11 @@ export interface RunAnalysisResponse {
   overallAssessment: string;
   weatherImpact?: string;
   warmUpAnalysis?: string;
+  goalProgress?: string;
 }
 
 export async function generateComprehensiveRunAnalysis(request: RunAnalysisRequest): Promise<RunAnalysisResponse> {
-  const { run, user, previousRuns = [] } = request;
+  const { run, user, previousRuns = [], goals = [] } = request;
   
   // Format km splits for analysis - now properly parsing the object structure
   let splitsInfo = 'No km split data available';
@@ -1574,7 +1638,8 @@ Return ONLY valid JSON with this exact structure:
   "coachingTips": ["3-5 specific, actionable tips for improvement"],
   "overallAssessment": "2-3 sentence summary of the run and next steps",
   "weatherImpact": "1-2 sentences analyzing how weather conditions affected this run (only include if weather data is available)",
-  "warmUpAnalysis": "Analysis of starting heart rate and warm-up quality (only include if heart rate data is available)"
+  "warmUpAnalysis": "Analysis of starting heart rate and warm-up quality (only include if heart rate data is available)",
+  "goalProgress": "How this run contributes to the runner's active goals (only include if goals data is available)"
 }`;
 
   const userPrompt = `Analyze this run and provide elite coaching feedback:
@@ -1633,6 +1698,34 @@ If heart rate data shows a gradual rise in the first few minutes, note this as g
 IMPORTANT: You MUST include a "warmUpAnalysis" field if heart rate data is available in the telemetry.
 
 ${previousRunsInfo}
+
+${goals.length > 0 ? `RUNNER'S ACTIVE GOALS:
+${goals.map(g => {
+  let goalInfo = `- ${g.title} (${g.type.replace(/_/g, ' ')})`;
+  if (g.description) goalInfo += `: ${g.description}`;
+  if (g.targetDate) {
+    const daysLeft = Math.ceil((new Date(g.targetDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    if (daysLeft > 0) goalInfo += ` - ${daysLeft} days until target`;
+    else if (daysLeft === 0) goalInfo += ' - TARGET DATE IS TODAY!';
+  }
+  if (g.eventName) goalInfo += ` (Event: ${g.eventName})`;
+  if (g.distanceTarget) goalInfo += ` - Target: ${g.distanceTarget}`;
+  if (g.timeTargetSeconds) {
+    const mins = Math.floor(g.timeTargetSeconds / 60);
+    const secs = g.timeTargetSeconds % 60;
+    goalInfo += ` - Target time: ${mins}:${String(secs).padStart(2, '0')}`;
+  }
+  if (g.progressPercent) goalInfo += ` (${g.progressPercent}% progress)`;
+  return goalInfo;
+}).join('\n')}
+
+GOAL ANALYSIS GUIDELINES:
+- Analyze how this specific run contributes to each goal
+- For event goals: How does this training session prepare them for race day?
+- For time/distance goals: How does their current pace compare to their target?
+- For consistency goals: Acknowledge their commitment to showing up
+- For health goals: How is this run contributing to their wellbeing journey?
+IMPORTANT: You MUST include a "goalProgress" field in your response analyzing goal contribution.` : ''}
 
 Provide your elite coaching analysis. Pay special attention to pacing patterns, elevation impact, and any key events that occurred during the run.`;
 

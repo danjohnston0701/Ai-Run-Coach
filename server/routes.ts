@@ -559,6 +559,22 @@ export async function registerRoutes(
         40 // Target 40 data points for cost efficiency
       );
       
+      // Fetch user's active goals for goal-aware analysis
+      const userGoals = await storage.getGoalsByUserId(userId);
+      const activeGoals = userGoals
+        .filter(g => g.status === 'active')
+        .map(g => ({
+          type: g.type,
+          title: g.title,
+          description: g.description,
+          targetDate: g.targetDate?.toISOString(),
+          distanceTarget: g.distanceTarget,
+          timeTargetSeconds: g.timeTargetSeconds,
+          eventName: g.eventName,
+          weeklyRunTarget: g.weeklyRunTarget,
+          progressPercent: g.progressPercent
+        }));
+      
       // Prepare analysis request
       const analysis = await generateComprehensiveRunAnalysis({
         run: {
@@ -585,7 +601,8 @@ export async function registerRoutes(
           fitnessLevel: user.fitnessLevel || undefined,
           desiredFitnessLevel: user.desiredFitnessLevel || undefined
         },
-        previousRuns
+        previousRuns,
+        goals: activeGoals.length > 0 ? activeGoals : undefined
       });
       
       // Store the analysis for future retrieval

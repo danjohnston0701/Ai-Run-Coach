@@ -431,7 +431,19 @@ export default function RunSession() {
     fitnessLevel?: string;
     desiredFitnessLevel?: string;
     coachName?: string;
+    id?: string;
   } | null>(null);
+  const [userGoals, setUserGoals] = useState<Array<{
+    type: string;
+    title: string;
+    description?: string | null;
+    targetDate?: string | null;
+    distanceTarget?: string | null;
+    timeTargetSeconds?: number | null;
+    eventName?: string | null;
+    weeklyRunTarget?: number | null;
+    progressPercent?: number | null;
+  }>>([]);
   
   const positionsRef = useRef<Position[]>([]);
   
@@ -527,7 +539,29 @@ export default function RunSession() {
         fitnessLevel: parsed.fitnessLevel,
         desiredFitnessLevel: parsed.desiredFitnessLevel,
         coachName: parsed.coachName,
+        id: parsed.id,
       });
+      
+      // Fetch user's active goals for goal-aware coaching
+      if (parsed.id) {
+        fetch(`/api/goals/user/${parsed.id}`)
+          .then(res => res.ok ? res.json() : [])
+          .then(goals => {
+            const activeGoals = goals.filter((g: any) => g.status === 'active').map((g: any) => ({
+              type: g.type,
+              title: g.title,
+              description: g.description,
+              targetDate: g.targetDate,
+              distanceTarget: g.distanceTarget,
+              timeTargetSeconds: g.timeTargetSeconds,
+              eventName: g.eventName,
+              weeklyRunTarget: g.weeklyRunTarget,
+              progressPercent: g.progressPercent,
+            }));
+            setUserGoals(activeGoals);
+          })
+          .catch(err => console.error('Failed to fetch goals for coaching:', err));
+      }
       
       const savedPrefs = localStorage.getItem("coachPreferences");
       if (savedPrefs) {
@@ -1859,6 +1893,7 @@ export default function RunSession() {
           milestones: milestones.length > 0 ? milestones : undefined,
           kmSplitTimes: kmSplits,
           weather: runWeather || undefined,
+          goals: userGoals.length > 0 ? userGoals : undefined,
         })
       });
       
@@ -1900,7 +1935,7 @@ export default function RunSession() {
     } finally {
       setIsCoaching(false);
     }
-  }, [userProfile, coachPreferences, speakCoaching, speak, routeData, currentPosition, runWeather, kmSplits, coachSettings]);
+  }, [userProfile, coachPreferences, speakCoaching, speak, routeData, currentPosition, runWeather, kmSplits, coachSettings, userGoals]);
 
   useEffect(() => {
     if (!active || !aiCoachEnabled || gpsStatus !== "active") {
