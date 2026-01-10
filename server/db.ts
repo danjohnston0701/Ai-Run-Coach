@@ -3,13 +3,13 @@ import pkg from "pg";
 const { Pool } = pkg;
 import * as schema from "@shared/schema";
 
-const databaseUrl = process.env.EXTERNAL_DATABASE_URL || process.env.DATABASE_URL;
+const databaseUrl = process.env.DATABASE_URL || process.env.EXTERNAL_DATABASE_URL;
 
 if (!databaseUrl) {
   throw new Error("DATABASE_URL or EXTERNAL_DATABASE_URL environment variable is required");
 }
 
-console.log("Using database:", process.env.EXTERNAL_DATABASE_URL ? "External (Neon)" : "Replit");
+console.log("Using database:", process.env.DATABASE_URL ? "Replit" : "External (Neon)");
 
 const pool = new Pool({
   connectionString: databaseUrl,
