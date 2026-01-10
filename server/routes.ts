@@ -480,6 +480,56 @@ export async function registerRoutes(
     }
   });
 
+  // Get saved AI analysis for a run
+  app.get("/api/runs/:id/analysis", async (req, res) => {
+    try {
+      const runId = req.params.id;
+      const userId = req.query.userId as string;
+      
+      // Get the run to verify ownership
+      const run = await storage.getRun(runId);
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+      
+      // Verify ownership
+      if (userId && run.userId !== userId) {
+        return res.status(403).json({ error: "Not authorized to view this analysis" });
+      }
+      
+      // Try to get from run_analyses table first
+      const savedAnalysis = await storage.getRunAnalysis(runId);
+      if (savedAnalysis) {
+        return res.json({
+          highlights: savedAnalysis.highlights || [],
+          struggles: savedAnalysis.struggles || [],
+          personalBests: savedAnalysis.personalBests || [],
+          demographicComparison: savedAnalysis.demographicComparison || '',
+          coachingTips: savedAnalysis.coachingTips || [],
+          overallAssessment: savedAnalysis.overallAssessment || '',
+          weatherImpact: savedAnalysis.weatherImpact || '',
+          warmUpAnalysis: savedAnalysis.warmUpAnalysis || '',
+          goalProgress: savedAnalysis.goalProgress || '',
+          cached: true
+        });
+      }
+      
+      // Fall back to aiCoachingNotes in runs table (legacy data)
+      if (run.aiCoachingNotes && typeof run.aiCoachingNotes === 'object') {
+        const notes = run.aiCoachingNotes as any;
+        if (notes.highlights && notes.coachingTips) {
+          return res.json({ ...notes, cached: true });
+        }
+      }
+      
+      // No analysis found
+      return res.status(404).json({ error: "No analysis found for this run" });
+    } catch (error) {
+      console.error("Get run analysis error:", error);
+      res.status(500).json({ error: "Failed to get run analysis" });
+    }
+  });
+
   // Generate AI analysis for a run
   app.post("/api/runs/:id/analysis", async (req, res) => {
     try {
@@ -501,11 +551,33 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Not authorized to analyze this run" });
       }
       
-      // Check if we already have AI analysis stored
-      if (run.aiCoachingNotes && typeof run.aiCoachingNotes === 'object') {
-        const notes = run.aiCoachingNotes as any;
-        if (notes.highlights && notes.coachingTips) {
-          return res.json(notes);
+      // Check for forceRegenerate flag (to allow regeneration if needed)
+      const { forceRegenerate } = req.body;
+      
+      if (!forceRegenerate) {
+        // Check if we already have AI analysis stored in run_analyses table
+        const savedAnalysis = await storage.getRunAnalysis(runId);
+        if (savedAnalysis && savedAnalysis.highlights && savedAnalysis.coachingTips) {
+          return res.json({
+            highlights: savedAnalysis.highlights || [],
+            struggles: savedAnalysis.struggles || [],
+            personalBests: savedAnalysis.personalBests || [],
+            demographicComparison: savedAnalysis.demographicComparison || '',
+            coachingTips: savedAnalysis.coachingTips || [],
+            overallAssessment: savedAnalysis.overallAssessment || '',
+            weatherImpact: savedAnalysis.weatherImpact || '',
+            warmUpAnalysis: savedAnalysis.warmUpAnalysis || '',
+            goalProgress: savedAnalysis.goalProgress || '',
+            cached: true
+          });
+        }
+        
+        // Fall back to legacy aiCoachingNotes in runs table
+        if (run.aiCoachingNotes && typeof run.aiCoachingNotes === 'object') {
+          const notes = run.aiCoachingNotes as any;
+          if (notes.highlights && notes.coachingTips) {
+            return res.json({ ...notes, cached: true });
+          }
         }
       }
       
@@ -560,10 +632,10 @@ export async function registerRoutes(
       );
       
       // Fetch user's active goals for goal-aware analysis
-      const userGoals = await storage.getGoalsByUserId(userId);
+      const userGoals = await storage.getUserGoals(userId);
       const activeGoals = userGoals
-        .filter(g => g.status === 'active')
-        .map(g => ({
+        .filter((g: any) => g.status === 'active')
+        .map((g: any) => ({
           type: g.type,
           title: g.title,
           description: g.description,
@@ -605,7 +677,21 @@ export async function registerRoutes(
         goals: activeGoals.length > 0 ? activeGoals : undefined
       });
       
-      // Store the analysis for future retrieval
+      // Store the analysis in run_analyses table for persistent retrieval
+      await storage.upsertRunAnalysis({
+        runId,
+        highlights: analysis.highlights || [],
+        struggles: analysis.struggles || [],
+        personalBests: analysis.personalBests || [],
+        demographicComparison: analysis.demographicComparison || '',
+        coachingTips: analysis.coachingTips || [],
+        overallAssessment: analysis.overallAssessment || '',
+        weatherImpact: analysis.weatherImpact || '',
+        warmUpAnalysis: analysis.warmUpAnalysis || '',
+        goalProgress: analysis.goalProgress || '',
+      });
+      
+      // Also update legacy aiCoachingNotes for backwards compatibility
       await storage.updateRun(runId, {
         aiCoachingNotes: analysis as any
       });
