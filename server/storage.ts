@@ -5,7 +5,7 @@ import {
   users, preRegistrations, friends, routes, runs, liveRunSessions, garminData,
   friendRequests, pushSubscriptions, notifications, routeRatings,
   aiCoachDescription, aiCoachInstructions, aiCoachKnowledge, aiCoachFaq,
-  couponCodes, userCoupons, groupRuns, groupRunParticipants,
+  couponCodes, userCoupons, groupRuns, groupRunParticipants, goals,
   type User, type InsertUser,
   type PreRegistration, type InsertPreRegistration,
   type Friend, type InsertFriend,
@@ -25,6 +25,7 @@ import {
   type UserCoupon, type InsertUserCoupon,
   type GroupRun, type InsertGroupRun,
   type GroupRunParticipant, type InsertGroupRunParticipant,
+  type Goal, type InsertGoal,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -148,6 +149,18 @@ export interface IStorage {
   acceptGroupRunInvite(participantId: string): Promise<GroupRunParticipant | undefined>;
   declineGroupRunInvite(participantId: string): Promise<GroupRunParticipant | undefined>;
   getGroupRunParticipantCounts(groupRunId: string): Promise<{ total: number; pending: number; accepted: number; declined: number; ready: number }>;
+
+  // Goals
+  createGoal(data: InsertGoal): Promise<Goal>;
+  getGoal(id: string): Promise<Goal | undefined>;
+  getUserGoals(userId: string, status?: string): Promise<Goal[]>;
+  getUserActiveGoals(userId: string): Promise<Goal[]>;
+  getPrimaryGoal(userId: string): Promise<Goal | undefined>;
+  updateGoal(id: string, data: Partial<InsertGoal>): Promise<Goal | undefined>;
+  updateGoalProgress(id: string, progressPercent: number): Promise<Goal | undefined>;
+  completeGoal(id: string): Promise<Goal | undefined>;
+  abandonGoal(id: string): Promise<Goal | undefined>;
+  deleteGoal(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1070,6 +1083,98 @@ export class DatabaseStorage implements IStorage {
         declined: participants.filter(p => p.invitationStatus === 'declined').length,
         ready: participants.filter(p => p.readyToStart === true).length
       };
+    });
+  }
+
+  // Goals
+  async createGoal(data: InsertGoal): Promise<Goal> {
+    return withRetry(async () => {
+      const [goal] = await db.insert(goals).values(data).returning();
+      return goal;
+    });
+  }
+
+  async getGoal(id: string): Promise<Goal | undefined> {
+    return withRetry(async () => {
+      const [goal] = await db.select().from(goals).where(eq(goals.id, id));
+      return goal;
+    });
+  }
+
+  async getUserGoals(userId: string, status?: string): Promise<Goal[]> {
+    return withRetry(async () => {
+      if (status) {
+        return db.select().from(goals)
+          .where(and(eq(goals.userId, userId), eq(goals.status, status)))
+          .orderBy(desc(goals.priority), desc(goals.createdAt));
+      }
+      return db.select().from(goals)
+        .where(eq(goals.userId, userId))
+        .orderBy(desc(goals.priority), desc(goals.createdAt));
+    });
+  }
+
+  async getUserActiveGoals(userId: string): Promise<Goal[]> {
+    return withRetry(async () => {
+      return db.select().from(goals)
+        .where(and(eq(goals.userId, userId), eq(goals.status, 'active')))
+        .orderBy(goals.priority, desc(goals.createdAt));
+    });
+  }
+
+  async getPrimaryGoal(userId: string): Promise<Goal | undefined> {
+    return withRetry(async () => {
+      const [goal] = await db.select().from(goals)
+        .where(and(eq(goals.userId, userId), eq(goals.status, 'active')))
+        .orderBy(goals.priority)
+        .limit(1);
+      return goal;
+    });
+  }
+
+  async updateGoal(id: string, data: Partial<InsertGoal>): Promise<Goal | undefined> {
+    return withRetry(async () => {
+      const [goal] = await db.update(goals)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(goals.id, id))
+        .returning();
+      return goal;
+    });
+  }
+
+  async updateGoalProgress(id: string, progressPercent: number): Promise<Goal | undefined> {
+    return withRetry(async () => {
+      const [goal] = await db.update(goals)
+        .set({ progressPercent, updatedAt: new Date() })
+        .where(eq(goals.id, id))
+        .returning();
+      return goal;
+    });
+  }
+
+  async completeGoal(id: string): Promise<Goal | undefined> {
+    return withRetry(async () => {
+      const [goal] = await db.update(goals)
+        .set({ status: 'completed', progressPercent: 100, completedAt: new Date(), updatedAt: new Date() })
+        .where(eq(goals.id, id))
+        .returning();
+      return goal;
+    });
+  }
+
+  async abandonGoal(id: string): Promise<Goal | undefined> {
+    return withRetry(async () => {
+      const [goal] = await db.update(goals)
+        .set({ status: 'abandoned', updatedAt: new Date() })
+        .where(eq(goals.id, id))
+        .returning();
+      return goal;
+    });
+  }
+
+  async deleteGoal(id: string): Promise<void> {
+    return withRetry(async () => {
+      await db.delete(goals).where(eq(goals.id, id));
     });
   }
 }
