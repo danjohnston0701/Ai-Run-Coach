@@ -129,6 +129,20 @@ export default function RunInsights() {
   } | null>(null);
   const [isLoadingAiAnalysis, setIsLoadingAiAnalysis] = useState(false);
   const [aiAnalysisError, setAiAnalysisError] = useState<string | null>(null);
+  const [coachingLogs, setCoachingLogs] = useState<Array<{
+    id: string;
+    createdAt: string;
+    promptSummary: string;
+    response: string;
+    terrainContext: string | null;
+    weatherContext: string | null;
+    latencyMs: number | null;
+    runDistanceKm: number | null;
+    runDurationSecs: number | null;
+  }>>([]);
+  const [isLoadingCoachingLogs, setIsLoadingCoachingLogs] = useState(false);
+  const [showCoachingLogs, setShowCoachingLogs] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [telemetryData, setTelemetryData] = useState<{
     dataPoints: TelemetryDataPoint[];
     paceStats?: { min: number; max: number; avg: number };
@@ -269,6 +283,39 @@ export default function RunInsights() {
     
     fetchTelemetry();
   }, [params?.id]);
+
+  // Check admin status and fetch coaching logs for admin users
+  useEffect(() => {
+    const profile = localStorage.getItem("userProfile");
+    if (profile) {
+      const parsed = JSON.parse(profile);
+      if (parsed.isAdmin) {
+        setIsAdmin(true);
+      }
+    }
+  }, []);
+
+  // Fetch coaching logs when admin clicks to view them
+  const fetchCoachingLogs = async () => {
+    if (!params?.id || isLoadingCoachingLogs) return;
+    
+    setIsLoadingCoachingLogs(true);
+    try {
+      const profile = localStorage.getItem("userProfile");
+      const userId = profile ? JSON.parse(profile).id : null;
+      if (!userId) return;
+      
+      const response = await fetch(`/api/runs/${params.id}/coaching-logs?userId=${userId}`);
+      if (response.ok) {
+        const logs = await response.json();
+        setCoachingLogs(logs);
+      }
+    } catch (err) {
+      console.error('Failed to fetch coaching logs:', err);
+    } finally {
+      setIsLoadingCoachingLogs(false);
+    }
+  };
 
   // Fetch AI cadence analysis when run is loaded
   useEffect(() => {
@@ -1449,6 +1496,92 @@ export default function RunInsights() {
             </div>
           )}
         </section>
+
+        {/* Admin AI Coaching Logs Section */}
+        {isAdmin && (
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-purple-500/10 rounded-lg">
+                  <Brain className="w-5 h-5 text-purple-400" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-display font-bold uppercase tracking-wide">AI Coaching Logs</h2>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Admin: View OpenAI interactions</p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (!showCoachingLogs && coachingLogs.length === 0) {
+                    fetchCoachingLogs();
+                  }
+                  setShowCoachingLogs(!showCoachingLogs);
+                }}
+                className="border-purple-500/30 text-purple-400 hover:bg-purple-500/10"
+                data-testid="button-toggle-coaching-logs"
+              >
+                {isLoadingCoachingLogs ? "Loading..." : showCoachingLogs ? "Hide Logs" : "View Logs"}
+              </Button>
+            </div>
+            
+            {showCoachingLogs && (
+              <Card className="bg-card/30 border-purple-500/20 backdrop-blur-sm">
+                <CardContent className="p-4">
+                  {coachingLogs.length === 0 ? (
+                    <p className="text-sm text-white/60 text-center py-4">
+                      {isLoadingCoachingLogs ? "Loading coaching logs..." : "No AI coaching interactions recorded for this run"}
+                    </p>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="text-xs text-white/60 mb-2">
+                        {coachingLogs.length} coaching interaction{coachingLogs.length !== 1 ? 's' : ''} • 
+                        Total latency: {coachingLogs.reduce((sum, log) => sum + (log.latencyMs || 0), 0)}ms
+                      </div>
+                      {coachingLogs.map((log, idx) => (
+                        <div key={log.id} className="border border-white/10 rounded-lg p-3 space-y-2">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-purple-400 font-mono">#{idx + 1}</span>
+                            <span className="text-white/40">
+                              {new Date(log.createdAt).toLocaleTimeString()} • {log.latencyMs}ms
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-xs text-white/60">
+                            <div>Distance: {log.runDistanceKm?.toFixed(2) || '-'} km</div>
+                            <div>Duration: {log.runDurationSecs ? Math.floor(log.runDurationSecs / 60) + ':' + String(Math.floor(log.runDurationSecs % 60)).padStart(2, '0') : '-'}</div>
+                          </div>
+                          {(log.terrainContext || log.weatherContext) && (
+                            <div className="flex gap-2 text-xs">
+                              {log.terrainContext && (
+                                <Badge variant="outline" className="text-orange-400 border-orange-400/30">
+                                  Terrain: {log.terrainContext}
+                                </Badge>
+                              )}
+                              {log.weatherContext && (
+                                <Badge variant="outline" className="text-blue-400 border-blue-400/30">
+                                  Weather: {log.weatherContext}
+                                </Badge>
+                              )}
+                            </div>
+                          )}
+                          <div className="bg-white/5 rounded p-2 text-xs">
+                            <div className="text-purple-300 font-medium mb-1">Prompt:</div>
+                            <div className="text-white/70">{log.promptSummary}</div>
+                          </div>
+                          <div className="bg-primary/5 rounded p-2 text-xs">
+                            <div className="text-primary font-medium mb-1">Response:</div>
+                            <div className="text-white/80">{log.response}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </section>
+        )}
 
         {/* Weather Conditions */}
         {(run as any).weatherData && (
