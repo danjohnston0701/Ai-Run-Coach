@@ -3,19 +3,19 @@ import pkg from "pg";
 const { Pool } = pkg;
 import * as schema from "@shared/schema";
 
-// Always prioritize EXTERNAL_DATABASE_URL (Neon) when available - this is where user data lives
-// Fall back to DATABASE_URL (Replit's built-in) only if EXTERNAL_DATABASE_URL is not set
-const databaseUrl = process.env.EXTERNAL_DATABASE_URL || process.env.DATABASE_URL;
+// In production (deployment), use EXTERNAL_DATABASE_URL (Neon) where user data lives
+// In development, use DATABASE_URL (Replit's local PostgreSQL)
+const isProduction = process.env.REPLIT_DEPLOYMENT === '1' || process.env.NODE_ENV === 'production';
+const databaseUrl = isProduction 
+  ? (process.env.EXTERNAL_DATABASE_URL || process.env.DATABASE_URL)
+  : (process.env.DATABASE_URL || process.env.EXTERNAL_DATABASE_URL);
 
 if (!databaseUrl) {
   throw new Error("DATABASE_URL or EXTERNAL_DATABASE_URL environment variable is required");
 }
 
-const isUsingNeon = !!process.env.EXTERNAL_DATABASE_URL;
-console.log("Using database:", isUsingNeon ? "External (Neon)" : "Replit built-in");
-console.log("NODE_ENV:", process.env.NODE_ENV);
-console.log("EXTERNAL_DATABASE_URL exists:", !!process.env.EXTERNAL_DATABASE_URL);
-console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
+console.log(`Database mode: ${isProduction ? 'Production' : 'Development'}`);
+console.log(`Using: ${isProduction && process.env.EXTERNAL_DATABASE_URL ? 'EXTERNAL_DATABASE_URL (Neon)' : 'DATABASE_URL'}`);
 
 const pool = new Pool({
   connectionString: databaseUrl,
