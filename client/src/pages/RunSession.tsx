@@ -213,22 +213,32 @@ function getDirectionInstruction(currentBearing: number, nextBearing: number, di
 }
 
 const COACH_MESSAGES = [
-  "Good pace. Keep your breathing steady.",
-  "You're doing great! Stay focused.",
-  "Keep your head up, you're doing great.",
-  "Relax your shoulders, rememberto use your arms.",
-  "Focus on your breathing. In, two, three.... Out, two, three."
+  "Keep your posture tall and proud, imagine a string gently lifting the top of your head.",
+  "Lightly engage your core to keep your torso stable as your legs and arms move.",
+  "Settle into a steady, rhythmic breathing pattern that feels sustainable.",
+  "Stay tall through your hips, avoid collapsing or bending at the waist as you tire.",
+  "Relax your shoulders and let them drop away from your ears.",
+  "If you feel stressed, take a deeper, slower breath and genty reset your rhythm.",
+  "Remember to smile! It helps you relax and enjoy the run.",
+  "Keep your eyes on the horizon, not your feet.",
+  "Think quick and elastic, lifting the foot up and through instead of pushing long and hard.",
+  "Keep your arms relaxed and swinging naturally with your stride.",
+  "Run with quite confidence, efficient, relaxed form is your biggest advantage today.",
+  "Let your foot land roughly under your body instead of reaching out in front",
+  "Keep your hands soft, as if gently holding something fragile."
 ];
 
 const MOTIVATIONAL_MESSAGES = [
-  "You're crushing it!",
-  "Keep pushing, you've got this!",
-  "Strong work! Stay focused.",
-  "You're doing amazing!",
-  "Every step counts. Keep going!",
-  "That's the pace! Maintain it.",
-  "You're a machine!",
-  "Fantastic effort!"
+  "You're stronger with every stride. Stay smooth, stay strong",
+  "Breathe deep and reset. the next kilometer is yours to own",
+  "Pain fades, pride lasts - push through this stetch and keep your head up",
+  "Focus on form - tall posture, light feet and controlled breathing. You've got this.",
+  "Your body can do this. Trust it and let your mind follow",
+  "One step at a time. That's how every great journey is conquered",
+  "Every run is a story of progress. Focus on your purpose",
+  "It's not about being the fastest, it's about being a better version of yourself",
+  "Remember why you started. Keep going, you're making progress",
+  "Your body is capable of amazing things. Trust the process and keep moving forward"
 ];
 
 // Legacy static feedback - kept as fallback
