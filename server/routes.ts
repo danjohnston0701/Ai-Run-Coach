@@ -5,7 +5,7 @@ import {
   insertPreRegistrationSchema, insertUserSchema, insertRouteSchema, insertRunSchema, 
   insertLiveRunSessionSchema, insertPushSubscriptionSchema,
   insertAiCoachDescriptionSchema, insertAiCoachInstructionSchema, 
-  insertAiCoachKnowledgeSchema, insertAiCoachFaqSchema
+  insertAiCoachKnowledgeSchema, insertAiCoachFaqSchema, insertGoalSchema
 } from "@shared/schema";
 import { z } from "zod";
 import { generateRoute, getCoachingAdvice, analyzeRunPerformance, generateTTS, calculateAge, analyzeCadence, type CoachTone, type TTSVoice, type AiCoachConfig } from "./openai";
@@ -2957,6 +2957,144 @@ export async function registerRoutes(
       });
     } catch (error) {
       res.status(500).json({ error: "Failed to get AI config" });
+    }
+  });
+
+  // =====================
+  // GOALS ROUTES
+  // =====================
+
+  // Create a new goal
+  app.post("/api/goals", async (req, res) => {
+    try {
+      const data = insertGoalSchema.parse(req.body);
+      const goal = await storage.createGoal(data);
+      res.status(201).json(goal);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      console.error("Create goal error:", error);
+      res.status(500).json({ error: "Failed to create goal" });
+    }
+  });
+
+  // Get user's goals (with optional status filter)
+  app.get("/api/goals/user/:userId", async (req, res) => {
+    try {
+      const status = req.query.status as string | undefined;
+      const goals = await storage.getUserGoals(req.params.userId, status);
+      res.json(goals);
+    } catch (error) {
+      console.error("Get user goals error:", error);
+      res.status(500).json({ error: "Failed to get goals" });
+    }
+  });
+
+  // Get user's active goals
+  app.get("/api/goals/user/:userId/active", async (req, res) => {
+    try {
+      const goals = await storage.getUserActiveGoals(req.params.userId);
+      res.json(goals);
+    } catch (error) {
+      console.error("Get active goals error:", error);
+      res.status(500).json({ error: "Failed to get active goals" });
+    }
+  });
+
+  // Get user's primary goal (highest priority active goal)
+  app.get("/api/goals/user/:userId/primary", async (req, res) => {
+    try {
+      const goal = await storage.getPrimaryGoal(req.params.userId);
+      res.json(goal || null);
+    } catch (error) {
+      console.error("Get primary goal error:", error);
+      res.status(500).json({ error: "Failed to get primary goal" });
+    }
+  });
+
+  // Get a specific goal
+  app.get("/api/goals/:id", async (req, res) => {
+    try {
+      const goal = await storage.getGoal(req.params.id);
+      if (!goal) {
+        return res.status(404).json({ error: "Goal not found" });
+      }
+      res.json(goal);
+    } catch (error) {
+      console.error("Get goal error:", error);
+      res.status(500).json({ error: "Failed to get goal" });
+    }
+  });
+
+  // Update a goal
+  app.patch("/api/goals/:id", async (req, res) => {
+    try {
+      const goal = await storage.updateGoal(req.params.id, req.body);
+      if (!goal) {
+        return res.status(404).json({ error: "Goal not found" });
+      }
+      res.json(goal);
+    } catch (error) {
+      console.error("Update goal error:", error);
+      res.status(500).json({ error: "Failed to update goal" });
+    }
+  });
+
+  // Update goal progress
+  app.patch("/api/goals/:id/progress", async (req, res) => {
+    try {
+      const { progressPercent } = req.body;
+      if (typeof progressPercent !== 'number' || progressPercent < 0 || progressPercent > 100) {
+        return res.status(400).json({ error: "Invalid progress percent (must be 0-100)" });
+      }
+      const goal = await storage.updateGoalProgress(req.params.id, progressPercent);
+      if (!goal) {
+        return res.status(404).json({ error: "Goal not found" });
+      }
+      res.json(goal);
+    } catch (error) {
+      console.error("Update goal progress error:", error);
+      res.status(500).json({ error: "Failed to update goal progress" });
+    }
+  });
+
+  // Complete a goal
+  app.post("/api/goals/:id/complete", async (req, res) => {
+    try {
+      const goal = await storage.completeGoal(req.params.id);
+      if (!goal) {
+        return res.status(404).json({ error: "Goal not found" });
+      }
+      res.json(goal);
+    } catch (error) {
+      console.error("Complete goal error:", error);
+      res.status(500).json({ error: "Failed to complete goal" });
+    }
+  });
+
+  // Abandon a goal
+  app.post("/api/goals/:id/abandon", async (req, res) => {
+    try {
+      const goal = await storage.abandonGoal(req.params.id);
+      if (!goal) {
+        return res.status(404).json({ error: "Goal not found" });
+      }
+      res.json(goal);
+    } catch (error) {
+      console.error("Abandon goal error:", error);
+      res.status(500).json({ error: "Failed to abandon goal" });
+    }
+  });
+
+  // Delete a goal
+  app.delete("/api/goals/:id", async (req, res) => {
+    try {
+      await storage.deleteGoal(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete goal error:", error);
+      res.status(500).json({ error: "Failed to delete goal" });
     }
   });
 
