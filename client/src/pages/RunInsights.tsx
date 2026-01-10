@@ -212,6 +212,34 @@ export default function RunInsights() {
     }
   }, [params?.id]);
 
+  // Fetch saved AI analysis on page load
+  useEffect(() => {
+    if (!params?.id) return;
+    
+    const fetchSavedAnalysis = async () => {
+      try {
+        const profile = localStorage.getItem("userProfile");
+        const userId = profile ? JSON.parse(profile).id : null;
+        const url = userId 
+          ? `/api/runs/${params.id}/analysis?userId=${userId}` 
+          : `/api/runs/${params.id}/analysis`;
+        
+        const response = await fetch(url);
+        if (response.ok) {
+          const savedAnalysis = await response.json();
+          if (savedAnalysis && savedAnalysis.highlights) {
+            setAiAnalysis(savedAnalysis);
+          }
+        }
+      } catch (err) {
+        // Silently fail - user can manually generate if needed
+        console.warn('No saved AI analysis found:', err);
+      }
+    };
+    
+    fetchSavedAnalysis();
+  }, [params?.id]);
+
   // Fetch telemetry data for charts
   useEffect(() => {
     if (!params?.id) return;
