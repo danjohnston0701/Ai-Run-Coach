@@ -1,22 +1,8 @@
 import OpenAI from "openai";
 
-// Use Replit AI Integration if available (recommended for production)
-// Falls back to direct OPENAI_API_KEY if AI Integration not configured
-const useReplitAI = process.env.AI_INTEGRATIONS_OPENAI_API_KEY && process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-const useDirectKey = process.env.OPENAI_API_KEY;
-
-if (!useReplitAI && !useDirectKey) {
-  console.warn('[OpenAI] WARNING: No OpenAI API key configured. AI features will not work.');
-  console.warn('[OpenAI] Set either AI_INTEGRATIONS_OPENAI_API_KEY (Replit) or OPENAI_API_KEY');
-} else if (useReplitAI) {
-  console.log('[OpenAI] Using Replit AI Integration');
-} else {
-  console.log('[OpenAI] Using direct OPENAI_API_KEY');
-}
-
+// Initialize OpenAI with user's API key
 const openai = new OpenAI({
-  apiKey: useReplitAI ? process.env.AI_INTEGRATIONS_OPENAI_API_KEY : process.env.OPENAI_API_KEY || '',
-  baseURL: useReplitAI ? process.env.AI_INTEGRATIONS_OPENAI_BASE_URL : undefined,
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 export function calculateAge(dateOfBirth: string | Date | null | undefined): number | undefined {
@@ -1745,14 +1731,6 @@ IMPORTANT: You MUST include a "goalProgress" field in your response analyzing go
 Provide your elite coaching analysis. Pay special attention to pacing patterns, elevation impact, and any key events that occurred during the run.`;
 
   try {
-    // Check API key before making request
-    if (!process.env.OPENAI_API_KEY) {
-      console.error('[OpenAI] generateComprehensiveRunAnalysis: OPENAI_API_KEY is not set');
-      throw new Error('OpenAI API key is not configured');
-    }
-    
-    console.log('[OpenAI] Generating comprehensive run analysis...');
-    
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -1767,13 +1745,11 @@ Provide your elite coaching analysis. Pay special attention to pacing patterns, 
     if (!content) {
       throw new Error("No response from OpenAI");
     }
-    
-    console.log('[OpenAI] Analysis generated successfully');
 
     const analysis = JSON.parse(content) as RunAnalysisResponse;
     return analysis;
-  } catch (error: any) {
-    console.error("[OpenAI] Run analysis error:", error?.message || error);
+  } catch (error) {
+    console.error("Run analysis error:", error);
     // Return a sensible fallback
     return {
       highlights: [`Completed a ${run.distance.toFixed(2)}km run - great effort!`],

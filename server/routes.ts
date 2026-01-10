@@ -697,26 +697,9 @@ export async function registerRoutes(
       });
       
       res.json(analysis);
-    } catch (error: any) {
+    } catch (error) {
       console.error("Run analysis error:", error);
-      console.error("Error message:", error?.message);
-      console.error("Error stack:", error?.stack);
-      
-      // Check for specific OpenAI errors
-      if (error?.status === 401) {
-        console.error("OpenAI authentication failed - check OPENAI_API_KEY");
-        return res.status(500).json({ error: "AI service authentication failed" });
-      }
-      if (error?.status === 429) {
-        console.error("OpenAI rate limit exceeded");
-        return res.status(503).json({ error: "AI service temporarily unavailable - rate limit exceeded" });
-      }
-      if (error?.code === 'insufficient_quota') {
-        console.error("OpenAI quota exceeded");
-        return res.status(503).json({ error: "AI service temporarily unavailable - quota exceeded" });
-      }
-      
-      res.status(500).json({ error: "Failed to generate run analysis", details: error?.message });
+      res.status(500).json({ error: "Failed to generate run analysis" });
     }
   });
 
