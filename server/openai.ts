@@ -1453,6 +1453,7 @@ export interface RunAnalysisResponse {
   coachingTips: string[];
   overallAssessment: string;
   weatherImpact?: string;
+  warmUpAnalysis?: string;
 }
 
 export async function generateComprehensiveRunAnalysis(request: RunAnalysisRequest): Promise<RunAnalysisResponse> {
@@ -1572,7 +1573,8 @@ Return ONLY valid JSON with this exact structure:
   "demographicComparison": "1-2 sentences comparing to others in their age/fitness group",
   "coachingTips": ["3-5 specific, actionable tips for improvement"],
   "overallAssessment": "2-3 sentence summary of the run and next steps",
-  "weatherImpact": "1-2 sentences analyzing how weather conditions affected this run (only include if weather data is available)"
+  "weatherImpact": "1-2 sentences analyzing how weather conditions affected this run (only include if weather data is available)",
+  "warmUpAnalysis": "Analysis of starting heart rate and warm-up quality (only include if heart rate data is available)"
 }`;
 
   const userPrompt = `Analyze this run and provide elite coaching feedback:
@@ -1615,6 +1617,20 @@ WEATHER IMPACT ANALYSIS GUIDELINES:
 - Rain/wet conditions: May impact footing and comfort
 IMPORTANT: You MUST include a "weatherImpact" field in your response analyzing how these conditions specifically affected this run's performance.` : ''}
 ${telemetryInfo}
+
+WARM-UP ANALYSIS GUIDELINES (if heart rate data available):
+Analyze the runner's starting heart rate (first 1-2 minutes of run) to assess warm-up quality:
+- Zone 1 (50-60% max HR): Indicates proper warm-up was performed before the run
+- Below Zone 1 (<50% max HR, typically <100-110 bpm for most adults): Suggests "cold start" - runner began without warming up
+
+If a cold start is detected, explain in the "warmUpAnalysis" field:
+1. That starting with a low heart rate suggests no pre-run warm-up
+2. Benefits of warming up: Gradually increases blood flow to muscles, raises core temperature, lubricates joints, activates neuromuscular pathways
+3. Performance benefits: Reduces injury risk by 50%+, improves running economy, enables faster pace from the start, prevents early fatigue
+4. Recommendation: 5-10 minute easy jog + dynamic stretches before main effort
+
+If heart rate data shows a gradual rise in the first few minutes, note this as good warm-up behavior.
+IMPORTANT: You MUST include a "warmUpAnalysis" field if heart rate data is available in the telemetry.
 
 ${previousRunsInfo}
 
