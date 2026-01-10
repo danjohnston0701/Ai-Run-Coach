@@ -295,6 +295,22 @@ export const groupRunParticipants = pgTable("group_run_participants", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const runAnalyses = pgTable("run_analyses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull().references(() => runs.id).unique(),
+  highlights: jsonb("highlights").$type<string[]>(),
+  struggles: jsonb("struggles").$type<string[]>(),
+  personalBests: jsonb("personal_bests").$type<string[]>(),
+  demographicComparison: text("demographic_comparison"),
+  coachingTips: jsonb("coaching_tips").$type<string[]>(),
+  overallAssessment: text("overall_assessment"),
+  weatherImpact: text("weather_impact"),
+  warmUpAnalysis: text("warm_up_analysis"),
+  goalProgress: text("goal_progress"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, userCode: true, createdAt: true });
 export const insertPreRegistrationSchema = createInsertSchema(preRegistrations).omit({ id: true, createdAt: true });
 export const insertFriendSchema = createInsertSchema(friends).omit({ id: true, createdAt: true });
@@ -315,6 +331,7 @@ export const insertUserCouponSchema = createInsertSchema(userCoupons).omit({ id:
 export const insertGroupRunSchema = createInsertSchema(groupRuns).omit({ id: true, createdAt: true, startedAt: true, completedAt: true });
 export const insertGroupRunParticipantSchema = createInsertSchema(groupRunParticipants).omit({ id: true, createdAt: true, joinedAt: true, completedAt: true, acceptedAt: true, declinedAt: true });
 export const insertGoalSchema = createInsertSchema(goals).omit({ id: true, createdAt: true, updatedAt: true, completedAt: true, progressPercent: true });
+export const insertRunAnalysisSchema = createInsertSchema(runAnalyses).omit({ id: true, createdAt: true, updatedAt: true });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -375,3 +392,6 @@ export type GroupRunParticipant = typeof groupRunParticipants.$inferSelect;
 
 export type InsertGoal = z.infer<typeof insertGoalSchema>;
 export type Goal = typeof goals.$inferSelect;
+
+export type InsertRunAnalysis = z.infer<typeof insertRunAnalysisSchema>;
+export type RunAnalysis = typeof runAnalyses.$inferSelect;
