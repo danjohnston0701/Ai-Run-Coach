@@ -1245,8 +1245,8 @@ export async function registerRoutes(
         difficulty, userFitnessLevel, targetTimeSeconds, userName, dateOfBirth,
         userWeight, userHeight, userGender, desiredFitnessLevel, coachName,
         userMessage, coachPreferences, coachTone, includeAiConfig,
-        // New parameters for smarter coaching
-        recentCoachingTopics, paceChange, currentKm, progressPercent, milestones, kmSplitTimes, terrain, weather
+        recentCoachingTopics, paceChange, currentKm, progressPercent, milestones, kmSplitTimes, terrain, weather,
+        userId, sessionKey, cadence
       } = req.body;
       
       if (!currentPace || !targetPace || elapsedTime === undefined || distanceCovered === undefined || !totalDistance) {
@@ -1275,7 +1275,7 @@ export async function registerRoutes(
         }
       }
 
-      const advice = await getCoachingAdvice({
+      const coachingRequest = {
         currentPace,
         targetPace,
         heartRate,
@@ -1296,7 +1296,6 @@ export async function registerRoutes(
         coachPreferences,
         coachTone,
         aiConfig,
-        // New parameters for smarter coaching
         recentCoachingTopics,
         paceChange,
         currentKm,
@@ -1305,7 +1304,52 @@ export async function registerRoutes(
         kmSplitTimes,
         terrain,
         weather
-      });
+      };
+
+      const startTime = Date.now();
+      const advice = await getCoachingAdvice(coachingRequest);
+      const latencyMs = Date.now() - startTime;
+
+      if (userId && sessionKey) {
+        try {
+          const promptSummary = JSON.stringify({
+            currentPace,
+            targetPace,
+            heartRate,
+            elapsedTime,
+            distanceCovered,
+            totalDistance,
+            difficulty,
+            terrain: terrain ? { grade: terrain.currentGrade, altitude: terrain.currentAltitude } : null,
+            weather: weather ? { temp: weather.temperature, condition: weather.condition } : null,
+            paceChange,
+            currentKm,
+            milestones,
+            userMessage
+          });
+
+          await storage.createAiCoachingLog({
+            userId,
+            sessionKey,
+            eventType: 'coaching',
+            elapsedSeconds: Math.round(elapsedTime),
+            distanceKm: distanceCovered,
+            currentPace,
+            heartRate,
+            cadence,
+            terrain: terrain || null,
+            weather: weather || null,
+            prompt: promptSummary,
+            response: advice,
+            responseText: advice.message,
+            topic: advice.topic || null,
+            model: 'gpt-4o',
+            latencyMs
+          });
+        } catch (logErr) {
+          console.warn("Failed to log AI coaching interaction:", logErr);
+        }
+      }
 
       res.json(advice);
     } catch (error) {

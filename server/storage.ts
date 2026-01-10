@@ -6,6 +6,7 @@ import {
   friendRequests, pushSubscriptions, notifications, routeRatings,
   aiCoachDescription, aiCoachInstructions, aiCoachKnowledge, aiCoachFaq,
   couponCodes, userCoupons, groupRuns, groupRunParticipants, goals, runAnalyses,
+  aiCoachingLogs,
   type User, type InsertUser,
   type PreRegistration, type InsertPreRegistration,
   type Friend, type InsertFriend,
@@ -27,6 +28,7 @@ import {
   type GroupRunParticipant, type InsertGroupRunParticipant,
   type Goal, type InsertGoal,
   type RunAnalysis, type InsertRunAnalysis,
+  type AiCoachingLog, type InsertAiCoachingLog,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -179,6 +181,12 @@ export interface IStorage {
   // Run Analysis
   getRunAnalysis(runId: string): Promise<RunAnalysis | undefined>;
   upsertRunAnalysis(data: InsertRunAnalysis): Promise<RunAnalysis>;
+
+  // AI Coaching Logs
+  createAiCoachingLog(data: InsertAiCoachingLog): Promise<AiCoachingLog>;
+  getAiCoachingLogsBySession(sessionKey: string): Promise<AiCoachingLog[]>;
+  getAiCoachingLogsByRun(runId: string): Promise<AiCoachingLog[]>;
+  updateAiCoachingLogsRunId(sessionKey: string, runId: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1296,6 +1304,38 @@ export class DatabaseStorage implements IStorage {
         })
         .returning();
       return analysis;
+    });
+  }
+
+  // AI Coaching Logs
+  async createAiCoachingLog(data: InsertAiCoachingLog): Promise<AiCoachingLog> {
+    return withRetry(async () => {
+      const [log] = await db.insert(aiCoachingLogs).values(data).returning();
+      return log;
+    });
+  }
+
+  async getAiCoachingLogsBySession(sessionKey: string): Promise<AiCoachingLog[]> {
+    return withRetry(async () => {
+      return db.select().from(aiCoachingLogs)
+        .where(eq(aiCoachingLogs.sessionKey, sessionKey))
+        .orderBy(aiCoachingLogs.createdAt);
+    });
+  }
+
+  async getAiCoachingLogsByRun(runId: string): Promise<AiCoachingLog[]> {
+    return withRetry(async () => {
+      return db.select().from(aiCoachingLogs)
+        .where(eq(aiCoachingLogs.runId, runId))
+        .orderBy(aiCoachingLogs.createdAt);
+    });
+  }
+
+  async updateAiCoachingLogsRunId(sessionKey: string, runId: string): Promise<void> {
+    return withRetry(async () => {
+      await db.update(aiCoachingLogs)
+        .set({ runId })
+        .where(eq(aiCoachingLogs.sessionKey, sessionKey));
     });
   }
 }

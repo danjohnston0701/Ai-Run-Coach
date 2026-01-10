@@ -1933,7 +1933,6 @@ export default function RunSession() {
           coachPreferences: coachPreferences || undefined,
           coachTone: coachSettings.tone,
           terrain: terrainData ? { ...terrainData, previousGrade: previousGradeRef.current ?? undefined } : undefined,
-          // New data for smarter coaching
           recentCoachingTopics: recentCoachingRef.current.slice(-5),
           paceChange,
           currentKm,
@@ -1942,6 +1941,9 @@ export default function RunSession() {
           kmSplitTimes: kmSplits,
           weather: runWeather || undefined,
           goals: userGoals.length > 0 ? userGoals : undefined,
+          userId: userProfile?.id,
+          sessionKey: sessionIdRef.current,
+          cadence: cadence || undefined,
         })
       });
       
