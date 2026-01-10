@@ -3,16 +3,12 @@ import pkg from "pg";
 const { Pool } = pkg;
 import * as schema from "@shared/schema";
 
-// ALWAYS prefer EXTERNAL_DATABASE_URL (Neon) when available - this is where production data lives
-// Only use DATABASE_URL if EXTERNAL is not set (for local-only development)
-const databaseUrl = process.env.EXTERNAL_DATABASE_URL || process.env.DATABASE_URL;
+// Use DATABASE_URL - this is where user data lives (Replit's production database)
+const databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {
-  throw new Error("DATABASE_URL or EXTERNAL_DATABASE_URL environment variable is required");
+  throw new Error("DATABASE_URL environment variable is required");
 }
-
-const usingExternal = !!process.env.EXTERNAL_DATABASE_URL;
-console.log(`Database: ${usingExternal ? 'Neon (EXTERNAL_DATABASE_URL)' : 'Local (DATABASE_URL)'}`);
 
 const pool = new Pool({
   connectionString: databaseUrl,
