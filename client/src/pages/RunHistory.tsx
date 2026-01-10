@@ -11,6 +11,7 @@ import WeatherImpactAnalysis from "@/components/WeatherImpactAnalysis";
 
 export interface RunData {
   id: string;
+  name?: string;
   date: string;
   time: string;
   distance: number;
@@ -50,6 +51,7 @@ export default function RunHistory() {
               const data = await response.json();
               dbRuns = data.map((run: any) => ({
                 id: run.id,
+                name: run.name,
                 date: run.completedAt ? new Date(run.completedAt).toLocaleDateString('en-GB') : '',
                 time: run.completedAt ? new Date(run.completedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '',
                 distance: run.distance,
@@ -252,9 +254,15 @@ export default function RunHistory() {
                   <div className="p-4">
                     <div className="flex items-start justify-between mb-4">
                       <div className="space-y-1">
+                        {run.name && (
+                          <span className="text-sm font-bold font-display uppercase tracking-wider text-primary mb-1 block">{run.name}</span>
+                        )}
                         <div className="flex items-center gap-2">
                           <Calendar className="w-4 h-4 text-primary" />
                           <span className="text-sm font-bold font-display uppercase tracking-wider">{run.date}</span>
+                          {run.time && (
+                            <span className="text-sm text-muted-foreground font-display">{run.time}</span>
+                          )}
                         </div>
                         <Badge className={`${getDifficultyBadgeColor(run.difficulty)} border rounded-full px-3 py-0 h-5 text-[10px] uppercase font-bold tracking-tighter`}>
                           {run.difficulty}

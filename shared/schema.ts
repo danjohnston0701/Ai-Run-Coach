@@ -103,6 +103,7 @@ export const runs = pgTable("runs", {
   userId: varchar("user_id").notNull().references(() => users.id),
   routeId: varchar("route_id").references(() => routes.id),
   groupRunId: varchar("group_run_id"),
+  name: text("name"),
   distance: real("distance").notNull(),
   duration: integer("duration").notNull(),
   avgPace: text("avg_pace"),

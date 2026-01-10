@@ -8,8 +8,9 @@ import { toast } from "sonner";
 import { 
   ArrowLeft, Calendar, TrendingUp, Heart, 
   Activity, Zap as CadenceIcon, Info, Timer, MapPin, Share2, Mail, User as UserIcon, Search, Star,
-  Facebook, Instagram, Download, X, Map, Users, Trophy, Medal, Award, Trash2, Brain, CheckCircle, Target, Lightbulb, AlertTriangle, Sparkles, Footprints
+  Facebook, Instagram, Download, X, Map, Users, Trophy, Medal, Award, Trash2, Brain, CheckCircle, Target, Lightbulb, AlertTriangle, Sparkles, Footprints, Pencil, Check
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { TelemetryChartSection, type TelemetryDataPoint } from "@/components/TelemetryChartSection";
 import {
   AlertDialog,
@@ -112,6 +113,9 @@ export default function RunInsights() {
   const [isLoadingCadenceAnalysis, setIsLoadingCadenceAnalysis] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState("");
+  const [isSavingName, setIsSavingName] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState<{
     highlights: string[];
     struggles: string[];
@@ -163,6 +167,7 @@ export default function RunInsights() {
           const dbRun = await response.json();
           const mappedRun: RunData = {
             id: dbRun.id,
+            name: dbRun.name,
             date: dbRun.completedAt ? new Date(dbRun.completedAt).toLocaleDateString('en-GB') : '',
             time: dbRun.completedAt ? new Date(dbRun.completedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '',
             distance: dbRun.distance,
@@ -443,6 +448,49 @@ export default function RunInsights() {
       setIsDeleting(false);
       setShowDeleteConfirm(false);
     }
+  };
+
+  const handleSaveRunName = async () => {
+    if (!run || !params?.id || !editedName.trim()) return;
+    
+    setIsSavingName(true);
+    try {
+      const response = await fetch(`/api/runs/${params.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: editedName.trim() }),
+      });
+      
+      if (!response.ok) {
+        throw new Error("Failed to update run name");
+      }
+      
+      // Update local state
+      setRun({ ...run, name: editedName.trim() } as any);
+      
+      // Update localStorage
+      const runHistory = localStorage.getItem("runHistory");
+      if (runHistory) {
+        const runs = JSON.parse(runHistory);
+        const updatedRuns = runs.map((r: RunData) => 
+          r.id === params.id ? { ...r, name: editedName.trim() } : r
+        );
+        localStorage.setItem("runHistory", JSON.stringify(updatedRuns));
+      }
+      
+      setIsEditingName(false);
+      toast.success("Run renamed successfully");
+    } catch (error) {
+      console.error("Failed to rename run:", error);
+      toast.error("Failed to rename run");
+    } finally {
+      setIsSavingName(false);
+    }
+  };
+
+  const startEditingName = () => {
+    setEditedName((run as any)?.name || `Run on ${run?.date}`);
+    setIsEditingName(true);
   };
 
   const generateAiAnalysis = async () => {
@@ -763,8 +811,58 @@ export default function RunInsights() {
           >
             <ArrowLeft className="w-5 h-5" />
           </Button>
-          <div>
-            <h1 className="text-3xl font-display font-bold text-primary uppercase tracking-wider">Run Insights</h1>
+          <div className="flex-1">
+            {isEditingName ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  value={editedName}
+                  onChange={(e) => setEditedName(e.target.value)}
+                  className="text-xl font-display font-bold bg-white/10 border-primary/50 text-foreground h-10 max-w-[280px]"
+                  placeholder="Enter run name..."
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveRunName();
+                    if (e.key === "Escape") setIsEditingName(false);
+                  }}
+                  data-testid="input-run-name"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleSaveRunName}
+                  disabled={isSavingName || !editedName.trim()}
+                  className="text-green-400 hover:bg-green-400/20"
+                  data-testid="button-save-name"
+                >
+                  <Check className="w-5 h-5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsEditingName(false)}
+                  className="text-muted-foreground hover:bg-white/10"
+                  data-testid="button-cancel-edit"
+                >
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-display font-bold text-primary uppercase tracking-wider">
+                  {(run as any).name || "Run Insights"}
+                </h1>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={startEditingName}
+                  className="text-muted-foreground hover:text-primary hover:bg-white/10 h-8 w-8"
+                  data-testid="button-edit-name"
+                  title="Rename run"
+                >
+                  <Pencil className="w-4 h-4" />
+                </Button>
+              </div>
+            )}
             <div className="flex items-center gap-2 mt-1">
               <Calendar className="w-3 h-3 text-muted-foreground" />
               <span className="text-xs text-muted-foreground">{run.date} • {run.time}</span>
