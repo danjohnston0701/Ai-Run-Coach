@@ -123,6 +123,31 @@ export const runs = pgTable("runs", {
   completedAt: timestamp("completed_at").defaultNow(),
 });
 
+export const goals = pgTable("goals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  type: text("type").notNull(), // 'event', 'distance_time', 'health_wellbeing', 'consistency'
+  title: text("title").notNull(),
+  description: text("description"),
+  status: text("status").default("active"), // 'active', 'completed', 'abandoned'
+  priority: integer("priority").default(1), // 1 = highest priority
+  targetDate: timestamp("target_date"),
+  distanceTarget: text("distance_target"), // 'marathon', 'half_marathon', '10k', '5k', or custom
+  timeTargetSeconds: integer("time_target_seconds"), // target time in seconds
+  healthTarget: text("health_target"), // 'improve_fitness', 'improve_endurance', 'lose_weight', or custom
+  targetWeightKg: real("target_weight_kg"), // for weight loss goals
+  startingWeightKg: real("starting_weight_kg"), // to track progress
+  weeklyRunTarget: integer("weekly_run_target"), // for consistency goals
+  monthlyDistanceTarget: real("monthly_distance_target"), // for distance goals
+  eventName: text("event_name"), // for event goals
+  eventLocation: text("event_location"), // for event goals
+  notes: text("notes"),
+  progressPercent: integer("progress_percent").default(0),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const liveRunSessions = pgTable("live_run_sessions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
@@ -289,6 +314,7 @@ export const insertCouponCodeSchema = createInsertSchema(couponCodes).omit({ id:
 export const insertUserCouponSchema = createInsertSchema(userCoupons).omit({ id: true, redeemedAt: true });
 export const insertGroupRunSchema = createInsertSchema(groupRuns).omit({ id: true, createdAt: true, startedAt: true, completedAt: true });
 export const insertGroupRunParticipantSchema = createInsertSchema(groupRunParticipants).omit({ id: true, createdAt: true, joinedAt: true, completedAt: true, acceptedAt: true, declinedAt: true });
+export const insertGoalSchema = createInsertSchema(goals).omit({ id: true, createdAt: true, updatedAt: true, completedAt: true, progressPercent: true });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -346,3 +372,6 @@ export type GroupRun = typeof groupRuns.$inferSelect;
 
 export type InsertGroupRunParticipant = z.infer<typeof insertGroupRunParticipantSchema>;
 export type GroupRunParticipant = typeof groupRunParticipants.$inferSelect;
+
+export type InsertGoal = z.infer<typeof insertGoalSchema>;
+export type Goal = typeof goals.$inferSelect;
