@@ -1,12 +1,22 @@
 import OpenAI from "openai";
 
-// Check if OpenAI API key is configured
-if (!process.env.OPENAI_API_KEY) {
-  console.warn('[OpenAI] WARNING: OPENAI_API_KEY is not set. AI features will not work.');
+// Use Replit AI Integration if available (recommended for production)
+// Falls back to direct OPENAI_API_KEY if AI Integration not configured
+const useReplitAI = process.env.AI_INTEGRATIONS_OPENAI_API_KEY && process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+const useDirectKey = process.env.OPENAI_API_KEY;
+
+if (!useReplitAI && !useDirectKey) {
+  console.warn('[OpenAI] WARNING: No OpenAI API key configured. AI features will not work.');
+  console.warn('[OpenAI] Set either AI_INTEGRATIONS_OPENAI_API_KEY (Replit) or OPENAI_API_KEY');
+} else if (useReplitAI) {
+  console.log('[OpenAI] Using Replit AI Integration');
+} else {
+  console.log('[OpenAI] Using direct OPENAI_API_KEY');
 }
 
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || '',
+  apiKey: useReplitAI ? process.env.AI_INTEGRATIONS_OPENAI_API_KEY : process.env.OPENAI_API_KEY || '',
+  baseURL: useReplitAI ? process.env.AI_INTEGRATIONS_OPENAI_BASE_URL : undefined,
 });
 
 export function calculateAge(dateOfBirth: string | Date | null | undefined): number | undefined {
