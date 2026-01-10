@@ -5,7 +5,7 @@ import {
   users, preRegistrations, friends, routes, runs, liveRunSessions, garminData,
   friendRequests, pushSubscriptions, notifications, routeRatings,
   aiCoachDescription, aiCoachInstructions, aiCoachKnowledge, aiCoachFaq,
-  couponCodes, userCoupons, groupRuns, groupRunParticipants, goals,
+  couponCodes, userCoupons, groupRuns, groupRunParticipants, goals, runAnalyses,
   type User, type InsertUser,
   type PreRegistration, type InsertPreRegistration,
   type Friend, type InsertFriend,
@@ -26,6 +26,7 @@ import {
   type GroupRun, type InsertGroupRun,
   type GroupRunParticipant, type InsertGroupRunParticipant,
   type Goal, type InsertGoal,
+  type RunAnalysis, type InsertRunAnalysis,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -161,6 +162,10 @@ export interface IStorage {
   completeGoal(id: string): Promise<Goal | undefined>;
   abandonGoal(id: string): Promise<Goal | undefined>;
   deleteGoal(id: string): Promise<void>;
+
+  // Run Analysis
+  getRunAnalysis(runId: string): Promise<RunAnalysis | undefined>;
+  upsertRunAnalysis(data: InsertRunAnalysis): Promise<RunAnalysis>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1175,6 +1180,38 @@ export class DatabaseStorage implements IStorage {
   async deleteGoal(id: string): Promise<void> {
     return withRetry(async () => {
       await db.delete(goals).where(eq(goals.id, id));
+    });
+  }
+
+  // Run Analysis
+  async getRunAnalysis(runId: string): Promise<RunAnalysis | undefined> {
+    return withRetry(async () => {
+      const [analysis] = await db.select().from(runAnalyses).where(eq(runAnalyses.runId, runId));
+      return analysis;
+    });
+  }
+
+  async upsertRunAnalysis(data: InsertRunAnalysis): Promise<RunAnalysis> {
+    return withRetry(async () => {
+      const [analysis] = await db.insert(runAnalyses)
+        .values(data)
+        .onConflictDoUpdate({
+          target: runAnalyses.runId,
+          set: {
+            highlights: data.highlights,
+            struggles: data.struggles,
+            personalBests: data.personalBests,
+            demographicComparison: data.demographicComparison,
+            coachingTips: data.coachingTips,
+            overallAssessment: data.overallAssessment,
+            weatherImpact: data.weatherImpact,
+            warmUpAnalysis: data.warmUpAnalysis,
+            goalProgress: data.goalProgress,
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
+      return analysis;
     });
   }
 }
