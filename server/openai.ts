@@ -28,42 +28,47 @@ export interface AiCoachConfig {
   faqs?: Array<{ question: string; answer: string }>;
 }
 
-// Elite coaching cues organized by professional technique categories
+// Elite coaching cues organized by professional technique categories (30 total)
 export const ELITE_COACHING_TIPS: Record<string, string[]> = {
   "posture_alignment": [
     "Keep your posture tall and proud; imagine a string gently lifting the top of your head.",
     "Run with your ears, shoulders, hips, and ankles roughly in one line.",
     "Stay tall through your hips; avoid collapsing or bending at the waist as you tire.",
     "Lean very slightly forward from the ankles, not from the hips, letting gravity help you move.",
-    "Keep your chin level and your neck relaxed; avoid letting your head drop forward."
+    "Keep your chin level and your neck relaxed; avoid letting your head drop forward.",
+    "Think 'run tall' — elongate your spine and lift your chest slightly for better breathing."
   ],
   "arms_upper_body": [
     "Relax your shoulders and let them drop away from your ears.",
     "Keep your arms close to your sides with a gentle bend at the elbows.",
     "Let your arms swing forward and back, not across your body.",
     "Keep your hands soft, as if gently holding something you don't want to crush.",
-    "When tension builds, briefly shake out your hands and arms, then settle back into rhythm."
+    "When tension builds, briefly shake out your hands and arms, then settle back into rhythm.",
+    "Your arms drive your legs — pump them actively to help maintain pace on tough sections."
   ],
   "breathing_relaxation": [
     "Breathe from your belly, letting the abdomen expand rather than lifting the chest.",
     "Settle into a steady, rhythmic breathing pattern that feels sustainable.",
     "Use your exhale to release tension from your shoulders and face.",
     "Let your breath guide your effort — calm, controlled breathing supports smooth running.",
-    "If you feel stressed, take a deeper, slower breath and gently reset your rhythm."
+    "If you feel stressed, take a deeper, slower breath and gently reset your rhythm.",
+    "Match your breathing to your stride — try a 3:2 or 2:2 inhale-exhale pattern for rhythm."
   ],
   "stride_foot_strike": [
     "Aim for smooth, light steps that land softly on the ground.",
     "Let your foot land roughly under your body instead of reaching out in front.",
     "Think 'quick and elastic,' lifting the foot up and through instead of pushing long and hard.",
     "Focus on gliding forward — avoid bounding or overstriding.",
-    "Use the ground to push you forward, not upward; channel your force into forward motion."
+    "Use the ground to push you forward, not upward; channel your force into forward motion.",
+    "Aim for around 180 steps per minute — quicker turnover reduces impact and improves efficiency."
   ],
   "core_hips_mindset": [
     "Lightly engage your core to keep your torso stable as your legs and arms move.",
     "Let the movement start from your hips, driving you calmly forward.",
     "When you tire, come back to basics: tall posture, relaxed shoulders, smooth steps.",
     "Stay present in this section of the run — one controlled stride at a time.",
-    "Run with quiet confidence; efficient, relaxed form is your biggest advantage today."
+    "Run with quiet confidence; efficient, relaxed form is your biggest advantage today.",
+    "Visualize strong, controlled strides — your mind guides your body through the tough moments."
   ]
 };
 
@@ -485,10 +490,11 @@ ${w.precipitationProbability > 50 ? "- Rain likely: Advise on grip, visibility, 
   });
   const eliteTip = getEliteCoachingTip(selectedCategory);
   
-  const eliteCoachingSection = `\n\nELITE TECHNIQUE CUE (use this in your coaching):
+  const eliteCoachingSection = `\n\n**ELITE TECHNIQUE CUE - PRIORITY** (MUST incorporate into your main message):
 Category: ${selectedCategory.replace(/_/g, ' ')}
 Cue: "${eliteTip}"
-Incorporate this technique cue naturally into your coaching message when appropriate.`;
+
+IMPORTANT: Your main coaching message MUST include guidance from this elite technique cue. This is professional running form advice that should be woven into your response. Rephrase it naturally but ensure the core technique point is communicated.`;
   
   const prompt = `${coachIdentity} Providing real-time guidance.${aiConfigSection}${eliteCoachingSection}
 
@@ -1446,6 +1452,7 @@ export interface RunAnalysisResponse {
   demographicComparison: string;
   coachingTips: string[];
   overallAssessment: string;
+  weatherImpact?: string;
 }
 
 export async function generateComprehensiveRunAnalysis(request: RunAnalysisRequest): Promise<RunAnalysisResponse> {
@@ -1564,7 +1571,8 @@ Return ONLY valid JSON with this exact structure:
   "personalBests": ["Any PBs or notable achievements from this run or compared to history"],
   "demographicComparison": "1-2 sentences comparing to others in their age/fitness group",
   "coachingTips": ["3-5 specific, actionable tips for improvement"],
-  "overallAssessment": "2-3 sentence summary of the run and next steps"
+  "overallAssessment": "2-3 sentence summary of the run and next steps",
+  "weatherImpact": "1-2 sentences analyzing how weather conditions affected this run (only include if weather data is available)"
 }`;
 
   const userPrompt = `Analyze this run and provide elite coaching feedback:
@@ -1590,7 +1598,7 @@ ${run.elevationGain ? `- Elevation gain: ${run.elevationGain}m` : ''}
 ${run.elevationLoss ? `- Elevation loss: ${run.elevationLoss}m` : ''}
 ${splitsInfo}
 
-${run.weatherData ? `WEATHER CONDITIONS:
+${run.weatherData ? `WEATHER CONDITIONS (ANALYZE IMPACT ON PERFORMANCE):
 - Temperature: ${run.weatherData.temperature !== undefined ? `${run.weatherData.temperature}°C` : 'Unknown'}
 - Feels like: ${run.weatherData.feelsLike !== undefined ? `${run.weatherData.feelsLike}°C` : 'Unknown'}
 - Humidity: ${run.weatherData.humidity !== undefined ? `${run.weatherData.humidity}%` : 'Unknown'}
@@ -1598,7 +1606,14 @@ ${run.weatherData ? `WEATHER CONDITIONS:
 - UV Index: ${run.weatherData.uvIndex !== undefined ? run.weatherData.uvIndex : 'Unknown'}
 - Precipitation chance: ${run.weatherData.precipitationProbability !== undefined ? `${run.weatherData.precipitationProbability}%` : 'Unknown'}
 - Conditions: ${run.weatherData.condition || 'Unknown'}
-(Consider how these conditions may have impacted the runner's performance)` : ''}
+
+WEATHER IMPACT ANALYSIS GUIDELINES:
+- Hot conditions (>25°C): Expect 1-2% slower pace per degree above 20°C due to increased cardiovascular strain
+- High humidity (>70%): Body cooling is less efficient, expect reduced performance
+- Strong wind (>20 km/h): Can add 5-10 seconds per km on exposed sections
+- Cold conditions (<5°C): May affect muscle performance in early stages
+- Rain/wet conditions: May impact footing and comfort
+IMPORTANT: You MUST include a "weatherImpact" field in your response analyzing how these conditions specifically affected this run's performance.` : ''}
 ${telemetryInfo}
 
 ${previousRunsInfo}

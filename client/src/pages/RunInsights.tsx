@@ -119,6 +119,7 @@ export default function RunInsights() {
     demographicComparison: string;
     coachingTips: string[];
     overallAssessment: string;
+    weatherImpact?: string;
   } | null>(null);
   const [isLoadingAiAnalysis, setIsLoadingAiAnalysis] = useState(false);
   const [aiAnalysisError, setAiAnalysisError] = useState<string | null>(null);
@@ -1222,6 +1223,19 @@ export default function RunInsights() {
                         </li>
                       ))}
                     </ul>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Weather Impact */}
+              {aiAnalysis.weatherImpact && (
+                <Card className="bg-card/30 border-cyan-500/20 backdrop-blur-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Cloud className="w-4 h-4 text-cyan-400" />
+                      <h3 className="text-sm font-display font-bold text-cyan-400 uppercase tracking-wide">Weather Impact</h3>
+                    </div>
+                    <p className="text-sm text-white/80">{aiAnalysis.weatherImpact}</p>
                   </CardContent>
                 </Card>
               )}
