@@ -899,16 +899,18 @@ export default function RunInsights() {
                 <h1 className="text-2xl font-display font-bold text-primary uppercase tracking-wider">
                   {(run as any).name || "Run Insights"}
                 </h1>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={startEditingName}
-                  className="text-muted-foreground hover:text-primary hover:bg-white/10 h-8 w-8"
-                  data-testid="button-edit-name"
-                  title="Rename run"
-                >
-                  <Pencil className="w-4 h-4" />
-                </Button>
+                {!isFriendView && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={startEditingName}
+                    className="text-muted-foreground hover:text-primary hover:bg-white/10 h-8 w-8"
+                    data-testid="button-edit-name"
+                    title="Rename run"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </Button>
+                )}
               </div>
             )}
             <div className="flex items-center gap-2 mt-1">
@@ -918,26 +920,30 @@ export default function RunInsights() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setShowSocialShareModal(true)}
-            className="rounded-full border-primary/50 hover:bg-primary/20 text-primary"
-            data-testid="button-social-share"
-            title="Share to Social Media"
-          >
-            <Instagram className="w-5 h-5" />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setShowShareModal(true)}
-            className="rounded-full border-white/20 hover:bg-white/10 text-muted-foreground"
-            data-testid="button-share-run"
-            title="Share with Friends"
-          >
-            <Share2 className="w-5 h-5" />
-          </Button>
+          {!isFriendView && (
+            <>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setShowSocialShareModal(true)}
+                className="rounded-full border-primary/50 hover:bg-primary/20 text-primary"
+                data-testid="button-social-share"
+                title="Share to Social Media"
+              >
+                <Instagram className="w-5 h-5" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setShowShareModal(true)}
+                className="rounded-full border-white/20 hover:bg-white/10 text-muted-foreground"
+                data-testid="button-share-run"
+                title="Share with Friends"
+              >
+                <Share2 className="w-5 h-5" />
+              </Button>
+            </>
+          )}
           <Badge className="bg-primary/10 border-primary/30 text-primary text-[10px] uppercase font-bold px-3">
             {run.difficulty}
           </Badge>
@@ -2023,18 +2029,20 @@ export default function RunInsights() {
             </div>
           )}
 
-          {/* Delete Run Section */}
-          <div className="mt-8 pt-6 border-t border-white/10">
-            <Button
-              variant="outline"
-              className="w-full border-red-500/30 text-red-400 hover:bg-red-500/10 hover:border-red-500/50"
-              onClick={() => setShowDeleteConfirm(true)}
-              data-testid="button-delete-run"
-            >
-              <Trash2 className="w-4 h-4 mr-2" />
-              Delete This Run
-            </Button>
-          </div>
+          {/* Delete Run Section - only show for own runs */}
+          {!isFriendView && (
+            <div className="mt-8 pt-6 border-t border-white/10">
+              <Button
+                variant="outline"
+                className="w-full border-red-500/30 text-red-400 hover:bg-red-500/10 hover:border-red-500/50"
+                onClick={() => setShowDeleteConfirm(true)}
+                data-testid="button-delete-run"
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete This Run
+              </Button>
+            </div>
+          )}
         </section>
       </main>
 
