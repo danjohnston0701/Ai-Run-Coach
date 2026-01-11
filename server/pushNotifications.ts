@@ -111,6 +111,20 @@ export async function sendPushNotification(
   }
 }
 
+async function checkNotificationPreference(userId: string, prefKey: 'friendRequest' | 'friendAccepted' | 'groupRunInvite' | 'groupRunStarting' | 'runCompleted' | 'weeklyProgress'): Promise<boolean> {
+  try {
+    const prefs = await storage.getNotificationPreferences(userId);
+    if (!prefs) {
+      // Default to true for essential notifications if no preferences set
+      return ['friendRequest', 'friendAccepted', 'groupRunInvite', 'groupRunStarting'].includes(prefKey);
+    }
+    return prefs[prefKey] ?? true;
+  } catch (error) {
+    console.error('[Push] Failed to check notification preferences:', error);
+    return true; // Default to allowing notifications on error
+  }
+}
+
 export async function sendFriendRequestNotification(
   addresseeId: string,
   requesterName: string,
@@ -128,6 +142,13 @@ export async function sendFriendRequestNotification(
     });
   } catch (error) {
     console.error('[Notification] Failed to create notification record:', error);
+  }
+
+  // Check if user wants push notifications for friend requests
+  const wantsPush = await checkNotificationPreference(addresseeId, 'friendRequest');
+  if (!wantsPush) {
+    console.log(`[Push] User ${addresseeId} has disabled friend_request push notifications`);
+    return false;
   }
 
   // Also send push notification if configured
@@ -163,6 +184,13 @@ export async function sendFriendAcceptedNotification(
     console.error('[Notification] Failed to create notification record:', error);
   }
 
+  // Check if user wants push notifications for friend accepted
+  const wantsPush = await checkNotificationPreference(requesterId, 'friendAccepted');
+  if (!wantsPush) {
+    console.log(`[Push] User ${requesterId} has disabled friend_accepted push notifications`);
+    return false;
+  }
+
   // Also send push notification if configured
   return sendPushNotification(requesterId, {
     title: 'Friend Request Accepted',
@@ -183,6 +211,13 @@ export async function sendGroupRunInviteNotification(
   const message = routeName 
     ? `${hostName} invited you to join a group run on "${routeName}"!`
     : `${hostName} invited you to join a group run!`;
+
+  // Check if user wants push notifications for group run invites
+  const wantsPush = await checkNotificationPreference(inviteeId, 'groupRunInvite');
+  if (!wantsPush) {
+    console.log(`[Push] User ${inviteeId} has disabled group_run_invite push notifications`);
+    return false;
+  }
 
   // Send push notification if configured
   return sendPushNotification(inviteeId, {
@@ -219,6 +254,13 @@ export async function sendGroupRunAcceptedNotification(
     });
   } catch (error) {
     console.error('[Notification] Failed to create notification record:', error);
+  }
+
+  // Check if user wants push notifications for group run updates (uses groupRunInvite preference)
+  const wantsPush = await checkNotificationPreference(hostId, 'groupRunInvite');
+  if (!wantsPush) {
+    console.log(`[Push] User ${hostId} has disabled group run push notifications`);
+    return false;
   }
 
   // Send push notification
