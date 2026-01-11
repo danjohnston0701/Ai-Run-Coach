@@ -2464,6 +2464,7 @@ export async function registerRoutes(
             requesterName: requester?.name || 'Unknown',
             requesterUserCode: requester?.userCode || null,
             requesterProfilePic: requester?.profilePic || null,
+            requesterEmail: requester?.email || null,
           };
         })
       );
