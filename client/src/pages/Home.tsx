@@ -329,10 +329,22 @@ export default function Home() {
       });
       if (res.ok) {
         const { user, originalAdminId, originalAdminEmail } = await res.json();
-        // Store original admin info for returning later
+        // Store original admin's full profile for returning later
+        const currentProfile = localStorage.getItem('userProfile');
+        localStorage.setItem('originalAdminProfile', currentProfile || '');
         localStorage.setItem('originalAdmin', JSON.stringify({ id: originalAdminId, email: originalAdminEmail }));
-        // Replace current user with impersonated user
-        localStorage.setItem('user', JSON.stringify(user));
+        // Replace current userProfile with impersonated user's profile
+        const impersonatedProfile = {
+          id: user.id,
+          name: user.name,
+          coachName: user.coachName || 'Coach',
+          profilePic: user.profilePic,
+          isAdmin: user.isAdmin,
+          distanceMinKm: user.distanceMinKm,
+          distanceMaxKm: user.distanceMaxKm,
+          distanceDecimalsEnabled: user.distanceDecimalsEnabled,
+        };
+        localStorage.setItem('userProfile', JSON.stringify(impersonatedProfile));
         toast.success(`Now viewing as ${user.name || user.email}`);
         setShowUserSupportModal(false);
         // Reload to apply impersonation
@@ -350,21 +362,14 @@ export default function Home() {
 
   // Admin: Return to original admin account
   const handleReturnToAdmin = () => {
-    const originalAdmin = localStorage.getItem('originalAdmin');
-    if (originalAdmin) {
-      const admin = JSON.parse(originalAdmin);
-      // Need to fetch the full admin user data
-      fetch(`/api/users/${admin.id}`)
-        .then(res => res.json())
-        .then(adminUser => {
-          localStorage.setItem('user', JSON.stringify(adminUser));
-          localStorage.removeItem('originalAdmin');
-          toast.success("Returned to your admin account");
-          window.location.reload();
-        })
-        .catch(() => {
-          toast.error("Failed to return to admin account");
-        });
+    const originalAdminProfile = localStorage.getItem('originalAdminProfile');
+    if (originalAdminProfile) {
+      // Restore the original admin's full profile
+      localStorage.setItem('userProfile', originalAdminProfile);
+      localStorage.removeItem('originalAdmin');
+      localStorage.removeItem('originalAdminProfile');
+      toast.success("Returned to your admin account");
+      window.location.reload();
     }
   };
 
