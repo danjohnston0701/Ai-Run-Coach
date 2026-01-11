@@ -57,12 +57,11 @@ export function getPublicVapidKey() {
 
 function getNotificationIcon(): string {
   // Use absolute URL for Chrome notification icon compatibility
-  const baseUrl = process.env.REPLIT_DEV_DOMAIN 
-    ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-    : process.env.REPL_SLUG && process.env.REPL_OWNER
-      ? `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`
-      : '';
-  return baseUrl ? `${baseUrl}/favicon.png` : '/favicon.png';
+  // Production uses airuncoach.live, development uses REPLIT_DEV_DOMAIN
+  if (process.env.NODE_ENV === 'production' || !process.env.REPLIT_DEV_DOMAIN) {
+    return 'https://airuncoach.live/favicon.png';
+  }
+  return `https://${process.env.REPLIT_DEV_DOMAIN}/favicon.png`;
 }
 
 interface NotificationPayload {

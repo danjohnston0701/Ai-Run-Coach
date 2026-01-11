@@ -8,8 +8,8 @@ self.addEventListener('push', function(event) {
     const data = event.data.json();
     const options = {
       body: data.body || 'You have a new notification',
-      icon: data.icon || '/favicon.ico',
-      badge: data.badge || '/favicon.ico',
+      icon: data.icon || '/favicon.png',
+      badge: data.badge || '/favicon.png',
       tag: data.tag || 'default',
       data: data.data || {},
       actions: data.actions || [],
