@@ -207,6 +207,19 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   lastUsedAt: timestamp("last_used_at"),
 });
 
+export const notificationPreferences = pgTable("notification_preferences", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id).unique(),
+  friendRequest: boolean("friend_request").default(true),
+  friendAccepted: boolean("friend_accepted").default(true),
+  groupRunInvite: boolean("group_run_invite").default(true),
+  groupRunStarting: boolean("group_run_starting").default(true),
+  runCompleted: boolean("run_completed").default(false),
+  weeklyProgress: boolean("weekly_progress").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const notifications = pgTable("notifications", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
@@ -351,6 +364,7 @@ export const insertLiveRunSessionSchema = createInsertSchema(liveRunSessions).om
 export const insertGarminDataSchema = createInsertSchema(garminData).omit({ id: true, syncedAt: true });
 export const insertFriendRequestSchema = createInsertSchema(friendRequests).omit({ id: true, createdAt: true, respondedAt: true });
 export const insertPushSubscriptionSchema = createInsertSchema(pushSubscriptions).omit({ id: true, createdAt: true, lastUsedAt: true });
+export const insertNotificationPreferencesSchema = createInsertSchema(notificationPreferences).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
 export const insertRouteRatingSchema = createInsertSchema(routeRatings).omit({ id: true, createdAt: true });
 export const insertAiCoachDescriptionSchema = createInsertSchema(aiCoachDescription).omit({ id: true, updatedAt: true });
@@ -391,6 +405,9 @@ export type FriendRequest = typeof friendRequests.$inferSelect;
 
 export type InsertPushSubscription = z.infer<typeof insertPushSubscriptionSchema>;
 export type PushSubscription = typeof pushSubscriptions.$inferSelect;
+
+export type InsertNotificationPreferences = z.infer<typeof insertNotificationPreferencesSchema>;
+export type NotificationPreferences = typeof notificationPreferences.$inferSelect;
 
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 export type Notification = typeof notifications.$inferSelect;
