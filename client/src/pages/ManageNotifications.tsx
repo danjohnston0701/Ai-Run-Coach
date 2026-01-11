@@ -164,7 +164,7 @@ export default function ManageNotifications() {
     updateMutation.mutate({ [key]: !preferences[key] });
   };
 
-  const allEnabled = preferences ? Object.values(preferences).every(v => v === true) : false;
+  const allEnabled = preferences ? NOTIFICATION_TYPES.every(t => preferences[t.key] === true) : false;
   
   const handleToggleAll = () => {
     if (!preferences) return;
