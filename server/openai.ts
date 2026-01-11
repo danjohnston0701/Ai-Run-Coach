@@ -1629,8 +1629,15 @@ ANALYSIS APPROACH:
 4. If previous runs exist, identify trends and personal bests
 5. Provide actionable, specific coaching tips
 
+CRITICAL DATA INTEGRITY RULES:
+1. ONLY analyze data that is EXPLICITLY provided. NEVER infer, assume, or fabricate data.
+2. If heart rate data is not provided, DO NOT include "warmUpAnalysis" in your response. DO NOT mention heart rate at all.
+3. If weather data is not provided, DO NOT include "weatherImpact" in your response.
+4. If goals data is not provided, DO NOT include "goalProgress" in your response.
+5. Base ALL analysis strictly on the data provided. Do not make claims about data that was not collected.
+
 RESPONSE FORMAT:
-Return ONLY valid JSON with this exact structure:
+Return ONLY valid JSON with this exact structure (only include optional fields if their data is available):
 {
   "highlights": ["2-4 specific things the runner did well, with data to back it up"],
   "struggles": ["1-3 areas where the runner struggled, be constructive not critical"],
@@ -1638,9 +1645,9 @@ Return ONLY valid JSON with this exact structure:
   "demographicComparison": "1-2 sentences comparing to others in their age/fitness group",
   "coachingTips": ["3-5 specific, actionable tips for improvement"],
   "overallAssessment": "2-3 sentence summary of the run and next steps",
-  "weatherImpact": "1-2 sentences analyzing how weather conditions affected this run (only include if weather data is available)",
-  "warmUpAnalysis": "Analysis of starting heart rate and warm-up quality (only include if heart rate data is available)",
-  "goalProgress": "How this run contributes to the runner's active goals (only include if goals data is available)"
+  "weatherImpact": "ONLY include if weather data was provided above",
+  "warmUpAnalysis": "ONLY include if heart rate data was provided above",
+  "goalProgress": "ONLY include if goals data was provided above"
 }`;
 
   const userPrompt = `Analyze this run and provide elite coaching feedback:
@@ -1684,19 +1691,18 @@ WEATHER IMPACT ANALYSIS GUIDELINES:
 IMPORTANT: You MUST include a "weatherImpact" field in your response analyzing how these conditions specifically affected this run's performance.` : ''}
 ${telemetryInfo}
 
-WARM-UP ANALYSIS GUIDELINES (if heart rate data available):
+${run.avgHeartRate || (run.telemetry?.dataPoints?.some(p => p.heartRate)) ? `WARM-UP ANALYSIS GUIDELINES (heart rate data is available - include warmUpAnalysis):
 Analyze the runner's starting heart rate (first 1-2 minutes of run) to assess warm-up quality:
 - Zone 1 (50-60% max HR): Indicates proper warm-up was performed before the run
 - Below Zone 1 (<50% max HR, typically <100-110 bpm for most adults): Suggests "cold start" - runner began without warming up
 
 If a cold start is detected, explain in the "warmUpAnalysis" field:
 1. That starting with a low heart rate suggests no pre-run warm-up
-2. Benefits of warming up: Gradually increases blood flow to muscles, raises core temperature, lubricates joints, activates neuromuscular pathways
-3. Performance benefits: Reduces injury risk by 50%+, improves running economy, enables faster pace from the start, prevents early fatigue
+2. Benefits of warming up: Gradually increases blood flow to muscles, raises core temperature, lubricates joints
+3. Performance benefits: Reduces injury risk, improves running economy
 4. Recommendation: 5-10 minute easy jog + dynamic stretches before main effort
 
-If heart rate data shows a gradual rise in the first few minutes, note this as good warm-up behavior.
-IMPORTANT: You MUST include a "warmUpAnalysis" field if heart rate data is available in the telemetry.
+If heart rate data shows a gradual rise in the first few minutes, note this as good warm-up behavior.` : 'NO HEART RATE DATA COLLECTED - DO NOT include warmUpAnalysis in your response. DO NOT mention or infer anything about heart rate.'}
 
 ${previousRunsInfo}
 
