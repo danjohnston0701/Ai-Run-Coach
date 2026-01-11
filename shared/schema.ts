@@ -214,6 +214,8 @@ export const notificationPreferences = pgTable("notification_preferences", {
   friendAccepted: boolean("friend_accepted").default(true),
   groupRunInvite: boolean("group_run_invite").default(true),
   groupRunStarting: boolean("group_run_starting").default(true),
+  liveRunInvite: boolean("live_run_invite").default(true),
+  liveObserverJoined: boolean("live_observer_joined").default(true),
   runCompleted: boolean("run_completed").default(false),
   weeklyProgress: boolean("weekly_progress").default(false),
   createdAt: timestamp("created_at").defaultNow(),

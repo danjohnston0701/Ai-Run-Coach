@@ -2272,14 +2272,50 @@ export default function RunSession() {
     }
   }, []);
 
-  const toggleLiveShare = (friend: Friend) => {
+  const toggleLiveShare = async (friend: Friend) => {
     const uniqueId = friend.friendId || friend.name;
     if (sharedWith.includes(uniqueId)) {
       setSharedWith(prev => prev.filter(id => id !== uniqueId));
       toast.info(`Stopped live sharing with ${friend.name}`);
     } else {
-      setSharedWith(prev => [...prev, uniqueId]);
-      toast.success(`Now sharing live location & route with ${friend.name}!`);
+      // Only proceed if friend has a valid ID
+      if (!friend.friendId) {
+        toast.error(`Unable to share with ${friend.name} - missing user info`);
+        return;
+      }
+      
+      const profile = localStorage.getItem("userProfile");
+      const userId = profile ? JSON.parse(profile).id : null;
+      
+      if (!userId) {
+        toast.error("Please log in to share your run");
+        return;
+      }
+      
+      // Send notification to friend that they were invited to watch
+      try {
+        const response = await fetch(`/api/live-sessions/${sessionIdRef.current}/invite-observer`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            runnerId: userId,
+            friendId: friend.friendId,
+          }),
+        });
+        
+        if (!response.ok) {
+          const error = await response.json();
+          console.error('Failed to send invite:', error);
+          toast.error(`Failed to invite ${friend.name}`);
+          return;
+        }
+        
+        setSharedWith(prev => [...prev, uniqueId]);
+        toast.success(`Now sharing live location & route with ${friend.name}!`);
+      } catch (error) {
+        console.error('Failed to send live run invite notification:', error);
+        toast.error(`Failed to invite ${friend.name}`);
+      }
     }
   };
 

@@ -12,7 +12,7 @@ import { generateRoute, getCoachingAdvice, analyzeRunPerformance, generateTTS, c
 import { generateCircularRoute, generateMultipleRoutes, isGoogleMapsConfigured } from "./routePlanner";
 import { generateAIRoutes } from "./aiRoutePlanner";
 import bcrypt from "bcryptjs";
-import { initializePushNotifications, isPushConfigured, getPublicVapidKey, sendFriendRequestNotification, sendFriendAcceptedNotification, sendGroupRunInviteNotification, sendGroupRunAcceptedNotification } from "./pushNotifications";
+import { initializePushNotifications, isPushConfigured, getPublicVapidKey, sendFriendRequestNotification, sendFriendAcceptedNotification, sendGroupRunInviteNotification, sendGroupRunAcceptedNotification, sendLiveRunInviteNotification, sendLiveObserverJoinedNotification } from "./pushNotifications";
 import { getCurrentWeather, getFullWeatherData, getWeatherDescription, isGoodRunningWeather, type WeatherCondition, type WeatherData } from "./weather";
 
 export async function registerRoutes(
@@ -1152,6 +1152,94 @@ export async function registerRoutes(
     }
   });
 
+  // Live run observer invite endpoint - notify friend when invited to watch
+  app.post("/api/live-sessions/:sessionId/invite-observer", async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      const { runnerId, friendId } = req.body;
+      
+      if (!runnerId || !friendId) {
+        return res.status(400).json({ error: "runnerId and friendId are required" });
+      }
+      
+      // Verify runner exists
+      const runner = await storage.getUser(runnerId);
+      if (!runner) {
+        return res.status(404).json({ error: "Runner not found" });
+      }
+      
+      // Verify friend exists
+      const friend = await storage.getUser(friendId);
+      if (!friend) {
+        return res.status(404).json({ error: "Friend not found" });
+      }
+      
+      // Verify they are actually friends (bidirectional check)
+      const runnerFriends = await storage.getFriends(runnerId);
+      const isFriend = runnerFriends.some(f => f.friendId === friendId);
+      if (!isFriend) {
+        return res.status(403).json({ error: "Users are not friends" });
+      }
+      
+      // Send notification to friend
+      await sendLiveRunInviteNotification(
+        friendId,
+        runner.name,
+        runnerId,
+        sessionId
+      );
+      
+      res.json({ success: true, message: "Observer invite notification sent" });
+    } catch (error) {
+      console.error("Failed to send live run invite:", error);
+      res.status(500).json({ error: "Failed to send invite notification" });
+    }
+  });
+
+  // Live run observer join endpoint - notify runner when friend starts watching
+  app.post("/api/live-sessions/:sessionId/observer-joined", async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      const { runnerId, observerId } = req.body;
+      
+      if (!runnerId || !observerId) {
+        return res.status(400).json({ error: "runnerId and observerId are required" });
+      }
+      
+      // Verify runner exists
+      const runner = await storage.getUser(runnerId);
+      if (!runner) {
+        return res.status(404).json({ error: "Runner not found" });
+      }
+      
+      // Verify observer exists
+      const observer = await storage.getUser(observerId);
+      if (!observer) {
+        return res.status(404).json({ error: "Observer not found" });
+      }
+      
+      // Verify they are actually friends (observer should be friend of runner)
+      const runnerFriends = await storage.getFriends(runnerId);
+      const isFriend = runnerFriends.some(f => f.friendId === observerId);
+      if (!isFriend) {
+        return res.status(403).json({ error: "Users are not friends" });
+      }
+      
+      // Send notification to runner
+      await sendLiveObserverJoinedNotification(
+        runnerId,
+        observer.name,
+        observerId,
+        sessionId
+      );
+      
+      res.json({ success: true, message: "Observer joined notification sent" });
+    } catch (error) {
+      console.error("Failed to send observer joined notification:", error);
+      res.status(500).json({ error: "Failed to send notification" });
+    }
+  });
+
   // Friends endpoints
   app.get("/api/users/:userId/friends", async (req, res) => {
     try {
@@ -1900,6 +1988,8 @@ export async function registerRoutes(
       friendAccepted: true,
       groupRunInvite: true,
       groupRunStarting: true,
+      liveRunInvite: true,
+      liveObserverJoined: true,
       runCompleted: false,
       weeklyProgress: false,
     };
@@ -1918,27 +2008,31 @@ export async function registerRoutes(
   });
 
   app.put("/api/notification-preferences/:userId", async (req, res) => {
+    const prefsData = req.body;
     try {
-      const { friendRequest, friendAccepted, groupRunInvite, groupRunStarting, runCompleted, weeklyProgress } = req.body;
       const prefs = await storage.upsertNotificationPreferences(req.params.userId, {
-        friendRequest,
-        friendAccepted,
-        groupRunInvite,
-        groupRunStarting,
-        runCompleted,
-        weeklyProgress,
+        friendRequest: prefsData.friendRequest,
+        friendAccepted: prefsData.friendAccepted,
+        groupRunInvite: prefsData.groupRunInvite,
+        groupRunStarting: prefsData.groupRunStarting,
+        liveRunInvite: prefsData.liveRunInvite,
+        liveObserverJoined: prefsData.liveObserverJoined,
+        runCompleted: prefsData.runCompleted,
+        weeklyProgress: prefsData.weeklyProgress,
       });
       res.json(prefs);
     } catch (error: any) {
       // If table doesn't exist yet, return the values they tried to save
       if (error?.code === '42P01') {
         return res.json({
-          friendRequest: friendRequest ?? true,
-          friendAccepted: friendAccepted ?? true,
-          groupRunInvite: groupRunInvite ?? true,
-          groupRunStarting: groupRunStarting ?? true,
-          runCompleted: runCompleted ?? false,
-          weeklyProgress: weeklyProgress ?? false,
+          friendRequest: prefsData.friendRequest ?? true,
+          friendAccepted: prefsData.friendAccepted ?? true,
+          groupRunInvite: prefsData.groupRunInvite ?? true,
+          groupRunStarting: prefsData.groupRunStarting ?? true,
+          liveRunInvite: prefsData.liveRunInvite ?? true,
+          liveObserverJoined: prefsData.liveObserverJoined ?? true,
+          runCompleted: prefsData.runCompleted ?? false,
+          weeklyProgress: prefsData.weeklyProgress ?? false,
         });
       }
       console.error("Error updating notification preferences:", error);
@@ -1977,6 +2071,16 @@ export async function registerRoutes(
           title: "Group Run Starting Soon",
           body: "Your group run is starting in 5 minutes!",
           data: { type: "group_run_starting", groupRunId: "test-id" }
+        },
+        live_run_invite: {
+          title: "Live Run Invitation",
+          body: "Test User invited you to watch their live run!",
+          data: { type: "live_run_invite", runnerId: "test-id", sessionId: "test-session" }
+        },
+        live_observer_joined: {
+          title: "Friend Watching Your Run",
+          body: "Test User is now watching your live run!",
+          data: { type: "live_observer_joined", observerId: "test-id", sessionId: "test-session" }
         },
       };
 

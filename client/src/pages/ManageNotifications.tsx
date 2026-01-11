@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
-import { ArrowLeft, Bell, UserPlus, Users, Play, Settings, Loader2, Send } from "lucide-react";
+import { ArrowLeft, Bell, UserPlus, Users, Play, Settings, Loader2, Send, Eye, Radio } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -11,6 +11,8 @@ interface NotificationPreferences {
   friendAccepted: boolean;
   groupRunInvite: boolean;
   groupRunStarting: boolean;
+  liveRunInvite: boolean;
+  liveObserverJoined: boolean;
   runCompleted: boolean;
   weeklyProgress: boolean;
 }
@@ -50,6 +52,20 @@ const NOTIFICATION_TYPES = [
     testType: 'group_run_starting',
   },
   {
+    key: 'liveRunInvite' as const,
+    label: 'Live Run Invitations',
+    description: 'When a friend invites you to watch their live run',
+    icon: Eye,
+    testType: 'live_run_invite',
+  },
+  {
+    key: 'liveObserverJoined' as const,
+    label: 'Friend Watching Your Run',
+    description: 'When a friend starts watching your live run',
+    icon: Radio,
+    testType: 'live_observer_joined',
+  },
+  {
     key: 'runCompleted' as const,
     label: 'Run Completed',
     description: 'Summary when you complete a run',
@@ -86,6 +102,8 @@ export default function ManageNotifications() {
         friendAccepted: true,
         groupRunInvite: true,
         groupRunStarting: true,
+        liveRunInvite: true,
+        liveObserverJoined: true,
         runCompleted: false,
         weeklyProgress: false,
       };

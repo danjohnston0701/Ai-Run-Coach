@@ -111,12 +111,12 @@ export async function sendPushNotification(
   }
 }
 
-async function checkNotificationPreference(userId: string, prefKey: 'friendRequest' | 'friendAccepted' | 'groupRunInvite' | 'groupRunStarting' | 'runCompleted' | 'weeklyProgress'): Promise<boolean> {
+async function checkNotificationPreference(userId: string, prefKey: 'friendRequest' | 'friendAccepted' | 'groupRunInvite' | 'groupRunStarting' | 'liveRunInvite' | 'liveObserverJoined' | 'runCompleted' | 'weeklyProgress'): Promise<boolean> {
   try {
     const prefs = await storage.getNotificationPreferences(userId);
     if (!prefs) {
       // Default to true for essential notifications if no preferences set
-      return ['friendRequest', 'friendAccepted', 'groupRunInvite', 'groupRunStarting'].includes(prefKey);
+      return ['friendRequest', 'friendAccepted', 'groupRunInvite', 'groupRunStarting', 'liveRunInvite', 'liveObserverJoined'].includes(prefKey);
     }
     return prefs[prefKey] ?? true;
   } catch (error) {
@@ -155,7 +155,7 @@ export async function sendFriendRequestNotification(
   return sendPushNotification(addresseeId, {
     title: 'New Friend Request',
     body: `${requesterName} (${requesterEmail}) wants to be your friend!`,
-    icon: '/icon-192x192.png',
+    icon: '/favicon.png',
     tag: 'friend-request',
     data: { type: 'friend-request' },
     actions: [
@@ -195,7 +195,7 @@ export async function sendFriendAcceptedNotification(
   return sendPushNotification(requesterId, {
     title: 'Friend Request Accepted',
     body: `${addresseeName} (${addresseeEmail}) accepted your friend request!`,
-    icon: '/icon-192x192.png',
+    icon: '/favicon.png',
     tag: 'friend-accepted',
     data: { type: 'friend-accepted', friendId: addresseeId },
   });
@@ -223,7 +223,7 @@ export async function sendGroupRunInviteNotification(
   return sendPushNotification(inviteeId, {
     title: 'Group Run Invitation',
     body: message,
-    icon: '/icon-192x192.png',
+    icon: '/favicon.png',
     tag: `group-run-invite-${groupRunId}`,
     data: { 
       type: 'group-run-invite',
@@ -267,8 +267,85 @@ export async function sendGroupRunAcceptedNotification(
   return sendPushNotification(hostId, {
     title: 'Group Run: Friend Joined',
     body: `${participantName} accepted your group run invitation!`,
-    icon: '/icon-192x192.png',
+    icon: '/favicon.png',
     tag: `group-run-accepted-${groupRunId}`,
     data: { type: 'group-run-accepted', groupRunId },
+  });
+}
+
+export async function sendLiveRunInviteNotification(
+  friendId: string,
+  runnerName: string,
+  runnerId: string,
+  sessionId: string
+): Promise<boolean> {
+  // Create notification record in database
+  try {
+    await storage.createNotification({
+      userId: friendId,
+      type: 'live_run_invite',
+      title: 'Live Run Invitation',
+      message: `${runnerName} invited you to watch their live run!`,
+      read: false,
+      data: JSON.stringify({ type: 'live-run-invite', runnerId, sessionId }),
+    });
+  } catch (error) {
+    console.error('[Notification] Failed to create notification record:', error);
+  }
+
+  // Check if user wants push notifications for live run invites
+  const wantsPush = await checkNotificationPreference(friendId, 'liveRunInvite');
+  if (!wantsPush) {
+    console.log(`[Push] User ${friendId} has disabled live_run_invite push notifications`);
+    return false;
+  }
+
+  // Send push notification
+  return sendPushNotification(friendId, {
+    title: 'Live Run Invitation',
+    body: `${runnerName} invited you to watch their live run!`,
+    icon: '/favicon.png',
+    tag: `live-run-invite-${sessionId}`,
+    data: { type: 'live-run-invite', runnerId, sessionId },
+    actions: [
+      { action: 'view', title: 'Watch Live' },
+    ],
+  });
+}
+
+export async function sendLiveObserverJoinedNotification(
+  runnerId: string,
+  observerName: string,
+  observerId: string,
+  sessionId: string
+): Promise<boolean> {
+  // Create notification record in database
+  try {
+    await storage.createNotification({
+      userId: runnerId,
+      type: 'live_observer_joined',
+      title: 'Friend Watching Your Run',
+      message: `${observerName} is now watching your live run!`,
+      read: false,
+      data: JSON.stringify({ type: 'live-observer-joined', observerId, sessionId }),
+    });
+  } catch (error) {
+    console.error('[Notification] Failed to create notification record:', error);
+  }
+
+  // Check if user wants push notifications for observers joining
+  const wantsPush = await checkNotificationPreference(runnerId, 'liveObserverJoined');
+  if (!wantsPush) {
+    console.log(`[Push] User ${runnerId} has disabled live_observer_joined push notifications`);
+    return false;
+  }
+
+  // Send push notification
+  return sendPushNotification(runnerId, {
+    title: 'Friend Watching Your Run',
+    body: `${observerName} is now watching your live run!`,
+    icon: '/favicon.png',
+    tag: `live-observer-joined-${sessionId}`,
+    data: { type: 'live-observer-joined', observerId, sessionId },
   });
 }
