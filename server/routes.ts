@@ -1932,12 +1932,18 @@ export async function registerRoutes(
   app.post("/api/push/subscribe", async (req, res) => {
     try {
       const { userId, subscription, deviceId, deviceName } = req.body;
+      console.log(`[Push] Subscribe request for user ${userId}, deviceName: ${deviceName}`);
+      
       if (!userId || !subscription) {
+        console.log(`[Push] Missing userId or subscription`);
         return res.status(400).json({ error: "Missing userId or subscription" });
       }
 
       const { endpoint, keys } = subscription;
+      console.log(`[Push] Endpoint received: ${endpoint?.substring(0, 80)}...`);
+      
       if (!endpoint || !keys?.p256dh || !keys?.auth) {
+        console.log(`[Push] Invalid subscription format - endpoint: ${!!endpoint}, p256dh: ${!!keys?.p256dh}, auth: ${!!keys?.auth}`);
         return res.status(400).json({ error: "Invalid subscription format" });
       }
 
@@ -1951,11 +1957,40 @@ export async function registerRoutes(
         userAgent: req.headers['user-agent'] || null,
       });
 
-      console.log(`[Push] Subscription saved for user ${userId} (device: ${deviceName || 'unknown'})`);
+      console.log(`[Push] Subscription saved successfully for user ${userId}, id: ${saved.id}`);
       res.json({ success: true, id: saved.id });
-    } catch (error) {
-      console.error("Push subscription error:", error);
-      res.status(500).json({ error: "Failed to save subscription" });
+    } catch (error: any) {
+      console.error("[Push] Subscription error:", error?.message || error);
+      res.status(500).json({ error: "Failed to save subscription", details: error?.message });
+    }
+  });
+  
+  // Debug endpoint to check push subscription status
+  app.get("/api/push/debug/:userId", async (req, res) => {
+    try {
+      const userId = req.params.userId;
+      const allSubs = await storage.getAllPushSubscriptions(userId);
+      const activeSub = await storage.getPushSubscription(userId);
+      
+      res.json({
+        userId,
+        totalSubscriptions: allSubs.length,
+        activeSubscription: activeSub ? {
+          id: activeSub.id,
+          endpointPrefix: activeSub.endpoint.substring(0, 60) + '...',
+          isActive: activeSub.isActive,
+          deviceName: activeSub.deviceName,
+          lastUsedAt: activeSub.lastUsedAt,
+        } : null,
+        allSubscriptions: allSubs.map(s => ({
+          id: s.id,
+          endpointPrefix: s.endpoint.substring(0, 60) + '...',
+          isActive: s.isActive,
+          deviceName: s.deviceName,
+        })),
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Failed to get debug info" });
     }
   });
 
