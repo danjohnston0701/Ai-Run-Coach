@@ -13,6 +13,7 @@ export interface Friend {
   name: string;
   userCode?: string;
   friendId?: string;
+  profilePic?: string;
 }
 
 interface ProfileData {
@@ -271,6 +272,7 @@ export default function Profile() {
         name: f.name,
         userCode: f.userCode,
         friendId: f.friendId,
+        profilePic: f.profilePic,
       }));
       
       // Only update if friends are different
@@ -1171,8 +1173,12 @@ export default function Profile() {
                     onClick={() => handleViewFriendProfile(friend)}
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary/30 to-primary/10 flex items-center justify-center">
-                        <User className="w-4 h-4 text-primary" />
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary/30 to-primary/10 flex items-center justify-center overflow-hidden">
+                        {friend.profilePic ? (
+                          <img src={friend.profilePic} alt={friend.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <User className="w-4 h-4 text-primary" />
+                        )}
                       </div>
                       <div>
                         <p className="text-sm font-medium text-foreground">{friend.name}</p>
