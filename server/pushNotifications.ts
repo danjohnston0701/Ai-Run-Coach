@@ -155,7 +155,7 @@ export async function sendFriendRequestNotification(
   return sendPushNotification(addresseeId, {
     title: 'New Friend Request',
     body: `${requesterName} (${requesterEmail}) wants to be your friend!`,
-    icon: '/favicon.ico',
+    icon: '/icon-192x192.png',
     tag: 'friend-request',
     data: { type: 'friend-request' },
     actions: [
@@ -195,7 +195,7 @@ export async function sendFriendAcceptedNotification(
   return sendPushNotification(requesterId, {
     title: 'Friend Request Accepted',
     body: `${addresseeName} (${addresseeEmail}) accepted your friend request!`,
-    icon: '/favicon.ico',
+    icon: '/icon-192x192.png',
     tag: 'friend-accepted',
     data: { type: 'friend-accepted', friendId: addresseeId },
   });
@@ -223,7 +223,7 @@ export async function sendGroupRunInviteNotification(
   return sendPushNotification(inviteeId, {
     title: 'Group Run Invitation',
     body: message,
-    icon: '/favicon.ico',
+    icon: '/icon-192x192.png',
     tag: `group-run-invite-${groupRunId}`,
     data: { 
       type: 'group-run-invite',
@@ -267,7 +267,7 @@ export async function sendGroupRunAcceptedNotification(
   return sendPushNotification(hostId, {
     title: 'Group Run: Friend Joined',
     body: `${participantName} accepted your group run invitation!`,
-    icon: '/favicon.ico',
+    icon: '/icon-192x192.png',
     tag: `group-run-accepted-${groupRunId}`,
     data: { type: 'group-run-accepted', groupRunId },
   });
