@@ -3,7 +3,7 @@ import { randomInt } from "crypto";
 import { db, withRetry } from "./db";
 import {
   users, preRegistrations, friends, routes, runs, liveRunSessions, garminData,
-  friendRequests, pushSubscriptions, notifications, routeRatings,
+  friendRequests, pushSubscriptions, notificationPreferences, notifications, routeRatings,
   aiCoachDescription, aiCoachInstructions, aiCoachKnowledge, aiCoachFaq,
   couponCodes, userCoupons, groupRuns, groupRunParticipants, goals, runAnalyses,
   aiCoachingLogs,
@@ -16,6 +16,7 @@ import {
   type GarminData, type InsertGarminData,
   type FriendRequest, type InsertFriendRequest,
   type PushSubscription, type InsertPushSubscription,
+  type NotificationPreferences, type InsertNotificationPreferences,
   type Notification, type InsertNotification,
   type RouteRating, type InsertRouteRating,
   type AiCoachDescription, type InsertAiCoachDescription,
@@ -98,6 +99,10 @@ export interface IStorage {
   savePushSubscription(data: InsertPushSubscription): Promise<PushSubscription>;
   getPushSubscription(userId: string): Promise<PushSubscription | undefined>;
   deletePushSubscription(userId: string): Promise<void>;
+
+  // Notification Preferences
+  getNotificationPreferences(userId: string): Promise<NotificationPreferences | undefined>;
+  upsertNotificationPreferences(userId: string, prefs: Partial<InsertNotificationPreferences>): Promise<NotificationPreferences>;
 
   // Notifications
   createNotification(data: InsertNotification): Promise<Notification>;
@@ -690,6 +695,32 @@ export class DatabaseStorage implements IStorage {
   async deletePushSubscription(userId: string): Promise<void> {
     return withRetry(async () => {
       await db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, userId));
+    });
+  }
+
+  // Notification Preferences
+  async getNotificationPreferences(userId: string): Promise<NotificationPreferences | undefined> {
+    return withRetry(async () => {
+      const [prefs] = await db.select().from(notificationPreferences).where(eq(notificationPreferences.userId, userId));
+      return prefs;
+    });
+  }
+
+  async upsertNotificationPreferences(userId: string, prefs: Partial<InsertNotificationPreferences>): Promise<NotificationPreferences> {
+    return withRetry(async () => {
+      const existing = await this.getNotificationPreferences(userId);
+      if (existing) {
+        const [updated] = await db.update(notificationPreferences)
+          .set({ ...prefs, updatedAt: new Date() })
+          .where(eq(notificationPreferences.userId, userId))
+          .returning();
+        return updated;
+      } else {
+        const [created] = await db.insert(notificationPreferences)
+          .values({ userId, ...prefs })
+          .returning();
+        return created;
+      }
     });
   }
 
