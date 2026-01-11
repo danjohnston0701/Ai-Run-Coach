@@ -323,6 +323,7 @@ export default function RunSession() {
   const [active, setActive] = useState(false);
   const [time, setTime] = useState(0);
   const [distance, setDistance] = useState(0);
+  const [realtimePace, setRealtimePace] = useState<string | null>(null);
   const [message, setMessage] = useState("Acquiring GPS signal...");
   const [lastMessageTime, setLastMessageTime] = useState(0);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -484,6 +485,14 @@ export default function RunSession() {
   const runStoppedRef = useRef<boolean>(false);
   const finishAnnouncedRef = useRef<boolean>(false);
   const lastTurnAnnouncedIndexRef = useRef<number>(-1);
+  
+  // Timestamp-based timer refs for screen-off tracking
+  const pausedDurationRef = useRef<number>(0);
+  const pauseStartTimeRef = useRef<number | null>(null);
+  const lastVisibilityTimeRef = useRef<number>(Date.now());
+  
+  // Real-time pace calculation: recent GPS samples for instantaneous pace
+  const recentPaceSamplesRef = useRef<Array<{ distance: number; time: number; timestamp: number }>>([]);
 
   const searchParams = new URLSearchParams(window.location.search);
   const isResuming = searchParams.get("resume") === "true";
@@ -592,7 +601,6 @@ export default function RunSession() {
       const savedSession = loadActiveRunSession();
       if (savedSession) {
         console.log("Restoring session:", savedSession);
-        setTime(savedSession.elapsedSeconds);
         setDistance(savedSession.distanceKm);
         setCadence(savedSession.cadence);
         setKmSplits(savedSession.kmSplits);
@@ -603,6 +611,26 @@ export default function RunSession() {
         sessionIdRef.current = savedSession.id;
         setActive(savedSession.status === 'active');
         setRunStarted(true); // Resumed sessions are already started
+        
+        // Restore paused duration from saved session
+        const savedPausedMs = savedSession.pausedDurationMs || 0;
+        
+        if (savedSession.status === 'active') {
+          // Session was active - background time counts as running time
+          // Restore saved pause duration and calculate elapsed from timestamps
+          pausedDurationRef.current = savedPausedMs;
+          // Calculate correct elapsed time immediately including background time
+          const correctElapsed = Math.floor((Date.now() - savedSession.startTimestamp - savedPausedMs) / 1000);
+          setTime(correctElapsed);
+        } else {
+          // Session was paused - add off-app gap to paused duration
+          const nowGap = Date.now() - savedSession.startTimestamp;
+          const savedElapsedMs = savedSession.elapsedSeconds * 1000;
+          const additionalPause = nowGap - savedPausedMs - savedElapsedMs;
+          pausedDurationRef.current = savedPausedMs + Math.max(0, additionalPause);
+          // Keep saved elapsed time for paused sessions
+          setTime(savedSession.elapsedSeconds);
+        }
         
         sessionMetadataRef.current = {
           targetDistance: savedSession.targetDistance,
@@ -1037,6 +1065,44 @@ export default function RunSession() {
       lastGpsFixTimeRef.current = Date.now();
       gpsTimeoutAttempts.current = 0; // Reset timeout counter on successful fix
       watchdogRecoveryAttempts.current = 0; // Reset watchdog counter on successful fix
+      
+      // Calculate real-time pace from recent GPS samples (last 10-15 seconds)
+      const now = Date.now();
+      recentPaceSamplesRef.current.push({ 
+        distance: distanceKm, 
+        time: timeDiffSec,
+        timestamp: now 
+      });
+      
+      // Keep only samples from last 15 seconds
+      const cutoffTime = now - 15000;
+      recentPaceSamplesRef.current = recentPaceSamplesRef.current.filter(s => s.timestamp > cutoffTime);
+      
+      // Calculate real-time pace from recent samples
+      if (recentPaceSamplesRef.current.length >= 2) {
+        const recentDistance = recentPaceSamplesRef.current.reduce((sum, s) => sum + s.distance, 0);
+        const recentTime = recentPaceSamplesRef.current.reduce((sum, s) => sum + s.time, 0);
+        
+        if (recentDistance > 0.005 && recentTime > 2) { // At least 5m and 2 seconds
+          const realtimePaceSecsPerKm = recentTime / recentDistance;
+          
+          // Only show valid pace (between 2:00 and 15:00 per km)
+          if (realtimePaceSecsPerKm > 120 && realtimePaceSecsPerKm < 900) {
+            const mins = Math.floor(realtimePaceSecsPerKm / 60);
+            const secs = Math.floor(realtimePaceSecsPerKm % 60);
+            setRealtimePace(`${mins}'${secs.toString().padStart(2, '0')}"`);
+          } else {
+            // Invalid pace, fall back to average
+            setRealtimePace(null);
+          }
+        } else {
+          // Not enough recent data, fall back to average
+          setRealtimePace(null);
+        }
+      } else {
+        // Not enough samples, fall back to average
+        setRealtimePace(null);
+      }
     };
 
     const handleError = (error: GeolocationPositionError) => {
@@ -1082,6 +1148,25 @@ export default function RunSession() {
       }
     };
   }, [gpsStatus, gpsRestartKey]); // Include gpsRestartKey to allow forced restarts
+
+  // Handle visibility change - ensure GPS resumes and distance is recalculated
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[GPS] Page became visible, checking GPS status');
+        const timeSinceLastFix = Date.now() - lastGpsFixTimeRef.current;
+        
+        // If we've been hidden for a while, force a GPS restart to get fresh data
+        if (timeSinceLastFix > 10000 && gpsStatus === "active") {
+          console.log(`[GPS] Was hidden for ${Math.round(timeSinceLastFix / 1000)}s, triggering GPS refresh`);
+          setGpsRestartKey(prev => prev + 1);
+        }
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [gpsStatus]);
 
   // GPS Watchdog: Monitor for stale GPS and attempt recovery
   // Track last restart time separately to avoid false positives
@@ -1441,15 +1526,57 @@ export default function RunSession() {
     return () => clearInterval(interval);
   }, [active, lastMessageTime, gpsStatus, speak]);
 
+  // Timestamp-based timer that works even when screen is off
+  // Timer only pauses when user explicitly pauses (active = false)
+  // GPS status does NOT affect timer - only distance tracking
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (active && gpsStatus === "active") {
-      interval = setInterval(() => {
-        setTime(t => t + 1);
-      }, 1000);
+    if (!active || !runStarted) {
+      // Timer should pause - record when if not already recorded
+      if (pauseStartTimeRef.current === null && runStarted && !active) {
+        pauseStartTimeRef.current = Date.now();
+        console.log('[Timer] Paused at', new Date().toLocaleTimeString());
+      }
+      return;
     }
-    return () => clearInterval(interval);
-  }, [active, gpsStatus]);
+    
+    // Timer should run - if resuming from pause, add paused duration
+    if (pauseStartTimeRef.current !== null) {
+      const pausedFor = Date.now() - pauseStartTimeRef.current;
+      pausedDurationRef.current += pausedFor;
+      console.log('[Timer] Resumed after', Math.round(pausedFor / 1000), 'seconds pause');
+      pauseStartTimeRef.current = null;
+    }
+    
+    // Calculate elapsed time from timestamps
+    const updateTime = () => {
+      const now = Date.now();
+      const elapsedMs = now - startTimestampRef.current - pausedDurationRef.current;
+      const elapsedSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+      setTime(elapsedSeconds);
+      runMetricsRef.current.time = elapsedSeconds;
+    };
+    
+    // Update immediately
+    updateTime();
+    
+    // Then update every second
+    const interval = setInterval(updateTime, 1000);
+    
+    // Handle visibility change - recalculate time when page becomes visible again
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[Timer] Page became visible, recalculating time');
+        updateTime();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [active, runStarted]);
 
   const saveSessionNow = useCallback(() => {
     // Don't save if run has been stopped/completed
@@ -1461,6 +1588,7 @@ export default function RunSession() {
       id: sessionIdRef.current,
       startTimestamp: startTimestampRef.current,
       elapsedSeconds: time,
+      pausedDurationMs: pausedDurationRef.current,
       distanceKm: distance,
       cadence,
       routeId: routeData?.id || metadata.routeId,
@@ -2377,6 +2505,13 @@ export default function RunSession() {
   };
 
   const handleStartRun = () => {
+    // Reset timer tracking for fresh run
+    startTimestampRef.current = Date.now();
+    pausedDurationRef.current = 0;
+    pauseStartTimeRef.current = null;
+    recentPaceSamplesRef.current = [];
+    setRealtimePace(null);
+    
     setRunStarted(true);
     setActive(true);
     // Announce run start
@@ -2399,6 +2534,8 @@ export default function RunSession() {
   const confirmPause = () => {
     setShowPauseConfirmation(false);
     setActive(false);
+    setRealtimePace(null); // Clear real-time pace on pause
+    recentPaceSamplesRef.current = []; // Clear pace samples
     speak("Run paused. Take a breather.", { domain: 'system' });
   };
 
@@ -2752,8 +2889,10 @@ export default function RunSession() {
              <div className="text-[8px] text-muted-foreground">km</div>
           </div>
           <div className="border-r border-white/10">
-             <div className="text-muted-foreground text-[12px] uppercase tracking-wider">Pace</div>
-             <div className="text-base font-display font-bold">{calculatePace()}</div>
+             <div className="text-muted-foreground text-[12px] uppercase tracking-wider">
+               {realtimePace ? 'Pace' : 'Avg Pace'}
+             </div>
+             <div className="text-base font-display font-bold">{realtimePace || calculatePace()}</div>
              <div className="text-[8px] text-muted-foreground">/km</div>
           </div>
           <div>

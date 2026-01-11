@@ -2,6 +2,7 @@ export interface ActiveRunSession {
   id: string;
   startTimestamp: number;
   elapsedSeconds: number;
+  pausedDurationMs?: number; // Total milliseconds spent paused
   distanceKm: number;
   cadence: number;
   routeId: string;
