@@ -87,36 +87,45 @@ export async function sendPushNotification(
   }
 
   try {
-    const subscription = await storage.getPushSubscription(userId);
-    if (!subscription) {
-      console.log(`[Push] No subscription found for user ${userId} - they may need to re-enable notifications`);
+    // Get all active subscriptions for this user (multi-device support)
+    const subscriptions = await storage.getAllPushSubscriptions(userId);
+    if (!subscriptions || subscriptions.length === 0) {
+      console.log(`[Push] No subscriptions found for user ${userId} - they may need to re-enable notifications`);
       return false;
     }
     
-    console.log(`[Push] Found subscription for user ${userId}, sending...`);
+    console.log(`[Push] Found ${subscriptions.length} subscription(s) for user ${userId}, sending to all...`);
 
-    const pushSubscription = {
-      endpoint: subscription.endpoint,
-      keys: {
-        p256dh: subscription.p256dhKey,
-        auth: subscription.authKey,
-      },
-    };
+    let successCount = 0;
+    for (const subscription of subscriptions) {
+      try {
+        const pushSubscription = {
+          endpoint: subscription.endpoint,
+          keys: {
+            p256dh: subscription.p256dhKey,
+            auth: subscription.authKey,
+          },
+        };
 
-    await webpush.sendNotification(
-      pushSubscription,
-      JSON.stringify(payload)
-    );
-
-    console.log(`[Push] Notification sent to user ${userId}`);
-    return true;
-  } catch (error: any) {
-    if (error.statusCode === 410 || error.statusCode === 404) {
-      console.log(`[Push] Subscription expired for user ${userId}, removing`);
-      await storage.deletePushSubscription(userId);
-    } else {
-      console.error(`[Push] Failed to send notification to ${userId}:`, error);
+        await webpush.sendNotification(
+          pushSubscription,
+          JSON.stringify(payload)
+        );
+        successCount++;
+      } catch (error: any) {
+        if (error.statusCode === 410 || error.statusCode === 404) {
+          console.log(`[Push] Subscription expired for endpoint, marking inactive`);
+          await storage.markSubscriptionInactive(subscription.endpoint);
+        } else {
+          console.error(`[Push] Failed to send to one device:`, error.message);
+        }
+      }
     }
+
+    console.log(`[Push] Notification sent to ${successCount}/${subscriptions.length} devices for user ${userId}`);
+    return successCount > 0;
+  } catch (error: any) {
+    console.error(`[Push] Failed to send notification to ${userId}:`, error);
     return false;
   }
 }

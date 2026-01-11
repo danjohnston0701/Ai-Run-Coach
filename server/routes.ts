@@ -1928,10 +1928,10 @@ export async function registerRoutes(
     res.json({ configured: isPushConfigured() });
   });
 
-  // Subscribe to push notifications
+  // Subscribe to push notifications (multi-device support)
   app.post("/api/push/subscribe", async (req, res) => {
     try {
-      const { userId, subscription } = req.body;
+      const { userId, subscription, deviceId, deviceName } = req.body;
       if (!userId || !subscription) {
         return res.status(400).json({ error: "Missing userId or subscription" });
       }
@@ -1946,10 +1946,12 @@ export async function registerRoutes(
         endpoint,
         p256dhKey: keys.p256dh,
         authKey: keys.auth,
+        deviceId: deviceId || null,
+        deviceName: deviceName || null,
         userAgent: req.headers['user-agent'] || null,
       });
 
-      console.log(`[Push] Subscription saved for user ${userId}`);
+      console.log(`[Push] Subscription saved for user ${userId} (device: ${deviceName || 'unknown'})`);
       res.json({ success: true, id: saved.id });
     } catch (error) {
       console.error("Push subscription error:", error);
@@ -1971,13 +1973,45 @@ export async function registerRoutes(
   app.get("/api/push/subscription-status", async (req, res) => {
     try {
       const userId = req.query.userId as string;
+      const endpoint = req.query.endpoint as string;
+      
       if (!userId) {
         return res.status(400).json({ error: "Missing userId" });
       }
-      const subscription = await storage.getPushSubscription(userId);
-      res.json({ hasSubscription: !!subscription });
+      
+      // If endpoint provided, check if this specific device is registered
+      if (endpoint) {
+        const subscription = await storage.getPushSubscriptionByEndpoint(endpoint);
+        res.json({ 
+          hasSubscription: !!subscription && subscription.isActive,
+          isCurrentDevice: !!subscription && subscription.userId === userId,
+          deviceRegistered: !!subscription,
+        });
+        return;
+      }
+      
+      // Otherwise check if user has any active subscription
+      const subscriptions = await storage.getAllPushSubscriptions(userId);
+      res.json({ 
+        hasSubscription: subscriptions.length > 0,
+        deviceCount: subscriptions.length,
+      });
     } catch (error) {
       res.status(500).json({ error: "Failed to check subscription status" });
+    }
+  });
+  
+  // Unsubscribe a specific device by endpoint
+  app.post("/api/push/unsubscribe-device", async (req, res) => {
+    try {
+      const { endpoint } = req.body;
+      if (!endpoint) {
+        return res.status(400).json({ error: "Missing endpoint" });
+      }
+      await storage.deletePushSubscriptionByEndpoint(endpoint);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to unsubscribe device" });
     }
   });
 

@@ -95,10 +95,14 @@ export interface IStorage {
   getPendingRequestBetweenUsers(requesterId: string, addresseeId: string): Promise<FriendRequest | undefined>;
   respondToFriendRequest(id: string, status: 'accepted' | 'rejected' | 'cancelled'): Promise<FriendRequest | undefined>;
 
-  // Push Subscriptions
+  // Push Subscriptions (multi-device support)
   savePushSubscription(data: InsertPushSubscription): Promise<PushSubscription>;
   getPushSubscription(userId: string): Promise<PushSubscription | undefined>;
+  getAllPushSubscriptions(userId: string): Promise<PushSubscription[]>;
+  getPushSubscriptionByEndpoint(endpoint: string): Promise<PushSubscription | undefined>;
   deletePushSubscription(userId: string): Promise<void>;
+  deletePushSubscriptionByEndpoint(endpoint: string): Promise<void>;
+  markSubscriptionInactive(endpoint: string): Promise<void>;
 
   // Notification Preferences
   getNotificationPreferences(userId: string): Promise<NotificationPreferences | undefined>;
@@ -675,19 +679,58 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  // Push Subscriptions
+  // Push Subscriptions (multi-device support)
   async savePushSubscription(data: InsertPushSubscription): Promise<PushSubscription> {
     return withRetry(async () => {
-      // Delete existing subscription for this user first
-      await db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, data.userId));
-      const [subscription] = await db.insert(pushSubscriptions).values(data).returning();
+      // Upsert by endpoint - update if exists, insert if new
+      const existing = await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.endpoint, data.endpoint));
+      if (existing.length > 0) {
+        // Update existing subscription (might be re-registering on same device)
+        const [updated] = await db.update(pushSubscriptions)
+          .set({
+            userId: data.userId,
+            p256dhKey: data.p256dhKey,
+            authKey: data.authKey,
+            deviceId: data.deviceId,
+            deviceName: data.deviceName,
+            userAgent: data.userAgent,
+            isActive: true,
+            lastUsedAt: new Date(),
+          })
+          .where(eq(pushSubscriptions.endpoint, data.endpoint))
+          .returning();
+        return updated;
+      }
+      const [subscription] = await db.insert(pushSubscriptions).values({
+        ...data,
+        isActive: true,
+      }).returning();
       return subscription;
     });
   }
 
   async getPushSubscription(userId: string): Promise<PushSubscription | undefined> {
     return withRetry(async () => {
-      const [subscription] = await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.userId, userId));
+      // Return the most recently used active subscription for backward compatibility
+      const [subscription] = await db.select().from(pushSubscriptions)
+        .where(and(eq(pushSubscriptions.userId, userId), eq(pushSubscriptions.isActive, true)))
+        .orderBy(desc(pushSubscriptions.lastUsedAt))
+        .limit(1);
+      return subscription;
+    });
+  }
+
+  async getAllPushSubscriptions(userId: string): Promise<PushSubscription[]> {
+    return withRetry(async () => {
+      return db.select().from(pushSubscriptions)
+        .where(and(eq(pushSubscriptions.userId, userId), eq(pushSubscriptions.isActive, true)));
+    });
+  }
+
+  async getPushSubscriptionByEndpoint(endpoint: string): Promise<PushSubscription | undefined> {
+    return withRetry(async () => {
+      const [subscription] = await db.select().from(pushSubscriptions)
+        .where(eq(pushSubscriptions.endpoint, endpoint));
       return subscription;
     });
   }
@@ -695,6 +738,20 @@ export class DatabaseStorage implements IStorage {
   async deletePushSubscription(userId: string): Promise<void> {
     return withRetry(async () => {
       await db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, userId));
+    });
+  }
+
+  async deletePushSubscriptionByEndpoint(endpoint: string): Promise<void> {
+    return withRetry(async () => {
+      await db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, endpoint));
+    });
+  }
+
+  async markSubscriptionInactive(endpoint: string): Promise<void> {
+    return withRetry(async () => {
+      await db.update(pushSubscriptions)
+        .set({ isActive: false })
+        .where(eq(pushSubscriptions.endpoint, endpoint));
     });
   }
 

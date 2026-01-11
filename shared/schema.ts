@@ -199,10 +199,13 @@ export const friendRequests = pgTable("friend_requests", {
 export const pushSubscriptions = pgTable("push_subscriptions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
-  endpoint: text("endpoint").notNull(),
+  endpoint: text("endpoint").notNull().unique(),
   p256dhKey: text("p256dh_key").notNull(),
   authKey: text("auth_key").notNull(),
+  deviceId: text("device_id"),
+  deviceName: text("device_name"),
   userAgent: text("user_agent"),
+  isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   lastUsedAt: timestamp("last_used_at"),
 });
