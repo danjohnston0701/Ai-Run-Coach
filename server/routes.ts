@@ -1893,6 +1893,88 @@ export async function registerRoutes(
     }
   });
 
+  // Notification Preferences endpoints
+  app.get("/api/notification-preferences/:userId", async (req, res) => {
+    try {
+      const prefs = await storage.getNotificationPreferences(req.params.userId);
+      // Return defaults if no preferences exist
+      res.json(prefs || {
+        friendRequest: true,
+        friendAccepted: true,
+        groupRunInvite: true,
+        groupRunStarting: true,
+        runCompleted: false,
+        weeklyProgress: false,
+      });
+    } catch (error) {
+      console.error("Error fetching notification preferences:", error);
+      res.status(500).json({ error: "Failed to fetch notification preferences" });
+    }
+  });
+
+  app.put("/api/notification-preferences/:userId", async (req, res) => {
+    try {
+      const { friendRequest, friendAccepted, groupRunInvite, groupRunStarting, runCompleted, weeklyProgress } = req.body;
+      const prefs = await storage.upsertNotificationPreferences(req.params.userId, {
+        friendRequest,
+        friendAccepted,
+        groupRunInvite,
+        groupRunStarting,
+        runCompleted,
+        weeklyProgress,
+      });
+      res.json(prefs);
+    } catch (error) {
+      console.error("Error updating notification preferences:", error);
+      res.status(500).json({ error: "Failed to update notification preferences" });
+    }
+  });
+
+  // Test push notification endpoint (for debugging)
+  app.post("/api/push/test/:userId", async (req, res) => {
+    try {
+      const { type } = req.body;
+      const userId = req.params.userId;
+      
+      const subscription = await storage.getPushSubscription(userId);
+      if (!subscription) {
+        return res.status(404).json({ error: "No push subscription found for this user" });
+      }
+
+      const testMessages: Record<string, { title: string; body: string; data: any }> = {
+        friend_request: {
+          title: "New Friend Request",
+          body: "Test User wants to be your friend!",
+          data: { type: "friend_request", requesterId: "test-id" }
+        },
+        friend_accepted: {
+          title: "Friend Request Accepted",
+          body: "Test User accepted your friend request!",
+          data: { type: "friend_accepted", friendId: "test-id" }
+        },
+        group_run_invite: {
+          title: "Group Run Invitation",
+          body: "Test User invited you to a group run!",
+          data: { type: "group_run_invite", groupRunId: "test-id" }
+        },
+        group_run_starting: {
+          title: "Group Run Starting Soon",
+          body: "Your group run is starting in 5 minutes!",
+          data: { type: "group_run_starting", groupRunId: "test-id" }
+        },
+      };
+
+      const message = testMessages[type] || testMessages.friend_request;
+      
+      const { sendPushNotification } = await import("./pushNotifications");
+      await sendPushNotification(userId, { title: message.title, body: message.body, data: message.data });
+      res.json({ success: true, message: `Test notification sent: ${type}` });
+    } catch (error) {
+      console.error("Error sending test notification:", error);
+      res.status(500).json({ error: "Failed to send test notification" });
+    }
+  });
+
   // Notification endpoints
   app.get("/api/notifications", async (req, res) => {
     try {
