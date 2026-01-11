@@ -2594,6 +2594,49 @@ export async function registerRoutes(
     }
   });
 
+  // =============================================
+  // ADMIN: User Support / Impersonation Endpoints
+  // =============================================
+
+  // Get all users for admin (user support)
+  app.get("/api/admin/users", requireAdmin, async (req, res) => {
+    try {
+      const userList = await storage.getAllUsersForAdmin();
+      res.json(userList);
+    } catch (error) {
+      console.error("Failed to get users for admin:", error);
+      res.status(500).json({ error: "Failed to get users" });
+    }
+  });
+
+  // Impersonate a user (admin only) - returns the target user's data
+  app.post("/api/admin/impersonate", requireAdmin, async (req, res) => {
+    try {
+      const { targetUserId } = req.body;
+      if (!targetUserId) {
+        return res.status(400).json({ error: "Target user ID is required" });
+      }
+      
+      const targetUser = await storage.getUser(targetUserId);
+      if (!targetUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      const adminUser = (req as any).adminUser;
+      console.log(`Admin ${adminUser.email} impersonating user ${targetUser.email}`);
+      
+      const { password: _, ...safeUser } = targetUser;
+      res.json({
+        user: safeUser,
+        originalAdminId: adminUser.id,
+        originalAdminEmail: adminUser.email,
+      });
+    } catch (error) {
+      console.error("Impersonation error:", error);
+      res.status(500).json({ error: "Failed to impersonate user" });
+    }
+  });
+
   // AI Coach Description
   app.get("/api/admin/ai-config/description", requireAdmin, async (req, res) => {
     try {

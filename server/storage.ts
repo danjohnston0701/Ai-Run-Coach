@@ -37,6 +37,7 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, data: Partial<InsertUser>): Promise<User | undefined>;
   searchUsers(query: string): Promise<Array<{ id: string; name: string; userCode: string | null }>>;
+  getAllUsersForAdmin(): Promise<Array<{ id: string; email: string; name: string; isAdmin: boolean; createdAt: Date | null }>>;
 
   createPreRegistration(data: InsertPreRegistration): Promise<PreRegistration>;
   getPreRegistrations(): Promise<PreRegistration[]>;
@@ -279,6 +280,18 @@ export class DatabaseStorage implements IStorage {
         (u.name && u.name.toLowerCase().includes(lowerQuery)) || 
         (u.userCode && u.userCode.includes(query))
       );
+    });
+  }
+
+  async getAllUsersForAdmin(): Promise<Array<{ id: string; email: string; name: string; isAdmin: boolean; createdAt: Date | null }>> {
+    return withRetry(async () => {
+      return db.select({
+        id: users.id,
+        email: users.email,
+        name: users.name,
+        isAdmin: users.isAdmin,
+        createdAt: users.createdAt,
+      }).from(users).orderBy(desc(users.createdAt));
     });
   }
 
