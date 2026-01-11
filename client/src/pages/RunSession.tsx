@@ -1759,12 +1759,13 @@ export default function RunSession() {
         if (now - lastStep > minTimeBetweenSteps) {
           stepTimestampsRef.current.push(now);
           
-          if (stepTimestampsRef.current.length > 60) {
-            stepTimestampsRef.current = stepTimestampsRef.current.slice(-60);
+          if (stepTimestampsRef.current.length > 30) {
+            stepTimestampsRef.current = stepTimestampsRef.current.slice(-30);
           }
           
-          const recentSteps = stepTimestampsRef.current.filter(t => now - t < 60000);
-          if (recentSteps.length >= 2) {
+          // Use 15-second window for real-time cadence (matches pace calculation)
+          const recentSteps = stepTimestampsRef.current.filter(t => now - t < 15000);
+          if (recentSteps.length >= 3) {
             const timeSpan = (recentSteps[recentSteps.length - 1] - recentSteps[0]) / 1000 / 60;
             if (timeSpan > 0) {
               const stepsPerMinute = Math.round((recentSteps.length - 1) / timeSpan);
