@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
-import { ArrowLeft, Bell, UserPlus, Route, Trophy, Clock, Check, X, ChevronRight } from "lucide-react";
+import { ArrowLeft, Bell, UserPlus, Route, Trophy, Clock, Check, X, ChevronRight, Settings } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -197,17 +197,27 @@ export default function Notifications() {
             )}
           </div>
         </div>
-        {unreadCount > 0 && (
+        <div className="flex items-center gap-2">
+          {unreadCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => markAllAsReadMutation.mutate()}
+              disabled={markAllAsReadMutation.isPending}
+              data-testid="button-mark-all-read"
+            >
+              Mark all read
+            </Button>
+          )}
           <Button
-            variant="outline"
-            size="sm"
-            onClick={() => markAllAsReadMutation.mutate()}
-            disabled={markAllAsReadMutation.isPending}
-            data-testid="button-mark-all-read"
+            variant="ghost"
+            size="icon"
+            onClick={() => setLocation("/notifications/manage")}
+            data-testid="button-manage-notifications"
           >
-            Mark all read
+            <Settings className="w-5 h-5" />
           </Button>
-        )}
+        </div>
       </header>
 
       {isLoading ? (

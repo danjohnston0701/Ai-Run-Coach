@@ -164,6 +164,24 @@ export default function ManageNotifications() {
     updateMutation.mutate({ [key]: !preferences[key] });
   };
 
+  const allEnabled = preferences ? Object.values(preferences).every(v => v === true) : false;
+  
+  const handleToggleAll = () => {
+    if (!preferences) return;
+    const newValue = !allEnabled;
+    const allPrefs: NotificationPreferences = {
+      friendRequest: newValue,
+      friendAccepted: newValue,
+      groupRunInvite: newValue,
+      groupRunStarting: newValue,
+      liveRunInvite: newValue,
+      liveObserverJoined: newValue,
+      runCompleted: newValue,
+      weeklyProgress: newValue,
+    };
+    updateMutation.mutate(allPrefs);
+  };
+
   const handleTest = (testType: string) => {
     testMutation.mutate(testType);
   };
@@ -208,6 +226,35 @@ export default function ManageNotifications() {
             <p className="text-sm text-muted-foreground">
               Choose which notifications you want to receive. Test buttons send a sample notification to your device.
             </p>
+          </div>
+
+          <div className="p-4 border-b border-white/5 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                allEnabled ? 'bg-primary/20' : 'bg-white/5'
+              }`}>
+                <Bell className={`w-5 h-5 ${allEnabled ? 'text-primary' : 'text-muted-foreground'}`} />
+              </div>
+              <div>
+                <p className="text-sm font-bold">All Notifications</p>
+                <p className="text-[10px] text-muted-foreground">Enable or disable all notifications at once</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleToggleAll}
+              disabled={updateMutation.isPending}
+              className={`relative w-12 h-6 rounded-full transition-colors ${
+                allEnabled ? 'bg-green-500' : 'bg-white/20'
+              }`}
+              data-testid="toggle-all-notifications"
+            >
+              <span 
+                className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                  allEnabled ? 'left-7' : 'left-1'
+                }`} 
+              />
+            </button>
           </div>
 
           <div className="divide-y divide-white/5">
