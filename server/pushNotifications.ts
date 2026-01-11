@@ -55,6 +55,16 @@ export function getPublicVapidKey() {
   return vapidPublicKey;
 }
 
+function getNotificationIcon(): string {
+  // Use absolute URL for Chrome notification icon compatibility
+  const baseUrl = process.env.REPLIT_DEV_DOMAIN 
+    ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+    : process.env.REPL_SLUG && process.env.REPL_OWNER
+      ? `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`
+      : '';
+  return baseUrl ? `${baseUrl}/favicon.png` : '/favicon.png';
+}
+
 interface NotificationPayload {
   title: string;
   body: string;
@@ -155,7 +165,7 @@ export async function sendFriendRequestNotification(
   return sendPushNotification(addresseeId, {
     title: 'New Friend Request',
     body: `${requesterName} (${requesterEmail}) wants to be your friend!`,
-    icon: '/favicon.png',
+    icon: getNotificationIcon(),
     tag: 'friend-request',
     data: { type: 'friend-request' },
     actions: [
@@ -195,7 +205,7 @@ export async function sendFriendAcceptedNotification(
   return sendPushNotification(requesterId, {
     title: 'Friend Request Accepted',
     body: `${addresseeName} (${addresseeEmail}) accepted your friend request!`,
-    icon: '/favicon.png',
+    icon: getNotificationIcon(),
     tag: 'friend-accepted',
     data: { type: 'friend-accepted', friendId: addresseeId },
   });
@@ -223,7 +233,7 @@ export async function sendGroupRunInviteNotification(
   return sendPushNotification(inviteeId, {
     title: 'Group Run Invitation',
     body: message,
-    icon: '/favicon.png',
+    icon: getNotificationIcon(),
     tag: `group-run-invite-${groupRunId}`,
     data: { 
       type: 'group-run-invite',
@@ -267,7 +277,7 @@ export async function sendGroupRunAcceptedNotification(
   return sendPushNotification(hostId, {
     title: 'Group Run: Friend Joined',
     body: `${participantName} accepted your group run invitation!`,
-    icon: '/favicon.png',
+    icon: getNotificationIcon(),
     tag: `group-run-accepted-${groupRunId}`,
     data: { type: 'group-run-accepted', groupRunId },
   });
@@ -304,7 +314,7 @@ export async function sendLiveRunInviteNotification(
   return sendPushNotification(friendId, {
     title: 'Live Run Invitation',
     body: `${runnerName} invited you to watch their live run!`,
-    icon: '/favicon.png',
+    icon: getNotificationIcon(),
     tag: `live-run-invite-${sessionId}`,
     data: { type: 'live-run-invite', runnerId, sessionId },
     actions: [
@@ -344,7 +354,7 @@ export async function sendLiveObserverJoinedNotification(
   return sendPushNotification(runnerId, {
     title: 'Friend Watching Your Run',
     body: `${observerName} is now watching your live run!`,
-    icon: '/favicon.png',
+    icon: getNotificationIcon(),
     tag: `live-observer-joined-${sessionId}`,
     data: { type: 'live-observer-joined', observerId, sessionId },
   });
