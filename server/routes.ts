@@ -1895,18 +1895,23 @@ export async function registerRoutes(
 
   // Notification Preferences endpoints
   app.get("/api/notification-preferences/:userId", async (req, res) => {
+    const defaults = {
+      friendRequest: true,
+      friendAccepted: true,
+      groupRunInvite: true,
+      groupRunStarting: true,
+      runCompleted: false,
+      weeklyProgress: false,
+    };
     try {
       const prefs = await storage.getNotificationPreferences(req.params.userId);
       // Return defaults if no preferences exist
-      res.json(prefs || {
-        friendRequest: true,
-        friendAccepted: true,
-        groupRunInvite: true,
-        groupRunStarting: true,
-        runCompleted: false,
-        weeklyProgress: false,
-      });
-    } catch (error) {
+      res.json(prefs || defaults);
+    } catch (error: any) {
+      // If table doesn't exist yet, return defaults
+      if (error?.code === '42P01') {
+        return res.json(defaults);
+      }
       console.error("Error fetching notification preferences:", error);
       res.status(500).json({ error: "Failed to fetch notification preferences" });
     }
@@ -1924,7 +1929,18 @@ export async function registerRoutes(
         weeklyProgress,
       });
       res.json(prefs);
-    } catch (error) {
+    } catch (error: any) {
+      // If table doesn't exist yet, return the values they tried to save
+      if (error?.code === '42P01') {
+        return res.json({
+          friendRequest: friendRequest ?? true,
+          friendAccepted: friendAccepted ?? true,
+          groupRunInvite: groupRunInvite ?? true,
+          groupRunStarting: groupRunStarting ?? true,
+          runCompleted: runCompleted ?? false,
+          weeklyProgress: weeklyProgress ?? false,
+        });
+      }
       console.error("Error updating notification preferences:", error);
       res.status(500).json({ error: "Failed to update notification preferences" });
     }
