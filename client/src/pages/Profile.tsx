@@ -265,9 +265,9 @@ export default function Profile() {
     enabled: !!profile?.id,
   });
 
-  // Update profile with friends from database
+  // Update profile with friends from database - always sync to get latest profilePic
   useEffect(() => {
-    if (profile && dbFriends.length > 0) {
+    if (profile && dbFriends.length >= 0) {
       const friendsList = dbFriends.map((f: any) => ({
         name: f.name,
         userCode: f.userCode,
@@ -275,15 +275,10 @@ export default function Profile() {
         profilePic: f.profilePic,
       }));
       
-      // Only update if friends are different
-      const currentFriendsStr = JSON.stringify(profile.friends || []);
-      const newFriendsStr = JSON.stringify(friendsList);
-      
-      if (currentFriendsStr !== newFriendsStr) {
-        const updatedProfile = { ...profile, friends: friendsList };
-        setProfile(updatedProfile);
-        localStorage.setItem("userProfile", JSON.stringify(updatedProfile));
-      }
+      // Always update to ensure we have latest data including profilePic
+      const updatedProfile = { ...profile, friends: friendsList };
+      setProfile(updatedProfile);
+      localStorage.setItem("userProfile", JSON.stringify(updatedProfile));
     }
   }, [dbFriends]);
 
@@ -1186,7 +1181,7 @@ export default function Profile() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Eye className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <Eye className="w-4 h-4 text-primary/70" />
                       <button
                         type="button"
                         onClick={(e) => {
