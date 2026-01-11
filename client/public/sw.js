@@ -6,10 +6,15 @@ self.addEventListener('push', function(event) {
 
   try {
     const data = event.data.json();
+    
+    // Build absolute icon URL for Android Chrome compatibility
+    const origin = self.location.origin;
+    const defaultIcon = origin + '/favicon.png';
+    
     const options = {
       body: data.body || 'You have a new notification',
-      icon: data.icon || '/favicon.png',
-      badge: data.badge || '/favicon.png',
+      icon: data.icon || defaultIcon,
+      badge: data.badge || defaultIcon,
       tag: data.tag || 'default',
       data: data.data || {},
       actions: data.actions || [],
