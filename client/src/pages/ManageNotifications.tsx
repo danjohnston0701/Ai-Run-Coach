@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
-import { ArrowLeft, Bell, UserPlus, Users, Play, Settings, Loader2, Send, Eye, Radio } from "lucide-react";
+import { ArrowLeft, Bell, UserPlus, Users, Play, Settings, Loader2, Send, Eye, Radio, AlertTriangle, RefreshCw } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -20,6 +20,64 @@ interface NotificationPreferences {
 interface UserProfile {
   id?: string;
   name: string;
+}
+
+type PushResult = { success: true } | { success: false; error: string };
+
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+async function registerPushSubscription(userId: string): Promise<PushResult> {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    console.log('[Push] Push notifications not supported');
+    return { success: false, error: 'not_supported' };
+  }
+
+  try {
+    console.log('[Push] Getting VAPID key...');
+    const keyRes = await fetch('/api/push/vapid-public-key');
+    if (!keyRes.ok) {
+      console.log('[Push] Could not get VAPID key');
+      return { success: false, error: 'not_configured' };
+    }
+    const { vapidPublicKey } = await keyRes.json();
+
+    console.log('[Push] Registering service worker...');
+    const registration = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+
+    console.log('[Push] Subscribing to push manager...');
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+    });
+
+    console.log('[Push] Saving subscription to server...');
+    const saveRes = await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, subscription: subscription.toJSON() }),
+    });
+    
+    if (!saveRes.ok) {
+      console.error('[Push] Failed to save subscription to server');
+      return { success: false, error: 'failed' };
+    }
+
+    console.log('[Push] Successfully subscribed');
+    return { success: true };
+  } catch (error) {
+    console.error('[Push] Registration failed:', error);
+    return { success: false, error: 'failed' };
+  }
 }
 
 const NOTIFICATION_TYPES = [
@@ -85,12 +143,63 @@ export default function ManageNotifications() {
   const [, setLocation] = useLocation();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [testingType, setTestingType] = useState<string | null>(null);
+  const [subscriptionNeedsSync, setSubscriptionNeedsSync] = useState(false);
+  const [isResyncing, setIsResyncing] = useState(false);
   const queryClient = useQueryClient();
+
+  const checkSubscriptionSync = async (userId: string) => {
+    try {
+      if (!('serviceWorker' in navigator) || !('Notification' in window)) return;
+      if (Notification.permission !== 'granted') return;
+
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      
+      if (subscription) {
+        const res = await fetch(`/api/push/subscription-status?userId=${userId}&endpoint=${encodeURIComponent(subscription.endpoint)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (!data.hasSubscription) {
+            console.log('[Push] Browser has subscription but server lacks it - needs sync');
+            setSubscriptionNeedsSync(true);
+          } else {
+            setSubscriptionNeedsSync(false);
+          }
+        }
+      } else {
+        console.log('[Push] Browser has permission but no subscription - needs setup');
+        setSubscriptionNeedsSync(true);
+      }
+    } catch (error) {
+      console.error('[Push] Failed to check subscription sync:', error);
+    }
+  };
+
+  const handleResyncSubscription = async () => {
+    if (!profile?.id) return;
+    setIsResyncing(true);
+    try {
+      const result = await registerPushSubscription(profile.id);
+      if (result.success) {
+        setSubscriptionNeedsSync(false);
+        toast.success('Notifications re-enabled for this device');
+      } else {
+        toast.error('Failed to re-enable notifications');
+      }
+    } finally {
+      setIsResyncing(false);
+    }
+  };
 
   useEffect(() => {
     const userProfile = localStorage.getItem("userProfile");
     if (userProfile) {
-      setProfile(JSON.parse(userProfile));
+      const parsed = JSON.parse(userProfile);
+      setProfile(parsed);
+      
+      if (parsed.id && 'Notification' in window && Notification.permission === 'granted') {
+        checkSubscriptionSync(parsed.id);
+      }
     }
   }, []);
 
@@ -221,6 +330,45 @@ export default function ManageNotifications() {
       </motion.header>
 
       <main className="max-w-lg mx-auto px-4 py-6 space-y-6">
+        {subscriptionNeedsSync && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-4 bg-amber-500/10 rounded-xl border border-amber-500/30"
+          >
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-amber-400">
+                  Notifications need to be refreshed
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Your notification settings need to be re-synced with your device.
+                </p>
+                <Button
+                  onClick={handleResyncSubscription}
+                  disabled={isResyncing}
+                  size="sm"
+                  className="mt-3 bg-amber-500 hover:bg-amber-600 text-black"
+                  data-testid="button-resync-notifications"
+                >
+                  {isResyncing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Refreshing...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Refresh Notifications
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         <div className="bg-card/50 rounded-2xl border border-white/5 overflow-hidden">
           <div className="p-4 border-b border-white/5">
             <p className="text-sm text-muted-foreground">
