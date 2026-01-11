@@ -69,6 +69,8 @@ export async function sendPushNotification(
   userId: string,
   payload: NotificationPayload
 ): Promise<boolean> {
+  console.log(`[Push] Attempting to send notification to user ${userId}:`, payload.title);
+  
   if (!isConfigured) {
     console.log('[Push] Push notifications not configured, skipping notification');
     return false;
@@ -77,9 +79,11 @@ export async function sendPushNotification(
   try {
     const subscription = await storage.getPushSubscription(userId);
     if (!subscription) {
-      console.log(`[Push] No subscription found for user ${userId}`);
+      console.log(`[Push] No subscription found for user ${userId} - they may need to re-enable notifications`);
       return false;
     }
+    
+    console.log(`[Push] Found subscription for user ${userId}, sending...`);
 
     const pushSubscription = {
       endpoint: subscription.endpoint,
