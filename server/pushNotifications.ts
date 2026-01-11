@@ -142,7 +142,8 @@ export async function sendFriendRequestNotification(
 export async function sendFriendAcceptedNotification(
   requesterId: string,
   addresseeName: string,
-  addresseeEmail: string
+  addresseeEmail: string,
+  addresseeId?: string
 ): Promise<boolean> {
   // Create notification record in database (so it appears in notifications page)
   try {
@@ -152,7 +153,7 @@ export async function sendFriendAcceptedNotification(
       title: 'Friend Request Accepted',
       message: `${addresseeName} (${addresseeEmail}) accepted your friend request!`,
       read: false,
-      data: JSON.stringify({ type: 'friend-accepted', addresseeEmail }),
+      data: JSON.stringify({ type: 'friend-accepted', addresseeEmail, friendId: addresseeId }),
     });
   } catch (error) {
     console.error('[Notification] Failed to create notification record:', error);
@@ -164,7 +165,7 @@ export async function sendFriendAcceptedNotification(
     body: `${addresseeName} (${addresseeEmail}) accepted your friend request!`,
     icon: '/favicon.ico',
     tag: 'friend-accepted',
-    data: { type: 'friend-accepted' },
+    data: { type: 'friend-accepted', friendId: addresseeId },
   });
 }
 

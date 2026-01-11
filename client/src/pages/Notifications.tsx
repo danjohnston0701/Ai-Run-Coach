@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
-import { ArrowLeft, Bell, UserPlus, Route, Trophy, Clock, Check, X } from "lucide-react";
+import { ArrowLeft, Bell, UserPlus, Route, Trophy, Clock, Check, X, ChevronRight } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -245,6 +245,17 @@ export default function Notifications() {
                   if (!notification.read) {
                     markAsReadMutation.mutate(notification.id);
                   }
+                  // Navigate to friend profile for friend_accepted notifications
+                  if (notification.type === 'friend_accepted') {
+                    try {
+                      const data = notification.data ? JSON.parse(notification.data) : {};
+                      if (data.friendId) {
+                        setLocation(`/friend/${data.friendId}`);
+                      }
+                    } catch (e) {
+                      // Invalid JSON, ignore
+                    }
+                  }
                 }}
                 data-testid={`notification-${notification.id}`}
               >
@@ -258,6 +269,12 @@ export default function Notifications() {
                       </div>
                     </div>
                     <div className="flex-1 min-w-0">
+                      {/* Show navigation hint for friend_accepted */}
+                      {notification.type === 'friend_accepted' && (
+                        <div className="float-right ml-2">
+                          <ChevronRight className="w-5 h-5 text-primary/50" />
+                        </div>
+                      )}
                       <div className="flex items-center justify-between gap-2">
                         <h3 className={`font-medium text-sm ${
                           notification.read ? 'text-muted-foreground' : 'text-foreground'
