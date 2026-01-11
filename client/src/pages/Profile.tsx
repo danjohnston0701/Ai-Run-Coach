@@ -399,6 +399,30 @@ export default function Profile() {
     }
   };
 
+  const handleDisableNotifications = async () => {
+    if (!profile?.id) return;
+    try {
+      const res = await fetch(`/api/push/subscribe/${profile.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setNotificationsEnabled(false);
+        toast.success('Notifications disabled');
+      } else {
+        toast.error('Failed to disable notifications');
+      }
+    } catch (error) {
+      console.error('Failed to disable notifications:', error);
+      toast.error('Failed to disable notifications');
+    }
+  };
+
+  const handleToggleNotifications = async () => {
+    if (notificationsEnabled) {
+      await handleDisableNotifications();
+    } else {
+      await handleEnableNotifications();
+    }
+  };
+
   const handleUploadClick = () => {
     fileInputRef.current?.click();
     setShowPhotoOptions(false);
@@ -1045,27 +1069,20 @@ export default function Profile() {
                 <p className="text-sm font-medium">Push Notifications</p>
                 <p className="text-[10px] text-muted-foreground">Get notified when friends add you</p>
               </div>
-              {notificationsEnabled ? (
-                <button
-                  type="button"
-                  onClick={handleEnableNotifications}
-                  className="flex items-center gap-2 text-green-500 hover:opacity-80 transition-opacity"
-                  data-testid="button-refresh-notifications"
-                >
-                  <Bell className="w-4 h-4" />
-                  <span className="text-xs font-bold">ON</span>
-                </button>
-              ) : (
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={handleEnableNotifications}
-                  className="h-8 px-3 bg-primary/20 hover:bg-primary/30 text-primary text-xs font-bold"
-                  data-testid="button-enable-notifications"
-                >
-                  Enable
-                </Button>
-              )}
+              <button
+                type="button"
+                onClick={handleToggleNotifications}
+                className={`relative w-12 h-6 rounded-full transition-colors ${
+                  notificationsEnabled ? 'bg-green-500' : 'bg-white/20'
+                }`}
+                data-testid="toggle-notifications"
+              >
+                <span 
+                  className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                    notificationsEnabled ? 'left-7' : 'left-1'
+                  }`} 
+                />
+              </button>
             </div>
           </div>
 
