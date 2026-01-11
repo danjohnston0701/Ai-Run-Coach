@@ -2434,6 +2434,7 @@ export default function RunSession() {
       elevationGain: routeData?.elevation?.gain || 0,
       elevationLoss: routeData?.elevation?.loss || 0,
       weatherData: runWeather || undefined,
+      aiCoachEnabled: aiCoachEnabled,
     };
     console.log('[Save] localRunData.weatherData:', localRunData.weatherData);
     console.log('[Save] GPS points recorded:', positionsRef.current.length, 'saved:', localRunData.gpsTrack.length);
@@ -2459,6 +2460,7 @@ export default function RunSession() {
             paceData: formattedKmSplits,
             weatherData: runWeather || undefined,
             sessionKey: sessionIdRef.current,
+            aiCoachEnabled: aiCoachEnabled,
           };
           
           console.log('[Save] Attempting to save run to database for userId:', userProfile.id);

@@ -121,6 +121,7 @@ export const runs = pgTable("runs", {
   weatherData: jsonb("weather_data"),
   aiInsights: text("ai_insights"),
   aiCoachingNotes: jsonb("ai_coaching_notes"),
+  aiCoachEnabled: boolean("ai_coach_enabled"),
   completedAt: timestamp("completed_at").defaultNow(),
 });
 
