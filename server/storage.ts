@@ -285,13 +285,14 @@ export class DatabaseStorage implements IStorage {
 
   async getAllUsersForAdmin(): Promise<Array<{ id: string; email: string; name: string; isAdmin: boolean; createdAt: Date | null }>> {
     return withRetry(async () => {
-      return db.select({
+      const result = await db.select({
         id: users.id,
         email: users.email,
         name: users.name,
         isAdmin: users.isAdmin,
         createdAt: users.createdAt,
       }).from(users).orderBy(desc(users.createdAt));
+      return result.map(u => ({ ...u, isAdmin: u.isAdmin ?? false }));
     });
   }
 

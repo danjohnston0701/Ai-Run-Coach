@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "framer-motion";
-import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, MicOff, Settings, Users, Check, Copy, Radio, Target } from "lucide-react";
+import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, MicOff, Settings, Users, Check, Copy, Radio, Target, UserCog, LogOut, Search } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -240,6 +240,13 @@ export default function Home() {
   const [preRunDistance, setPreRunDistance] = useState([5]);
   const [preRunTime, setPreRunTime] = useState({ h: "0", m: "30", s: "00" });
   const [preRunMode, setPreRunMode] = useState<"freerun" | "mapmyrun">("freerun");
+  
+  // Admin User Support state
+  const [showUserSupportModal, setShowUserSupportModal] = useState(false);
+  const [adminUserList, setAdminUserList] = useState<Array<{ id: string; email: string; name: string; isAdmin: boolean; createdAt: Date | null }>>([]);
+  const [userSearchQuery, setUserSearchQuery] = useState("");
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [impersonating, setImpersonating] = useState(false);
 
   interface PendingGroupInvite {
     id: string;
@@ -285,6 +292,85 @@ export default function Home() {
     setActiveSession(null);
     toast.success("Previous run session discarded");
   };
+
+  // Admin: Load users for User Support modal
+  const loadAdminUsers = async () => {
+    if (!profile?.id) return;
+    setLoadingUsers(true);
+    try {
+      const res = await fetch('/api/admin/users', {
+        headers: { 'x-user-id': profile.id }
+      });
+      if (res.ok) {
+        const users = await res.json();
+        setAdminUserList(users);
+      } else {
+        toast.error("Failed to load users");
+      }
+    } catch (error) {
+      toast.error("Failed to load users");
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  // Admin: Impersonate a user
+  const handleImpersonate = async (targetUserId: string) => {
+    if (!profile?.id) return;
+    setImpersonating(true);
+    try {
+      const res = await fetch('/api/admin/impersonate', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-id': profile.id 
+        },
+        body: JSON.stringify({ targetUserId })
+      });
+      if (res.ok) {
+        const { user, originalAdminId, originalAdminEmail } = await res.json();
+        // Store original admin info for returning later
+        localStorage.setItem('originalAdmin', JSON.stringify({ id: originalAdminId, email: originalAdminEmail }));
+        // Replace current user with impersonated user
+        localStorage.setItem('user', JSON.stringify(user));
+        toast.success(`Now viewing as ${user.name || user.email}`);
+        setShowUserSupportModal(false);
+        // Reload to apply impersonation
+        window.location.reload();
+      } else {
+        const error = await res.json();
+        toast.error(error.error || "Failed to impersonate user");
+      }
+    } catch (error) {
+      toast.error("Failed to impersonate user");
+    } finally {
+      setImpersonating(false);
+    }
+  };
+
+  // Admin: Return to original admin account
+  const handleReturnToAdmin = () => {
+    const originalAdmin = localStorage.getItem('originalAdmin');
+    if (originalAdmin) {
+      const admin = JSON.parse(originalAdmin);
+      // Need to fetch the full admin user data
+      fetch(`/api/users/${admin.id}`)
+        .then(res => res.json())
+        .then(adminUser => {
+          localStorage.setItem('user', JSON.stringify(adminUser));
+          localStorage.removeItem('originalAdmin');
+          toast.success("Returned to your admin account");
+          window.location.reload();
+        })
+        .catch(() => {
+          toast.error("Failed to return to admin account");
+        });
+    }
+  };
+
+  // Check if currently impersonating
+  const originalAdmin = localStorage.getItem('originalAdmin');
+  const isImpersonating = !!originalAdmin;
 
   const formatTime = (seconds: number): string => {
     const h = Math.floor(seconds / 3600);
@@ -1296,17 +1382,31 @@ export default function Home() {
                   <span className="font-medium">AI Coach Settings</span>
                 </button>
                 {profile?.isAdmin && (
-                  <button
-                    onClick={() => {
-                      setMenuOpen(false);
-                      setLocation("/admin/ai-config");
-                    }}
-                    className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left"
-                    data-testid="menu-ai-control-centre"
-                  >
-                    <Settings className="w-5 h-5 text-primary" />
-                    <span className="font-medium">AI Control Centre</span>
-                  </button>
+                  <>
+                    <button
+                      onClick={() => {
+                        setMenuOpen(false);
+                        setLocation("/admin/ai-config");
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left"
+                      data-testid="menu-ai-control-centre"
+                    >
+                      <Settings className="w-5 h-5 text-primary" />
+                      <span className="font-medium">AI Control Centre</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setMenuOpen(false);
+                        setShowUserSupportModal(true);
+                        loadAdminUsers();
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left"
+                      data-testid="menu-user-support"
+                    >
+                      <UserCog className="w-5 h-5 text-primary" />
+                      <span className="font-medium">User Support</span>
+                    </button>
+                  </>
                 )}
               </nav>
             </SheetContent>
@@ -1336,7 +1436,7 @@ export default function Home() {
       </header>
 
       {/* Goal Widget */}
-      {profile && <GoalWidget userId={profile.id} />}
+      {profile?.id && <GoalWidget userId={profile.id} />}
 
       {/* GPS Status Section - Always visible */}
       {locationLoading && !userLocation && !locationError && (
@@ -2221,6 +2321,121 @@ export default function Home() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* User Support Modal (Admin Only) */}
+      <Dialog open={showUserSupportModal} onOpenChange={setShowUserSupportModal}>
+        <DialogContent className="max-w-md max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserCog className="w-5 h-5" />
+              User Support
+            </DialogTitle>
+            <DialogDescription>
+              Select a user to view their account and run history
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="relative mb-4">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search by name or email..."
+              value={userSearchQuery}
+              onChange={(e) => setUserSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-muted/50 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              data-testid="input-user-search"
+            />
+          </div>
+          
+          <div className="flex-1 overflow-y-auto space-y-2 max-h-[400px]">
+            {loadingUsers ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader className="w-6 h-6 animate-spin text-primary" />
+              </div>
+            ) : adminUserList.filter(u => 
+              userSearchQuery === "" || 
+              u.name.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
+              u.email.toLowerCase().includes(userSearchQuery.toLowerCase())
+            ).length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                No users found
+              </div>
+            ) : (
+              adminUserList
+                .filter(u => 
+                  userSearchQuery === "" || 
+                  u.name.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
+                  u.email.toLowerCase().includes(userSearchQuery.toLowerCase())
+                )
+                .map(user => (
+                  <div
+                    key={user.id}
+                    className="flex items-center justify-between p-3 bg-muted/30 rounded-lg hover:bg-muted/50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
+                        {user.isAdmin ? (
+                          <UserCog className="w-5 h-5 text-primary" />
+                        ) : (
+                          <User className="w-5 h-5 text-primary" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium truncate">{user.name}</p>
+                          {user.isAdmin && (
+                            <Badge variant="secondary" className="text-xs">Admin</Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleImpersonate(user.id)}
+                      disabled={impersonating || user.id === profile?.id}
+                      className="shrink-0 ml-2"
+                      data-testid={`button-impersonate-${user.id}`}
+                    >
+                      {impersonating ? (
+                        <Loader className="w-4 h-4 animate-spin" />
+                      ) : (
+                        "View As"
+                      )}
+                    </Button>
+                  </div>
+                ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Impersonation Indicator */}
+      {isImpersonating && (
+        <motion.div
+          initial={{ y: -100 }}
+          animate={{ y: 0 }}
+          className="fixed top-0 left-0 right-0 bg-amber-500 text-black py-2 px-4 z-50 flex items-center justify-between"
+        >
+          <div className="flex items-center gap-2">
+            <UserCog className="w-4 h-4" />
+            <span className="text-sm font-medium">
+              Viewing as: {profile?.name || profile?.id}
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={handleReturnToAdmin}
+            className="text-black hover:bg-amber-600"
+            data-testid="button-return-to-admin"
+          >
+            <LogOut className="w-4 h-4 mr-2" />
+            Return to Admin
+          </Button>
+        </motion.div>
+      )}
     </div>
   );
 }
