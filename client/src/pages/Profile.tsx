@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { ArrowLeft, Save, User, Camera, Upload, UserPlus, X, Users, Check, Bell, BellOff, Clock, Loader2, Pencil, Ruler } from "lucide-react";
+import { ArrowLeft, Save, User, Camera, Upload, UserPlus, X, Users, Check, Bell, BellOff, Clock, Loader2, Pencil, Ruler, Eye, Shield } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -190,6 +190,11 @@ export default function Profile() {
   const [isSearching, setIsSearching] = useState(false);
   const [isEditingEmail, setIsEditingEmail] = useState(false);
   const [newEmail, setNewEmail] = useState("");
+  const [showPrivacyDialog, setShowPrivacyDialog] = useState(false);
+  const [pendingFriendRequest, setPendingFriendRequest] = useState<SearchUser | null>(null);
+  const [dontShowPrivacyAgain, setDontShowPrivacyAgain] = useState(() => {
+    return localStorage.getItem("hidePrivacyDialog") === "true";
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
@@ -436,7 +441,41 @@ export default function Profile() {
   };
 
   const handleSendRequest = (user: SearchUser) => {
-    sendRequestMutation.mutate(user.id);
+    if (dontShowPrivacyAgain) {
+      sendRequestMutation.mutate(user.id);
+    } else {
+      setPendingFriendRequest(user);
+      setShowPrivacyDialog(true);
+    }
+  };
+
+  const confirmSendRequest = () => {
+    if (pendingFriendRequest) {
+      sendRequestMutation.mutate(pendingFriendRequest.id);
+    }
+    setShowPrivacyDialog(false);
+    setPendingFriendRequest(null);
+  };
+
+  const handleDontShowAgain = () => {
+    localStorage.setItem("hidePrivacyDialog", "true");
+    setDontShowPrivacyAgain(true);
+    if (pendingFriendRequest) {
+      sendRequestMutation.mutate(pendingFriendRequest.id);
+    }
+    setShowPrivacyDialog(false);
+    setPendingFriendRequest(null);
+  };
+
+  const cancelPrivacyDialog = () => {
+    setShowPrivacyDialog(false);
+    setPendingFriendRequest(null);
+  };
+
+  const handleViewFriendProfile = (friend: Friend) => {
+    if (friend.friendId) {
+      setLocation(`/friend/${friend.friendId}`);
+    }
   };
 
   const handleRemoveFriend = async (index: number) => {
@@ -1125,19 +1164,35 @@ export default function Profile() {
               <div className="space-y-2">
                 <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">Your Friends</p>
                 {profile.friends.map((friend, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5" data-testid={`friend-${idx}`}>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{friend.name}</p>
-                      {friend.userCode && <p className="text-[10px] text-muted-foreground font-mono">ID: {friend.userCode}</p>}
+                  <div 
+                    key={idx} 
+                    className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5 hover:border-primary/30 hover:bg-white/10 transition-all cursor-pointer group" 
+                    data-testid={`friend-${idx}`}
+                    onClick={() => handleViewFriendProfile(friend)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary/30 to-primary/10 flex items-center justify-center">
+                        <User className="w-4 h-4 text-primary" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{friend.name}</p>
+                        {friend.userCode && <p className="text-[10px] text-muted-foreground font-mono">ID: {friend.userCode}</p>}
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveFriend(idx)}
-                      className="p-1 hover:bg-white/10 rounded transition-colors"
-                      data-testid={`button-remove-friend-${idx}`}
-                    >
-                      <X className="w-4 h-4 text-muted-foreground hover:text-red-500" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <Eye className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveFriend(idx);
+                        }}
+                        className="p-1 hover:bg-white/10 rounded transition-colors"
+                        data-testid={`button-remove-friend-${idx}`}
+                      >
+                        <X className="w-4 h-4 text-muted-foreground hover:text-red-500" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1236,6 +1291,62 @@ export default function Profile() {
           </div>
         </form>
       </motion.div>
+
+      {/* Privacy Dialog */}
+      <AnimatePresence>
+        {showPrivacyDialog && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-6"
+            onClick={cancelPrivacyDialog}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-card border border-white/10 rounded-2xl max-w-sm w-full overflow-hidden"
+            >
+              <div className="p-6 text-center">
+                <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mx-auto mb-4">
+                  <Shield className="w-8 h-8 text-primary" />
+                </div>
+                <h3 className="text-xl font-bold text-foreground mb-4">Profile and Activity Visibility</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  Connections can see your profile and activity data that you choose to share with them. 
+                  You can change your privacy settings globally, or on each activity, and you may disconnect 
+                  from Connections at any time.
+                </p>
+              </div>
+              <div className="border-t border-white/10">
+                <button
+                  onClick={confirmSendRequest}
+                  className="w-full py-4 text-sm font-bold text-primary hover:bg-white/5 transition-colors"
+                  data-testid="button-privacy-ok"
+                >
+                  OK
+                </button>
+                <button
+                  onClick={cancelPrivacyDialog}
+                  className="w-full py-4 text-sm font-medium text-muted-foreground hover:bg-white/5 transition-colors border-t border-white/10"
+                  data-testid="button-privacy-cancel"
+                >
+                  CANCEL
+                </button>
+                <button
+                  onClick={handleDontShowAgain}
+                  className="w-full py-4 text-sm font-medium text-muted-foreground hover:bg-white/5 transition-colors border-t border-white/10"
+                  data-testid="button-privacy-dont-show"
+                >
+                  DON'T SHOW AGAIN
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

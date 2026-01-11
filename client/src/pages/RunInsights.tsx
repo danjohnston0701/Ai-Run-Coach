@@ -89,6 +89,7 @@ export default function RunInsights() {
   const searchString = useSearch();
   const searchParams = new URLSearchParams(searchString);
   const groupRunId = searchParams.get("groupRunId");
+  const isFriendView = searchParams.get("friendView") === "true";
   
   const [run, setRun] = useState<RunData | null>(null);
   const [groupRunSummary, setGroupRunSummary] = useState<GroupRunSummary | null>(null);
@@ -1283,7 +1284,8 @@ export default function RunInsights() {
           </Card>
         </section>
 
-        {/* AI Run Analysis Section */}
+        {/* AI Run Analysis Section - Hidden for friend views */}
+        {!isFriendView && (
         <section className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -1496,6 +1498,7 @@ export default function RunInsights() {
             </div>
           )}
         </section>
+        )}
 
         {/* Admin AI Coaching Logs Section */}
         {isAdmin && (

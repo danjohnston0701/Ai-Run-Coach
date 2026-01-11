@@ -23,6 +23,7 @@ import Routes from "@/pages/Routes";
 import Pricing from "@/pages/Pricing";
 import SubscriptionSuccess from "@/pages/SubscriptionSuccess";
 import Goals from "@/pages/Goals";
+import FriendProfile from "@/pages/FriendProfile";
 import { migrateLocalDataToDatabase } from "@/lib/dataMigration";
 
 function ScrollToTop() {
@@ -106,6 +107,7 @@ function Router() {
           <Route path="/history/:id" component={RunInsights} />
           <Route path="/goals" component={Goals} />
           <Route path="/profile" component={Profile} />
+          <Route path="/friend/:friendId" component={FriendProfile} />
           <Route path="/notifications" component={Notifications} />
           <Route path="/admin/ai-config" component={AdminAIConfig} />
           <Route path="/routes" component={Routes} />

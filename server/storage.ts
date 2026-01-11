@@ -45,6 +45,7 @@ export interface IStorage {
   getFriends(userId: string): Promise<Friend[]>;
   addFriend(data: InsertFriend): Promise<Friend>;
   removeFriend(userId: string, friendId: string): Promise<void>;
+  areFriends(userId1: string, userId2: string): Promise<boolean>;
 
   createRoute(data: InsertRoute): Promise<Route>;
   getRoute(id: string): Promise<Route | undefined>;
@@ -318,6 +319,19 @@ export class DatabaseStorage implements IStorage {
     await db.delete(friends).where(
       and(eq(friends.userId, userId), eq(friends.friendId, friendId))
     );
+  }
+
+  async areFriends(userId1: string, userId2: string): Promise<boolean> {
+    const result = await db.select().from(friends).where(
+      and(
+        eq(friends.status, 'accepted'),
+        or(
+          and(eq(friends.userId, userId1), eq(friends.friendId, userId2)),
+          and(eq(friends.userId, userId2), eq(friends.friendId, userId1))
+        )
+      )
+    );
+    return result.length > 0;
   }
 
   async createRoute(data: InsertRoute): Promise<Route> {

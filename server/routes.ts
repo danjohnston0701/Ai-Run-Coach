@@ -480,11 +480,32 @@ export async function registerRoutes(
       if (!run) {
         return res.status(404).json({ error: "Run not found" });
       }
-      // Verify the requesting user owns this run
+      
       const requestingUserId = req.query.userId as string;
-      if (requestingUserId && run.userId !== requestingUserId) {
-        return res.status(403).json({ error: "Not authorized to view this run" });
+      
+      // Require userId for authorization
+      if (!requestingUserId) {
+        return res.status(401).json({ error: "Authentication required" });
       }
+      
+      const isOwner = run.userId === requestingUserId;
+      
+      // Check if requester is admin
+      const requester = await storage.getUser(requestingUserId);
+      const isAdmin = requester?.isAdmin || false;
+      
+      // If not owner and not admin, check if they're friends
+      if (!isOwner && !isAdmin) {
+        const isFriend = await storage.areFriends(requestingUserId, run.userId);
+        if (!isFriend) {
+          return res.status(403).json({ error: "Not authorized to view this run" });
+        }
+        
+        // Friend can view run, but strip ALL AI-related fields
+        const { aiCoachingNotes, aiInsights, ...runWithoutAI } = run;
+        return res.json(runWithoutAI);
+      }
+      
       res.json(run);
     } catch (error) {
       res.status(500).json({ error: "Failed to get run" });
@@ -497,14 +518,24 @@ export async function registerRoutes(
       const runId = req.params.id;
       const userId = req.query.userId as string;
       
+      // Require userId for authorization
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      
       // Get the run to verify ownership
       const run = await storage.getRun(runId);
       if (!run) {
         return res.status(404).json({ error: "Run not found" });
       }
       
-      // Verify ownership
-      if (userId && run.userId !== userId) {
+      // Check if requester is owner or admin
+      const isOwner = run.userId === userId;
+      const requester = await storage.getUser(userId);
+      const isAdmin = requester?.isAdmin || false;
+      
+      // Only owner or admin can view AI analysis - friends cannot
+      if (!isOwner && !isAdmin) {
         return res.status(403).json({ error: "Not authorized to view this analysis" });
       }
       
@@ -1167,6 +1198,88 @@ export async function registerRoutes(
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to remove friend" });
+    }
+  });
+
+  // Get public profile for a friend (limited data)
+  app.get("/api/users/:id/public-profile", async (req, res) => {
+    try {
+      const userId = req.params.id;
+      const requesterId = req.query.requesterId as string;
+      
+      if (!requesterId) {
+        return res.status(400).json({ error: "requesterId is required" });
+      }
+      
+      // Verify they are friends
+      const areFriends = await storage.areFriends(requesterId, userId);
+      if (!areFriends) {
+        return res.status(403).json({ error: "Not authorized to view this profile" });
+      }
+      
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      // Return limited public profile data
+      res.json({
+        id: user.id,
+        name: user.name,
+        userCode: user.userCode,
+        profilePic: user.profilePic,
+        fitnessLevel: user.fitnessLevel,
+      });
+    } catch (error) {
+      console.error("Get public profile error:", error);
+      res.status(500).json({ error: "Failed to get profile" });
+    }
+  });
+
+  // Get friend's runs (with privacy filtering - no AI insights)
+  app.get("/api/users/:id/runs", async (req, res) => {
+    try {
+      const userId = req.params.id;
+      const requesterId = req.query.requesterId as string;
+      
+      if (!requesterId) {
+        return res.status(400).json({ error: "requesterId is required" });
+      }
+      
+      // Verify they are friends
+      const areFriends = await storage.areFriends(requesterId, userId);
+      if (!areFriends) {
+        return res.status(403).json({ error: "Not authorized to view these runs" });
+      }
+      
+      const runs = await storage.getUserRuns(userId);
+      
+      // Return runs without sensitive AI analysis data
+      const publicRuns = runs.map(run => ({
+        id: run.id,
+        distance: run.distance,
+        duration: run.duration,
+        avgPace: run.avgPace,
+        difficulty: run.difficulty,
+        completedAt: run.completedAt,
+        name: run.name,
+        elevation: run.elevation,
+        startLat: run.startLat,
+        startLng: run.startLng,
+        gpsTrack: run.gpsTrack,
+        paceData: run.paceData,
+        weatherData: run.weatherData,
+        cadence: run.cadence,
+        avgHeartRate: run.avgHeartRate,
+        maxHeartRate: run.maxHeartRate,
+        calories: run.calories,
+        // Explicitly exclude: aiInsights, aiCoachingNotes
+      }));
+      
+      res.json(publicRuns);
+    } catch (error) {
+      console.error("Get friend runs error:", error);
+      res.status(500).json({ error: "Failed to get runs" });
     }
   });
 
