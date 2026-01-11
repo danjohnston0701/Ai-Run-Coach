@@ -187,6 +187,7 @@ export default function Profile() {
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [friendSearchQuery, setFriendSearchQuery] = useState("");
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [subscriptionNeedsSync, setSubscriptionNeedsSync] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isEditingEmail, setIsEditingEmail] = useState(false);
@@ -200,6 +201,47 @@ export default function Profile() {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
+  // Check if browser has permission but server lacks subscription for this device
+  const checkSubscriptionSync = async (userId: string) => {
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      
+      if (subscription) {
+        // Check if this specific endpoint is registered on server
+        const res = await fetch(`/api/push/subscription-status?userId=${userId}&endpoint=${encodeURIComponent(subscription.endpoint)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (!data.hasSubscription) {
+            // Browser has subscription but server doesn't - needs re-sync
+            console.log('[Push] Browser has subscription but server lacks it - needs sync');
+            setSubscriptionNeedsSync(true);
+          } else {
+            setSubscriptionNeedsSync(false);
+          }
+        }
+      } else {
+        // Browser has permission but no subscription - user may have cleared data
+        console.log('[Push] Browser has permission but no subscription - needs setup');
+        setSubscriptionNeedsSync(true);
+      }
+    } catch (error) {
+      console.error('[Push] Failed to check subscription sync:', error);
+    }
+  };
+
+  // Handle re-syncing push subscription
+  const handleResyncSubscription = async () => {
+    if (!profile?.id) return;
+    const result = await registerPushSubscription(profile.id);
+    if (result.success) {
+      setSubscriptionNeedsSync(false);
+      toast.success('Notifications re-enabled for this device');
+    } else {
+      toast.error('Failed to re-enable notifications');
+    }
+  };
+
   useEffect(() => {
     const savedProfile = localStorage.getItem("userProfile");
     if (savedProfile) {
@@ -210,7 +252,13 @@ export default function Profile() {
       setProfile(parsed);
 
       if ('Notification' in window) {
-        setNotificationsEnabled(Notification.permission === 'granted');
+        const hasPermission = Notification.permission === 'granted';
+        setNotificationsEnabled(hasPermission);
+        
+        // Check if browser has permission but server subscription may be missing
+        if (hasPermission && parsed.id && 'serviceWorker' in navigator) {
+          checkSubscriptionSync(parsed.id);
+        }
       }
       
       // Fetch userCode from database if not in localStorage
@@ -1092,6 +1140,23 @@ export default function Profile() {
                 />
               </button>
             </div>
+            
+            {subscriptionNeedsSync && notificationsEnabled && (
+              <div className="p-3 bg-amber-500/10 rounded-lg border border-amber-500/20">
+                <p className="text-xs text-amber-400 mb-2">
+                  Notifications need to be re-enabled on this device
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleResyncSubscription}
+                  className="h-7 px-3 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 text-xs"
+                  data-testid="button-resync-notifications"
+                >
+                  Re-enable Notifications
+                </Button>
+              </div>
+            )}
           </div>
 
           <div className="space-y-4 bg-card/50 p-6 rounded-2xl border border-white/5">
