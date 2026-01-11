@@ -15,6 +15,7 @@ import RunInsights from "@/pages/RunInsights";
 import ProfileSetup from "@/pages/ProfileSetup";
 import Profile from "@/pages/Profile";
 import Notifications from "@/pages/Notifications";
+import ManageNotifications from "@/pages/ManageNotifications";
 import PrivacyPolicy from "@/pages/PrivacyPolicy";
 import TermsOfUse from "@/pages/TermsOfUse";
 import Login from "@/pages/Login";
@@ -109,6 +110,7 @@ function Router() {
           <Route path="/profile" component={Profile} />
           <Route path="/friend/:friendId" component={FriendProfile} />
           <Route path="/notifications" component={Notifications} />
+          <Route path="/notifications/manage" component={ManageNotifications} />
           <Route path="/admin/ai-config" component={AdminAIConfig} />
           <Route path="/routes" component={Routes} />
           <Route path="/pricing" component={Pricing} />

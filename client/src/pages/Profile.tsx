@@ -1062,6 +1062,14 @@ export default function Profile() {
                 <Bell className="w-5 h-5 text-primary" />
                 <h2 className="text-lg font-display font-bold uppercase tracking-wide">Notifications</h2>
               </div>
+              <Button
+                type="button"
+                onClick={() => setLocation("/notifications/manage")}
+                className="h-8 px-3 bg-primary/20 hover:bg-primary/30 text-primary text-xs font-bold uppercase"
+                data-testid="button-manage-notifications"
+              >
+                Manage
+              </Button>
             </div>
             
             <div className="flex items-center justify-between p-3 bg-white/5 rounded-lg">
