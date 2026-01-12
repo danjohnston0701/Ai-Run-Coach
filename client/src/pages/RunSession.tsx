@@ -495,6 +495,23 @@ export default function RunSession() {
   // Real-time pace calculation: recent GPS samples for instantaneous pace
   const recentPaceSamplesRef = useRef<Array<{ distance: number; time: number; timestamp: number }>>([]);
 
+  // Weakness detection: track pace drops during the run
+  interface WeaknessEvent {
+    startDistanceKm: number;
+    endDistanceKm: number;
+    durationSeconds: number;
+    avgPaceBefore: number;
+    avgPaceDuring: number;
+    dropPercent: number;
+    coachResponseGiven?: string;
+  }
+  const [detectedWeaknesses, setDetectedWeaknesses] = useState<WeaknessEvent[]>([]);
+  const rollingPaceWindowRef = useRef<Array<{ distanceKm: number; timeSeconds: number; paceSecondsPerKm: number }>>([]);
+  const baselinePaceRef = useRef<number>(0);
+  const inSlowdownRef = useRef<boolean>(false);
+  const slowdownStartRef = useRef<{ distanceKm: number; timeSeconds: number; baselinePace: number } | null>(null);
+  const lastWeaknessCoachTimeRef = useRef<number>(0);
+
   const searchParams = new URLSearchParams(window.location.search);
   const isResuming = searchParams.get("resume") === "true";
   const urlTargetDistance = searchParams.get("distance") || "5";
@@ -1133,6 +1150,76 @@ export default function RunSession() {
       } else {
         // Not enough samples, fall back to average
         setRealtimePace(null);
+      }
+      
+      // Weakness Detection: Track pace drops during the run
+      if (recentDistance > 0.005 && recentTime > 2) {
+        const currentPaceSecsPerKm = recentTime / recentDistance;
+        const currentDistanceKm = distance + distanceKm;
+        const currentTimeSeconds = runMetricsRef.current.time;
+        
+        // Add to rolling window (keep last 60 seconds of pace data)
+        rollingPaceWindowRef.current.push({
+          distanceKm: currentDistanceKm,
+          timeSeconds: currentTimeSeconds,
+          paceSecondsPerKm: currentPaceSecsPerKm,
+        });
+        
+        // Remove samples older than 60 seconds
+        const windowCutoff = currentTimeSeconds - 60;
+        rollingPaceWindowRef.current = rollingPaceWindowRef.current.filter(
+          s => s.timeSeconds > windowCutoff
+        );
+        
+        // Calculate baseline pace (average of first 30 seconds of window or overall if insufficient)
+        if (rollingPaceWindowRef.current.length >= 5) {
+          const windowStart = rollingPaceWindowRef.current[0].timeSeconds;
+          const baselineSamples = rollingPaceWindowRef.current.filter(
+            s => s.timeSeconds - windowStart <= 30
+          );
+          
+          if (baselineSamples.length >= 3) {
+            baselinePaceRef.current = baselineSamples.reduce((sum, s) => sum + s.paceSecondsPerKm, 0) / baselineSamples.length;
+          }
+        }
+        
+        // Detect pace drop: current pace >= 1.75x baseline (75% slower)
+        const dropThreshold = 1.75;
+        const isSignificantDrop = baselinePaceRef.current > 0 && 
+          currentPaceSecsPerKm >= baselinePaceRef.current * dropThreshold &&
+          currentPaceSecsPerKm < 900; // Ignore stopped (> 15 min/km)
+        
+        if (isSignificantDrop && !inSlowdownRef.current) {
+          // Start of a slowdown
+          inSlowdownRef.current = true;
+          slowdownStartRef.current = {
+            distanceKm: currentDistanceKm,
+            timeSeconds: currentTimeSeconds,
+            baselinePace: baselinePaceRef.current,
+          };
+          console.log(`[Weakness] Slowdown detected at ${currentDistanceKm.toFixed(2)}km - pace ${(currentPaceSecsPerKm/60).toFixed(1)} vs baseline ${(baselinePaceRef.current/60).toFixed(1)} min/km`);
+        } else if (!isSignificantDrop && inSlowdownRef.current && slowdownStartRef.current) {
+          // End of slowdown - record the event
+          const durationSeconds = currentTimeSeconds - slowdownStartRef.current.timeSeconds;
+          
+          // Only record if slowdown lasted at least 30 seconds
+          if (durationSeconds >= 30) {
+            const event: WeaknessEvent = {
+              startDistanceKm: slowdownStartRef.current.distanceKm,
+              endDistanceKm: currentDistanceKm,
+              durationSeconds,
+              avgPaceBefore: slowdownStartRef.current.baselinePace,
+              avgPaceDuring: currentPaceSecsPerKm,
+              dropPercent: ((currentPaceSecsPerKm - slowdownStartRef.current.baselinePace) / slowdownStartRef.current.baselinePace) * 100,
+            };
+            
+            setDetectedWeaknesses(prev => [...prev, event]);
+            console.log(`[Weakness] Recorded: ${event.startDistanceKm.toFixed(2)}-${event.endDistanceKm.toFixed(2)}km, ${durationSeconds}s, ${event.dropPercent.toFixed(0)}% drop`);
+          }
+          
+          inSlowdownRef.current = false;
+          slowdownStartRef.current = null;
+        }
       }
     };
 
@@ -2602,6 +2689,21 @@ export default function RunSession() {
           if (response.ok) {
             const savedRun = await response.json();
             console.log('[Save] Run saved to database successfully:', savedRun.id);
+            
+            // Save detected weakness events if any
+            if (detectedWeaknesses.length > 0) {
+              try {
+                console.log('[Save] Saving', detectedWeaknesses.length, 'weakness events');
+                await fetch(`/api/runs/${savedRun.id}/weakness-events/bulk`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ events: detectedWeaknesses })
+                });
+                console.log('[Save] Weakness events saved successfully');
+              } catch (err) {
+                console.error('[Save] Failed to save weakness events:', err);
+              }
+            }
             
             // Update localStorage with the DB record so RunInsights can find it
             const localDataWithDbId = {
