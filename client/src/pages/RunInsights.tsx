@@ -1939,7 +1939,7 @@ export default function RunInsights() {
           </section>
         )}
 
-        {/* Struggle Points Section - Hidden for friend views */}
+        {/* Runner Struggle Analysis Section - Hidden for friend views */}
         {!isFriendView && weaknessEvents.length > 0 && (
           <section className="space-y-4">
             <div className="flex items-center justify-between">
@@ -1948,7 +1948,7 @@ export default function RunInsights() {
                   <AlertTriangle className="w-5 h-5 text-orange-500" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-display font-bold uppercase tracking-wide">Struggle Points</h2>
+                  <h2 className="text-lg font-display font-bold uppercase tracking-wide">Runner Struggle Analysis</h2>
                   <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Moments where you slowed down</p>
                 </div>
               </div>
