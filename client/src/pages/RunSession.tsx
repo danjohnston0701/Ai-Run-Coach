@@ -477,6 +477,7 @@ export default function RunSession() {
   const lastNavSpeakTimeRef = useRef<number>(0);
   const navSpeakQueueRef = useRef<string[]>([]);
   const isNavSpeakingRef = useRef<boolean>(false);
+  const speechStartTimeRef = useRef<number>(0);
   const lastMovementTimeRef = useRef<number>(Date.now());
   const lastGpsFixTimeRef = useRef<number>(Date.now());
   const gpsTimeoutAttempts = useRef<number>(0); // For handleError timeout retries
@@ -840,17 +841,37 @@ export default function RunSession() {
     return new Promise<void>((resolve) => {
       const audio = new Audio(audioUrl);
       audioRef.current = audio;
+      let resolved = false;
+      
+      const cleanup = () => {
+        if (resolved) return;
+        resolved = true;
+        isNavSpeakingRef.current = false;
+        resolve();
+      };
+      
+      // Safety timeout - ensure audio doesn't block queue for more than 30 seconds
+      const timeout = setTimeout(() => {
+        console.warn('[Audio] Playback timeout, releasing queue');
+        cleanup();
+      }, 30000);
+      
       audio.onended = () => {
-        isNavSpeakingRef.current = false;
-        resolve();
+        clearTimeout(timeout);
+        console.log('[Audio] Playback ended:', text.substring(0, 30));
+        cleanup();
       };
-      audio.onerror = () => {
-        isNavSpeakingRef.current = false;
-        resolve();
+      audio.onerror = (e) => {
+        clearTimeout(timeout);
+        console.error('[Audio] Playback error:', e);
+        cleanup();
       };
-      audio.play().catch(() => {
-        isNavSpeakingRef.current = false;
-        resolve();
+      audio.play().then(() => {
+        console.log('[Audio] Playing:', text.substring(0, 30));
+      }).catch((err) => {
+        clearTimeout(timeout);
+        console.error('[Audio] Play failed:', err);
+        cleanup();
       });
     });
   }, []);
@@ -862,6 +883,8 @@ export default function RunSession() {
     if (!text) return;
     
     isNavSpeakingRef.current = true;
+    speechStartTimeRef.current = Date.now();
+    console.log('[Speech Queue] Processing:', text.substring(0, 40), 'Queue length:', navSpeakQueueRef.current.length);
     
     // If AI Coach is disabled, use device TTS directly for all speech
     if (!aiCoachEnabled) {
@@ -887,6 +910,10 @@ export default function RunSession() {
     const prefs = getVoicePreferences(coachSettings);
     
     try {
+      // Add timeout for TTS fetch to prevent hanging
+      const controller = new AbortController();
+      const fetchTimeout = setTimeout(() => controller.abort(), 15000);
+      
       const response = await fetch('/api/ai/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -895,10 +922,13 @@ export default function RunSession() {
           tone: coachSettings.tone,
           voice: ttsVoice,
           speed: prefs.rate
-        })
+        }),
+        signal: controller.signal
       });
       
-      if (!response.ok) throw new Error('TTS failed');
+      clearTimeout(fetchTimeout);
+      
+      if (!response.ok) throw new Error('TTS failed with status: ' + response.status);
       
       const audioBlob = await response.blob();
       const audioUrl = URL.createObjectURL(audioBlob);
@@ -916,13 +946,14 @@ export default function RunSession() {
       
       console.log("Using AI voice for navigation:", text.substring(0, 30));
       await playNavAudio(audioUrl, text);
-    } catch (error) {
-      console.error('Navigation TTS error, using device fallback:', error);
+    } catch (error: any) {
+      console.error('Navigation TTS error, using device fallback:', error?.message || error);
       speakWithDeviceTTS(text);
       isNavSpeakingRef.current = false;
     }
     
-    processNavQueue();
+    // Always ensure we continue processing
+    setTimeout(() => processNavQueue(), 100);
   }, [coachSettings, speakWithDeviceTTS, playNavAudio, aiCoachEnabled]);
 
   // Domain types: 'coach' (AI coaching), 'nav' (navigation), 'system' (run control)
@@ -1214,7 +1245,37 @@ export default function RunSession() {
     return () => clearInterval(watchdogInterval);
   }, [gpsStatus]);
 
+  // Speech queue watchdog - recover if stuck for more than 45 seconds
   useEffect(() => {
+    if (!active) return;
+    
+    const speechWatchdog = setInterval(() => {
+      if (isNavSpeakingRef.current && speechStartTimeRef.current > 0) {
+        const stuckTime = Date.now() - speechStartTimeRef.current;
+        if (stuckTime > 45000) {
+          console.warn(`[Speech Watchdog] Queue stuck for ${Math.round(stuckTime / 1000)}s - forcing recovery`);
+          isNavSpeakingRef.current = false;
+          speechStartTimeRef.current = 0;
+          // Force process next item if queue has items
+          if (navSpeakQueueRef.current.length > 0) {
+            console.log('[Speech Watchdog] Processing next item in queue');
+            setTimeout(() => processNavQueue(), 100);
+          }
+        }
+      }
+    }, 15000);
+    
+    return () => clearInterval(speechWatchdog);
+  }, [active, processNavQueue]);
+
+  useEffect(() => {
+    console.log('[Pre-Run Summary] Checking conditions:', {
+      gpsStatus,
+      hasPosition: !!currentPosition,
+      announcementMade: initialAnnouncementMadeRef.current,
+      isResuming
+    });
+    
     if (gpsStatus !== "active" || !currentPosition || initialAnnouncementMadeRef.current) return;
     if (isResuming) {
       initialAnnouncementMadeRef.current = true;
@@ -1223,11 +1284,13 @@ export default function RunSession() {
     }
     
     initialAnnouncementMadeRef.current = true;
+    console.log('[Pre-Run Summary] Generating pre-run summary...');
     
     const metadata = sessionMetadataRef.current;
     const targetDistNum = parseFloat(metadata.targetDistance);
     
     const speakFallback = () => {
+      console.log('[Pre-Run Summary] Using fallback announcement');
       getInitialDirectionAnnouncement(
         currentPosition.lat,
         currentPosition.lng,
@@ -1240,6 +1303,7 @@ export default function RunSession() {
     };
     
     if (!isFinite(targetDistNum) || targetDistNum <= 0) {
+      console.log('[Pre-Run Summary] Invalid target distance, using fallback');
       speakFallback();
       return;
     }
@@ -1266,24 +1330,41 @@ export default function RunSession() {
           includeAiConfig: true
         };
         
+        console.log('[Pre-Run Summary] Calling API with:', { 
+          routeName: summaryRequest.routeName,
+          targetDistance: summaryRequest.targetDistance,
+          difficulty: summaryRequest.difficulty,
+          hasWeather: !!summaryRequest.weather
+        });
+        
+        // Add timeout for pre-run summary API call
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 20000);
+        
         const response = await fetch('/api/ai/run-summary', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(summaryRequest)
+          body: JSON.stringify(summaryRequest),
+          signal: controller.signal
         });
+        
+        clearTimeout(timeout);
         
         if (response.ok) {
           const data = await response.json();
+          console.log('[Pre-Run Summary] Got summary, length:', data.summary?.length || 0);
           if (data.summary && typeof data.summary === 'string') {
             // Add prompt to click Start Run at the end
             const summaryWithPrompt = data.summary + " When you're ready, tap the Start Run button to begin your session.";
             speak(summaryWithPrompt, { domain: 'coach' });
             return;
           }
+        } else {
+          console.error('[Pre-Run Summary] API error:', response.status, await response.text().catch(() => 'unknown'));
         }
         speakFallback();
-      } catch (err) {
-        console.warn('Run summary generation failed:', err);
+      } catch (err: any) {
+        console.warn('[Pre-Run Summary] Generation failed:', err?.message || err);
         speakFallback();
       }
     };
@@ -1791,6 +1872,7 @@ export default function RunSession() {
     const currentKm = Math.floor(distance);
     
     if (currentKm > lastKmAnnounced && currentKm > 0) {
+      console.log(`[Km Split] ${currentKm}km reached! active=${active}, gpsStatus=${gpsStatus}, aiCoachEnabled=${aiCoachEnabled}, audioEnabled=${audioEnabled}`);
       setLastKmAnnounced(currentKm);
       
       const splitTime = time;
@@ -2117,6 +2199,8 @@ export default function RunSession() {
   }, [userProfile, coachPreferences, speakCoaching, speak, routeData, currentPosition, runWeather, kmSplits, coachSettings, userGoals]);
 
   useEffect(() => {
+    console.log('[Coaching Cycle] State check:', { active, aiCoachEnabled, gpsStatus });
+    
     if (!active || !aiCoachEnabled || gpsStatus !== "active") {
       if (coachingTimeoutRef.current) {
         clearTimeout(coachingTimeoutRef.current);
@@ -2125,13 +2209,19 @@ export default function RunSession() {
       return;
     }
     
+    console.log(`[Coaching Cycle] Starting coaching cycle, interval: ${coachingInterval}s`);
+    
     const runCoachingCycle = () => {
       const { active: isActive, aiCoachEnabled: isEnabled, gpsStatus: gps } = coachingControlRef.current;
+      console.log('[Coaching Cycle] Running cycle check:', { isActive, isEnabled, gps });
+      
       if (!isActive || !isEnabled || gps !== "active") {
+        console.log('[Coaching Cycle] Conditions not met, stopping');
         coachingTimeoutRef.current = null;
         return;
       }
       
+      console.log('[Coaching Cycle] Fetching coaching...');
       fetchCoaching();
       coachingTimeoutRef.current = setTimeout(runCoachingCycle, coachingInterval * 1000);
     };
