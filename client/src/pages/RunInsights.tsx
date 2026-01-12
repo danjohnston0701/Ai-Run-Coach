@@ -1972,6 +1972,9 @@ export default function RunInsights() {
                     { value: "hydration", label: "Hydration" },
                     { value: "nutrition", label: "Nutrition" },
                     { value: "injury", label: "Injury/Pain" },
+                    { value: "headache", label: "Headache" },
+                    { value: "vision", label: "Vision went blurry" },
+                    { value: "chest", label: "Chest pain" },
                     { value: "mental", label: "Mental" },
                     { value: "other", label: "Other" },
                   ];
