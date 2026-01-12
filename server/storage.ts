@@ -6,7 +6,7 @@ import {
   friendRequests, pushSubscriptions, notificationPreferences, notifications, routeRatings,
   aiCoachDescription, aiCoachInstructions, aiCoachKnowledge, aiCoachFaq,
   couponCodes, userCoupons, groupRuns, groupRunParticipants, goals, runAnalyses,
-  aiCoachingLogs,
+  aiCoachingLogs, runWeaknessEvents,
   type User, type InsertUser,
   type PreRegistration, type InsertPreRegistration,
   type Friend, type InsertFriend,
@@ -30,6 +30,7 @@ import {
   type Goal, type InsertGoal,
   type RunAnalysis, type InsertRunAnalysis,
   type AiCoachingLog, type InsertAiCoachingLog,
+  type RunWeaknessEvent, type InsertRunWeaknessEvent,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -198,6 +199,13 @@ export interface IStorage {
   getAiCoachingLogsBySession(sessionKey: string): Promise<AiCoachingLog[]>;
   getAiCoachingLogsByRun(runId: string): Promise<AiCoachingLog[]>;
   updateAiCoachingLogsRunId(sessionKey: string, runId: string): Promise<void>;
+
+  // Run Weakness Events
+  createRunWeaknessEvent(data: InsertRunWeaknessEvent): Promise<RunWeaknessEvent>;
+  getRunWeaknessEvents(runId: string): Promise<RunWeaknessEvent[]>;
+  getUserWeaknessHistory(userId: string, limit?: number): Promise<RunWeaknessEvent[]>;
+  updateWeaknessEventCause(id: string, causeTag: string | null, causeNote: string | null): Promise<RunWeaknessEvent | undefined>;
+  deleteRunWeaknessEvent(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1452,6 +1460,47 @@ export class DatabaseStorage implements IStorage {
       await db.update(aiCoachingLogs)
         .set({ runId })
         .where(eq(aiCoachingLogs.sessionKey, sessionKey));
+    });
+  }
+
+  // Run Weakness Events
+  async createRunWeaknessEvent(data: InsertRunWeaknessEvent): Promise<RunWeaknessEvent> {
+    return withRetry(async () => {
+      const [event] = await db.insert(runWeaknessEvents).values(data).returning();
+      return event;
+    });
+  }
+
+  async getRunWeaknessEvents(runId: string): Promise<RunWeaknessEvent[]> {
+    return withRetry(async () => {
+      return db.select().from(runWeaknessEvents)
+        .where(eq(runWeaknessEvents.runId, runId))
+        .orderBy(runWeaknessEvents.startDistanceKm);
+    });
+  }
+
+  async getUserWeaknessHistory(userId: string, limit: number = 50): Promise<RunWeaknessEvent[]> {
+    return withRetry(async () => {
+      return db.select().from(runWeaknessEvents)
+        .where(eq(runWeaknessEvents.userId, userId))
+        .orderBy(desc(runWeaknessEvents.createdAt))
+        .limit(limit);
+    });
+  }
+
+  async updateWeaknessEventCause(id: string, causeTag: string | null, causeNote: string | null): Promise<RunWeaknessEvent | undefined> {
+    return withRetry(async () => {
+      const [event] = await db.update(runWeaknessEvents)
+        .set({ causeTag, causeNote })
+        .where(eq(runWeaknessEvents.id, id))
+        .returning();
+      return event;
+    });
+  }
+
+  async deleteRunWeaknessEvent(id: string): Promise<void> {
+    return withRetry(async () => {
+      await db.delete(runWeaknessEvents).where(eq(runWeaknessEvents.id, id));
     });
   }
 }
