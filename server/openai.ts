@@ -214,6 +214,14 @@ export interface CoachingRequest {
     weeklyRunTarget?: number | null;
     progressPercent?: number | null;
   }>;
+  // Historical weakness/struggle patterns for personalized coaching
+  weaknessHistory?: Array<{
+    causeTag: string | null;
+    causeNote: string | null;
+    distanceKm: number;
+    dropPercent: number;
+    count: number;
+  }>;
 }
 
 export interface CoachingResponse {
@@ -534,6 +542,24 @@ ${w.precipitationProbability > 50 ? "- Rain likely: Advise on grip, visibility, 
 - Don't mention goals in every message - use naturally when relevant`;
   }
   
+  // Weakness history section - patterns from past runs
+  let weaknessHistorySection = "";
+  if (request.weaknessHistory && request.weaknessHistory.length > 0) {
+    weaknessHistorySection = "\n\nPAST STRUGGLE PATTERNS (for personalized coaching):";
+    for (const pattern of request.weaknessHistory) {
+      const causeLabel = pattern.causeTag || 'unspecified';
+      weaknessHistorySection += `\n- ${causeLabel}: ${pattern.count} occurrence(s), typically around km ${pattern.distanceKm.toFixed(1)}, avg ${Math.round(pattern.dropPercent)}% pace drop`;
+      if (pattern.causeNote) {
+        weaknessHistorySection += ` (note: ${pattern.causeNote})`;
+      }
+    }
+    weaknessHistorySection += `\n\nWEAKNESS-AWARE COACHING GUIDELINES:
+- If runner is approaching a distance where they historically struggle, proactively offer encouragement
+- Tailor advice based on known struggle causes (e.g., hydration issues = remind to drink; hill struggles = pace conservation advice)
+- Use this knowledge subtly - don't explicitly say "you always struggle here" but be supportive
+- Turn past struggles into coaching opportunities to help them improve`;
+  }
+  
   // Select an elite coaching tip based on current run context
   const selectedCategory = selectCoachingCategory({
     paceChange: request.paceChange,
@@ -561,7 +587,7 @@ Current Run Stats:
 - Current km: ${request.currentKm || Math.floor(request.distanceCovered)}
 - Elapsed time: ${Math.floor(request.elapsedTime / 60)} minutes ${Math.floor(request.elapsedTime % 60)} seconds
 - Difficulty: ${request.difficulty}
-- Fitness level: ${request.userFitnessLevel || "intermediate"}${targetTimeInfo}${preferencesSection}${terrainSection}${weatherSection}${goalsSection}${eventsSection}${splitInfo}${userMessageSection}${antiRepetitionSection}
+- Fitness level: ${request.userFitnessLevel || "intermediate"}${targetTimeInfo}${preferencesSection}${terrainSection}${weatherSection}${goalsSection}${weaknessHistorySection}${eventsSection}${splitInfo}${userMessageSection}${antiRepetitionSection}
 
 ${request.milestones && request.milestones.length > 0 ? "PRIORITIZE milestone celebration!" : ""}
 ${request.terrain?.upcomingTerrain ? "PRIORITIZE terrain coaching - warn about upcoming hills." : ""} 

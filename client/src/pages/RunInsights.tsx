@@ -152,6 +152,24 @@ export default function RunInsights() {
     distance?: number;
     duration?: number;
   } | null>(null);
+  
+  // Weakness/Struggle events state
+  const [weaknessEvents, setWeaknessEvents] = useState<Array<{
+    id: string;
+    startDistanceKm: number;
+    endDistanceKm: number;
+    durationSeconds: number;
+    avgPaceBefore: number;
+    avgPaceDuring: number;
+    dropPercent: number;
+    causeTag: string | null;
+    causeNote: string | null;
+    coachResponseGiven: string | null;
+  }>>([]);
+  const [isLoadingWeaknesses, setIsLoadingWeaknesses] = useState(false);
+  const [editingWeaknessId, setEditingWeaknessId] = useState<string | null>(null);
+  const [editingCauseTag, setEditingCauseTag] = useState<string>("");
+  const [editingCauseNote, setEditingCauseNote] = useState<string>("");
 
   useEffect(() => {
     const loadRun = async () => {
@@ -283,6 +301,32 @@ export default function RunInsights() {
     };
     
     fetchTelemetry();
+  }, [params?.id]);
+
+  // Fetch weakness/struggle events for this run
+  useEffect(() => {
+    if (!params?.id) return;
+    
+    const fetchWeaknesses = async () => {
+      setIsLoadingWeaknesses(true);
+      try {
+        const profile = localStorage.getItem("userProfile");
+        const userId = profile ? JSON.parse(profile).id : null;
+        if (!userId) return;
+        
+        const response = await fetch(`/api/runs/${params.id}/weakness-events?userId=${userId}`);
+        if (response.ok) {
+          const events = await response.json();
+          setWeaknessEvents(events);
+        }
+      } catch (err) {
+        console.warn('Failed to fetch weakness events:', err);
+      } finally {
+        setIsLoadingWeaknesses(false);
+      }
+    };
+    
+    fetchWeaknesses();
   }, [params?.id]);
 
   // Check admin status and fetch coaching logs for admin users
@@ -539,6 +583,51 @@ export default function RunInsights() {
   const startEditingName = () => {
     setEditedName((run as any)?.name || `Run on ${run?.date}`);
     setIsEditingName(true);
+  };
+
+  // Save weakness event annotation
+  const saveWeaknessAnnotation = async (eventId: string) => {
+    try {
+      const profile = localStorage.getItem("userProfile");
+      const userId = profile ? JSON.parse(profile).id : null;
+      if (!userId) return;
+      
+      const response = await fetch(`/api/weakness-events/${eventId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId,
+          causeTag: editingCauseTag || null,
+          causeNote: editingCauseNote || null,
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error("Failed to save annotation");
+      }
+      
+      // Update local state
+      setWeaknessEvents(prev => prev.map(e => 
+        e.id === eventId 
+          ? { ...e, causeTag: editingCauseTag || null, causeNote: editingCauseNote || null }
+          : e
+      ));
+      
+      setEditingWeaknessId(null);
+      setEditingCauseTag("");
+      setEditingCauseNote("");
+      toast.success("Struggle point annotated");
+    } catch (error) {
+      console.error("Failed to save weakness annotation:", error);
+      toast.error("Failed to save annotation");
+    }
+  };
+
+  // Start editing a weakness event
+  const startEditingWeakness = (event: typeof weaknessEvents[0]) => {
+    setEditingWeaknessId(event.id);
+    setEditingCauseTag(event.causeTag || "");
+    setEditingCauseNote(event.causeNote || "");
   };
 
   const generateAiAnalysis = async () => {
@@ -1845,6 +1934,166 @@ export default function RunInsights() {
                     </div>
                   );
                 })}
+              </div>
+            </Card>
+          </section>
+        )}
+
+        {/* Struggle Points Section - Hidden for friend views */}
+        {!isFriendView && weaknessEvents.length > 0 && (
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-orange-500/10 rounded-lg">
+                  <AlertTriangle className="w-5 h-5 text-orange-500" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-display font-bold uppercase tracking-wide">Struggle Points</h2>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Moments where you slowed down</p>
+                </div>
+              </div>
+            </div>
+            
+            <Card className="bg-card/30 border-white/5 p-4 overflow-hidden">
+              <div className="space-y-4">
+                {weaknessEvents.map((event, idx) => {
+                  const isEditing = editingWeaknessId === event.id;
+                  const paceBeforeMins = Math.floor(event.avgPaceBefore / 60);
+                  const paceBeforeSecs = Math.floor(event.avgPaceBefore % 60);
+                  const paceDuringMins = Math.floor(event.avgPaceDuring / 60);
+                  const paceDuringSecs = Math.floor(event.avgPaceDuring % 60);
+                  
+                  const causeTags = [
+                    { value: "hill", label: "Hill" },
+                    { value: "fatigue", label: "Fatigue" },
+                    { value: "breathing", label: "Breathing" },
+                    { value: "heat", label: "Heat" },
+                    { value: "cold", label: "Cold" },
+                    { value: "hydration", label: "Hydration" },
+                    { value: "nutrition", label: "Nutrition" },
+                    { value: "injury", label: "Injury/Pain" },
+                    { value: "mental", label: "Mental" },
+                    { value: "other", label: "Other" },
+                  ];
+                  
+                  return (
+                    <div key={event.id} className="py-3 border-b border-white/5 last:border-0">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-orange-500/20 flex items-center justify-center">
+                            <span className="text-xs font-bold text-orange-500">{idx + 1}</span>
+                          </div>
+                          <div>
+                            <span className="text-sm font-medium">
+                              {event.startDistanceKm.toFixed(1)} - {event.endDistanceKm.toFixed(1)} km
+                            </span>
+                            <p className="text-[10px] text-muted-foreground">
+                              {Math.floor(event.durationSeconds / 60)}:{(event.durationSeconds % 60).toString().padStart(2, '0')} duration
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="flex items-center gap-1">
+                            <span className="text-sm text-muted-foreground">
+                              {paceBeforeMins}:{paceBeforeSecs.toString().padStart(2, '0')}
+                            </span>
+                            <span className="text-xs text-muted-foreground">→</span>
+                            <span className="text-sm text-red-400 font-medium">
+                              {paceDuringMins}:{paceDuringSecs.toString().padStart(2, '0')}
+                            </span>
+                            <span className="text-xs text-muted-foreground">/km</span>
+                          </div>
+                          <Badge className="bg-red-500/20 text-red-400 text-[9px]">
+                            {Math.round(event.dropPercent)}% slower
+                          </Badge>
+                        </div>
+                      </div>
+                      
+                      {/* Annotation section */}
+                      {isEditing ? (
+                        <div className="mt-3 space-y-3 bg-white/5 rounded-lg p-3">
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-2">What caused this slowdown?</p>
+                            <div className="flex flex-wrap gap-2">
+                              {causeTags.map(tag => (
+                                <button
+                                  key={tag.value}
+                                  onClick={() => setEditingCauseTag(tag.value)}
+                                  className={`px-3 py-1 rounded-full text-xs transition-colors ${
+                                    editingCauseTag === tag.value
+                                      ? 'bg-primary text-primary-foreground'
+                                      : 'bg-white/10 text-muted-foreground hover:bg-white/20'
+                                  }`}
+                                >
+                                  {tag.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <Input
+                              placeholder="Add a note (optional)..."
+                              value={editingCauseNote}
+                              onChange={(e) => setEditingCauseNote(e.target.value)}
+                              className="bg-white/5 border-white/10 text-sm"
+                            />
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => saveWeaknessAnnotation(event.id)}
+                              className="flex-1"
+                            >
+                              <Check className="w-4 h-4 mr-1" /> Save
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setEditingWeaknessId(null)}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-2 flex items-center justify-between">
+                          {event.causeTag ? (
+                            <div className="flex items-center gap-2">
+                              <Badge className="bg-orange-500/20 text-orange-400">
+                                {causeTags.find(t => t.value === event.causeTag)?.label || event.causeTag}
+                              </Badge>
+                              {event.causeNote && (
+                                <span className="text-xs text-muted-foreground italic">
+                                  "{event.causeNote}"
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground italic">
+                              No cause recorded
+                            </span>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => startEditingWeakness(event)}
+                            className="h-7 px-2"
+                          >
+                            <Pencil className="w-3 h-3 mr-1" />
+                            {event.causeTag ? 'Edit' : 'Annotate'}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              
+              <div className="mt-4 pt-4 border-t border-white/5">
+                <p className="text-xs text-muted-foreground text-center">
+                  <Lightbulb className="w-3 h-3 inline mr-1" />
+                  Annotating your struggles helps the AI coach give you better advice in future runs
+                </p>
               </div>
             </Card>
           </section>

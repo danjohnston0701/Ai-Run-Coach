@@ -1606,6 +1606,47 @@ export async function registerRoutes(
         }
       }
 
+      // Fetch user's weakness history for personalized coaching
+      let weaknessHistory: Array<{
+        causeTag: string | null;
+        causeNote: string | null;
+        distanceKm: number;
+        dropPercent: number;
+        count: number;
+      }> | undefined;
+      
+      if (userId) {
+        try {
+          const events = await storage.getUserWeaknessHistory(userId, 30);
+          if (events.length > 0) {
+            // Aggregate weakness events by cause tag
+            const tagMap = new Map<string | null, { distanceSum: number; dropSum: number; count: number; notes: Set<string> }>();
+            for (const event of events) {
+              const key = event.causeTag;
+              const existing = tagMap.get(key) || { distanceSum: 0, dropSum: 0, count: 0, notes: new Set<string>() };
+              existing.distanceSum += event.startDistanceKm;
+              existing.dropSum += event.dropPercent;
+              existing.count += 1;
+              if (event.causeNote) existing.notes.add(event.causeNote);
+              tagMap.set(key, existing);
+            }
+            
+            // Convert to array and sort by average distance for context ordering
+            weaknessHistory = Array.from(tagMap.entries())
+              .map(([causeTag, data]) => ({
+                causeTag,
+                causeNote: data.notes.size > 0 ? Array.from(data.notes).slice(0, 3).join('; ') : null,
+                distanceKm: data.distanceSum / data.count,
+                dropPercent: data.dropSum / data.count,
+                count: data.count
+              }))
+              .sort((a, b) => a.distanceKm - b.distanceKm);
+          }
+        } catch (err) {
+          console.warn("Failed to fetch weakness history for coaching:", err);
+        }
+      }
+
       const coachingRequest = {
         currentPace,
         targetPace,
@@ -1634,7 +1675,8 @@ export async function registerRoutes(
         milestones,
         kmSplitTimes,
         terrain,
-        weather
+        weather,
+        weaknessHistory
       };
 
       const startTime = Date.now();
