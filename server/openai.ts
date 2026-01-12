@@ -820,15 +820,15 @@ Generate a brief pre-run announcement (25-35 words, under 12 seconds when spoken
 
 Route: ${targetDistance.toFixed(1)}km ${difficulty}
 ${terrainHint ? `Terrain: ${terrainHint}` : "No elevation data"}
-${paceHint || "No target pace set"}
+${paceHint ? `Pace: ${paceHint}` : ""}
 ${weatherInfo || ""}
 
 Requirements:
 1. LIMIT: 25-35 words maximum
 2. MUST include terrain/elevation info if provided (e.g., "with 48 meters of climbing" or "mostly flat")
-3. Include pace guidance if target pace is set
-4. Format: "[Distance] [difficulty]. [Terrain insight]. [Pace if set]. Let's go!"
-5. Example: "Four point three K easy run with 52 meters of climbing. Aim for seven-oh-three pace. Let's go!"
+3. ${paceHint ? "Include pace guidance since target pace is set" : "Do NOT mention pace - no target pace was set by the user"}
+4. Format: "[Distance] [difficulty]. [Terrain insight].${paceHint ? " [Pace]." : ""} Let's go!"
+5. Example: ${paceHint ? '"Four point three K easy run with 52 meters of climbing. Aim for seven-oh-three pace. Let\'s go!"' : '"Five K moderate with some hills ahead. Let\'s go!"'}
 6. No greetings, no names - get straight to the point`;
 
   try {
