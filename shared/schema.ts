@@ -125,6 +125,23 @@ export const runs = pgTable("runs", {
   completedAt: timestamp("completed_at").defaultNow(),
 });
 
+export const runWeaknessEvents = pgTable("run_weakness_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull().references(() => runs.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  startDistanceKm: real("start_distance_km").notNull(),
+  endDistanceKm: real("end_distance_km").notNull(),
+  durationSeconds: integer("duration_seconds").notNull(),
+  avgPaceBefore: real("avg_pace_before").notNull(),
+  avgPaceDuring: real("avg_pace_during").notNull(),
+  dropPercent: real("drop_percent").notNull(),
+  causeTag: text("cause_tag"),
+  causeNote: text("cause_note"),
+  coachResponseGiven: text("coach_response_given"),
+  detectedAt: timestamp("detected_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const goals = pgTable("goals", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
@@ -383,6 +400,7 @@ export const insertGroupRunParticipantSchema = createInsertSchema(groupRunPartic
 export const insertGoalSchema = createInsertSchema(goals).omit({ id: true, createdAt: true, updatedAt: true, completedAt: true, progressPercent: true });
 export const insertRunAnalysisSchema = createInsertSchema(runAnalyses).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertAiCoachingLogSchema = createInsertSchema(aiCoachingLogs).omit({ id: true, createdAt: true });
+export const insertRunWeaknessEventSchema = createInsertSchema(runWeaknessEvents).omit({ id: true, createdAt: true, detectedAt: true });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -452,3 +470,34 @@ export type RunAnalysis = typeof runAnalyses.$inferSelect;
 
 export type InsertAiCoachingLog = z.infer<typeof insertAiCoachingLogSchema>;
 export type AiCoachingLog = typeof aiCoachingLogs.$inferSelect;
+
+export type InsertRunWeaknessEvent = z.infer<typeof insertRunWeaknessEventSchema>;
+export type RunWeaknessEvent = typeof runWeaknessEvents.$inferSelect;
+
+export const weaknessCauseTags = [
+  "cramp",
+  "stitch", 
+  "breathing",
+  "leg_fatigue",
+  "uphill",
+  "heat",
+  "hydration",
+  "injury",
+  "mental",
+  "other"
+] as const;
+
+export type WeaknessCauseTag = typeof weaknessCauseTags[number];
+
+export const weaknessCauseLabels: Record<WeaknessCauseTag, string> = {
+  cramp: "Got cramp",
+  stitch: "Had a stitch",
+  breathing: "Struggled to breathe",
+  leg_fatigue: "Legs were too tired",
+  uphill: "Uphill was hard",
+  heat: "Too hot",
+  hydration: "Needed water",
+  injury: "Pain/Injury",
+  mental: "Mental fatigue",
+  other: "Other"
+};
