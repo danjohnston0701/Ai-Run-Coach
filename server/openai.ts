@@ -791,14 +791,17 @@ export async function generateRunSummary(request: RunSummaryRequest): Promise<st
     if (parts.length > 0) weatherInfo = `Current conditions: ${parts.join(", ")}.`;
   }
 
-  // Build compact terrain hint
+  // Build compact terrain hint - always include when we have elevation data
   let terrainHint = "";
-  if (elevationGain && elevationGain > 20) {
-    terrainHint = `${Math.round(elevationGain)}m climb ahead`;
+  if (elevationGain && elevationGain > 10) {
+    terrainHint = `${Math.round(elevationGain)}m total climb`;
+    if (elevationLoss && elevationLoss > elevationGain * 0.8) {
+      terrainHint += `, ${Math.round(elevationLoss)}m descent`;
+    }
   } else if (terrainAnalysis && terrainAnalysis.includes("uphill")) {
     terrainHint = "some hills ahead";
   } else if (terrainAnalysis && terrainAnalysis.includes("flat")) {
-    terrainHint = "mostly flat";
+    terrainHint = "mostly flat terrain";
   }
 
   // Build target pace hint
@@ -807,30 +810,32 @@ export async function generateRunSummary(request: RunSummaryRequest): Promise<st
     const targetPaceSecondsPerKm = targetTimeSeconds / targetDistance;
     const paceMinutes = Math.floor(targetPaceSecondsPerKm / 60);
     const paceSecondsRounded = Math.round(targetPaceSecondsPerKm % 60);
-    paceHint = `Aim for ${paceMinutes}:${paceSecondsRounded.toString().padStart(2, '0')} pace.`;
+    paceHint = `Target pace: ${paceMinutes}:${paceSecondsRounded.toString().padStart(2, '0')} per km.`;
   }
 
   const prompt = `${coachIdentity}.
 ${configSection}
 
-Generate a VERY SHORT pre-run announcement (MAXIMUM 15-20 words, under 8 seconds when spoken).
+Generate a brief pre-run announcement (25-35 words, under 12 seconds when spoken).
 
 Route: ${targetDistance.toFixed(1)}km ${difficulty}
-${terrainHint ? `Terrain: ${terrainHint}` : ""}
-${paceHint}
+${terrainHint ? `Terrain: ${terrainHint}` : "No elevation data"}
+${paceHint || "No target pace set"}
+${weatherInfo || ""}
 
 Requirements:
-1. STRICT LIMIT: 15-20 words maximum - this is critical
-2. Format: "[Distance]k [terrain note]. [Pace if applicable]. Let's go!"
-3. No greetings, no names, no fluff - get straight to the point
-4. Example: "Five K with some hills. Aim for five-thirty pace. Let's go!"
-5. This plays BEFORE any navigation instructions`;
+1. LIMIT: 25-35 words maximum
+2. MUST include terrain/elevation info if provided (e.g., "with 48 meters of climbing" or "mostly flat")
+3. Include pace guidance if target pace is set
+4. Format: "[Distance] [difficulty]. [Terrain insight]. [Pace if set]. Let's go!"
+5. Example: "Four point three K easy run with 52 meters of climbing. Aim for seven-oh-three pace. Let's go!"
+6. No greetings, no names - get straight to the point`;
 
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [{ role: "user", content: prompt }],
-      max_tokens: 50,
+      max_tokens: 100,
       temperature: 0.7,
     });
 
