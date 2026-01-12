@@ -849,6 +849,95 @@ export async function registerRoutes(
     }
   });
 
+  // Run Weakness Events endpoints
+  app.get("/api/runs/:id/weakness-events", async (req, res) => {
+    try {
+      const events = await storage.getRunWeaknessEvents(req.params.id);
+      res.json(events);
+    } catch (error) {
+      console.error("Get weakness events error:", error);
+      res.status(500).json({ error: "Failed to get weakness events" });
+    }
+  });
+
+  app.post("/api/runs/:id/weakness-events", async (req, res) => {
+    try {
+      const run = await storage.getRun(req.params.id);
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+      const eventData = {
+        ...req.body,
+        runId: req.params.id,
+        userId: run.userId,
+      };
+      const event = await storage.createRunWeaknessEvent(eventData);
+      res.json(event);
+    } catch (error) {
+      console.error("Create weakness event error:", error);
+      res.status(500).json({ error: "Failed to create weakness event" });
+    }
+  });
+
+  app.post("/api/runs/:id/weakness-events/bulk", async (req, res) => {
+    try {
+      const run = await storage.getRun(req.params.id);
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+      const { events } = req.body;
+      if (!Array.isArray(events)) {
+        return res.status(400).json({ error: "Events must be an array" });
+      }
+      const createdEvents = await Promise.all(
+        events.map(event => storage.createRunWeaknessEvent({
+          ...event,
+          runId: req.params.id,
+          userId: run.userId,
+        }))
+      );
+      res.json(createdEvents);
+    } catch (error) {
+      console.error("Create bulk weakness events error:", error);
+      res.status(500).json({ error: "Failed to create weakness events" });
+    }
+  });
+
+  app.patch("/api/weakness-events/:id", async (req, res) => {
+    try {
+      const { causeTag, causeNote } = req.body;
+      const event = await storage.updateWeaknessEventCause(req.params.id, causeTag ?? null, causeNote ?? null);
+      if (!event) {
+        return res.status(404).json({ error: "Weakness event not found" });
+      }
+      res.json(event);
+    } catch (error) {
+      console.error("Update weakness event error:", error);
+      res.status(500).json({ error: "Failed to update weakness event" });
+    }
+  });
+
+  app.delete("/api/weakness-events/:id", async (req, res) => {
+    try {
+      await storage.deleteRunWeaknessEvent(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete weakness event error:", error);
+      res.status(500).json({ error: "Failed to delete weakness event" });
+    }
+  });
+
+  app.get("/api/users/:userId/weakness-history", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const events = await storage.getUserWeaknessHistory(req.params.userId, limit);
+      res.json(events);
+    } catch (error) {
+      console.error("Get user weakness history error:", error);
+      res.status(500).json({ error: "Failed to get weakness history" });
+    }
+  });
+
   // Weather Impact Analysis endpoint
   app.get("/api/users/:userId/weather-impact", async (req, res) => {
     try {
