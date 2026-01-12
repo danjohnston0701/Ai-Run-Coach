@@ -669,7 +669,7 @@ export default function RunInsights() {
   };
 
   const handleShareFriend = (friend: Friend) => {
-    const recipient = friend.email || friend.name;
+    const recipient = friend.userCode || friend.name;
     if (sharedWith.includes(recipient)) {
       toast.error("Already shared with this friend");
       return;
@@ -1142,10 +1142,10 @@ export default function RunInsights() {
                       <button
                         key={idx}
                         onClick={() => handleShareFriend(friend)}
-                        disabled={sharedWith.includes(friend.email || friend.name)}
+                        disabled={sharedWith.includes(friend.userCode || friend.name)}
                         className="p-3 bg-white/5 hover:bg-primary/10 border border-white/10 hover:border-primary/50 rounded-lg text-xs font-bold uppercase transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {sharedWith.includes(friend.email || friend.name) ? "✓" : "+"} {friend.name.split(" ")[0]}
+                        {sharedWith.includes(friend.userCode || friend.name) ? "✓" : "+"} {friend.name.split(" ")[0]}
                       </button>
                     ))}
                   </div>
