@@ -1143,6 +1143,121 @@ export default function RunSession() {
             // Invalid pace, fall back to average
             setRealtimePace(null);
           }
+          
+          // Weakness Detection: Track pace drops during the run
+          const currentPaceSecsPerKm = recentTime / recentDistance;
+          const currentDistanceKm = distance + distanceKm;
+          const currentTimeSeconds = runMetricsRef.current.time;
+          
+          // Add to rolling window (keep last 60 seconds of pace data)
+          rollingPaceWindowRef.current.push({
+            distanceKm: currentDistanceKm,
+            timeSeconds: currentTimeSeconds,
+            paceSecondsPerKm: currentPaceSecsPerKm,
+          });
+          
+          // Remove samples older than 60 seconds
+          const windowCutoff = currentTimeSeconds - 60;
+          rollingPaceWindowRef.current = rollingPaceWindowRef.current.filter(
+            s => s.timeSeconds > windowCutoff
+          );
+          
+          // Calculate baseline pace (average of first 30 seconds of window or overall if insufficient)
+          if (rollingPaceWindowRef.current.length >= 5) {
+            const windowStart = rollingPaceWindowRef.current[0].timeSeconds;
+            const baselineSamples = rollingPaceWindowRef.current.filter(
+              s => s.timeSeconds - windowStart <= 30
+            );
+            
+            if (baselineSamples.length >= 3) {
+              baselinePaceRef.current = baselineSamples.reduce((sum, s) => sum + s.paceSecondsPerKm, 0) / baselineSamples.length;
+            }
+          }
+          
+          // Detect pace drop: current pace >= 1.75x baseline (75% slower)
+          const dropThreshold = 1.75;
+          const isSignificantDrop = baselinePaceRef.current > 0 && 
+            currentPaceSecsPerKm >= baselinePaceRef.current * dropThreshold &&
+            currentPaceSecsPerKm < 900; // Ignore stopped (> 15 min/km)
+          
+          if (isSignificantDrop && !inSlowdownRef.current) {
+            // Start of a slowdown
+            inSlowdownRef.current = true;
+            slowdownStartRef.current = {
+              distanceKm: currentDistanceKm,
+              timeSeconds: currentTimeSeconds,
+              baselinePace: baselinePaceRef.current,
+            };
+            console.log(`[Weakness] Slowdown detected at ${currentDistanceKm.toFixed(2)}km - pace ${(currentPaceSecsPerKm/60).toFixed(1)} vs baseline ${(baselinePaceRef.current/60).toFixed(1)} min/km`);
+            
+            // Trigger dynamic coaching response (only if AI coach enabled and not recently coached)
+            const coachNow = Date.now();
+            if (aiCoachEnabled && audioEnabled && coachNow - lastWeaknessCoachTimeRef.current > 60000) {
+              lastWeaknessCoachTimeRef.current = coachNow;
+              
+              // Determine coaching style based on user profile
+              const profile = userProfile;
+              const isHighFitness = profile?.fitnessLevel === 'expert' || profile?.fitnessLevel === 'advanced' || profile?.fitnessLevel === 'intermediate';
+              const hasPerformanceGoal = userGoals?.some(g => g.type === 'event' || g.type === 'distance_time');
+              const userAge = profile?.dob ? calculateAge(profile.dob) : undefined;
+              const isOlder = userAge && userAge > 55;
+              const isWeightLossGoal = userGoals?.some(g => g.title?.toLowerCase().includes('weight'));
+              
+              // Dynamic message based on profile
+              let coachMessage: string;
+              if (isHighFitness && hasPerformanceGoal && !isOlder) {
+                // Fit athlete - encourage pushing through
+                const encouragements = [
+                  "I see you're slowing down. Dig deep! You've got the strength to push through this.",
+                  "Come on, don't give in now! Find your rhythm and power through.",
+                  "You're tougher than this moment. Reset your breathing and pick it up!",
+                  "This is where champions are made. Push through the discomfort!",
+                ];
+                coachMessage = encouragements[Math.floor(Math.random() * encouragements.length)];
+              } else if (isWeightLossGoal || isOlder || profile?.fitnessLevel === 'beginner') {
+                // Beginner or recovery focus - gentle support
+                const gentleMessages = [
+                  "I noticed you're slowing down. That's perfectly okay. Take a moment if you need it.",
+                  "Listen to your body. It's okay to ease up when you need to.",
+                  "You're doing great just being out here. Take it at your own pace.",
+                  "Every step counts. There's no rush - find a comfortable rhythm.",
+                ];
+                coachMessage = gentleMessages[Math.floor(Math.random() * gentleMessages.length)];
+              } else {
+                // Moderate - balanced approach
+                const balancedMessages = [
+                  "You're slowing a bit. Take a breath and ease back into your pace when ready.",
+                  "I see the pace dropping. Focus on your form and breathing.",
+                  "Finding it tough? That's okay. Steady yourself and build back up gradually.",
+                ];
+                coachMessage = balancedMessages[Math.floor(Math.random() * balancedMessages.length)];
+              }
+              
+              // Speak the coaching message
+              speak(coachMessage, { domain: 'coach', priority: 'high' });
+            }
+          } else if (!isSignificantDrop && inSlowdownRef.current && slowdownStartRef.current) {
+            // End of slowdown - record the event
+            const durationSeconds = currentTimeSeconds - slowdownStartRef.current.timeSeconds;
+            
+            // Only record if slowdown lasted at least 30 seconds
+            if (durationSeconds >= 30) {
+              const event: WeaknessEvent = {
+                startDistanceKm: slowdownStartRef.current.distanceKm,
+                endDistanceKm: currentDistanceKm,
+                durationSeconds,
+                avgPaceBefore: slowdownStartRef.current.baselinePace,
+                avgPaceDuring: currentPaceSecsPerKm,
+                dropPercent: ((currentPaceSecsPerKm - slowdownStartRef.current.baselinePace) / slowdownStartRef.current.baselinePace) * 100,
+              };
+              
+              setDetectedWeaknesses(prev => [...prev, event]);
+              console.log(`[Weakness] Recorded: ${event.startDistanceKm.toFixed(2)}-${event.endDistanceKm.toFixed(2)}km, ${durationSeconds}s, ${event.dropPercent.toFixed(0)}% drop`);
+            }
+            
+            inSlowdownRef.current = false;
+            slowdownStartRef.current = null;
+          }
         } else {
           // Not enough recent data, fall back to average
           setRealtimePace(null);
@@ -1150,76 +1265,6 @@ export default function RunSession() {
       } else {
         // Not enough samples, fall back to average
         setRealtimePace(null);
-      }
-      
-      // Weakness Detection: Track pace drops during the run
-      if (recentDistance > 0.005 && recentTime > 2) {
-        const currentPaceSecsPerKm = recentTime / recentDistance;
-        const currentDistanceKm = distance + distanceKm;
-        const currentTimeSeconds = runMetricsRef.current.time;
-        
-        // Add to rolling window (keep last 60 seconds of pace data)
-        rollingPaceWindowRef.current.push({
-          distanceKm: currentDistanceKm,
-          timeSeconds: currentTimeSeconds,
-          paceSecondsPerKm: currentPaceSecsPerKm,
-        });
-        
-        // Remove samples older than 60 seconds
-        const windowCutoff = currentTimeSeconds - 60;
-        rollingPaceWindowRef.current = rollingPaceWindowRef.current.filter(
-          s => s.timeSeconds > windowCutoff
-        );
-        
-        // Calculate baseline pace (average of first 30 seconds of window or overall if insufficient)
-        if (rollingPaceWindowRef.current.length >= 5) {
-          const windowStart = rollingPaceWindowRef.current[0].timeSeconds;
-          const baselineSamples = rollingPaceWindowRef.current.filter(
-            s => s.timeSeconds - windowStart <= 30
-          );
-          
-          if (baselineSamples.length >= 3) {
-            baselinePaceRef.current = baselineSamples.reduce((sum, s) => sum + s.paceSecondsPerKm, 0) / baselineSamples.length;
-          }
-        }
-        
-        // Detect pace drop: current pace >= 1.75x baseline (75% slower)
-        const dropThreshold = 1.75;
-        const isSignificantDrop = baselinePaceRef.current > 0 && 
-          currentPaceSecsPerKm >= baselinePaceRef.current * dropThreshold &&
-          currentPaceSecsPerKm < 900; // Ignore stopped (> 15 min/km)
-        
-        if (isSignificantDrop && !inSlowdownRef.current) {
-          // Start of a slowdown
-          inSlowdownRef.current = true;
-          slowdownStartRef.current = {
-            distanceKm: currentDistanceKm,
-            timeSeconds: currentTimeSeconds,
-            baselinePace: baselinePaceRef.current,
-          };
-          console.log(`[Weakness] Slowdown detected at ${currentDistanceKm.toFixed(2)}km - pace ${(currentPaceSecsPerKm/60).toFixed(1)} vs baseline ${(baselinePaceRef.current/60).toFixed(1)} min/km`);
-        } else if (!isSignificantDrop && inSlowdownRef.current && slowdownStartRef.current) {
-          // End of slowdown - record the event
-          const durationSeconds = currentTimeSeconds - slowdownStartRef.current.timeSeconds;
-          
-          // Only record if slowdown lasted at least 30 seconds
-          if (durationSeconds >= 30) {
-            const event: WeaknessEvent = {
-              startDistanceKm: slowdownStartRef.current.distanceKm,
-              endDistanceKm: currentDistanceKm,
-              durationSeconds,
-              avgPaceBefore: slowdownStartRef.current.baselinePace,
-              avgPaceDuring: currentPaceSecsPerKm,
-              dropPercent: ((currentPaceSecsPerKm - slowdownStartRef.current.baselinePace) / slowdownStartRef.current.baselinePace) * 100,
-            };
-            
-            setDetectedWeaknesses(prev => [...prev, event]);
-            console.log(`[Weakness] Recorded: ${event.startDistanceKm.toFixed(2)}-${event.endDistanceKm.toFixed(2)}km, ${durationSeconds}s, ${event.dropPercent.toFixed(0)}% drop`);
-          }
-          
-          inSlowdownRef.current = false;
-          slowdownStartRef.current = null;
-        }
       }
     };
 
