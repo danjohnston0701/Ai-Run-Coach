@@ -1334,6 +1334,9 @@ export default function RunSession() {
           routeName: summaryRequest.routeName,
           targetDistance: summaryRequest.targetDistance,
           difficulty: summaryRequest.difficulty,
+          elevationGain: summaryRequest.elevationGain,
+          elevationLoss: summaryRequest.elevationLoss,
+          hasElevationProfile: !!summaryRequest.elevationProfile?.length,
           hasWeather: !!summaryRequest.weather
         });
         

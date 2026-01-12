@@ -445,6 +445,11 @@ export default function Home() {
             waypoints: data.route.waypoints || [],
             startLat: data.route.startLat,
             startLng: data.route.startLng,
+            elevation: data.route.elevation || (data.route.elevationGain ? {
+              gain: data.route.elevationGain,
+              loss: data.route.elevationLoss,
+              profile: data.route.elevationProfile,
+            } : undefined),
           }));
         }
       }
@@ -482,6 +487,8 @@ export default function Home() {
     difficulty: string;
     startLocationLabel?: string;
     elevationGain?: number;
+    elevationLoss?: number;
+    elevationProfile?: Array<{ distance: number; elevation: number; grade?: number }>;
     createdAt: string;
     lastStartedAt?: string;
     startLat: number;
@@ -523,6 +530,23 @@ export default function Home() {
     } catch (err) {
       console.log("Failed to mark route started:", err);
     }
+    
+    // Store route in localStorage with elevation data for RunSession
+    localStorage.setItem("activeRoute", JSON.stringify({
+      id: route.id,
+      routeName: route.name,
+      difficulty: route.difficulty,
+      actualDistance: route.distance,
+      polyline: route.polyline,
+      waypoints: [],
+      startLat: route.startLat,
+      startLng: route.startLng,
+      elevation: route.elevationGain ? {
+        gain: route.elevationGain,
+        loss: route.elevationLoss || 0,
+        profile: route.elevationProfile,
+      } : undefined,
+    }));
     
     const targetSeconds = parseInt(targetTime.h || "0") * 3600 + parseInt(targetTime.m || "0") * 60 + parseInt(targetTime.s || "0");
     const params = new URLSearchParams({

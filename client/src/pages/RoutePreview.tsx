@@ -166,6 +166,7 @@ export default function RoutePreview() {
       waypoints: selectedRoute.waypoints || [],
       startLat: lat,
       startLng: lng,
+      elevation: selectedRoute.elevation,
     }));
     
     const runParams = new URLSearchParams({
@@ -242,6 +243,7 @@ export default function RoutePreview() {
       waypoints: selectedRoute.waypoints || [],
       startLat: lat,
       startLng: lng,
+      elevation: selectedRoute.elevation,
     }));
     
     const runParams = new URLSearchParams({
