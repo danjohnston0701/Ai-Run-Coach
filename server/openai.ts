@@ -867,10 +867,11 @@ Requirements:
 1. LIMIT: 30-45 words maximum
 2. MUST include terrain/elevation info if provided (e.g., "with 48 meters of climbing" or "mostly flat")
 3. ${paceHint ? "Include pace guidance since target pace is set" : "Do NOT mention pace - no target pace was set by the user"}
-4. ${firstTurnHint ? "MUST end with the first navigation instruction - include the distance and direction exactly as provided" : "No navigation instruction available"}
+4. ${firstTurnHint ? "MUST end with the first navigation instruction - use the EXACT direction words from the instruction (left, right, straight) - NEVER convert to cardinal directions (north, south, east, west)" : "No navigation instruction available"}
 5. Format: "[Distance] [difficulty]. [Terrain insight].${paceHint ? " [Pace]." : ""}${firstTurnHint ? " Start by heading [distance] [direction]." : " Let's go!"}"
 6. Example with navigation: "Four point three K easy run with mostly flat terrain. Start by running 50 meters down Bronte Place then turn left onto Addison Street."
-7. No greetings, no names - get straight to the point`;
+7. No greetings, no names - get straight to the point
+8. CRITICAL: For navigation, use "turn left", "turn right", "continue straight" - NEVER say "turn north/south/east/west"`;
 
   try {
     const response = await openai.chat.completions.create({
