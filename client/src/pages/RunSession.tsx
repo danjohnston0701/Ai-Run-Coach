@@ -529,6 +529,51 @@ export default function RunSession() {
   const slowdownStartRef = useRef<{ distanceKm: number; timeSeconds: number; baselinePace: number } | null>(null);
   const lastWeaknessCoachTimeRef = useRef<number>(0);
 
+  const saveCoachingLog = useCallback(async (data: {
+    eventType: string;
+    topic?: string;
+    responseText?: string;
+    prompt?: string;
+    latencyMs?: number;
+  }) => {
+    const userId = userProfile?.id;
+    if (!userId) return;
+    
+    const { time: currentTime, distance: currentDistance } = runMetricsRef.current;
+    const paceSeconds = currentDistance > 0 ? currentTime / currentDistance : 0;
+    const paceMins = Math.floor(paceSeconds / 60);
+    const paceSecs = Math.floor(paceSeconds % 60);
+    
+    try {
+      await fetch('/api/coaching-logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          sessionKey: sessionIdRef.current,
+          eventType: data.eventType,
+          elapsedSeconds: Math.floor(currentTime),
+          distanceKm: parseFloat(currentDistance.toFixed(2)),
+          currentPace: `${paceMins}:${paceSecs.toString().padStart(2, '0')}`,
+          heartRate: null,
+          cadence: cadence || null,
+          terrain: routeData?.elevation ? {
+            grade: previousGradeRef.current,
+            totalGain: routeData.elevation.gain,
+            totalLoss: routeData.elevation.loss
+          } : null,
+          weather: runWeather || null,
+          topic: data.topic,
+          responseText: data.responseText,
+          prompt: data.prompt,
+          latencyMs: data.latencyMs,
+        })
+      });
+    } catch (error) {
+      console.error('Failed to save coaching log:', error);
+    }
+  }, [userProfile?.id, cadence, routeData?.elevation, runWeather]);
+
   const searchParams = new URLSearchParams(window.location.search);
   const isResuming = searchParams.get("resume") === "true";
   const urlTargetDistance = searchParams.get("distance") || "5";
@@ -1277,6 +1322,13 @@ export default function RunSession() {
                   
                   // Speak the coaching message
                   speak(coachMessage, { domain: 'coach', force: true });
+                  
+                  // Log weakness coaching
+                  saveCoachingLog({
+                    eventType: 'weakness_detected',
+                    topic: 'pace_drop',
+                    responseText: coachMessage,
+                  });
                 }
               } else if (!isSignificantDrop && inSlowdownRef.current && slowdownStartRef.current) {
                 // End of slowdown - record the event
@@ -2487,6 +2539,15 @@ export default function RunSession() {
             speakCoaching(coachMessage.trim());
           }
           setMessage(advice.message || "Coach says...");
+          
+          // Save coaching log for post-run review
+          saveCoachingLog({
+            eventType: userMessage ? 'user_question' : 'periodic_coaching',
+            topic,
+            responseText: coachMessage.trim(),
+            prompt: userMessage || undefined,
+            latencyMs: advice.latencyMs,
+          });
         }
       }
     } catch (error) {
@@ -2494,7 +2555,7 @@ export default function RunSession() {
     } finally {
       setIsCoaching(false);
     }
-  }, [userProfile, coachPreferences, speakCoaching, speak, routeData, currentPosition, runWeather, kmSplits, coachSettings, userGoals]);
+  }, [userProfile, coachPreferences, speakCoaching, speak, routeData, currentPosition, runWeather, kmSplits, coachSettings, userGoals, saveCoachingLog]);
 
   useEffect(() => {
     console.log('[Coaching Cycle] State check:', { active, aiCoachEnabled, gpsStatus });
@@ -2911,6 +2972,23 @@ export default function RunSession() {
               } catch (err) {
                 console.error('[Save] Failed to save weakness events:', err);
               }
+            }
+            
+            // Link coaching logs to this run
+            try {
+              console.log('[Save] Linking coaching logs to run:', savedRun.id, 'session:', sessionIdRef.current);
+              await fetch('/api/coaching-logs/link-to-run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sessionKey: sessionIdRef.current,
+                  runId: savedRun.id,
+                  userId: userProfile.id
+                })
+              });
+              console.log('[Save] Coaching logs linked successfully');
+            } catch (err) {
+              console.error('[Save] Failed to link coaching logs:', err);
             }
             
             // Update localStorage with the DB record so RunInsights can find it

@@ -133,13 +133,18 @@ export default function RunInsights() {
   const [coachingLogs, setCoachingLogs] = useState<Array<{
     id: string;
     createdAt: string;
-    promptSummary: string;
-    response: string;
-    terrainContext: string | null;
-    weatherContext: string | null;
+    eventType: string;
+    elapsedSeconds: number | null;
+    distanceKm: number | null;
+    currentPace: string | null;
+    heartRate: number | null;
+    cadence: number | null;
+    terrain: unknown;
+    weather: unknown;
+    prompt: string | null;
+    responseText: string | null;
+    topic: string | null;
     latencyMs: number | null;
-    runDistanceKm: number | null;
-    runDurationSecs: number | null;
   }>>([]);
   const [isLoadingCoachingLogs, setIsLoadingCoachingLogs] = useState(false);
   const [showCoachingLogs, setShowCoachingLogs] = useState(false);
@@ -1595,8 +1600,8 @@ export default function RunInsights() {
         </section>
         )}
 
-        {/* Admin AI Coaching Logs Section */}
-        {isAdmin && (
+        {/* AI Coaching Logs Section - visible to run owner and admins */}
+        {(isAdmin || (run && (run as any).aiCoachEnabled)) && (
           <section className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -1605,7 +1610,7 @@ export default function RunInsights() {
                 </div>
                 <div>
                   <h2 className="text-lg font-display font-bold uppercase tracking-wide">AI Coaching Logs</h2>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Admin: View OpenAI interactions</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest">View coaching advice from your run</p>
                 </div>
               </div>
               <Button
@@ -1640,36 +1645,45 @@ export default function RunInsights() {
                       {coachingLogs.map((log, idx) => (
                         <div key={log.id} className="border border-white/10 rounded-lg p-3 space-y-2">
                           <div className="flex items-center justify-between text-xs">
-                            <span className="text-purple-400 font-mono">#{idx + 1}</span>
+                            <span className="text-purple-400 font-mono">#{idx + 1} • {log.eventType || 'coaching'}</span>
                             <span className="text-white/40">
-                              {new Date(log.createdAt).toLocaleTimeString()} • {log.latencyMs}ms
+                              {new Date(log.createdAt).toLocaleTimeString()}{log.latencyMs ? ` • ${log.latencyMs}ms` : ''}
                             </span>
                           </div>
                           <div className="grid grid-cols-2 gap-2 text-xs text-white/60">
-                            <div>Distance: {log.runDistanceKm?.toFixed(2) || '-'} km</div>
-                            <div>Duration: {log.runDurationSecs ? Math.floor(log.runDurationSecs / 60) + ':' + String(Math.floor(log.runDurationSecs % 60)).padStart(2, '0') : '-'}</div>
+                            <div>Distance: {log.distanceKm?.toFixed(2) || '-'} km</div>
+                            <div>Duration: {log.elapsedSeconds ? Math.floor(log.elapsedSeconds / 60) + ':' + String(Math.floor(log.elapsedSeconds % 60)).padStart(2, '0') : '-'}</div>
+                            {log.currentPace && <div>Pace: {log.currentPace} /km</div>}
+                            {log.cadence && <div>Cadence: {log.cadence} spm</div>}
                           </div>
-                          {(log.terrainContext || log.weatherContext) && (
-                            <div className="flex gap-2 text-xs">
-                              {log.terrainContext && (
+                          {(log.terrain || log.weather) ? (
+                            <div className="flex gap-2 text-xs flex-wrap">
+                              {log.terrain ? (
                                 <Badge variant="outline" className="text-orange-400 border-orange-400/30">
-                                  Terrain: {log.terrainContext}
+                                  Grade: {(log.terrain as { grade?: number })?.grade?.toFixed(1) || '-'}%
                                 </Badge>
-                              )}
-                              {log.weatherContext && (
+                              ) : null}
+                              {log.weather ? (
                                 <Badge variant="outline" className="text-blue-400 border-blue-400/30">
-                                  Weather: {log.weatherContext}
+                                  {(log.weather as { temperature?: number })?.temperature ? `${Math.round((log.weather as { temperature?: number }).temperature!)}°C` : ''} {(log.weather as { condition?: string })?.condition || ''}
                                 </Badge>
-                              )}
+                              ) : null}
+                            </div>
+                          ) : null}
+                          {log.topic && (
+                            <div className="text-xs text-purple-300">
+                              Topic: {log.topic}
                             </div>
                           )}
-                          <div className="bg-white/5 rounded p-2 text-xs">
-                            <div className="text-purple-300 font-medium mb-1">Prompt:</div>
-                            <div className="text-white/70">{log.promptSummary}</div>
-                          </div>
+                          {log.prompt && (
+                            <div className="bg-white/5 rounded p-2 text-xs">
+                              <div className="text-purple-300 font-medium mb-1">Your question:</div>
+                              <div className="text-white/70">{log.prompt}</div>
+                            </div>
+                          )}
                           <div className="bg-primary/5 rounded p-2 text-xs">
-                            <div className="text-primary font-medium mb-1">Response:</div>
-                            <div className="text-white/80">{log.response}</div>
+                            <div className="text-primary font-medium mb-1">Coach:</div>
+                            <div className="text-white/80">{log.responseText || '-'}</div>
                           </div>
                         </div>
                       ))}

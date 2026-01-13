@@ -789,16 +789,16 @@ export async function registerRoutes(
         return res.status(400).json({ error: "userId required" });
       }
       
-      // Verify user is admin
-      const user = await storage.getUser(userId);
-      if (!user?.isAdmin) {
-        return res.status(403).json({ error: "Admin access required" });
-      }
-      
-      // Get the run to verify it exists
+      // Get the run to verify it exists and check ownership
       const run = await storage.getRun(runId);
       if (!run) {
         return res.status(404).json({ error: "Run not found" });
+      }
+      
+      // Allow run owner OR admin to view logs
+      const user = await storage.getUser(userId);
+      if (run.userId !== userId && !user?.isAdmin) {
+        return res.status(403).json({ error: "Access denied" });
       }
       
       const logs = await storage.getAiCoachingLogsByRun(runId);
@@ -806,6 +806,69 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Get coaching logs error:", error);
       res.status(500).json({ error: "Failed to get coaching logs" });
+    }
+  });
+
+  // Create AI coaching log during a run session
+  app.post("/api/coaching-logs", async (req, res) => {
+    try {
+      const { userId, sessionKey, eventType, elapsedSeconds, distanceKm, currentPace, heartRate, cadence, terrain, weather, prompt, response, responseText, topic, model, tokenCount, latencyMs } = req.body;
+      
+      if (!userId || !sessionKey || !eventType) {
+        return res.status(400).json({ error: "userId, sessionKey, and eventType are required" });
+      }
+      
+      const log = await storage.createAiCoachingLog({
+        userId,
+        sessionKey,
+        eventType,
+        elapsedSeconds,
+        distanceKm,
+        currentPace,
+        heartRate,
+        cadence,
+        terrain,
+        weather,
+        prompt,
+        response,
+        responseText,
+        topic,
+        model,
+        tokenCount,
+        latencyMs,
+      });
+      
+      res.json(log);
+    } catch (error) {
+      console.error("Create coaching log error:", error);
+      res.status(500).json({ error: "Failed to create coaching log" });
+    }
+  });
+
+  // Link session coaching logs to a completed run
+  app.post("/api/coaching-logs/link-to-run", async (req, res) => {
+    try {
+      const { sessionKey, runId, userId } = req.body;
+      
+      if (!sessionKey || !runId || !userId) {
+        return res.status(400).json({ error: "sessionKey, runId, and userId are required" });
+      }
+      
+      // Verify the run exists and belongs to the user
+      const run = await storage.getRun(runId);
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+      if (run.userId !== userId) {
+        return res.status(403).json({ error: "Not authorized" });
+      }
+      
+      // Update all logs with this session key to have the run ID
+      await storage.updateAiCoachingLogsRunId(sessionKey, runId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Link coaching logs error:", error);
+      res.status(500).json({ error: "Failed to link coaching logs" });
     }
   });
 
