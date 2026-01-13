@@ -1723,11 +1723,26 @@ export default function RunSession() {
       let currentIdx = currentStoredTurnIndexRef.current;
       let turn = null;
       
-      // Skip to next valid turn (skip 'straight' maneuvers)
+      // Skip to next valid turn (skip 'straight' maneuvers and 'continue' instructions)
       while (currentIdx < storedInstructions.length) {
         const candidate = storedInstructions[currentIdx];
-        if (candidate.maneuver && candidate.maneuver !== 'straight') {
+        const maneuver = (candidate.maneuver || '').toLowerCase();
+        const instruction = (candidate.instruction || '').toLowerCase();
+        
+        // Skip if it's a straight/continue instruction
+        const isSkippable = maneuver === 'straight' || 
+                           maneuver === '' && !instruction.includes('turn') && !instruction.includes('left') && !instruction.includes('right');
+        
+        // Accept if it has a turn maneuver OR the instruction mentions turning
+        const isTurn = maneuver.includes('turn') || 
+                      maneuver.includes('left') || 
+                      maneuver.includes('right') ||
+                      instruction.includes('turn left') || 
+                      instruction.includes('turn right');
+        
+        if (isTurn || (!isSkippable && candidate.distance > 5)) {
           turn = candidate;
+          console.log(`[Nav] Found turn at idx ${currentIdx}: "${candidate.instruction}" (maneuver: ${maneuver || 'none'})`);
           break;
         }
         currentIdx++;
@@ -1753,7 +1768,18 @@ export default function RunSession() {
           let nextTurn = null;
           while (nextValidIdx < storedInstructions.length) {
             const candidate = storedInstructions[nextValidIdx];
-            if (candidate.maneuver && candidate.maneuver !== 'straight') {
+            const maneuver = (candidate.maneuver || '').toLowerCase();
+            const instruction = (candidate.instruction || '').toLowerCase();
+            
+            const isSkippable = maneuver === 'straight' || 
+                               maneuver === '' && !instruction.includes('turn') && !instruction.includes('left') && !instruction.includes('right');
+            const isTurn = maneuver.includes('turn') || 
+                          maneuver.includes('left') || 
+                          maneuver.includes('right') ||
+                          instruction.includes('turn left') || 
+                          instruction.includes('turn right');
+            
+            if (isTurn || (!isSkippable && candidate.distance > 5)) {
               nextTurn = candidate;
               break;
             }
@@ -1821,7 +1847,18 @@ export default function RunSession() {
         turn = null;
         while (currentIdx < storedInstructions.length) {
           const candidate = storedInstructions[currentIdx];
-          if (candidate.maneuver && candidate.maneuver !== 'straight') {
+          const maneuver = (candidate.maneuver || '').toLowerCase();
+          const instruction = (candidate.instruction || '').toLowerCase();
+          
+          const isSkippable = maneuver === 'straight' || 
+                             maneuver === '' && !instruction.includes('turn') && !instruction.includes('left') && !instruction.includes('right');
+          const isTurn = maneuver.includes('turn') || 
+                        maneuver.includes('left') || 
+                        maneuver.includes('right') ||
+                        instruction.includes('turn left') || 
+                        instruction.includes('turn right');
+          
+          if (isTurn || (!isSkippable && candidate.distance > 5)) {
             turn = candidate;
             break;
           }
