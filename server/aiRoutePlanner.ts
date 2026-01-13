@@ -229,6 +229,18 @@ interface RouteRequest {
   difficulty?: "easy" | "moderate" | "hard";
 }
 
+interface TurnInstruction {
+  instruction: string;
+  maneuver: string;
+  distance: number;
+  duration: number;
+  startLat: number;
+  startLng: number;
+  endLat: number;
+  endLng: number;
+  cumulativeDistance: number;
+}
+
 interface RouteCandidate {
   id: string;
   waypoints: Array<{ lat: number; lng: number }>;
@@ -241,6 +253,7 @@ interface RouteCandidate {
   hasMajorRoads: boolean;
   uniquenessScore: number;
   deadEndCount: number;
+  turnInstructions?: TurnInstruction[];
   elevation?: {
     gain: number;
     loss: number;
@@ -267,6 +280,7 @@ interface DirectionsResult {
   polyline: string;
   success: boolean;
   instructions: string[];
+  turnInstructions: TurnInstruction[];
   error?: string;
 }
 
@@ -536,7 +550,7 @@ async function fetchRoute(
   optimize: boolean = false
 ): Promise<DirectionsResult> {
   if (!GOOGLE_MAPS_API_KEY) {
-    return { distance: 0, duration: 0, polyline: "", success: false, instructions: [], error: "No API key" };
+    return { distance: 0, duration: 0, polyline: "", success: false, instructions: [], turnInstructions: [], error: "No API key" };
   }
 
   const waypointsStr = waypoints.map((wp) => `${wp.lat},${wp.lng}`).join("|");
@@ -549,20 +563,37 @@ async function fetchRoute(
     const data = await response.json();
 
     if (data.status !== "OK" || !data.routes[0]) {
-      return { distance: 0, duration: 0, polyline: "", success: false, instructions: [], error: data.status };
+      return { distance: 0, duration: 0, polyline: "", success: false, instructions: [], turnInstructions: [], error: data.status };
     }
 
     const route = data.routes[0];
     let totalDistance = 0;
     let totalDuration = 0;
+    let cumulativeDistance = 0;
     const allInstructions: string[] = [];
+    const turnInstructions: TurnInstruction[] = [];
 
     for (const leg of route.legs) {
       totalDistance += leg.distance.value;
       totalDuration += leg.duration.value;
       for (const step of leg.steps) {
         if (step.html_instructions) {
-          allInstructions.push(step.html_instructions.replace(/<[^>]*>/g, ''));
+          const cleanInstruction = step.html_instructions.replace(/<[^>]*>/g, '');
+          allInstructions.push(cleanInstruction);
+          
+          const turnInstruction: TurnInstruction = {
+            instruction: cleanInstruction,
+            maneuver: step.maneuver || 'straight',
+            distance: step.distance?.value || 0,
+            duration: step.duration?.value || 0,
+            startLat: step.start_location?.lat || 0,
+            startLng: step.start_location?.lng || 0,
+            endLat: step.end_location?.lat || 0,
+            endLng: step.end_location?.lng || 0,
+            cumulativeDistance: cumulativeDistance,
+          };
+          turnInstructions.push(turnInstruction);
+          cumulativeDistance += step.distance?.value || 0;
         }
       }
     }
@@ -573,10 +604,11 @@ async function fetchRoute(
       polyline: route.overview_polyline.points,
       success: true,
       instructions: allInstructions,
+      turnInstructions,
     };
   } catch (error) {
     console.error("Directions fetch error:", error);
-    return { distance: 0, duration: 0, polyline: "", success: false, instructions: [], error: "Fetch failed" };
+    return { distance: 0, duration: 0, polyline: "", success: false, instructions: [], turnInstructions: [], error: "Fetch failed" };
   }
 }
 
@@ -1321,6 +1353,7 @@ export async function generateAIRoutes(
         hasMajorRoads,
         uniquenessScore: uniqueRatio,
         deadEndCount: 0,
+        turnInstructions: result.turnInstructions,
         aiReasoning: aiReasoningMap.get(template.name) || template.name,
       });
       
@@ -1383,6 +1416,7 @@ export async function generateAIRoutes(
           hasMajorRoads,
           uniquenessScore: 1,
           deadEndCount: 0,
+          turnInstructions: result.turnInstructions,
           aiReasoning: aiReasoningMap.get(template.name) || template.name,
         });
         

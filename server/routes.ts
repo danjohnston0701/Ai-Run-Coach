@@ -383,6 +383,7 @@ export async function registerRoutes(
             estimatedTime: route.duration,
             terrainType: route.hasMajorRoads ? 'road' : 'mixed',
             startLocationLabel,
+            turnInstructions: (route as any).turnInstructions || null,
           });
           savedRoutes.push({ ...route, dbId: savedRoute.id });
         } catch (saveErr) {
