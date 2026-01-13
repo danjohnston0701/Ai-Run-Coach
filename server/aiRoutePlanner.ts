@@ -1198,39 +1198,25 @@ export async function generateAIRoutes(
   // Fetch nearby trail anchors (parks, walking paths, natural features)
   const nearbyPlaces = await findNearbyTrailAnchors(startLat, startLng, targetDistance);
   
-  // Use OpenAI to intelligently design routes based on local geography
-  const aiSuggestions = await designWaypointsWithAI(startLat, startLng, targetDistance, nearbyPlaces);
+  // NOTE: OpenAI waypoint design is disabled - using only Google Maps APIs and geometric templates
+  // const aiSuggestions = await designWaypointsWithAI(startLat, startLng, targetDistance, nearbyPlaces);
   
   // Store AI reasoning for later attachment to RouteCandidate
   const aiReasoningMap = new Map<string, string>();
   
-  // Convert AI suggestions to templates (highest priority)
-  const aiTemplates: Array<{ name: string; waypoints: Array<{ lat: number; lng: number }>; optimize: boolean }> = 
-    aiSuggestions.map(suggestion => {
-      const templateName = `AI: ${suggestion.routeName}`;
-      const reasoning = [
-        suggestion.description,
-        ...suggestion.waypoints.map(wp => wp.reason).filter(Boolean)
-      ].join('. ');
-      aiReasoningMap.set(templateName, reasoning);
-      
-      return {
-        name: templateName,
-        waypoints: suggestion.waypoints.map(wp => ({ lat: wp.lat, lng: wp.lng })),
-        optimize: false
-      };
-    });
+  // AI templates disabled - using trail-based and geometric templates only
+  const aiTemplates: Array<{ name: string; waypoints: Array<{ lat: number; lng: number }>; optimize: boolean }> = [];
   
-  // Generate geometric route templates as fallback
+  // Generate geometric route templates
   let templates = generateRouteTemplates(startLat, startLng, targetDistance);
   
   // Add trail-based templates that use actual parks/trails as waypoints
   const trailTemplates = generateTrailBasedTemplates(startLat, startLng, targetDistance, nearbyPlaces);
   
-  // Prioritize: AI-designed > trail-based > geometric
-  templates = [...aiTemplates, ...trailTemplates, ...templates];
+  // Prioritize: trail-based > geometric (AI disabled)
+  templates = [...trailTemplates, ...templates];
   
-  console.log(`[Route Gen] Created ${templates.length} unique templates (${aiTemplates.length} AI-designed, ${trailTemplates.length} trail-based)`);
+  console.log(`[Route Gen] Created ${templates.length} unique templates (${trailTemplates.length} trail-based, ${templates.length - trailTemplates.length} geometric)`);
   
   // Sort templates by user preferences if available
   if (templatePreferences && templatePreferences.length > 0) {
