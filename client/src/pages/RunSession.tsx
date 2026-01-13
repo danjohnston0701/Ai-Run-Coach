@@ -192,7 +192,8 @@ function getSignedTurnAngle(
   const vOutNormY = vOutY / vOutLen;
   
   // Cross product gives sin of angle (sign indicates direction)
-  // Positive cross = right turn, negative cross = left turn
+  // In 2D coords where Y is north: positive cross = counter-clockwise = LEFT
+  // We negate to get: positive = RIGHT turn, negative = LEFT turn
   const cross = vInNormX * vOutNormY - vInNormY * vOutNormX;
   // Dot product gives cos of angle
   const dot = vInNormX * vOutNormX + vInNormY * vOutNormY;
@@ -201,7 +202,8 @@ function getSignedTurnAngle(
   const angleRad = Math.atan2(cross, dot);
   const angleDeg = angleRad * (180 / Math.PI);
   
-  return angleDeg;
+  // Negate to correct the sign: positive = RIGHT, negative = LEFT
+  return -angleDeg;
 }
 
 function getDirectionInstruction(currentBearing: number, nextBearing: number, distanceToWaypoint: number): string {
@@ -806,6 +808,33 @@ export default function RunSession() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const cachedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const [voicesLoaded, setVoicesLoaded] = useState(false);
+  
+  // Listen for voiceschanged event (voices load asynchronously on mobile)
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) return;
+    
+    const handleVoicesChanged = () => {
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length > 0) {
+        console.log('[Voice] Voices loaded:', voices.length, 'available');
+        setVoicesLoaded(true);
+        // Clear cached voice so it gets re-selected with proper gender
+        cachedVoiceRef.current = null;
+      }
+    };
+    
+    // Check immediately in case voices are already loaded
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      setVoicesLoaded(true);
+    }
+    
+    window.speechSynthesis.addEventListener('voiceschanged', handleVoicesChanged);
+    return () => {
+      window.speechSynthesis.removeEventListener('voiceschanged', handleVoicesChanged);
+    };
+  }, []);
   
   const cleanupAudio = useCallback(() => {
     if (audioRef.current) {
