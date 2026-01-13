@@ -483,11 +483,7 @@ export default function RoutePreview() {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-6"
         >
-          <DifficultySection title="Easy Routes" routeList={easyRoutes} color="text-green-400" />
-          <DifficultySection title="Moderate Routes" routeList={moderateRoutes} color="text-yellow-400" />
-          <DifficultySection title="Hard Routes" routeList={hardRoutes} color="text-red-400" />
-
-          {/* Route color legend */}
+          {/* Route color legend - moved to top */}
           <div className="flex items-center justify-center gap-4 py-3 px-4 bg-card/50 rounded-lg border border-white/10">
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 rounded-full bg-[#3b82f6]" />
@@ -501,6 +497,10 @@ export default function RoutePreview() {
               <span className="text-sm text-muted-foreground">Finish</span>
             </div>
           </div>
+
+          <DifficultySection title="Easy Routes" routeList={easyRoutes} color="text-green-400" />
+          <DifficultySection title="Moderate Routes" routeList={moderateRoutes} color="text-yellow-400" />
+          <DifficultySection title="Hard Routes" routeList={hardRoutes} color="text-red-400" />
 
           <div className="pt-4">
             <Button 
