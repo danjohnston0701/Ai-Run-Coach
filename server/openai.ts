@@ -752,13 +752,19 @@ export interface RunSummaryRequest {
   coachName?: string;
   userName?: string;
   aiConfig?: AiCoachConfig;
+  firstTurnInstruction?: {
+    instruction: string;
+    maneuver: string;
+    distance: number;
+    streetName?: string;
+  };
 }
 
 export async function generateRunSummary(request: RunSummaryRequest): Promise<string> {
   const {
     routeName, targetDistance, targetTimeSeconds, difficulty,
     elevationGain, elevationLoss, elevationProfile, terrainType,
-    weather, coachName, userName, aiConfig
+    weather, coachName, userName, aiConfig, firstTurnInstruction
   } = request;
 
   let coachIdentity = coachName ? `You are ${coachName}, an AI running coach` : "You are an AI running coach";
@@ -839,23 +845,32 @@ export async function generateRunSummary(request: RunSummaryRequest): Promise<st
     paceHint = `Target pace: ${paceMinutes}:${paceSecondsRounded.toString().padStart(2, '0')} per km.`;
   }
 
+  // Build first navigation instruction hint - preserve original text for accurate street names
+  let firstTurnHint = "";
+  if (firstTurnInstruction && firstTurnInstruction.instruction && firstTurnInstruction.distance > 0) {
+    const distanceM = Math.round(firstTurnInstruction.distance);
+    firstTurnHint = `First navigation: Run ${distanceM} meters, then: "${firstTurnInstruction.instruction}"`;
+  }
+
   const prompt = `${coachIdentity}.
 ${configSection}
 
-Generate a brief pre-run announcement (25-35 words, under 12 seconds when spoken).
+Generate a brief pre-run announcement (30-45 words, under 15 seconds when spoken).
 
 Route: ${targetDistance.toFixed(1)}km ${difficulty}
 ${terrainHint ? `Terrain: ${terrainHint}` : "No elevation data"}
 ${paceHint ? `Pace: ${paceHint}` : ""}
 ${weatherInfo || ""}
+${firstTurnHint || ""}
 
 Requirements:
-1. LIMIT: 25-35 words maximum
+1. LIMIT: 30-45 words maximum
 2. MUST include terrain/elevation info if provided (e.g., "with 48 meters of climbing" or "mostly flat")
 3. ${paceHint ? "Include pace guidance since target pace is set" : "Do NOT mention pace - no target pace was set by the user"}
-4. Format: "[Distance] [difficulty]. [Terrain insight].${paceHint ? " [Pace]." : ""} Let's go!"
-5. Example: ${paceHint ? '"Four point three K easy run with 52 meters of climbing. Aim for seven-oh-three pace. Let\'s go!"' : '"Five K moderate with some hills ahead. Let\'s go!"'}
-6. No greetings, no names - get straight to the point`;
+4. ${firstTurnHint ? "MUST end with the first navigation instruction - include the distance and direction exactly as provided" : "No navigation instruction available"}
+5. Format: "[Distance] [difficulty]. [Terrain insight].${paceHint ? " [Pace]." : ""}${firstTurnHint ? " Start by heading [distance] [direction]." : " Let's go!"}"
+6. Example with navigation: "Four point three K easy run with mostly flat terrain. Start by running 50 meters down Bronte Place then turn left onto Addison Street."
+7. No greetings, no names - get straight to the point`;
 
   try {
     const response = await openai.chat.completions.create({

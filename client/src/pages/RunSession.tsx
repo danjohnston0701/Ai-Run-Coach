@@ -1567,6 +1567,7 @@ export default function RunSession() {
     
     const generateAndSpeakSummary = async () => {
       try {
+        const firstTurn = routeData?.turnInstructions?.[0];
         const summaryRequest = {
           routeName: routeData?.routeName || metadata.routeName || "Your route",
           targetDistance: targetDistNum,
@@ -1584,7 +1585,12 @@ export default function RunSession() {
           } : undefined,
           coachName: userProfile?.coachName,
           userName: userProfile?.name,
-          includeAiConfig: true
+          includeAiConfig: true,
+          firstTurnInstruction: firstTurn ? {
+            instruction: firstTurn.instruction,
+            maneuver: firstTurn.maneuver,
+            distance: firstTurn.distance
+          } : undefined
         };
         
         console.log('[Pre-Run Summary] Calling API with:', { 
@@ -1594,7 +1600,8 @@ export default function RunSession() {
           elevationGain: summaryRequest.elevationGain,
           elevationLoss: summaryRequest.elevationLoss,
           hasElevationProfile: !!summaryRequest.elevationProfile?.length,
-          hasWeather: !!summaryRequest.weather
+          hasWeather: !!summaryRequest.weather,
+          firstTurnInstruction: summaryRequest.firstTurnInstruction
         });
         
         // Add timeout for pre-run summary API call

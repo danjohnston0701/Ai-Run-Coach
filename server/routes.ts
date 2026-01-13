@@ -1800,7 +1800,7 @@ export async function registerRoutes(
       const { 
         routeName, targetDistance, targetTimeSeconds, difficulty,
         elevationGain, elevationLoss, elevationProfile, terrainType,
-        weather, coachName, userName, includeAiConfig
+        weather, coachName, userName, includeAiConfig, firstTurnInstruction
       } = req.body;
       
       if (!routeName || !difficulty) {
@@ -1845,7 +1845,8 @@ export async function registerRoutes(
         weather,
         coachName,
         userName,
-        aiConfig
+        aiConfig,
+        firstTurnInstruction
       });
 
       res.json({ summary });
