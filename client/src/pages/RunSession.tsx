@@ -505,6 +505,7 @@ export default function RunSession() {
   const turnApproachAnnouncedRef = useRef<boolean>(false);
   const turnAtAnnouncedRef = useRef<boolean>(false);
   const distanceAtTurnReachRef = useRef<number>(0); // distance (km) when we first reach the turn location
+  const closestDistanceToTurnRef = useRef<number>(0); // closest we got to the turn point (meters)
   
   // Timestamp-based timer refs for screen-off tracking
   const pausedDurationRef = useRef<number>(0);
@@ -860,6 +861,7 @@ export default function RunSession() {
     turnApproachAnnouncedRef.current = false;
     turnAtAnnouncedRef.current = false;
     distanceAtTurnReachRef.current = 0;
+    closestDistanceToTurnRef.current = 0;
     lastTurnAnnouncedIndexRef.current = -1;
     console.log('[Nav] Reset turn tracking for new route instructions');
   }, [routeData?.turnInstructions]);
@@ -1737,6 +1739,7 @@ export default function RunSession() {
         turnApproachAnnouncedRef.current = false;
         turnAtAnnouncedRef.current = false;
         distanceAtTurnReachRef.current = 0;
+        closestDistanceToTurnRef.current = 0;
       }
       
       if (turn && currentIdx < storedInstructions.length) {
@@ -1783,14 +1786,34 @@ export default function RunSession() {
             turnApproachAnnouncedRef.current = false;
             turnAtAnnouncedRef.current = false;
             distanceAtTurnReachRef.current = 0;
+            closestDistanceToTurnRef.current = 0;
             // Continue to process next turn in same tick (don't return)
           }
         }
         
-        // Mark when we first reach the turn location (within 15m) - for distance tracking
-        if (distanceToTurn <= 15 && distanceAtTurnReachRef.current === 0) {
+        // Mark when we first reach the turn location (within 25m) - for distance tracking
+        if (distanceToTurn <= 25 && distanceAtTurnReachRef.current === 0) {
           distanceAtTurnReachRef.current = currentDistanceKm;
-          console.log(`[Nav] Reached turn ${currentIdx} at ${currentDistanceKm.toFixed(3)}km`);
+          closestDistanceToTurnRef.current = distanceToTurn;
+          console.log(`[Nav] Reached turn ${currentIdx} at ${currentDistanceKm.toFixed(3)}km, distance ${distanceToTurn.toFixed(0)}m`);
+        }
+        
+        // Track closest distance to turn for "passed turn" detection
+        if (distanceAtTurnReachRef.current > 0 && distanceToTurn < (closestDistanceToTurnRef.current || Infinity)) {
+          closestDistanceToTurnRef.current = distanceToTurn;
+        }
+        
+        // Detect if runner has passed the turn (was close, now moving away)
+        if (distanceAtTurnReachRef.current > 0 && closestDistanceToTurnRef.current && closestDistanceToTurnRef.current < 20) {
+          // If we were within 20m and are now 15m+ further away, we've passed
+          if (distanceToTurn > closestDistanceToTurnRef.current + 15) {
+            console.log(`[Nav] Passed turn ${currentIdx}: closest ${closestDistanceToTurnRef.current.toFixed(0)}m, now ${distanceToTurn.toFixed(0)}m`);
+            currentStoredTurnIndexRef.current = currentIdx + 1;
+            turnApproachAnnouncedRef.current = false;
+            turnAtAnnouncedRef.current = false;
+            distanceAtTurnReachRef.current = 0;
+            closestDistanceToTurnRef.current = 0;
+          }
         }
         
         // Re-find current turn after potential advancement
@@ -1819,8 +1842,8 @@ export default function RunSession() {
             setNextTurnInstruction(navInstruction);
             setLastDirectionTime(Date.now());
             setLastMessageTime(Date.now());
-          } else if (newDistanceToTurn <= 10 && !turnAtAnnouncedRef.current) {
-            // At the turn - give the instruction now
+          } else if (newDistanceToTurn <= 20 && !turnAtAnnouncedRef.current) {
+            // At the turn - give the instruction now (20m threshold for GPS accuracy)
             turnAtAnnouncedRef.current = true;
             speak(turn.instruction, { domain: 'nav' });
             setMessage(turn.instruction);
