@@ -16,6 +16,18 @@ interface Friend {
   profilePic?: string;
 }
 
+interface TurnInstruction {
+  instruction: string;
+  maneuver: string;
+  distance: number;
+  duration: number;
+  startLat: number;
+  startLng: number;
+  endLat: number;
+  endLng: number;
+  cumulativeDistance: number;
+}
+
 interface RouteCandidate {
   id: string;
   waypoints: Array<{ lat: number; lng: number }>;
@@ -28,6 +40,7 @@ interface RouteCandidate {
   hasMajorRoads: boolean;
   uniquenessScore: number;
   deadEndCount: number;
+  turnInstructions?: TurnInstruction[];
   elevation?: {
     gain: number;
     loss: number;
@@ -167,6 +180,7 @@ export default function RoutePreview() {
       startLat: lat,
       startLng: lng,
       elevation: selectedRoute.elevation,
+      turnInstructions: selectedRoute.turnInstructions || [],
     }));
     
     const runParams = new URLSearchParams({
@@ -244,6 +258,7 @@ export default function RoutePreview() {
       startLat: lat,
       startLng: lng,
       elevation: selectedRoute.elevation,
+      turnInstructions: selectedRoute.turnInstructions || [],
     }));
     
     const runParams = new URLSearchParams({
