@@ -27,6 +27,18 @@ import { GpsHelpDialog } from "@/components/GpsHelpDialog";
 
 import coachAvatar from "@assets/generated_images/glowing_ai_voice_sphere_interface.png";
 
+interface TurnInstruction {
+  instruction: string;
+  maneuver: string;
+  distance: number;
+  duration: number;
+  startLat: number;
+  startLng: number;
+  endLat: number;
+  endLng: number;
+  cumulativeDistance: number;
+}
+
 interface RouteData {
   id: string;
   routeName: string;
@@ -36,6 +48,7 @@ interface RouteData {
   waypoints: Array<{ lat: number; lng: number }>;
   startLat: number;
   startLng: number;
+  turnInstructions?: TurnInstruction[];
   elevation?: {
     gain: number;
     loss: number;
@@ -486,6 +499,10 @@ export default function RunSession() {
   const runStoppedRef = useRef<boolean>(false);
   const finishAnnouncedRef = useRef<boolean>(false);
   const lastTurnAnnouncedIndexRef = useRef<number>(-1);
+  const currentStoredTurnIndexRef = useRef<number>(0);
+  const turnApproachAnnouncedRef = useRef<boolean>(false);
+  const turnAtAnnouncedRef = useRef<boolean>(false);
+  const distanceAtTurnReachRef = useRef<number>(0); // distance (km) when we first reach the turn location
   
   // Timestamp-based timer refs for screen-off tracking
   const pausedDurationRef = useRef<number>(0);
@@ -762,6 +779,16 @@ export default function RunSession() {
       cleanupAudio();
     };
   }, [cleanupAudio]);
+
+  // Reset turn tracking refs when route changes
+  useEffect(() => {
+    currentStoredTurnIndexRef.current = 0;
+    turnApproachAnnouncedRef.current = false;
+    turnAtAnnouncedRef.current = false;
+    distanceAtTurnReachRef.current = 0;
+    lastTurnAnnouncedIndexRef.current = -1;
+    console.log('[Nav] Reset turn tracking for new route instructions');
+  }, [routeData?.turnInstructions]);
 
   const fetchGroupRunParticipants = useCallback(async () => {
     if (!urlGroupRunId) return;
@@ -1249,7 +1276,7 @@ export default function RunSession() {
                   }
                   
                   // Speak the coaching message
-                  speak(coachMessage, { domain: 'coach', priority: 'high' });
+                  speak(coachMessage, { domain: 'coach', force: true });
                 }
               } else if (!isSignificantDrop && inSlowdownRef.current && slowdownStartRef.current) {
                 // End of slowdown - record the event
@@ -1597,89 +1624,223 @@ export default function RunSession() {
       return;
     }
     
-    // Find the next significant turn point (where bearing changes > 25 degrees)
-    const lookAheadPoints = Math.min(Math.max(20, Math.floor(routePoints.length * 0.03)), 60);
-    
-    // Search for the next turn within reasonable range
-    for (let searchIdx = nearestIndex + 2; searchIdx < Math.min(nearestIndex + 150, routePoints.length - 2); searchIdx++) {
-      const turnPoint = routePoints[searchIdx];
-      const beforePoint = routePoints[Math.max(0, searchIdx - 1)];
-      const afterPoint = routePoints[Math.min(routePoints.length - 1, searchIdx + 1)];
+    // PRIORITY: Use stored turn instructions from Google Directions API (accurate street names)
+    if (routeData?.turnInstructions && routeData.turnInstructions.length > 0) {
+      const storedInstructions = routeData.turnInstructions;
+      const currentDistanceKm = distance; // distance is already in km
       
-      // Use signed turn angle for accurate left/right detection
-      const turnAngle = getSignedTurnAngle(beforePoint, turnPoint, afterPoint);
-      const absTurnAngle = Math.abs(turnAngle);
+      // Find the next valid turn starting from current pointer
+      let currentIdx = currentStoredTurnIndexRef.current;
+      let turn = null;
       
-      // This is a significant turn (> 25 degrees)
-      if (absTurnAngle > 25) {
-        const distToTurn = haversineDistance(currentPosition.lat, currentPosition.lng, turnPoint.lat, turnPoint.lng);
-        const distToTurnMeters = distToTurn * 1000;
-        
-        // Only announce when within 10 meters of the turn (approaching)
-        // or when very close (at the turn - within 5m)
-        if (distToTurnMeters <= 10 && distToTurnMeters > 5) {
-          // Check if we already announced this turn
-          if (lastTurnAnnouncedIndexRef.current === searchIdx) {
-            break; // Already announced approaching this turn
-          }
-          
-          // Determine turn direction using signed angle
-          // Positive = right turn, Negative = left turn
-          let turnInstruction = "";
-          if (turnAngle > 70) {
-            turnInstruction = "Turn right";
-          } else if (turnAngle > 20) {
-            turnInstruction = "Bear right";
-          } else if (turnAngle < -70) {
-            turnInstruction = "Turn left";
-          } else if (turnAngle < -20) {
-            turnInstruction = "Bear left";
-          }
-          
-          if (turnInstruction) {
-            // Get street name at the afterPoint - the street we're turning onto
-            const streetLookupPoint = afterPoint;
-            
-            getStreetName(streetLookupPoint.lat, streetLookupPoint.lng).then(streetName => {
-              const instruction = streetName 
-                ? `${turnInstruction} onto ${streetName}` 
-                : `${turnInstruction} ahead`;
-              
-              lastTurnAnnouncedIndexRef.current = searchIdx;
-              speak(instruction, { domain: 'nav' });
-              setMessage(instruction);
-              setNextTurnInstruction(instruction);
-              setLastDirectionTime(Date.now());
-              setLastMessageTime(Date.now());
-            });
-          }
+      // Skip to next valid turn (skip 'straight' maneuvers)
+      while (currentIdx < storedInstructions.length) {
+        const candidate = storedInstructions[currentIdx];
+        if (candidate.maneuver && candidate.maneuver !== 'straight') {
+          turn = candidate;
           break;
-        } else if (distToTurnMeters <= 5) {
-          // At the turn - give confirmation using signed angle
-          if (lastTurnAnnouncedIndexRef.current !== searchIdx + 1000) {
-            let confirmInstruction = turnAngle > 0 ? "Turn right now" : "Turn left now";
+        }
+        currentIdx++;
+      }
+      
+      // Update pointer if we skipped some turns
+      if (currentIdx !== currentStoredTurnIndexRef.current) {
+        currentStoredTurnIndexRef.current = currentIdx;
+        turnApproachAnnouncedRef.current = false;
+        turnAtAnnouncedRef.current = false;
+        distanceAtTurnReachRef.current = 0;
+      }
+      
+      if (turn && currentIdx < storedInstructions.length) {
+        const distanceToTurn = haversineDistance(currentPosition.lat, currentPosition.lng, turn.startLat, turn.startLng) * 1000;
+        
+        // Check if we should advance to the next turn
+        // We advance when: at-turn announced AND (closer to next turn OR traveled enough distance)
+        if (turnAtAnnouncedRef.current) {
+          // Find the next valid turn after current
+          let nextValidIdx = currentIdx + 1;
+          let nextTurn = null;
+          while (nextValidIdx < storedInstructions.length) {
+            const candidate = storedInstructions[nextValidIdx];
+            if (candidate.maneuver && candidate.maneuver !== 'straight') {
+              nextTurn = candidate;
+              break;
+            }
+            nextValidIdx++;
+          }
+          
+          let shouldAdvance = false;
+          
+          if (nextTurn) {
+            // Check if we're closer to the next turn than current
+            const distanceToNextTurn = haversineDistance(currentPosition.lat, currentPosition.lng, nextTurn.startLat, nextTurn.startLng) * 1000;
+            if (distanceToNextTurn < distanceToTurn) {
+              shouldAdvance = true;
+              console.log(`[Nav] Closer to next turn (${distanceToNextTurn.toFixed(0)}m vs ${distanceToTurn.toFixed(0)}m)`);
+            }
+          }
+          
+          // Also advance if we've traveled 15m since announcing at-turn (using cumulative distance)
+          if (!shouldAdvance && distanceAtTurnReachRef.current > 0) {
+            const distanceTraveledSinceReach = (currentDistanceKm - distanceAtTurnReachRef.current) * 1000;
+            if (distanceTraveledSinceReach > 15) {
+              shouldAdvance = true;
+              console.log(`[Nav] Traveled ${distanceTraveledSinceReach.toFixed(0)}m since reach`);
+            }
+          }
+          
+          if (shouldAdvance) {
+            console.log(`[Nav] Advancing past turn ${currentIdx}: ${turn.instruction}`);
+            currentStoredTurnIndexRef.current = currentIdx + 1;
+            turnApproachAnnouncedRef.current = false;
+            turnAtAnnouncedRef.current = false;
+            distanceAtTurnReachRef.current = 0;
+            // Continue to process next turn in same tick (don't return)
+          }
+        }
+        
+        // Mark when we first reach the turn location (within 15m) - for distance tracking
+        if (distanceToTurn <= 15 && distanceAtTurnReachRef.current === 0) {
+          distanceAtTurnReachRef.current = currentDistanceKm;
+          console.log(`[Nav] Reached turn ${currentIdx} at ${currentDistanceKm.toFixed(3)}km`);
+        }
+        
+        // Re-find current turn after potential advancement
+        currentIdx = currentStoredTurnIndexRef.current;
+        turn = null;
+        while (currentIdx < storedInstructions.length) {
+          const candidate = storedInstructions[currentIdx];
+          if (candidate.maneuver && candidate.maneuver !== 'straight') {
+            turn = candidate;
+            break;
+          }
+          currentIdx++;
+        }
+        
+        if (turn && currentIdx < storedInstructions.length) {
+          const newDistanceToTurn = haversineDistance(currentPosition.lat, currentPosition.lng, turn.startLat, turn.startLng) * 1000;
+          
+          // Announce when approaching the turn (within 50m)
+          if (newDistanceToTurn <= 50 && newDistanceToTurn > 10 && !turnApproachAnnouncedRef.current) {
+            const distMeters = Math.round(newDistanceToTurn);
+            const navInstruction = `In ${distMeters} meters, ${turn.instruction}`;
             
-            lastTurnAnnouncedIndexRef.current = searchIdx + 1000;
-            speak(confirmInstruction, { domain: 'nav' });
-            setMessage(confirmInstruction);
-            setNextTurnInstruction(null); // Clear after turn is executed
+            turnApproachAnnouncedRef.current = true;
+            speak(navInstruction, { domain: 'nav' });
+            setMessage(turn.instruction);
+            setNextTurnInstruction(navInstruction);
+            setLastDirectionTime(Date.now());
+            setLastMessageTime(Date.now());
+          } else if (newDistanceToTurn <= 10 && !turnAtAnnouncedRef.current) {
+            // At the turn - give the instruction now
+            turnAtAnnouncedRef.current = true;
+            speak(turn.instruction, { domain: 'nav' });
+            setMessage(turn.instruction);
+            setNextTurnInstruction(null);
             setLastDirectionTime(now);
             setLastMessageTime(now);
           }
+        }
+      }
+    } else {
+      // FALLBACK: Use bearing-based navigation when no stored instructions available
+      const lookAheadPoints = Math.min(Math.max(20, Math.floor(routePoints.length * 0.03)), 60);
+      
+      for (let searchIdx = nearestIndex + 2; searchIdx < Math.min(nearestIndex + 150, routePoints.length - 2); searchIdx++) {
+        const turnPoint = routePoints[searchIdx];
+        const beforePoint = routePoints[Math.max(0, searchIdx - 1)];
+        const afterPoint = routePoints[Math.min(routePoints.length - 1, searchIdx + 1)];
+        
+        const turnAngle = getSignedTurnAngle(beforePoint, turnPoint, afterPoint);
+        const absTurnAngle = Math.abs(turnAngle);
+        
+        if (absTurnAngle > 25) {
+          const distToTurn = haversineDistance(currentPosition.lat, currentPosition.lng, turnPoint.lat, turnPoint.lng);
+          const distToTurnMeters = distToTurn * 1000;
+          
+          if (distToTurnMeters <= 30 && distToTurnMeters > 5) {
+            if (lastTurnAnnouncedIndexRef.current === searchIdx) {
+              break;
+            }
+            
+            let turnInstruction = "";
+            if (turnAngle > 70) {
+              turnInstruction = "Turn right";
+            } else if (turnAngle > 20) {
+              turnInstruction = "Bear right";
+            } else if (turnAngle < -70) {
+              turnInstruction = "Turn left";
+            } else if (turnAngle < -20) {
+              turnInstruction = "Bear left";
+            }
+            
+            if (turnInstruction) {
+              const distMeters = Math.round(distToTurnMeters);
+              const instruction = `In ${distMeters} meters, ${turnInstruction.toLowerCase()}`;
+              
+              lastTurnAnnouncedIndexRef.current = searchIdx;
+              speak(instruction, { domain: 'nav' });
+              setMessage(turnInstruction);
+              setNextTurnInstruction(instruction);
+              setLastDirectionTime(Date.now());
+              setLastMessageTime(Date.now());
+            }
+            break;
+          } else if (distToTurnMeters <= 5) {
+            if (lastTurnAnnouncedIndexRef.current !== searchIdx + 1000) {
+              let confirmInstruction = turnAngle > 0 ? "Turn right now" : "Turn left now";
+              
+              lastTurnAnnouncedIndexRef.current = searchIdx + 1000;
+              speak(confirmInstruction, { domain: 'nav' });
+              setMessage(confirmInstruction);
+              setNextTurnInstruction(null);
+              setLastDirectionTime(now);
+              setLastMessageTime(now);
+            }
+            break;
+          }
           break;
         }
-        
-        // Found the next turn but not close enough yet - stop searching
-        break;
       }
     }
-  }, [active, currentPosition, routePoints, currentWaypointIndex, lastDirectionTime, speak]);
+  }, [active, currentPosition, routePoints, currentWaypointIndex, lastDirectionTime, speak, routeData?.turnInstructions]);
 
   // Pre-compute next turn for map display (runs more frequently, doesn't trigger audio)
   useEffect(() => {
     if (!currentPosition || routePoints.length < 3) return;
     
-    // Find nearest point on route
+    // PRIORITY: Use stored turn instructions for accurate display
+    if (routeData?.turnInstructions && routeData.turnInstructions.length > 0) {
+      const storedInstructions = routeData.turnInstructions;
+      
+      // Use the same pointer as the audio logic to find current turn
+      let currentIdx = currentStoredTurnIndexRef.current;
+      
+      // Skip to next valid turn (skip 'straight' maneuvers)
+      while (currentIdx < storedInstructions.length) {
+        const candidate = storedInstructions[currentIdx];
+        if (candidate.maneuver && candidate.maneuver !== 'straight') {
+          break;
+        }
+        currentIdx++;
+      }
+      
+      if (currentIdx < storedInstructions.length) {
+        const turn = storedInstructions[currentIdx];
+        const distanceToTurn = haversineDistance(currentPosition.lat, currentPosition.lng, turn.startLat, turn.startLng) * 1000;
+        
+        if (distanceToTurn <= 200 && distanceToTurn > 5) {
+          const distMeters = Math.round(distanceToTurn);
+          setNextTurnInstruction(`In ${distMeters}m: ${turn.instruction}`);
+          return;
+        }
+      }
+      
+      setNextTurnInstruction(null);
+      return;
+    }
+    
+    // FALLBACK: Use bearing-based detection when no stored instructions
     let nearestIndex = 0;
     let nearestDist = Infinity;
     for (let i = 0; i < routePoints.length; i++) {
@@ -1690,7 +1851,6 @@ export default function RunSession() {
       }
     }
     
-    // Look ahead for the next significant turn
     const lookAheadMax = Math.min(nearestIndex + 80, routePoints.length - 2);
     let foundTurn = false;
     
@@ -1699,7 +1859,6 @@ export default function RunSession() {
       const turnPoint = routePoints[searchIdx];
       const afterPoint = routePoints[Math.min(routePoints.length - 1, searchIdx + 1)];
       
-      // Use signed turn angle for accurate left/right detection
       const turnAngle = getSignedTurnAngle(prevPoint, turnPoint, afterPoint);
       const absTurnAngle = Math.abs(turnAngle);
       
@@ -1707,9 +1866,7 @@ export default function RunSession() {
         const distToTurn = haversineDistance(currentPosition.lat, currentPosition.lng, turnPoint.lat, turnPoint.lng);
         const distToTurnMeters = Math.round(distToTurn * 1000);
         
-        // Show upcoming turn on map if within 200m
         if (distToTurnMeters <= 200 && distToTurnMeters > 10) {
-          // Use signed angle: positive = right, negative = left
           let turnLabel = "";
           if (turnAngle > 70) turnLabel = "Turn right";
           else if (turnAngle > 20) turnLabel = "Bear right";
@@ -1718,31 +1875,20 @@ export default function RunSession() {
           
           if (turnLabel) {
             foundTurn = true;
-            // Fetch street name at the afterPoint - the street we're turning onto
-            const streetLookupPoint = afterPoint;
-            
-            getStreetName(streetLookupPoint.lat, streetLookupPoint.lng).then(streetName => {
-              if (streetName) {
-                setNextTurnInstruction(`In ${distToTurnMeters}m ${turnLabel.toLowerCase()} on ${streetName}`);
-              } else {
-                setNextTurnInstruction(`${turnLabel} in ${distToTurnMeters}m`);
-              }
-            });
+            setNextTurnInstruction(`${turnLabel} in ${distToTurnMeters}m`);
           }
         } else if (distToTurnMeters > 200) {
-          // Turn exists but too far away
-          foundTurn = true; // Still counts as finding a turn, just not displayable
+          foundTurn = true;
           setNextTurnInstruction(null);
         }
         break;
       }
     }
     
-    // Clear instruction if no turns found ahead
     if (!foundTurn) {
       setNextTurnInstruction(null);
     }
-  }, [currentPosition, routePoints]);
+  }, [currentPosition, routePoints, routeData?.turnInstructions]);
 
   useEffect(() => {
     if (!active) return;
