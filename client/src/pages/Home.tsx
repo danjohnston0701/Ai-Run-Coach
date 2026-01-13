@@ -450,6 +450,7 @@ export default function Home() {
               loss: data.route.elevationLoss,
               profile: data.route.elevationProfile,
             } : undefined),
+            turnInstructions: data.route.turnInstructions || [],
           }));
         }
       }
@@ -494,6 +495,17 @@ export default function Home() {
     startLat: number;
     startLng: number;
     polyline?: string;
+    turnInstructions?: Array<{
+      instruction: string;
+      maneuver: string;
+      distance: number;
+      duration: number;
+      startLat: number;
+      startLng: number;
+      endLat: number;
+      endLng: number;
+      cumulativeDistance: number;
+    }>;
   }
 
   const { data: recentRoutes = [], isLoading: routesLoading } = useQuery<RecentRoute[]>({
@@ -546,6 +558,7 @@ export default function Home() {
         loss: route.elevationLoss || 0,
         profile: route.elevationProfile,
       } : undefined,
+      turnInstructions: route.turnInstructions || [],
     }));
     
     const targetSeconds = parseInt(targetTime.h || "0") * 3600 + parseInt(targetTime.m || "0") * 60 + parseInt(targetTime.s || "0");
