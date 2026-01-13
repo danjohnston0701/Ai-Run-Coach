@@ -93,6 +93,7 @@ export const routes = pgTable("routes", {
   estimatedTime: integer("estimated_time"),
   terrainType: text("terrain_type"),
   startLocationLabel: text("start_location_label"),
+  turnInstructions: jsonb("turn_instructions"),
   isFavorite: boolean("is_favorite").default(false),
   lastStartedAt: timestamp("last_started_at"),
   createdAt: timestamp("created_at").defaultNow(),
