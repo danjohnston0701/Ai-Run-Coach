@@ -479,8 +479,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteRun(id: string): Promise<boolean> {
-    const result = await db.delete(runs).where(eq(runs.id, id));
-    return true;
+    return withRetry(async () => {
+      // Delete related records first (foreign key constraints)
+      await db.delete(aiCoachingLogs).where(eq(aiCoachingLogs.runId, id));
+      await db.delete(runWeaknessEvents).where(eq(runWeaknessEvents.runId, id));
+      await db.delete(runAnalyses).where(eq(runAnalyses.runId, id));
+      await db.delete(garminData).where(eq(garminData.runId, id));
+      await db.delete(routeRatings).where(eq(routeRatings.runId, id));
+      await db.update(groupRunParticipants).set({ runId: null }).where(eq(groupRunParticipants.runId, id));
+      // Now delete the run
+      await db.delete(runs).where(eq(runs.id, id));
+      return true;
+    });
   }
 
   async createLiveSession(data: InsertLiveRunSession): Promise<LiveRunSession> {
