@@ -1723,6 +1723,75 @@ export default function RunSession() {
       const storedInstructions = routeData.turnInstructions;
       const currentDistanceKm = distance; // distance is already in km
       
+      // === DYNAMIC RECALIBRATION ===
+      // On every GPS update, check if we're closer to a LATER instruction than the current one
+      // This handles missed waypoints, GPS jumps, and app pauses
+      const recalibrateTurnPointer = () => {
+        const currentIdx = currentStoredTurnIndexRef.current;
+        if (currentIdx >= storedInstructions.length) return;
+        
+        const currentTurn = storedInstructions[currentIdx];
+        const distanceToCurrentTurn = haversineDistance(
+          currentPosition.lat, currentPosition.lng, 
+          currentTurn.startLat, currentTurn.startLng
+        ) * 1000;
+        
+        // Only recalibrate if we're far from current waypoint (> 100m) or distance keeps increasing
+        const shouldCheckRecalibration = distanceToCurrentTurn > 100 || 
+          (increasingDistanceSamplesRef.current >= 2 && distanceToCurrentTurn > 60);
+        
+        if (!shouldCheckRecalibration) return;
+        
+        // Scan forward to find if any later turn is closer than current
+        let bestIdx = currentIdx;
+        let bestDistance = distanceToCurrentTurn;
+        
+        for (let i = currentIdx + 1; i < storedInstructions.length; i++) {
+          const candidate = storedInstructions[i];
+          const maneuver = (candidate.maneuver || '').toLowerCase();
+          const instruction = (candidate.instruction || '').toLowerCase();
+          
+          // Only consider valid turn instructions
+          const isSkippable = maneuver === 'straight' || 
+                             maneuver === '' && !instruction.includes('turn') && !instruction.includes('left') && !instruction.includes('right');
+          const isTurn = maneuver.includes('turn') || 
+                        maneuver.includes('left') || 
+                        maneuver.includes('right') ||
+                        instruction.includes('turn left') || 
+                        instruction.includes('turn right');
+          
+          if (!isTurn && (isSkippable || candidate.distance <= 5)) continue;
+          
+          const distanceToCandidate = haversineDistance(
+            currentPosition.lat, currentPosition.lng,
+            candidate.startLat, candidate.startLng
+          ) * 1000;
+          
+          // This turn is closer AND we're significantly closer to it than current
+          // Use a 25m hysteresis to prevent premature skipping
+          if (distanceToCandidate < bestDistance - 25 && distanceToCandidate < 150) {
+            bestIdx = i;
+            bestDistance = distanceToCandidate;
+            console.log(`[Nav Recal] Found closer turn at idx ${i}: ${distanceToCandidate.toFixed(0)}m (vs current ${distanceToCurrentTurn.toFixed(0)}m)`);
+          }
+        }
+        
+        // If we found a better turn, jump to it
+        if (bestIdx > currentIdx) {
+          console.log(`[Nav Recal] RECALIBRATING: Jumping from idx ${currentIdx} to ${bestIdx} (${storedInstructions[bestIdx].instruction})`);
+          currentStoredTurnIndexRef.current = bestIdx;
+          turnApproachAnnouncedRef.current = false;
+          turnAtAnnouncedRef.current = false;
+          distanceAtTurnReachRef.current = 0;
+          closestDistanceToTurnRef.current = 0;
+          increasingDistanceSamplesRef.current = 0;
+          lastDistanceToTurnRef.current = 0;
+        }
+      };
+      
+      // Run recalibration check on every GPS update
+      recalibrateTurnPointer();
+      
       // Find the next valid turn starting from current pointer
       let currentIdx = currentStoredTurnIndexRef.current;
       let turn = null;
