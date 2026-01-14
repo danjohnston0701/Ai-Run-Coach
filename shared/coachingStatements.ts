@@ -14,7 +14,7 @@ export const COACHING_STATEMENTS: CoachingStatement[] = [
   { id: 'early_3', text: "Start easy and let your body warm up naturally. The best runs build momentum.", phase: 'early', category: 'pacing' },
   { id: 'early_4', text: "Relax your shoulders and let them drop away from your ears.", phase: 'early', category: 'form' },
   { id: 'early_5', text: "Find your rhythm. These first kilometers are about settling into a sustainable pace.", phase: 'early', category: 'pacing' },
-  { id: 'early_6', text: "Keep your hands soft, as if gently holding something fragile.", phase: 'early', category: 'form' },
+  { id: 'early_6', text: "Keep your hands soft, stretch your fingers and release the tension.", phase: 'early', category: 'form' },
   { id: 'early_7', text: "Great start! Focus on smooth, relaxed movements as you warm up.", phase: 'early', category: 'motivation' },
   { id: 'early_8', text: "Keep your eyes on the horizon, not your feet.", phase: 'early', category: 'form' },
 
@@ -53,7 +53,7 @@ export const COACHING_STATEMENTS: CoachingStatement[] = [
   { id: 'generic_4', text: "Your body can do this. Trust it and let your mind follow.", phase: 'generic', category: 'mental' },
   { id: 'generic_5', text: "One step at a time. That's how every great journey is conquered.", phase: 'generic', category: 'motivation' },
   { id: 'generic_6', text: "Every run is a story of progress. Focus on your purpose.", phase: 'generic', category: 'motivation' },
-  { id: 'generic_7', text: "It's not about being the fastest, it's about being a better version of yourself.", phase: 'generic', category: 'mental' },
+  { id: 'generic_7', text: "It's not about being the fastest, it's about little improvements every session.", phase: 'generic', category: 'mental' },
   { id: 'generic_8', text: "Remember why you started. Keep going, you're making progress.", phase: 'generic', category: 'motivation' },
   { id: 'generic_9', text: "Breathe deep and reset. The next kilometer is yours to own.", phase: 'generic', category: 'breathing' },
   { id: 'generic_10', text: "Your body is capable of amazing things. Trust the process and keep moving forward.", phase: 'generic', category: 'motivation' },
