@@ -2669,8 +2669,15 @@ export default function RunSession() {
       speak(announcement, { domain: 'coach' });
       setMessage(`${currentKm}km - ${thisKmMins}:${thisKmSecs.toString().padStart(2, '0')} split`);
       setLastMessageTime(Date.now());
+      
+      // Log km split to coaching logs
+      saveCoachingLog({
+        eventType: 'km_split',
+        topic: 'distance_milestone',
+        responseText: announcement,
+      });
     }
-  }, [active, gpsStatus, distance, lastKmAnnounced, time, kmSplits, cadence, cadenceAnalysis, speak, routePoints]);
+  }, [active, gpsStatus, distance, lastKmAnnounced, time, kmSplits, cadence, cadenceAnalysis, speak, routePoints, saveCoachingLog]);
 
   // 0.50km pace summary announcement
   useEffect(() => {
@@ -2834,9 +2841,16 @@ export default function RunSession() {
       speak(paceMessage, { domain: 'coach' });
       setMessage(`0.5km - Pace: ${currentPaceStr}/km`);
       setLastMessageTime(Date.now());
+      
+      // Log 0.50km pace summary to coaching logs
+      saveCoachingLog({
+        eventType: 'pace_summary',
+        topic: 'half_km_update',
+        responseText: paceMessage,
+      });
     });
     
-  }, [active, gpsStatus, distance, time, speak, userProfile, aiCoachEnabled, coachSettings]);
+  }, [active, gpsStatus, distance, time, speak, userProfile, aiCoachEnabled, coachSettings, saveCoachingLog]);
 
   // Fetch AI cadence analysis periodically during runs
   useEffect(() => {
