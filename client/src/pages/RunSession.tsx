@@ -3539,6 +3539,8 @@ export default function RunSession() {
             avgPace: calculatePace(),
             cadence: cadence || undefined,
             elevation: routeData?.elevation?.gain || undefined,
+            elevationGain: routeData?.elevation?.gain || undefined,
+            elevationLoss: routeData?.elevation?.loss || undefined,
             difficulty: metadata.levelId,
             startLat: metadata.startLat,
             startLng: metadata.startLng,

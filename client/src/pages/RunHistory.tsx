@@ -108,6 +108,8 @@ export default function RunHistory() {
         avgPace: fullLocalRun.avgPace,
         cadence: fullLocalRun.avgCadence || fullLocalRun.cadence || undefined, // Local stores as avgCadence
         elevation: fullLocalRun.elevationGain || undefined,
+        elevationGain: fullLocalRun.elevationGain || undefined,
+        elevationLoss: fullLocalRun.elevationLoss || undefined,
         difficulty: fullLocalRun.difficulty,
         startLat: fullLocalRun.lat,
         startLng: fullLocalRun.lng,

@@ -115,6 +115,8 @@ export const runs = pgTable("runs", {
   calories: integer("calories"),
   cadence: integer("cadence"),
   elevation: real("elevation"),
+  elevationGain: real("elevation_gain"),
+  elevationLoss: real("elevation_loss"),
   difficulty: text("difficulty"),
   startLat: real("start_lat"),
   startLng: real("start_lng"),
