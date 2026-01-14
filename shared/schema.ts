@@ -143,6 +143,9 @@ export const runWeaknessEvents = pgTable("run_weakness_events", {
   causeTag: text("cause_tag"),
   causeNote: text("cause_note"),
   coachResponseGiven: text("coach_response_given"),
+  userComment: text("user_comment"),
+  isIrrelevant: boolean("is_irrelevant").default(false),
+  reviewedAt: timestamp("reviewed_at"),
   detectedAt: timestamp("detected_at").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
 });

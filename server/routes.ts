@@ -1013,6 +1013,25 @@ export async function registerRoutes(
     }
   });
 
+  // Update weakness event user review (comment, mark as irrelevant)
+  app.patch("/api/weakness-events/:id/review", async (req, res) => {
+    try {
+      const { userComment, isIrrelevant } = req.body;
+      const event = await storage.updateWeaknessEventReview(
+        req.params.id, 
+        userComment ?? null, 
+        isIrrelevant ?? false
+      );
+      if (!event) {
+        return res.status(404).json({ error: "Weakness event not found" });
+      }
+      res.json(event);
+    } catch (error) {
+      console.error("Update weakness event review error:", error);
+      res.status(500).json({ error: "Failed to update weakness event review" });
+    }
+  });
+
   app.get("/api/users/:userId/weakness-history", async (req, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 50;

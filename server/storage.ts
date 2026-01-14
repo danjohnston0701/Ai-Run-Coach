@@ -205,6 +205,7 @@ export interface IStorage {
   getRunWeaknessEvents(runId: string): Promise<RunWeaknessEvent[]>;
   getUserWeaknessHistory(userId: string, limit?: number): Promise<RunWeaknessEvent[]>;
   updateWeaknessEventCause(id: string, causeTag: string | null, causeNote: string | null): Promise<RunWeaknessEvent | undefined>;
+  updateWeaknessEventReview(id: string, userComment: string | null, isIrrelevant: boolean): Promise<RunWeaknessEvent | undefined>;
   deleteRunWeaknessEvent(id: string): Promise<void>;
 }
 
@@ -1502,6 +1503,16 @@ export class DatabaseStorage implements IStorage {
     return withRetry(async () => {
       const [event] = await db.update(runWeaknessEvents)
         .set({ causeTag, causeNote })
+        .where(eq(runWeaknessEvents.id, id))
+        .returning();
+      return event;
+    });
+  }
+
+  async updateWeaknessEventReview(id: string, userComment: string | null, isIrrelevant: boolean): Promise<RunWeaknessEvent | undefined> {
+    return withRetry(async () => {
+      const [event] = await db.update(runWeaknessEvents)
+        .set({ userComment, isIrrelevant, reviewedAt: new Date() })
         .where(eq(runWeaknessEvents.id, id))
         .returning();
       return event;
