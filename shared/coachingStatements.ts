@@ -82,36 +82,48 @@ export function determinePhase(
     ? (distanceKm / totalDistanceKm) * 100
     : null;
 
-  // Final phase: last 10% of run (only if we know total distance)
-  if (percentComplete !== null && percentComplete >= thresholds.final.minPercent) {
-    return 'final';
+  // If we have total distance, use percentage-based phase detection (more accurate)
+  if (percentComplete !== null) {
+    // Final phase: last 10% of run
+    if (percentComplete >= thresholds.final.minPercent) {
+      return 'final';
+    }
+    
+    // Late phase: 75-90% of run
+    if (percentComplete >= thresholds.late.minPercent) {
+      return 'late';
+    }
+    
+    // Mid phase: 40-50% of run
+    if (percentComplete >= thresholds.mid.minPercent && percentComplete <= thresholds.mid.maxPercent) {
+      return 'mid';
+    }
+    
+    // Early phase: first 10% of run
+    if (percentComplete <= thresholds.early.maxPercent) {
+      return 'early';
+    }
+    
+    // Between early and mid, or between mid and late - use generic
+    return 'generic';
   }
-
-  // Late phase: 7km+ OR 75-90% of run
-  if (distanceKm >= thresholds.late.minKm) {
-    return 'late';
-  }
-  if (percentComplete !== null && percentComplete >= thresholds.late.minPercent && percentComplete < thresholds.final.minPercent) {
-    return 'late';
-  }
-
-  // Mid phase: 3-5km OR 40-50% of run
-  if (distanceKm >= thresholds.mid.minKm && distanceKm <= thresholds.mid.maxKm) {
-    return 'mid';
-  }
-  if (percentComplete !== null && percentComplete >= thresholds.mid.minPercent && percentComplete <= thresholds.mid.maxPercent) {
-    return 'mid';
-  }
-
-  // Early phase: first 2km OR first 10% of run
+  
+  // No total distance known (free run) - use ONLY absolute distance thresholds
+  // But be conservative: without knowing total distance, avoid late/final phases
+  // to prevent fatigue-related statements early in potentially long runs
+  
+  // Early phase: first 2km
   if (distanceKm <= thresholds.early.maxKm) {
     return 'early';
   }
-  if (percentComplete !== null && percentComplete <= thresholds.early.maxPercent) {
-    return 'early';
+  
+  // Mid phase: 3-5km
+  if (distanceKm >= thresholds.mid.minKm && distanceKm <= thresholds.mid.maxKm) {
+    return 'mid';
   }
-
-  // Default to generic for distances between defined phases
+  
+  // For free runs beyond 5km without known total, default to generic
+  // This prevents fatigue messaging at 7km when user might be doing a 20km run
   return 'generic';
 }
 

@@ -24,6 +24,12 @@ import { saveActiveRunSession, loadActiveRunSession, clearActiveRunSession, type
 import { loadCoachSettings, loadCoachSettingsFromProfile, getVoicePreferences, getTTSVoice, type AiCoachSettings } from "@/lib/coachSettings";
 import { calculateTerrainData, shouldTriggerTerrainCoaching, type ElevationPoint, type TerrainData, type TerrainEvent } from "@/lib/elevationTracker";
 import { GpsHelpDialog } from "@/components/GpsHelpDialog";
+import { 
+  determinePhase, 
+  selectStatement, 
+  MAX_STATEMENT_USES,
+  type CoachingPhase 
+} from "@shared/coachingStatements";
 
 import coachAvatar from "@assets/generated_images/glowing_ai_voice_sphere_interface.png";
 
@@ -227,34 +233,7 @@ function getDirectionInstruction(currentBearing: number, nextBearing: number, di
   }
 }
 
-const COACH_MESSAGES = [
-  "Keep your posture tall and proud, imagine a string gently lifting the top of your head.",
-  "Lightly engage your core to keep your torso stable as your legs and arms move.",
-  "Settle into a steady, rhythmic breathing pattern that feels sustainable.",
-  "Stay tall through your hips, avoid collapsing or bending at the waist as you tire.",
-  "Relax your shoulders and let them drop away from your ears.",
-  "If you feel stressed, take a deeper, slower breath and genty reset your rhythm.",
-  "Remember to smile! It helps you relax and enjoy the run.",
-  "Keep your eyes on the horizon, not your feet.",
-  "Think quick and elastic, lifting the foot up and through instead of pushing long and hard.",
-  "Keep your arms relaxed and swinging naturally with your stride.",
-  "Run with quite confidence, efficient, relaxed form is your biggest advantage today.",
-  "Let your foot land roughly under your body instead of reaching out in front",
-  "Keep your hands soft, as if gently holding something fragile."
-];
-
-const MOTIVATIONAL_MESSAGES = [
-  "You're stronger with every stride. Stay smooth, stay strong",
-  "Breathe deep and reset. the next kilometer is yours to own",
-  "Pain fades, pride lasts - push through this stetch and keep your head up",
-  "Focus on form - tall posture, light feet and controlled breathing. You've got this.",
-  "Your body can do this. Trust it and let your mind follow",
-  "One step at a time. That's how every great journey is conquered",
-  "Every run is a story of progress. Focus on your purpose",
-  "It's not about being the fastest, it's about being a better version of yourself",
-  "Remember why you started. Keep going, you're making progress",
-  "Your body is capable of amazing things. Trust the process and keep moving forward"
-];
+// Legacy static messages removed - now using phase-based coaching from shared/coachingStatements.ts
 
 // Legacy static feedback - kept as fallback
 function getCadenceFeedback(cadence: number): string {
@@ -381,6 +360,9 @@ export default function RunSession() {
   const recentCoachingRef = useRef<string[]>([]);
   const lastProgressMilestoneRef = useRef<number>(0);
   const lastPaceRef = useRef<number>(0);
+  
+  // Phase-based coaching statement usage tracking (max 3 uses per statement per run)
+  const [statementUsageCounts, setStatementUsageCounts] = useState<Record<string, number>>({});
   
   const [aiCoachEnabled, setAiCoachEnabled] = useState(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -2291,20 +2273,35 @@ export default function RunSession() {
     }
   }, [currentPosition, routePoints, routeData?.turnInstructions]);
 
+  // Periodic coaching with phase-based statement selection
   useEffect(() => {
     if (!active) return;
     
     const interval = setInterval(() => {
       if (Date.now() - lastMessageTime > 30000 && gpsStatus === "active") {
-        const randomMsg = COACH_MESSAGES[Math.floor(Math.random() * COACH_MESSAGES.length)];
-        setMessage(randomMsg);
-        speak(randomMsg, { domain: 'coach' });
-        setLastMessageTime(Date.now());
+        // Determine current run phase based on distance and total planned distance
+        const targetDistNum = parseFloat(sessionMetadataRef.current.targetDistance) || null;
+        const currentPhase = determinePhase(distance, targetDistNum);
+        
+        // Select a phase-appropriate statement that hasn't been overused
+        const statement = selectStatement(currentPhase, statementUsageCounts);
+        
+        if (statement) {
+          // Update usage count for this statement
+          setStatementUsageCounts(prev => ({
+            ...prev,
+            [statement.id]: (prev[statement.id] || 0) + 1
+          }));
+          
+          setMessage(statement.text);
+          speak(statement.text, { domain: 'coach' });
+          setLastMessageTime(Date.now());
+        }
       }
     }, 20000);
 
     return () => clearInterval(interval);
-  }, [active, lastMessageTime, gpsStatus, speak]);
+  }, [active, lastMessageTime, gpsStatus, speak, distance, statementUsageCounts]);
 
   // Timestamp-based timer that works even when screen is off
   // Timer only pauses when user explicitly pauses (active = false)
@@ -2629,7 +2626,19 @@ export default function RunSession() {
       const avgPaceMins = Math.floor(avgPaceSeconds / 60);
       const avgPaceSecs = Math.floor(avgPaceSeconds % 60);
       
-      const motivation = MOTIVATIONAL_MESSAGES[Math.floor(Math.random() * MOTIVATIONAL_MESSAGES.length)];
+      // Select phase-appropriate motivational statement
+      const targetDistNum2 = parseFloat(sessionMetadataRef.current.targetDistance) || null;
+      const currentPhase = determinePhase(distance, targetDistNum2);
+      const motivationStatement = selectStatement(currentPhase, statementUsageCounts, true);
+      const motivation = motivationStatement?.text || "Keep going, you're doing great!";
+      
+      // Track usage if we got a statement
+      if (motivationStatement) {
+        setStatementUsageCounts(prev => ({
+          ...prev,
+          [motivationStatement.id]: (prev[motivationStatement.id] || 0) + 1
+        }));
+      }
       
       let announcement = `${currentKm} kilometer${currentKm > 1 ? 's' : ''} complete. `;
       announcement += `Split time: ${thisKmMins} minute${thisKmMins !== 1 ? 's' : ''} ${thisKmSecs} seconds. `;

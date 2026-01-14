@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { determinePhase, getPhaseInstructions, getPhaseDescription, type CoachingPhase } from "@shared/coachingStatements";
 
 // Initialize OpenAI with user's API key
 const openai = new OpenAI({
@@ -481,6 +482,11 @@ ${request.recentCoachingTopics.map(t => `- "${t}"`).join('\n')}
 Choose a DIFFERENT focus area for this message.`;
   }
   
+  // Phase-based coaching instructions
+  const currentPhase = determinePhase(request.distanceCovered, request.totalDistance);
+  const phaseSection = `\n\n**CURRENT RUN PHASE: ${currentPhase.toUpperCase()}** (${getPhaseDescription(currentPhase)})
+${getPhaseInstructions()}`;
+  
   // Weather section for weather-aware coaching
   let weatherSection = "";
   if (request.weather) {
@@ -575,7 +581,7 @@ Cue: "${eliteTip}"
 
 IMPORTANT: Your main coaching message MUST include guidance from this elite technique cue. This is professional running form advice that should be woven into your response. Rephrase it naturally but ensure the core technique point is communicated.`;
   
-  const prompt = `${coachIdentity} Providing real-time guidance.${aiConfigSection}${eliteCoachingSection}
+  const prompt = `${coachIdentity} Providing real-time guidance.${aiConfigSection}${phaseSection}${eliteCoachingSection}
 
 COACHING STYLE: ${toneStyle}${userProfileInfo}
 
@@ -1965,9 +1971,15 @@ ${request.bestPaceOnSimilarTerrain ? `- Best pace on similar terrain: ${Math.flo
     abrupt: "Be brief and direct."
   };
   
+  // Determine phase for pace coaching
+  const paceCoachingPhase = determinePhase(request.distanceCovered, request.totalDistance || null);
+  
   const systemPrompt = `You are ${request.coachName || 'an expert AI running coach'} providing a personalized, dynamic pace assessment at the 0.5km mark of a run.
 
 ${toneInstructions[request.coachTone || 'motivational']}
+
+**CURRENT RUN PHASE: ${paceCoachingPhase.toUpperCase()}** (${getPhaseDescription(paceCoachingPhase)})
+${getPhaseInstructions()}
 
 Your job is to analyze ALL available data and provide UNIQUE, SESSION-SPECIFIC coaching advice. Do NOT use generic templates - every response should be tailored to this exact situation.
 

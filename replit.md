@@ -31,6 +31,7 @@ The application follows a monorepo structure with `/client` for the frontend, `/
 - **Hill-Awareness Coaching**: Provides real-time, terrain-aware coaching by tracking elevation profiles and proactively triggering advice for significant hills (5%+ grade) using OpenAI.
 - **Weather-Aware Coaching**: Integrates with Google Maps Platform Weather API to fetch current and forecasted weather conditions. This data informs AI coaching advice, providing relevant guidance based on temperature, humidity, wind, UV, and precipitation.
 - **AI Coach Toggle**: Users can enable/disable the AI Coach. When disabled, no data is sent to OpenAI, and navigation audio defaults to the device's built-in text-to-speech.
+- **Phase-Based Coaching**: Coaching statements are organized by run phase (early/mid/late/final/generic) in `shared/coachingStatements.ts`. Each statement is only used in its appropriate phase (e.g., "if you're starting to tire" only in late phase, "warm up" only in early phase). Same statement can't be used more than 3 times per run. Phases are determined by both absolute distance (2km, 3-5km, 7km+) and percentage of total distance (10%, 40-50%, 75-90%, last 10%).
 
 ### Data Management
 - **Primary Storage**: PostgreSQL database for user accounts, coach settings, completed runs, routes, and favorites.
