@@ -3349,6 +3349,7 @@ export default function RunSession() {
           if (response.ok) {
             const savedRun = await response.json();
             console.log('[Save] Run saved to database successfully:', savedRun.id);
+            toast.success('Run saved to your account!');
             
             // Save detected weakness events if any
             if (detectedWeaknesses.length > 0) {
@@ -3398,10 +3399,12 @@ export default function RunSession() {
           } else {
             const errorText = await response.text();
             console.error('[Save] Database save failed with status:', response.status, 'Error:', errorText);
+            toast.error('Failed to sync run to cloud - saved locally');
           }
         }
       } catch (err) {
         console.error('[Save] Failed to save run to database, using localStorage:', err);
+        toast.error('Network error - run saved locally only');
       }
     }
     
