@@ -506,6 +506,8 @@ export default function RunSession() {
   const turnAtAnnouncedRef = useRef<boolean>(false);
   const distanceAtTurnReachRef = useRef<number>(0); // distance (km) when we first reach the turn location
   const closestDistanceToTurnRef = useRef<number>(0); // closest we got to the turn point (meters)
+  const increasingDistanceSamplesRef = useRef<number>(0); // count of consecutive samples where distance is increasing
+  const lastDistanceToTurnRef = useRef<number>(0); // last measured distance to current turn
   
   // Timestamp-based timer refs for screen-off tracking
   const pausedDurationRef = useRef<number>(0);
@@ -862,6 +864,8 @@ export default function RunSession() {
     turnAtAnnouncedRef.current = false;
     distanceAtTurnReachRef.current = 0;
     closestDistanceToTurnRef.current = 0;
+    increasingDistanceSamplesRef.current = 0;
+    lastDistanceToTurnRef.current = 0;
     lastTurnAnnouncedIndexRef.current = -1;
     console.log('[Nav] Reset turn tracking for new route instructions');
   }, [routeData?.turnInstructions]);
@@ -1797,14 +1801,27 @@ export default function RunSession() {
             }
           }
           
-          // Also advance if we've traveled 15m since announcing at-turn (using cumulative distance)
+          // Also advance if we've traveled 25m since announcing at-turn (using cumulative distance)
           if (!shouldAdvance && distanceAtTurnReachRef.current > 0) {
             const distanceTraveledSinceReach = (currentDistanceKm - distanceAtTurnReachRef.current) * 1000;
-            if (distanceTraveledSinceReach > 15) {
+            if (distanceTraveledSinceReach > 25) {
               shouldAdvance = true;
               console.log(`[Nav] Traveled ${distanceTraveledSinceReach.toFixed(0)}m since reach`);
             }
           }
+          
+          // Track if distance is increasing (stuck turn detection)
+          if (lastDistanceToTurnRef.current > 0 && distanceToTurn > lastDistanceToTurnRef.current + 5) {
+            increasingDistanceSamplesRef.current++;
+            // Auto-advance if distance increased for 3+ samples or exceeded 120m
+            if (increasingDistanceSamplesRef.current >= 3 || distanceToTurn > 120) {
+              shouldAdvance = true;
+              console.log(`[Nav] Auto-advance: distance increasing for ${increasingDistanceSamplesRef.current} samples (${distanceToTurn.toFixed(0)}m)`);
+            }
+          } else {
+            increasingDistanceSamplesRef.current = 0;
+          }
+          lastDistanceToTurnRef.current = distanceToTurn;
           
           if (shouldAdvance) {
             console.log(`[Nav] Advancing past turn ${currentIdx}: ${turn.instruction}`);
@@ -1813,12 +1830,14 @@ export default function RunSession() {
             turnAtAnnouncedRef.current = false;
             distanceAtTurnReachRef.current = 0;
             closestDistanceToTurnRef.current = 0;
+            increasingDistanceSamplesRef.current = 0;
+            lastDistanceToTurnRef.current = 0;
             // Continue to process next turn in same tick (don't return)
           }
         }
         
-        // Mark when we first reach the turn location (within 25m) - for distance tracking
-        if (distanceToTurn <= 25 && distanceAtTurnReachRef.current === 0) {
+        // Mark when we first reach the turn location (within 45m) - for distance tracking
+        if (distanceToTurn <= 45 && distanceAtTurnReachRef.current === 0) {
           distanceAtTurnReachRef.current = currentDistanceKm;
           closestDistanceToTurnRef.current = distanceToTurn;
           console.log(`[Nav] Reached turn ${currentIdx} at ${currentDistanceKm.toFixed(3)}km, distance ${distanceToTurn.toFixed(0)}m`);
@@ -1830,15 +1849,17 @@ export default function RunSession() {
         }
         
         // Detect if runner has passed the turn (was close, now moving away)
-        if (distanceAtTurnReachRef.current > 0 && closestDistanceToTurnRef.current && closestDistanceToTurnRef.current < 20) {
-          // If we were within 20m and are now 15m+ further away, we've passed
-          if (distanceToTurn > closestDistanceToTurnRef.current + 15) {
+        if (distanceAtTurnReachRef.current > 0 && closestDistanceToTurnRef.current && closestDistanceToTurnRef.current < 45) {
+          // If we were within 45m and are now 40m+ further away, we've passed
+          if (distanceToTurn > closestDistanceToTurnRef.current + 40) {
             console.log(`[Nav] Passed turn ${currentIdx}: closest ${closestDistanceToTurnRef.current.toFixed(0)}m, now ${distanceToTurn.toFixed(0)}m`);
             currentStoredTurnIndexRef.current = currentIdx + 1;
             turnApproachAnnouncedRef.current = false;
             turnAtAnnouncedRef.current = false;
             distanceAtTurnReachRef.current = 0;
             closestDistanceToTurnRef.current = 0;
+            increasingDistanceSamplesRef.current = 0;
+            lastDistanceToTurnRef.current = 0;
           }
         }
         
@@ -1868,8 +1889,8 @@ export default function RunSession() {
         if (turn && currentIdx < storedInstructions.length) {
           const newDistanceToTurn = haversineDistance(currentPosition.lat, currentPosition.lng, turn.startLat, turn.startLng) * 1000;
           
-          // Announce when approaching the turn (within 50m)
-          if (newDistanceToTurn <= 50 && newDistanceToTurn > 10 && !turnApproachAnnouncedRef.current) {
+          // Announce when approaching the turn (within 90m, at least 20m before at-turn threshold)
+          if (newDistanceToTurn <= 90 && newDistanceToTurn > 35 && !turnApproachAnnouncedRef.current) {
             const distMeters = Math.round(newDistanceToTurn);
             const navInstruction = `In ${distMeters} meters, ${turn.instruction}`;
             
@@ -1879,8 +1900,8 @@ export default function RunSession() {
             setNextTurnInstruction(navInstruction);
             setLastDirectionTime(Date.now());
             setLastMessageTime(Date.now());
-          } else if (newDistanceToTurn <= 20 && !turnAtAnnouncedRef.current) {
-            // At the turn - give the instruction now (20m threshold for GPS accuracy)
+          } else if (newDistanceToTurn <= 35 && !turnAtAnnouncedRef.current) {
+            // At the turn - give the instruction now (35m threshold for GPS accuracy/drift)
             turnAtAnnouncedRef.current = true;
             speak(turn.instruction, { domain: 'nav' });
             setMessage(turn.instruction);
