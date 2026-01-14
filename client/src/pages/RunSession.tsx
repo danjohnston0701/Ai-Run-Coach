@@ -3326,6 +3326,8 @@ export default function RunSession() {
             routeId: metadata.routeId || undefined,
             distance: distance,
             duration: time,
+            runDate: date,
+            runTime: timeStr,
             avgPace: calculatePace(),
             cadence: cadence || undefined,
             elevation: routeData?.elevation?.gain || undefined,

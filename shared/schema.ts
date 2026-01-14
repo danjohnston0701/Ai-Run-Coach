@@ -107,6 +107,8 @@ export const runs = pgTable("runs", {
   name: text("name"),
   distance: real("distance").notNull(),
   duration: integer("duration").notNull(),
+  runDate: text("run_date"),
+  runTime: text("run_time"),
   avgPace: text("avg_pace"),
   avgHeartRate: integer("avg_heart_rate"),
   maxHeartRate: integer("max_heart_rate"),
