@@ -2364,6 +2364,42 @@ export default function RunSession() {
       return;
     }
     const metadata = sessionMetadataRef.current;
+    
+    // Downsample GPS track for localStorage (keep ~200 points max to save space)
+    const positions = positionsRef.current;
+    const maxBackupPoints = 200;
+    let gpsBackup: Array<{ lat: number; lng: number; timestamp?: number }> = [];
+    if (positions.length > 0) {
+      if (positions.length <= maxBackupPoints) {
+        gpsBackup = positions.map(p => ({ lat: p.lat, lng: p.lng, timestamp: p.timestamp }));
+      } else {
+        const step = Math.ceil(positions.length / maxBackupPoints);
+        for (let i = 0; i < positions.length; i += step) {
+          const p = positions[i];
+          gpsBackup.push({ lat: p.lat, lng: p.lng, timestamp: p.timestamp });
+        }
+        // Always include the last point
+        const lastP = positions[positions.length - 1];
+        if (gpsBackup[gpsBackup.length - 1]?.timestamp !== lastP.timestamp) {
+          gpsBackup.push({ lat: lastP.lat, lng: lastP.lng, timestamp: lastP.timestamp });
+        }
+      }
+    }
+    
+    // Build pace data from kmSplits
+    const paceData = kmSplits.map((cumulativeTime, idx) => {
+      const prevTime = idx > 0 ? kmSplits[idx - 1] : 0;
+      const kmTime = cumulativeTime - prevTime;
+      const paceMinutes = Math.floor(kmTime / 60);
+      const paceSeconds = Math.floor(kmTime % 60);
+      return {
+        km: idx + 1,
+        pace: `${paceMinutes}:${paceSeconds.toString().padStart(2, '0')}`,
+        paceSeconds: kmTime,
+        cumulativeTime: cumulativeTime
+      };
+    });
+    
     const session: ActiveRunSession = {
       id: sessionIdRef.current,
       startTimestamp: startTimestampRef.current,
@@ -2385,9 +2421,13 @@ export default function RunSession() {
       kmSplits,
       lastKmAnnounced,
       status: active ? 'active' : 'paused',
+      // NEW: Include GPS backup for recovery
+      gpsTrackBackup: gpsBackup,
+      weatherData: runWeather || undefined,
+      paceData: paceData.length > 0 ? paceData : undefined,
     };
     saveActiveRunSession(session);
-  }, [active, time, distance, cadence, routeData, audioEnabled, aiCoachEnabled, kmSplits, lastKmAnnounced]);
+  }, [active, time, distance, cadence, routeData, audioEnabled, aiCoachEnabled, kmSplits, lastKmAnnounced, runWeather]);
 
   const syncToDatabase = useCallback(async () => {
     if (runStoppedRef.current) return;
@@ -3415,6 +3455,8 @@ export default function RunSession() {
     });
     console.log('[Save] formattedKmSplits:', formattedKmSplits);
     
+    const gpsTrackData = downsampleGpsTrack(positionsRef.current, 1000);
+    
     const localRunData = {
       id: localRunId,
       date,
@@ -3427,7 +3469,7 @@ export default function RunSession() {
       lng: metadata.startLng,
       routeName: metadata.routeName,
       routeId: metadata.routeId,
-      gpsTrack: downsampleGpsTrack(positionsRef.current, 1000),
+      gpsTrack: gpsTrackData,
       avgCadence: cadence,
       kmSplits: formattedKmSplits,
       targetDistance: metadata.targetDistance,
@@ -3435,9 +3477,51 @@ export default function RunSession() {
       elevationLoss: routeData?.elevation?.loss || 0,
       weatherData: runWeather || undefined,
       aiCoachEnabled: aiCoachEnabled,
+      dbSynced: false, // Will be updated if DB save succeeds
+      pendingSync: true, // Marks this run needs to be synced
+      sessionKey: sessionIdRef.current, // Store for manual sync
+      detectedWeaknesses: detectedWeaknesses, // Store for manual sync
     };
     console.log('[Save] localRunData.weatherData:', localRunData.weatherData);
     console.log('[Save] GPS points recorded:', positionsRef.current.length, 'saved:', localRunData.gpsTrack.length);
+
+    // Helper function for retry with exponential backoff
+    const saveToDbWithRetry = async (dbRunData: any, maxRetries: number = 3): Promise<{ success: boolean; savedRun?: any; error?: string }> => {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          console.log(`[Save] Attempt ${attempt}/${maxRetries} to save run to database`);
+          const response = await fetch('/api/runs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(dbRunData)
+          });
+          
+          if (response.ok) {
+            const savedRun = await response.json();
+            console.log('[Save] Run saved to database successfully:', savedRun.id);
+            return { success: true, savedRun };
+          } else {
+            const errorText = await response.text();
+            console.error(`[Save] Attempt ${attempt} failed with status:`, response.status, 'Error:', errorText);
+            
+            // Don't retry on 4xx errors (client errors)
+            if (response.status >= 400 && response.status < 500) {
+              return { success: false, error: errorText };
+            }
+          }
+        } catch (err) {
+          console.error(`[Save] Attempt ${attempt} network error:`, err);
+        }
+        
+        // Wait before retry with exponential backoff (1s, 2s, 4s)
+        if (attempt < maxRetries) {
+          const waitMs = Math.pow(2, attempt - 1) * 1000;
+          console.log(`[Save] Waiting ${waitMs}ms before retry...`);
+          await new Promise(resolve => setTimeout(resolve, waitMs));
+        }
+      }
+      return { success: false, error: 'All retry attempts failed' };
+    };
 
     // Try to save to database if user is logged in
     const userProfileStr = localStorage.getItem("userProfile");
@@ -3458,7 +3542,7 @@ export default function RunSession() {
             difficulty: metadata.levelId,
             startLat: metadata.startLat,
             startLng: metadata.startLng,
-            gpsTrack: downsampleGpsTrack(positionsRef.current, 1000),
+            gpsTrack: gpsTrackData,
             paceData: formattedKmSplits,
             weatherData: runWeather || undefined,
             sessionKey: sessionIdRef.current,
@@ -3466,22 +3550,18 @@ export default function RunSession() {
           };
           
           console.log('[Save] Attempting to save run to database for userId:', userProfile.id);
-          const response = await fetch('/api/runs', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(dbRunData)
-          });
           
-          if (response.ok) {
-            const savedRun = await response.json();
-            console.log('[Save] Run saved to database successfully:', savedRun.id);
+          // Use retry mechanism
+          const result = await saveToDbWithRetry(dbRunData, 3);
+          
+          if (result.success && result.savedRun) {
             toast.success('Run saved to your account!');
             
             // Save detected weakness events if any
             if (detectedWeaknesses.length > 0) {
               try {
                 console.log('[Save] Saving', detectedWeaknesses.length, 'weakness events');
-                await fetch(`/api/runs/${savedRun.id}/weakness-events/bulk`, {
+                await fetch(`/api/runs/${result.savedRun.id}/weakness-events/bulk`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ events: detectedWeaknesses })
@@ -3494,13 +3574,13 @@ export default function RunSession() {
             
             // Link coaching logs to this run
             try {
-              console.log('[Save] Linking coaching logs to run:', savedRun.id, 'session:', sessionIdRef.current);
+              console.log('[Save] Linking coaching logs to run:', result.savedRun.id, 'session:', sessionIdRef.current);
               await fetch('/api/coaching-logs/link-to-run', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   sessionKey: sessionIdRef.current,
-                  runId: savedRun.id,
+                  runId: result.savedRun.id,
                   userId: userProfile.id
                 })
               });
@@ -3512,8 +3592,9 @@ export default function RunSession() {
             // Update localStorage with the DB record so RunInsights can find it
             const localDataWithDbId = {
               ...localRunData,
-              id: savedRun.id,
-              dbSynced: true
+              id: result.savedRun.id,
+              dbSynced: true,
+              pendingSync: false,
             };
             const runHistory = localStorage.getItem("runHistory");
             const runs = runHistory ? JSON.parse(runHistory) : [];
@@ -3521,20 +3602,21 @@ export default function RunSession() {
             localStorage.setItem("runHistory", JSON.stringify(runs));
             
             localStorage.removeItem("activeRoute");
-            return savedRun.id;
+            return result.savedRun.id;
           } else {
-            const errorText = await response.text();
-            console.error('[Save] Database save failed with status:', response.status, 'Error:', errorText);
-            toast.error('Failed to sync run to cloud - saved locally');
+            console.error('[Save] All database save attempts failed:', result.error);
+            // Show persistent warning for failed sync
+            toast.error('Run saved locally - will sync when connection improves', { duration: 8000 });
+            toast.info('Your run data is safe. Go to Run History to manually sync later.', { duration: 10000 });
           }
         }
       } catch (err) {
         console.error('[Save] Failed to save run to database, using localStorage:', err);
-        toast.error('Network error - run saved locally only');
+        toast.error('Network error - run saved locally. Sync from Run History later.', { duration: 8000 });
       }
     }
     
-    // Fallback: save to localStorage only
+    // Fallback: save to localStorage with pending sync flag
     const runHistory = localStorage.getItem("runHistory");
     const runs = runHistory ? JSON.parse(runHistory) : [];
     runs.push(localRunData);

@@ -19,6 +19,16 @@ export interface ActiveRunSession {
   kmSplits: number[];
   lastKmAnnounced: number;
   status: 'active' | 'paused' | 'completed';
+  // GPS backup - downsampled to save localStorage space
+  gpsTrackBackup?: Array<{ lat: number; lng: number; timestamp?: number }>;
+  // Weather data captured during run
+  weatherData?: any;
+  // Pace data for each km
+  paceData?: Array<{ km: number; pace: string; paceSeconds: number; cumulativeTime: number }>;
+  // Last successful database sync timestamp
+  lastDbSyncAt?: number;
+  // Number of failed sync attempts
+  failedSyncAttempts?: number;
 }
 
 const STORAGE_KEY = 'activeRunSession';

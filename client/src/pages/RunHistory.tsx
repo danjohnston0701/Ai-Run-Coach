@@ -5,9 +5,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
 import { 
-  ArrowLeft, Calendar, Route, ArrowRight, BarChart3, ChevronDown, ChevronUp
+  ArrowLeft, Calendar, Route, ArrowRight, BarChart3, ChevronDown, ChevronUp,
+  Cloud, CloudOff, RefreshCw, AlertCircle
 } from "lucide-react";
 import WeatherImpactAnalysis from "@/components/WeatherImpactAnalysis";
+import { toast } from "sonner";
 
 export interface RunData {
   id: string;
@@ -24,6 +26,17 @@ export interface RunData {
   maxHeartRate?: number;
   calories?: number;
   cadence?: number;
+  dbSynced?: boolean;
+  pendingSync?: boolean;
+  gpsTrack?: any[];
+  kmSplits?: any[];
+  weatherData?: any;
+  routeId?: string;
+  sessionKey?: string;
+  aiCoachEnabled?: boolean;
+  elevationGain?: number;
+  elevationLoss?: number;
+  detectedWeaknesses?: any[];
 }
 
 export default function RunHistory() {
@@ -32,6 +45,185 @@ export default function RunHistory() {
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [showWeatherAnalysis, setShowWeatherAnalysis] = useState(false);
+  const [syncingRunId, setSyncingRunId] = useState<string | null>(null);
+
+  const syncRunToCloud = async (run: RunData, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    if (!userId) {
+      toast.error("Please log in to sync runs");
+      return;
+    }
+    
+    setSyncingRunId(run.id);
+    const oldRunId = run.id;
+    
+    // Helper function for retry with exponential backoff
+    const saveWithRetry = async (dbRunData: any, maxRetries: number = 3): Promise<{ success: boolean; savedRun?: any; error?: string }> => {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          console.log(`[ManualSync] Attempt ${attempt}/${maxRetries}`);
+          const response = await fetch('/api/runs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(dbRunData)
+          });
+          
+          if (response.ok) {
+            const savedRun = await response.json();
+            return { success: true, savedRun };
+          } else {
+            const errorText = await response.text();
+            console.error(`[ManualSync] Attempt ${attempt} failed:`, errorText);
+            if (response.status >= 400 && response.status < 500) {
+              return { success: false, error: errorText };
+            }
+          }
+        } catch (err) {
+          console.error(`[ManualSync] Attempt ${attempt} network error:`, err);
+        }
+        
+        if (attempt < maxRetries) {
+          const waitMs = Math.pow(2, attempt - 1) * 1000;
+          await new Promise(resolve => setTimeout(resolve, waitMs));
+        }
+      }
+      return { success: false, error: 'All retry attempts failed' };
+    };
+    
+    try {
+      // Get the full local run data from localStorage for complete field access
+      const runHistoryStr = localStorage.getItem("runHistory");
+      const localRuns = runHistoryStr ? JSON.parse(runHistoryStr) : [];
+      const fullLocalRun = localRuns.find((r: any) => r.id === run.id) || run;
+      
+      // Build complete payload matching saveRunData - use fullLocalRun for original field names
+      const dbRunData = {
+        userId,
+        routeId: fullLocalRun.routeId || undefined,
+        distance: fullLocalRun.distance,
+        duration: fullLocalRun.totalTime,
+        runDate: fullLocalRun.date,
+        runTime: fullLocalRun.time,
+        avgPace: fullLocalRun.avgPace,
+        cadence: fullLocalRun.avgCadence || fullLocalRun.cadence || undefined, // Local stores as avgCadence
+        elevation: fullLocalRun.elevationGain || undefined,
+        difficulty: fullLocalRun.difficulty,
+        startLat: fullLocalRun.lat,
+        startLng: fullLocalRun.lng,
+        gpsTrack: fullLocalRun.gpsTrack || [],
+        paceData: fullLocalRun.kmSplits || [],
+        weatherData: fullLocalRun.weatherData || undefined,
+        sessionKey: fullLocalRun.sessionKey || undefined,
+        aiCoachEnabled: fullLocalRun.aiCoachEnabled ?? false,
+      };
+      
+      // Get weakness events from local run
+      const detectedWeaknesses = fullLocalRun.detectedWeaknesses || [];
+      const sessionKey = fullLocalRun.sessionKey;
+      
+      const result = await saveWithRetry(dbRunData, 3);
+      
+      if (result.success && result.savedRun) {
+        // Save detected weakness events if any
+        if (detectedWeaknesses.length > 0) {
+          try {
+            console.log('[ManualSync] Saving', detectedWeaknesses.length, 'weakness events');
+            await fetch(`/api/runs/${result.savedRun.id}/weakness-events/bulk`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ events: detectedWeaknesses })
+            });
+          } catch (err) {
+            console.error('[ManualSync] Failed to save weakness events:', err);
+          }
+        }
+        
+        // Link coaching logs to this run if sessionKey exists
+        if (sessionKey) {
+          try {
+            console.log('[ManualSync] Linking coaching logs to run:', result.savedRun.id);
+            await fetch('/api/coaching-logs/link-to-run', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                sessionKey: sessionKey,
+                runId: result.savedRun.id,
+                userId
+              })
+            });
+          } catch (err) {
+            console.error('[ManualSync] Failed to link coaching logs:', err);
+          }
+        }
+        
+        toast.success("Run synced to cloud!");
+        
+        // Update localStorage: remove old entry and add synced version
+        const runHistory = localStorage.getItem("runHistory");
+        if (runHistory) {
+          const localRuns = JSON.parse(runHistory);
+          const updatedRuns = localRuns.filter((r: any) => r.id !== oldRunId);
+          // Add the synced version with new ID
+          updatedRuns.push({
+            ...run,
+            id: result.savedRun.id,
+            dbSynced: true,
+            pendingSync: false,
+          });
+          localStorage.setItem("runHistory", JSON.stringify(updatedRuns));
+        }
+        
+        // Reload runs from both DB and localStorage to ensure consistency
+        setLoading(true);
+        const response = await fetch(`/api/users/${userId}/runs`);
+        if (response.ok) {
+          const dbRuns = await response.json();
+          const formattedDbRuns = dbRuns.map((dbRun: any) => ({
+            id: dbRun.id,
+            name: dbRun.name,
+            date: dbRun.completedAt ? new Date(dbRun.completedAt).toLocaleDateString('en-GB') : '',
+            time: dbRun.completedAt ? new Date(dbRun.completedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '',
+            distance: dbRun.distance,
+            totalTime: dbRun.duration,
+            avgPace: dbRun.avgPace || '',
+            difficulty: dbRun.difficulty || 'beginner',
+            lat: dbRun.startLat || 0,
+            lng: dbRun.startLng || 0,
+            dbSynced: true,
+            gpsTrack: dbRun.gpsTrack,
+            kmSplits: dbRun.paceData,
+            weatherData: dbRun.weatherData,
+            routeId: dbRun.routeId,
+          }));
+          
+          // Get remaining unsynced local runs
+          const localRunsStr = localStorage.getItem("runHistory");
+          const localRuns = localRunsStr ? JSON.parse(localRunsStr) : [];
+          const dbRunIds = new Set(formattedDbRuns.map((r: any) => r.id));
+          const unsyncedLocalRuns = localRuns.filter((r: any) => 
+            !dbRunIds.has(r.id) && !r.dbSynced
+          );
+          
+          const allRuns = [...formattedDbRuns, ...unsyncedLocalRuns].sort((a, b) => {
+            const dateA = a.date ? new Date(a.date.split('/').reverse().join('-')).getTime() : 0;
+            const dateB = b.date ? new Date(b.date.split('/').reverse().join('-')).getTime() : 0;
+            return dateB - dateA;
+          });
+          setRuns(allRuns);
+        }
+        setLoading(false);
+      } else {
+        console.error("Sync failed after retries:", result.error);
+        toast.error("Sync failed - try again later");
+      }
+    } catch (err) {
+      console.error("Sync error:", err);
+      toast.error("Network error - please try again");
+    } finally {
+      setSyncingRunId(null);
+    }
+  };
 
   useEffect(() => {
     const loadRuns = async () => {
@@ -264,9 +456,34 @@ export default function RunHistory() {
                             <span className="text-sm text-muted-foreground font-display">{run.time}</span>
                           )}
                         </div>
-                        <Badge className={`${getDifficultyBadgeColor(run.difficulty)} border rounded-full px-3 py-0 h-5 text-[10px] uppercase font-bold tracking-tighter`}>
-                          {run.difficulty}
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge className={`${getDifficultyBadgeColor(run.difficulty)} border rounded-full px-3 py-0 h-5 text-[10px] uppercase font-bold tracking-tighter`}>
+                            {run.difficulty}
+                          </Badge>
+                          {run.dbSynced === true ? (
+                            <Badge className="bg-green-500/10 border-green-500/30 text-green-400 border rounded-full px-2 py-0 h-5 text-[10px] uppercase font-bold tracking-tighter flex items-center gap-1">
+                              <Cloud className="w-3 h-3" />
+                              Synced
+                            </Badge>
+                          ) : run.pendingSync || (run.id && run.id.startsWith('run_')) ? (
+                            <Badge 
+                              className="bg-orange-500/10 border-orange-500/30 text-orange-400 border rounded-full px-2 py-0 h-5 text-[10px] uppercase font-bold tracking-tighter flex items-center gap-1 cursor-pointer hover:bg-orange-500/20"
+                              onClick={(e) => syncRunToCloud(run, e)}
+                            >
+                              {syncingRunId === run.id ? (
+                                <>
+                                  <RefreshCw className="w-3 h-3 animate-spin" />
+                                  Syncing...
+                                </>
+                              ) : (
+                                <>
+                                  <CloudOff className="w-3 h-3" />
+                                  Local Only - Tap to Sync
+                                </>
+                              )}
+                            </Badge>
+                          ) : null}
+                        </div>
                       </div>
                       <ArrowRight className="w-5 h-5 text-muted-foreground" />
                     </div>
