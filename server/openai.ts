@@ -1504,6 +1504,14 @@ export interface KmSplit {
   cumulativeTime: number;
 }
 
+export interface ReviewedStruggle {
+  distanceKm: string;
+  paceDropPercent: number;
+  durationSeconds: number;
+  userComment: string | null;
+  causeTag: string | null;
+}
+
 export interface RunAnalysisRequest {
   run: {
     id: string;
@@ -1528,6 +1536,7 @@ export interface RunAnalysisRequest {
       precipitationProbability?: number;
     };
     telemetry?: TelemetrySummary;
+    reviewedStruggles?: ReviewedStruggle[];
   };
   user: {
     age?: number;
@@ -1737,6 +1746,20 @@ WEATHER IMPACT ANALYSIS GUIDELINES:
 - Rain/wet conditions: May impact footing and comfort
 IMPORTANT: You MUST include a "weatherImpact" field in your response analyzing how these conditions specifically affected this run's performance.` : ''}
 ${telemetryInfo}
+
+${run.reviewedStruggles && run.reviewedStruggles.length > 0 ? `USER-REVIEWED STRUGGLE POINTS (pace drops that occurred during the run):
+${run.reviewedStruggles.map((s, i) => {
+  let desc = `${i + 1}. At ${s.distanceKm} km: ${s.paceDropPercent}% pace drop (${s.durationSeconds}s duration)`;
+  if (s.userComment) desc += ` - Runner's comment: "${s.userComment}"`;
+  if (s.causeTag) desc += ` - Cause: ${s.causeTag.replace(/_/g, ' ')}`;
+  return desc;
+}).join('\n')}
+
+STRUGGLE ANALYSIS GUIDELINES:
+- Consider the user's comments when analyzing pace drops - they may explain external factors (traffic lights, water breaks, obstacles)
+- Factor explained struggles appropriately - a traffic light stop is different from hitting a wall due to fatigue
+- Distinguish between environmental interruptions vs. genuine running challenges
+- Provide context-aware coaching based on what actually happened` : ''}
 
 ${run.avgHeartRate || (run.telemetry?.dataPoints?.some(p => p.heartRate)) ? `WARM-UP ANALYSIS GUIDELINES (heart rate data is available - include warmUpAnalysis):
 Analyze the runner's starting heart rate (first 1-2 minutes of run) to assess warm-up quality:

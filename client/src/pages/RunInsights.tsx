@@ -170,11 +170,18 @@ export default function RunInsights() {
     causeTag: string | null;
     causeNote: string | null;
     coachResponseGiven: string | null;
+    userComment: string | null;
+    isIrrelevant: boolean;
+    reviewedAt: string | null;
   }>>([]);
   const [isLoadingWeaknesses, setIsLoadingWeaknesses] = useState(false);
   const [editingWeaknessId, setEditingWeaknessId] = useState<string | null>(null);
   const [editingCauseTag, setEditingCauseTag] = useState<string>("");
   const [editingCauseNote, setEditingCauseNote] = useState<string>("");
+  const [editingUserComment, setEditingUserComment] = useState<string>("");
+  const [pendingReviewSaves, setPendingReviewSaves] = useState<Set<string>>(new Set());
+  // Track local comment edits per event (not yet saved to server) - used for toggleIrrelevant
+  const [localCommentEdits, setLocalCommentEdits] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const loadRun = async () => {
@@ -633,6 +640,63 @@ export default function RunInsights() {
     setEditingWeaknessId(event.id);
     setEditingCauseTag(event.causeTag || "");
     setEditingCauseNote(event.causeNote || "");
+    setEditingUserComment(event.userComment || "");
+  };
+
+  // Save user review (comment and isIrrelevant flag)
+  const saveWeaknessReview = async (eventId: string, userComment: string | null, isIrrelevant: boolean) => {
+    try {
+      setPendingReviewSaves(prev => new Set(prev).add(eventId));
+      
+      const response = await fetch(`/api/weakness-events/${eventId}/review`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userComment, isIrrelevant }),
+      });
+      
+      if (!response.ok) {
+        throw new Error("Failed to save review");
+      }
+      
+      const updatedEvent = await response.json();
+      
+      // Update local state
+      setWeaknessEvents(prev => prev.map(e => 
+        e.id === eventId 
+          ? { ...e, userComment, isIrrelevant, reviewedAt: updatedEvent.reviewedAt }
+          : e
+      ));
+      
+      toast.success(isIrrelevant ? "Marked as not relevant" : "Comment saved");
+    } catch (error) {
+      console.error("Failed to save weakness review:", error);
+      toast.error("Failed to save review");
+    } finally {
+      setPendingReviewSaves(prev => {
+        const next = new Set(prev);
+        next.delete(eventId);
+        return next;
+      });
+    }
+  };
+
+  // Toggle irrelevant status - use local edits if they exist (persists after blur)
+  const toggleIrrelevant = (event: typeof weaknessEvents[0]) => {
+    // Check for local edits first (persists even after blur), then editing state, then saved value
+    const currentComment = localCommentEdits[event.id] !== undefined 
+      ? localCommentEdits[event.id] 
+      : (editingWeaknessId === event.id ? editingUserComment : event.userComment);
+    saveWeaknessReview(event.id, currentComment || null, !event.isIrrelevant);
+    // Clear local edits for this event since we're saving
+    setLocalCommentEdits(prev => {
+      const next = { ...prev };
+      delete next[event.id];
+      return next;
+    });
+    // Clear editing state if applicable
+    if (editingWeaknessId === event.id) {
+      setEditingWeaknessId(null);
+    }
   };
 
   const generateAiAnalysis = async () => {
@@ -650,10 +714,24 @@ export default function RunInsights() {
         return;
       }
       
+      // Prepare struggle data for AI context - filter out irrelevant ones
+      const reviewedStruggles = weaknessEvents
+        .filter(e => !e.isIrrelevant)
+        .map(e => ({
+          distanceKm: `${e.startDistanceKm.toFixed(2)}-${e.endDistanceKm.toFixed(2)}`,
+          paceDropPercent: Math.round(e.dropPercent),
+          durationSeconds: e.durationSeconds,
+          userComment: e.userComment,
+          causeTag: e.causeTag,
+        }));
+      
       const response = await fetch(`/api/runs/${params.id}/analysis`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId }),
+        body: JSON.stringify({ 
+          userId,
+          reviewedStruggles: reviewedStruggles.length > 0 ? reviewedStruggles : undefined
+        }),
       });
       
       if (!response.ok) {
@@ -1383,6 +1461,159 @@ export default function RunInsights() {
             </CardContent>
           </Card>
         </section>
+
+        {/* Struggle Awareness Points Section - Above AI Analysis */}
+        {!isFriendView && (
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-orange-500/10 rounded-lg">
+                <AlertTriangle className="w-5 h-5 text-orange-400" />
+              </div>
+              <div>
+                <h2 className="text-lg font-display font-bold uppercase tracking-wide">Struggle Awareness Points</h2>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Review pace changes before generating AI analysis</p>
+              </div>
+            </div>
+          </div>
+
+          {isLoadingWeaknesses ? (
+            <Card className="bg-card/30 border-white/5 p-4">
+              <div className="animate-pulse space-y-3">
+                <div className="h-4 bg-white/10 rounded w-2/3" />
+                <div className="h-4 bg-white/10 rounded w-1/2" />
+              </div>
+            </Card>
+          ) : weaknessEvents.length === 0 ? (
+            <Card className="bg-gradient-to-br from-green-900/20 to-emerald-900/20 border-green-500/20 backdrop-blur-sm">
+              <CardContent className="p-6 text-center space-y-3">
+                <div className="p-3 bg-green-500/10 rounded-full w-fit mx-auto">
+                  <CheckCircle className="w-8 h-8 text-green-400" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-display font-bold text-green-400 mb-2">Great Work!</h3>
+                  <p className="text-sm text-muted-foreground">
+                    We didn't detect any points in your run where your pace suddenly changed. Keep up the consistent effort!
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Review these pace changes and add comments if they were caused by external factors (e.g., traffic lights, water break). 
+                Mark as "Not Relevant" to exclude from AI analysis.
+              </p>
+              {weaknessEvents.map((event, idx) => {
+                const isSaving = pendingReviewSaves.has(event.id);
+                const paceBeforeMins = Math.floor(event.avgPaceBefore / 60);
+                const paceBeforeSecs = Math.floor(event.avgPaceBefore % 60);
+                const paceDuringMins = Math.floor(event.avgPaceDuring / 60);
+                const paceDuringSecs = Math.floor(event.avgPaceDuring % 60);
+                
+                return (
+                  <Card 
+                    key={event.id} 
+                    className={`bg-card/30 border-white/5 p-4 ${event.isIrrelevant ? 'opacity-50' : ''}`}
+                    data-testid={`struggle-point-${idx}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 space-y-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant="outline" className="text-orange-400 border-orange-400/30 text-xs">
+                            {event.startDistanceKm.toFixed(2)} - {event.endDistanceKm.toFixed(2)} km
+                          </Badge>
+                          <Badge variant="outline" className="text-red-400 border-red-400/30 text-xs">
+                            -{Math.round(event.dropPercent)}% pace drop
+                          </Badge>
+                          {event.isIrrelevant && (
+                            <Badge variant="outline" className="text-gray-400 border-gray-400/30 text-xs">
+                              Not Relevant
+                            </Badge>
+                          )}
+                          {event.reviewedAt && !event.isIrrelevant && (
+                            <Badge variant="outline" className="text-green-400 border-green-400/30 text-xs">
+                              <Check className="w-3 h-3 mr-1" />
+                              Reviewed
+                            </Badge>
+                          )}
+                        </div>
+                        
+                        <div className="text-xs text-muted-foreground">
+                          Pace: {paceBeforeMins}:{paceBeforeSecs.toString().padStart(2, '0')} → {paceDuringMins}:{paceDuringSecs.toString().padStart(2, '0')}/km 
+                          <span className="mx-1">•</span>
+                          Duration: {event.durationSeconds}s
+                        </div>
+                        
+                        {event.coachResponseGiven && (
+                          <p className="text-xs text-white/70 italic bg-white/5 p-2 rounded">
+                            "{event.coachResponseGiven}"
+                          </p>
+                        )}
+                        
+                        <div className="pt-2">
+                          <label className="text-xs text-muted-foreground block mb-1">Your comment (optional):</label>
+                          <div className="flex gap-2">
+                            <Input
+                              placeholder="e.g., Stopped at traffic light, water break..."
+                              value={editingWeaknessId === event.id ? editingUserComment : (localCommentEdits[event.id] ?? event.userComment ?? "")}
+                              onChange={(e) => {
+                                const newValue = e.target.value;
+                                // Track local edits so toggleIrrelevant can access them even after blur
+                                setLocalCommentEdits(prev => ({ ...prev, [event.id]: newValue }));
+                                if (editingWeaknessId !== event.id) {
+                                  setEditingWeaknessId(event.id);
+                                  setEditingUserComment(newValue);
+                                } else {
+                                  setEditingUserComment(newValue);
+                                }
+                              }}
+                              onBlur={() => {
+                                if (editingWeaknessId === event.id && editingUserComment !== (event.userComment || "")) {
+                                  saveWeaknessReview(event.id, editingUserComment || null, event.isIrrelevant);
+                                  // Clear local edits after successful save on blur
+                                  setLocalCommentEdits(prev => {
+                                    const next = { ...prev };
+                                    delete next[event.id];
+                                    return next;
+                                  });
+                                }
+                                setEditingWeaknessId(null);
+                              }}
+                              className="text-xs h-8 bg-white/5 border-white/10"
+                              data-testid={`input-struggle-comment-${idx}`}
+                              disabled={isSaving}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex flex-col gap-2">
+                        <Button
+                          variant={event.isIrrelevant ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => toggleIrrelevant(event)}
+                          disabled={isSaving}
+                          className={`text-xs ${event.isIrrelevant ? 'bg-gray-600' : ''}`}
+                          data-testid={`button-toggle-irrelevant-${idx}`}
+                        >
+                          {isSaving ? (
+                            <span className="animate-spin">...</span>
+                          ) : event.isIrrelevant ? (
+                            "Mark Relevant"
+                          ) : (
+                            "Not Relevant"
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </section>
+        )}
 
         {/* AI Run Analysis Section - Hidden for friend views */}
         {!isFriendView && (

@@ -598,8 +598,8 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Not authorized to analyze this run" });
       }
       
-      // Check for forceRegenerate flag (to allow regeneration if needed)
-      const { forceRegenerate } = req.body;
+      // Check for forceRegenerate flag and reviewedStruggles
+      const { forceRegenerate, reviewedStruggles } = req.body;
       
       if (!forceRegenerate) {
         // Check if we already have AI analysis stored in run_analyses table
@@ -710,7 +710,8 @@ export async function registerRoutes(
           elevationGain,
           elevationLoss,
           weatherData: run.weatherData as any || undefined,
-          telemetry: telemetrySummary || undefined
+          telemetry: telemetrySummary || undefined,
+          reviewedStruggles: reviewedStruggles || undefined
         },
         user: {
           age: userAge,
