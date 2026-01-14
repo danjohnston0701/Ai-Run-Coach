@@ -1752,11 +1752,44 @@ export default function RunSession() {
         
         if (!shouldCheckRecalibration) return;
         
+        // === SKIP LIMITS ===
+        const MAX_WAYPOINTS_TO_SKIP = 5; // Never skip more than 5 waypoints at once
+        const totalInstructions = storedInstructions.length;
+        const targetDistNum = parseFloat(sessionMetadataRef.current.targetDistance || "0");
+        
+        // Protect final waypoints - don't allow jumping to last 3 instructions
+        // until we've covered at least 60% of expected distance
+        const progressPercent = targetDistNum > 0 ? (currentDistanceKm / targetDistNum) * 100 : 0;
+        const protectedFinalCount = progressPercent < 60 ? 3 : 1;
+        const maxAllowedIdx = totalInstructions - protectedFinalCount;
+        
+        // Calculate runner's direction of travel using recent GPS points
+        const positions = positionsRef.current;
+        let runnerBearing = null;
+        if (positions.length >= 3) {
+          const recentPos = positions.slice(-5); // Last 5 positions
+          if (recentPos.length >= 2) {
+            const startPos = recentPos[0];
+            const endPos = recentPos[recentPos.length - 1];
+            // Calculate bearing from recent movement
+            const dLon = (endPos.lng - startPos.lng) * Math.PI / 180;
+            const lat1 = startPos.lat * Math.PI / 180;
+            const lat2 = endPos.lat * Math.PI / 180;
+            const y = Math.sin(dLon) * Math.cos(lat2);
+            const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+            runnerBearing = Math.atan2(y, x) * 180 / Math.PI;
+            if (runnerBearing < 0) runnerBearing += 360;
+          }
+        }
+        
         // Scan forward to find if any later turn is closer than current
         let bestIdx = currentIdx;
         let bestDistance = distanceToCurrentTurn;
         
-        for (let i = currentIdx + 1; i < storedInstructions.length; i++) {
+        // Limit how far ahead we scan
+        const maxScanIdx = Math.min(currentIdx + MAX_WAYPOINTS_TO_SKIP, maxAllowedIdx);
+        
+        for (let i = currentIdx + 1; i <= maxScanIdx && i < storedInstructions.length; i++) {
           const candidate = storedInstructions[i];
           const maneuver = (candidate.maneuver || '').toLowerCase();
           const instruction = (candidate.instruction || '').toLowerCase();
@@ -1783,6 +1816,29 @@ export default function RunSession() {
             candidate.startLat, candidate.startLng
           ) * 1000;
           
+          // === DIRECTION CHECK ===
+          // Runner must be traveling TOWARD the candidate waypoint to skip to it
+          if (runnerBearing !== null && distanceToCandidate > 30) {
+            // Calculate bearing from runner to candidate waypoint
+            const dLon = (candidate.startLng - currentPosition.lng) * Math.PI / 180;
+            const lat1 = currentPosition.lat * Math.PI / 180;
+            const lat2 = candidate.startLat * Math.PI / 180;
+            const y = Math.sin(dLon) * Math.cos(lat2);
+            const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+            let waypointBearing = Math.atan2(y, x) * 180 / Math.PI;
+            if (waypointBearing < 0) waypointBearing += 360;
+            
+            // Calculate bearing difference
+            let bearingDiff = Math.abs(runnerBearing - waypointBearing);
+            if (bearingDiff > 180) bearingDiff = 360 - bearingDiff;
+            
+            // If running more than 90 degrees away from waypoint, don't skip to it
+            if (bearingDiff > 90) {
+              console.log(`[Nav Recal] Skip idx ${i}: runner heading ${runnerBearing.toFixed(0)}°, waypoint at ${waypointBearing.toFixed(0)}° (diff: ${bearingDiff.toFixed(0)}°)`);
+              continue;
+            }
+          }
+          
           // This turn is closer AND we're significantly closer to it than current
           // Use a 25m hysteresis to prevent premature skipping
           if (distanceToCandidate < bestDistance - 25 && distanceToCandidate < 150) {
@@ -1794,7 +1850,8 @@ export default function RunSession() {
         
         // If we found a better turn, jump to it
         if (bestIdx > currentIdx) {
-          console.log(`[Nav Recal] RECALIBRATING: Jumping from idx ${currentIdx} to ${bestIdx} (${storedInstructions[bestIdx].instruction})`);
+          const skippedCount = bestIdx - currentIdx;
+          console.log(`[Nav Recal] RECALIBRATING: Jumping from idx ${currentIdx} to ${bestIdx} (skipping ${skippedCount}, max allowed: ${MAX_WAYPOINTS_TO_SKIP}) - ${storedInstructions[bestIdx].instruction}`);
           currentStoredTurnIndexRef.current = bestIdx;
           turnApproachAnnouncedRef.current = false;
           turnAtAnnouncedRef.current = false;
@@ -1997,22 +2054,89 @@ export default function RunSession() {
         if (turn && currentIdx < storedInstructions.length) {
           const newDistanceToTurn = haversineDistance(currentPosition.lat, currentPosition.lng, turn.startLat, turn.startLng) * 1000;
           
+          // === GROUP NEARBY INSTRUCTIONS ===
+          // Check for turns within 150m of the current turn and combine into single announcement
+          const GROUP_DISTANCE_THRESHOLD = 150; // meters
+          const groupedTurns: typeof storedInstructions = [turn];
+          let lastTurnInGroup = turn;
+          
+          // Look ahead for closely spaced turns
+          for (let groupIdx = currentIdx + 1; groupIdx < storedInstructions.length; groupIdx++) {
+            const candidate = storedInstructions[groupIdx];
+            const maneuver = (candidate.maneuver || '').toLowerCase();
+            const instruction = (candidate.instruction || '').toLowerCase();
+            
+            // Check if meaningful turn
+            const isTurn = maneuver.includes('turn') || 
+                          maneuver.includes('left') || 
+                          maneuver.includes('right') ||
+                          instruction.includes('turn left') || 
+                          instruction.includes('turn right');
+            const isSignificant = maneuver.includes('roundabout') ||
+                                 maneuver.includes('merge') ||
+                                 instruction.includes('roundabout');
+            
+            if (!isTurn && !isSignificant) continue;
+            
+            // Check distance from last turn in group
+            const distFromLastTurn = haversineDistance(
+              lastTurnInGroup.startLat, lastTurnInGroup.startLng,
+              candidate.startLat, candidate.startLng
+            ) * 1000;
+            
+            if (distFromLastTurn <= GROUP_DISTANCE_THRESHOLD) {
+              groupedTurns.push(candidate);
+              lastTurnInGroup = candidate;
+              console.log(`[Nav Group] Adding turn at idx ${groupIdx} (${distFromLastTurn.toFixed(0)}m from previous): ${candidate.instruction}`);
+            } else {
+              break; // Gap too large, stop grouping
+            }
+            
+            // Limit group size
+            if (groupedTurns.length >= 4) break;
+          }
+          
+          // Build combined instruction if we have multiple turns
+          // NOTE: Grouping only affects the ANNOUNCEMENT text, not pointer advancement
+          // The pointer still advances through each turn normally using distance-based logic
+          let combinedInstruction = turn.instruction;
+          
+          if (groupedTurns.length > 1) {
+            // Build combined announcement: "Turn right, then in 80m turn left"
+            const parts = groupedTurns.map((t, i) => {
+              if (i === 0) return t.instruction;
+              
+              // Calculate distance from previous turn
+              const prevTurn = groupedTurns[i - 1];
+              const dist = haversineDistance(
+                prevTurn.startLat, prevTurn.startLng,
+                t.startLat, t.startLng
+              ) * 1000;
+              
+              const distText = dist < 50 ? 'immediately' : `in ${Math.round(dist)} meters`;
+              return `then ${distText} ${t.instruction.toLowerCase().replace(/^(turn|bear) /, '')}`;
+            });
+            
+            combinedInstruction = parts.join(', ');
+            console.log(`[Nav Group] Combined ${groupedTurns.length} turns: "${combinedInstruction}"`);
+          }
+          
           // Announce when approaching the turn (within 90m, at least 20m before at-turn threshold)
           if (newDistanceToTurn <= 90 && newDistanceToTurn > 35 && !turnApproachAnnouncedRef.current) {
             const distMeters = Math.round(newDistanceToTurn);
-            const navInstruction = `In ${distMeters} meters, ${turn.instruction}`;
+            const navInstruction = `In ${distMeters} meters, ${combinedInstruction}`;
             
             turnApproachAnnouncedRef.current = true;
             speak(navInstruction, { domain: 'nav' });
-            setMessage(turn.instruction);
+            setMessage(combinedInstruction);
             setNextTurnInstruction(navInstruction);
             setLastDirectionTime(Date.now());
             setLastMessageTime(Date.now());
           } else if (newDistanceToTurn <= 35 && !turnAtAnnouncedRef.current) {
             // At the turn - give the instruction now (35m threshold for GPS accuracy/drift)
             turnAtAnnouncedRef.current = true;
-            speak(turn.instruction, { domain: 'nav' });
-            setMessage(turn.instruction);
+            speak(combinedInstruction, { domain: 'nav' });
+            setMessage(combinedInstruction);
             setNextTurnInstruction(null);
             setLastDirectionTime(now);
             setLastMessageTime(now);
