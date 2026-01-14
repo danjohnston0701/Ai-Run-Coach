@@ -1819,4 +1819,200 @@ Provide your elite coaching analysis. Pay special attention to pacing patterns, 
   }
 }
 
+// Dynamic Pace Coaching - generates personalized, session-specific AI coaching
+export interface DynamicPaceCoachingRequest {
+  currentPaceSecondsPerKm: number;
+  targetPaceSecondsPerKm?: number;
+  distanceCovered: number;
+  totalDistance?: number;
+  elapsedTimeSeconds: number;
+  
+  // Route terrain data
+  elevationProfile?: Array<{ distance: number; elevation: number }>;
+  routeDifficulty?: string;
+  totalElevationGain?: number;
+  
+  // User profile
+  userName?: string;
+  userAge?: number;
+  userFitnessLevel?: string;
+  
+  // Historical data
+  historicAveragePace?: number;
+  recentRunsCount?: number;
+  bestPaceOnSimilarTerrain?: number;
+  
+  // Coach settings
+  coachTone?: CoachTone;
+  coachName?: string;
+}
+
+export interface DynamicPaceCoachingResponse {
+  primaryAdvice: string;
+  pacingRationale: string;
+  terrainInsight?: string;
+  motivation: string;
+  sustainabilityAssessment: 'sustainable' | 'caution' | 'unsustainable' | 'unknown';
+}
+
+export async function generateDynamicPaceCoaching(request: DynamicPaceCoachingRequest): Promise<DynamicPaceCoachingResponse> {
+  const currentPaceMins = Math.floor(request.currentPaceSecondsPerKm / 60);
+  const currentPaceSecs = Math.floor(request.currentPaceSecondsPerKm % 60);
+  const currentPaceStr = `${currentPaceMins}:${currentPaceSecs.toString().padStart(2, '0')}`;
+  
+  let targetPaceStr = 'not set';
+  let paceDifferenceInfo = '';
+  if (request.targetPaceSecondsPerKm) {
+    const targetMins = Math.floor(request.targetPaceSecondsPerKm / 60);
+    const targetSecs = Math.floor(request.targetPaceSecondsPerKm % 60);
+    targetPaceStr = `${targetMins}:${targetSecs.toString().padStart(2, '0')}`;
+    const diff = request.currentPaceSecondsPerKm - request.targetPaceSecondsPerKm;
+    const diffAbs = Math.abs(Math.round(diff));
+    if (diff < -5) {
+      paceDifferenceInfo = `Runner is ${diffAbs} seconds FASTER than target pace`;
+    } else if (diff > 5) {
+      paceDifferenceInfo = `Runner is ${diffAbs} seconds SLOWER than target pace`;
+    } else {
+      paceDifferenceInfo = `Runner is ON TARGET pace`;
+    }
+  }
+  
+  // Analyze elevation profile for upcoming terrain
+  let terrainAnalysis = '';
+  let upcomingHills = [];
+  let remainingElevationGain = 0;
+  
+  if (request.elevationProfile && request.elevationProfile.length > 0) {
+    const profile = request.elevationProfile;
+    const currentDistanceM = request.distanceCovered * 1000;
+    
+    // Find current position in elevation profile
+    let currentIdx = 0;
+    for (let i = 0; i < profile.length; i++) {
+      if (profile[i].distance >= currentDistanceM) {
+        currentIdx = i;
+        break;
+      }
+    }
+    
+    // Analyze remaining elevation
+    const remainingProfile = profile.slice(currentIdx);
+    for (let i = 1; i < remainingProfile.length; i++) {
+      const elevDiff = remainingProfile[i].elevation - remainingProfile[i-1].elevation;
+      if (elevDiff > 0) remainingElevationGain += elevDiff;
+      
+      // Detect significant hills (>5% grade)
+      const distDiff = remainingProfile[i].distance - remainingProfile[i-1].distance;
+      if (distDiff > 0) {
+        const grade = (elevDiff / distDiff) * 100;
+        if (grade > 5 && elevDiff > 5) {
+          upcomingHills.push({
+            distanceAhead: (remainingProfile[i-1].distance - currentDistanceM) / 1000,
+            grade: grade.toFixed(1),
+            gain: Math.round(elevDiff)
+          });
+        }
+      }
+    }
+    
+    terrainAnalysis = `TERRAIN ANALYSIS:
+- Total remaining elevation gain: ${Math.round(remainingElevationGain)}m
+- Route difficulty: ${request.routeDifficulty || 'moderate'}
+- Upcoming significant hills: ${upcomingHills.length > 0 ? upcomingHills.slice(0, 3).map(h => `${h.distanceAhead.toFixed(1)}km ahead (${h.grade}% grade, +${h.gain}m)`).join('; ') : 'None detected'}
+${upcomingHills.length > 0 ? '- This is a HILLY route - pacing strategy is critical!' : '- Route appears relatively flat from here'}`;
+  } else if (request.routeDifficulty) {
+    terrainAnalysis = `Route difficulty: ${request.routeDifficulty}`;
+  }
+  
+  // Build historical context
+  let historicalContext = '';
+  if (request.historicAveragePace) {
+    const histPaceMins = Math.floor(request.historicAveragePace / 60);
+    const histPaceSecs = Math.floor(request.historicAveragePace % 60);
+    historicalContext = `HISTORICAL DATA:
+- Runner's average pace: ${histPaceMins}:${histPaceSecs.toString().padStart(2, '0')}/km (from ${request.recentRunsCount || 'several'} previous runs)
+${request.bestPaceOnSimilarTerrain ? `- Best pace on similar terrain: ${Math.floor(request.bestPaceOnSimilarTerrain/60)}:${Math.floor(request.bestPaceOnSimilarTerrain%60).toString().padStart(2, '0')}/km` : ''}`;
+  }
+  
+  const toneInstructions: Record<string, string> = {
+    energetic: "Be high-energy and enthusiastic!",
+    motivational: "Be inspiring and supportive.",
+    instructive: "Be clear and educational with technique tips.",
+    factual: "Be straightforward and data-focused.",
+    abrupt: "Be brief and direct."
+  };
+  
+  const systemPrompt = `You are ${request.coachName || 'an expert AI running coach'} providing a personalized, dynamic pace assessment at the 0.5km mark of a run.
+
+${toneInstructions[request.coachTone || 'motivational']}
+
+Your job is to analyze ALL available data and provide UNIQUE, SESSION-SPECIFIC coaching advice. Do NOT use generic templates - every response should be tailored to this exact situation.
+
+CRITICAL: You must assess whether the current pace is SUSTAINABLE given:
+1. The upcoming terrain (hills, elevation changes)
+2. The runner's fitness level and history
+3. The total distance remaining
+4. Energy conservation needs for the full run
+
+If the runner is faster than target but has big hills ahead, warn them to conserve energy.
+If the route is flat and the runner has capacity, encourage maintaining the strong pace as a buffer.
+
+Return your response as JSON with these fields:
+- primaryAdvice: The main coaching message (2-3 sentences, specific to THIS run)
+- pacingRationale: Why you're giving this advice based on the data (1-2 sentences)  
+- terrainInsight: Specific terrain-based advice if elevation data is available (1 sentence, or null)
+- motivation: A brief personalized encouragement (1 sentence)
+- sustainabilityAssessment: One of "sustainable", "caution", "unsustainable", or "unknown"`;
+
+  const userPrompt = `CURRENT RUN STATUS (0.5km checkpoint):
+- Distance covered: ${request.distanceCovered.toFixed(2)}km
+- Current pace: ${currentPaceStr}/km
+- Target pace: ${targetPaceStr}/km
+${paceDifferenceInfo ? `- ${paceDifferenceInfo}` : ''}
+- Elapsed time: ${Math.floor(request.elapsedTimeSeconds / 60)}:${Math.floor(request.elapsedTimeSeconds % 60).toString().padStart(2, '0')}
+- Total planned distance: ${request.totalDistance ? request.totalDistance.toFixed(1) + 'km' : 'not specified'}
+
+RUNNER PROFILE:
+- Name: ${request.userName || 'Runner'}
+- Age: ${request.userAge || 'unknown'}
+- Fitness level: ${request.userFitnessLevel || 'intermediate'}
+
+${terrainAnalysis}
+
+${historicalContext}
+
+Generate unique, personalized coaching advice for this specific run. Consider all the data provided.`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+      temperature: 0.8, // Higher temperature for more varied responses
+      response_format: { type: "json_object" },
+      max_tokens: 400
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error("No response from OpenAI");
+    }
+
+    const result = JSON.parse(content) as DynamicPaceCoachingResponse;
+    console.log('[DynamicPaceCoaching] AI response generated:', result.sustainabilityAssessment);
+    return result;
+  } catch (error) {
+    console.error("Dynamic pace coaching error:", error);
+    // Return a sensible fallback
+    return {
+      primaryAdvice: `At ${currentPaceStr} per kilometer, you're off to a good start. Keep focusing on your form and breathing.`,
+      pacingRationale: "Based on your current pace and the route ahead.",
+      motivation: "You've got this - stay strong!",
+      sustainabilityAssessment: 'unknown'
+    };
+  }
+}
+
 export { openai };

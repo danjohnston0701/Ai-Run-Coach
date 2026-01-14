@@ -2533,12 +2533,55 @@ export default function RunSession() {
       targetPaceSecondsPerKm = targetTimeSeconds / targetDistNum;
     }
     
-    // Async function to build pace message with API calls when needed
+    // Async function to build pace message with dynamic AI coaching
     const buildPaceMessage = async () => {
+      const routeId = metadata.routeId;
+      const userId = userProfile?.id;
+      const hasRouteOrTarget = routeId || targetPaceSecondsPerKm > 0;
+      
+      // Use dynamic AI coaching for personalized, terrain-aware advice
+      if (hasRouteOrTarget && aiCoachEnabled) {
+        try {
+          console.log(`[0.50km] Requesting dynamic AI coaching (routeId: ${routeId}, target: ${targetPaceSecondsPerKm > 0})`);
+          const response = await fetch('/api/ai/dynamic-pace-coaching', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              currentPaceSecondsPerKm: paceSecondsPerKm,
+              targetPaceSecondsPerKm: targetPaceSecondsPerKm > 0 ? targetPaceSecondsPerKm : undefined,
+              distanceCovered: distance,
+              totalDistance: targetDistNum > 0 ? targetDistNum : undefined,
+              elapsedTimeSeconds: time,
+              routeId,
+              userId,
+              coachTone: coachSettings.tone || 'motivational',
+              coachName: userProfile?.coachName || 'AI Coach'
+            })
+          });
+          
+          if (response.ok) {
+            const coaching = await response.json();
+            console.log(`[0.50km] AI coaching response:`, coaching.sustainabilityAssessment);
+            
+            // Build dynamic message from AI response
+            let paceMessage = `Half kilometer complete. ${coaching.primaryAdvice} `;
+            if (coaching.terrainInsight) {
+              paceMessage += `${coaching.terrainInsight} `;
+            }
+            paceMessage += coaching.motivation;
+            
+            return paceMessage;
+          }
+        } catch (err) {
+          console.log('[0.50km] Dynamic AI coaching failed, using fallback:', err);
+        }
+      }
+      
+      // Fallback path: Use simpler comparison methods
       let paceMessage = `Half kilometer complete. Your current pace is ${currentPaceStr} per kilometer. `;
       
       if (targetPaceSecondsPerKm > 0) {
-        // RULE 1: Compare to target pace (user set a target time)
+        // Compare to target pace
         const targetPaceMins = Math.floor(targetPaceSecondsPerKm / 60);
         const targetPaceSecs = Math.floor(targetPaceSecondsPerKm % 60);
         const targetPaceStr = `${targetPaceMins}:${targetPaceSecs.toString().padStart(2, '0')}`;
@@ -2547,20 +2590,17 @@ export default function RunSession() {
         const diffSeconds = Math.abs(Math.round(paceDiff));
         
         if (paceDiff < -10) {
-          paceMessage += `You're running ${diffSeconds} seconds faster than your target pace of ${targetPaceStr}. Great start, but consider conserving energy for later. `;
+          paceMessage += `You're running ${diffSeconds} seconds faster than your target pace of ${targetPaceStr}. `;
         } else if (paceDiff > 15) {
-          paceMessage += `You're ${diffSeconds} seconds behind your target pace of ${targetPaceStr}. Try to pick up the pace gradually if you want to hit your goal. `;
+          paceMessage += `You're ${diffSeconds} seconds behind your target pace of ${targetPaceStr}. `;
         } else {
-          paceMessage += `You're right on track for your target pace of ${targetPaceStr}. Keep this effort level steady. `;
+          paceMessage += `You're right on track for your target pace of ${targetPaceStr}. `;
         }
-        console.log(`[0.50km] Using target time comparison: ${currentPaceStr}/km vs target ${targetPaceStr}/km`);
       } else {
-        // No target time - randomly alternate between historic and demographic comparison
+        // No target - alternate between historic and demographic
         const useHistoric = Math.random() > 0.5;
-        const userId = userProfile?.id;
         
         if (useHistoric && userId) {
-          // RULE 2: Compare to historic average pace from similar distance runs
           try {
             const response = await fetch('/api/ai/historic-pace', {
               method: 'POST',
@@ -2576,74 +2616,50 @@ export default function RunSession() {
               if (paceDiff < -15) {
                 paceMessage += `You're ${diffSeconds} seconds faster than your average pace of ${data.avgPace}. Strong start! `;
               } else if (paceDiff > 15) {
-                paceMessage += `You're ${diffSeconds} seconds slower than your usual ${data.avgPace} pace. Take your time warming up. `;
+                paceMessage += `You're ${diffSeconds} seconds slower than your usual ${data.avgPace} pace. `;
               } else {
                 paceMessage += `Right on your usual pace of ${data.avgPace}. Consistent running! `;
               }
-              paceMessage += `Based on ${data.runCount} previous ${data.isSimilarDistance ? 'similar distance' : ''} runs. `;
-              console.log(`[0.50km] Using historic comparison: ${currentPaceStr}/km vs avg ${data.avgPace}/km from ${data.runCount} runs`);
               return paceMessage;
             }
           } catch (err) {
-            console.log('[0.50km] Historic pace fetch failed, falling back to demographic');
+            console.log('[0.50km] Historic pace fetch failed');
           }
         }
         
-        // RULE 3: Use demographic-based pace suggestion
-        if (userProfile) {
+        // Demographic fallback
+        if (userProfile?.dob) {
           try {
-            const age = userProfile.dob ? 
-              Math.floor((Date.now() - new Date(userProfile.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : null;
-            const weight = userProfile.weight ? parseFloat(userProfile.weight.replace(/[^0-9.]/g, '')) : null;
-            const height = userProfile.height ? parseFloat(userProfile.height.replace(/[^0-9.]/g, '')) : null;
-            const fitnessLevel = userProfile.fitnessLevel || 'intermediate';
+            const age = Math.floor((Date.now() - new Date(userProfile.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+            const response = await fetch('/api/ai/demographic-pace', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                age, 
+                fitnessLevel: userProfile.fitnessLevel || 'intermediate',
+                targetDistance: targetDistNum > 0 ? targetDistNum : undefined 
+              })
+            });
+            const data = await response.json();
             
-            if (age) {
-              const response = await fetch('/api/ai/demographic-pace', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                  age, 
-                  weight, 
-                  height, 
-                  fitnessLevel,
-                  targetDistance: targetDistNum > 0 ? targetDistNum : undefined 
-                })
-              });
-              const data = await response.json();
-              
-              if (data.suggestedPace && data.suggestedPaceSeconds) {
-                const paceDiff = paceSecondsPerKm - data.suggestedPaceSeconds;
-                const diffSeconds = Math.abs(Math.round(paceDiff));
-                
-                if (paceDiff < -15) {
-                  paceMessage += `You're ${diffSeconds} seconds faster than the suggested ${data.suggestedPace} pace for your profile. Impressive start! `;
-                } else if (paceDiff > 15) {
-                  paceMessage += `A suggested pace for your fitness level would be around ${data.suggestedPace}. You're ${diffSeconds} seconds off, which is fine for warming up. `;
-                } else {
-                  paceMessage += `Your pace matches the suggested ${data.suggestedPace} for someone at your fitness level. Well paced! `;
-                }
-                console.log(`[0.50km] Using demographic comparison: ${currentPaceStr}/km vs suggested ${data.suggestedPace}/km`);
-                return paceMessage;
+            if (data.suggestedPace) {
+              const paceDiff = paceSecondsPerKm - data.suggestedPaceSeconds;
+              if (paceDiff < -15) {
+                paceMessage += `Faster than suggested ${data.suggestedPace} pace. Impressive! `;
+              } else if (paceDiff > 15) {
+                paceMessage += `Warming up nicely. Suggested pace is ${data.suggestedPace}. `;
+              } else {
+                paceMessage += `Perfect pace for your fitness level. `;
               }
+              return paceMessage;
             }
           } catch (err) {
-            console.log('[0.50km] Demographic pace fetch failed, using fallback');
+            console.log('[0.50km] Demographic pace fetch failed');
           }
         }
         
-        // Fallback: general feedback if no API data available
-        paceMessage += `This is your early run warm-up pace. `;
-        if (paceSecondsPerKm < 300) {
-          paceMessage += `You're starting strong with a fast pace. Make sure you're warmed up. `;
-        } else if (paceSecondsPerKm < 360) {
-          paceMessage += `A solid moderate pace to start. Good warm-up effort. `;
-        } else if (paceSecondsPerKm < 420) {
-          paceMessage += `Easy comfortable pace. Great for warming up your muscles. `;
-        } else {
-          paceMessage += `Taking it easy at the start. A good approach for longer runs. `;
-        }
-        console.log(`[0.50km] Using fallback general feedback: ${currentPaceStr}/km`);
+        // Final fallback
+        paceMessage += `Good early run pace. Stay relaxed and focused. `;
       }
       
       return paceMessage;
@@ -2656,7 +2672,7 @@ export default function RunSession() {
       setLastMessageTime(Date.now());
     });
     
-  }, [active, gpsStatus, distance, time, speak, userProfile]);
+  }, [active, gpsStatus, distance, time, speak, userProfile, aiCoachEnabled, coachSettings]);
 
   // Fetch AI cadence analysis periodically during runs
   useEffect(() => {

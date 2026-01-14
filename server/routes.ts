@@ -8,7 +8,7 @@ import {
   insertAiCoachKnowledgeSchema, insertAiCoachFaqSchema, insertGoalSchema
 } from "@shared/schema";
 import { z } from "zod";
-import { generateRoute, getCoachingAdvice, analyzeRunPerformance, generateTTS, calculateAge, analyzeCadence, type CoachTone, type TTSVoice, type AiCoachConfig } from "./openai";
+import { generateRoute, getCoachingAdvice, analyzeRunPerformance, generateTTS, calculateAge, analyzeCadence, generateDynamicPaceCoaching, type CoachTone, type TTSVoice, type AiCoachConfig } from "./openai";
 import { generateCircularRoute, generateMultipleRoutes, isGoogleMapsConfigured } from "./routePlanner";
 import { generateAIRoutes } from "./aiRoutePlanner";
 import bcrypt from "bcryptjs";
@@ -2054,6 +2054,110 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Demographic pace error:", error);
       res.status(500).json({ error: "Failed to calculate demographic pace" });
+    }
+  });
+
+  // Dynamic AI Pace Coaching endpoint - generates personalized, session-specific advice
+  app.post("/api/ai/dynamic-pace-coaching", async (req, res) => {
+    try {
+      const { 
+        currentPaceSecondsPerKm, 
+        targetPaceSecondsPerKm, 
+        distanceCovered,
+        totalDistance,
+        elapsedTimeSeconds,
+        routeId,
+        userId,
+        coachTone,
+        coachName
+      } = req.body;
+      
+      if (!currentPaceSecondsPerKm || distanceCovered === undefined || !elapsedTimeSeconds) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+      
+      // Gather route elevation data if routeId provided
+      let elevationProfile: Array<{ distance: number; elevation: number }> | undefined;
+      let routeDifficulty: string | undefined;
+      let totalElevationGain: number | undefined;
+      
+      if (routeId) {
+        try {
+          const route = await storage.getRoute(routeId);
+          if (route) {
+            if (route.elevationProfile) {
+              elevationProfile = route.elevationProfile as Array<{ distance: number; elevation: number }>;
+            }
+            routeDifficulty = route.difficulty || undefined;
+            totalElevationGain = route.elevationGain ? parseFloat(route.elevationGain.toString()) : undefined;
+          }
+        } catch (err) {
+          console.log('[DynamicPaceCoaching] Failed to load route data:', err);
+        }
+      }
+      
+      // Gather user profile and history if userId provided
+      let userName: string | undefined;
+      let userAge: number | undefined;
+      let userFitnessLevel: string | undefined;
+      let historicAveragePace: number | undefined;
+      let recentRunsCount: number | undefined;
+      
+      if (userId) {
+        try {
+          const user = await storage.getUser(userId);
+          if (user) {
+            userName = user.name || undefined;
+            userFitnessLevel = user.fitnessLevel || undefined;
+            if (user.dateOfBirth) {
+              userAge = calculateAge(user.dateOfBirth);
+            }
+          }
+          
+          // Get historical pace data
+          const runs = await storage.getUserRuns(userId);
+          if (runs && runs.length > 0) {
+            const paces = runs
+              .map(run => run.avgPace)
+              .filter(pace => pace && pace !== "0:00")
+              .map(pace => {
+                const [mins, secs] = (pace || "0:00").split(":").map(Number);
+                return mins * 60 + secs;
+              })
+              .filter(secs => secs > 0 && secs < 1800);
+            
+            if (paces.length > 0) {
+              historicAveragePace = paces.reduce((a, b) => a + b, 0) / paces.length;
+              recentRunsCount = paces.length;
+            }
+          }
+        } catch (err) {
+          console.log('[DynamicPaceCoaching] Failed to load user data:', err);
+        }
+      }
+      
+      const coaching = await generateDynamicPaceCoaching({
+        currentPaceSecondsPerKm: parseFloat(currentPaceSecondsPerKm),
+        targetPaceSecondsPerKm: targetPaceSecondsPerKm ? parseFloat(targetPaceSecondsPerKm) : undefined,
+        distanceCovered: parseFloat(distanceCovered),
+        totalDistance: totalDistance ? parseFloat(totalDistance) : undefined,
+        elapsedTimeSeconds: parseFloat(elapsedTimeSeconds),
+        elevationProfile,
+        routeDifficulty,
+        totalElevationGain,
+        userName,
+        userAge,
+        userFitnessLevel,
+        historicAveragePace,
+        recentRunsCount,
+        coachTone,
+        coachName
+      });
+      
+      res.json(coaching);
+    } catch (error) {
+      console.error("Dynamic pace coaching error:", error);
+      res.status(500).json({ error: "Failed to generate pace coaching" });
     }
   });
 
