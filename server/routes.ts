@@ -365,6 +365,9 @@ export async function registerRoutes(
       for (const route of result.routes) {
         try {
           const routeElevation = (route as any).elevation;
+          const routeTurnInstructions = (route as any).turnInstructions || null;
+          console.log(`[Route API] Route ${route.routeName} has ${routeTurnInstructions?.length || 0} turn instructions`);
+          
           const savedRoute = await storage.createRoute({
             userId: userId || null,
             name: route.routeName,
@@ -383,8 +386,9 @@ export async function registerRoutes(
             estimatedTime: route.duration,
             terrainType: route.hasMajorRoads ? 'road' : 'mixed',
             startLocationLabel,
-            turnInstructions: (route as any).turnInstructions || null,
+            turnInstructions: routeTurnInstructions,
           });
+          console.log(`[Route API] Saved route ${savedRoute.id}, turnInstructions saved: ${savedRoute.turnInstructions ? 'YES' : 'NO'}`);
           savedRoutes.push({ ...route, dbId: savedRoute.id });
         } catch (saveErr) {
           console.error("[Route API] Failed to save route:", saveErr);
