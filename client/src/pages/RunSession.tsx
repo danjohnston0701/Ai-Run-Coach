@@ -1736,9 +1736,13 @@ export default function RunSession() {
           currentTurn.startLat, currentTurn.startLng
         ) * 1000;
         
-        // Only recalibrate if we're far from current waypoint (> 100m) or distance keeps increasing
-        const shouldCheckRecalibration = distanceToCurrentTurn > 100 || 
-          (increasingDistanceSamplesRef.current >= 2 && distanceToCurrentTurn > 60);
+        // Always check recalibration if:
+        // - We're far from current waypoint (> 80m) 
+        // - Distance keeps increasing for 2+ samples
+        // - We're past the approach announcement and distance is growing
+        const shouldCheckRecalibration = distanceToCurrentTurn > 80 || 
+          (increasingDistanceSamplesRef.current >= 2 && distanceToCurrentTurn > 50) ||
+          (turnApproachAnnouncedRef.current && distanceToCurrentTurn > 60);
         
         if (!shouldCheckRecalibration) return;
         
@@ -1751,16 +1755,22 @@ export default function RunSession() {
           const maneuver = (candidate.maneuver || '').toLowerCase();
           const instruction = (candidate.instruction || '').toLowerCase();
           
-          // Only consider valid turn instructions
-          const isSkippable = maneuver === 'straight' || 
-                             maneuver === '' && !instruction.includes('turn') && !instruction.includes('left') && !instruction.includes('right');
+          // Check if this is a meaningful instruction
           const isTurn = maneuver.includes('turn') || 
                         maneuver.includes('left') || 
                         maneuver.includes('right') ||
                         instruction.includes('turn left') || 
                         instruction.includes('turn right');
+          const isSignificant = maneuver.includes('roundabout') ||
+                               maneuver.includes('merge') ||
+                               instruction.includes('roundabout');
+          const isSkippable = (maneuver === 'straight' || maneuver === '') && 
+                             !instruction.includes('turn') && 
+                             !instruction.includes('left') && 
+                             !instruction.includes('right') &&
+                             candidate.distance <= 10;
           
-          if (!isTurn && (isSkippable || candidate.distance <= 5)) continue;
+          if (!isTurn && !isSignificant && isSkippable) continue;
           
           const distanceToCandidate = haversineDistance(
             currentPosition.lat, currentPosition.lng,
@@ -1792,19 +1802,15 @@ export default function RunSession() {
       // Run recalibration check on every GPS update
       recalibrateTurnPointer();
       
-      // Find the next valid turn starting from current pointer
+      // Find the next valid instruction starting from current pointer
       let currentIdx = currentStoredTurnIndexRef.current;
       let turn = null;
       
-      // Skip to next valid turn (skip 'straight' maneuvers and 'continue' instructions)
+      // Find next meaningful instruction (turns, significant maneuvers, or direction changes)
       while (currentIdx < storedInstructions.length) {
         const candidate = storedInstructions[currentIdx];
         const maneuver = (candidate.maneuver || '').toLowerCase();
         const instruction = (candidate.instruction || '').toLowerCase();
-        
-        // Skip if it's a straight/continue instruction
-        const isSkippable = maneuver === 'straight' || 
-                           maneuver === '' && !instruction.includes('turn') && !instruction.includes('left') && !instruction.includes('right');
         
         // Accept if it has a turn maneuver OR the instruction mentions turning
         const isTurn = maneuver.includes('turn') || 
@@ -1813,9 +1819,24 @@ export default function RunSession() {
                       instruction.includes('turn left') || 
                       instruction.includes('turn right');
         
-        if (isTurn || (!isSkippable && candidate.distance > 5)) {
+        // Also accept roundabouts, merges, and other significant maneuvers
+        const isSignificant = maneuver.includes('roundabout') ||
+                             maneuver.includes('merge') ||
+                             maneuver.includes('ramp') ||
+                             instruction.includes('roundabout') ||
+                             instruction.includes('enter') ||
+                             instruction.includes('exit');
+        
+        // Accept any instruction with meaningful distance (> 5m) that's not just "straight"
+        const isSkippable = (maneuver === 'straight' || maneuver === '') && 
+                           !instruction.includes('turn') && 
+                           !instruction.includes('left') && 
+                           !instruction.includes('right') &&
+                           candidate.distance <= 10;
+        
+        if (isTurn || isSignificant || !isSkippable) {
           turn = candidate;
-          console.log(`[Nav] Found turn at idx ${currentIdx}: "${candidate.instruction}" (maneuver: ${maneuver || 'none'})`);
+          console.log(`[Nav] Found instruction at idx ${currentIdx}: "${candidate.instruction}" (maneuver: ${maneuver || 'none'}, dist: ${candidate.distance}m)`);
           break;
         }
         currentIdx++;
@@ -1836,7 +1857,7 @@ export default function RunSession() {
         // Check if we should advance to the next turn
         // We advance when: at-turn announced AND (closer to next turn OR traveled enough distance)
         if (turnAtAnnouncedRef.current) {
-          // Find the next valid turn after current
+          // Find the next valid instruction after current
           let nextValidIdx = currentIdx + 1;
           let nextTurn = null;
           while (nextValidIdx < storedInstructions.length) {
@@ -1844,15 +1865,21 @@ export default function RunSession() {
             const maneuver = (candidate.maneuver || '').toLowerCase();
             const instruction = (candidate.instruction || '').toLowerCase();
             
-            const isSkippable = maneuver === 'straight' || 
-                               maneuver === '' && !instruction.includes('turn') && !instruction.includes('left') && !instruction.includes('right');
             const isTurn = maneuver.includes('turn') || 
                           maneuver.includes('left') || 
                           maneuver.includes('right') ||
                           instruction.includes('turn left') || 
                           instruction.includes('turn right');
+            const isSignificant = maneuver.includes('roundabout') ||
+                                 maneuver.includes('merge') ||
+                                 instruction.includes('roundabout');
+            const isSkippable = (maneuver === 'straight' || maneuver === '') && 
+                               !instruction.includes('turn') && 
+                               !instruction.includes('left') && 
+                               !instruction.includes('right') &&
+                               candidate.distance <= 10;
             
-            if (isTurn || (!isSkippable && candidate.distance > 5)) {
+            if (isTurn || isSignificant || !isSkippable) {
               nextTurn = candidate;
               break;
             }
@@ -1932,7 +1959,7 @@ export default function RunSession() {
           }
         }
         
-        // Re-find current turn after potential advancement
+        // Re-find current instruction after potential advancement
         currentIdx = currentStoredTurnIndexRef.current;
         turn = null;
         while (currentIdx < storedInstructions.length) {
@@ -1940,15 +1967,21 @@ export default function RunSession() {
           const maneuver = (candidate.maneuver || '').toLowerCase();
           const instruction = (candidate.instruction || '').toLowerCase();
           
-          const isSkippable = maneuver === 'straight' || 
-                             maneuver === '' && !instruction.includes('turn') && !instruction.includes('left') && !instruction.includes('right');
           const isTurn = maneuver.includes('turn') || 
                         maneuver.includes('left') || 
                         maneuver.includes('right') ||
                         instruction.includes('turn left') || 
                         instruction.includes('turn right');
+          const isSignificant = maneuver.includes('roundabout') ||
+                               maneuver.includes('merge') ||
+                               instruction.includes('roundabout');
+          const isSkippable = (maneuver === 'straight' || maneuver === '') && 
+                             !instruction.includes('turn') && 
+                             !instruction.includes('left') && 
+                             !instruction.includes('right') &&
+                             candidate.distance <= 10;
           
-          if (isTurn || (!isSkippable && candidate.distance > 5)) {
+          if (isTurn || isSignificant || !isSkippable) {
             turn = candidate;
             break;
           }
