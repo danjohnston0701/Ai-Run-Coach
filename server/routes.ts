@@ -1925,6 +1925,138 @@ export async function registerRoutes(
     }
   });
 
+  // Historic pace endpoint - get average pace from similar distance runs
+  app.post("/api/ai/historic-pace", async (req, res) => {
+    try {
+      const { userId, targetDistance } = req.body;
+      
+      if (!userId) {
+        return res.status(400).json({ error: "Missing userId" });
+      }
+      
+      const runs = await storage.getUserRuns(userId);
+      
+      if (!runs || runs.length === 0) {
+        return res.json({ avgPace: null, runCount: 0, message: "No run history available" });
+      }
+      
+      // Filter runs to similar distance (within 30% of target, or all runs if no target)
+      const targetKm = targetDistance ? parseFloat(targetDistance) : 0;
+      let similarRuns = runs;
+      
+      if (targetKm > 0) {
+        const minDist = targetKm * 0.7;
+        const maxDist = targetKm * 1.3;
+        similarRuns = runs.filter(run => {
+          const runDist = parseFloat(run.distance || "0");
+          return runDist >= minDist && runDist <= maxDist;
+        });
+      }
+      
+      // Fall back to all runs if no similar distance runs
+      if (similarRuns.length === 0) {
+        similarRuns = runs;
+      }
+      
+      // Calculate average pace from runs
+      const paces = similarRuns
+        .map(run => run.avgPace)
+        .filter(pace => pace && pace !== "0:00")
+        .map(pace => {
+          const [mins, secs] = (pace || "0:00").split(":").map(Number);
+          return mins * 60 + secs;
+        })
+        .filter(secs => secs > 0 && secs < 1800); // Filter out invalid paces (0 or >30min/km)
+      
+      if (paces.length === 0) {
+        return res.json({ avgPace: null, runCount: 0, message: "No valid pace data in run history" });
+      }
+      
+      const avgPaceSeconds = paces.reduce((a, b) => a + b, 0) / paces.length;
+      const avgPaceMins = Math.floor(avgPaceSeconds / 60);
+      const avgPaceSecs = Math.floor(avgPaceSeconds % 60);
+      
+      res.json({
+        avgPace: `${avgPaceMins}:${avgPaceSecs.toString().padStart(2, '0')}`,
+        avgPaceSeconds,
+        runCount: paces.length,
+        isSimilarDistance: similarRuns !== runs
+      });
+    } catch (error) {
+      console.error("Historic pace error:", error);
+      res.status(500).json({ error: "Failed to get historic pace" });
+    }
+  });
+
+  // Demographic pace suggestion endpoint - AI suggests pace based on user profile
+  app.post("/api/ai/demographic-pace", async (req, res) => {
+    try {
+      const { age, weight, height, fitnessLevel, targetDistance } = req.body;
+      
+      if (!age || !fitnessLevel) {
+        return res.status(400).json({ error: "Missing required fields: age, fitnessLevel" });
+      }
+      
+      // Build a pace estimation based on demographics
+      // Base pace estimates by fitness level (min/km)
+      const basePaces: Record<string, number> = {
+        'beginner': 7.5,      // 7:30/km
+        'intermediate': 6.0,  // 6:00/km
+        'advanced': 5.0,      // 5:00/km
+        'elite': 4.0          // 4:00/km
+      };
+      
+      let basePace = basePaces[fitnessLevel] || 6.5;
+      
+      // Age adjustment: add ~2 seconds per year over 30, subtract under 30
+      const ageNum = parseInt(age);
+      if (ageNum > 30) {
+        basePace += (ageNum - 30) * 0.033; // ~2 sec per year
+      } else if (ageNum < 30 && ageNum > 20) {
+        basePace -= (30 - ageNum) * 0.017; // ~1 sec per year
+      }
+      
+      // Weight adjustment if provided (heavier = slightly slower)
+      if (weight) {
+        const weightNum = parseFloat(weight);
+        // Baseline around 70kg
+        if (weightNum > 80) {
+          basePace += (weightNum - 80) * 0.02;
+        } else if (weightNum < 60) {
+          basePace -= (60 - weightNum) * 0.01;
+        }
+      }
+      
+      // Distance adjustment: longer runs should have slightly slower pace
+      if (targetDistance) {
+        const distNum = parseFloat(targetDistance);
+        if (distNum > 10) {
+          basePace += (distNum - 10) * 0.05; // Add 3 sec per km over 10km
+        }
+      }
+      
+      // Clamp to reasonable range
+      basePace = Math.max(3.5, Math.min(12.0, basePace));
+      
+      const suggestedPaceMins = Math.floor(basePace);
+      const suggestedPaceSecs = Math.round((basePace - suggestedPaceMins) * 60);
+      
+      res.json({
+        suggestedPace: `${suggestedPaceMins}:${suggestedPaceSecs.toString().padStart(2, '0')}`,
+        suggestedPaceSeconds: basePace * 60,
+        basedOn: {
+          fitnessLevel,
+          age: ageNum,
+          weight: weight ? parseFloat(weight) : null,
+          targetDistance: targetDistance ? parseFloat(targetDistance) : null
+        }
+      });
+    } catch (error) {
+      console.error("Demographic pace error:", error);
+      res.status(500).json({ error: "Failed to calculate demographic pace" });
+    }
+  });
+
   // AI Run Analysis endpoint
   app.post("/api/ai/analyze-run", async (req, res) => {
     try {

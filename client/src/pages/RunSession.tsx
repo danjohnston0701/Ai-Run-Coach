@@ -2514,7 +2514,7 @@ export default function RunSession() {
     if (halfKmAnnouncedRef.current) return; // Already announced
     if (distance < 0.50) return; // Not reached 0.50km yet
     
-    // Mark as announced
+    // Mark as announced immediately to prevent re-triggering
     halfKmAnnouncedRef.current = true;
     
     // Calculate current pace
@@ -2533,51 +2533,130 @@ export default function RunSession() {
       targetPaceSecondsPerKm = targetTimeSeconds / targetDistNum;
     }
     
-    // Build pace comparison message
-    let paceMessage = `Half kilometer complete. Your current pace is ${currentPaceStr} per kilometer. `;
-    
-    if (targetPaceSecondsPerKm > 0) {
-      // Compare to target pace
-      const targetPaceMins = Math.floor(targetPaceSecondsPerKm / 60);
-      const targetPaceSecs = Math.floor(targetPaceSecondsPerKm % 60);
-      const targetPaceStr = `${targetPaceMins}:${targetPaceSecs.toString().padStart(2, '0')}`;
+    // Async function to build pace message with API calls when needed
+    const buildPaceMessage = async () => {
+      let paceMessage = `Half kilometer complete. Your current pace is ${currentPaceStr} per kilometer. `;
       
-      const paceDiff = paceSecondsPerKm - targetPaceSecondsPerKm;
-      const diffSeconds = Math.abs(Math.round(paceDiff));
-      
-      if (paceDiff < -10) {
-        // Running faster than target (lower pace = faster)
-        paceMessage += `You're running ${diffSeconds} seconds faster than your target pace of ${targetPaceStr}. Great start, but consider conserving energy for later. `;
-      } else if (paceDiff > 15) {
-        // Running slower than target
-        paceMessage += `You're ${diffSeconds} seconds behind your target pace of ${targetPaceStr}. Try to pick up the pace gradually if you want to hit your goal. `;
+      if (targetPaceSecondsPerKm > 0) {
+        // RULE 1: Compare to target pace (user set a target time)
+        const targetPaceMins = Math.floor(targetPaceSecondsPerKm / 60);
+        const targetPaceSecs = Math.floor(targetPaceSecondsPerKm % 60);
+        const targetPaceStr = `${targetPaceMins}:${targetPaceSecs.toString().padStart(2, '0')}`;
+        
+        const paceDiff = paceSecondsPerKm - targetPaceSecondsPerKm;
+        const diffSeconds = Math.abs(Math.round(paceDiff));
+        
+        if (paceDiff < -10) {
+          paceMessage += `You're running ${diffSeconds} seconds faster than your target pace of ${targetPaceStr}. Great start, but consider conserving energy for later. `;
+        } else if (paceDiff > 15) {
+          paceMessage += `You're ${diffSeconds} seconds behind your target pace of ${targetPaceStr}. Try to pick up the pace gradually if you want to hit your goal. `;
+        } else {
+          paceMessage += `You're right on track for your target pace of ${targetPaceStr}. Keep this effort level steady. `;
+        }
+        console.log(`[0.50km] Using target time comparison: ${currentPaceStr}/km vs target ${targetPaceStr}/km`);
       } else {
-        // On track
-        paceMessage += `You're right on track for your target pace of ${targetPaceStr}. Keep this effort level steady. `;
+        // No target time - randomly alternate between historic and demographic comparison
+        const useHistoric = Math.random() > 0.5;
+        const userId = userProfile?.id;
+        
+        if (useHistoric && userId) {
+          // RULE 2: Compare to historic average pace from similar distance runs
+          try {
+            const response = await fetch('/api/ai/historic-pace', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userId, targetDistance: targetDistNum > 0 ? targetDistNum : undefined })
+            });
+            const data = await response.json();
+            
+            if (data.avgPace && data.avgPaceSeconds) {
+              const paceDiff = paceSecondsPerKm - data.avgPaceSeconds;
+              const diffSeconds = Math.abs(Math.round(paceDiff));
+              
+              if (paceDiff < -15) {
+                paceMessage += `You're ${diffSeconds} seconds faster than your average pace of ${data.avgPace}. Strong start! `;
+              } else if (paceDiff > 15) {
+                paceMessage += `You're ${diffSeconds} seconds slower than your usual ${data.avgPace} pace. Take your time warming up. `;
+              } else {
+                paceMessage += `Right on your usual pace of ${data.avgPace}. Consistent running! `;
+              }
+              paceMessage += `Based on ${data.runCount} previous ${data.isSimilarDistance ? 'similar distance' : ''} runs. `;
+              console.log(`[0.50km] Using historic comparison: ${currentPaceStr}/km vs avg ${data.avgPace}/km from ${data.runCount} runs`);
+              return paceMessage;
+            }
+          } catch (err) {
+            console.log('[0.50km] Historic pace fetch failed, falling back to demographic');
+          }
+        }
+        
+        // RULE 3: Use demographic-based pace suggestion
+        if (userProfile) {
+          try {
+            const age = userProfile.dob ? 
+              Math.floor((Date.now() - new Date(userProfile.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : null;
+            const weight = userProfile.weight ? parseFloat(userProfile.weight.replace(/[^0-9.]/g, '')) : null;
+            const height = userProfile.height ? parseFloat(userProfile.height.replace(/[^0-9.]/g, '')) : null;
+            const fitnessLevel = userProfile.fitnessLevel || 'intermediate';
+            
+            if (age) {
+              const response = await fetch('/api/ai/demographic-pace', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                  age, 
+                  weight, 
+                  height, 
+                  fitnessLevel,
+                  targetDistance: targetDistNum > 0 ? targetDistNum : undefined 
+                })
+              });
+              const data = await response.json();
+              
+              if (data.suggestedPace && data.suggestedPaceSeconds) {
+                const paceDiff = paceSecondsPerKm - data.suggestedPaceSeconds;
+                const diffSeconds = Math.abs(Math.round(paceDiff));
+                
+                if (paceDiff < -15) {
+                  paceMessage += `You're ${diffSeconds} seconds faster than the suggested ${data.suggestedPace} pace for your profile. Impressive start! `;
+                } else if (paceDiff > 15) {
+                  paceMessage += `A suggested pace for your fitness level would be around ${data.suggestedPace}. You're ${diffSeconds} seconds off, which is fine for warming up. `;
+                } else {
+                  paceMessage += `Your pace matches the suggested ${data.suggestedPace} for someone at your fitness level. Well paced! `;
+                }
+                console.log(`[0.50km] Using demographic comparison: ${currentPaceStr}/km vs suggested ${data.suggestedPace}/km`);
+                return paceMessage;
+              }
+            }
+          } catch (err) {
+            console.log('[0.50km] Demographic pace fetch failed, using fallback');
+          }
+        }
+        
+        // Fallback: general feedback if no API data available
+        paceMessage += `This is your early run warm-up pace. `;
+        if (paceSecondsPerKm < 300) {
+          paceMessage += `You're starting strong with a fast pace. Make sure you're warmed up. `;
+        } else if (paceSecondsPerKm < 360) {
+          paceMessage += `A solid moderate pace to start. Good warm-up effort. `;
+        } else if (paceSecondsPerKm < 420) {
+          paceMessage += `Easy comfortable pace. Great for warming up your muscles. `;
+        } else {
+          paceMessage += `Taking it easy at the start. A good approach for longer runs. `;
+        }
+        console.log(`[0.50km] Using fallback general feedback: ${currentPaceStr}/km`);
       }
-    } else {
-      // No target - provide general feedback
-      paceMessage += `This is your early run warm-up pace. `;
       
-      if (paceSecondsPerKm < 300) {
-        paceMessage += `You're starting strong with a fast pace. Make sure you're warmed up. `;
-      } else if (paceSecondsPerKm < 360) {
-        paceMessage += `A solid moderate pace to start. Good warm-up effort. `;
-      } else if (paceSecondsPerKm < 420) {
-        paceMessage += `Easy comfortable pace. Great for warming up your muscles. `;
-      } else {
-        paceMessage += `Taking it easy at the start. A good approach for longer runs. `;
-      }
-    }
+      return paceMessage;
+    };
     
-    console.log(`[0.50km] Pace summary triggered: ${currentPaceStr}/km, targetPace: ${targetPaceSecondsPerKm > 0 ? (targetPaceSecondsPerKm/60).toFixed(2) : 'none'}`);
+    // Execute async pace message building
+    buildPaceMessage().then(paceMessage => {
+      speak(paceMessage, { domain: 'coach' });
+      setMessage(`0.5km - Pace: ${currentPaceStr}/km`);
+      setLastMessageTime(Date.now());
+    });
     
-    // Queue the announcement (navigation will take priority if pending)
-    speak(paceMessage, { domain: 'coach' });
-    setMessage(`0.5km - Pace: ${currentPaceStr}/km`);
-    setLastMessageTime(Date.now());
-    
-  }, [active, gpsStatus, distance, time, speak]);
+  }, [active, gpsStatus, distance, time, speak, userProfile]);
 
   // Fetch AI cadence analysis periodically during runs
   useEffect(() => {
