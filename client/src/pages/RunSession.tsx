@@ -363,6 +363,9 @@ export default function RunSession() {
   const [kmSplits, setKmSplits] = useState<number[]>([]);
   const [motionPermission, setMotionPermission] = useState<"unknown" | "granted" | "denied" | "unavailable">("unknown");
   
+  // 0.50km pace summary announcement
+  const halfKmAnnouncedRef = useRef<boolean>(false);
+  
   // AI Cadence Analysis state
   const [cadenceAnalysis, setCadenceAnalysis] = useState<{
     idealCadenceMin: number;
@@ -2505,6 +2508,77 @@ export default function RunSession() {
     }
   }, [active, gpsStatus, distance, lastKmAnnounced, time, kmSplits, cadence, cadenceAnalysis, speak, routePoints]);
 
+  // 0.50km pace summary announcement
+  useEffect(() => {
+    if (!active || gpsStatus !== "active") return;
+    if (halfKmAnnouncedRef.current) return; // Already announced
+    if (distance < 0.50) return; // Not reached 0.50km yet
+    
+    // Mark as announced
+    halfKmAnnouncedRef.current = true;
+    
+    // Calculate current pace
+    const paceSecondsPerKm = distance > 0 ? time / distance : 0;
+    const currentPaceMins = Math.floor(paceSecondsPerKm / 60);
+    const currentPaceSecs = Math.floor(paceSecondsPerKm % 60);
+    const currentPaceStr = `${currentPaceMins}:${currentPaceSecs.toString().padStart(2, '0')}`;
+    
+    const metadata = sessionMetadataRef.current;
+    const targetDistNum = parseFloat(metadata.targetDistance || "0");
+    const targetTimeSeconds = metadata.targetTimeSeconds || 0;
+    
+    // Calculate target pace if user set a target time
+    let targetPaceSecondsPerKm = 0;
+    if (targetTimeSeconds > 0 && targetDistNum > 0) {
+      targetPaceSecondsPerKm = targetTimeSeconds / targetDistNum;
+    }
+    
+    // Build pace comparison message
+    let paceMessage = `Half kilometer complete. Your current pace is ${currentPaceStr} per kilometer. `;
+    
+    if (targetPaceSecondsPerKm > 0) {
+      // Compare to target pace
+      const targetPaceMins = Math.floor(targetPaceSecondsPerKm / 60);
+      const targetPaceSecs = Math.floor(targetPaceSecondsPerKm % 60);
+      const targetPaceStr = `${targetPaceMins}:${targetPaceSecs.toString().padStart(2, '0')}`;
+      
+      const paceDiff = paceSecondsPerKm - targetPaceSecondsPerKm;
+      const diffSeconds = Math.abs(Math.round(paceDiff));
+      
+      if (paceDiff < -10) {
+        // Running faster than target (lower pace = faster)
+        paceMessage += `You're running ${diffSeconds} seconds faster than your target pace of ${targetPaceStr}. Great start, but consider conserving energy for later. `;
+      } else if (paceDiff > 15) {
+        // Running slower than target
+        paceMessage += `You're ${diffSeconds} seconds behind your target pace of ${targetPaceStr}. Try to pick up the pace gradually if you want to hit your goal. `;
+      } else {
+        // On track
+        paceMessage += `You're right on track for your target pace of ${targetPaceStr}. Keep this effort level steady. `;
+      }
+    } else {
+      // No target - provide general feedback
+      paceMessage += `This is your early run warm-up pace. `;
+      
+      if (paceSecondsPerKm < 300) {
+        paceMessage += `You're starting strong with a fast pace. Make sure you're warmed up. `;
+      } else if (paceSecondsPerKm < 360) {
+        paceMessage += `A solid moderate pace to start. Good warm-up effort. `;
+      } else if (paceSecondsPerKm < 420) {
+        paceMessage += `Easy comfortable pace. Great for warming up your muscles. `;
+      } else {
+        paceMessage += `Taking it easy at the start. A good approach for longer runs. `;
+      }
+    }
+    
+    console.log(`[0.50km] Pace summary triggered: ${currentPaceStr}/km, targetPace: ${targetPaceSecondsPerKm > 0 ? (targetPaceSecondsPerKm/60).toFixed(2) : 'none'}`);
+    
+    // Queue the announcement (navigation will take priority if pending)
+    speak(paceMessage, { domain: 'coach' });
+    setMessage(`0.5km - Pace: ${currentPaceStr}/km`);
+    setLastMessageTime(Date.now());
+    
+  }, [active, gpsStatus, distance, time, speak]);
+
   // Fetch AI cadence analysis periodically during runs
   useEffect(() => {
     const now = Date.now();
@@ -3252,6 +3326,7 @@ export default function RunSession() {
     pausedDurationRef.current = 0;
     pauseStartTimeRef.current = null;
     recentPaceSamplesRef.current = [];
+    halfKmAnnouncedRef.current = false; // Reset 0.50km pace summary for new run
     setRealtimePace(null);
     
     setRunStarted(true);
