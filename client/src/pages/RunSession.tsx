@@ -1670,9 +1670,12 @@ export default function RunSession() {
     }
     
     if (nearestIndex !== currentWaypointIndex) {
-      if (nearestIndex >= currentWaypointIndex || nearestDistance < 0.03) {
+      // Allow index to update in EITHER direction if runner is reasonably close to route
+      // This handles out-and-back routes where the runner needs to retrace their path
+      // 80m threshold accounts for GPS drift while still tracking properly
+      if (nearestIndex >= currentWaypointIndex || nearestDistance < 0.08) {
         setCurrentWaypointIndex(nearestIndex);
-        console.log(`Waypoint updated: ${nearestIndex}/${routePoints.length}, distance: ${(nearestDistance * 1000).toFixed(0)}m`);
+        console.log(`Waypoint updated: ${nearestIndex}/${routePoints.length}, distance: ${(nearestDistance * 1000).toFixed(0)}m, direction: ${nearestIndex >= currentWaypointIndex ? 'forward' : 'backward'}`);
       }
     }
     
