@@ -1948,6 +1948,8 @@ ${toneInstructions[request.coachTone || 'motivational']}
 
 Your job is to analyze ALL available data and provide UNIQUE, SESSION-SPECIFIC coaching advice. Do NOT use generic templates - every response should be tailored to this exact situation.
 
+CRITICAL REQUIREMENT: You MUST always state the runner's actual current pace measurement in your primary advice. For example: "At 4 minutes 23 seconds per kilometer, you're on track..." or "Your current pace of 5:15 per kilometer means..." - NEVER skip the actual pace number.
+
 CRITICAL: You must assess whether the current pace is SUSTAINABLE given:
 1. The upcoming terrain (hills, elevation changes)
 2. The runner's fitness level and history
