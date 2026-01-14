@@ -1465,6 +1465,16 @@ export default function RunInsights() {
         {/* Struggle Awareness Points Section - Above AI Analysis */}
         {!isFriendView && (
         <section className="space-y-4">
+          {/* Compact empty state */}
+          {!isLoadingWeaknesses && weaknessEvents.length === 0 ? (
+            <div className="flex items-center gap-2 px-3 py-2 bg-green-500/5 border border-green-500/10 rounded-lg">
+              <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
+              <span className="text-xs text-muted-foreground">
+                <span className="text-green-400 font-medium">No pace drops detected</span> — consistent effort throughout your run
+              </span>
+            </div>
+          ) : (
+          <>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="p-2 bg-orange-500/10 rounded-lg">
@@ -1483,20 +1493,6 @@ export default function RunInsights() {
                 <div className="h-4 bg-white/10 rounded w-2/3" />
                 <div className="h-4 bg-white/10 rounded w-1/2" />
               </div>
-            </Card>
-          ) : weaknessEvents.length === 0 ? (
-            <Card className="bg-gradient-to-br from-green-900/20 to-emerald-900/20 border-green-500/20 backdrop-blur-sm">
-              <CardContent className="p-6 text-center space-y-3">
-                <div className="p-3 bg-green-500/10 rounded-full w-fit mx-auto">
-                  <CheckCircle className="w-8 h-8 text-green-400" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-display font-bold text-green-400 mb-2">Great Work!</h3>
-                  <p className="text-sm text-muted-foreground">
-                    We didn't detect any points in your run where your pace suddenly changed. Keep up the consistent effort!
-                  </p>
-                </div>
-              </CardContent>
             </Card>
           ) : (
             <div className="space-y-3">
@@ -1611,6 +1607,8 @@ export default function RunInsights() {
                 );
               })}
             </div>
+          )}
+          </>
           )}
         </section>
         )}
