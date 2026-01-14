@@ -744,9 +744,27 @@ export async function registerRoutes(
       });
       
       res.json(analysis);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Run analysis error:", error);
-      res.status(500).json({ error: "Failed to generate run analysis" });
+      console.error("Run analysis error details:", {
+        message: error?.message,
+        code: error?.code,
+        name: error?.name,
+        stack: error?.stack?.split('\n').slice(0, 5).join('\n')
+      });
+      
+      // Provide more specific error messages
+      let errorMessage = "Failed to generate run analysis";
+      if (error?.message?.includes('relation') && error?.message?.includes('does not exist')) {
+        errorMessage = "Database table missing - please contact support";
+        console.error("CRITICAL: run_analyses table does not exist in database");
+      } else if (error?.message?.includes('OPENAI') || error?.message?.includes('API key')) {
+        errorMessage = "AI service configuration error";
+      } else if (error?.message?.includes('timeout') || error?.message?.includes('ETIMEDOUT')) {
+        errorMessage = "AI service timeout - please try again";
+      }
+      
+      res.status(500).json({ error: errorMessage });
     }
   });
 
