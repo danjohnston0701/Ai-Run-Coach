@@ -461,8 +461,8 @@ export default function RunHistory() {
 
   const timeFrameLabels: Record<TimeFrame, string> = {
     last_7_days: "Last 7 Days",
-    this_week: "This Week",
-    last_week: "Last Week",
+    this_week: "This Week (Mon - Sun)",
+    last_week: "Last Week (Mon - Sun)",
     this_month: "This Month",
     all_time: "All Time",
     custom: "Custom"
@@ -515,8 +515,8 @@ export default function RunHistory() {
           </SelectTrigger>
           <SelectContent className="bg-card border-white/10">
             <SelectItem value="last_7_days" data-testid="option-last-7-days">Last 7 Days</SelectItem>
-            <SelectItem value="this_week" data-testid="option-this-week">This Week</SelectItem>
-            <SelectItem value="last_week" data-testid="option-last-week">Last Week</SelectItem>
+            <SelectItem value="this_week" data-testid="option-this-week">This Week (Mon - Sun)</SelectItem>
+            <SelectItem value="last_week" data-testid="option-last-week">Last Week (Mon - Sun)</SelectItem>
             <SelectItem value="this_month" data-testid="option-this-month">This Month</SelectItem>
             <SelectItem value="all_time" data-testid="option-all-time">All Time</SelectItem>
             <SelectItem value="custom" data-testid="option-custom">Custom Range</SelectItem>
