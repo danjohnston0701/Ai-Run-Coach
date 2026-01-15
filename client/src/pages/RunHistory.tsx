@@ -12,7 +12,7 @@ import {
 import WeatherImpactAnalysis from "@/components/WeatherImpactAnalysis";
 import { toast } from "sonner";
 
-type TimeFrame = "this_week" | "last_week" | "this_month" | "all_time";
+type TimeFrame = "last_7_days" | "this_week" | "last_week" | "this_month" | "all_time" | "custom";
 
 export interface RunData {
   id: string;
@@ -49,7 +49,10 @@ export default function RunHistory() {
   const [userId, setUserId] = useState<string | null>(null);
   const [showWeatherAnalysis, setShowWeatherAnalysis] = useState(false);
   const [syncingRunId, setSyncingRunId] = useState<string | null>(null);
-  const [timeFrame, setTimeFrame] = useState<TimeFrame>("all_time");
+  const [timeFrame, setTimeFrame] = useState<TimeFrame>("last_7_days");
+  const [customStartDate, setCustomStartDate] = useState<string>("");
+  const [customEndDate, setCustomEndDate] = useState<string>("");
+  const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
 
   const parseRunDate = (dateStr: string): Date | null => {
     if (!dateStr) return null;
@@ -72,6 +75,13 @@ export default function RunHistory() {
     let endDate: Date;
     
     switch (timeFrame) {
+      case "last_7_days": {
+        startDate = new Date(today);
+        startDate.setDate(today.getDate() - 6);
+        endDate = new Date(today);
+        endDate.setHours(23, 59, 59, 999);
+        break;
+      }
       case "this_week": {
         startDate = new Date(today);
         startDate.setDate(today.getDate() - mondayOffset);
@@ -93,6 +103,13 @@ export default function RunHistory() {
         endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
         break;
       }
+      case "custom": {
+        if (!customStartDate || !customEndDate) return runs;
+        startDate = new Date(customStartDate);
+        endDate = new Date(customEndDate);
+        endDate.setHours(23, 59, 59, 999);
+        break;
+      }
       default:
         return runs;
     }
@@ -102,7 +119,7 @@ export default function RunHistory() {
       if (!runDate) return false;
       return runDate >= startDate && runDate <= endDate;
     });
-  }, [runs, timeFrame]);
+  }, [runs, timeFrame, customStartDate, customEndDate]);
 
   const syncRunToCloud = async (run: RunData, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -384,10 +401,28 @@ export default function RunHistory() {
   } : null;
 
   const timeFrameLabels: Record<TimeFrame, string> = {
+    last_7_days: "Last 7 Days",
     this_week: "This Week",
     last_week: "Last Week",
     this_month: "This Month",
-    all_time: "All Time"
+    all_time: "All Time",
+    custom: "Custom"
+  };
+
+  const handleTimeFrameChange = (value: string) => {
+    const newTimeFrame = value as TimeFrame;
+    setTimeFrame(newTimeFrame);
+    if (newTimeFrame === "custom") {
+      setShowCustomDatePicker(true);
+    } else {
+      setShowCustomDatePicker(false);
+    }
+  };
+
+  const formatDateForDisplay = (dateStr: string): string => {
+    if (!dateStr) return "";
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
   return (
@@ -408,8 +443,8 @@ export default function RunHistory() {
         </div>
       </header>
 
-      <div className="mb-6">
-        <Select value={timeFrame} onValueChange={(value) => setTimeFrame(value as TimeFrame)}>
+      <div className="mb-6 space-y-3">
+        <Select value={timeFrame} onValueChange={handleTimeFrameChange}>
           <SelectTrigger 
             className="w-full bg-card/50 border-white/10 text-white"
             data-testid="select-timeframe"
@@ -420,12 +455,51 @@ export default function RunHistory() {
             </div>
           </SelectTrigger>
           <SelectContent className="bg-card border-white/10">
+            <SelectItem value="last_7_days" data-testid="option-last-7-days">Last 7 Days</SelectItem>
             <SelectItem value="this_week" data-testid="option-this-week">This Week</SelectItem>
             <SelectItem value="last_week" data-testid="option-last-week">Last Week</SelectItem>
             <SelectItem value="this_month" data-testid="option-this-month">This Month</SelectItem>
             <SelectItem value="all_time" data-testid="option-all-time">All Time</SelectItem>
+            <SelectItem value="custom" data-testid="option-custom">Custom Range</SelectItem>
           </SelectContent>
         </Select>
+
+        {showCustomDatePicker && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="bg-card/50 border border-white/10 rounded-lg p-4"
+          >
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground uppercase tracking-wider mb-1 block">From</label>
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  className="w-full bg-background border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary"
+                  data-testid="input-custom-start-date"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground uppercase tracking-wider mb-1 block">To</label>
+                <input
+                  type="date"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  className="w-full bg-background border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary"
+                  data-testid="input-custom-end-date"
+                />
+              </div>
+            </div>
+            {customStartDate && customEndDate && (
+              <p className="text-xs text-muted-foreground mt-2">
+                Showing runs from {formatDateForDisplay(customStartDate)} to {formatDateForDisplay(customEndDate)}
+              </p>
+            )}
+          </motion.div>
+        )}
       </div>
 
       {totalStats && (
