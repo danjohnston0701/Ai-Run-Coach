@@ -148,10 +148,9 @@ export default function RunHistory() {
             return { success: true, savedRun };
           } else {
             const errorText = await response.text();
-            console.error(`[ManualSync] Attempt ${attempt} failed:`, errorText);
-            if (response.status >= 400 && response.status < 500) {
-              return { success: false, error: errorText };
-            }
+            console.error(`[ManualSync] Attempt ${attempt} failed. Status: ${response.status}. Body:`, errorText);
+            // Return error immediately for any non-2xx response to show detailed error
+            return { success: false, error: `Status ${response.status}: ${errorText}` };
           }
         } catch (err) {
           console.error(`[ManualSync] Attempt ${attempt} network error:`, err);
