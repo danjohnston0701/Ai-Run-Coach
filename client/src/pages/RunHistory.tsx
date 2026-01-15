@@ -306,8 +306,10 @@ export default function RunHistory() {
         }
         setLoading(false);
       } else {
-        console.error("Sync failed after retries:", result.error);
-        toast.error("Sync failed - try again later");
+        console.error("[ManualSync] Sync failed after retries. Error:", result.error);
+        // Show more detailed error message to help debug
+        const errorMsg = result.error?.substring(0, 100) || "Unknown error";
+        toast.error(`Sync failed: ${errorMsg}`);
       }
     } catch (err) {
       console.error("Sync error:", err);
