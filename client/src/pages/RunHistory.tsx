@@ -1,15 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { motion } from "framer-motion";
 import { 
   ArrowLeft, Calendar, Route, ArrowRight, BarChart3, ChevronDown, ChevronUp,
-  Cloud, CloudOff, RefreshCw, AlertCircle
+  Cloud, CloudOff, RefreshCw, AlertCircle, Filter
 } from "lucide-react";
 import WeatherImpactAnalysis from "@/components/WeatherImpactAnalysis";
 import { toast } from "sonner";
+
+type TimeFrame = "this_week" | "last_week" | "this_month" | "all_time";
 
 export interface RunData {
   id: string;
@@ -46,6 +49,60 @@ export default function RunHistory() {
   const [userId, setUserId] = useState<string | null>(null);
   const [showWeatherAnalysis, setShowWeatherAnalysis] = useState(false);
   const [syncingRunId, setSyncingRunId] = useState<string | null>(null);
+  const [timeFrame, setTimeFrame] = useState<TimeFrame>("all_time");
+
+  const parseRunDate = (dateStr: string): Date | null => {
+    if (!dateStr) return null;
+    const parts = dateStr.split('/');
+    if (parts.length === 3) {
+      return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+    }
+    return null;
+  };
+
+  const filteredRuns = useMemo(() => {
+    if (timeFrame === "all_time") return runs;
+    
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const dayOfWeek = today.getDay();
+    const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    
+    let startDate: Date;
+    let endDate: Date;
+    
+    switch (timeFrame) {
+      case "this_week": {
+        startDate = new Date(today);
+        startDate.setDate(today.getDate() - mondayOffset);
+        endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 6);
+        endDate.setHours(23, 59, 59, 999);
+        break;
+      }
+      case "last_week": {
+        startDate = new Date(today);
+        startDate.setDate(today.getDate() - mondayOffset - 7);
+        endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 6);
+        endDate.setHours(23, 59, 59, 999);
+        break;
+      }
+      case "this_month": {
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+        break;
+      }
+      default:
+        return runs;
+    }
+    
+    return runs.filter(run => {
+      const runDate = parseRunDate(run.date);
+      if (!runDate) return false;
+      return runDate >= startDate && runDate <= endDate;
+    });
+  }, [runs, timeFrame]);
 
   const syncRunToCloud = async (run: RunData, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -320,15 +377,22 @@ export default function RunHistory() {
     return `${mins}m ${secs}s`;
   };
 
-  const totalStats = runs.length > 0 ? {
-    totalRuns: runs.length,
-    totalDistance: runs.reduce((sum, run) => sum + run.distance, 0),
-    totalTime: runs.reduce((sum, run) => sum + run.totalTime, 0),
+  const totalStats = filteredRuns.length > 0 ? {
+    totalRuns: filteredRuns.length,
+    totalDistance: filteredRuns.reduce((sum, run) => sum + run.distance, 0),
+    totalTime: filteredRuns.reduce((sum, run) => sum + run.totalTime, 0),
   } : null;
+
+  const timeFrameLabels: Record<TimeFrame, string> = {
+    this_week: "This Week",
+    last_week: "Last Week",
+    this_month: "This Month",
+    all_time: "All Time"
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground p-6 pb-24">
-      <header className="mb-8 flex items-center gap-4">
+      <header className="mb-6 flex items-center gap-4">
         <Button
           variant="outline"
           size="icon"
@@ -343,6 +407,26 @@ export default function RunHistory() {
           <p className="text-muted-foreground text-sm">Review your performance insights</p>
         </div>
       </header>
+
+      <div className="mb-6">
+        <Select value={timeFrame} onValueChange={(value) => setTimeFrame(value as TimeFrame)}>
+          <SelectTrigger 
+            className="w-full bg-card/50 border-white/10 text-white"
+            data-testid="select-timeframe"
+          >
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-primary" />
+              <SelectValue placeholder="Select time period" />
+            </div>
+          </SelectTrigger>
+          <SelectContent className="bg-card border-white/10">
+            <SelectItem value="this_week" data-testid="option-this-week">This Week</SelectItem>
+            <SelectItem value="last_week" data-testid="option-last-week">Last Week</SelectItem>
+            <SelectItem value="this_month" data-testid="option-this-month">This Month</SelectItem>
+            <SelectItem value="all_time" data-testid="option-all-time">All Time</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
       {totalStats && (
         <motion.div
@@ -409,7 +493,7 @@ export default function RunHistory() {
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
           <p className="text-muted-foreground">Loading your runs...</p>
         </div>
-      ) : runs.length === 0 ? (
+      ) : filteredRuns.length === 0 ? (
         <div className="flex flex-col items-center justify-center min-h-[60vh]">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
@@ -417,22 +501,40 @@ export default function RunHistory() {
             className="text-center"
           >
             <Route className="w-16 h-16 text-muted-foreground/30 mx-auto mb-6" />
-            <h2 className="text-2xl font-display font-bold text-foreground mb-3">Ready to Track Your Progress?</h2>
-            <p className="text-muted-foreground max-w-sm mx-auto mb-8">
-              No previous run history. Complete your first session to track and review your performance.
-            </p>
-            <Button 
-              onClick={() => setLocation("/")} 
-              className="bg-primary text-background hover:bg-primary/90"
-              data-testid="button-start-first-run"
-            >
-              Start Your First Run
-            </Button>
+            {runs.length > 0 && timeFrame !== "all_time" ? (
+              <>
+                <h2 className="text-2xl font-display font-bold text-foreground mb-3">No Runs Found</h2>
+                <p className="text-muted-foreground max-w-sm mx-auto mb-8">
+                  No runs recorded for {timeFrameLabels[timeFrame].toLowerCase()}. Try selecting a different time period.
+                </p>
+                <Button 
+                  onClick={() => setTimeFrame("all_time")} 
+                  className="bg-primary text-background hover:bg-primary/90"
+                  data-testid="button-view-all-runs"
+                >
+                  View All Runs
+                </Button>
+              </>
+            ) : (
+              <>
+                <h2 className="text-2xl font-display font-bold text-foreground mb-3">Ready to Track Your Progress?</h2>
+                <p className="text-muted-foreground max-w-sm mx-auto mb-8">
+                  No previous run history. Complete your first session to track and review your performance.
+                </p>
+                <Button 
+                  onClick={() => setLocation("/")} 
+                  className="bg-primary text-background hover:bg-primary/90"
+                  data-testid="button-start-first-run"
+                >
+                  Start Your First Run
+                </Button>
+              </>
+            )}
           </motion.div>
         </div>
       ) : (
         <div className="space-y-4">
-          {runs.map((run, index) => (
+          {filteredRuns.map((run, index) => (
             <motion.div
               key={run.id}
               initial={{ opacity: 0, y: 10 }}
