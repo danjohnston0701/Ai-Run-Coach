@@ -4298,14 +4298,14 @@ export default function RunSession() {
                       const step = Math.max(1, Math.floor((routePoints.length - 1) / totalSegments));
                       const midpoint = Math.floor(routePoints.length / 2);
                       
-                      // Detect overlapping segments using segment-to-segment proximity
-                      // For each segment in second half, check if it runs close to AND parallel/opposite to any first-half segment
+                      // Detect overlapping segments using multi-point segment comparison
+                      // For robust detection, sample multiple points per segment and check proximity + bearing
                       const overlappingSegments = new Set<number>();
                       
-                      // Build list of first-half segments with their center points and bearings
-                      const firstHalfSegments: Array<{
+                      // Build first-half segment data with multiple sample points and bearing
+                      const firstHalfData: Array<{
                         segIdx: number;
-                        center: {lat: number; lng: number};
+                        points: Array<{lat: number; lng: number}>;
                         bearing: number;
                       }> = [];
                       for (let segIdx = 0; segIdx < Math.ceil(midpoint / step); segIdx++) {
@@ -4313,16 +4313,24 @@ export default function RunSession() {
                         const segEnd = Math.min(segStart + step, routePoints.length - 1);
                         if (segEnd <= segStart) continue;
                         
-                        const startPt = routePoints[segStart];
-                        const endPt = routePoints[segEnd];
-                        const midIdx = Math.floor((segStart + segEnd) / 2);
-                        const midPt = routePoints[midIdx];
-                        const bearing = calculateBearing(startPt.lat, startPt.lng, endPt.lat, endPt.lng);
+                        // Sample 3 points: start, middle, end of segment
+                        const points = [
+                          routePoints[segStart],
+                          routePoints[Math.floor((segStart + segEnd) / 2)],
+                          routePoints[segEnd]
+                        ];
+                        const bearing = calculateBearing(
+                          routePoints[segStart].lat, routePoints[segStart].lng,
+                          routePoints[segEnd].lat, routePoints[segEnd].lng
+                        );
                         
-                        firstHalfSegments.push({ segIdx, center: midPt, bearing });
+                        firstHalfData.push({ segIdx, points, bearing });
                       }
                       
-                      // Check each second-half segment for overlap
+                      // Check each second-half segment for overlap with first-half segments
+                      // Track contiguous overlap ranges
+                      let overlapRangeStart = -1;
+                      
                       for (let segIdx = 0; segIdx < totalSegments; segIdx++) {
                         const segStart = segIdx * step;
                         if (segStart < midpoint) continue;
@@ -4330,30 +4338,64 @@ export default function RunSession() {
                         const segEnd = Math.min(segStart + step, routePoints.length - 1);
                         if (segEnd <= segStart) continue;
                         
-                        const startPt = routePoints[segStart];
-                        const endPt = routePoints[segEnd];
-                        const midIdx = Math.floor((segStart + segEnd) / 2);
-                        const midPt = routePoints[midIdx];
-                        const returnBearing = calculateBearing(startPt.lat, startPt.lng, endPt.lat, endPt.lng);
+                        // Sample 3 points from this segment
+                        const returnPoints = [
+                          routePoints[segStart],
+                          routePoints[Math.floor((segStart + segEnd) / 2)],
+                          routePoints[segEnd]
+                        ];
+                        const returnBearing = calculateBearing(
+                          routePoints[segStart].lat, routePoints[segStart].lng,
+                          routePoints[segEnd].lat, routePoints[segEnd].lng
+                        );
                         
                         // Check against all first-half segments
-                        for (const firstSeg of firstHalfSegments) {
-                          // Check proximity (segment centers within 40m)
-                          if (!arePointsClose(midPt, firstSeg.center, 40)) continue;
+                        let foundOverlap = false;
+                        for (const firstSeg of firstHalfData) {
+                          // Check multiple point pairs for proximity (any match counts)
+                          let hasProximity = false;
+                          for (const rp of returnPoints) {
+                            for (const fp of firstSeg.points) {
+                              if (arePointsClose(rp, fp, 35)) {
+                                hasProximity = true;
+                                break;
+                              }
+                            }
+                            if (hasProximity) break;
+                          }
                           
-                          // Check if bearings are roughly opposite (150-210° difference)
+                          if (!hasProximity) continue;
+                          
+                          // Check if bearings are roughly opposite (130°+ difference)
                           const rawDiff = Math.abs(returnBearing - firstSeg.bearing);
                           const normalizedDiff = rawDiff > 180 ? 360 - rawDiff : rawDiff;
                           
-                          if (normalizedDiff >= 140) {
-                            // This segment overlaps - mark it and all subsequent segments in range
-                            overlappingSegments.add(segIdx);
-                            // Also mark neighbors for smooth transition
-                            if (segIdx > 0) overlappingSegments.add(segIdx - 1);
-                            if (segIdx < totalSegments - 1) overlappingSegments.add(segIdx + 1);
+                          if (normalizedDiff >= 130) {
+                            foundOverlap = true;
                             break;
                           }
                         }
+                        
+                        if (foundOverlap) {
+                          // Track contiguous range start
+                          if (overlapRangeStart === -1) {
+                            overlapRangeStart = segIdx;
+                            // Add leading neighbor for smooth transition
+                            if (segIdx > 0) overlappingSegments.add(segIdx - 1);
+                          }
+                          overlappingSegments.add(segIdx);
+                        } else {
+                          // End of contiguous range - add trailing neighbor
+                          if (overlapRangeStart !== -1) {
+                            overlappingSegments.add(segIdx); // Include this as transition segment
+                            overlapRangeStart = -1;
+                          }
+                        }
+                      }
+                      
+                      // If overlap range extends to end, add final segment
+                      if (overlapRangeStart !== -1) {
+                        overlappingSegments.add(totalSegments - 1);
                       }
                       
                       // Render route segments with gradient color and opacity
