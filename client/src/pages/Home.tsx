@@ -2143,7 +2143,7 @@ export default function Home() {
                           <div className="font-display font-bold text-primary">{lastRun.distance.toFixed(2)} km</div>
                         </div>
                         <div>
-                          <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Pace</div>
+                          <div className="text-muted-foreground text-xs uppercase tracking-wider mb-1">Avg Pace</div>
                           <div className="font-display font-bold text-primary">{lastRun.avgPace}/km</div>
                         </div>
                         <div>
