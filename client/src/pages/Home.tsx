@@ -2125,7 +2125,11 @@ export default function Home() {
               animate={{ opacity: 1, y: 0 }}
               data-testid="card-last-run"
             >
-              <Card className="relative overflow-hidden border-2 border-primary/30 bg-primary/5 cursor-pointer hover:border-primary/50 transition-all">
+              <Card 
+                className="relative overflow-hidden border-2 border-primary/30 bg-primary/5 cursor-pointer hover:border-primary/50 transition-all"
+                onClick={() => setLocation("/history")}
+                data-testid="card-previous-runs-clickable"
+              >
                 <CardContent className="p-4">
                   <div className="flex items-center gap-3 mb-3">
                     <History className="w-5 h-5 text-primary" />
