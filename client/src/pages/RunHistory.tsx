@@ -173,11 +173,52 @@ export default function RunHistory() {
       // Validate and sanitize fields to ensure database compatibility
       const validDistance = typeof fullLocalRun.distance === 'number' && !isNaN(fullLocalRun.distance) ? fullLocalRun.distance : 0;
       const validDuration = typeof fullLocalRun.totalTime === 'number' && !isNaN(fullLocalRun.totalTime) ? Math.floor(fullLocalRun.totalTime) : 0;
-      // Don't include routeId for local runs - the route likely doesn't exist in production DB
-      const validRouteId = undefined;
       const validStartLat = typeof fullLocalRun.lat === 'number' && !isNaN(fullLocalRun.lat) ? fullLocalRun.lat : undefined;
       const validStartLng = typeof fullLocalRun.lng === 'number' && !isNaN(fullLocalRun.lng) ? fullLocalRun.lng : undefined;
       const validCadence = (fullLocalRun.avgCadence || fullLocalRun.cadence);
+      
+      // Try to create route record if local run has route data
+      let validRouteId: string | undefined = undefined;
+      const hasRouteData = fullLocalRun.routePolyline || fullLocalRun.turnInstructions || 
+                           (fullLocalRun.routeWaypoints && fullLocalRun.routeWaypoints.length > 0);
+      
+      if (hasRouteData) {
+        try {
+          console.log('[ManualSync] Creating route record for local run');
+          const routeData = {
+            userId,
+            name: fullLocalRun.routeName || `Run on ${fullLocalRun.date}`,
+            distance: validDistance,
+            difficulty: fullLocalRun.difficulty || 'moderate',
+            startLat: validStartLat,
+            startLng: validStartLng,
+            waypoints: fullLocalRun.routeWaypoints || [],
+            polyline: fullLocalRun.routePolyline || '',
+            elevationGain: fullLocalRun.elevationGain,
+            elevationLoss: fullLocalRun.elevationLoss,
+            elevationProfile: fullLocalRun.elevationProfile,
+            turnInstructions: fullLocalRun.turnInstructions,
+            source: 'synced_run',
+            sourceRunId: run.id,
+          };
+          
+          const routeResponse = await fetch('/api/routes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(routeData)
+          });
+          
+          if (routeResponse.ok) {
+            const savedRoute = await routeResponse.json();
+            validRouteId = savedRoute.id;
+            console.log('[ManualSync] Route created with ID:', validRouteId);
+          } else {
+            console.warn('[ManualSync] Failed to create route, proceeding without it');
+          }
+        } catch (routeErr) {
+          console.warn('[ManualSync] Route creation error, proceeding without it:', routeErr);
+        }
+      }
       
       // Build complete payload matching saveRunData - use fullLocalRun for original field names
       const dbRunData = {
