@@ -157,7 +157,7 @@ export default function Features() {
           <p className="text-muted-foreground mb-6">Experience AI-powered coaching on your next run</p>
           <Link href="/setup">
             <Button size="lg" className="font-display uppercase tracking-wider" data-testid="button-get-started">
-              Get Started Free
+              Start Free Trial
             </Button>
           </Link>
         </section>

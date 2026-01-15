@@ -2620,15 +2620,82 @@ export default function RunSession() {
       
       const lastSplitTime = kmSplits.length > 0 ? kmSplits[kmSplits.length - 1] : 0;
       const thisKmTime = splitTime - lastSplitTime;
-      const thisKmMins = Math.floor(thisKmTime / 60);
-      const thisKmSecs = thisKmTime % 60;
+      
+      // Last km pace (as min/km format)
+      const lastKmPaceMins = Math.floor(thisKmTime / 60);
+      const lastKmPaceSecs = Math.floor(thisKmTime % 60);
       
       const targetDistNum = parseFloat(sessionMetadataRef.current.targetDistance);
       const remainingKm = targetDistNum - currentKm;
       
+      // Overall average pace
       const avgPaceSeconds = time / currentKm;
       const avgPaceMins = Math.floor(avgPaceSeconds / 60);
       const avgPaceSecs = Math.floor(avgPaceSeconds % 60);
+      
+      // Total run time formatting
+      const totalMins = Math.floor(time / 60);
+      const totalSecs = Math.floor(time % 60);
+      
+      // Target pace (if set)
+      const targetTimeSeconds = sessionMetadataRef.current.targetTimeSeconds || 0;
+      let targetPaceStr = "";
+      if (targetTimeSeconds > 0 && targetDistNum > 0) {
+        const targetPaceSecondsPerKm = targetTimeSeconds / targetDistNum;
+        const targetPaceMins = Math.floor(targetPaceSecondsPerKm / 60);
+        const targetPaceSecs = Math.floor(targetPaceSecondsPerKm % 60);
+        targetPaceStr = `${targetPaceMins}:${targetPaceSecs.toString().padStart(2, '0')}`;
+      }
+      
+      // Terrain and elevation summary for next km
+      let terrainSummary = "";
+      if (routeData?.elevation?.profile && currentPosition) {
+        const profile = routeData.elevation.profile as Array<{ lat: number; lng: number; elevation: number; distance: number; grade: number }>;
+        
+        // Find nearest profile point to current position (same approach as elevationTracker)
+        let nearestIdx = 0;
+        let minDist = Infinity;
+        for (let i = 0; i < profile.length; i++) {
+          const dLat = currentPosition.lat - profile[i].lat;
+          const dLng = currentPosition.lng - profile[i].lng;
+          const dist = dLat * dLat + dLng * dLng;
+          if (dist < minDist) {
+            minDist = dist;
+            nearestIdx = i;
+          }
+        }
+        
+        // Get profile distance at current position and look ahead 1km
+        const currentProfileDistance = profile[nearestIdx]?.distance || 0;
+        const nextKmEnd = currentProfileDistance + 1000;
+        
+        // Find elevation points in the next km range using profile distance
+        const nextKmPoints = profile.filter(p => 
+          p.distance > currentProfileDistance && p.distance <= nextKmEnd
+        );
+        
+        if (nextKmPoints.length > 0) {
+          // Calculate elevation change and max grade in next km
+          const startElevation = nextKmPoints[0].elevation;
+          const endElevation = nextKmPoints[nextKmPoints.length - 1].elevation;
+          const elevationChange = Math.round(endElevation - startElevation);
+          const maxGrade = Math.max(...nextKmPoints.map(p => Math.abs(p.grade)));
+          
+          // Only emit terrain summary if significant (15m+ elevation or 3%+ grade)
+          if (Math.abs(elevationChange) >= 15 || maxGrade >= 3) {
+            if (elevationChange >= 15) {
+              terrainSummary = `Next kilometer: climbing ${elevationChange} meters`;
+              if (maxGrade >= 5) terrainSummary += ` with steep sections`;
+            } else if (elevationChange <= -15) {
+              terrainSummary = `Next kilometer: descending ${Math.abs(elevationChange)} meters`;
+            } else if (maxGrade >= 5) {
+              terrainSummary = `Next kilometer: undulating terrain with some hills`;
+            } else if (maxGrade >= 3) {
+              terrainSummary = `Next kilometer: gentle rolling terrain`;
+            }
+          }
+        }
+      }
       
       // Select phase-appropriate motivational statement
       const targetDistNum2 = parseFloat(sessionMetadataRef.current.targetDistance) || null;
@@ -2644,12 +2711,24 @@ export default function RunSession() {
         }));
       }
       
+      // Build comprehensive announcement
       let announcement = `${currentKm} kilometer${currentKm > 1 ? 's' : ''} complete. `;
-      announcement += `Split time: ${thisKmMins} minute${thisKmMins !== 1 ? 's' : ''} ${thisKmSecs} seconds. `;
-      announcement += `Average pace: ${avgPaceMins}:${avgPaceSecs.toString().padStart(2, '0')} per kilometer. `;
+      announcement += `Total time: ${totalMins} minutes ${totalSecs} seconds. `;
+      
+      // Target vs actual pace comparison
+      if (targetPaceStr) {
+        announcement += `Target pace: ${targetPaceStr} per kilometer. `;
+      }
+      announcement += `Overall pace: ${avgPaceMins}:${avgPaceSecs.toString().padStart(2, '0')} per kilometer. `;
+      announcement += `Last km pace: ${lastKmPaceMins}:${lastKmPaceSecs.toString().padStart(2, '0')} per kilometer. `;
       
       if (remainingKm > 0) {
         announcement += `${remainingKm.toFixed(1)} kilometers to go. `;
+      }
+      
+      // Add terrain summary if available
+      if (terrainSummary) {
+        announcement += `${terrainSummary}. `;
       }
       
       // Cadence coaching frequency depends on run type:
@@ -2680,7 +2759,7 @@ export default function RunSession() {
       announcement += motivation;
       
       speak(announcement, { domain: 'coach' });
-      setMessage(`${currentKm}km - ${thisKmMins}:${thisKmSecs.toString().padStart(2, '0')} split`);
+      setMessage(`${currentKm}km - ${lastKmPaceMins}:${lastKmPaceSecs.toString().padStart(2, '0')} split`);
       setLastMessageTime(Date.now());
       
       // Log km split to coaching logs
@@ -2690,7 +2769,7 @@ export default function RunSession() {
         responseText: announcement,
       });
     }
-  }, [active, gpsStatus, distance, lastKmAnnounced, time, kmSplits, cadence, cadenceAnalysis, speak, routePoints, saveCoachingLog]);
+  }, [active, gpsStatus, distance, lastKmAnnounced, time, kmSplits, cadence, cadenceAnalysis, speak, routePoints, saveCoachingLog, routeData, currentPosition]);
 
   // 0.50km pace summary announcement
   useEffect(() => {
