@@ -97,6 +97,8 @@ export const routes = pgTable("routes", {
   isFavorite: boolean("is_favorite").default(false),
   lastStartedAt: timestamp("last_started_at"),
   createdAt: timestamp("created_at").defaultNow(),
+  source: text("source").default("ai"),
+  sourceRunId: varchar("source_run_id"),
 });
 
 export const runs = pgTable("runs", {

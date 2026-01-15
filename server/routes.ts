@@ -936,6 +936,78 @@ export async function registerRoutes(
     }
   });
 
+  // Convert a completed run to a reusable route
+  app.post("/api/runs/:id/to-route", async (req, res) => {
+    try {
+      const run = await storage.getRun(req.params.id);
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+
+      const { name, makeFavorite } = req.body;
+
+      // Validate that the run has GPS track data
+      const gpsTrack = run.gpsTrack as Array<{ lat: number; lng: number; timestamp?: number; altitude?: number }> | null;
+      if (!gpsTrack || gpsTrack.length < 2) {
+        return res.status(400).json({ error: "Run does not have enough GPS data to create a route" });
+      }
+
+      // Create polyline from GPS track (simple format: array of lat/lng)
+      const waypoints = gpsTrack.map(p => ({ lat: p.lat, lng: p.lng }));
+      
+      // Calculate start and end points
+      const startPoint = gpsTrack[0];
+      const endPoint = gpsTrack[gpsTrack.length - 1];
+
+      // Build elevation profile from GPS track if altitude data exists
+      let elevationProfile = null;
+      const pointsWithAltitude = gpsTrack.filter(p => p.altitude !== undefined);
+      if (pointsWithAltitude.length > 10) {
+        let cumulativeDistance = 0;
+        elevationProfile = [];
+        for (let i = 0; i < pointsWithAltitude.length; i++) {
+          if (i > 0) {
+            const prev = pointsWithAltitude[i - 1];
+            const curr = pointsWithAltitude[i];
+            const dLat = (curr.lat - prev.lat) * 111000;
+            const dLng = (curr.lng - prev.lng) * 111000 * Math.cos(prev.lat * Math.PI / 180);
+            cumulativeDistance += Math.sqrt(dLat * dLat + dLng * dLng);
+          }
+          elevationProfile.push({
+            distance: cumulativeDistance,
+            elevation: pointsWithAltitude[i].altitude
+          });
+        }
+      }
+
+      // Create the route from the run data
+      const routeData = {
+        userId: run.userId,
+        name: name || run.name || `Route from ${run.runDate || 'run'}`,
+        distance: run.distance,
+        difficulty: run.difficulty || "moderate",
+        startLat: startPoint.lat,
+        startLng: startPoint.lng,
+        endLat: endPoint.lat,
+        endLng: endPoint.lng,
+        waypoints: waypoints,
+        elevationGain: run.elevationGain,
+        elevationLoss: run.elevationLoss,
+        elevationProfile: elevationProfile,
+        estimatedTime: run.duration,
+        isFavorite: makeFavorite === true,
+        source: "run",
+        sourceRunId: run.id,
+      };
+
+      const route = await storage.createRoute(routeData);
+      res.json(route);
+    } catch (error) {
+      console.error("Convert run to route error:", error);
+      res.status(500).json({ error: "Failed to convert run to route" });
+    }
+  });
+
   // Run Weakness Events endpoints
   app.get("/api/runs/:id/weakness-events", async (req, res) => {
     try {
