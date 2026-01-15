@@ -7,7 +7,8 @@ import { toast } from "sonner";
 import { 
   Pause, Play, Square, Heart, Share2, Users, Navigation, Volume2, VolumeX, Footprints, Mic, MicOff, MessageCircle, AlertTriangle, Map as MapIcon, ChevronUp, ChevronDown, Navigation2, Check, Loader
 } from "lucide-react";
-import { MapContainer, TileLayer, Polyline, CircleMarker, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Polyline, CircleMarker, Marker, useMap } from "react-leaflet";
+import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
   AlertDialog,
@@ -114,6 +115,70 @@ function FitBoundsToRoute({ routePoints, enabled }: { routePoints: Array<{ lat: 
     }
   }, [map, routePoints, enabled]);
   return null;
+}
+
+// Calculate bearing between two points in degrees
+function calculateBearing(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const lat1Rad = lat1 * Math.PI / 180;
+  const lat2Rad = lat2 * Math.PI / 180;
+  
+  const y = Math.sin(dLng) * Math.cos(lat2Rad);
+  const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) - Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(dLng);
+  
+  let bearing = Math.atan2(y, x) * 180 / Math.PI;
+  return (bearing + 360) % 360;
+}
+
+// Create arrow icon for direction indicators
+// Uses a north-pointing arrow (▲) and rotates by bearing (0°=north, 90°=east)
+function createArrowIcon(bearing: number, color: string): L.DivIcon {
+  return L.divIcon({
+    className: 'route-direction-arrow',
+    html: `<div style="
+      transform: rotate(${bearing}deg);
+      color: ${color};
+      font-size: 14px;
+      font-weight: bold;
+      text-shadow: 0 0 3px rgba(0,0,0,0.7), 0 0 1px rgba(255,255,255,0.5);
+      line-height: 1;
+    ">▲</div>`,
+    iconSize: [14, 14],
+    iconAnchor: [7, 7],
+  });
+}
+
+// Check if two points are close (within threshold meters)
+function arePointsClose(p1: { lat: number; lng: number }, p2: { lat: number; lng: number }, thresholdMeters: number): boolean {
+  const R = 6371000;
+  const dLat = (p2.lat - p1.lat) * Math.PI / 180;
+  const dLng = (p2.lng - p1.lng) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(p1.lat * Math.PI / 180) * Math.cos(p2.lat * Math.PI / 180) *
+            Math.sin(dLng/2) * Math.sin(dLng/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c < thresholdMeters;
+}
+
+// Offset a point perpendicular to bearing
+function offsetPoint(lat: number, lng: number, bearing: number, offsetMeters: number): { lat: number; lng: number } {
+  const perpBearing = (bearing + 90) % 360;
+  const R = 6371000;
+  const d = offsetMeters / R;
+  const bearingRad = perpBearing * Math.PI / 180;
+  const latRad = lat * Math.PI / 180;
+  const lngRad = lng * Math.PI / 180;
+  
+  const newLatRad = Math.asin(Math.sin(latRad) * Math.cos(d) + Math.cos(latRad) * Math.sin(d) * Math.cos(bearingRad));
+  const newLngRad = lngRad + Math.atan2(
+    Math.sin(bearingRad) * Math.sin(d) * Math.cos(latRad),
+    Math.cos(d) - Math.sin(latRad) * Math.sin(newLatRad)
+  );
+  
+  return {
+    lat: newLatRad * 180 / Math.PI,
+    lng: newLngRad * 180 / Math.PI
+  };
 }
 
 function decodePolyline(encoded: string): Array<{ lat: number; lng: number }> {
@@ -4226,14 +4291,74 @@ export default function RunSession() {
                     <TileLayer
                       url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
                     />
-                    {/* Route line - color gradient from green (start) to red (finish) */}
+                    {/* Route line with direction indicators, opacity gradient, and overlap handling */}
                     {routePoints.length > 1 && (() => {
-                      // Create segments with gradient colors
-                      const segments = [];
-                      const totalSegments = Math.min(routePoints.length - 1, 50); // Limit for performance
+                      const elements: React.ReactNode[] = [];
+                      const totalSegments = Math.min(routePoints.length - 1, 50);
                       const step = Math.max(1, Math.floor((routePoints.length - 1) / totalSegments));
+                      const midpoint = Math.floor(routePoints.length / 2);
                       
-                      for (let i = 0; i < routePoints.length - 1; i += step) {
+                      // Detect overlapping segments using segment-to-segment proximity
+                      // For each segment in second half, check if it runs close to AND parallel/opposite to any first-half segment
+                      const overlappingSegments = new Set<number>();
+                      
+                      // Build list of first-half segments with their center points and bearings
+                      const firstHalfSegments: Array<{
+                        segIdx: number;
+                        center: {lat: number; lng: number};
+                        bearing: number;
+                      }> = [];
+                      for (let segIdx = 0; segIdx < Math.ceil(midpoint / step); segIdx++) {
+                        const segStart = segIdx * step;
+                        const segEnd = Math.min(segStart + step, routePoints.length - 1);
+                        if (segEnd <= segStart) continue;
+                        
+                        const startPt = routePoints[segStart];
+                        const endPt = routePoints[segEnd];
+                        const midIdx = Math.floor((segStart + segEnd) / 2);
+                        const midPt = routePoints[midIdx];
+                        const bearing = calculateBearing(startPt.lat, startPt.lng, endPt.lat, endPt.lng);
+                        
+                        firstHalfSegments.push({ segIdx, center: midPt, bearing });
+                      }
+                      
+                      // Check each second-half segment for overlap
+                      for (let segIdx = 0; segIdx < totalSegments; segIdx++) {
+                        const segStart = segIdx * step;
+                        if (segStart < midpoint) continue;
+                        
+                        const segEnd = Math.min(segStart + step, routePoints.length - 1);
+                        if (segEnd <= segStart) continue;
+                        
+                        const startPt = routePoints[segStart];
+                        const endPt = routePoints[segEnd];
+                        const midIdx = Math.floor((segStart + segEnd) / 2);
+                        const midPt = routePoints[midIdx];
+                        const returnBearing = calculateBearing(startPt.lat, startPt.lng, endPt.lat, endPt.lng);
+                        
+                        // Check against all first-half segments
+                        for (const firstSeg of firstHalfSegments) {
+                          // Check proximity (segment centers within 40m)
+                          if (!arePointsClose(midPt, firstSeg.center, 40)) continue;
+                          
+                          // Check if bearings are roughly opposite (150-210° difference)
+                          const rawDiff = Math.abs(returnBearing - firstSeg.bearing);
+                          const normalizedDiff = rawDiff > 180 ? 360 - rawDiff : rawDiff;
+                          
+                          if (normalizedDiff >= 140) {
+                            // This segment overlaps - mark it and all subsequent segments in range
+                            overlappingSegments.add(segIdx);
+                            // Also mark neighbors for smooth transition
+                            if (segIdx > 0) overlappingSegments.add(segIdx - 1);
+                            if (segIdx < totalSegments - 1) overlappingSegments.add(segIdx + 1);
+                            break;
+                          }
+                        }
+                      }
+                      
+                      // Render route segments with gradient color and opacity
+                      for (let segIdx = 0; segIdx < totalSegments; segIdx++) {
+                        const i = segIdx * step;
                         const progress = i / (routePoints.length - 1);
                         // Interpolate from blue (#3b82f6) to green (#22c55e)
                         const r = Math.round(59 + progress * (34 - 59));
@@ -4241,20 +4366,56 @@ export default function RunSession() {
                         const b = Math.round(246 + progress * (94 - 246));
                         const color = `rgb(${r},${g},${b})`;
                         
-                        const endIdx = Math.min(i + step, routePoints.length - 1);
-                        const segmentPoints = routePoints.slice(i, endIdx + 1).map(p => [p.lat, p.lng] as [number, number]);
+                        // Opacity gradient: 1.0 at start, 0.5 at end
+                        const opacity = 1.0 - (progress * 0.5);
                         
-                        segments.push(
+                        const endIdx = Math.min(i + step, routePoints.length - 1);
+                        let segmentPoints = routePoints.slice(i, endIdx + 1);
+                        
+                        // Offset return path for overlapping segments
+                        const isReturnOverlap = overlappingSegments.has(segIdx);
+                        if (isReturnOverlap && i > 0) {
+                          const bearing = calculateBearing(
+                            routePoints[Math.max(0, i-1)].lat, routePoints[Math.max(0, i-1)].lng,
+                            routePoints[i].lat, routePoints[i].lng
+                          );
+                          segmentPoints = segmentPoints.map(p => offsetPoint(p.lat, p.lng, bearing, 8));
+                        }
+                        
+                        elements.push(
                           <Polyline
-                            key={`route-segment-${i}`}
-                            positions={segmentPoints}
+                            key={`route-segment-${segIdx}`}
+                            positions={segmentPoints.map(p => [p.lat, p.lng] as [number, number])}
                             color={color}
-                            weight={5}
-                            opacity={0.9}
+                            weight={isReturnOverlap ? 3 : 5}
+                            opacity={isReturnOverlap ? opacity * 0.6 : opacity}
                           />
                         );
                       }
-                      return segments;
+                      
+                      // Add direction arrows every ~300m (or every 10-15 points)
+                      const arrowInterval = Math.max(15, Math.floor(routePoints.length / 10));
+                      for (let i = arrowInterval; i < routePoints.length - arrowInterval; i += arrowInterval) {
+                        const prevPoint = routePoints[Math.max(0, i - 3)];
+                        const point = routePoints[i];
+                        const bearing = calculateBearing(prevPoint.lat, prevPoint.lng, point.lat, point.lng);
+                        
+                        const progress = i / (routePoints.length - 1);
+                        const r = Math.round(59 + progress * (34 - 59));
+                        const g = Math.round(130 + progress * (197 - 130));
+                        const b = Math.round(246 + progress * (94 - 246));
+                        const arrowColor = `rgb(${r},${g},${b})`;
+                        
+                        elements.push(
+                          <Marker
+                            key={`arrow-${i}`}
+                            position={[point.lat, point.lng]}
+                            icon={createArrowIcon(bearing, arrowColor)}
+                          />
+                        );
+                      }
+                      
+                      return elements;
                     })()}
                     {/* Start marker (blue) */}
                     <CircleMarker
