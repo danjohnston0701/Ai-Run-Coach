@@ -2246,47 +2246,37 @@ export default function Home() {
               </div>
 
               <div className="space-y-4">
-                {/* Exercise Type Toggle */}
-                <div className="bg-white/5 rounded-xl p-4 border border-white/10" data-testid="section-exercise-type">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full flex items-center justify-center bg-primary/20">
-                        <Activity className="w-5 h-5 text-primary" />
-                      </div>
-                      <div>
-                        <h3 className="font-medium" id="exercise-type-label">Exercise Type</h3>
-                        <p className="text-xs text-muted-foreground">Select your activity mode</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex gap-2 mt-3" role="radiogroup" aria-labelledby="exercise-type-label">
+                {/* Exercise Type Toggle - Compact inline */}
+                <div className="flex items-center justify-between px-1" data-testid="section-exercise-type">
+                  <span className="text-sm text-muted-foreground" id="exercise-type-label">Activity</span>
+                  <div className="flex gap-1 bg-white/5 rounded-lg p-0.5" role="radiogroup" aria-labelledby="exercise-type-label">
                     <button
                       type="button"
                       role="radio"
                       aria-checked={exerciseType === "running"}
                       onClick={() => setExerciseType("running")}
-                      className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold uppercase tracking-wider transition-all ${
+                      className={`py-1.5 px-3 rounded-md text-xs font-medium transition-all ${
                         exerciseType === "running"
                           ? "bg-primary text-background"
-                          : "bg-white/10 text-muted-foreground border border-white/10"
+                          : "text-muted-foreground hover:text-foreground"
                       }`}
                       data-testid="button-exercise-running"
                     >
-                      Running
+                      Run
                     </button>
                     <button
                       type="button"
                       role="radio"
                       aria-checked={exerciseType === "walking"}
                       onClick={() => setExerciseType("walking")}
-                      className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold uppercase tracking-wider transition-all ${
+                      className={`py-1.5 px-3 rounded-md text-xs font-medium transition-all ${
                         exerciseType === "walking"
                           ? "bg-primary text-background"
-                          : "bg-white/10 text-muted-foreground border border-white/10"
+                          : "text-muted-foreground hover:text-foreground"
                       }`}
                       data-testid="button-exercise-walking"
                     >
-                      Walking
+                      Walk
                     </button>
                   </div>
                 </div>
