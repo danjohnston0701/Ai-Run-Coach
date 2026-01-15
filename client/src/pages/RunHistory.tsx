@@ -173,7 +173,8 @@ export default function RunHistory() {
       // Validate and sanitize fields to ensure database compatibility
       const validDistance = typeof fullLocalRun.distance === 'number' && !isNaN(fullLocalRun.distance) ? fullLocalRun.distance : 0;
       const validDuration = typeof fullLocalRun.totalTime === 'number' && !isNaN(fullLocalRun.totalTime) ? Math.floor(fullLocalRun.totalTime) : 0;
-      const validRouteId = fullLocalRun.routeId && fullLocalRun.routeId.length > 0 ? fullLocalRun.routeId : undefined;
+      // Don't include routeId for local runs - the route likely doesn't exist in production DB
+      const validRouteId = undefined;
       const validStartLat = typeof fullLocalRun.lat === 'number' && !isNaN(fullLocalRun.lat) ? fullLocalRun.lat : undefined;
       const validStartLng = typeof fullLocalRun.lng === 'number' && !isNaN(fullLocalRun.lng) ? fullLocalRun.lng : undefined;
       const validCadence = (fullLocalRun.avgCadence || fullLocalRun.cadence);
