@@ -76,8 +76,8 @@ function PaceBar({ paceVsAvg, label, runCount }: { paceVsAvg: number | null; lab
             }}
           />
         </div>
-        <span className={`text-xs font-medium w-16 text-right ${isFaster ? 'text-green-400' : 'text-red-400'}`}>
-          {isFaster ? '-' : '+'}{absValue.toFixed(1)}%
+        <span className={`text-xs font-medium text-right ${isFaster ? 'text-green-400' : 'text-red-400'}`}>
+          {absValue.toFixed(1)}% {isFaster ? 'faster' : 'slower'}
         </span>
       </div>
     </div>
@@ -271,7 +271,7 @@ export default function WeatherImpactAnalysis({ userId }: { userId: string }) {
                   <div className="flex items-center gap-3">
                     <span className="text-xs text-muted-foreground">{cond.runCount} runs</span>
                     <span className={`text-sm font-medium ${cond.paceVsAvg < 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {cond.paceVsAvg < 0 ? '-' : '+'}{Math.abs(cond.paceVsAvg).toFixed(1)}%
+                      {Math.abs(cond.paceVsAvg).toFixed(1)}% {cond.paceVsAvg < 0 ? 'faster' : 'slower'}
                     </span>
                   </div>
                 </div>
