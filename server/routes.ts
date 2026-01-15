@@ -458,8 +458,13 @@ export async function registerRoutes(
   app.post("/api/runs", async (req, res) => {
     try {
       const { sessionKey, ...runData } = req.body;
+      console.log("[API /runs POST] Received run data for userId:", runData.userId, "distance:", runData.distance);
+      
       const data = insertRunSchema.parse(runData);
+      console.log("[API /runs POST] Schema validation passed, saving to database...");
+      
       const run = await storage.createRun(data);
+      console.log("[API /runs POST] Run saved successfully with id:", run.id);
       
       // Link any AI coaching logs from this session to the completed run
       if (sessionKey && run.id) {
@@ -472,10 +477,14 @@ export async function registerRoutes(
       
       res.status(201).json(run);
     } catch (error) {
+      console.error("[API /runs POST] Error saving run:", error);
       if (error instanceof z.ZodError) {
+        console.error("[API /runs POST] Zod validation errors:", JSON.stringify(error.errors));
         return res.status(400).json({ error: error.errors });
       }
-      res.status(500).json({ error: "Failed to create run" });
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      console.error("[API /runs POST] Database error:", errorMessage);
+      res.status(500).json({ error: `Failed to create run: ${errorMessage}` });
     }
   });
 

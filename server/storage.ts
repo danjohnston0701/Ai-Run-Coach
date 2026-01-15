@@ -454,29 +454,39 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createRun(data: InsertRun): Promise<Run> {
-    const [run] = await db.insert(runs).values(data).returning();
-    return run;
+    return withRetry(async () => {
+      const [run] = await db.insert(runs).values(data).returning();
+      return run;
+    });
   }
 
   async getRun(id: string): Promise<Run | undefined> {
-    const [run] = await db.select().from(runs).where(eq(runs.id, id));
-    return run;
+    return withRetry(async () => {
+      const [run] = await db.select().from(runs).where(eq(runs.id, id));
+      return run;
+    });
   }
 
   async getUserRuns(userId: string): Promise<Run[]> {
-    return db.select().from(runs).where(eq(runs.userId, userId)).orderBy(desc(runs.completedAt));
+    return withRetry(async () => {
+      return db.select().from(runs).where(eq(runs.userId, userId)).orderBy(desc(runs.completedAt));
+    });
   }
 
   async getUserRunsByRoute(userId: string, routeId: string, limit: number = 10): Promise<Run[]> {
-    return db.select().from(runs)
-      .where(and(eq(runs.userId, userId), eq(runs.routeId, routeId)))
-      .orderBy(desc(runs.completedAt))
-      .limit(limit);
+    return withRetry(async () => {
+      return db.select().from(runs)
+        .where(and(eq(runs.userId, userId), eq(runs.routeId, routeId)))
+        .orderBy(desc(runs.completedAt))
+        .limit(limit);
+    });
   }
 
   async updateRun(id: string, data: Partial<InsertRun>): Promise<Run | undefined> {
-    const [run] = await db.update(runs).set(data).where(eq(runs.id, id)).returning();
-    return run;
+    return withRetry(async () => {
+      const [run] = await db.update(runs).set(data).where(eq(runs.id, id)).returning();
+      return run;
+    });
   }
 
   async deleteRun(id: string): Promise<boolean> {
@@ -495,29 +505,39 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createLiveSession(data: InsertLiveRunSession): Promise<LiveRunSession> {
-    const [session] = await db.insert(liveRunSessions).values(data).returning();
-    return session;
+    return withRetry(async () => {
+      const [session] = await db.insert(liveRunSessions).values(data).returning();
+      return session;
+    });
   }
 
   async getLiveSession(id: string): Promise<LiveRunSession | undefined> {
-    const [session] = await db.select().from(liveRunSessions).where(eq(liveRunSessions.id, id));
-    return session;
+    return withRetry(async () => {
+      const [session] = await db.select().from(liveRunSessions).where(eq(liveRunSessions.id, id));
+      return session;
+    });
   }
 
   async getActiveLiveSession(userId: string): Promise<LiveRunSession | undefined> {
-    const [session] = await db.select().from(liveRunSessions).where(
-      and(eq(liveRunSessions.userId, userId), eq(liveRunSessions.isActive, true))
-    );
-    return session;
+    return withRetry(async () => {
+      const [session] = await db.select().from(liveRunSessions).where(
+        and(eq(liveRunSessions.userId, userId), eq(liveRunSessions.isActive, true))
+      );
+      return session;
+    });
   }
 
   async updateLiveSession(id: string, data: Partial<InsertLiveRunSession>): Promise<LiveRunSession | undefined> {
-    const [session] = await db.update(liveRunSessions).set(data).where(eq(liveRunSessions.id, id)).returning();
-    return session;
+    return withRetry(async () => {
+      const [session] = await db.update(liveRunSessions).set(data).where(eq(liveRunSessions.id, id)).returning();
+      return session;
+    });
   }
 
   async endLiveSession(id: string): Promise<void> {
-    await db.update(liveRunSessions).set({ isActive: false }).where(eq(liveRunSessions.id, id));
+    return withRetry(async () => {
+      await db.update(liveRunSessions).set({ isActive: false }).where(eq(liveRunSessions.id, id));
+    });
   }
 
   async getLiveSessionByKey(sessionKey: string, userId: string): Promise<LiveRunSession | undefined> {
