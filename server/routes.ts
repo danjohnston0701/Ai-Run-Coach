@@ -1267,7 +1267,42 @@ export async function registerRoutes(
         paceVsAvg: ((conditionRuns.reduce((sum, r) => sum + r.paceSecondsPerKm, 0) / conditionRuns.length) - avgPace) / avgPace * 100,
       }));
 
-      // Find best and worst conditions - include condition analysis
+      // Group by time of day
+      const timeOfDayRanges = {
+        earlyMorning: { min: 5, max: 7, label: "Early Morning (5-7am)", runs: [] as typeof runMetrics },
+        morning: { min: 7, max: 10, label: "Morning (7-10am)", runs: [] as typeof runMetrics },
+        midday: { min: 10, max: 14, label: "Midday (10am-2pm)", runs: [] as typeof runMetrics },
+        afternoon: { min: 14, max: 17, label: "Afternoon (2-5pm)", runs: [] as typeof runMetrics },
+        evening: { min: 17, max: 20, label: "Evening (5-8pm)", runs: [] as typeof runMetrics },
+        night: { min: 20, max: 24, label: "Night (8pm+)", runs: [] as typeof runMetrics },
+      };
+
+      runMetrics.forEach(run => {
+        if (run.date) {
+          const runDate = new Date(run.date);
+          const hour = runDate.getHours();
+          if (hour >= 5 && hour < 7) timeOfDayRanges.earlyMorning.runs.push(run);
+          else if (hour >= 7 && hour < 10) timeOfDayRanges.morning.runs.push(run);
+          else if (hour >= 10 && hour < 14) timeOfDayRanges.midday.runs.push(run);
+          else if (hour >= 14 && hour < 17) timeOfDayRanges.afternoon.runs.push(run);
+          else if (hour >= 17 && hour < 20) timeOfDayRanges.evening.runs.push(run);
+          else if (hour >= 20 || hour < 5) timeOfDayRanges.night.runs.push(run);
+        }
+      });
+
+      const timeOfDayAnalysis = Object.entries(timeOfDayRanges).map(([key, range]) => ({
+        range: key,
+        label: range.label,
+        avgPace: range.runs.length > 0 
+          ? range.runs.reduce((sum, r) => sum + r.paceSecondsPerKm, 0) / range.runs.length 
+          : null,
+        runCount: range.runs.length,
+        paceVsAvg: range.runs.length > 0 
+          ? ((range.runs.reduce((sum, r) => sum + r.paceSecondsPerKm, 0) / range.runs.length) - avgPace) / avgPace * 100
+          : null,
+      })).filter(t => t.runCount > 0);
+
+      // Find best and worst conditions - include condition and time of day analysis
       const allAnalysis = [
         ...temperatureAnalysis.map(t => ({ ...t, type: 'temperature', displayLabel: t.label })),
         ...humidityAnalysis.map(h => ({ ...h, type: 'humidity', displayLabel: h.label })),
@@ -1278,6 +1313,7 @@ export async function registerRoutes(
           displayLabel: `${c.condition} weather`,
           label: c.condition,
         })),
+        ...timeOfDayAnalysis.map(t => ({ ...t, type: 'timeOfDay', displayLabel: t.label })),
       ].filter(a => a.runCount >= 2 && a.paceVsAvg !== null);
 
       const bestCondition = allAnalysis.length > 0 
@@ -1300,6 +1336,7 @@ export async function registerRoutes(
         humidityAnalysis,
         windAnalysis,
         conditionAnalysis,
+        timeOfDayAnalysis,
         insights: {
           bestCondition: bestCondition ? {
             label: bestCondition.displayLabel || bestCondition.label,
@@ -1760,7 +1797,7 @@ export async function registerRoutes(
         userWeight, userHeight, userGender, desiredFitnessLevel, coachName,
         userMessage, coachPreferences, coachTone, includeAiConfig,
         recentCoachingTopics, paceChange, currentKm, progressPercent, milestones, kmSplitTimes, terrain, weather,
-        userId, sessionKey, cadence
+        userId, sessionKey, cadence, exerciseType
       } = req.body;
       
       if (!currentPace || !targetPace || elapsedTime === undefined || distanceCovered === undefined || !totalDistance) {
@@ -1859,7 +1896,8 @@ export async function registerRoutes(
         kmSplitTimes,
         terrain,
         weather,
-        weaknessHistory
+        weaknessHistory,
+        exerciseType: exerciseType || 'running',
       };
 
       const startTime = Date.now();

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "framer-motion";
-import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, MicOff, Settings, Users, Check, Copy, Radio, Target, UserCog, LogOut, Search, Heart } from "lucide-react";
+import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, MicOff, Settings, Users, Check, Copy, Radio, Target, UserCog, LogOut, Search, Heart, Activity } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -248,6 +248,7 @@ export default function Home() {
   const [preRunDistance, setPreRunDistance] = useState([5]);
   const [preRunTime, setPreRunTime] = useState({ h: "0", m: "30", s: "00" });
   const [preRunMode, setPreRunMode] = useState<"freerun" | "mapmyrun">("freerun");
+  const [exerciseType, setExerciseType] = useState<"running" | "walking">("running");
   
   // Admin User Support state
   const [showUserSupportModal, setShowUserSupportModal] = useState(false);
@@ -1216,6 +1217,7 @@ export default function Home() {
         targetTime: targetSeconds.toString(),
         targetTimeEnabled: preRunTimeEnabled ? "on" : "off",
         liveTracking: preRunLiveTracking ? "on" : "off",
+        exerciseType,
       });
       setLocation(`/route-preview?${params.toString()}`);
     } else {
@@ -1236,6 +1238,7 @@ export default function Home() {
         targetTime: targetSeconds.toString(),
         aiCoach: canUseAiCoach ? "on" : "off",
         liveTracking: preRunLiveTracking ? "on" : "off",
+        exerciseType,
       });
       setLocation(`/run?${params.toString()}`);
     }
@@ -2243,6 +2246,51 @@ export default function Home() {
               </div>
 
               <div className="space-y-4">
+                {/* Exercise Type Toggle */}
+                <div className="bg-white/5 rounded-xl p-4 border border-white/10" data-testid="section-exercise-type">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full flex items-center justify-center bg-primary/20">
+                        <Activity className="w-5 h-5 text-primary" />
+                      </div>
+                      <div>
+                        <h3 className="font-medium" id="exercise-type-label">Exercise Type</h3>
+                        <p className="text-xs text-muted-foreground">Select your activity mode</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-3" role="radiogroup" aria-labelledby="exercise-type-label">
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={exerciseType === "running"}
+                      onClick={() => setExerciseType("running")}
+                      className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold uppercase tracking-wider transition-all ${
+                        exerciseType === "running"
+                          ? "bg-primary text-background"
+                          : "bg-white/10 text-muted-foreground border border-white/10"
+                      }`}
+                      data-testid="button-exercise-running"
+                    >
+                      Running
+                    </button>
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={exerciseType === "walking"}
+                      onClick={() => setExerciseType("walking")}
+                      className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold uppercase tracking-wider transition-all ${
+                        exerciseType === "walking"
+                          ? "bg-primary text-background"
+                          : "bg-white/10 text-muted-foreground border border-white/10"
+                      }`}
+                      data-testid="button-exercise-walking"
+                    >
+                      Walking
+                    </button>
+                  </div>
+                </div>
+
                 {/* Target Distance */}
                 <div className="bg-white/5 rounded-xl p-4 border border-white/10">
                   <div className="flex items-center justify-between mb-3">

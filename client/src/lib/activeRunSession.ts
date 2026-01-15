@@ -14,6 +14,7 @@ export interface ActiveRunSession {
   targetDistance: string;
   levelId: string;
   targetTimeSeconds: number;
+  exerciseType?: 'running' | 'walking';
   audioEnabled: boolean;
   aiCoachEnabled: boolean;
   kmSplits: number[];

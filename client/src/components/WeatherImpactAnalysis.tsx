@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
-import { Thermometer, Droplets, Wind, Sun, Cloud, CloudRain, TrendingUp, TrendingDown, BarChart3, Loader2 } from "lucide-react";
+import { Thermometer, Droplets, Wind, Sun, Cloud, CloudRain, TrendingUp, TrendingDown, BarChart3, Loader2, Clock } from "lucide-react";
 import { motion } from "framer-motion";
 
 interface WeatherImpactData {
@@ -34,6 +34,13 @@ interface WeatherImpactData {
     avgPace: number;
     runCount: number;
     paceVsAvg: number;
+  }>;
+  timeOfDayAnalysis?: Array<{
+    range: string;
+    label: string;
+    avgPace: number | null;
+    runCount: number;
+    paceVsAvg: number | null;
   }>;
   insights?: {
     bestCondition: { label: string; type: string; improvement: string | null } | null;
@@ -274,6 +281,24 @@ export default function WeatherImpactAnalysis({ userId }: { userId: string }) {
                       {Math.abs(cond.paceVsAvg).toFixed(1)}% {cond.paceVsAvg < 0 ? 'faster' : 'slower'}
                     </span>
                   </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {data.timeOfDayAnalysis && data.timeOfDayAnalysis.length > 0 && (
+        <Card className="bg-gradient-to-br from-purple-900/20 to-gray-900/30 border-purple-500/20 backdrop-blur-sm" data-testid="card-time-of-day">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Clock className="w-4 h-4 text-purple-400" />
+              <span className="text-sm font-bold text-white uppercase tracking-wider">Time of Day</span>
+            </div>
+            <div className="space-y-3">
+              {data.timeOfDayAnalysis.map((time) => (
+                <div key={time.range} data-testid={`row-time-of-day-${time.range}`}>
+                  <PaceBar paceVsAvg={time.paceVsAvg} label={time.label} runCount={time.runCount} />
                 </div>
               ))}
             </div>

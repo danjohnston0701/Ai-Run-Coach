@@ -576,6 +576,7 @@ export default function RunSession() {
   const urlAiCoach = searchParams.get("aiCoach");
   const urlGroupRunId = searchParams.get("groupRunId") || "";
   const urlWaitingForParticipants = searchParams.get("waiting") === "true";
+  const urlExerciseType = (searchParams.get("exerciseType") as "running" | "walking") || "running";
 
   const [groupRunParticipants, setGroupRunParticipants] = useState<{id: string; userId: string; userName: string; role: string; invitationStatus: string}[]>([]);
   const [isGroupRun, setIsGroupRun] = useState(!!urlGroupRunId);
@@ -590,6 +591,7 @@ export default function RunSession() {
     routeName: urlRouteName,
     routeId: urlRouteId,
     targetTimeSeconds: urlTargetTimeSeconds,
+    exerciseType: urlExerciseType,
   });
 
   const calculateAge = (dob: string): number | undefined => {
@@ -710,6 +712,7 @@ export default function RunSession() {
           routeName: savedSession.routeName,
           routeId: savedSession.routeId,
           targetTimeSeconds: savedSession.targetTimeSeconds,
+          exerciseType: savedSession.exerciseType || 'running',
         };
         
         if (savedSession.routePolyline) {
@@ -2413,6 +2416,7 @@ export default function RunSession() {
       targetDistance: metadata.targetDistance,
       levelId: metadata.levelId,
       targetTimeSeconds: metadata.targetTimeSeconds,
+      exerciseType: metadata.exerciseType,
       audioEnabled,
       aiCoachEnabled,
       kmSplits,
@@ -3083,6 +3087,7 @@ export default function RunSession() {
           userId: userProfile?.id,
           sessionKey: sessionIdRef.current,
           cadence: cadence || undefined,
+          exerciseType: sessionMetadataRef.current.exerciseType || 'running',
         })
       });
       

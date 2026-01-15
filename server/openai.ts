@@ -223,6 +223,8 @@ export interface CoachingRequest {
     dropPercent: number;
     count: number;
   }>;
+  // Exercise type for pace expectations (running vs walking)
+  exerciseType?: 'running' | 'walking';
 }
 
 export interface CoachingResponse {
@@ -342,6 +344,18 @@ export async function getCoachingAdvice(request: CoachingRequest): Promise<Coach
     if (request.userWeight) userProfileInfo += `\n- Weight: ${request.userWeight}`;
     if (request.desiredFitnessLevel) userProfileInfo += `\n- Goal: ${request.desiredFitnessLevel} fitness`;
   }
+
+  // Exercise type context for pace expectations
+  const isWalking = request.exerciseType === 'walking';
+  const exerciseTypeSection = isWalking 
+    ? `\n\nEXERCISE TYPE: WALKING
+The user is WALKING, not running. Adjust all pace expectations accordingly:
+- Average walking pace: 8-12 min/km (slow) to 6-8 min/km (brisk)
+- Slowest acceptable pace: 15 min/km
+- Do NOT suggest running or picking up to running pace
+- Use walking-appropriate terminology (stroll, stride, walk briskly)
+- Encourage good walking posture: heel-to-toe roll, arm swing, upright posture`
+    : "";
 
   let userMessageSection = "";
   if (request.userMessage) {
@@ -583,7 +597,7 @@ IMPORTANT: Your main coaching message MUST include guidance from this elite tech
   
   const prompt = `${coachIdentity} Providing real-time guidance.${aiConfigSection}${phaseSection}${eliteCoachingSection}
 
-COACHING STYLE: ${toneStyle}${userProfileInfo}
+COACHING STYLE: ${toneStyle}${userProfileInfo}${exerciseTypeSection}
 
 Current Run Stats:
 - Current pace: ${request.currentPace}
