@@ -944,7 +944,12 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Run not found" });
       }
 
-      const { name, makeFavorite } = req.body;
+      const { name, makeFavorite, userId } = req.body;
+      
+      // Verify the requesting user owns this run
+      if (!userId || run.userId !== userId) {
+        return res.status(403).json({ error: "Not authorized to convert this run" });
+      }
 
       // Validate that the run has GPS track data
       const gpsTrack = run.gpsTrack as Array<{ lat: number; lng: number; timestamp?: number; altitude?: number }> | null;

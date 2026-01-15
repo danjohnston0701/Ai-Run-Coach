@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { 
   ArrowLeft, Calendar, TrendingUp, Heart, 
   Activity, Zap as CadenceIcon, Info, Timer, MapPin, Share2, Mail, User as UserIcon, Search, Star,
-  Facebook, Instagram, Download, X, Map, Users, Trophy, Medal, Award, Trash2, Brain, CheckCircle, Target, Lightbulb, AlertTriangle, Sparkles, Footprints, Pencil, Check
+  Facebook, Instagram, Download, X, Map, Users, Trophy, Medal, Award, Trash2, Brain, CheckCircle, Target, Lightbulb, AlertTriangle, Sparkles, Footprints, Pencil, Check, Play, Route
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { TelemetryChartSection, type TelemetryDataPoint } from "@/components/TelemetryChartSection";
@@ -182,6 +182,9 @@ export default function RunInsights() {
   const [pendingReviewSaves, setPendingReviewSaves] = useState<Set<string>>(new Set());
   // Track local comment edits per event (not yet saved to server) - used for toggleIrrelevant
   const [localCommentEdits, setLocalCommentEdits] = useState<Record<string, string>>({});
+  
+  // Run-to-route conversion state
+  const [isSavingRoute, setIsSavingRoute] = useState(false);
 
   useEffect(() => {
     const loadRun = async () => {
@@ -517,6 +520,61 @@ export default function RunInsights() {
       console.error("Failed to submit rating:", error);
       toast.error("Failed to save rating");
     }
+  };
+
+  const handleSaveAsRoute = async () => {
+    if (!run || !params?.id) return;
+    
+    const profile = localStorage.getItem("userProfile");
+    const userId = profile ? JSON.parse(profile).id : null;
+    
+    if (!userId) {
+      toast.error("Please log in to save routes");
+      return;
+    }
+    
+    setIsSavingRoute(true);
+    try {
+      const response = await fetch(`/api/runs/${params.id}/to-route`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          name: run.name || `Route from ${run.date}`,
+          makeFavorite: true,
+          userId: userId
+        }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to save route");
+      }
+      
+      toast.success("Route saved to favorites!");
+    } catch (error) {
+      console.error("Failed to save as route:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to save route");
+    } finally {
+      setIsSavingRoute(false);
+    }
+  };
+
+  const handleRunAgain = () => {
+    if (!run || !params?.id) return;
+    
+    const profile = localStorage.getItem("userProfile");
+    const userId = profile ? JSON.parse(profile).id : null;
+    
+    if (!userId) {
+      toast.error("Please log in to run again");
+      return;
+    }
+    
+    // Store the run ID, name, and userId to convert to route and navigate to home
+    localStorage.setItem("runAgainRunId", params.id);
+    localStorage.setItem("runAgainRunName", run.name || `Run from ${run.date}`);
+    localStorage.setItem("runAgainUserId", userId);
+    setLocation("/");
   };
 
   const handleDeleteRun = async () => {
@@ -2524,9 +2582,39 @@ export default function RunInsights() {
             </div>
           )}
 
+          {/* Run Again & Save Route Actions - only show for own runs */}
+          {!isFriendView && (
+            <div className="mt-8 pt-6 border-t border-white/10 space-y-3">
+              <div className="flex gap-3">
+                <Button
+                  variant="default"
+                  className="flex-1 bg-primary hover:bg-primary/90"
+                  onClick={handleRunAgain}
+                  data-testid="button-run-again"
+                >
+                  <Play className="w-4 h-4 mr-2" />
+                  Run Again
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1 border-primary/30 text-primary hover:bg-primary/10"
+                  onClick={handleSaveAsRoute}
+                  disabled={isSavingRoute}
+                  data-testid="button-save-route"
+                >
+                  <Route className="w-4 h-4 mr-2" />
+                  {isSavingRoute ? "Saving..." : "Save Route"}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground text-center">
+                Run this route again with AI coaching or save it to your favorites
+              </p>
+            </div>
+          )}
+
           {/* Delete Run Section - only show for own runs */}
           {!isFriendView && (
-            <div className="mt-8 pt-6 border-t border-white/10">
+            <div className="mt-6 pt-6 border-t border-white/10">
               <Button
                 variant="outline"
                 className="w-full border-red-500/30 text-red-400 hover:bg-red-500/10 hover:border-red-500/50"

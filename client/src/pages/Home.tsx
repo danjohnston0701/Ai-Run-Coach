@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "framer-motion";
-import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, MicOff, Settings, Users, Check, Copy, Radio, Target, UserCog, LogOut, Search } from "lucide-react";
+import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, MicOff, Settings, Users, Check, Copy, Radio, Target, UserCog, LogOut, Search, Heart } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -215,6 +215,14 @@ export default function Home() {
   const [customLng, setCustomLng] = useState("");
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [lastRun, setLastRun] = useState<RunData | null>(null);
+  const [favoriteRoutes, setFavoriteRoutes] = useState<Array<{
+    id: string;
+    name: string;
+    distance: number;
+    difficulty: string;
+    elevationGain?: number;
+    isFavorite: boolean;
+  }>>([]);
   const [targetTimeActive, setTargetTimeActive] = useState(false);
   const [targetTime, setTargetTime] = useState({ h: "0", m: "30", s: "00" });
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
@@ -625,12 +633,16 @@ export default function Home() {
         const parsedProfile = JSON.parse(userProfileStr);
         setProfile(parsedProfile);
         
-        // Try to load last run from database if user has an ID
+        // Try to load last run and favorite routes from database if user has an ID
         if (parsedProfile.id) {
           try {
-            const response = await fetch(`/api/users/${parsedProfile.id}/runs`);
-            if (response.ok) {
-              const runs = await response.json();
+            const [runsResponse, routesResponse] = await Promise.all([
+              fetch(`/api/users/${parsedProfile.id}/runs`),
+              fetch(`/api/routes/favorites?userId=${parsedProfile.id}`)
+            ]);
+            
+            if (runsResponse.ok) {
+              const runs = await runsResponse.json();
               if (runs.length > 0) {
                 const lastDbRun = runs[0]; // Already sorted by completedAt desc
                 setLastRun({
@@ -644,12 +656,17 @@ export default function Home() {
                   lat: lastDbRun.startLat || 0,
                   lng: lastDbRun.startLng || 0,
                 });
-                return;
               }
             }
+            
+            if (routesResponse.ok) {
+              const routes = await routesResponse.json();
+              setFavoriteRoutes(routes);
+            }
           } catch (err) {
-            console.warn('Failed to load runs from database:', err);
+            console.warn('Failed to load data from database:', err);
           }
+          return;
         }
       }
 
@@ -802,6 +819,91 @@ export default function Home() {
     
     checkNotificationStatus();
   }, [profile?.id]);
+
+  // Handle "Run Again" flow from RunInsights page
+  useEffect(() => {
+    const runAgainRunId = localStorage.getItem("runAgainRunId");
+    const runAgainRunName = localStorage.getItem("runAgainRunName");
+    const runAgainUserId = localStorage.getItem("runAgainUserId");
+    
+    if (!runAgainRunId) return;
+    
+    // If location is not available yet, show a message and wait
+    if (!userLocation) {
+      // Only show this toast once per session
+      const toastShown = sessionStorage.getItem("runAgainLocationToastShown");
+      if (!toastShown) {
+        sessionStorage.setItem("runAgainLocationToastShown", "true");
+        toast.info("Waiting for GPS location to start your run...");
+      }
+      return;
+    }
+    
+    // Verify the current user matches the stored userId (security check)
+    const currentProfile = localStorage.getItem("userProfile");
+    const currentUserId = currentProfile ? JSON.parse(currentProfile).id : null;
+    
+    if (!currentUserId || currentUserId !== runAgainUserId) {
+      // Clear flags and abort - user doesn't own this run
+      localStorage.removeItem("runAgainRunId");
+      localStorage.removeItem("runAgainRunName");
+      localStorage.removeItem("runAgainUserId");
+      sessionStorage.removeItem("runAgainLocationToastShown");
+      toast.error("Cannot start run - please try again");
+      return;
+    }
+    
+    // Convert the run to a route and start a new run
+    const convertAndStart = async () => {
+      try {
+        const response = await fetch(`/api/runs/${runAgainRunId}/to-route`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            name: runAgainRunName || "Run Again Route",
+            makeFavorite: false,
+            userId: runAgainUserId
+          }),
+        });
+        
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || "Failed to create route from run");
+        }
+        
+        const route = await response.json();
+        
+        // Clear flags only after successful conversion
+        localStorage.removeItem("runAgainRunId");
+        localStorage.removeItem("runAgainRunName");
+        localStorage.removeItem("runAgainUserId");
+        sessionStorage.removeItem("runAgainLocationToastShown");
+        
+        // Navigate to run session with the new route
+        const params = new URLSearchParams({
+          routeId: route.id,
+          lat: userLocation.lat.toString(),
+          lng: userLocation.lng.toString(),
+          level: route.difficulty || "moderate",
+          distance: route.distance?.toString() || "5",
+          aiCoach: isPremiumUser && aiCoachEnabled ? "on" : "off",
+        });
+        
+        toast.success("Starting run with your saved route!");
+        setLocation(`/run?${params.toString()}`);
+      } catch (error) {
+        console.error("Failed to start Run Again:", error);
+        // Clear flags on error to prevent infinite retry
+        localStorage.removeItem("runAgainRunId");
+        localStorage.removeItem("runAgainRunName");
+        localStorage.removeItem("runAgainUserId");
+        sessionStorage.removeItem("runAgainLocationToastShown");
+        toast.error(error instanceof Error ? error.message : "Failed to start run from previous route");
+      }
+    };
+    
+    convertAndStart();
+  }, [userLocation, isPremiumUser, aiCoachEnabled, setLocation]);
 
   const handleEnableNotifications = async () => {
     if (!profile?.id) return;
@@ -1894,6 +1996,73 @@ export default function Home() {
                 <Play className="mr-2 w-5 h-5 fill-current" /> Run without Route
               </Button>
             </motion.div>
+
+            {favoriteRoutes.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                data-testid="card-favorites"
+              >
+                <Card className="relative overflow-hidden border-2 border-yellow-500/30 bg-yellow-500/5 hover:border-yellow-500/50 transition-all">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-3 mb-3">
+                      <Heart className="w-5 h-5 text-yellow-500 fill-yellow-500" />
+                      <h3 className="text-lg font-display font-bold uppercase">Saved Routes</h3>
+                    </div>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {favoriteRoutes.slice(0, 5).map((route) => (
+                        <button
+                          key={route.id}
+                          onClick={() => {
+                            if (!userLocation) {
+                              toast.error("Enable location to run saved routes");
+                              return;
+                            }
+                            const params = new URLSearchParams({
+                              routeId: route.id,
+                              lat: userLocation.lat.toString(),
+                              lng: userLocation.lng.toString(),
+                              level: route.difficulty || "moderate",
+                              distance: route.distance?.toString() || "5",
+                              aiCoach: isPremiumUser && aiCoachEnabled ? "on" : "off",
+                            });
+                            setLocation(`/run?${params.toString()}`);
+                          }}
+                          className="w-full flex items-center justify-between p-3 bg-white/5 hover:bg-primary/10 border border-white/10 hover:border-primary/30 rounded-lg transition-colors text-left"
+                          data-testid={`button-favorite-route-${route.id}`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium truncate">{route.name}</div>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                              <span>{route.distance?.toFixed(1)} km</span>
+                              {route.elevationGain && (
+                                <>
+                                  <span>•</span>
+                                  <span className="flex items-center gap-1">
+                                    <Mountain className="w-3 h-3" />
+                                    {route.elevationGain}m
+                                  </span>
+                                </>
+                              )}
+                              <span>•</span>
+                              <Badge variant="outline" className="text-[10px] py-0 px-1 h-4">
+                                {route.difficulty}
+                              </Badge>
+                            </div>
+                          </div>
+                          <Play className="w-4 h-4 text-primary flex-shrink-0 ml-2" />
+                        </button>
+                      ))}
+                    </div>
+                    {favoriteRoutes.length > 5 && (
+                      <p className="text-xs text-muted-foreground text-center mt-2">
+                        +{favoriteRoutes.length - 5} more saved routes
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              </motion.div>
+            )}
 
             <motion.div
               initial={{ opacity: 0, y: 10 }}
