@@ -25,6 +25,7 @@ import Pricing from "@/pages/Pricing";
 import SubscriptionSuccess from "@/pages/SubscriptionSuccess";
 import Goals from "@/pages/Goals";
 import FriendProfile from "@/pages/FriendProfile";
+import Features from "@/pages/Features";
 import { migrateLocalDataToDatabase } from "@/lib/dataMigration";
 
 function ScrollToTop() {
@@ -92,6 +93,7 @@ function Router() {
       <Route path="/privacy" component={PrivacyPolicy} />
       <Route path="/terms" component={TermsOfUse} />
       <Route path="/login" component={Login} />
+      <Route path="/features" component={Features} />
       {!hasProfile && (
         <>
           <Route path="/" component={LandingPage} />

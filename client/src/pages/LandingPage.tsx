@@ -103,8 +103,10 @@ export default function LandingPage() {
               variant="outline" 
               size="lg" 
               className="h-12 px-8 text-base font-display uppercase tracking-widest rounded-full border-white/10 hover:bg-white/5"
+              onClick={() => setLocation("/features")}
+              data-testid="button-view-features"
             >
-              Watch Demo
+              View All Features
             </Button>
           </motion.div>
         </div>
