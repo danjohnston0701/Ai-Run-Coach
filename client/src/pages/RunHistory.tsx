@@ -171,28 +171,44 @@ export default function RunHistory() {
       const localRuns = runHistoryStr ? JSON.parse(runHistoryStr) : [];
       const fullLocalRun = localRuns.find((r: any) => r.id === run.id) || run;
       
+      // Validate and sanitize fields to ensure database compatibility
+      const validDistance = typeof fullLocalRun.distance === 'number' && !isNaN(fullLocalRun.distance) ? fullLocalRun.distance : 0;
+      const validDuration = typeof fullLocalRun.totalTime === 'number' && !isNaN(fullLocalRun.totalTime) ? Math.floor(fullLocalRun.totalTime) : 0;
+      const validRouteId = fullLocalRun.routeId && fullLocalRun.routeId.length > 0 ? fullLocalRun.routeId : undefined;
+      const validStartLat = typeof fullLocalRun.lat === 'number' && !isNaN(fullLocalRun.lat) ? fullLocalRun.lat : undefined;
+      const validStartLng = typeof fullLocalRun.lng === 'number' && !isNaN(fullLocalRun.lng) ? fullLocalRun.lng : undefined;
+      const validCadence = (fullLocalRun.avgCadence || fullLocalRun.cadence);
+      
       // Build complete payload matching saveRunData - use fullLocalRun for original field names
       const dbRunData = {
         userId,
-        routeId: fullLocalRun.routeId || undefined,
-        distance: fullLocalRun.distance,
-        duration: fullLocalRun.totalTime,
+        routeId: validRouteId,
+        distance: validDistance,
+        duration: validDuration,
         runDate: fullLocalRun.date,
         runTime: fullLocalRun.time,
         avgPace: fullLocalRun.avgPace,
-        cadence: fullLocalRun.avgCadence || fullLocalRun.cadence || undefined, // Local stores as avgCadence
+        cadence: validCadence && validCadence > 0 ? validCadence : undefined,
         elevation: fullLocalRun.elevationGain || undefined,
         elevationGain: fullLocalRun.elevationGain || undefined,
         elevationLoss: fullLocalRun.elevationLoss || undefined,
-        difficulty: fullLocalRun.difficulty,
-        startLat: fullLocalRun.lat,
-        startLng: fullLocalRun.lng,
+        difficulty: fullLocalRun.difficulty || 'moderate',
+        startLat: validStartLat,
+        startLng: validStartLng,
         gpsTrack: fullLocalRun.gpsTrack || [],
         paceData: fullLocalRun.kmSplits || [],
         weatherData: fullLocalRun.weatherData || undefined,
         sessionKey: fullLocalRun.sessionKey || undefined,
         aiCoachEnabled: fullLocalRun.aiCoachEnabled ?? false,
       };
+      
+      console.log('[ManualSync] dbRunData:', JSON.stringify({
+        userId: dbRunData.userId,
+        distance: dbRunData.distance,
+        duration: dbRunData.duration,
+        routeId: dbRunData.routeId,
+        difficulty: dbRunData.difficulty
+      }));
       
       // Get weakness events from local run
       const detectedWeaknesses = fullLocalRun.detectedWeaknesses || [];

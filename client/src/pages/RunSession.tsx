@@ -3701,27 +3701,42 @@ export default function RunSession() {
       try {
         const userProfile = JSON.parse(userProfileStr);
         if (userProfile.id) {
+          // Ensure all required fields have valid values
+          const validDistance = typeof distance === 'number' && !isNaN(distance) ? distance : 0;
+          const validDuration = typeof time === 'number' && !isNaN(time) ? Math.floor(time) : 0;
+          const validRouteId = metadata.routeId && metadata.routeId.length > 0 ? metadata.routeId : undefined;
+          const validStartLat = typeof metadata.startLat === 'number' && !isNaN(metadata.startLat) ? metadata.startLat : undefined;
+          const validStartLng = typeof metadata.startLng === 'number' && !isNaN(metadata.startLng) ? metadata.startLng : undefined;
+          
           const dbRunData = {
             userId: userProfile.id,
-            routeId: metadata.routeId || undefined,
-            distance: distance,
-            duration: time,
+            routeId: validRouteId,
+            distance: validDistance,
+            duration: validDuration,
             runDate: date,
             runTime: timeStr,
             avgPace: calculatePace(),
-            cadence: cadence || undefined,
+            cadence: cadence && cadence > 0 ? cadence : undefined,
             elevation: routeData?.elevation?.gain || undefined,
             elevationGain: routeData?.elevation?.gain || undefined,
             elevationLoss: routeData?.elevation?.loss || undefined,
-            difficulty: metadata.levelId,
-            startLat: metadata.startLat,
-            startLng: metadata.startLng,
+            difficulty: metadata.levelId || 'moderate',
+            startLat: validStartLat,
+            startLng: validStartLng,
             gpsTrack: gpsTrackData,
             paceData: formattedKmSplits,
             weatherData: runWeather || undefined,
             sessionKey: sessionIdRef.current,
             aiCoachEnabled: aiCoachEnabled,
           };
+          
+          console.log('[Save] dbRunData:', JSON.stringify({
+            userId: dbRunData.userId,
+            distance: dbRunData.distance,
+            duration: dbRunData.duration,
+            routeId: dbRunData.routeId,
+            difficulty: dbRunData.difficulty
+          }));
           
           console.log('[Save] Attempting to save run to database for userId:', userProfile.id);
           
