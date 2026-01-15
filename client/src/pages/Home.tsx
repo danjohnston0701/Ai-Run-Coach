@@ -879,6 +879,27 @@ export default function Home() {
         localStorage.removeItem("runAgainUserId");
         sessionStorage.removeItem("runAgainLocationToastShown");
         
+        // Transform route data to expected format for RunSession with elevation
+        const routeData = {
+          id: route.id,
+          routeName: route.name,
+          difficulty: route.difficulty,
+          actualDistance: route.distance,
+          polyline: route.polyline,
+          waypoints: route.waypoints,
+          startLat: route.startLat,
+          startLng: route.startLng,
+          elevation: route.elevationProfile ? {
+            gain: route.elevationGain || 0,
+            loss: route.elevationLoss || 0,
+            profile: route.elevationProfile
+          } : undefined,
+          turnInstructions: route.turnInstructions,
+        };
+        
+        // Store in localStorage for RunSession to use (enables elevation-aware coaching)
+        localStorage.setItem("activeRoute", JSON.stringify(routeData));
+        
         // Navigate to run session with the new route
         const params = new URLSearchParams({
           routeId: route.id,
@@ -2013,11 +2034,43 @@ export default function Home() {
                       {favoriteRoutes.slice(0, 5).map((route) => (
                         <button
                           key={route.id}
-                          onClick={() => {
+                          onClick={async () => {
                             if (!userLocation) {
                               toast.error("Enable location to run saved routes");
                               return;
                             }
+                            
+                            // Fetch full route data including elevation for AI coaching
+                            try {
+                              const response = await fetch(`/api/routes/${route.id}`);
+                              if (response.ok) {
+                                const fullRoute = await response.json();
+                                
+                                // Transform route data to expected format for RunSession
+                                const routeData = {
+                                  id: fullRoute.id,
+                                  routeName: fullRoute.name,
+                                  difficulty: fullRoute.difficulty,
+                                  actualDistance: fullRoute.distance,
+                                  polyline: fullRoute.polyline,
+                                  waypoints: fullRoute.waypoints,
+                                  startLat: fullRoute.startLat,
+                                  startLng: fullRoute.startLng,
+                                  elevation: fullRoute.elevationProfile ? {
+                                    gain: fullRoute.elevationGain || 0,
+                                    loss: fullRoute.elevationLoss || 0,
+                                    profile: fullRoute.elevationProfile
+                                  } : undefined,
+                                  turnInstructions: fullRoute.turnInstructions,
+                                };
+                                
+                                // Store in localStorage for RunSession to use
+                                localStorage.setItem("activeRoute", JSON.stringify(routeData));
+                              }
+                            } catch (err) {
+                              console.warn("Failed to fetch full route data:", err);
+                            }
+                            
                             const params = new URLSearchParams({
                               routeId: route.id,
                               lat: userLocation.lat.toString(),
