@@ -1,10 +1,39 @@
 import express, { type Request, Response, NextFunction } from "express";
+import cors from "cors";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 
 const app = express();
 const httpServer = createServer(app);
+
+// CORS configuration for mobile app and external origins
+const allowedOrigins = [
+  "https://airuncoach.live",
+  "https://www.airuncoach.live",
+  "https://5ae4bd95-19b6-4fcc-a296-0be8a7a1a661-00-1enfoxnqluph3.worf.replit.dev",
+  // Expo Go development
+  "exp://",
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is in allowed list or is a Replit dev URL
+    if (allowedOrigins.some(allowed => origin.startsWith(allowed)) || 
+        origin.includes('.replit.dev') ||
+        origin.includes('.replit.app')) {
+      return callback(null, true);
+    }
+    
+    callback(null, false);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+}));
 
 declare module "http" {
   interface IncomingMessage {
