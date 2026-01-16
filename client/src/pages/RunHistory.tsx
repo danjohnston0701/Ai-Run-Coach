@@ -67,6 +67,11 @@ export default function RunHistory() {
     city: "",
     eventType: "parkrun",
     description: "",
+    scheduleType: "recurring" as "one_time" | "recurring",
+    specificDate: "",
+    recurrencePattern: "weekly" as "daily" | "weekly" | "fortnightly" | "monthly",
+    dayOfWeek: 6, // Saturday by default
+    dayOfMonth: 1,
   });
 
   const parseRunDate = (dateStr: string): Date | null => {
@@ -510,6 +515,11 @@ export default function RunHistory() {
       city: "",
       eventType: "parkrun",
       description: "",
+      scheduleType: "recurring",
+      specificDate: "",
+      recurrencePattern: "weekly",
+      dayOfWeek: 6, // Saturday
+      dayOfMonth: 1,
     });
     setShowCreateEventDialog(true);
   };
@@ -517,6 +527,12 @@ export default function RunHistory() {
   const handleCreateEvent = async () => {
     if (!selectedRunForEvent || !userId || !eventForm.name || !eventForm.country) {
       toast.error("Please fill in the required fields");
+      return;
+    }
+
+    // Validate one-time event has a date
+    if (eventForm.scheduleType === "one_time" && !eventForm.specificDate) {
+      toast.error("Please select a date for the one-time event");
       return;
     }
 
@@ -532,6 +548,11 @@ export default function RunHistory() {
           city: eventForm.city,
           eventType: eventForm.eventType,
           description: eventForm.description,
+          scheduleType: eventForm.scheduleType,
+          specificDate: eventForm.scheduleType === "one_time" ? eventForm.specificDate : null,
+          recurrencePattern: eventForm.scheduleType === "recurring" ? eventForm.recurrencePattern : null,
+          dayOfWeek: eventForm.scheduleType === "recurring" && eventForm.recurrencePattern !== "monthly" && eventForm.recurrencePattern !== "daily" ? eventForm.dayOfWeek : null,
+          dayOfMonth: eventForm.scheduleType === "recurring" && eventForm.recurrencePattern === "monthly" ? eventForm.dayOfMonth : null,
         }),
       });
 
@@ -904,6 +925,114 @@ export default function RunHistory() {
                 rows={3}
                 data-testid="input-event-description"
               />
+            </div>
+
+            <div className="space-y-3 pt-2 border-t border-white/10">
+              <Label className="text-sm font-medium">Schedule</Label>
+              
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="scheduleType"
+                    checked={eventForm.scheduleType === "recurring"}
+                    onChange={() => setEventForm(prev => ({ ...prev, scheduleType: "recurring" }))}
+                    className="accent-primary"
+                  />
+                  <span className="text-sm">Recurring</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="scheduleType"
+                    checked={eventForm.scheduleType === "one_time"}
+                    onChange={() => setEventForm(prev => ({ ...prev, scheduleType: "one_time" }))}
+                    className="accent-primary"
+                  />
+                  <span className="text-sm">One-time Event</span>
+                </label>
+              </div>
+
+              {eventForm.scheduleType === "one_time" && (
+                <div className="space-y-2">
+                  <Label htmlFor="specific-date">Event Date *</Label>
+                  <Input
+                    id="specific-date"
+                    type="date"
+                    value={eventForm.specificDate}
+                    onChange={(e) => setEventForm(prev => ({ ...prev, specificDate: e.target.value }))}
+                    data-testid="input-specific-date"
+                  />
+                </div>
+              )}
+
+              {eventForm.scheduleType === "recurring" && (
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="recurrence-pattern">Frequency</Label>
+                    <Select
+                      value={eventForm.recurrencePattern}
+                      onValueChange={(value: "daily" | "weekly" | "fortnightly" | "monthly") => 
+                        setEventForm(prev => ({ ...prev, recurrencePattern: value }))
+                      }
+                    >
+                      <SelectTrigger id="recurrence-pattern" data-testid="select-recurrence-pattern">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="daily">Daily</SelectItem>
+                        <SelectItem value="weekly">Weekly</SelectItem>
+                        <SelectItem value="fortnightly">Fortnightly</SelectItem>
+                        <SelectItem value="monthly">Monthly</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {(eventForm.recurrencePattern === "weekly" || eventForm.recurrencePattern === "fortnightly") && (
+                    <div className="space-y-2">
+                      <Label htmlFor="day-of-week">Day of Week</Label>
+                      <Select
+                        value={String(eventForm.dayOfWeek)}
+                        onValueChange={(value) => setEventForm(prev => ({ ...prev, dayOfWeek: parseInt(value) }))}
+                      >
+                        <SelectTrigger id="day-of-week" data-testid="select-day-of-week">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="0">Sunday</SelectItem>
+                          <SelectItem value="1">Monday</SelectItem>
+                          <SelectItem value="2">Tuesday</SelectItem>
+                          <SelectItem value="3">Wednesday</SelectItem>
+                          <SelectItem value="4">Thursday</SelectItem>
+                          <SelectItem value="5">Friday</SelectItem>
+                          <SelectItem value="6">Saturday</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {eventForm.recurrencePattern === "monthly" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="day-of-month">Day of Month</Label>
+                      <Select
+                        value={String(eventForm.dayOfMonth)}
+                        onValueChange={(value) => setEventForm(prev => ({ ...prev, dayOfMonth: parseInt(value) }))}
+                      >
+                        <SelectTrigger id="day-of-month" data-testid="select-day-of-month">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
+                            <SelectItem key={day} value={String(day)}>
+                              {day}{day === 1 ? 'st' : day === 2 ? 'nd' : day === 3 ? 'rd' : 'th'}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
           

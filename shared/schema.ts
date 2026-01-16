@@ -111,6 +111,12 @@ export const events = pgTable("events", {
   routeId: varchar("route_id").notNull().references(() => routes.id),
   sourceRunId: varchar("source_run_id"), // The original run this event was created from
   createdByUserId: varchar("created_by_user_id").notNull().references(() => users.id),
+  // Schedule fields
+  scheduleType: text("schedule_type").default("recurring"), // 'one_time' or 'recurring'
+  specificDate: timestamp("specific_date"), // For one-time events
+  recurrencePattern: text("recurrence_pattern"), // 'daily', 'weekly', 'fortnightly', 'monthly'
+  dayOfWeek: integer("day_of_week"), // 0=Sunday, 1=Monday, ... 6=Saturday (for weekly/fortnightly)
+  dayOfMonth: integer("day_of_month"), // 1-31 (for monthly)
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
 });
