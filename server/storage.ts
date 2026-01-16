@@ -6,7 +6,7 @@ import {
   friendRequests, pushSubscriptions, notificationPreferences, notifications, routeRatings,
   aiCoachDescription, aiCoachInstructions, aiCoachKnowledge, aiCoachFaq,
   couponCodes, userCoupons, groupRuns, groupRunParticipants, goals, runAnalyses,
-  aiCoachingLogs, runWeaknessEvents,
+  aiCoachingLogs, runWeaknessEvents, events,
   type User, type InsertUser,
   type PreRegistration, type InsertPreRegistration,
   type Friend, type InsertFriend,
@@ -31,6 +31,7 @@ import {
   type RunAnalysis, type InsertRunAnalysis,
   type AiCoachingLog, type InsertAiCoachingLog,
   type RunWeaknessEvent, type InsertRunWeaknessEvent,
+  type Event, type InsertEvent,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -207,6 +208,16 @@ export interface IStorage {
   updateWeaknessEventCause(id: string, causeTag: string | null, causeNote: string | null): Promise<RunWeaknessEvent | undefined>;
   updateWeaknessEventReview(id: string, userComment: string | null, isIrrelevant: boolean): Promise<RunWeaknessEvent | undefined>;
   deleteRunWeaknessEvent(id: string): Promise<void>;
+
+  // Events
+  createEvent(data: InsertEvent): Promise<Event>;
+  getEvent(id: string): Promise<Event | undefined>;
+  getAllEvents(): Promise<Event[]>;
+  getEventsByCountry(country: string): Promise<Event[]>;
+  getEventsGroupedByCountry(): Promise<Record<string, Event[]>>;
+  getUserEventRuns(userId: string, eventId: string): Promise<Run[]>;
+  updateEvent(id: string, data: Partial<InsertEvent>): Promise<Event | undefined>;
+  deleteEvent(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1542,6 +1553,80 @@ export class DatabaseStorage implements IStorage {
   async deleteRunWeaknessEvent(id: string): Promise<void> {
     return withRetry(async () => {
       await db.delete(runWeaknessEvents).where(eq(runWeaknessEvents.id, id));
+    });
+  }
+
+  // Events
+  async createEvent(data: InsertEvent): Promise<Event> {
+    return withRetry(async () => {
+      const [event] = await db.insert(events).values(data).returning();
+      return event;
+    });
+  }
+
+  async getEvent(id: string): Promise<Event | undefined> {
+    return withRetry(async () => {
+      const [event] = await db.select().from(events).where(eq(events.id, id));
+      return event;
+    });
+  }
+
+  async getAllEvents(): Promise<Event[]> {
+    return withRetry(async () => {
+      return db.select().from(events)
+        .where(eq(events.isActive, true))
+        .orderBy(events.country, events.name);
+    });
+  }
+
+  async getEventsByCountry(country: string): Promise<Event[]> {
+    return withRetry(async () => {
+      return db.select().from(events)
+        .where(and(eq(events.country, country), eq(events.isActive, true)))
+        .orderBy(events.name);
+    });
+  }
+
+  async getEventsGroupedByCountry(): Promise<Record<string, Event[]>> {
+    return withRetry(async () => {
+      const allEvents = await db.select().from(events)
+        .where(eq(events.isActive, true))
+        .orderBy(events.country, events.name);
+      
+      const grouped: Record<string, Event[]> = {};
+      for (const event of allEvents) {
+        if (!grouped[event.country]) {
+          grouped[event.country] = [];
+        }
+        grouped[event.country].push(event);
+      }
+      return grouped;
+    });
+  }
+
+  async getUserEventRuns(userId: string, eventId: string): Promise<Run[]> {
+    return withRetry(async () => {
+      return db.select().from(runs)
+        .where(and(eq(runs.userId, userId), eq(runs.eventId, eventId)))
+        .orderBy(desc(runs.completedAt));
+    });
+  }
+
+  async updateEvent(id: string, data: Partial<InsertEvent>): Promise<Event | undefined> {
+    return withRetry(async () => {
+      const [event] = await db.update(events)
+        .set(data)
+        .where(eq(events.id, id))
+        .returning();
+      return event;
+    });
+  }
+
+  async deleteEvent(id: string): Promise<void> {
+    return withRetry(async () => {
+      await db.update(events)
+        .set({ isActive: false })
+        .where(eq(events.id, id));
     });
   }
 }

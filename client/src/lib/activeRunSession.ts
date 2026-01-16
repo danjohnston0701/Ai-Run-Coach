@@ -15,6 +15,7 @@ export interface ActiveRunSession {
   levelId: string;
   targetTimeSeconds: number;
   exerciseType?: 'running' | 'walking';
+  eventId?: string; // ID of the event if running as part of an event
   audioEnabled: boolean;
   aiCoachEnabled: boolean;
   kmSplits: number[];

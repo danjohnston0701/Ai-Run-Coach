@@ -47,10 +47,11 @@ The application follows a monorepo structure with `/client` for the frontend, `/
 - **Paywall**: Enforced both client-side via hooks and server-side for defense in depth.
 
 ### User Interface & Features
-- **Pages**: Landing Page, Profile Setup (onboarding), Home (run configuration), Run Session (live tracking), Run History, Run Insights (detailed post-run analysis), Authentication (Login, Pre-registration), Pricing.
+- **Pages**: Landing Page, Profile Setup (onboarding), Home (run configuration), Run Session (live tracking), Run History, Run Insights (detailed post-run analysis), Events (browse public events by country), Authentication (Login, Pre-registration), Pricing.
 - **Run Insights**: Displays real-time data, pace gradient maps, km splits, conditional heart rate, and elevation profiles. Features Garmin-style expandable performance charts (pace, heart rate, elevation, cadence) with time/distance toggle and brand color styling.
 - **AI Run Analysis**: Post-run feature that generates comprehensive AI coaching insights including highlights, struggles, personal bests, demographic comparison, and actionable tips. Analysis is cached in the database for instant retrieval on return visits.
 - **Social Sharing**: Generates branded images for Facebook/Instagram sharing with run summaries (map, distance, time, pace, difficulty, branding) using HTML Canvas.
+- **Events System**: Public events organized by country (parkruns, marathons, 5Ks, etc.) that users can browse and run. Admins can create events from completed runs. Event runs are tracked with eventId to link user runs to specific events.
 
 ## External Dependencies
 

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "framer-motion";
-import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, MicOff, Settings, Users, Check, Copy, Radio, Target, UserCog, LogOut, Search, Heart, Activity } from "lucide-react";
+import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, MicOff, Settings, Users, Check, Copy, Radio, Target, UserCog, LogOut, Search, Heart, Activity, Calendar } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -1537,6 +1537,17 @@ export default function Home() {
                 >
                   <Target className="w-5 h-5 text-primary" />
                   <span className="font-medium">Goals</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setLocation("/events");
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-muted/50 transition-colors text-left"
+                  data-testid="menu-events"
+                >
+                  <Calendar className="w-5 h-5 text-primary" />
+                  <span className="font-medium">Events</span>
                 </button>
                 <button
                   onClick={() => {

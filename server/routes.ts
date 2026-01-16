@@ -1130,6 +1130,158 @@ export async function registerRoutes(
     }
   });
 
+  // Events endpoints
+  app.get("/api/events", async (req, res) => {
+    try {
+      const events = await storage.getAllEvents();
+      res.json(events);
+    } catch (error) {
+      console.error("Get events error:", error);
+      res.status(500).json({ error: "Failed to get events" });
+    }
+  });
+
+  app.get("/api/events/grouped", async (req, res) => {
+    try {
+      const grouped = await storage.getEventsGroupedByCountry();
+      res.json(grouped);
+    } catch (error) {
+      console.error("Get grouped events error:", error);
+      res.status(500).json({ error: "Failed to get grouped events" });
+    }
+  });
+
+  app.get("/api/events/:id", async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.id);
+      if (!event) {
+        return res.status(404).json({ error: "Event not found" });
+      }
+      // Also fetch the route data for the event
+      const route = await storage.getRoute(event.routeId);
+      res.json({ ...event, route });
+    } catch (error) {
+      console.error("Get event error:", error);
+      res.status(500).json({ error: "Failed to get event" });
+    }
+  });
+
+  app.get("/api/events/:id/user-runs/:userId", async (req, res) => {
+    try {
+      const runs = await storage.getUserEventRuns(req.params.userId, req.params.id);
+      res.json(runs);
+    } catch (error) {
+      console.error("Get user event runs error:", error);
+      res.status(500).json({ error: "Failed to get user event runs" });
+    }
+  });
+
+  // Admin-only: Create event from a run
+  app.post("/api/events/from-run/:runId", async (req, res) => {
+    try {
+      const { userId, name, country, city, eventType, description } = req.body;
+      
+      // Verify user is admin
+      const user = await storage.getUser(userId);
+      if (!user || !user.isAdmin) {
+        return res.status(403).json({ error: "Only admins can create events" });
+      }
+      
+      // Get the source run
+      const run = await storage.getRun(req.params.runId);
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+      
+      // Check if run has a route, if not create one from GPS track
+      let routeId = run.routeId;
+      
+      if (!routeId && run.gpsTrack) {
+        // Create a route from the run's GPS track
+        const gpsTrack = run.gpsTrack as Array<{ lat: number; lng: number }>;
+        const startPoint = gpsTrack[0];
+        const endPoint = gpsTrack[gpsTrack.length - 1];
+        
+        const newRoute = await storage.createRoute({
+          userId: userId,
+          name: name,
+          distance: run.distance,
+          difficulty: run.difficulty || 'moderate',
+          startLat: startPoint?.lat || run.startLat || 0,
+          startLng: startPoint?.lng || run.startLng || 0,
+          endLat: endPoint?.lat,
+          endLng: endPoint?.lng,
+          waypoints: gpsTrack,
+          elevationGain: run.elevationGain,
+          elevationLoss: run.elevationLoss,
+          source: 'event',
+          sourceRunId: run.id,
+        });
+        routeId = newRoute.id;
+      }
+      
+      if (!routeId) {
+        return res.status(400).json({ error: "Run has no route or GPS track to create event from" });
+      }
+      
+      // Create the event
+      const event = await storage.createEvent({
+        name,
+        country,
+        city,
+        description,
+        eventType: eventType || 'parkrun',
+        routeId,
+        sourceRunId: run.id,
+        createdByUserId: userId,
+      });
+      
+      res.status(201).json(event);
+    } catch (error) {
+      console.error("Create event from run error:", error);
+      res.status(500).json({ error: "Failed to create event" });
+    }
+  });
+
+  app.put("/api/events/:id", async (req, res) => {
+    try {
+      const { userId, ...updateData } = req.body;
+      
+      // Verify user is admin
+      const user = await storage.getUser(userId);
+      if (!user || !user.isAdmin) {
+        return res.status(403).json({ error: "Only admins can update events" });
+      }
+      
+      const event = await storage.updateEvent(req.params.id, updateData);
+      if (!event) {
+        return res.status(404).json({ error: "Event not found" });
+      }
+      res.json(event);
+    } catch (error) {
+      console.error("Update event error:", error);
+      res.status(500).json({ error: "Failed to update event" });
+    }
+  });
+
+  app.delete("/api/events/:id", async (req, res) => {
+    try {
+      const { userId } = req.body;
+      
+      // Verify user is admin
+      const user = await storage.getUser(userId);
+      if (!user || !user.isAdmin) {
+        return res.status(403).json({ error: "Only admins can delete events" });
+      }
+      
+      await storage.deleteEvent(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete event error:", error);
+      res.status(500).json({ error: "Failed to delete event" });
+    }
+  });
+
   // Weather Impact Analysis endpoint
   app.get("/api/users/:userId/weather-impact", async (req, res) => {
     try {

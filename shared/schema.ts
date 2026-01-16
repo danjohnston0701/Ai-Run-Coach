@@ -101,10 +101,25 @@ export const routes = pgTable("routes", {
   sourceRunId: varchar("source_run_id"),
 });
 
+export const events = pgTable("events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  country: text("country").notNull(),
+  city: text("city"),
+  description: text("description"),
+  eventType: text("event_type").default("parkrun"), // parkrun, marathon, half_marathon, 10k, 5k, trail, other
+  routeId: varchar("route_id").notNull().references(() => routes.id),
+  sourceRunId: varchar("source_run_id"), // The original run this event was created from
+  createdByUserId: varchar("created_by_user_id").notNull().references(() => users.id),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const runs = pgTable("runs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
   routeId: varchar("route_id").references(() => routes.id),
+  eventId: varchar("event_id").references(() => events.id),
   groupRunId: varchar("group_run_id"),
   name: text("name"),
   distance: real("distance").notNull(),
@@ -391,6 +406,7 @@ export const insertUserSchema = createInsertSchema(users).omit({ id: true, userC
 export const insertPreRegistrationSchema = createInsertSchema(preRegistrations).omit({ id: true, createdAt: true });
 export const insertFriendSchema = createInsertSchema(friends).omit({ id: true, createdAt: true });
 export const insertRouteSchema = createInsertSchema(routes).omit({ id: true, createdAt: true });
+export const insertEventSchema = createInsertSchema(events).omit({ id: true, createdAt: true });
 export const insertRunSchema = createInsertSchema(runs).omit({ id: true, completedAt: true });
 export const insertLiveRunSessionSchema = createInsertSchema(liveRunSessions).omit({ id: true, startedAt: true });
 export const insertGarminDataSchema = createInsertSchema(garminData).omit({ id: true, syncedAt: true });
@@ -423,6 +439,9 @@ export type Friend = typeof friends.$inferSelect;
 
 export type InsertRoute = z.infer<typeof insertRouteSchema>;
 export type Route = typeof routes.$inferSelect;
+
+export type InsertEvent = z.infer<typeof insertEventSchema>;
+export type Event = typeof events.$inferSelect;
 
 export type InsertRun = z.infer<typeof insertRunSchema>;
 export type Run = typeof runs.$inferSelect;

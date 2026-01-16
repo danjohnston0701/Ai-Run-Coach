@@ -85,6 +85,7 @@ async function migrateRuns(userId: string): Promise<number> {
           gpsTrack: run.gpsTrack || undefined,
           paceData: run.kmSplits || undefined,
           weatherData: run.weatherData || undefined,
+          eventId: run.eventId || undefined,
         };
         
         const response = await fetch('/api/runs', {

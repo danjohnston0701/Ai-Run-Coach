@@ -7,8 +7,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { motion } from "framer-motion";
 import { 
   ArrowLeft, Calendar, Route, ArrowRight, BarChart3, ChevronDown, ChevronUp,
-  Cloud, CloudOff, RefreshCw, AlertCircle, Filter
+  Cloud, CloudOff, RefreshCw, AlertCircle, Filter, Plus, Globe
 } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import WeatherImpactAnalysis from "@/components/WeatherImpactAnalysis";
 import { toast } from "sonner";
 
@@ -47,12 +51,23 @@ export default function RunHistory() {
   const [runs, setRuns] = useState<RunData[]>([]);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [showWeatherAnalysis, setShowWeatherAnalysis] = useState(false);
   const [syncingRunId, setSyncingRunId] = useState<string | null>(null);
   const [timeFrame, setTimeFrame] = useState<TimeFrame>("last_7_days");
   const [customStartDate, setCustomStartDate] = useState<string>("");
   const [customEndDate, setCustomEndDate] = useState<string>("");
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
+  const [showCreateEventDialog, setShowCreateEventDialog] = useState(false);
+  const [selectedRunForEvent, setSelectedRunForEvent] = useState<RunData | null>(null);
+  const [creatingEvent, setCreatingEvent] = useState(false);
+  const [eventForm, setEventForm] = useState({
+    name: "",
+    country: "",
+    city: "",
+    eventType: "parkrun",
+    description: "",
+  });
 
   const parseRunDate = (dateStr: string): Date | null => {
     if (!dateStr) return null;
@@ -224,6 +239,7 @@ export default function RunHistory() {
       const dbRunData = {
         userId,
         routeId: validRouteId,
+        eventId: fullLocalRun.eventId || undefined,
         distance: validDistance,
         duration: validDuration,
         runDate: fullLocalRun.date,
@@ -373,6 +389,7 @@ export default function RunHistory() {
           const userProfile = JSON.parse(userProfileStr);
           if (userProfile.id) {
             setUserId(userProfile.id);
+            setIsAdmin(!!userProfile.isAdmin);
             const response = await fetch(`/api/users/${userProfile.id}/runs`);
             if (response.ok) {
               const data = await response.json();
@@ -482,6 +499,56 @@ export default function RunHistory() {
     if (!dateStr) return "";
     const date = new Date(dateStr);
     return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
+  const openCreateEventDialog = (run: RunData, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedRunForEvent(run);
+    setEventForm({
+      name: run.name || `Run on ${run.date}`,
+      country: "",
+      city: "",
+      eventType: "parkrun",
+      description: "",
+    });
+    setShowCreateEventDialog(true);
+  };
+
+  const handleCreateEvent = async () => {
+    if (!selectedRunForEvent || !userId || !eventForm.name || !eventForm.country) {
+      toast.error("Please fill in the required fields");
+      return;
+    }
+
+    setCreatingEvent(true);
+    try {
+      const response = await fetch(`/api/events/from-run/${selectedRunForEvent.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId,
+          name: eventForm.name,
+          country: eventForm.country,
+          city: eventForm.city,
+          eventType: eventForm.eventType,
+          description: eventForm.description,
+        }),
+      });
+
+      if (response.ok) {
+        toast.success("Event created successfully!");
+        setShowCreateEventDialog(false);
+        setSelectedRunForEvent(null);
+      } else {
+        const data = await response.json();
+        toast.error(data.error || "Failed to create event");
+      }
+    } catch (error) {
+      console.error("Create event error:", error);
+      toast.error("Failed to create event");
+    } finally {
+      setCreatingEvent(false);
+    }
   };
 
   return (
@@ -739,6 +806,21 @@ export default function RunHistory() {
                         <div className="text-xl font-display font-bold text-primary leading-none">{formatTime(run.totalTime)}</div>
                       </div>
                     </div>
+
+                    {isAdmin && run.dbSynced && (
+                      <div className="mt-3 pt-3 border-t border-white/5">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full text-xs border-primary/30 text-primary hover:bg-primary/10"
+                          onClick={(e) => openCreateEventDialog(run, e)}
+                          data-testid={`button-create-event-${run.id}`}
+                        >
+                          <Globe className="w-3 h-3 mr-2" />
+                          Create Public Event
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -746,6 +828,103 @@ export default function RunHistory() {
           ))}
         </div>
       )}
+
+      <Dialog open={showCreateEventDialog} onOpenChange={setShowCreateEventDialog}>
+        <DialogContent className="bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="font-display uppercase tracking-wider">Create Public Event</DialogTitle>
+            <DialogDescription>
+              Create a public event from this run so other users can run the same route.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="event-name">Event Name *</Label>
+              <Input
+                id="event-name"
+                value={eventForm.name}
+                onChange={(e) => setEventForm(prev => ({ ...prev, name: e.target.value }))}
+                placeholder="e.g., Auckland Domain Parkrun"
+                data-testid="input-event-name"
+              />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="event-country">Country *</Label>
+                <Input
+                  id="event-country"
+                  value={eventForm.country}
+                  onChange={(e) => setEventForm(prev => ({ ...prev, country: e.target.value }))}
+                  placeholder="e.g., New Zealand"
+                  data-testid="input-event-country"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="event-city">City</Label>
+                <Input
+                  id="event-city"
+                  value={eventForm.city}
+                  onChange={(e) => setEventForm(prev => ({ ...prev, city: e.target.value }))}
+                  placeholder="e.g., Auckland"
+                  data-testid="input-event-city"
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="event-type">Event Type</Label>
+              <Select
+                value={eventForm.eventType}
+                onValueChange={(value) => setEventForm(prev => ({ ...prev, eventType: value }))}
+              >
+                <SelectTrigger id="event-type" data-testid="select-event-type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="parkrun">Park Run</SelectItem>
+                  <SelectItem value="5k">5K</SelectItem>
+                  <SelectItem value="10k">10K</SelectItem>
+                  <SelectItem value="half_marathon">Half Marathon</SelectItem>
+                  <SelectItem value="marathon">Marathon</SelectItem>
+                  <SelectItem value="trail">Trail Run</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="event-description">Description</Label>
+              <Textarea
+                id="event-description"
+                value={eventForm.description}
+                onChange={(e) => setEventForm(prev => ({ ...prev, description: e.target.value }))}
+                placeholder="Describe the event route and any important details..."
+                rows={3}
+                data-testid="input-event-description"
+              />
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowCreateEventDialog(false)}
+              data-testid="button-cancel-event"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateEvent}
+              disabled={creatingEvent || !eventForm.name || !eventForm.country}
+              data-testid="button-submit-event"
+            >
+              {creatingEvent ? "Creating..." : "Create Event"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

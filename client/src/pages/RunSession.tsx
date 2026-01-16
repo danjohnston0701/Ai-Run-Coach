@@ -63,6 +63,8 @@ interface RouteData {
     minElevation: number;
     profile?: ElevationPoint[];
   };
+  eventId?: string;
+  eventName?: string;
 }
 
 interface Position {
@@ -657,6 +659,7 @@ export default function RunSession() {
     routeId: urlRouteId,
     targetTimeSeconds: urlTargetTimeSeconds,
     exerciseType: urlExerciseType,
+    eventId: "" as string | undefined,
   });
 
   const calculateAge = (dob: string): number | undefined => {
@@ -731,6 +734,7 @@ export default function RunSession() {
         startLng: route.startLng ?? sessionMetadataRef.current.startLng,
         targetDistance: route.actualDistance?.toString() || sessionMetadataRef.current.targetDistance,
         levelId: route.difficulty || sessionMetadataRef.current.levelId,
+        eventId: route.eventId || sessionMetadataRef.current.eventId,
       };
     }
     
@@ -778,6 +782,7 @@ export default function RunSession() {
           routeId: savedSession.routeId,
           targetTimeSeconds: savedSession.targetTimeSeconds,
           exerciseType: savedSession.exerciseType || 'running',
+          eventId: savedSession.eventId,
         };
         
         if (savedSession.routePolyline) {
@@ -3641,6 +3646,7 @@ export default function RunSession() {
       lng: metadata.startLng,
       routeName: metadata.routeName,
       routeId: metadata.routeId,
+      eventId: metadata.eventId || undefined, // Preserve event linkage for offline runs
       gpsTrack: gpsTrackData,
       avgCadence: cadence,
       kmSplits: formattedKmSplits,
@@ -3708,9 +3714,12 @@ export default function RunSession() {
           const validStartLat = typeof metadata.startLat === 'number' && !isNaN(metadata.startLat) ? metadata.startLat : undefined;
           const validStartLng = typeof metadata.startLng === 'number' && !isNaN(metadata.startLng) ? metadata.startLng : undefined;
           
+          const validEventId = metadata.eventId && metadata.eventId.length > 0 ? metadata.eventId : undefined;
+          
           const dbRunData = {
             userId: userProfile.id,
             routeId: validRouteId,
+            eventId: validEventId,
             distance: validDistance,
             duration: validDuration,
             runDate: date,
