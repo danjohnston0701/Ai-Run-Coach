@@ -1179,7 +1179,7 @@ export async function registerRoutes(
   // Admin-only: Create event from a run
   app.post("/api/events/from-run/:runId", async (req, res) => {
     try {
-      const { userId, name, country, city, eventType, description } = req.body;
+      const { userId, name, country, city, eventType, description, scheduleType, specificDate, recurrencePattern, dayOfWeek, dayOfMonth } = req.body;
       
       // Verify user is admin
       const user = await storage.getUser(userId);
@@ -1234,6 +1234,11 @@ export async function registerRoutes(
         routeId,
         sourceRunId: run.id,
         createdByUserId: userId,
+        scheduleType: scheduleType || 'recurring',
+        specificDate: specificDate ? new Date(specificDate) : null,
+        recurrencePattern: recurrencePattern || null,
+        dayOfWeek: dayOfWeek !== null && dayOfWeek !== undefined ? dayOfWeek : null,
+        dayOfMonth: dayOfMonth !== null && dayOfMonth !== undefined ? dayOfMonth : null,
       });
       
       res.status(201).json(event);

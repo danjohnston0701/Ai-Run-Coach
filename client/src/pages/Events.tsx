@@ -29,6 +29,74 @@ interface Event {
   route?: EventRoute;
   isActive: boolean;
   createdAt: string;
+  scheduleType?: string;
+  specificDate?: string;
+  recurrencePattern?: string;
+  dayOfWeek?: number;
+  dayOfMonth?: number;
+}
+
+function getNextEventDate(event: Event): Date | null {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  if (event.scheduleType === "one_time" && event.specificDate) {
+    const date = new Date(event.specificDate);
+    return date >= now ? date : null;
+  }
+
+  if (event.scheduleType === "recurring") {
+    const pattern = event.recurrencePattern;
+
+    if (pattern === "daily") {
+      return now;
+    }
+
+    if ((pattern === "weekly" || pattern === "fortnightly") && event.dayOfWeek !== undefined) {
+      const targetDay = event.dayOfWeek;
+      const currentDay = now.getDay();
+      let daysUntil = targetDay - currentDay;
+      if (daysUntil < 0) daysUntil += 7;
+      if (daysUntil === 0) {
+        return now;
+      }
+      const nextDate = new Date(now);
+      nextDate.setDate(now.getDate() + daysUntil);
+      return nextDate;
+    }
+
+    if (pattern === "monthly" && event.dayOfMonth !== undefined) {
+      const targetDay = event.dayOfMonth;
+      const currentDate = now.getDate();
+      const nextDate = new Date(now);
+      
+      if (currentDate <= targetDay) {
+        nextDate.setDate(targetDay);
+      } else {
+        nextDate.setMonth(nextDate.getMonth() + 1);
+        nextDate.setDate(targetDay);
+      }
+      return nextDate;
+    }
+  }
+
+  return null;
+}
+
+function formatNextEventDate(date: Date | null): string {
+  if (!date) return "No upcoming date";
+  
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const diffDays = Math.floor((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Tomorrow";
+  if (diffDays < 7) {
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    return days[date.getDay()];
+  }
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
 const eventTypeLabels: Record<string, string> = {
@@ -75,6 +143,8 @@ function EventCard({ event, onSelect }: { event: Event; onSelect: () => void }) 
   };
 
   const route = event.route;
+  const nextDate = getNextEventDate(event);
+  const nextDateLabel = formatNextEventDate(nextDate);
 
   return (
     <Card
@@ -96,6 +166,16 @@ function EventCard({ event, onSelect }: { event: Event; onSelect: () => void }) 
           <Badge variant="outline" className="text-xs">
             {eventTypeLabels[event.eventType] || event.eventType}
           </Badge>
+        </div>
+
+        <div className="flex items-center gap-2 text-sm mt-2">
+          <Calendar className="w-4 h-4 text-primary" />
+          <span className="text-primary font-medium">{nextDateLabel}</span>
+          {event.scheduleType === "recurring" && event.recurrencePattern && (
+            <span className="text-xs text-muted-foreground">
+              ({event.recurrencePattern === "fortnightly" ? "every 2 weeks" : event.recurrencePattern})
+            </span>
+          )}
         </div>
 
         {route && (
@@ -139,6 +219,19 @@ function CountrySection({
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const flag = countryFlags[country] || "🌍";
 
+  // Sort events by next occurrence date (soonest first)
+  const sortedEvents = [...events].sort((a, b) => {
+    const dateA = getNextEventDate(a);
+    const dateB = getNextEventDate(b);
+    
+    // Events with no upcoming date go to the end
+    if (!dateA && !dateB) return 0;
+    if (!dateA) return 1;
+    if (!dateB) return -1;
+    
+    return dateA.getTime() - dateB.getTime();
+  });
+
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen} className="mb-4">
       <CollapsibleTrigger className="w-full">
@@ -155,7 +248,7 @@ function CountrySection({
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="grid gap-3 mt-3 pl-2">
-          {events.map((event) => (
+          {sortedEvents.map((event) => (
             <EventCard
               key={event.id}
               event={event}
