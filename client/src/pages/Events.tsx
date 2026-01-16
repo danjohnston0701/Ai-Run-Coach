@@ -40,29 +40,55 @@ function getNextEventDate(event: Event): Date | null {
   const now = new Date();
   now.setHours(0, 0, 0, 0);
 
+  // Handle one-time events
   if (event.scheduleType === "one_time" && event.specificDate) {
     const date = new Date(event.specificDate);
+    date.setHours(0, 0, 0, 0);
     return date >= now ? date : null;
   }
 
-  if (event.scheduleType === "recurring") {
-    const pattern = event.recurrencePattern;
+  // Handle recurring events (default to recurring if scheduleType is missing for backwards compatibility)
+  if (event.scheduleType === "recurring" || !event.scheduleType) {
+    const pattern = event.recurrencePattern || "weekly"; // Default to weekly
 
     if (pattern === "daily") {
       return now;
     }
 
-    if ((pattern === "weekly" || pattern === "fortnightly") && event.dayOfWeek !== undefined) {
+    if (pattern === "weekly" && event.dayOfWeek !== undefined) {
       const targetDay = event.dayOfWeek;
       const currentDay = now.getDay();
       let daysUntil = targetDay - currentDay;
       if (daysUntil < 0) daysUntil += 7;
-      if (daysUntil === 0) {
-        return now;
-      }
       const nextDate = new Date(now);
       nextDate.setDate(now.getDate() + daysUntil);
       return nextDate;
+    }
+
+    if (pattern === "fortnightly" && event.dayOfWeek !== undefined) {
+      // Use event creation date as anchor for fortnightly calculation
+      const createdAt = event.createdAt ? new Date(event.createdAt) : new Date();
+      createdAt.setHours(0, 0, 0, 0);
+      
+      const targetDay = event.dayOfWeek;
+      const currentDay = now.getDay();
+      let daysUntil = targetDay - currentDay;
+      if (daysUntil < 0) daysUntil += 7;
+      
+      const nextOnTargetDay = new Date(now);
+      nextOnTargetDay.setDate(now.getDate() + daysUntil);
+      
+      // Calculate weeks since anchor and check if this week is even (fortnightly)
+      const daysSinceAnchor = Math.floor((nextOnTargetDay.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
+      const weeksSinceAnchor = Math.floor(daysSinceAnchor / 7);
+      
+      if (weeksSinceAnchor % 2 === 0) {
+        return nextOnTargetDay;
+      } else {
+        // Add another week
+        nextOnTargetDay.setDate(nextOnTargetDay.getDate() + 7);
+        return nextOnTargetDay;
+      }
     }
 
     if (pattern === "monthly" && event.dayOfMonth !== undefined) {
@@ -71,16 +97,32 @@ function getNextEventDate(event: Event): Date | null {
       const nextDate = new Date(now);
       
       if (currentDate <= targetDay) {
-        nextDate.setDate(targetDay);
+        // Try this month
+        const lastDayOfMonth = new Date(nextDate.getFullYear(), nextDate.getMonth() + 1, 0).getDate();
+        nextDate.setDate(Math.min(targetDay, lastDayOfMonth));
       } else {
+        // Move to next month
         nextDate.setMonth(nextDate.getMonth() + 1);
-        nextDate.setDate(targetDay);
+        const lastDayOfMonth = new Date(nextDate.getFullYear(), nextDate.getMonth() + 1, 0).getDate();
+        nextDate.setDate(Math.min(targetDay, lastDayOfMonth));
       }
+      return nextDate;
+    }
+
+    // Fallback for recurring events with dayOfWeek but no pattern specified
+    if (event.dayOfWeek !== undefined) {
+      const targetDay = event.dayOfWeek;
+      const currentDay = now.getDay();
+      let daysUntil = targetDay - currentDay;
+      if (daysUntil < 0) daysUntil += 7;
+      const nextDate = new Date(now);
+      nextDate.setDate(now.getDate() + daysUntil);
       return nextDate;
     }
   }
 
-  return null;
+  // Default: return today for events without proper schedule data
+  return now;
 }
 
 function formatNextEventDate(date: Date | null): string {
