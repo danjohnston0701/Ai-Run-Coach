@@ -3272,7 +3272,7 @@ export default function RunSession() {
           
           // Use speak() with force=true for user questions to bypass all checks
           if (userMessage) {
-            console.log("User question - forcing speech response");
+            console.log("User question - forcing speech response:", coachMessage.trim().substring(0, 50));
             speak(coachMessage.trim(), { force: true, domain: 'coach' });
           } else {
             speakCoaching(coachMessage.trim());
@@ -3287,10 +3287,21 @@ export default function RunSession() {
             prompt: userMessage || undefined,
             latencyMs: advice.latencyMs,
           });
+        } else if (userMessage) {
+          console.warn("Coach returned empty response for user question");
+          speak("I heard you. Let me think about that as we run.", { force: true, domain: 'coach' });
         }
+      } else if (userMessage) {
+        console.error("Coaching API error:", response.status);
+        toast.error("Coach unavailable - try again shortly");
+        speak("I'm having trouble connecting. Keep running, you're doing great!", { force: true, domain: 'system' });
       }
     } catch (error) {
       console.error('AI coaching error:', error);
+      if (userMessage) {
+        toast.error("Coach couldn't respond - please try again");
+        speak("Sorry, I couldn't process that. Please try again.", { force: true, domain: 'system' });
+      }
     } finally {
       setIsCoaching(false);
     }
@@ -3433,6 +3444,7 @@ export default function RunSession() {
         speak("Okay! I'll give you regular coaching updates.", { domain: 'system' });
         toast.success("Regular coaching enabled");
       } else {
+        toast.info(`Asking coach: "${transcript.substring(0, 40)}${transcript.length > 40 ? '...' : ''}"`);
         fetchCoaching(transcript);
       }
     };
