@@ -2369,12 +2369,19 @@ export default function RunSession() {
           setMessage(statement.text);
           speak(statement.text, { domain: 'coach' });
           setLastMessageTime(Date.now());
+          
+          // Log the predefined coaching statement
+          saveCoachingLog({
+            eventType: 'phase_coaching',
+            topic: `${currentPhase}_${statement.category}`,
+            responseText: statement.text,
+          });
         }
       }
     }, 20000);
 
     return () => clearInterval(interval);
-  }, [active, lastMessageTime, gpsStatus, speak, distance, statementUsageCounts]);
+  }, [active, lastMessageTime, gpsStatus, speak, distance, statementUsageCounts, saveCoachingLog]);
 
   // Timestamp-based timer that works even when screen is off
   // Timer only pauses when user explicitly pauses (active = false)

@@ -185,6 +185,22 @@ export default function RunInsights() {
   
   // Run-to-route conversion state
   const [isSavingRoute, setIsSavingRoute] = useState(false);
+  
+  // Create Event state (admin only)
+  const [showCreateEventModal, setShowCreateEventModal] = useState(false);
+  const [isCreatingEvent, setIsCreatingEvent] = useState(false);
+  const [eventForm, setEventForm] = useState({
+    name: "",
+    country: "",
+    city: "",
+    eventType: "parkrun",
+    description: "",
+    scheduleType: "recurring" as "one_time" | "recurring",
+    recurrencePattern: "weekly" as "daily" | "weekly" | "fortnightly" | "monthly",
+    dayOfWeek: 6, // Saturday default
+    dayOfMonth: 1,
+    specificDate: "",
+  });
 
   useEffect(() => {
     const loadRun = async () => {
@@ -232,6 +248,7 @@ export default function RunInsights() {
             kmSplits: dbRun.paceData,
             weatherData: dbRun.weatherData,
             routeId: dbRun.routeId,
+            aiCoachEnabled: dbRun.aiCoachEnabled,
           } as any;
           setRun(mappedRun);
           if ((mappedRun as any).rating) {
@@ -575,6 +592,77 @@ export default function RunInsights() {
     localStorage.setItem("runAgainRunName", run.name || `Run from ${run.date}`);
     localStorage.setItem("runAgainUserId", userId);
     setLocation("/");
+  };
+
+  const handleCreateEvent = async () => {
+    if (!run || !params?.id) return;
+    
+    const profile = localStorage.getItem("userProfile");
+    const userId = profile ? JSON.parse(profile).id : null;
+    
+    if (!userId) {
+      toast.error("Please log in to create events");
+      return;
+    }
+    
+    if (!eventForm.name.trim() || !eventForm.country.trim()) {
+      toast.error("Event name and country are required");
+      return;
+    }
+    
+    if (eventForm.scheduleType === "one_time" && !eventForm.specificDate) {
+      toast.error("Event date is required for one-time events");
+      return;
+    }
+    
+    setIsCreatingEvent(true);
+    try {
+      const response = await fetch(`/api/events/from-run/${params.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId,
+          name: eventForm.name,
+          country: eventForm.country,
+          city: eventForm.city || undefined,
+          eventType: eventForm.eventType,
+          description: eventForm.description || undefined,
+          scheduleType: eventForm.scheduleType,
+          specificDate: eventForm.scheduleType === "one_time" ? eventForm.specificDate : undefined,
+          recurrencePattern: eventForm.scheduleType === "recurring" ? eventForm.recurrencePattern : undefined,
+          dayOfWeek: eventForm.scheduleType === "recurring" && ["weekly", "fortnightly"].includes(eventForm.recurrencePattern) 
+            ? eventForm.dayOfWeek : undefined,
+          dayOfMonth: eventForm.scheduleType === "recurring" && eventForm.recurrencePattern === "monthly" 
+            ? eventForm.dayOfMonth : undefined,
+        }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to create event");
+      }
+      
+      const result = await response.json();
+      toast.success(`Event "${eventForm.name}" created successfully!`);
+      setShowCreateEventModal(false);
+      setEventForm({
+        name: "",
+        country: "",
+        city: "",
+        eventType: "parkrun",
+        description: "",
+        scheduleType: "recurring",
+        recurrencePattern: "weekly",
+        dayOfWeek: 6,
+        dayOfMonth: 1,
+        specificDate: "",
+      });
+    } catch (error) {
+      console.error("Failed to create event:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to create event");
+    } finally {
+      setIsCreatingEvent(false);
+    }
   };
 
   const handleDeleteRun = async () => {
@@ -1887,8 +1975,8 @@ export default function RunInsights() {
         </section>
         )}
 
-        {/* AI Coaching Logs Section - visible to run owner and admins */}
-        {(isAdmin || (run && (run as any).aiCoachEnabled)) && (
+        {/* AI Coaching Logs Section - visible to run owner when AI coaching was enabled or to admins */}
+        {(isAdmin || (run && (run as any).aiCoachEnabled !== false)) && !isFriendView && (
           <section className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -2606,6 +2694,20 @@ export default function RunInsights() {
                   {isSavingRoute ? "Saving..." : "Save Route"}
                 </Button>
               </div>
+              
+              {/* Create Event button - admin only */}
+              {isAdmin && (
+                <Button
+                  variant="outline"
+                  className="w-full border-green-500/30 text-green-400 hover:bg-green-500/10"
+                  onClick={() => setShowCreateEventModal(true)}
+                  data-testid="button-create-event"
+                >
+                  <Calendar className="w-4 h-4 mr-2" />
+                  Create Event from This Run
+                </Button>
+              )}
+              
               <p className="text-xs text-muted-foreground text-center">
                 Run this route again with AI coaching or save it to your favorites
               </p>
@@ -2647,6 +2749,197 @@ export default function RunInsights() {
             >
               {isDeleting ? "Deleting..." : "Delete Run"}
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Create Event Modal */}
+      <AlertDialog open={showCreateEventModal} onOpenChange={setShowCreateEventModal}>
+        <AlertDialogContent className="bg-card border-white/10 max-w-md max-h-[90vh] overflow-y-auto">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-green-400" />
+              Create Event
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Create a public event from this run route. Other users can browse and run this event.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Event Name *</label>
+              <Input
+                value={eventForm.name}
+                onChange={(e) => setEventForm(prev => ({ ...prev, name: e.target.value }))}
+                placeholder="e.g., Hamilton Lake Parkrun"
+                className="bg-background/50"
+                data-testid="input-event-name"
+              />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Country *</label>
+                <Input
+                  value={eventForm.country}
+                  onChange={(e) => setEventForm(prev => ({ ...prev, country: e.target.value }))}
+                  placeholder="e.g., New Zealand"
+                  className="bg-background/50"
+                  data-testid="input-event-country"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">City</label>
+                <Input
+                  value={eventForm.city}
+                  onChange={(e) => setEventForm(prev => ({ ...prev, city: e.target.value }))}
+                  placeholder="e.g., Hamilton"
+                  className="bg-background/50"
+                  data-testid="input-event-city"
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Event Type</label>
+              <select
+                value={eventForm.eventType}
+                onChange={(e) => setEventForm(prev => ({ ...prev, eventType: e.target.value }))}
+                className="w-full h-10 px-3 rounded-md border border-white/10 bg-background/50 text-foreground"
+                data-testid="select-event-type"
+              >
+                <option value="parkrun">Parkrun</option>
+                <option value="5k">5K</option>
+                <option value="10k">10K</option>
+                <option value="half_marathon">Half Marathon</option>
+                <option value="marathon">Marathon</option>
+                <option value="trail">Trail Run</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Description</label>
+              <textarea
+                value={eventForm.description}
+                onChange={(e) => setEventForm(prev => ({ ...prev, description: e.target.value }))}
+                placeholder="Brief description of the event..."
+                rows={2}
+                className="w-full px-3 py-2 rounded-md border border-white/10 bg-background/50 text-foreground resize-none"
+                data-testid="textarea-event-description"
+              />
+            </div>
+            
+            <div className="space-y-3 pt-2 border-t border-white/10">
+              <label className="text-sm font-medium">Schedule</label>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="scheduleType"
+                    checked={eventForm.scheduleType === "recurring"}
+                    onChange={() => setEventForm(prev => ({ ...prev, scheduleType: "recurring" }))}
+                    className="accent-primary"
+                    data-testid="radio-schedule-recurring"
+                  />
+                  <span className="text-sm">Recurring</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="scheduleType"
+                    checked={eventForm.scheduleType === "one_time"}
+                    onChange={() => setEventForm(prev => ({ ...prev, scheduleType: "one_time" }))}
+                    className="accent-primary"
+                    data-testid="radio-schedule-onetime"
+                  />
+                  <span className="text-sm">One-time</span>
+                </label>
+              </div>
+              
+              {eventForm.scheduleType === "recurring" && (
+                <div className="space-y-3">
+                  <select
+                    value={eventForm.recurrencePattern}
+                    onChange={(e) => setEventForm(prev => ({ ...prev, recurrencePattern: e.target.value as any }))}
+                    className="w-full h-10 px-3 rounded-md border border-white/10 bg-background/50 text-foreground"
+                    data-testid="select-recurrence-pattern"
+                  >
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="fortnightly">Fortnightly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                  
+                  {["weekly", "fortnightly"].includes(eventForm.recurrencePattern) && (
+                    <div className="space-y-2">
+                      <label className="text-xs text-muted-foreground">Day of Week</label>
+                      <select
+                        value={eventForm.dayOfWeek}
+                        onChange={(e) => setEventForm(prev => ({ ...prev, dayOfWeek: parseInt(e.target.value) }))}
+                        className="w-full h-10 px-3 rounded-md border border-white/10 bg-background/50 text-foreground"
+                        data-testid="select-day-of-week"
+                      >
+                        <option value={0}>Sunday</option>
+                        <option value={1}>Monday</option>
+                        <option value={2}>Tuesday</option>
+                        <option value={3}>Wednesday</option>
+                        <option value={4}>Thursday</option>
+                        <option value={5}>Friday</option>
+                        <option value={6}>Saturday</option>
+                      </select>
+                    </div>
+                  )}
+                  
+                  {eventForm.recurrencePattern === "monthly" && (
+                    <div className="space-y-2">
+                      <label className="text-xs text-muted-foreground">Day of Month</label>
+                      <select
+                        value={eventForm.dayOfMonth}
+                        onChange={(e) => setEventForm(prev => ({ ...prev, dayOfMonth: parseInt(e.target.value) }))}
+                        className="w-full h-10 px-3 rounded-md border border-white/10 bg-background/50 text-foreground"
+                        data-testid="select-day-of-month"
+                      >
+                        {Array.from({ length: 31 }, (_, i) => (
+                          <option key={i + 1} value={i + 1}>{i + 1}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {eventForm.scheduleType === "one_time" && (
+                <div className="space-y-2">
+                  <label className="text-xs text-muted-foreground">Event Date *</label>
+                  <Input
+                    type="date"
+                    value={eventForm.specificDate}
+                    onChange={(e) => setEventForm(prev => ({ ...prev, specificDate: e.target.value }))}
+                    className="bg-background/50"
+                    data-testid="input-event-date"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+          
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isCreatingEvent}>Cancel</AlertDialogCancel>
+            <Button
+              onClick={handleCreateEvent}
+              disabled={
+                isCreatingEvent || 
+                !eventForm.name.trim() || 
+                !eventForm.country.trim() ||
+                (eventForm.scheduleType === "one_time" && !eventForm.specificDate)
+              }
+              className="bg-green-500 hover:bg-green-600 text-white"
+              data-testid="button-submit-create-event"
+            >
+              {isCreatingEvent ? "Creating..." : "Create Event"}
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
