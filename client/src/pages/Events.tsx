@@ -195,7 +195,7 @@ export default function Events() {
         eventName: event.name,
       }));
     }
-    setLocation(`/home?eventId=${event.id}`);
+    setLocation(`/?eventId=${event.id}`);
   };
 
   const countries = Object.keys(groupedEvents).sort();
@@ -208,7 +208,7 @@ export default function Events() {
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setLocation("/home")}
+            onClick={() => setLocation("/")}
             data-testid="button-back"
           >
             <ArrowLeft className="w-5 h-5" />
