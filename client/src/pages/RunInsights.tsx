@@ -127,6 +127,7 @@ export default function RunInsights() {
     weatherImpact?: string;
     warmUpAnalysis?: string;
     goalProgress?: string;
+    targetTimeAnalysis?: string;
   } | null>(null);
   const [isLoadingAiAnalysis, setIsLoadingAiAnalysis] = useState(false);
   const [aiAnalysisError, setAiAnalysisError] = useState<string | null>(null);
@@ -1938,6 +1939,19 @@ export default function RunInsights() {
                       <h3 className="text-sm font-display font-bold text-violet-400 uppercase tracking-wide">Goal Progress</h3>
                     </div>
                     <p className="text-sm text-white/80">{aiAnalysis.goalProgress}</p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Target Time Analysis */}
+              {aiAnalysis.targetTimeAnalysis && (
+                <Card className="bg-card/30 border-amber-500/20 backdrop-blur-sm">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Timer className="w-4 h-4 text-amber-400" />
+                      <h3 className="text-sm font-display font-bold text-amber-400 uppercase tracking-wide">Target Time</h3>
+                    </div>
+                    <p className="text-sm text-white/80">{aiAnalysis.targetTimeAnalysis}</p>
                   </CardContent>
                 </Card>
               )}

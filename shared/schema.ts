@@ -150,6 +150,7 @@ export const runs = pgTable("runs", {
   aiInsights: text("ai_insights"),
   aiCoachingNotes: jsonb("ai_coaching_notes"),
   aiCoachEnabled: boolean("ai_coach_enabled"),
+  targetTime: integer("target_time"), // Target time in seconds set by user before the run
   completedAt: timestamp("completed_at").defaultNow(),
 });
 
@@ -381,6 +382,7 @@ export const runAnalyses = pgTable("run_analyses", {
   weatherImpact: text("weather_impact"),
   warmUpAnalysis: text("warm_up_analysis"),
   goalProgress: text("goal_progress"),
+  targetTimeAnalysis: text("target_time_analysis"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

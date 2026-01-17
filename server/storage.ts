@@ -1465,6 +1465,7 @@ export class DatabaseStorage implements IStorage {
             weatherImpact: data.weatherImpact,
             warmUpAnalysis: data.warmUpAnalysis,
             goalProgress: data.goalProgress,
+            targetTimeAnalysis: data.targetTimeAnalysis,
             updatedAt: new Date(),
           },
         })

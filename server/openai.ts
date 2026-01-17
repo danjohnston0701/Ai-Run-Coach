@@ -1546,6 +1546,7 @@ export interface RunAnalysisRequest {
     kmSplits?: KmSplit[];
     elevationGain?: number;
     elevationLoss?: number;
+    targetTime?: number; // Target time in seconds set by user before the run
     weatherData?: {
       temperature?: number;
       feelsLike?: number;
@@ -1596,6 +1597,7 @@ export interface RunAnalysisResponse {
   weatherImpact?: string;
   warmUpAnalysis?: string;
   goalProgress?: string;
+  targetTimeAnalysis?: string;
 }
 
 export async function generateComprehensiveRunAnalysis(request: RunAnalysisRequest): Promise<RunAnalysisResponse> {
@@ -1724,7 +1726,8 @@ Return ONLY valid JSON with this exact structure (only include optional fields i
   "overallAssessment": "2-3 sentence summary of the run and next steps",
   "weatherImpact": "ONLY include if weather data was provided above",
   "warmUpAnalysis": "ONLY include if heart rate data was provided above",
-  "goalProgress": "ONLY include if goals data was provided above"
+  "goalProgress": "ONLY include if goals data was provided above",
+  "targetTimeAnalysis": "ONLY include if target time data was provided above"
 }`;
 
   const userPrompt = `Analyze this run and provide elite coaching feedback:
@@ -1749,6 +1752,20 @@ ${run.calories ? `- Calories: ${run.calories}` : ''}
 ${run.elevationGain ? `- Elevation gain: ${run.elevationGain}m` : ''}
 ${run.elevationLoss ? `- Elevation loss: ${run.elevationLoss}m` : ''}
 ${splitsInfo}
+
+${run.targetTime ? `TARGET TIME SET BY RUNNER:
+- Target time: ${Math.floor(run.targetTime / 3600)}:${Math.floor((run.targetTime % 3600) / 60).toString().padStart(2, '0')}:${(run.targetTime % 60).toString().padStart(2, '0')}
+- Actual time: ${Math.floor(run.duration / 3600)}:${Math.floor((run.duration % 3600) / 60).toString().padStart(2, '0')}:${(run.duration % 60).toString().padStart(2, '0')}
+- Difference: ${run.duration <= run.targetTime ? 'BEAT TARGET by ' : 'Missed target by '}${Math.abs(run.duration - run.targetTime)} seconds (${(Math.abs(run.duration - run.targetTime) / 60).toFixed(1)} minutes)
+- Result: ${run.duration <= run.targetTime ? 'ACHIEVED' : 'NOT ACHIEVED'}
+
+TARGET TIME ANALYSIS GUIDELINES:
+- If runner ACHIEVED or BEAT their target: Celebrate this accomplishment! Acknowledge their success and the work that went into it.
+- If runner MISSED their target: Be encouraging but honest. Analyze why they may have missed it (pace issues, terrain, weather, fatigue patterns).
+- Provide specific, actionable coaching tips to help them get closer to or maintain their target time.
+- Consider: Did they start too fast? Did they fade in the second half? Were there external factors?
+- Suggest pacing strategies, training adjustments, or mental techniques for next time.
+IMPORTANT: You MUST include a "targetTimeAnalysis" field in your response with specific feedback about their target time performance.` : ''}
 
 ${run.weatherData ? `WEATHER CONDITIONS (ANALYZE IMPACT ON PERFORMANCE):
 - Temperature: ${run.weatherData.temperature !== undefined ? `${run.weatherData.temperature}°C` : 'Unknown'}

@@ -565,6 +565,7 @@ export async function registerRoutes(
           overallAssessment: savedAnalysis.overallAssessment || '',
           weatherImpact: savedAnalysis.weatherImpact || '',
           warmUpAnalysis: savedAnalysis.warmUpAnalysis || '',
+          targetTimeAnalysis: savedAnalysis.targetTimeAnalysis || '',
           goalProgress: savedAnalysis.goalProgress || '',
           cached: true
         });
@@ -623,6 +624,7 @@ export async function registerRoutes(
             overallAssessment: savedAnalysis.overallAssessment || '',
             weatherImpact: savedAnalysis.weatherImpact || '',
             warmUpAnalysis: savedAnalysis.warmUpAnalysis || '',
+            targetTimeAnalysis: savedAnalysis.targetTimeAnalysis || '',
             goalProgress: savedAnalysis.goalProgress || '',
             cached: true
           });
@@ -718,6 +720,7 @@ export async function registerRoutes(
           kmSplits: run.paceData as any || undefined,
           elevationGain,
           elevationLoss,
+          targetTime: run.targetTime || undefined,
           weatherData: run.weatherData as any || undefined,
           telemetry: telemetrySummary || undefined,
           reviewedStruggles: reviewedStruggles || undefined,
@@ -747,6 +750,7 @@ export async function registerRoutes(
         weatherImpact: analysis.weatherImpact || '',
         warmUpAnalysis: analysis.warmUpAnalysis || '',
         goalProgress: analysis.goalProgress || '',
+        targetTimeAnalysis: analysis.targetTimeAnalysis || '',
       });
       
       // Also update legacy aiCoachingNotes for backwards compatibility

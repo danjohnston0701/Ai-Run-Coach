@@ -3756,6 +3756,7 @@ export default function RunSession() {
             weatherData: runWeather || undefined,
             sessionKey: sessionIdRef.current,
             aiCoachEnabled: aiCoachEnabled,
+            targetTime: metadata.targetTimeSeconds > 0 ? metadata.targetTimeSeconds : undefined,
           };
           
           console.log('[Save] dbRunData:', JSON.stringify({
