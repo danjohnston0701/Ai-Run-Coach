@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { 
   ArrowLeft, Calendar, TrendingUp, Heart, 
   Activity, Zap as CadenceIcon, Info, Timer, MapPin, Share2, Mail, User as UserIcon, Search, Star,
-  Facebook, Instagram, Download, X, Map, Users, Trophy, Medal, Award, Trash2, Brain, CheckCircle, Target, Lightbulb, AlertTriangle, Sparkles, Footprints, Pencil, Check, Play, Route
+  Facebook, Instagram, Download, X, Map, Users, Trophy, Medal, Award, Trash2, Brain, CheckCircle, Target, Lightbulb, AlertTriangle, Sparkles, Footprints, Pencil, Check, Play, Route, MessageSquare
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { TelemetryChartSection, type TelemetryDataPoint } from "@/components/TelemetryChartSection";
@@ -130,6 +130,7 @@ export default function RunInsights() {
   } | null>(null);
   const [isLoadingAiAnalysis, setIsLoadingAiAnalysis] = useState(false);
   const [aiAnalysisError, setAiAnalysisError] = useState<string | null>(null);
+  const [selfAssessment, setSelfAssessment] = useState("");
   const [coachingLogs, setCoachingLogs] = useState<Array<{
     id: string;
     createdAt: string;
@@ -876,7 +877,8 @@ export default function RunInsights() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           userId,
-          reviewedStruggles: reviewedStruggles.length > 0 ? reviewedStruggles : undefined
+          reviewedStruggles: reviewedStruggles.length > 0 ? reviewedStruggles : undefined,
+          selfAssessment: selfAssessment.trim() || undefined
         }),
       });
       
@@ -1776,31 +1778,52 @@ export default function RunInsights() {
 
           {!aiAnalysis && !isLoadingAiAnalysis && (
             <Card className="bg-gradient-to-br from-purple-900/20 to-blue-900/20 border-purple-500/20 backdrop-blur-sm">
-              <CardContent className="p-6 text-center space-y-4">
-                <div className="p-4 bg-purple-500/10 rounded-full w-fit mx-auto">
-                  <Sparkles className="w-8 h-8 text-purple-400" />
-                </div>
-                <div>
+              <CardContent className="p-6 space-y-4">
+                <div className="text-center">
+                  <div className="p-4 bg-purple-500/10 rounded-full w-fit mx-auto mb-4">
+                    <Sparkles className="w-8 h-8 text-purple-400" />
+                  </div>
                   <h3 className="text-lg font-display font-bold text-white mb-2">Get Personalized Coaching</h3>
                   <p className="text-sm text-muted-foreground max-w-sm mx-auto">
                     Our AI coach will analyze your run data, compare it to your history, and provide expert tips tailored to your fitness goals.
                   </p>
                 </div>
+                
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-white/90 flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4 text-purple-400" />
+                    Self-Assessment - How did the session go? (optional)
+                  </label>
+                  <textarea
+                    value={selfAssessment}
+                    onChange={(e) => setSelfAssessment(e.target.value)}
+                    placeholder="Share your thoughts... e.g., 'I got sore shins after 3km', 'Felt strong on the hills', 'Had a muscle knot in my shoulder the whole run', 'Struggled mentally in the middle section'"
+                    rows={3}
+                    className="w-full px-3 py-2 rounded-md border border-white/10 bg-background/50 text-foreground placeholder:text-muted-foreground/60 resize-none text-sm"
+                    data-testid="textarea-self-assessment"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Include any aches, pains, challenges, or positive feelings that data might not capture. This helps the AI coach provide more relevant advice.
+                  </p>
+                </div>
+                
                 {aiAnalysisError && (
                   <div className="flex items-center justify-center gap-2 text-red-400 text-sm">
                     <AlertTriangle className="w-4 h-4" />
                     {aiAnalysisError}
                   </div>
                 )}
-                <Button
-                  onClick={generateAiAnalysis}
-                  disabled={isLoadingAiAnalysis}
-                  className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-bold px-8"
-                  data-testid="button-generate-ai-analysis"
-                >
-                  <Brain className="w-4 h-4 mr-2" />
-                  Generate AI Run Analysis
-                </Button>
+                <div className="text-center">
+                  <Button
+                    onClick={generateAiAnalysis}
+                    disabled={isLoadingAiAnalysis}
+                    className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-bold px-8"
+                    data-testid="button-generate-ai-analysis"
+                  >
+                    <Brain className="w-4 h-4 mr-2" />
+                    Generate AI Run Analysis
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}

@@ -1557,6 +1557,7 @@ export interface RunAnalysisRequest {
     };
     telemetry?: TelemetrySummary;
     reviewedStruggles?: ReviewedStruggle[];
+    selfAssessment?: string;
   };
   user: {
     age?: number;
@@ -1780,6 +1781,18 @@ STRUGGLE ANALYSIS GUIDELINES:
 - Factor explained struggles appropriately - a traffic light stop is different from hitting a wall due to fatigue
 - Distinguish between environmental interruptions vs. genuine running challenges
 - Provide context-aware coaching based on what actually happened` : ''}
+
+${run.selfAssessment ? `RUNNER'S SELF-ASSESSMENT:
+"${run.selfAssessment}"
+
+SELF-ASSESSMENT GUIDELINES:
+- The runner has provided their own thoughts on how the session went
+- Pay close attention to any aches, pains, or physical discomfort they mention
+- Consider any mental/motivational challenges they describe
+- Factor their subjective experience into your coaching advice
+- If they mention specific body parts hurting, provide targeted advice for that issue
+- Address any concerns they raise with professional coaching guidance
+- Their perception matters - acknowledge what they felt even if data doesn't show it` : ''}
 
 ${run.avgHeartRate || (run.telemetry?.dataPoints?.some(p => p.heartRate)) ? `WARM-UP ANALYSIS GUIDELINES (heart rate data is available - include warmUpAnalysis):
 Analyze the runner's starting heart rate (first 1-2 minutes of run) to assess warm-up quality:
