@@ -640,7 +640,8 @@ export default function RunInsights() {
       
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || "Failed to create event");
+        const errorMsg = error.detail ? `${error.error}: ${error.detail}` : (error.error || "Failed to create event");
+        throw new Error(errorMsg);
       }
       
       const result = await response.json();

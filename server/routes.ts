@@ -1243,9 +1243,14 @@ export async function registerRoutes(
       });
       
       res.status(201).json(event);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Create event from run error:", error);
-      res.status(500).json({ error: "Failed to create event" });
+      const errorMessage = error?.message || "Unknown error";
+      const errorDetail = error?.detail || error?.code || "";
+      res.status(500).json({ 
+        error: "Failed to create event", 
+        detail: `${errorMessage}${errorDetail ? ` (${errorDetail})` : ""}` 
+      });
     }
   });
 
