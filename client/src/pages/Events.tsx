@@ -316,21 +316,7 @@ export default function Events() {
   });
 
   const handleSelectEvent = (event: Event) => {
-    localStorage.setItem("selectedEvent", JSON.stringify(event));
-    if (event.route) {
-      localStorage.setItem("activeRoute", JSON.stringify({
-        id: event.route.id,
-        routeName: event.name,
-        distance: event.route.distance,
-        difficulty: event.route.difficulty,
-        polyline: event.route.polyline,
-        elevationGain: event.route.elevationGain,
-        elevationLoss: event.route.elevationLoss,
-        eventId: event.id,
-        eventName: event.name,
-      }));
-    }
-    setLocation(`/?eventId=${event.id}`);
+    setLocation(`/event/${event.id}`);
   };
 
   const countries = Object.keys(groupedEvents).sort();

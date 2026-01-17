@@ -22,6 +22,7 @@ import Login from "@/pages/Login";
 import AdminAIConfig from "@/pages/AdminAIConfig";
 import Routes from "@/pages/Routes";
 import Events from "@/pages/Events";
+import PreEvent from "@/pages/PreEvent";
 import Pricing from "@/pages/Pricing";
 import SubscriptionSuccess from "@/pages/SubscriptionSuccess";
 import Goals from "@/pages/Goals";
@@ -117,6 +118,7 @@ function Router() {
           <Route path="/admin/ai-config" component={AdminAIConfig} />
           <Route path="/routes" component={Routes} />
           <Route path="/events" component={Events} />
+          <Route path="/event/:id" component={PreEvent} />
           <Route path="/pricing" component={Pricing} />
           <Route path="/subscription/success" component={SubscriptionSuccess} />
         </>
