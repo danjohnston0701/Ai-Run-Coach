@@ -1,6 +1,6 @@
 # AI Run Coach - Complete Mobile App Handoff Document
 
-**Version:** 1.0  
+**Version:** 2.0  
 **Date:** January 2026  
 **Purpose:** Enable fully independent mobile app development with complete feature parity to the web app.
 
@@ -25,6 +25,17 @@
 15. [Subscription & Payment System](#15-subscription--payment-system)
 16. [Push Notifications](#16-push-notifications)
 17. [Authentication](#17-authentication)
+18. [GPS Session Management](#18-gps-session-management)
+19. [Speech Queue & Audio Management](#19-speech-queue--audio-management)
+20. [Pause/Resume & Timer Management](#20-pauseresume--timer-management)
+21. [Run Completion & Data Saving](#21-run-completion--data-saving)
+22. [Cadence Detection & Analysis](#22-cadence-detection--analysis)
+23. [Weather Integration](#23-weather-integration)
+24. [Pre-Run Summary](#24-pre-run-summary)
+25. [Post-Run AI Analysis](#25-post-run-ai-analysis)
+26. [Weakness Detection](#26-weakness-detection)
+27. [AI Route Generation](#27-ai-route-generation)
+28. [Events System](#28-events-system)
 
 ---
 
@@ -2079,32 +2090,1417 @@ function generateUserCode(): string {
 
 ---
 
+## 18. GPS SESSION MANAGEMENT
+
+> **Note:** Sections 18-28 use shared types and helpers defined in Section 13 (Business Logic & Calculations). Key dependencies include:
+> - `Position` type: `{ lat: number; lng: number; timestamp?: number; altitude?: number }`
+> - `haversineDistance(lat1, lng1, lat2, lng2)` - returns km
+> - `getBearing(lat1, lng1, lat2, lng2)` - returns degrees
+> - `formatPace(secondsPerKm)` - returns "M:SS" string
+> - `formatTime(totalSeconds)` - returns "M:SS" or "H:MM:SS" string
+
+### GPS Watchdog & Recovery
+
+The GPS system requires robust recovery mechanisms for when signal is lost or becomes stale.
+
+```typescript
+// Refs for GPS monitoring
+const lastGpsFixTimeRef = useRef<number>(Date.now());
+const gpsTimeoutAttempts = useRef<number>(0);
+const watchdogRecoveryAttempts = useRef<number>(0);
+const lastRecoveryAttemptTimeRef = useRef<number>(0);
+const [gpsRestartKey, setGpsRestartKey] = useState<number>(0); // Increment to force restart
+
+// GPS Watchdog: runs every 10 seconds
+useEffect(() => {
+  const watchdogInterval = setInterval(() => {
+    const timeSinceLastFix = Date.now() - lastGpsFixTimeRef.current;
+    const timeSinceLastRecovery = Date.now() - lastRecoveryAttemptTimeRef.current;
+    
+    // Warn if no fix for 30 seconds
+    if (timeSinceLastFix > 30000 && gpsStatus !== "error") {
+      console.warn(`GPS Watchdog: No fix for ${timeSinceLastFix/1000}s`);
+      
+      // Severe stall - attempt recovery via watchPosition restart
+      if (timeSinceLastFix > 60000 && timeSinceLastRecovery > 45000) {
+        if (watchdogRecoveryAttempts.current < 5) {
+          watchdogRecoveryAttempts.current++;
+          lastRecoveryAttemptTimeRef.current = Date.now();
+          setMessage(`Reconnecting GPS... (attempt ${watchdogRecoveryAttempts.current})`);
+          setGpsRestartKey(prev => prev + 1); // Triggers GPS restart
+        } else {
+          setMessage("GPS signal lost - try moving to open area");
+        }
+      } else {
+        setMessage("GPS signal weak - keep phone visible");
+      }
+    } else if (timeSinceLastFix < 10000 && gpsStatus === "active") {
+      // GPS recovered
+      if (watchdogRecoveryAttempts.current > 0) {
+        watchdogRecoveryAttempts.current = 0;
+      }
+      setMessage("");
+    }
+  }, 10000);
+  
+  return () => clearInterval(watchdogInterval);
+}, [gpsStatus]);
+```
+
+### GPS Accuracy & Distance Filtering
+
+```typescript
+// Window-based GPS filtering for accurate distance
+interface WindowSegment {
+  lat: number;
+  lng: number;
+  timestamp: number;
+  accuracy: number;
+  deltaDist: number;
+  bearing: number;
+}
+
+// Buffer for sliding window
+const windowBufferRef = useRef<WindowSegment[]>([]);
+const bufferedDistanceRef = useRef<number>(0);
+const lastAcceptedPosRef = useRef<Position | null>(null);
+const positionsRef = useRef<Position[]>([]);
+
+// GPS position handler
+const handlePosition = (position: GeolocationPosition) => {
+  const accuracy = position.coords.accuracy;
+  const lat = position.coords.latitude;
+  const lng = position.coords.longitude;
+  
+  // Update last fix time for watchdog
+  lastGpsFixTimeRef.current = Date.now();
+  
+  // Initial lock requires <30m accuracy
+  if (gpsStatus === "acquiring" && accuracy > 30) {
+    setMessage(`Refining GPS signal... (${Math.round(accuracy)}m accuracy)`);
+    return;
+  }
+  
+  // Accept position after initial lock
+  if (gpsStatus === "acquiring") {
+    setGpsStatus("active");
+    setMessage("GPS locked!");
+    positionsRef.current = [{ lat, lng, timestamp: position.timestamp }];
+    return;
+  }
+  
+  // Distance calculation with spike filtering
+  if (active && lastAcceptedPosRef.current) {
+    const rawDelta = haversineDistance(
+      lastAcceptedPosRef.current.lat,
+      lastAcceptedPosRef.current.lng,
+      lat, lng
+    );
+    
+    const timeDeltaMs = position.timestamp - (lastAcceptedPosRef.current.timestamp || 0);
+    const speedMps = timeDeltaMs > 0 ? (rawDelta * 1000) / (timeDeltaMs / 1000) : 0;
+    
+    // Reject impossible speeds (>12.5 m/s = 45 km/h)
+    const maxSpeed = 12.5;
+    if (speedMps > maxSpeed) {
+      console.log(`GPS spike rejected: ${speedMps.toFixed(1)} m/s`);
+      return;
+    }
+    
+    // Add to window buffer
+    windowBufferRef.current.push({
+      lat, lng,
+      timestamp: position.timestamp,
+      accuracy,
+      deltaDist: rawDelta,
+      bearing: getBearing(lastAcceptedPosRef.current.lat, lastAcceptedPosRef.current.lng, lat, lng)
+    });
+    
+    // Keep only last 10 segments
+    if (windowBufferRef.current.length > 10) {
+      windowBufferRef.current.shift();
+    }
+    
+    // Accept segment if movement detected
+    if (rawDelta >= 0.003) { // 3 meters minimum
+      lastAcceptedPosRef.current = { lat, lng, timestamp: position.timestamp };
+      lastMovementTimeRef.current = Date.now();
+      setDistance(prev => prev + rawDelta);
+      positionsRef.current.push({ lat, lng, timestamp: position.timestamp });
+    }
+  }
+};
+```
+
+### Visibility Change Handling
+
+```typescript
+// Resume GPS when app becomes visible
+useEffect(() => {
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible') {
+      const timeSinceLastFix = Date.now() - lastGpsFixTimeRef.current;
+      
+      if (timeSinceLastFix > 10000 && gpsStatus === "active") {
+        console.log(`Was hidden for ${timeSinceLastFix/1000}s, refreshing GPS`);
+        setGpsRestartKey(prev => prev + 1);
+      }
+    }
+  };
+  
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+}, [gpsStatus]);
+```
+
+### GPS Track Downsampling (for storage)
+
+```typescript
+function downsampleGpsTrack(
+  track: Array<{ lat: number; lng: number; timestamp?: number }>,
+  maxPoints: number
+): Array<{ lat: number; lng: number; timestamp?: number }> {
+  if (track.length <= maxPoints) return track;
+  
+  const step = track.length / maxPoints;
+  const result: typeof track = [];
+  
+  // Always include first point
+  result.push(track[0]);
+  
+  // Sample at intervals
+  for (let i = 1; i < maxPoints - 1; i++) {
+    result.push(track[Math.floor(i * step)]);
+  }
+  
+  // Always include last point
+  result.push(track[track.length - 1]);
+  
+  return result;
+}
+```
+
+---
+
+## 19. SPEECH QUEUE & AUDIO MANAGEMENT
+
+### Speech Queue System
+
+The speech system uses a FIFO queue to prevent overlapping announcements:
+
+```typescript
+const navSpeakQueueRef = useRef<string[]>([]);
+const isNavSpeakingRef = useRef<boolean>(false);
+const speechStartTimeRef = useRef<number>(0);
+const navAudioCacheRef = useRef<Map<string, string>>(new Map()); // Cache audio URLs
+const lastNavSpeakTimeRef = useRef<number>(0);
+
+// Process queue items one at a time
+const processNavQueue = async () => {
+  if (isNavSpeakingRef.current || navSpeakQueueRef.current.length === 0) return;
+  
+  const text = navSpeakQueueRef.current.shift();
+  if (!text) return;
+  
+  isNavSpeakingRef.current = true;
+  speechStartTimeRef.current = Date.now();
+  
+  // Route to appropriate TTS system
+  if (!aiCoachEnabled) {
+    // Use device TTS
+    speakWithDeviceTTS(text);
+    isNavSpeakingRef.current = false;
+    processNavQueue();
+    return;
+  }
+  
+  // Check audio cache first
+  const cacheKey = text.toLowerCase().trim();
+  const cachedUrl = navAudioCacheRef.current.get(cacheKey);
+  
+  if (cachedUrl) {
+    await playAudio(cachedUrl);
+    processNavQueue();
+    return;
+  }
+  
+  // Fetch AI TTS with timeout
+  try {
+    const controller = new AbortController();
+    const fetchTimeout = setTimeout(() => controller.abort(), 15000);
+    
+    const response = await fetch('/api/ai/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voice: getTTSVoice(coachSettings) }),
+      signal: controller.signal
+    });
+    
+    clearTimeout(fetchTimeout);
+    
+    if (!response.ok) throw new Error('TTS failed');
+    
+    const blob = await response.blob();
+    const audioUrl = URL.createObjectURL(blob);
+    
+    // Cache (limit 20 entries)
+    if (navAudioCacheRef.current.size >= 20) {
+      const firstKey = navAudioCacheRef.current.keys().next().value;
+      if (firstKey) {
+        URL.revokeObjectURL(navAudioCacheRef.current.get(firstKey)!);
+        navAudioCacheRef.current.delete(firstKey);
+      }
+    }
+    navAudioCacheRef.current.set(cacheKey, audioUrl);
+    
+    await playAudio(audioUrl);
+  } catch (error) {
+    console.error('TTS error, using fallback:', error);
+    speakWithDeviceTTS(text);
+    isNavSpeakingRef.current = false;
+  }
+  
+  setTimeout(() => processNavQueue(), 100);
+};
+```
+
+### Speech Domains
+
+```typescript
+type SpeechDomain = 'coach' | 'nav' | 'system';
+
+// Domain behavior:
+// - 'coach': AI coaching - blocked when aiCoachEnabled=false
+// - 'nav': Navigation instructions - always allowed
+// - 'system': Run control announcements - always allowed
+
+const speak = (text: string, options: { force?: boolean; domain?: SpeechDomain } = {}) => {
+  const { force = false, domain = 'coach' } = options;
+  
+  // Block coaching when AI coach disabled (unless forced)
+  if (!force && domain === 'coach' && !aiCoachEnabled) {
+    return;
+  }
+  
+  // Block all speech when audio disabled (unless forced)
+  if (!force && !audioEnabled) {
+    return;
+  }
+  
+  // Throttle: minimum 3 seconds between calls
+  const now = Date.now();
+  if (now - lastNavSpeakTimeRef.current < 3000 && !force) {
+    return;
+  }
+  lastNavSpeakTimeRef.current = now;
+  
+  // Add to queue
+  navSpeakQueueRef.current.push(text);
+  processNavQueue();
+};
+```
+
+### Speech Queue Watchdog
+
+```typescript
+// Recover if speech gets stuck for >45 seconds
+useEffect(() => {
+  if (!active) return;
+  
+  const speechWatchdog = setInterval(() => {
+    if (isNavSpeakingRef.current && speechStartTimeRef.current > 0) {
+      const stuckTime = Date.now() - speechStartTimeRef.current;
+      if (stuckTime > 45000) {
+        console.warn(`Speech stuck for ${stuckTime/1000}s - forcing recovery`);
+        isNavSpeakingRef.current = false;
+        speechStartTimeRef.current = 0;
+        if (navSpeakQueueRef.current.length > 0) {
+          setTimeout(() => processNavQueue(), 100);
+        }
+      }
+    }
+  }, 15000);
+  
+  return () => clearInterval(speechWatchdog);
+}, [active]);
+```
+
+### Audio Playback with Timeout
+
+```typescript
+const playAudio = (audioUrl: string): Promise<void> => {
+  return new Promise((resolve) => {
+    const audio = new Audio(audioUrl);
+    audioRef.current = audio;
+    let resolved = false;
+    
+    const cleanup = () => {
+      if (resolved) return;
+      resolved = true;
+      isNavSpeakingRef.current = false;
+      resolve();
+    };
+    
+    // Safety timeout - max 30 seconds per audio
+    const timeout = setTimeout(cleanup, 30000);
+    
+    audio.onended = () => { clearTimeout(timeout); cleanup(); };
+    audio.onerror = () => { clearTimeout(timeout); cleanup(); };
+    audio.play().catch(() => { clearTimeout(timeout); cleanup(); });
+  });
+};
+```
+
+---
+
+## 20. PAUSE/RESUME & TIMER MANAGEMENT
+
+### Timestamp-Based Timer
+
+Using wall-clock timestamps ensures accurate time tracking even when screen is off:
+
+```typescript
+const startTimestampRef = useRef<number>(Date.now());
+const pausedDurationRef = useRef<number>(0);
+const pauseStartTimeRef = useRef<number | null>(null);
+
+// Timer effect - updates every second
+useEffect(() => {
+  if (!active) {
+    // Track pause start
+    if (pauseStartTimeRef.current === null && runStarted) {
+      pauseStartTimeRef.current = Date.now();
+    }
+    return;
+  }
+  
+  // Calculate paused duration when resuming
+  if (pauseStartTimeRef.current !== null) {
+    const pausedFor = Date.now() - pauseStartTimeRef.current;
+    pausedDurationRef.current += pausedFor;
+    console.log(`Resumed: was paused for ${pausedFor}ms`);
+    pauseStartTimeRef.current = null;
+  }
+  
+  // Timer interval
+  const interval = setInterval(() => {
+    const now = Date.now();
+    const elapsedMs = now - startTimestampRef.current - pausedDurationRef.current;
+    const elapsedSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+    setTime(elapsedSeconds);
+  }, 1000);
+  
+  return () => clearInterval(interval);
+}, [active, runStarted]);
+```
+
+### Pause Flow
+
+```typescript
+const handlePauseClick = () => {
+  if (active) {
+    setShowPauseConfirmation(true);
+  } else {
+    // Resume
+    setActive(true);
+    speak("Let's go! Run resumed.", { domain: 'system' });
+  }
+};
+
+const confirmPause = () => {
+  setShowPauseConfirmation(false);
+  setActive(false);
+  setRealtimePace(null);
+  recentPaceSamplesRef.current = [];
+  speak("Run paused. Take a breather.", { domain: 'system' });
+};
+```
+
+### Start Run
+
+```typescript
+const handleStartRun = () => {
+  // Reset timer tracking for fresh run
+  startTimestampRef.current = Date.now();
+  pausedDurationRef.current = 0;
+  pauseStartTimeRef.current = null;
+  recentPaceSamplesRef.current = [];
+  halfKmAnnouncedRef.current = false;
+  setRealtimePace(null);
+  
+  setRunStarted(true);
+  setActive(true);
+  speak("Let's go! Your run has started. Good luck!", { domain: 'system' });
+};
+```
+
+---
+
+## 21. RUN COMPLETION & DATA SAVING
+
+### Save Run Data with Retry
+
+```typescript
+const saveRunData = async (): Promise<string> => {
+  const now = new Date();
+  const date = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()}`;
+  const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+  
+  const localRunId = `run_${Date.now()}`;
+  
+  // Format km splits
+  const formattedKmSplits = kmSplits.map((cumulativeTime, idx) => {
+    const prevTime = idx > 0 ? kmSplits[idx - 1] : 0;
+    const kmTime = cumulativeTime - prevTime;
+    return {
+      km: idx + 1,
+      pace: formatPace(kmTime),
+      paceSeconds: kmTime,
+      cumulativeTime
+    };
+  });
+  
+  // Downsample GPS track for storage
+  const gpsTrackData = downsampleGpsTrack(positionsRef.current, 1000);
+  
+  // Calculate average pace (seconds per km)
+  const avgPaceSecondsPerKm = distance > 0 ? time / distance : 0;
+  const avgPaceFormatted = formatPace(avgPaceSecondsPerKm);
+  
+  // Local storage data (always saved first)
+  const localRunData = {
+    id: localRunId,
+    date,
+    time: timeStr,
+    distance,
+    totalTime: time,
+    avgPace: avgPaceFormatted,
+    difficulty: metadata.levelId,
+    lat: metadata.startLat,
+    lng: metadata.startLng,
+    routeName: metadata.routeName,
+    routeId: metadata.routeId,
+    eventId: metadata.eventId,
+    gpsTrack: gpsTrackData,
+    avgCadence: cadence,
+    kmSplits: formattedKmSplits,
+    targetDistance: metadata.targetDistance,
+    elevationGain: routeData?.elevation?.gain || 0,
+    elevationLoss: routeData?.elevation?.loss || 0,
+    weatherData: runWeather,
+    aiCoachEnabled,
+    dbSynced: false,
+    pendingSync: true,
+    sessionKey: sessionIdRef.current,
+    detectedWeaknesses
+  };
+  
+  // Retry helper with exponential backoff
+  const saveToDbWithRetry = async (data: any, maxRetries = 3) => {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await fetch('/api/runs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+          return { success: true, savedRun: await response.json() };
+        }
+        
+        // Don't retry 4xx errors
+        if (response.status >= 400 && response.status < 500) {
+          return { success: false, error: await response.text() };
+        }
+      } catch (err) {
+        console.error(`Attempt ${attempt} failed:`, err);
+      }
+      
+      // Exponential backoff: 1s, 2s, 4s
+      if (attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, Math.pow(2, attempt - 1) * 1000));
+      }
+    }
+    return { success: false, error: 'All attempts failed' };
+  };
+  
+  // Try database save if logged in
+  const userProfile = JSON.parse(localStorage.getItem("userProfile") || "{}");
+  if (userProfile.id) {
+    const dbRunData = {
+      userId: userProfile.id,
+      routeId: metadata.routeId || undefined,
+      eventId: metadata.eventId || undefined,
+      distance,
+      duration: Math.floor(time),
+      runDate: date,
+      runTime: timeStr,
+      avgPace: avgPaceFormatted, // Calculated earlier
+      cadence: cadence > 0 ? cadence : undefined,
+      elevationGain: routeData?.elevation?.gain,
+      elevationLoss: routeData?.elevation?.loss,
+      difficulty: metadata.levelId,
+      startLat: metadata.startLat,
+      startLng: metadata.startLng,
+      gpsTrack: gpsTrackData,
+      paceData: formattedKmSplits,
+      weatherData: runWeather,
+      sessionKey: sessionIdRef.current,
+      aiCoachEnabled,
+      targetTime: metadata.targetTimeSeconds > 0 ? metadata.targetTimeSeconds : undefined
+    };
+    
+    const result = await saveToDbWithRetry(dbRunData);
+    
+    if (result.success && result.savedRun) {
+      // Save weakness events
+      if (detectedWeaknesses.length > 0) {
+        await fetch(`/api/runs/${result.savedRun.id}/weakness-events/bulk`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ events: detectedWeaknesses })
+        }).catch(console.error);
+      }
+      
+      // Link coaching logs
+      await fetch('/api/coaching-logs/link-to-run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionKey: sessionIdRef.current,
+          runId: result.savedRun.id,
+          userId: userProfile.id
+        })
+      }).catch(console.error);
+      
+      // Update local storage with DB ID
+      const synced = { ...localRunData, id: result.savedRun.id, dbSynced: true, pendingSync: false };
+      const runs = JSON.parse(localStorage.getItem("runHistory") || "[]");
+      runs.push(synced);
+      localStorage.setItem("runHistory", JSON.stringify(runs));
+      
+      return result.savedRun.id;
+    } else {
+      showToast("Run saved locally - will sync later", 'warning');
+    }
+  }
+  
+  // Fallback: local storage only
+  const runs = JSON.parse(localStorage.getItem("runHistory") || "[]");
+  runs.push(localRunData);
+  localStorage.setItem("runHistory", JSON.stringify(runs));
+  
+  return localRunId;
+};
+```
+
+### Confirm Stop Flow
+
+```typescript
+const confirmStop = async () => {
+  setShowExitConfirmation(false);
+  runStoppedRef.current = true;
+  
+  // Stop all audio
+  if (audioRef.current) {
+    audioRef.current.pause();
+    audioRef.current.src = '';
+  }
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+  }
+  
+  // Clear session from local storage
+  clearActiveRunSession();
+  
+  if (time > 0 && distance > 0) {
+    const runId = await saveRunData();
+    speak("Run complete! Great job!", { domain: 'system' });
+    navigate(`/history/${runId}`);
+  } else {
+    navigate("/");
+  }
+};
+```
+
+---
+
+## 22. CADENCE DETECTION & ANALYSIS
+
+### DeviceMotion-Based Cadence
+
+```typescript
+// Permission states
+type MotionPermission = "unknown" | "granted" | "denied" | "unavailable";
+
+const requestMotionPermission = async () => {
+  if (!('DeviceMotionEvent' in window)) {
+    setMotionPermission("unavailable");
+    return;
+  }
+  
+  // iOS requires explicit permission request
+  if (typeof (DeviceMotionEvent as any).requestPermission === 'function') {
+    try {
+      const response = await (DeviceMotionEvent as any).requestPermission();
+      setMotionPermission(response === 'granted' ? "granted" : "denied");
+    } catch (err) {
+      setMotionPermission("denied");
+    }
+  } else {
+    // Android/other - permission implicit
+    setMotionPermission("granted");
+  }
+};
+
+// Step detection
+const stepTimestampsRef = useRef<number[]>([]);
+const lastAccelRef = useRef<number>(0);
+
+useEffect(() => {
+  if (!active || motionPermission !== "granted") return;
+  
+  const handleMotion = (event: DeviceMotionEvent) => {
+    const acc = event.accelerationIncludingGravity;
+    if (!acc || acc.z === null) return;
+    
+    const magnitude = Math.sqrt(
+      (acc.x || 0) ** 2 + 
+      (acc.y || 0) ** 2 + 
+      (acc.z || 0) ** 2
+    );
+    
+    const threshold = 12;
+    const minTimeBetweenSteps = 200; // ms
+    const now = Date.now();
+    
+    // Detect step on threshold crossing (rising edge)
+    if (magnitude > threshold && lastAccelRef.current <= threshold) {
+      const lastStep = stepTimestampsRef.current[stepTimestampsRef.current.length - 1] || 0;
+      
+      if (now - lastStep > minTimeBetweenSteps) {
+        stepTimestampsRef.current.push(now);
+        
+        // Keep only last 30 steps
+        if (stepTimestampsRef.current.length > 30) {
+          stepTimestampsRef.current = stepTimestampsRef.current.slice(-30);
+        }
+        
+        // Calculate cadence from 15-second window
+        const recentSteps = stepTimestampsRef.current.filter(t => now - t < 15000);
+        if (recentSteps.length >= 3) {
+          const timeSpan = (recentSteps[recentSteps.length - 1] - recentSteps[0]) / 1000 / 60;
+          if (timeSpan > 0) {
+            const stepsPerMinute = Math.round((recentSteps.length - 1) / timeSpan);
+            setCadence(stepsPerMinute);
+          }
+        }
+      }
+    }
+    
+    lastAccelRef.current = magnitude;
+  };
+  
+  window.addEventListener('devicemotion', handleMotion);
+  return () => window.removeEventListener('devicemotion', handleMotion);
+}, [active, motionPermission]);
+```
+
+### AI Cadence Analysis API
+
+**POST** `/api/ai/analyze-cadence`
+
+```typescript
+// Request
+{
+  heightCm: number;
+  paceMinPerKm: number;
+  cadenceSpm: number;
+  distanceKm: number;
+  userFitnessLevel?: string;
+  userAge?: number;
+}
+
+// Response
+{
+  idealCadenceMin: number;
+  idealCadenceMax: number;
+  strideAssessment: "overstriding" | "understriding" | "optimal";
+  shortAdvice: string;      // 1 sentence
+  coachingAdvice: string;   // Full coaching tip
+}
+```
+
+---
+
+## 23. WEATHER INTEGRATION
+
+### Fetch Weather on GPS Lock
+
+```typescript
+// In handlePosition when GPS first locks:
+if (gpsStatus === "acquiring") {
+  setGpsStatus("active");
+  
+  // Fetch weather
+  fetch(`/api/weather/current?lat=${lat}&lng=${lng}`)
+    .then(res => res.ok ? res.json() : null)
+    .then(data => {
+      if (data?.current) {
+        setRunWeather(data.current);
+      }
+    })
+    .catch(console.error);
+}
+```
+
+### Weather Data Structure
+
+```typescript
+interface RunWeather {
+  temperature: number;       // Celsius
+  feelsLike: number;
+  humidity: number;          // Percentage
+  windSpeed: number;         // km/h
+  windDirection: string;     // "NE", "SW", etc.
+  condition: string;         // "Sunny", "Cloudy", etc.
+  uvIndex: number;
+  precipitationProbability: number;
+}
+```
+
+### Weather API Endpoint
+
+**GET** `/api/weather/current?lat={lat}&lng={lng}`
+
+Uses Google Maps Platform Weather API internally. Response:
+
+```typescript
+{
+  current: {
+    temperature: 22,
+    feelsLike: 24,
+    humidity: 65,
+    windSpeed: 12,
+    windDirection: "NE",
+    condition: "Partly Cloudy",
+    uvIndex: 4,
+    precipitationProbability: 10
+  }
+}
+```
+
+### Weather in Coaching Context
+
+Weather is included in AI coaching requests:
+
+```typescript
+const coachingRequest = {
+  // ... other fields
+  weather: runWeather ? {
+    temperature: runWeather.temperature,
+    humidity: runWeather.humidity,
+    windSpeed: runWeather.windSpeed,
+    conditions: runWeather.condition
+  } : undefined
+};
+```
+
+---
+
+## 24. PRE-RUN SUMMARY
+
+### Generation Trigger
+
+Pre-run summary is generated when GPS locks (before user starts running):
+
+```typescript
+useEffect(() => {
+  if (gpsStatus !== "active" || !currentPosition || initialAnnouncementMadeRef.current) return;
+  if (isResuming) {
+    initialAnnouncementMadeRef.current = true;
+    speak("Welcome back! Resuming your run.", { domain: 'system' });
+    return;
+  }
+  
+  initialAnnouncementMadeRef.current = true;
+  generateAndSpeakSummary();
+}, [gpsStatus, currentPosition, isResuming]);
+```
+
+### Summary API Request
+
+**POST** `/api/ai/run-summary`
+
+```typescript
+// Request
+{
+  routeName: string;
+  targetDistance: number;
+  targetTimeSeconds?: number;
+  difficulty: string;
+  elevationGain?: number;
+  elevationLoss?: number;
+  elevationProfile?: ElevationPoint[];
+  terrainType?: string;
+  weather?: {
+    temperature: number;
+    humidity: number;
+    windSpeed: number;
+    conditions: string;
+  };
+  coachName?: string;
+  userName?: string;
+  includeAiConfig?: boolean;
+  firstTurnInstruction?: {
+    instruction: string;
+    maneuver: string;
+    distance: number;
+  };
+}
+
+// Response
+{
+  summary: string;  // AI-generated summary (2-3 sentences)
+}
+```
+
+### Summary Content Includes
+
+- Route name and distance
+- Difficulty assessment
+- Elevation preview (if notable hills)
+- Weather conditions (if extreme)
+- First turn direction
+- Target pace context (if target time set)
+- Ends with "Tap Start Run when you're ready"
+
+---
+
+## 25. POST-RUN AI ANALYSIS
+
+### Analysis Request
+
+**POST** `/api/ai/run-analysis`
+
+```typescript
+{
+  runId: string;
+  userId: string;
+  distance: number;
+  duration: number;
+  avgPace: string;
+  paceData: Array<{ km: number; pace: string; paceSeconds: number }>;
+  elevationGain?: number;
+  elevationLoss?: number;
+  weather?: RunWeather;
+  targetTime?: number;          // CRITICAL: for target time analysis
+  userProfile: {
+    age?: number;
+    gender?: string;
+    fitnessLevel?: string;
+    weight?: string;
+  };
+  goals?: Array<{ type: string; title: string }>;
+}
+```
+
+### Analysis Response
+
+```typescript
+{
+  highlights: string[];           // Best moments (e.g., "Strong finish - last km was fastest")
+  struggles: string[];            // Challenges (e.g., "Pace dropped 25% in km 4")
+  personalBests: string[];        // New records if any
+  demographicComparison: string;  // How they compare to peers
+  coachingTips: string[];         // Actionable improvements
+  overallAssessment: string;      // Summary paragraph
+  weatherImpact?: string;         // How weather affected performance
+  warmUpAnalysis?: string;        // First km analysis
+  goalProgress?: string;          // Progress toward goals
+  targetTimeAnalysis?: string;    // CRITICAL: Analysis vs target time
+}
+```
+
+### Target Time Analysis Examples
+
+```
+// Beat target
+"Congratulations! You beat your target time of 30:00 by 1:23! This shows excellent pacing discipline."
+
+// Missed target
+"You finished 2:15 behind your 30:00 target. The data shows pace dropped significantly in km 4-5, likely due to the hill. Consider more conservative early pacing next time."
+
+// Close to target
+"Just 32 seconds off your 30:00 target! Your pacing was very consistent - a strong performance."
+```
+
+### Storage & Caching
+
+Analysis is stored in `run_analyses` table and retrieved instantly on return visits:
+
+```typescript
+// Check for existing analysis first
+const existing = await db.query.runAnalyses.findFirst({
+  where: eq(runAnalyses.runId, runId)
+});
+
+if (existing) {
+  return existing; // Return cached analysis
+}
+
+// Generate new analysis
+const analysis = await generateAnalysis(runData);
+await db.insert(runAnalyses).values({ runId, ...analysis });
+return analysis;
+```
+
+---
+
+## 26. WEAKNESS DETECTION
+
+### Weakness Event Interface
+
+```typescript
+interface WeaknessEvent {
+  startDistanceKm: number;
+  endDistanceKm: number;
+  durationSeconds: number;
+  avgPaceBefore: number;       // seconds/km
+  avgPaceDuring: number;       // seconds/km
+  dropPercent: number;         // How much slower
+  coachResponseGiven?: string; // What coach said
+}
+```
+
+### Detection Algorithm
+
+```typescript
+const PACE_DROP_THRESHOLD = 0.20;    // 20% slower triggers weakness
+const MIN_WEAKNESS_DURATION = 30;     // Minimum 30 seconds
+const ROLLING_WINDOW_SIZE = 10;       // Pace samples for median
+
+// State refs
+const rollingPaceWindowRef = useRef<Array<{
+  distanceKm: number;
+  timeSeconds: number;
+  paceSecondsPerKm: number;
+}>>([]);
+const baselinePaceRef = useRef<number>(0);
+const inSlowdownRef = useRef<boolean>(false);
+const slowdownStartRef = useRef<{ distanceKm: number; timeSeconds: number; baselinePace: number } | null>(null);
+
+// Calculate rolling pace median
+function getMedianPace(samples: number[]): number {
+  if (samples.length === 0) return 0;
+  const sorted = [...samples].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+// On each GPS update with valid distance/time:
+const currentPace = elapsedTime / distanceCovered;
+rollingPaceWindowRef.current.push({ distanceKm: distance, timeSeconds: time, paceSecondsPerKm: currentPace });
+
+if (rollingPaceWindowRef.current.length > ROLLING_WINDOW_SIZE) {
+  rollingPaceWindowRef.current.shift();
+}
+
+// Establish baseline after 500m
+if (distance > 0.5 && baselinePaceRef.current === 0) {
+  baselinePaceRef.current = currentPace;
+}
+
+// Check for slowdown
+if (baselinePaceRef.current > 0) {
+  const recentPaces = rollingPaceWindowRef.current.map(s => s.paceSecondsPerKm);
+  const medianPace = getMedianPace(recentPaces);
+  const dropPercent = (medianPace - baselinePaceRef.current) / baselinePaceRef.current;
+  
+  if (dropPercent > PACE_DROP_THRESHOLD && !inSlowdownRef.current) {
+    // Slowdown started
+    inSlowdownRef.current = true;
+    slowdownStartRef.current = { distanceKm: distance, timeSeconds: time, baselinePace: baselinePaceRef.current };
+  } else if (dropPercent <= PACE_DROP_THRESHOLD * 0.5 && inSlowdownRef.current) {
+    // Slowdown ended - record event if significant
+    const start = slowdownStartRef.current!;
+    const duration = time - start.timeSeconds;
+    
+    if (duration >= MIN_WEAKNESS_DURATION) {
+      setDetectedWeaknesses(prev => [...prev, {
+        startDistanceKm: start.distanceKm,
+        endDistanceKm: distance,
+        durationSeconds: Math.round(duration),
+        avgPaceBefore: start.baselinePace,
+        avgPaceDuring: medianPace,
+        dropPercent: Math.round(dropPercent * 100)
+      }]);
+    }
+    
+    inSlowdownRef.current = false;
+    slowdownStartRef.current = null;
+  }
+}
+```
+
+### Saving Weakness Events
+
+Weakness events are saved to the database after run completion:
+
+**POST** `/api/runs/:runId/weakness-events/bulk`
+
+```typescript
+{
+  events: WeaknessEvent[]
+}
+```
+
+---
+
+## 27. AI ROUTE GENERATION
+
+### Route Generation Flow
+
+1. **Find nearby landmarks** using Google Places API
+2. **Design waypoints** using OpenAI to create intelligent loops
+3. **Get directions** using Google Directions API
+4. **Get elevation profile** using Google Elevation API
+5. **Parse turn instructions** from directions response
+
+### Generate Multiple Routes
+
+**POST** `/api/routes/generate`
+
+```typescript
+// Request
+{
+  startLat: number;
+  startLng: number;
+  targetDistance: number;         // km
+  difficulty?: "easy" | "moderate" | "hard";
+}
+
+// Response
+{
+  success: true;
+  routes: Array<{
+    id: string;
+    routeName: string;
+    actualDistance: number;
+    duration: number;              // seconds
+    difficulty: "easy" | "moderate" | "hard";
+    waypoints: Array<{ lat: number; lng: number }>;
+    polyline: string;              // Encoded polyline
+    turnInstructions: TurnInstruction[];
+    elevation: {
+      gain: number;
+      loss: number;
+      maxElevation: number;
+      minElevation: number;
+      profile: ElevationPoint[];
+    };
+    aiReasoning?: string;
+  }>;
+}
+```
+
+### Places API Search
+
+```typescript
+const RUNNING_PLACE_TYPES = ['park', 'natural_feature', 'campground', 'stadium', 'tourist_attraction'];
+
+async function findNearbyTrailAnchors(lat: number, lng: number, radiusKm: number) {
+  const places = [];
+  const radiusMeters = Math.min(radiusKm * 1000, 50000);
+  
+  for (const placeType of RUNNING_PLACE_TYPES) {
+    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radiusMeters}&type=${placeType}&key=${GOOGLE_MAPS_API_KEY}`;
+    const data = await fetch(url).then(r => r.json());
+    
+    if (data.status === 'OK' && data.results) {
+      for (const result of data.results.slice(0, 5)) {
+        places.push({
+          lat: result.geometry.location.lat,
+          lng: result.geometry.location.lng,
+          name: result.name,
+          type: placeType
+        });
+      }
+    }
+  }
+  
+  // Also search keywords
+  for (const keyword of ['walking trail', 'river walk', 'nature reserve']) {
+    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radiusMeters}&keyword=${encodeURIComponent(keyword)}&key=${GOOGLE_MAPS_API_KEY}`;
+    const data = await fetch(url).then(r => r.json());
+    // ... add results
+  }
+  
+  return places;
+}
+```
+
+### AI Waypoint Design Prompt
+
+```typescript
+const prompt = `You are a running route designer. Design 3 diverse running loop routes.
+
+START LOCATION: ${startLat.toFixed(6)}, ${startLng.toFixed(6)}
+TARGET DISTANCE: ${targetDistance}km
+APPROXIMATE LOOP RADIUS: ${baseRadius}km
+
+NEARBY POINTS OF INTEREST:
+${placeDescriptions}
+
+DESIGN RULES:
+1. Each route must be a LOOP that returns to the start point
+2. Prioritize trails, parks, river walks when available
+3. Create 3 DIFFERENT routes going in different directions
+4. Use 3-5 waypoints per route to create genuine loops
+5. Place waypoints at actual landmarks or logical turning points
+6. ALL coordinates must be within ${maxDistance}km of start
+
+Return ONLY valid JSON:
+{
+  "routes": [
+    {
+      "routeName": "Descriptive Name",
+      "description": "Brief description",
+      "waypoints": [
+        {"lat": 0.000000, "lng": 0.000000, "reason": "Why this waypoint"}
+      ]
+    }
+  ]
+}`;
+```
+
+---
+
+## 28. EVENTS SYSTEM
+
+### Event Types
+
+```typescript
+type EventType = 'parkrun' | 'marathon' | 'half_marathon' | '5k' | '10k' | 'fun_run' | 'trail' | 'custom';
+```
+
+### Schedule Types
+
+```typescript
+type ScheduleType = 'one_time' | 'recurring';
+
+type RecurrencePattern = 
+  | 'daily'
+  | 'weekly'      // Uses dayOfWeek (0-6)
+  | 'fortnightly' // Every 2 weeks
+  | 'monthly';    // Uses dayOfMonth (1-31)
+```
+
+### Event Schema
+
+```typescript
+interface Event {
+  id: string;
+  name: string;
+  country: string;
+  city?: string;
+  description?: string;
+  eventType: EventType;
+  routeId: string;           // Links to routes table
+  createdByUserId: string;
+  scheduleType: ScheduleType;
+  specificDate?: Date;       // For one_time events
+  recurrencePattern?: RecurrencePattern;
+  dayOfWeek?: number;        // 0=Sunday, 6=Saturday
+  dayOfMonth?: number;       // 1-31
+  isActive: boolean;
+}
+```
+
+### Browse Events by Country
+
+**GET** `/api/events/by-country/:country`
+
+```typescript
+// Response
+{
+  events: Array<{
+    id: string;
+    name: string;
+    city?: string;
+    description?: string;
+    eventType: string;
+    route: {
+      distance: number;
+      difficulty: string;
+      elevationGain?: number;
+    };
+    nextOccurrence?: string;  // ISO date of next event
+    schedule: {
+      type: string;
+      pattern?: string;
+      dayOfWeek?: number;
+    };
+  }>;
+}
+```
+
+### Calculate Next Occurrence
+
+```typescript
+function getNextOccurrence(event: Event): Date | null {
+  const now = new Date();
+  
+  if (event.scheduleType === 'one_time') {
+    return event.specificDate && event.specificDate > now ? event.specificDate : null;
+  }
+  
+  // Recurring events
+  switch (event.recurrencePattern) {
+    case 'daily':
+      return new Date(now.setHours(8, 0, 0, 0)); // Next occurrence today at 8am
+      
+    case 'weekly':
+      const daysUntil = (event.dayOfWeek! - now.getDay() + 7) % 7 || 7;
+      const next = new Date(now);
+      next.setDate(now.getDate() + daysUntil);
+      next.setHours(9, 0, 0, 0); // Default 9am
+      return next;
+      
+    case 'fortnightly':
+      // Calculate based on first event date
+      // ... logic based on event creation date
+      
+    case 'monthly':
+      const nextMonth = new Date(now.getFullYear(), now.getMonth(), event.dayOfMonth!);
+      if (nextMonth <= now) nextMonth.setMonth(nextMonth.getMonth() + 1);
+      nextMonth.setHours(9, 0, 0, 0);
+      return nextMonth;
+      
+    default:
+      return null;
+  }
+}
+```
+
+### Start Event Run
+
+Events are run like regular routes but with `eventId` tracked:
+
+```typescript
+// Navigate to run session with event context
+navigate(`/run-session?routeId=${event.routeId}&eventId=${event.id}&distance=${route.distance}`);
+```
+
+The `eventId` is stored with the completed run to link participation.
+
+### Create Event from Completed Run (Admin)
+
+**POST** `/api/events`
+
+```typescript
+{
+  name: string;
+  country: string;
+  city?: string;
+  description?: string;
+  eventType: EventType;
+  sourceRunId: string;       // Create route from this run's GPS track
+  scheduleType: ScheduleType;
+  specificDate?: string;     // For one_time
+  recurrencePattern?: string;
+  dayOfWeek?: number;
+  dayOfMonth?: number;
+}
+```
+
+---
+
 ## QUICK IMPLEMENTATION CHECKLIST
 
 ### Core Features
-- [ ] User registration/login
-- [ ] Route map with start/finish markers and legend
-- [ ] GPS tracking during run
-- [ ] Distance/time/pace calculations
-- [ ] Km milestone announcements
-- [ ] Session auto-save every 5 seconds
-- [ ] Resume interrupted session
+- [ ] User registration/login with password hashing
+- [ ] Route map with start/finish markers, legend, and polyline
+- [ ] GPS tracking with accuracy filtering and spike rejection
+- [ ] Distance/time/pace calculations (Haversine distance)
+- [ ] Km milestone announcements with split times
+- [ ] Session auto-save every 5 seconds to local storage
+- [ ] Resume interrupted session (12-hour expiration)
+- [ ] Pause/resume with timestamp-based timer tracking
+
+### GPS Management
+- [ ] GPS watchdog (10s interval, detect 30s stale)
+- [ ] Recovery attempts (max 5, 45s cooldown)
+- [ ] Visibility change handling (refresh on app resume)
+- [ ] Track downsampling for storage (max 1000 points)
+- [ ] Speed-based spike filtering (max 12.5 m/s)
+
+### Speech & Audio
+- [ ] Speech queue (FIFO, one-at-a-time)
+- [ ] Domain-based routing (coach/nav/system)
+- [ ] AI TTS with caching (20 entries max)
+- [ ] Device TTS fallback
+- [ ] Queue watchdog (45s stuck detection)
+- [ ] 3-second throttling between announcements
 
 ### Navigation
-- [ ] Turn-by-turn instructions from route
-- [ ] Street-to-street format (not just street name)
-- [ ] Distance-based announcements (200m, 100m, 30m)
-- [ ] Off-route detection and guidance
+- [ ] Turn-by-turn from Google Directions API
+- [ ] Street-to-street format announcements
+- [ ] Distance-based triggers (200m, 100m, 30m)
+- [ ] Off-route detection (>100m threshold)
+- [ ] Direction-based waypoint validation
+- [ ] Protected final waypoints (60% rule)
+- [ ] Turn grouping within 150m
 
 ### AI Coaching
-- [ ] Pre-run summary/briefing
-- [ ] Periodic coaching (every 120 seconds)
-- [ ] Phase-based coaching statements
-- [ ] Terrain-aware coaching (hills)
+- [ ] Pre-run summary with route/weather/terrain
+- [ ] Periodic coaching (120s interval)
+- [ ] Phase-based statements (early/mid/late/final)
+- [ ] Terrain-aware hill coaching (5%+ grade triggers)
 - [ ] Pace drop detection and encouragement
-- [ ] Talk to coach (voice input)
-- [ ] Weather-aware coaching
+- [ ] Talk to coach (voice input with SpeechRecognition)
+- [ ] Weather-aware coaching context
 - [ ] Goal-aware coaching
+- [ ] 0.50km pace summary with AI or fallback
+
+### Cadence Detection
+- [ ] DeviceMotion permission (iOS explicit request)
+- [ ] Step detection (12g threshold, 200ms debounce)
+- [ ] 15-second rolling window for SPM
+- [ ] AI cadence analysis API integration
+
+### Weather
+- [ ] Fetch on GPS lock via weather API
+- [ ] Store with run data
+- [ ] Include in coaching context
+
+### Run Completion
+- [ ] Save with retry (3 attempts, exponential backoff)
+- [ ] Local storage fallback with pendingSync flag
+- [ ] Link coaching logs to run
+- [ ] Save weakness events
+- [ ] GPS track downsampling
+
+### Weakness Detection
+- [ ] Rolling pace median (10 samples)
+- [ ] 20% drop threshold detection
+- [ ] 30s minimum duration
+- [ ] Record start/end distance and pace drop
+
+### Route Generation
+- [ ] Google Places API for landmarks
+- [ ] OpenAI for intelligent waypoint design
+- [ ] Google Directions API for turn-by-turn
+- [ ] Google Elevation API for profiles
+- [ ] Generate 3 diverse loop options
+
+### Events System
+- [ ] Event types (parkrun, marathon, 5k, etc.)
+- [ ] Schedule types (one-time, recurring)
+- [ ] Recurrence patterns (daily/weekly/fortnightly/monthly)
+- [ ] Browse by country
+- [ ] Calculate next occurrence
+- [ ] Track eventId with completed runs
 
 ### Live Features
 - [ ] Live session sync every 5 seconds
@@ -2112,14 +3508,16 @@ function generateUserCode(): string {
 - [ ] Observer view (watch friend's run)
 - [ ] Push notifications for invites
 
-### Post-Run
-- [ ] Save completed run
-- [ ] AI analysis with target time feedback
+### Post-Run Analysis
+- [ ] AI analysis with highlights/struggles
+- [ ] Target time achievement analysis (CRITICAL)
+- [ ] Demographic comparison
+- [ ] Personal bests detection
+- [ ] Cache analysis in database
 - [ ] Coaching log review
-- [ ] Weakness event tracking
 
 ---
 
 ## END OF DOCUMENT
 
-This document provides complete specifications for building a fully independent mobile app with feature parity to the web app. All business logic, API formats, and UI requirements are included.
+This document provides complete specifications for building a fully independent mobile app with feature parity to the web app. All business logic, API formats, UI requirements, and implementation details are included. Version 2.0 adds comprehensive coverage of GPS management, speech queuing, pause/resume timing, run completion flow, cadence detection, weather integration, pre-run summary, post-run analysis, weakness detection, AI route generation, and the events system.
