@@ -869,28 +869,312 @@ interface TurnInstruction {
 }
 ```
 
-### Navigation Announcement Logic
+### Critical Navigation Constants
 
 ```typescript
-// Skip 'straight' maneuvers - only announce actual turns
-if (maneuver === 'straight') continue;
+// Distance thresholds
+const APPROACH_ANNOUNCE_DISTANCE = 90;  // meters - first warning
+const AT_TURN_DISTANCE = 35;            // meters - "now" announcement
+const OFF_ROUTE_THRESHOLD = 50;         // meters
+const RECALIBRATION_FAR_THRESHOLD = 80; // meters - trigger waypoint recalibration
+const PASSED_TURN_DELTA = 40;           // meters - how far past turn to auto-advance
 
-const distanceToTurn = calculateDistance(currentPosition, turnPoint);
+// Waypoint protection
+const MAX_WAYPOINTS_TO_SKIP = 5;        // Never skip more than 5 at once
+const PROTECTED_FINAL_COUNT = 3;        // Protect last 3 waypoints until 60% done
+const PROGRESS_THRESHOLD_FOR_FINAL = 60; // Percent - when to reduce protection to 1
 
-// Distance-based announcements
-if (distanceToTurn <= 200 && distanceToTurn > 100) {
-  // Far warning
-  speak(`In ${Math.round(distanceToTurn)} meters, ${instruction}`);
-} else if (distanceToTurn <= 100 && distanceToTurn > 30) {
-  // Close warning
-  speak(`In ${Math.round(distanceToTurn)} meters, ${instruction}`);
-} else if (distanceToTurn <= 30 && distanceToTurn > 5) {
-  // Immediate
-  speak(instruction.replace('Turn', 'Turn now'));
+// Turn grouping
+const GROUP_DISTANCE_THRESHOLD = 150;   // meters - combine turns within this distance
+const MAX_GROUPED_TURNS = 4;            // Max turns to announce together
+
+// Direction validation
+const MAX_BEARING_DIFF = 90;            // degrees - runner must be heading toward waypoint
+```
+
+### Instruction Filtering (What to Announce)
+
+```typescript
+// Only announce meaningful instructions
+function isMeaningfulInstruction(candidate: TurnInstruction): boolean {
+  const maneuver = (candidate.maneuver || '').toLowerCase();
+  const instruction = (candidate.instruction || '').toLowerCase();
+  
+  // Accept if it has a turn maneuver OR the instruction mentions turning
+  const isTurn = maneuver.includes('turn') || 
+                maneuver.includes('left') || 
+                maneuver.includes('right') ||
+                instruction.includes('turn left') || 
+                instruction.includes('turn right');
+  
+  // Accept roundabouts, merges, and other significant maneuvers
+  const isSignificant = maneuver.includes('roundabout') ||
+                       maneuver.includes('merge') ||
+                       maneuver.includes('ramp') ||
+                       instruction.includes('roundabout') ||
+                       instruction.includes('enter') ||
+                       instruction.includes('exit');
+  
+  // Skip trivial "straight" instructions with small distance
+  const isSkippable = (maneuver === 'straight' || maneuver === '') && 
+                     !instruction.includes('turn') && 
+                     !instruction.includes('left') && 
+                     !instruction.includes('right') &&
+                     candidate.distance <= 10;
+  
+  return isTurn || isSignificant || !isSkippable;
+}
+```
+
+### Waypoint Pointer Management
+
+The system maintains a `currentTurnIndex` pointer that tracks which instruction is next.
+
+```typescript
+// State refs for turn tracking
+let currentTurnIndex = 0;              // Current instruction pointer
+let turnApproachAnnounced = false;     // Has 90m warning been given?
+let turnAtAnnounced = false;           // Has "now" announcement been given?
+let distanceAtTurnReach = 0;           // Distance (km) when we first reached the turn
+let closestDistanceToTurn = 0;         // Closest we've been to current turn
+let increasingDistanceSamples = 0;     // Count of GPS samples where distance increased
+let lastDistanceToTurn = 0;            // Previous distance for comparison
+```
+
+### CRITICAL: Direction-Based Waypoint Validation
+
+**RULE: Runner must be heading TOWARD a waypoint to skip to it.**
+
+This prevents the end waypoint being picked up at the first corner when the runner is close to the start.
+
+```typescript
+function validateWaypointDirection(
+  currentPosition: { lat: number; lng: number },
+  candidateWaypoint: { lat: number; lng: number },
+  recentPositions: Array<{ lat: number; lng: number }>
+): boolean {
+  // Need at least 3 positions to calculate direction
+  if (recentPositions.length < 3) return true;
+  
+  // Calculate runner's bearing from recent movement
+  const startPos = recentPositions[0];
+  const endPos = recentPositions[recentPositions.length - 1];
+  const runnerBearing = calculateBearing(startPos.lat, startPos.lng, endPos.lat, endPos.lng);
+  
+  // Calculate bearing from runner to candidate waypoint
+  const waypointBearing = calculateBearing(
+    currentPosition.lat, currentPosition.lng,
+    candidateWaypoint.lat, candidateWaypoint.lng
+  );
+  
+  // Calculate bearing difference
+  let bearingDiff = Math.abs(runnerBearing - waypointBearing);
+  if (bearingDiff > 180) bearingDiff = 360 - bearingDiff;
+  
+  // If running more than 90 degrees away from waypoint, REJECT
+  return bearingDiff <= 90;
+}
+```
+
+### CRITICAL: Protected Final Waypoints
+
+**RULE: Don't allow jumping to last 3 instructions until 60%+ distance covered.**
+
+This prevents premature finish detection when near the start of a loop route.
+
+```typescript
+function getMaxAllowedWaypointIndex(
+  totalInstructions: number,
+  distanceCoveredKm: number,
+  targetDistanceKm: number
+): number {
+  const progressPercent = targetDistanceKm > 0 
+    ? (distanceCoveredKm / targetDistanceKm) * 100 
+    : 0;
+  
+  // Protect last 3 waypoints until 60% done, then only protect last 1
+  const protectedFinalCount = progressPercent < 60 ? 3 : 1;
+  
+  return totalInstructions - protectedFinalCount;
+}
+```
+
+### Dynamic Recalibration Algorithm
+
+On every GPS update, check if we should skip to a later waypoint:
+
+```typescript
+function recalibrateTurnPointer(
+  currentPosition: { lat: number; lng: number },
+  storedInstructions: TurnInstruction[],
+  currentIdx: number,
+  distanceCoveredKm: number,
+  targetDistanceKm: number,
+  recentPositions: Array<{ lat: number; lng: number }>
+): number {
+  const currentTurn = storedInstructions[currentIdx];
+  const distanceToCurrentTurn = haversineDistance(currentPosition, currentTurn) * 1000;
+  
+  // Only check recalibration if:
+  // - We're far from current waypoint (> 80m)
+  // - Distance keeps increasing for 2+ samples
+  // - We're past the approach announcement and distance is growing
+  const shouldCheck = distanceToCurrentTurn > 80 || 
+    (increasingDistanceSamples >= 2 && distanceToCurrentTurn > 50);
+  
+  if (!shouldCheck) return currentIdx;
+  
+  const maxAllowedIdx = getMaxAllowedWaypointIndex(
+    storedInstructions.length, distanceCoveredKm, targetDistanceKm
+  );
+  const maxScanIdx = Math.min(currentIdx + MAX_WAYPOINTS_TO_SKIP, maxAllowedIdx);
+  
+  let bestIdx = currentIdx;
+  let bestDistance = distanceToCurrentTurn;
+  
+  for (let i = currentIdx + 1; i <= maxScanIdx; i++) {
+    const candidate = storedInstructions[i];
+    
+    // Skip non-meaningful instructions
+    if (!isMeaningfulInstruction(candidate)) continue;
+    
+    const distanceToCandidate = haversineDistance(currentPosition, candidate) * 1000;
+    
+    // CRITICAL: Validate direction
+    if (!validateWaypointDirection(currentPosition, candidate, recentPositions)) {
+      console.log(`[Nav] Skip idx ${i}: runner not heading toward waypoint`);
+      continue;
+    }
+    
+    // Use 25m hysteresis to prevent premature skipping
+    if (distanceToCandidate < bestDistance - 25 && distanceToCandidate < 150) {
+      bestIdx = i;
+      bestDistance = distanceToCandidate;
+    }
+  }
+  
+  if (bestIdx > currentIdx) {
+    console.log(`[Nav] RECALIBRATING: Jumping from idx ${currentIdx} to ${bestIdx}`);
+    // Reset all announcement flags
+  }
+  
+  return bestIdx;
+}
+```
+
+### "Passed Turn" Detection
+
+Detect when runner has physically passed a turn point:
+
+```typescript
+// Mark when we first reach the turn location (within 45m)
+if (distanceToTurn <= 45 && distanceAtTurnReach === 0) {
+  distanceAtTurnReach = distanceCoveredKm;
+  closestDistanceToTurn = distanceToTurn;
 }
 
-// Minimum 30 seconds between navigation announcements
-const NAVIGATION_COOLDOWN = 30000; // ms
+// Track closest distance
+if (distanceAtTurnReach > 0 && distanceToTurn < closestDistanceToTurn) {
+  closestDistanceToTurn = distanceToTurn;
+}
+
+// Detect if runner has passed the turn
+// Was within 45m, now 40m+ further away = passed
+if (closestDistanceToTurn < 45 && distanceToTurn > closestDistanceToTurn + 40) {
+  console.log(`[Nav] Passed turn: closest ${closestDistanceToTurn}m, now ${distanceToTurn}m`);
+  currentTurnIndex++;
+  // Reset all flags
+}
+```
+
+### Auto-Advance Logic
+
+Multiple conditions can trigger advancing to the next waypoint:
+
+```typescript
+let shouldAdvance = false;
+
+// 1. Closer to next turn than current
+if (nextTurn) {
+  const distanceToNext = haversineDistance(currentPosition, nextTurn) * 1000;
+  if (distanceToNext < distanceToTurn) {
+    shouldAdvance = true;
+  }
+}
+
+// 2. Traveled 25m since at-turn announcement
+if (distanceAtTurnReach > 0) {
+  const distanceTraveled = (distanceCoveredKm - distanceAtTurnReach) * 1000;
+  if (distanceTraveled > 25) {
+    shouldAdvance = true;
+  }
+}
+
+// 3. Distance increasing for 3+ samples or exceeded 120m
+if (distanceToTurn > lastDistanceToTurn + 5) {
+  increasingDistanceSamples++;
+  if (increasingDistanceSamples >= 3 || distanceToTurn > 120) {
+    shouldAdvance = true;
+  }
+} else {
+  increasingDistanceSamples = 0;
+}
+```
+
+### Turn Grouping (Closely Spaced Turns)
+
+Combine turns within 150m into a single announcement:
+
+```typescript
+// Look ahead for turns within 150m
+const groupedTurns = [currentTurn];
+let lastTurnInGroup = currentTurn;
+
+for (let i = currentIdx + 1; i < storedInstructions.length; i++) {
+  const candidate = storedInstructions[i];
+  if (!isMeaningfulInstruction(candidate)) continue;
+  
+  const distFromLast = haversineDistance(lastTurnInGroup, candidate) * 1000;
+  
+  if (distFromLast <= 150) {
+    groupedTurns.push(candidate);
+    lastTurnInGroup = candidate;
+  } else {
+    break;
+  }
+  
+  if (groupedTurns.length >= 4) break;
+}
+
+// Build combined announcement
+// "Turn right, then in 80m turn left, then immediately right"
+if (groupedTurns.length > 1) {
+  const parts = groupedTurns.map((t, i) => {
+    if (i === 0) return t.instruction;
+    
+    const dist = haversineDistance(groupedTurns[i-1], t) * 1000;
+    const distText = dist < 50 ? 'immediately' : `in ${Math.round(dist)} meters`;
+    return `then ${distText} ${t.instruction.toLowerCase().replace(/^(turn|bear) /, '')}`;
+  });
+  
+  combinedInstruction = parts.join(', ');
+}
+```
+
+### Announcement Timing
+
+```typescript
+// Approach warning: 35m < distance <= 90m
+if (distanceToTurn <= 90 && distanceToTurn > 35 && !turnApproachAnnounced) {
+  speak(`In ${Math.round(distanceToTurn)} meters, ${instruction}`);
+  turnApproachAnnounced = true;
+}
+
+// At-turn announcement: distance <= 35m
+if (distanceToTurn <= 35 && !turnAtAnnounced) {
+  speak(instruction);
+  turnAtAnnounced = true;
+}
 ```
 
 ### Off-Route Detection
@@ -898,7 +1182,6 @@ const NAVIGATION_COOLDOWN = 30000; // ms
 ```typescript
 const OFF_ROUTE_THRESHOLD = 50; // meters
 
-// Check distance to nearest route point
 if (distanceToNearestRoutePoint > OFF_ROUTE_THRESHOLD) {
   // Fetch street name via reverse geocode
   const streetName = await getStreetName(nearestRoutePoint.lat, nearestRoutePoint.lng);
@@ -908,6 +1191,22 @@ if (distanceToNearestRoutePoint > OFF_ROUTE_THRESHOLD) {
     : `You're ${distMeters} meters off route. Check your map to get back on track.`;
   
   speak(instruction);
+}
+```
+
+### Navigation State Reset
+
+When advancing to the next turn, reset all tracking state:
+
+```typescript
+function advanceToNextTurn() {
+  currentTurnIndex++;
+  turnApproachAnnounced = false;
+  turnAtAnnounced = false;
+  distanceAtTurnReach = 0;
+  closestDistanceToTurn = 0;
+  increasingDistanceSamples = 0;
+  lastDistanceToTurn = 0;
 }
 ```
 
