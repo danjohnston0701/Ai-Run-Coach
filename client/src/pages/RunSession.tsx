@@ -387,6 +387,7 @@ export default function RunSession() {
   const [realtimePace, setRealtimePace] = useState<string | null>(null);
   const [message, setMessage] = useState("Acquiring GPS signal...");
   const [lastMessageTime, setLastMessageTime] = useState(0);
+  const [lastPredefinedCoachingTime, setLastPredefinedCoachingTime] = useState(0); // Separate timer for predefined coaching
   const [showShareModal, setShowShareModal] = useState(false);
   const [showNavMap, setShowNavMap] = useState(true);
   const [mapFollowRunner, setMapFollowRunner] = useState(true);
@@ -594,40 +595,54 @@ export default function RunSession() {
     latencyMs?: number;
   }) => {
     const userId = userProfile?.id;
-    if (!userId) return;
+    if (!userId) {
+      console.warn('[CoachingLog] No userId - user may not be logged in');
+      return;
+    }
     
     const { time: currentTime, distance: currentDistance } = runMetricsRef.current;
     const paceSeconds = currentDistance > 0 ? currentTime / currentDistance : 0;
     const paceMins = Math.floor(paceSeconds / 60);
     const paceSecs = Math.floor(paceSeconds % 60);
     
+    const logPayload = {
+      userId,
+      sessionKey: sessionIdRef.current,
+      eventType: data.eventType,
+      elapsedSeconds: Math.floor(currentTime),
+      distanceKm: parseFloat(currentDistance.toFixed(2)),
+      currentPace: `${paceMins}:${paceSecs.toString().padStart(2, '0')}`,
+      heartRate: null,
+      cadence: cadence || null,
+      terrain: routeData?.elevation ? {
+        grade: previousGradeRef.current,
+        totalGain: routeData.elevation.gain,
+        totalLoss: routeData.elevation.loss
+      } : null,
+      weather: runWeather || null,
+      topic: data.topic,
+      responseText: data.responseText,
+      prompt: data.prompt,
+      latencyMs: data.latencyMs,
+    };
+    
+    console.log('[CoachingLog] Saving:', data.eventType, data.topic);
+    
     try {
-      await fetch('/api/coaching-logs', {
+      const response = await fetch('/api/coaching-logs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          sessionKey: sessionIdRef.current,
-          eventType: data.eventType,
-          elapsedSeconds: Math.floor(currentTime),
-          distanceKm: parseFloat(currentDistance.toFixed(2)),
-          currentPace: `${paceMins}:${paceSecs.toString().padStart(2, '0')}`,
-          heartRate: null,
-          cadence: cadence || null,
-          terrain: routeData?.elevation ? {
-            grade: previousGradeRef.current,
-            totalGain: routeData.elevation.gain,
-            totalLoss: routeData.elevation.loss
-          } : null,
-          weather: runWeather || null,
-          topic: data.topic,
-          responseText: data.responseText,
-          prompt: data.prompt,
-          latencyMs: data.latencyMs,
-        })
+        body: JSON.stringify(logPayload)
       });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[CoachingLog] Server error:', response.status, errorText);
+      } else {
+        console.log('[CoachingLog] Saved successfully');
+      }
     } catch (error) {
-      console.error('Failed to save coaching log:', error);
+      console.error('[CoachingLog] Failed to save:', error);
     }
   }, [userProfile?.id, cadence, routeData?.elevation, runWeather]);
 
@@ -2347,11 +2362,18 @@ export default function RunSession() {
   }, [currentPosition, routePoints, routeData?.turnInstructions]);
 
   // Periodic coaching with phase-based statement selection
+  // Uses separate timer to avoid being blocked by splits/navigation
   useEffect(() => {
     if (!active) return;
     
     const interval = setInterval(() => {
-      if (Date.now() - lastMessageTime > 30000 && gpsStatus === "active") {
+      const now = Date.now();
+      // Use separate timer for predefined coaching - 45 seconds between statements
+      // Also ensure we're not speaking right after navigation (5 second gap)
+      const timeSincePredefined = now - lastPredefinedCoachingTime;
+      const timeSinceAnyMessage = now - lastMessageTime;
+      
+      if (timeSincePredefined > 45000 && timeSinceAnyMessage > 5000 && gpsStatus === "active") {
         // Determine current run phase based on distance and total planned distance
         const targetDistNum = parseFloat(sessionMetadataRef.current.targetDistance) || null;
         const currentPhase = determinePhase(distance, targetDistNum);
@@ -2366,9 +2388,10 @@ export default function RunSession() {
             [statement.id]: (prev[statement.id] || 0) + 1
           }));
           
+          console.log(`[Predefined Coaching] Speaking: ${statement.id} (${currentPhase})`);
           setMessage(statement.text);
           speak(statement.text, { domain: 'coach' });
-          setLastMessageTime(Date.now());
+          setLastPredefinedCoachingTime(now); // Only update predefined timer
           
           // Log the predefined coaching statement
           saveCoachingLog({
@@ -2378,10 +2401,10 @@ export default function RunSession() {
           });
         }
       }
-    }, 20000);
+    }, 15000); // Check more frequently (every 15s) since we have separate cooldown
 
     return () => clearInterval(interval);
-  }, [active, lastMessageTime, gpsStatus, speak, distance, statementUsageCounts, saveCoachingLog]);
+  }, [active, lastPredefinedCoachingTime, lastMessageTime, gpsStatus, speak, distance, statementUsageCounts, saveCoachingLog]);
 
   // Timestamp-based timer that works even when screen is off
   // Timer only pauses when user explicitly pauses (active = false)
@@ -3444,8 +3467,11 @@ export default function RunSession() {
         speak("Okay! I'll give you regular coaching updates.", { domain: 'system' });
         toast.success("Regular coaching enabled");
       } else {
+        console.log('[Voice Input] Sending to AI coach:', transcript);
         toast.info(`Asking coach: "${transcript.substring(0, 40)}${transcript.length > 40 ? '...' : ''}"`);
-        fetchCoaching(transcript);
+        fetchCoaching(transcript).finally(() => {
+          console.log('[Voice Input] Coach response complete');
+        });
       }
     };
     
@@ -3852,6 +3878,7 @@ export default function RunSession() {
     recentPaceSamplesRef.current = [];
     halfKmAnnouncedRef.current = false; // Reset 0.50km pace summary for new run
     setRealtimePace(null);
+    setLastPredefinedCoachingTime(Date.now()); // Reset predefined coaching timer to avoid immediate trigger
     
     setRunStarted(true);
     setActive(true);
