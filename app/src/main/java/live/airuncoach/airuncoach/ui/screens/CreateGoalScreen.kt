@@ -14,20 +14,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.ui.theme.*
+import live.airuncoach.airuncoach.viewmodel.CreateGoalState
+import live.airuncoach.airuncoach.viewmodel.GoalsViewModel
+import live.airuncoach.airuncoach.viewmodel.GoalsViewModelFactory
 
 enum class GoalType {
     EVENT, DISTANCE_TIME, HEALTH_WELLBEING, CONSISTENCY
 }
 
 @Composable
-fun CreateGoalScreen(onDismiss: () -> Unit = {}, onCreateGoal: () -> Unit = {}) {
+fun CreateGoalScreen(
+    onDismiss: () -> Unit = {},
+    onCreateGoal: () -> Unit = {},
+    viewModel: GoalsViewModel = viewModel(factory = GoalsViewModelFactory(LocalContext.current))
+) {
     var selectedType by remember { mutableStateOf<GoalType?>(null) }
     var goalTitle by remember { mutableStateOf("") }
     var targetDate by remember { mutableStateOf("") }
@@ -51,6 +60,67 @@ fun CreateGoalScreen(onDismiss: () -> Unit = {}, onCreateGoal: () -> Unit = {}) 
     
     // Consistency fields
     var weeklyRunTarget by remember { mutableStateOf("") }
+    
+    // Observe create goal state
+    val createGoalState by viewModel.createGoalState.collectAsState()
+    
+    // Show loading/error states
+    var showError by remember { mutableStateOf<String?>(null) }
+    
+    // Handle state changes
+    LaunchedEffect(createGoalState) {
+        when (createGoalState) {
+            is CreateGoalState.Success -> {
+                viewModel.resetCreateGoalState()
+                onCreateGoal()
+            }
+            is CreateGoalState.Error -> {
+                showError = (createGoalState as CreateGoalState.Error).message
+            }
+            else -> {}
+        }
+    }
+    
+    // Function to handle goal creation
+    val handleCreateGoal = {
+        // Validation
+        if (selectedType == null) {
+            showError = "Please select a goal type"
+        } else if (goalTitle.isBlank()) {
+            showError = "Please enter a goal title"
+        } else {
+            // Calculate time target in seconds
+            val timeTargetSeconds = if (timeHours.isNotBlank() || timeMinutes.isNotBlank() || timeSeconds.isNotBlank()) {
+                val hours = timeHours.toIntOrNull() ?: 0
+                val minutes = timeMinutes.toIntOrNull() ?: 0
+                val seconds = timeSeconds.toIntOrNull() ?: 0
+                (hours * 3600) + (minutes * 60) + seconds
+            } else null
+            
+            // Determine distance target (prefer selected, fallback to custom)
+            val finalDistanceTarget = selectedDistance.ifBlank { customDistance.ifBlank { null } }
+            
+            // Determine health target (prefer selected, fallback to custom)
+            val finalHealthTarget = selectedHealthTarget.ifBlank { customHealthGoal.ifBlank { null } }
+            
+            // Parse weekly run target
+            val finalWeeklyTarget = weeklyRunTarget.toIntOrNull()
+            
+            viewModel.createGoal(
+                type = selectedType.toString(),
+                title = goalTitle,
+                description = description.ifBlank { null },
+                notes = notes.ifBlank { null },
+                targetDate = targetDate.ifBlank { null },
+                eventName = eventName.ifBlank { null },
+                eventLocation = eventLocation.ifBlank { null },
+                distanceTarget = finalDistanceTarget,
+                timeTargetSeconds = timeTargetSeconds,
+                healthTarget = finalHealthTarget,
+                weeklyRunTarget = finalWeeklyTarget
+            )
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -283,9 +353,27 @@ fun CreateGoalScreen(onDismiss: () -> Unit = {}, onCreateGoal: () -> Unit = {}) 
                 }
                 
                 item {
+                    // Error message
+                    if (showError != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Colors.error.copy(alpha = 0.1f), RoundedCornerShape(BorderRadius.sm))
+                                .padding(Spacing.md)
+                        ) {
+                            Text(
+                                text = showError ?: "",
+                                style = AppTextStyles.body,
+                                color = Colors.error
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(Spacing.md))
+                    }
+                    
                     // Action Buttons
                     Button(
-                        onClick = onCreateGoal,
+                        onClick = handleCreateGoal,
+                        enabled = createGoalState !is CreateGoalState.Loading,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(56.dp),
@@ -295,10 +383,17 @@ fun CreateGoalScreen(onDismiss: () -> Unit = {}, onCreateGoal: () -> Unit = {}) 
                             contentColor = Colors.buttonText
                         )
                     ) {
-                        Text(
-                            text = "Create Goal",
-                            style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
-                        )
+                        if (createGoalState is CreateGoalState.Loading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                color = Colors.buttonText
+                            )
+                        } else {
+                            Text(
+                                text = "Create Goal",
+                                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.height(Spacing.md))
                     

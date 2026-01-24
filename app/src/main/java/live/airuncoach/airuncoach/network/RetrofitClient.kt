@@ -1,6 +1,7 @@
 package live.airuncoach.airuncoach.network
 
 import android.content.Context
+import live.airuncoach.airuncoach.BuildConfig
 import live.airuncoach.airuncoach.data.SessionManager
 import okhttp3.Cookie
 import okhttp3.CookieJar
@@ -32,8 +33,17 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
         .build()
 
     val instance: ApiService by lazy {
+        // Use local backend for debug builds, production backend for release builds
+        val baseUrl = if (BuildConfig.DEBUG) { 
+            // For Android emulator, use 10.0.2.2 to access host machine's localhost:3000
+            // For physical device, replace with your Mac's IP address (e.g., "http://192.168.1.100:3000")
+            "http://10.0.2.2:3000"
+        } else {
+            "https://airuncoach.live"
+        }
+        
         val retrofit = Retrofit.Builder()
-            .baseUrl("https://airuncoach.live")
+            .baseUrl(baseUrl)
             .addConverterFactory(GsonConverterFactory.create())
             .client(okHttpClient)
             .build()

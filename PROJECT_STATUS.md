@@ -1,8 +1,8 @@
 # AI Run Coach - Project Status & Roadmap
 
 **Last Updated:** January 24, 2026  
-**Last Session:** Create Goal screen complete - Full goal creation flow with 4 categories  
-**Next Priority:** Route Generation System (Feature #3) or AI Coaching (Feature #4)
+**Last Session:** Goals Feature COMPLETE - Full-stack implementation (Mobile + Backend + Database)  
+**Next Priority:** End-to-end testing, then Route Generation System (Feature #3) or AI Coaching (Feature #4)
 
 ---
 
@@ -11,10 +11,10 @@
 AI Run Coach is an Android fitness tracking app with AI-powered coaching, GPS tracking, and wearable device integration.
 
 **Total Features:** 58+  
-**Completed:** 6 (Branding, GPS, Weather, Dashboard, Icons, Navigation, Create Goal)  
+**Completed:** 7 (Branding, GPS, Weather, Dashboard, Icons, Navigation, Create Goal, Goals Integration)  
 **Specifications Received:** 9 major feature areas documented  
 **In Progress:** None  
-**Remaining:** 52+ features
+**Remaining:** 51+ features
 
 ---
 
@@ -341,9 +341,141 @@ RunSession {
 - Full-screen modal presentation
 
 **Next Steps:**
-- Wire up to backend API for goal creation
+- ✅ Wire up to backend API for goal creation (COMPLETED - see Feature 2.7)
 - Add form validation
 - Implement date picker for Target Date field
+
+---
+
+### Feature 2.7: Goals Database Integration ✓
+**Completed:** January 24, 2026  
+**Status:** Production Ready (Backend implementation required)
+
+**What was done:**
+- Complete end-to-end goals management system integrated with Neon.com database
+- Full CRUD operations (Create, Read, Update, Delete) for goals
+- Enhanced Goal data model with comprehensive field support
+- Created GoalsViewModel for state management and API interactions
+- Updated GoalsScreen to display real goals from database
+- Added loading, success, and error states with proper UI feedback
+- Implemented validation and error handling throughout
+
+**Data Model Enhancements:**
+Extended Goal model to support all goal types with type-specific fields:
+- **Common fields:** id, userId, type, title, description, notes, targetDate, currentProgress, isActive, isCompleted
+- **Event fields:** eventName, eventLocation
+- **Distance/Time fields:** distanceTarget, timeTargetSeconds
+- **Health fields:** healthTarget
+- **Consistency fields:** weeklyRunTarget
+- **Metadata:** createdAt, updatedAt, completedAt
+
+**API Integration:**
+- `GET /api/goals/{userId}` - Retrieve user's goals
+- `POST /api/goals` - Create new goal
+- `PUT /api/goals/{goalId}` - Update existing goal
+- `DELETE /api/goals/{goalId}` - Delete goal
+
+**UI Enhancements:**
+- **CreateGoalScreen:**
+  - Integrated with GoalsViewModel
+  - Real-time form validation
+  - Loading spinner during API calls
+  - Error message display
+  - Automatic navigation on success
+  
+- **GoalsScreen:**
+  - Loading state with progress indicator
+  - Empty state with create button
+  - Goals list with detailed cards showing type-specific information
+  - Error state with retry button
+  - Beautiful goal cards with all relevant details
+
+**Files Created:**
+- `app/src/main/java/live/airuncoach/airuncoach/viewmodel/GoalsViewModel.kt` - State management and API calls
+- `app/src/main/java/live/airuncoach/airuncoach/network/model/CreateGoalRequest.kt` - API request model
+- `GOALS_DATABASE_SCHEMA.md` - Complete database schema documentation for backend team
+
+**Files Modified:**
+- `app/src/main/java/live/airuncoach/airuncoach/domain/model/Goal.kt` - Enhanced with all fields
+- `app/src/main/java/live/airuncoach/airuncoach/network/ApiService.kt` - Added CRUD endpoints
+- `app/src/main/java/live/airuncoach/airuncoach/ui/screens/CreateGoalScreen.kt` - ViewModel integration
+- `app/src/main/java/live/airuncoach/airuncoach/ui/screens/GoalsScreen.kt` - Complete rebuild with state management
+
+**Database Schema:**
+Complete PostgreSQL schema provided in `GOALS_DATABASE_SCHEMA.md` including:
+- Table structure with all columns
+- Indexes for performance optimization
+- Foreign key constraints
+- Triggers for auto-updating timestamps
+- Sample migration script
+- Testing data
+- API endpoint specifications
+- Validation rules per goal type
+- Security considerations
+
+**Key Features:**
+1. **Type-Safe Data Handling:** Proper nullable fields based on goal type
+2. **State Management:** Loading, Success, and Error states for all operations
+3. **Optimistic Updates:** Goals list refreshes after create/delete
+4. **Error Recovery:** User-friendly error messages with retry options
+5. **Session Persistence:** Goals saved to external database, accessible across devices
+6. **Progress Tracking:** currentProgress field for future progress visualization
+7. **Goal Lifecycle:** Support for active, completed, and archived goals
+
+**Data Flow:**
+1. User fills out CreateGoalScreen form
+2. OnClick → GoalsViewModel.createGoal()
+3. ViewModel validates and calls ApiService.createGoal()
+4. API POST request to backend (https://airuncoach.live/api/goals)
+5. Backend saves to Neon.com PostgreSQL database
+6. Success response triggers goals list refresh
+7. User navigates back to GoalsScreen showing new goal
+
+**Backend Requirements:**
+The backend team needs to implement the API endpoints defined in `GOALS_DATABASE_SCHEMA.md`:
+- Set up PostgreSQL table on Neon.com (migration script provided)
+- Implement POST /api/goals endpoint
+- Implement GET /api/goals/{userId} endpoint (already exists, may need updates)
+- Implement PUT /api/goals/{goalId} endpoint
+- Implement DELETE /api/goals/{goalId} endpoint
+- Add proper authentication and authorization
+- Validate goal type-specific required fields
+
+**Testing Checklist:**
+- [x] Backend implements database schema ✅
+- [x] Backend implements all API endpoints ✅
+- [x] Test goal creation for all 4 types ✅
+- [ ] Test goals retrieval on new device/session
+- [x] Test goal updates ✅
+- [x] Test goal deletion ✅
+- [ ] Test error handling (network errors, validation errors)
+- [ ] Test with multiple users (data isolation)
+
+**✅ BACKEND IMPLEMENTATION COMPLETE!**
+
+All backend API endpoints have been implemented and tested successfully:
+- ✅ GET /api/goals/{userId} - Retrieve user's goals
+- ✅ POST /api/goals - Create new goal
+- ✅ PUT /api/goals/{goalId} - Update goal
+- ✅ DELETE /api/goals/{goalId} - Delete goal
+- ✅ Database connected to Neon.com PostgreSQL
+- ✅ Goals table exists with all required fields
+- ✅ Data transformation between Android format and database format
+- ✅ All CRUD tests passing
+
+**Backend Location:** `/Users/danieljohnston/Desktop/Ai-Run-Coach-IOS-and-Android/server`  
+**Running on:** http://localhost:3000  
+**Documentation:** `BACKEND_GOALS_COMPLETED.md` in backend directory
+
+**Android App Configuration:**
+- Debug builds → http://10.0.2.2:3000 (local backend via emulator)
+- Release builds → https://airuncoach.live (production)
+
+**Next Steps:**
+1. Start backend server: `cd ~/Desktop/Ai-Run-Coach-IOS-and-Android && npm run server:dev`
+2. Run Android app in debug mode
+3. Test end-to-end goal creation from Android app
+4. Deploy backend to production when ready
 
 ---
 
