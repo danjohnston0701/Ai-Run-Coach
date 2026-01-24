@@ -56,7 +56,8 @@ fun DashboardScreen(
     onNavigateToRunSession: () -> Unit = {},
     onNavigateToGoals: () -> Unit = {},
     onNavigateToProfile: () -> Unit = {},
-    onNavigateToHistory: () -> Unit = {}
+    onNavigateToHistory: () -> Unit = {},
+    onCreateGoal: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val viewModel: DashboardViewModel = viewModel(
@@ -95,7 +96,7 @@ fun DashboardScreen(
             item { GarminConnectionCard(connection = connection) }
             item { Spacer(modifier = Modifier.height(Spacing.md)) }
         }
-        item { GoalCard(goal = goals.firstOrNull(), onClick = onNavigateToGoals) }
+        item { GoalCard(goal = goals.firstOrNull(), onClick = onNavigateToGoals, onAddGoal = onCreateGoal) }
         item { Spacer(modifier = Modifier.height(Spacing.md)) }
         item { weatherData?.let { TimeAndWeatherBar(time = currentTime, weather = it) } }
         item { Spacer(modifier = Modifier.height(Spacing.xl)) }
@@ -261,7 +262,7 @@ fun GarminConnectionCard(connection: live.airuncoach.airuncoach.domain.model.Gar
 }
 
 @Composable
-fun GoalCard(goal: Goal?, onClick: () -> Unit) {
+fun GoalCard(goal: Goal?, onClick: () -> Unit, onAddGoal: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -327,7 +328,8 @@ fun GoalCard(goal: Goal?, onClick: () -> Unit) {
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
-                    .background(Colors.primary.copy(alpha = 0.2f)),
+                    .background(Colors.primary.copy(alpha = 0.2f))
+                    .clickable { onAddGoal() },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -369,7 +371,7 @@ fun TimeAndWeatherBar(time: String, weather: WeatherData) {
             color = Colors.textMuted
         )
         Icon(
-            painter = painterResource(id = R.drawable.icon_trending),
+            painter = painterResource(id = R.drawable.icon_trending_vector),
             contentDescription = "Weather",
             tint = Colors.textMuted,
             modifier = Modifier.size(20.dp)
@@ -500,24 +502,25 @@ fun TargetTimeCard(
             }
             
             if (isEnabled) {
-                Spacer(modifier = Modifier.height(Spacing.xl))
+                Spacer(modifier = Modifier.height(Spacing.md))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.Bottom
                 ) {
                     TimePickerColumn(value = hours, label = "HOURS", onValueChange = onHoursChange)
                     Text(
                         text = ":",
-                        style = AppTextStyles.h1,
+                        style = AppTextStyles.h2,
                         color = Colors.textMuted,
-                        modifier = Modifier.padding(top = 28.dp)
+                        modifier = Modifier.padding(bottom = 4.dp, start = 4.dp, end = 4.dp)
                     )
                     TimePickerColumn(value = minutes, label = "MINUTES", onValueChange = onMinutesChange)
                     Text(
                         text = ":",
-                        style = AppTextStyles.h1,
+                        style = AppTextStyles.h2,
                         color = Colors.textMuted,
-                        modifier = Modifier.padding(top = 28.dp)
+                        modifier = Modifier.padding(bottom = 4.dp, start = 4.dp, end = 4.dp)
                     )
                     TimePickerColumn(value = seconds, label = "SECONDS", onValueChange = onSecondsChange)
                 }
@@ -529,17 +532,20 @@ fun TargetTimeCard(
 @Composable
 fun TimePickerColumn(value: String, label: String, onValueChange: (String) -> Unit) {
     Column(
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(
             text = label,
-            style = AppTextStyles.caption.copy(fontSize = androidx.compose.ui.unit.TextUnit(8f, androidx.compose.ui.unit.TextUnitType.Sp)),
+            style = AppTextStyles.caption.copy(
+                fontSize = androidx.compose.ui.unit.TextUnit(9f, androidx.compose.ui.unit.TextUnitType.Sp),
+                fontWeight = FontWeight.Medium
+            ),
             color = Colors.textMuted
         )
-        Spacer(modifier = Modifier.height(2.dp))
         Box(
             modifier = Modifier
-                .size(width = 45.dp, height = 35.dp)
+                .size(width = 48.dp, height = 40.dp)
                 .clip(RoundedCornerShape(BorderRadius.sm))
                 .background(Colors.backgroundTertiary)
                 .clickable { /* Could open number picker dialog */ },
@@ -548,7 +554,7 @@ fun TimePickerColumn(value: String, label: String, onValueChange: (String) -> Un
             androidx.compose.foundation.text.BasicTextField(
                 value = value,
                 onValueChange = onValueChange,
-                textStyle = AppTextStyles.h4.copy(
+                textStyle = AppTextStyles.h3.copy(
                     color = Colors.primary,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     fontWeight = FontWeight.Bold

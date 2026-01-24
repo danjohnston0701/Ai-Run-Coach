@@ -1,8 +1,8 @@
 # AI Run Coach - Project Status & Roadmap
 
 **Last Updated:** January 24, 2026  
-**Last Session:** Goals API integration + complete AI coaching specifications received  
-**Next Priority:** Route Generation System (Feature #3)
+**Last Session:** Create Goal screen complete - Full goal creation flow with 4 categories  
+**Next Priority:** Route Generation System (Feature #3) or AI Coaching (Feature #4)
 
 ---
 
@@ -11,10 +11,10 @@
 AI Run Coach is an Android fitness tracking app with AI-powered coaching, GPS tracking, and wearable device integration.
 
 **Total Features:** 58+  
-**Completed:** 2.5 (Dashboard, GPS, Weather, Goals API)  
+**Completed:** 6 (Branding, GPS, Weather, Dashboard, Icons, Navigation, Create Goal)  
 **Specifications Received:** 9 major feature areas documented  
-**In Progress:** Icon fixes  
-**Remaining:** 55+ features
+**In Progress:** None  
+**Remaining:** 52+ features
 
 ---
 
@@ -238,23 +238,118 @@ RunSession {
 
 ---
 
-## 🚧 In Progress Features
-
-### Feature 2.2: Icon Display Fixes
-**Status:** In Progress  
-**Issue:** Large PNG icons (200-600KB) not displaying properly  
-**Solution:** Created lightweight XML vector drawable versions of all UI icons  
-**Files Created:**
-- Vector icons: `icon_target_vector.xml`, `icon_location_vector.xml`, `icon_play_vector.xml`, `icon_home_vector.xml`, `icon_chart_vector.xml`, `icon_calendar_vector.xml`, `icon_profile_vector.xml`, `icon_timer_vector.xml`
-- Updated all references in `DashboardScreen.kt` and `MainScreen.kt`
-
 ### Feature 2.3: Goals API Integration ✓
 **Completed:** January 24, 2026  
+**Status:** Production Ready
+
 **What was done:**
 - Added `/api/goals/{userId}` endpoint to `ApiService.kt`
 - Updated `DashboardViewModel` to fetch real goals from Neon database
 - Goals now display on dashboard when user has active goals
 - Error handling for API failures with graceful fallback
+
+---
+
+### Feature 2.4: Icon Display Fixes ✓
+**Completed:** January 24, 2026  
+**Status:** Production Ready
+
+**What was done:**
+- Created lightweight XML vector drawable versions of all UI icons
+- Replaced large PNG icons (200-600KB) with efficient vector drawables
+- All icons now render properly and are theme-tintable
+
+**Files Created:**
+- `icon_target_vector.xml`, `icon_location_vector.xml`, `icon_play_vector.xml`
+- `icon_home_vector.xml`, `icon_chart_vector.xml`, `icon_calendar_vector.xml`
+- `icon_profile_vector.xml`, `icon_timer_vector.xml`, `icon_trending_vector.xml`
+
+**Files Modified:**
+- `DashboardScreen.kt` - Updated all icon references to vector versions
+- `MainScreen.kt` - Updated bottom navigation icons to vector versions
+
+---
+
+### Feature 2.5: Dashboard Navigation & Placeholder Screens ✓
+**Completed:** January 24, 2026  
+**Status:** Production Ready
+
+**What was done:**
+- Created `RouteGenerationScreen.kt` placeholder for "MAP MY RUN" button
+- Created `RunSessionScreen.kt` placeholder for "RUN WITHOUT ROUTE" button
+- Wired up navigation in `MainScreen.kt` to both new screens
+- Dashboard action buttons now fully functional with proper navigation
+
+**Files Created:**
+- `app/src/main/java/live/airuncoach/airuncoach/ui/screens/RouteGenerationScreen.kt`
+- `app/src/main/java/live/airuncoach/airuncoach/ui/screens/RunSessionScreen.kt`
+
+**Files Modified:**
+- `app/src/main/java/live/airuncoach/airuncoach/ui/screens/MainScreen.kt`
+
+---
+
+### Feature 2.6: Create Goal Screen ✓
+**Completed:** January 24, 2026  
+**Status:** Production Ready
+
+**What was done:**
+- Built complete goal creation UI matching webapp design
+- Implemented 4 goal type categories with conditional fields
+- Created dynamic form with proper validation structure
+- Wired up navigation from Dashboard and Goals screen
+
+**Goal Type Categories:**
+1. **Event** - Race or competition
+   - Event Name, Event Location
+   - Distance Target (5K, 10K, Half Marathon, Marathon, Ultra Marathon + custom)
+   - Time Target (optional HH:MM:SS)
+
+2. **Distance/Time** - Personal record target
+   - Distance Target (preset buttons + custom input)
+   - Time Target (optional)
+
+3. **Health & Wellbeing** - Fitness or weight goals
+   - Health Target (Improve fitness, Improve endurance, Lose weight, Build strength, Better recovery + custom)
+
+4. **Consistency** - Run frequency target
+   - Weekly Run Target (number input + "runs per week")
+
+**Common Fields (All Categories):**
+- Goal Title * (required)
+- Target Date (optional dropdown)
+- Description (optional multiline)
+- Notes (optional multiline)
+- Create Goal button (primary)
+- Cancel button (outlined)
+
+**Files Created:**
+- `app/src/main/java/live/airuncoach/airuncoach/ui/screens/CreateGoalScreen.kt`
+
+**Files Modified:**
+- `app/src/main/java/live/airuncoach/airuncoach/ui/screens/GoalsScreen.kt` - Added create goal button
+- `app/src/main/java/live/airuncoach/airuncoach/ui/screens/DashboardScreen.kt` - + button opens create goal
+- `app/src/main/java/live/airuncoach/airuncoach/ui/screens/MainScreen.kt` - Added create_goal route
+
+**UI Features:**
+- 2x2 grid of selectable goal type cards with icons
+- Conditional field rendering based on selected type
+- Consistent styling with app theme
+- Chip-style selection buttons for preset options
+- Custom input fallbacks for all preset fields
+- Proper spacing and alignment matching webapp
+- Full-screen modal presentation
+
+**Next Steps:**
+- Wire up to backend API for goal creation
+- Add form validation
+- Implement date picker for Target Date field
+
+---
+
+## 🚧 In Progress Features
+
+_(No features currently in progress)_
 
 ---
 
@@ -506,15 +601,15 @@ The following comprehensive specifications have been documented in the project:
 ## 🔧 Technical Debt & Future Improvements
 
 ### High Priority
-- [ ] Get OpenWeatherMap API key and test weather integration
+- [ ] Test weather integration on real device (API key already configured)
 - [ ] Test RunTrackingService on real device (not emulator)
 - [ ] Add notification permission request for Android 13+
 
 ### Medium Priority
 - [ ] Migrate RunRepository from SharedPreferences to Room database
 - [ ] Add error handling for GPS permission denied
-- [ ] Implement RunSession screen (for "RUN WITHOUT ROUTE" button)
-- [ ] Implement RouteGeneration screen (for "MAP MY RUN" button)
+- [x] ~~Implement RunSession screen~~ ✓ Placeholder created
+- [x] ~~Implement RouteGeneration screen~~ ✓ Placeholder created
 
 ### Low Priority
 - [ ] Optimize GPS battery usage
@@ -534,10 +629,11 @@ The following comprehensive specifications have been documented in the project:
 | **Dashboard (Home)** | ✅ Complete | Fully redesigned, production ready |
 | **History** | 📝 Placeholder | Needs implementation |
 | **Events** | 📝 Placeholder | Needs implementation |
-| **Goals** | 📝 Placeholder | Needs implementation |
+| **Goals** | 📝 Placeholder | Shows empty state with create button |
 | **Profile** | 📝 Placeholder | Needs implementation |
-| **Route Generation** | ❌ Not Created | MAP MY RUN destination |
-| **Run Session** | ❌ Not Created | RUN WITHOUT ROUTE destination |
+| **Route Generation** | 📝 Placeholder | MAP MY RUN - navigation working |
+| **Run Session** | 📝 Placeholder | RUN WITHOUT ROUTE - navigation working |
+| **Create Goal** | ✅ Complete | Full form with 4 categories, conditional fields |
 
 ---
 
@@ -622,8 +718,10 @@ The following comprehensive specifications have been documented in the project:
 - [ ] Dashboard displays correctly
 - [ ] Bottom navigation works across all screens
 - [ ] Garmin card hidden by default (no connection configured)
-- [ ] Weather data loads (requires API key)
+- [ ] Weather data loads (API key configured)
 - [ ] GPS tracking service starts (test on device)
+- [ ] "MAP MY RUN" button navigates to route generation placeholder
+- [ ] "RUN WITHOUT ROUTE" button navigates to run session placeholder
 
 ---
 

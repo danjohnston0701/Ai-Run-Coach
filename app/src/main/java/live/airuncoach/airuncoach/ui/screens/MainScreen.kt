@@ -52,8 +52,16 @@ fun MainScreen() {
             ) {
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentDestination = navBackStackEntry?.destination
+                val currentRoute = currentDestination?.route
                 items.forEach { screen ->
-                    val isSelected = currentDestination?.hierarchy?.any { it.route == screen.route } == true
+                    // Home is selected when on home, route_generation, or run_session
+                    val isSelected = if (screen.route == Screen.Home.route) {
+                        currentRoute == Screen.Home.route || 
+                        currentRoute == "route_generation" || 
+                        currentRoute == "run_session"
+                    } else {
+                        currentDestination?.hierarchy?.any { it.route == screen.route } == true
+                    }
                     NavigationBarItem(
                         icon = { 
                             Icon(
@@ -73,7 +81,8 @@ fun MainScreen() {
                         selected = isSelected,
                         onClick = {
                             navController.navigate(screen.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
+                                popUpTo(Screen.Home.route) {
+                                    inclusive = false
                                     saveState = true
                                 }
                                 launchSingleTop = true
@@ -99,12 +108,10 @@ fun MainScreen() {
             composable(Screen.Home.route) { 
                 DashboardScreen(
                     onNavigateToRouteGeneration = {
-                        // TODO: Navigate to route generation screen
-                        // For now, this will be a placeholder
+                        navController.navigate("route_generation")
                     },
                     onNavigateToRunSession = {
-                        // TODO: Navigate to run session screen
-                        // For now, this will be a placeholder
+                        navController.navigate("run_session")
                     },
                     onNavigateToGoals = {
                         navController.navigate(Screen.Goals.route)
@@ -114,13 +121,31 @@ fun MainScreen() {
                     },
                     onNavigateToHistory = {
                         navController.navigate(Screen.History.route)
+                    },
+                    onCreateGoal = {
+                        navController.navigate("create_goal")
                     }
                 )
             }
             composable(Screen.History.route) { HistoryScreen() }
             composable(Screen.Events.route) { EventsScreen() }
-            composable(Screen.Goals.route) { GoalsScreen() }
+            composable(Screen.Goals.route) { 
+                GoalsScreen(
+                    onCreateGoal = { navController.navigate("create_goal") }
+                )
+            }
             composable(Screen.Profile.route) { ProfileScreen() }
+            composable("route_generation") { RouteGenerationScreen() }
+            composable("run_session") { RunSessionScreen() }
+            composable("create_goal") {
+                CreateGoalScreen(
+                    onDismiss = { navController.popBackStack() },
+                    onCreateGoal = {
+                        // TODO: Save goal
+                        navController.popBackStack()
+                    }
+                )
+            }
         }
     }
 }
