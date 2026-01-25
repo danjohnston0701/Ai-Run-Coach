@@ -1,3 +1,4 @@
+
 package live.airuncoach.airuncoach.ui.screens
 
 import androidx.compose.foundation.layout.padding
@@ -20,6 +21,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import live.airuncoach.airuncoach.AppRoutes
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
@@ -41,7 +43,7 @@ val items = listOf(
 )
 
 @Composable
-fun MainScreen() {
+fun MainScreen(onNavigateToLogin: () -> Unit) {
     val navController = rememberNavController()
     Scaffold(
         containerColor = Colors.backgroundRoot,
@@ -134,7 +136,21 @@ fun MainScreen() {
                     onCreateGoal = { navController.navigate("create_goal") }
                 )
             }
-            composable(Screen.Profile.route) { ProfileScreen() }
+            composable(Screen.Profile.route) { 
+                ProfileScreen(
+                    onNavigateToLogin = onNavigateToLogin,
+                    onNavigateToFriends = { navController.navigate("friends") },
+                    onNavigateToGroupRuns = { navController.navigate("group_runs") },
+                    onNavigateToCoachSettings = { navController.navigate("coach_settings") },
+                    onNavigateToPersonalDetails = { navController.navigate("personal_details") },
+                    onNavigateToFitnessLevel = { navController.navigate("fitness_level") },
+                    onNavigateToGoals = { navController.navigate("goals") },
+                    onNavigateToDistanceScale = { navController.navigate("distance_scale") },
+                    onNavigateToNotifications = { navController.navigate("notifications") },
+                    onNavigateToConnectedDevices = { navController.navigate("connected_devices") },
+                    onNavigateToSubscription = { navController.navigate("subscription") }
+                )
+            }
             composable("route_generation") {
                 RouteGenerationScreen(
                     onNavigateBack = { navController.popBackStack() },
@@ -154,6 +170,28 @@ fun MainScreen() {
                     }
                 )
             }
+            composable("friends") { 
+                FriendsScreen(onNavigateToFindFriends = { navController.navigate("find_friends") })
+            }
+            composable("find_friends") { 
+                FindFriendsScreen(onNavigateBack = { navController.popBackStack() })
+            }
+            composable("group_runs") { 
+                GroupRunsScreen(
+                    onCreateGroupRun = { navController.navigate("create_group_run") },
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+            composable("create_group_run") {
+                CreateGroupRunScreen(onNavigateBack = { navController.popBackStack() })
+            }
+            composable("coach_settings") { CoachSettingsScreen() }
+            composable("personal_details") { PersonalDetailsScreen() }
+            composable("fitness_level") { FitnessLevelScreen() }
+            composable("distance_scale") { DistanceScaleScreen() }
+            composable("notifications") { NotificationsScreen() }
+            composable("connected_devices") { ConnectedDevicesScreen() }
+            composable("subscription") { SubscriptionScreen() }
         }
     }
 }

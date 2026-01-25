@@ -1,3 +1,4 @@
+
 package live.airuncoach.airuncoach.viewmodel
 
 import android.content.Context
@@ -8,6 +9,7 @@ import com.google.gson.Gson
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.Goal
@@ -36,8 +38,13 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
     private val sessionManager = SessionManager(context)
     private val apiService = RetrofitClient(context, sessionManager).instance
 
+    private val _allGoals = MutableStateFlow<List<Goal>>(emptyList())
+    private val _selectedTab = MutableStateFlow(0) // 0: Active, 1: Completed, 2: Abandoned
+
     private val _goalsState = MutableStateFlow<GoalsUiState>(GoalsUiState.Loading)
     val goalsState: StateFlow<GoalsUiState> = _goalsState.asStateFlow()
+
+    val selectedTab: StateFlow<Int> = _selectedTab.asStateFlow()
 
     private val _createGoalState = MutableStateFlow<CreateGoalState>(CreateGoalState.Idle)
     val createGoalState: StateFlow<CreateGoalState> = _createGoalState.asStateFlow()
@@ -47,6 +54,17 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
     init {
         loadUser()
         loadGoals()
+
+        viewModelScope.launch {
+            combine(_allGoals, _selectedTab) { goals, tab ->
+                val filteredGoals = when (tab) {
+                    0 -> goals.filter { it.isActive && !it.isCompleted }
+                    1 -> goals.filter { it.isCompleted }
+                    else -> goals.filter { !it.isActive && !it.isCompleted } // Abandoned
+                }
+                _goalsState.value = GoalsUiState.Success(filteredGoals)
+            }.collect {}
+        }
     }
 
     private fun loadUser() {
@@ -63,7 +81,7 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
                 val userId = _user.value?.id
                 if (userId != null) {
                     val goals = apiService.getGoals(userId)
-                    _goalsState.value = GoalsUiState.Success(goals)
+                    _allGoals.value = goals
                 } else {
                     _goalsState.value = GoalsUiState.Error("User not logged in")
                 }
@@ -72,6 +90,10 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
                 android.util.Log.e("GoalsViewModel", "Failed to load goals: ${e.message}", e)
             }
         }
+    }
+
+    fun selectTab(index: Int) {
+        _selectedTab.value = index
     }
 
     fun createGoal(
