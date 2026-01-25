@@ -89,6 +89,10 @@ dependencies {
     // --- Location Services: Google Play Services for GPS tracking ---
     implementation("com.google.android.gms:play-services-location:21.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+    
+    // --- Google Maps: For route display and navigation ---
+    implementation("com.google.android.gms:play-services-maps:18.2.0")
+    implementation("com.google.maps.android:maps-compose:4.3.0")
 
     // --- Image Loading: Coil for profile pictures ---
     implementation("io.coil-kt:coil-compose:2.5.0")

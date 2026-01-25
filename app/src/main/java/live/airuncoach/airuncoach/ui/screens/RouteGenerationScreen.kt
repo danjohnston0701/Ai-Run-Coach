@@ -1,68 +1,141 @@
 package live.airuncoach.airuncoach.ui.screens
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import live.airuncoach.airuncoach.R
-import live.airuncoach.airuncoach.ui.theme.AppTextStyles
-import live.airuncoach.airuncoach.ui.theme.Colors
-import live.airuncoach.airuncoach.ui.theme.Spacing
+import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.viewmodel.compose.viewModel
+import live.airuncoach.airuncoach.viewmodel.RouteGenerationState
+import live.airuncoach.airuncoach.viewmodel.RouteGenerationViewModel
+import live.airuncoach.airuncoach.viewmodel.RouteGenerationViewModelFactory
 
+/**
+ * Main Route Generation Screen - Orchestrates the flow between:
+ * 1. Setup screen (configure run parameters)
+ * 2. Loading screen (generating routes from backend)
+ * 3. Selection screen (choose from generated routes)
+ */
 @Composable
-fun RouteGenerationScreen() {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Colors.backgroundRoot)
-            .padding(Spacing.lg),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                painter = painterResource(id = R.drawable.icon_location_vector),
-                contentDescription = "Route Generation",
-                tint = Colors.primary,
-                modifier = Modifier.size(80.dp)
+fun RouteGenerationScreen(
+    onNavigateBack: () -> Unit = {},
+    onRouteSelected: (String) -> Unit = {}
+) {
+    val context = LocalContext.current
+    val viewModel: RouteGenerationViewModel = viewModel(
+        factory = RouteGenerationViewModelFactory(context)
+    )
+    
+    val uiState by viewModel.uiState.collectAsState()
+    val routes by viewModel.routes.collectAsState()
+    val userLocation by viewModel.userLocation.collectAsState()
+    val aiCoachEnabled by viewModel.aiCoachEnabled.collectAsState()
+    
+    // State for setup screen
+    var targetDistance by remember { mutableStateOf(5f) }
+    var targetTimeEnabled by remember { mutableStateOf(false) }
+    var targetHours by remember { mutableStateOf(0) }
+    var targetMinutes by remember { mutableStateOf(0) }
+    var targetSeconds by remember { mutableStateOf(0) }
+    var liveTrackingEnabled by remember { mutableStateOf(false) }
+    var isGroupRun by remember { mutableStateOf(false) }
+    
+    when (uiState) {
+        is RouteGenerationState.Setup -> {
+            MapMyRunSetupScreen(
+                initialDistance = targetDistance,
+                initialTargetTimeEnabled = targetTimeEnabled,
+                initialHours = targetHours,
+                initialMinutes = targetMinutes,
+                initialSeconds = targetSeconds,
+                onNavigateBack = onNavigateBack,
+                onGenerateRoute = { distance, timeEnabled, hours, minutes, seconds, liveTracking, groupRun ->
+                    // Save parameters
+                    targetDistance = distance
+                    targetTimeEnabled = timeEnabled
+                    targetHours = hours
+                    targetMinutes = minutes
+                    targetSeconds = seconds
+                    liveTrackingEnabled = liveTracking
+                    isGroupRun = groupRun
+                    
+                    // Trigger route generation
+                    viewModel.generateRoutes(
+                        distance = distance,
+                        activityType = "run",
+                        targetTimeEnabled = timeEnabled,
+                        hours = hours,
+                        minutes = minutes,
+                        seconds = seconds,
+                        liveTrackingEnabled = liveTracking,
+                        isGroupRun = groupRun
+                    )
+                }
             )
-            Spacer(modifier = Modifier.height(Spacing.xl))
-            Text(
-                text = "MAP MY RUN",
-                style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
-                color = Colors.textPrimary,
-                textAlign = TextAlign.Center
+        }
+        
+        is RouteGenerationState.Loading -> {
+            RouteGenerationLoadingScreen(
+                coachName = "Coach Carter",
+                targetDistance = targetDistance
             )
-            Spacer(modifier = Modifier.height(Spacing.md))
-            Text(
-                text = "Route generation coming soon!\n\nThis feature will generate 5+ diverse circuit routes based on your target distance using Google Maps API.",
-                style = AppTextStyles.body,
-                color = Colors.textSecondary,
-                textAlign = TextAlign.Center
+        }
+        
+        is RouteGenerationState.Success -> {
+            RouteSelectionScreen(
+                routes = routes,
+                targetDistance = targetDistance,
+                aiCoachEnabled = aiCoachEnabled,
+                onAiCoachToggle = { viewModel.toggleAiCoach() },
+                onNavigateBack = {
+                    viewModel.resetToSetup()
+                },
+                onRouteSelected = { selectedRoute ->
+                    onRouteSelected(selectedRoute.id)
+                },
+                onRegenerateRoutes = {
+                    viewModel.generateRoutes(
+                        distance = targetDistance,
+                        activityType = "run",
+                        targetTimeEnabled = targetTimeEnabled,
+                        hours = targetHours,
+                        minutes = targetMinutes,
+                        seconds = targetSeconds,
+                        liveTrackingEnabled = liveTrackingEnabled,
+                        isGroupRun = isGroupRun
+                    )
+                }
             )
-            Spacer(modifier = Modifier.height(Spacing.sm))
-            Text(
-                text = "See ROUTE_GENERATION_SPEC.md for details",
-                style = AppTextStyles.caption,
-                color = Colors.textMuted,
-                textAlign = TextAlign.Center
+        }
+        
+        is RouteGenerationState.Error -> {
+            // Show error state (could create a dedicated error screen)
+            MapMyRunSetupScreen(
+                initialDistance = targetDistance,
+                initialTargetTimeEnabled = targetTimeEnabled,
+                initialHours = targetHours,
+                initialMinutes = targetMinutes,
+                initialSeconds = targetSeconds,
+                onNavigateBack = onNavigateBack,
+                onGenerateRoute = { distance, timeEnabled, hours, minutes, seconds, liveTracking, groupRun ->
+                    targetDistance = distance
+                    targetTimeEnabled = timeEnabled
+                    targetHours = hours
+                    targetMinutes = minutes
+                    targetSeconds = seconds
+                    liveTrackingEnabled = liveTracking
+                    isGroupRun = groupRun
+                    
+                    viewModel.generateRoutes(
+                        distance = distance,
+                        activityType = "run",
+                        targetTimeEnabled = timeEnabled,
+                        hours = hours,
+                        minutes = minutes,
+                        seconds = seconds,
+                        liveTrackingEnabled = liveTracking,
+                        isGroupRun = groupRun
+                    )
+                }
             )
+            // TODO: Show error snackbar
         }
     }
 }

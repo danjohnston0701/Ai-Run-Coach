@@ -74,6 +74,7 @@ fun DashboardScreen(
     val targetHours by viewModel.targetHours.collectAsState()
     val targetMinutes by viewModel.targetMinutes.collectAsState()
     val targetSeconds by viewModel.targetSeconds.collectAsState()
+    val hasLocationPermission by viewModel.hasLocationPermission.collectAsState()
 
     LazyColumn(
         modifier = Modifier
@@ -100,6 +101,12 @@ fun DashboardScreen(
         item { Spacer(modifier = Modifier.height(Spacing.md)) }
         item { weatherData?.let { TimeAndWeatherBar(time = currentTime, weather = it) } }
         item { Spacer(modifier = Modifier.height(Spacing.xl)) }
+        
+        // Location permission warning
+        if (!hasLocationPermission) {
+            item { LocationPermissionWarning() }
+            item { Spacer(modifier = Modifier.height(Spacing.md)) }
+        }
         item { TargetDistanceSection(distance = targetDistance, onDistanceChanged = viewModel::onDistanceChanged) }
         item { Spacer(modifier = Modifier.height(Spacing.md)) }
         item { 
@@ -118,7 +125,8 @@ fun DashboardScreen(
         item { 
             ActionButtons(
                 onMapMyRun = onNavigateToRouteGeneration,
-                onRunWithoutRoute = onNavigateToRunSession
+                onRunWithoutRoute = onNavigateToRunSession,
+                isEnabled = hasLocationPermission
             )
         }
         item { Spacer(modifier = Modifier.height(Spacing.md)) }
@@ -305,7 +313,7 @@ fun GoalCard(goal: Goal?, onClick: () -> Unit, onAddGoal: () -> Unit) {
                         color = Colors.textPrimary
                     )
                     Text(
-                        text = goal.description,
+                        text = goal.description ?: "",
                         style = AppTextStyles.small,
                         color = Colors.textMuted
                     )
@@ -571,11 +579,52 @@ fun TimePickerColumn(value: String, label: String, onValueChange: (String) -> Un
 }
 
 @Composable
-fun ActionButtons(onMapMyRun: () -> Unit, onRunWithoutRoute: () -> Unit) {
+fun LocationPermissionWarning() {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg),
+        shape = RoundedCornerShape(BorderRadius.md),
+        colors = CardDefaults.cardColors(
+            containerColor = androidx.compose.ui.graphics.Color(0xFFEF4444).copy(alpha = 0.15f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.icon_location_vector),
+                contentDescription = "Warning",
+                tint = androidx.compose.ui.graphics.Color(0xFFEF4444),
+                modifier = Modifier.size(32.dp)
+            )
+            Spacer(modifier = Modifier.width(Spacing.md))
+            Column {
+                Text(
+                    text = "Location Required",
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                    color = androidx.compose.ui.graphics.Color(0xFFEF4444)
+                )
+                Text(
+                    text = "Enable location services to generate routes and track runs",
+                    style = AppTextStyles.small,
+                    color = Colors.textSecondary
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ActionButtons(onMapMyRun: () -> Unit, onRunWithoutRoute: () -> Unit, isEnabled: Boolean = true) {
     Column(modifier = Modifier.padding(horizontal = Spacing.lg)) {
         // MAP MY RUN button - bright cyan with location icon
         Button(
-            onClick = onMapMyRun,
+            onClick = { if (isEnabled) onMapMyRun() },
+            enabled = isEnabled,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(60.dp),
@@ -602,7 +651,8 @@ fun ActionButtons(onMapMyRun: () -> Unit, onRunWithoutRoute: () -> Unit) {
 
         // RUN WITHOUT ROUTE button - dark gray with play icon
         Button(
-            onClick = onRunWithoutRoute,
+            onClick = { if (isEnabled) onRunWithoutRoute() },
+            enabled = isEnabled,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(60.dp),

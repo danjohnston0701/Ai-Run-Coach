@@ -35,10 +35,27 @@ class LoginViewModel(
         viewModelScope.launch {
             _loginState.value = LoginState.Loading
             try {
-                val user = retrofitClient.instance.login(LoginRequest(email, password))
-                saveUserToPrefs(user)
+                android.util.Log.d("LoginViewModel", "🔐 Attempting login for: $email")
+                val response = retrofitClient.instance.login(LoginRequest(email, password))
+                
+                if (response.user == null || response.token == null) {
+                    android.util.Log.e("LoginViewModel", "❌ Invalid response: user or token is null")
+                    _loginState.value = LoginState.Error("Invalid response from server")
+                    return@launch
+                }
+                
+                android.util.Log.d("LoginViewModel", "✅ Login successful: ${response.user.email}")
+                android.util.Log.d("LoginViewModel", "🔑 Got Bearer token: ${response.token.take(20)}...")
+                
+                // Save token for Bearer authentication
+                sessionManager.saveAuthToken(response.token)
+                
+                // Save user to SharedPreferences
+                saveUserToPrefs(response.user)
+                
                 _loginState.value = LoginState.Success
             } catch (e: Exception) {
+                android.util.Log.e("LoginViewModel", "❌ Login failed: ${e.message}", e)
                 _loginState.value = LoginState.Error("Login failed. Please check your credentials.")
             }
         }
@@ -52,8 +69,19 @@ class LoginViewModel(
         viewModelScope.launch {
             _loginState.value = LoginState.Loading
             try {
-                val user = retrofitClient.instance.register(RegisterRequest(name, email, password))
-                saveUserToPrefs(user)
+                val response = retrofitClient.instance.register(RegisterRequest(name, email, password))
+                
+                if (response.user == null || response.token == null) {
+                    _loginState.value = LoginState.Error("Invalid response from server")
+                    return@launch
+                }
+                
+                // Save token for Bearer authentication
+                sessionManager.saveAuthToken(response.token)
+                
+                // Save user to SharedPreferences
+                saveUserToPrefs(response.user)
+                
                 _loginState.value = LoginState.Success
             } catch (e: Exception) {
                 _loginState.value = LoginState.Error(e.message ?: "Registration failed. Please try again.")

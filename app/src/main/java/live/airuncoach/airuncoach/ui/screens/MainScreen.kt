@@ -135,7 +135,15 @@ fun MainScreen() {
                 )
             }
             composable(Screen.Profile.route) { ProfileScreen() }
-            composable("route_generation") { RouteGenerationScreen() }
+            composable("route_generation") {
+                RouteGenerationScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onRouteSelected = { routeId ->
+                        // Navigate to run session with the selected route
+                        navController.navigate("run_session/$routeId")
+                    }
+                )
+            }
             composable("run_session") { RunSessionScreen() }
             composable("create_goal") {
                 CreateGoalScreen(

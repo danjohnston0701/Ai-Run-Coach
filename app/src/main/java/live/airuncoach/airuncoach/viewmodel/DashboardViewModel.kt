@@ -1,6 +1,8 @@
 package live.airuncoach.airuncoach.viewmodel
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -80,7 +82,26 @@ class DashboardViewModel(private val context: Context) : ViewModel() {
     val targetMinutes: StateFlow<String> = _targetMinutes.asStateFlow()
 
     private val _targetSeconds = MutableStateFlow("00")
-    val targetSeconds: StateFlow<String> = _targetSeconds.asStateFlow()
+    val targetSeconds: StateFlow<String> = _targetSeconds
+    
+    // Location permission state
+    private val _hasLocationPermission = MutableStateFlow(false)
+    val hasLocationPermission: StateFlow<Boolean> = _hasLocationPermission
+    
+    init {
+        checkLocationPermission()
+    }
+    
+    /**
+     * Check if location permissions are granted
+     */
+    fun checkLocationPermission() {
+        val fineLocation = context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+        val coarseLocation = context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+        
+        _hasLocationPermission.value = fineLocation == PackageManager.PERMISSION_GRANTED || 
+                                       coarseLocation == PackageManager.PERMISSION_GRANTED
+    }
 
     init {
         loadUser()

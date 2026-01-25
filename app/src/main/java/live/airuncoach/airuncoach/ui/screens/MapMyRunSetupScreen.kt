@@ -1,0 +1,451 @@
+package live.airuncoach.airuncoach.ui.screens
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import live.airuncoach.airuncoach.R
+import live.airuncoach.airuncoach.ui.theme.AppTextStyles
+import live.airuncoach.airuncoach.ui.theme.BorderRadius
+import live.airuncoach.airuncoach.ui.theme.Colors
+import live.airuncoach.airuncoach.ui.theme.Spacing
+
+@Composable
+fun MapMyRunSetupScreen(
+    initialDistance: Float = 5f,
+    initialTargetTimeEnabled: Boolean = false,
+    initialHours: Int = 0,
+    initialMinutes: Int = 0,
+    initialSeconds: Int = 0,
+    onNavigateBack: () -> Unit = {},
+    onGenerateRoute: (
+        distance: Float,
+        targetTimeEnabled: Boolean,
+        hours: Int,
+        minutes: Int,
+        seconds: Int,
+        liveTrackingEnabled: Boolean,
+        isGroupRun: Boolean
+    ) -> Unit = { _, _, _, _, _, _, _ -> }
+) {
+    var selectedActivity by remember { mutableStateOf("Run") }
+    var targetDistance by remember { mutableStateOf(initialDistance) }
+    var isTargetTimeEnabled by remember { mutableStateOf(initialTargetTimeEnabled) }
+    var targetHours by remember { mutableStateOf(initialHours.toString().padStart(2, '0')) }
+    var targetMinutes by remember { mutableStateOf(initialMinutes.toString().padStart(2, '0')) }
+    var targetSeconds by remember { mutableStateOf(initialSeconds.toString().padStart(2, '0')) }
+    var isLiveTrackingEnabled by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Colors.backgroundRoot)
+    ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = 100.dp)  // Space for bottom button
+        ) {
+            item {
+                // Header with close button
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg, vertical = Spacing.md),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "MAP MY RUN SETUP",
+                            style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.textPrimary
+                        )
+                        Text(
+                            text = "Configure your AI-generated route",
+                            style = AppTextStyles.body,
+                            color = Colors.textSecondary
+                        )
+                    }
+                    
+                    // Close button
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.icon_play_vector), // Replace with close icon
+                            contentDescription = "Close",
+                            tint = Colors.textMuted,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+            }
+            
+            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+            
+            // Activity Type Selector
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                ) {
+                    ActivityTypeButton(
+                        text = "Run",
+                        isSelected = selectedActivity == "Run",
+                        onClick = { selectedActivity = "Run" },
+                        modifier = Modifier.weight(1f)
+                    )
+                    ActivityTypeButton(
+                        text = "Walk",
+                        isSelected = selectedActivity == "Walk",
+                        onClick = { selectedActivity = "Walk" },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+            
+            item { Spacer(modifier = Modifier.height(Spacing.xl)) }
+            
+            // Target Distance
+            item {
+                TargetDistanceCard(
+                    distance = targetDistance,
+                    onDistanceChanged = { targetDistance = it }
+                )
+            }
+            
+            item { Spacer(modifier = Modifier.height(Spacing.md)) }
+            
+            // Target Time
+            item {
+                TargetTimeCard(
+                    isEnabled = isTargetTimeEnabled,
+                    onEnabledChange = { isTargetTimeEnabled = it },
+                    hours = targetHours,
+                    minutes = targetMinutes,
+                    seconds = targetSeconds,
+                    onHoursChange = { if (it.length <= 2) targetHours = it },
+                    onMinutesChange = { if (it.length <= 2) targetMinutes = it },
+                    onSecondsChange = { if (it.length <= 2) targetSeconds = it }
+                )
+            }
+            
+            item { Spacer(modifier = Modifier.height(Spacing.md)) }
+            
+            // Live Tracking
+            item {
+                LiveTrackingCard(
+                    isEnabled = isLiveTrackingEnabled,
+                    onToggle = { isLiveTrackingEnabled = it },
+                    onAddObservers = { /* Navigate to friend selector */ }
+                )
+            }
+            
+            item { Spacer(modifier = Modifier.height(Spacing.md)) }
+            
+            // Run with Friends
+            item {
+                RunWithFriendsCard(
+                    onSetupGroupRun = { /* Navigate to group run setup */ }
+                )
+            }
+            
+            item { Spacer(modifier = Modifier.height(Spacing.xxl)) }
+        }
+        
+        // Bottom Button
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(Colors.backgroundRoot)
+                .padding(Spacing.lg)
+        ) {
+            Button(
+                onClick = {
+                    val hours = targetHours.toIntOrNull() ?: 0
+                    val minutes = targetMinutes.toIntOrNull() ?: 0
+                    val seconds = targetSeconds.toIntOrNull() ?: 0
+                    onGenerateRoute(
+                        targetDistance,
+                        isTargetTimeEnabled,
+                        hours,
+                        minutes,
+                        seconds,
+                        isLiveTrackingEnabled,
+                        false
+                    )
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp),
+                shape = RoundedCornerShape(BorderRadius.lg),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Colors.primary,
+                    contentColor = Colors.buttonText
+                )
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.icon_location_vector),
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(Spacing.sm))
+                Text(
+                    text = "GENERATE ROUTE",
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+            
+            Text(
+                text = "Target: ${targetDistance.toInt()} km",
+                style = AppTextStyles.caption,
+                color = Colors.textMuted,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = (-8).dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun ActivityTypeButton(
+    text: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.height(50.dp),
+        shape = RoundedCornerShape(BorderRadius.md),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (isSelected) Colors.primary else Colors.backgroundSecondary,
+            contentColor = if (isSelected) Colors.buttonText else Colors.textPrimary
+        )
+    ) {
+        Text(
+            text = text,
+            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+        )
+    }
+}
+
+@Composable
+fun TargetDistanceCard(distance: Float, onDistanceChanged: (Float) -> Unit) {
+    Column(modifier = Modifier.padding(horizontal = Spacing.lg)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom
+        ) {
+            Text(
+                text = "Target Distance",
+                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                color = Colors.textPrimary
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(BorderRadius.sm))
+                    .background(Colors.backgroundSecondary)
+                    .padding(horizontal = Spacing.md, vertical = Spacing.sm)
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.icon_location_vector),
+                    contentDescription = null,
+                    tint = Colors.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(Spacing.xs))
+                Text(
+                    text = "%.0f km goal".format(distance),
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.primary
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(Spacing.md))
+        Slider(
+            value = distance,
+            onValueChange = onDistanceChanged,
+            valueRange = 1f..50f,
+            modifier = Modifier.fillMaxWidth(),
+            colors = SliderDefaults.colors(
+                thumbColor = Colors.primary,
+                activeTrackColor = Colors.primary,
+                inactiveTrackColor = Colors.backgroundTertiary
+            )
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("1 km", style = AppTextStyles.caption, color = Colors.textMuted)
+            Text("50 km", style = AppTextStyles.caption, color = Colors.textMuted)
+        }
+    }
+}
+
+@Composable
+fun LiveTrackingCard(
+    isEnabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+    onAddObservers: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg),
+        shape = RoundedCornerShape(BorderRadius.md),
+        colors = CardDefaults.cardColors(
+            containerColor = Colors.backgroundSecondary.copy(alpha = 0.8f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(Spacing.lg)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(50.dp)
+                        .clip(CircleShape)
+                        .background(Colors.backgroundTertiary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.icon_location_vector),
+                        contentDescription = "Live Tracking",
+                        tint = Colors.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+                
+                Spacer(modifier = Modifier.width(Spacing.md))
+                
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Live Tracking",
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                    Text(
+                        text = "Share your location with friends",
+                        style = AppTextStyles.small,
+                        color = Colors.textMuted
+                    )
+                }
+                
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(BorderRadius.full))
+                        .clickable { onToggle(!isEnabled) }
+                        .background(if (isEnabled) Colors.primary else Colors.backgroundTertiary)
+                        .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (isEnabled) "ON" else "OFF",
+                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                        color = if (isEnabled) Colors.buttonText else Colors.textMuted
+                    )
+                }
+            }
+            
+            if (isEnabled) {
+                Spacer(modifier = Modifier.height(Spacing.md))
+                Divider(color = Colors.backgroundTertiary)
+                Spacer(modifier = Modifier.height(Spacing.md))
+                
+                Button(
+                    onClick = onAddObservers,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(BorderRadius.md),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Colors.primary.copy(alpha = 0.2f),
+                        contentColor = Colors.primary
+                    )
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.icon_profile_vector),
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(Spacing.sm))
+                    Text("Add Observers", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RunWithFriendsCard(onSetupGroupRun: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+            .clickable(onClick = onSetupGroupRun),
+        shape = RoundedCornerShape(BorderRadius.md),
+        colors = CardDefaults.cardColors(
+            containerColor = Colors.backgroundSecondary.copy(alpha = 0.8f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(50.dp)
+                    .clip(CircleShape)
+                    .background(Colors.primary.copy(alpha = 0.2f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.icon_profile_vector),
+                    contentDescription = "Run with Friends",
+                    tint = Colors.primary,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+            
+            Spacer(modifier = Modifier.width(Spacing.md))
+            
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Run with Friends",
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.textPrimary
+                )
+                Text(
+                    text = "Create a group run and invite friends",
+                    style = AppTextStyles.small,
+                    color = Colors.textMuted
+                )
+            }
+            
+            Icon(
+                painter = painterResource(id = R.drawable.icon_play_vector),
+                contentDescription = "Navigate",
+                tint = Colors.textMuted,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+    }
+}

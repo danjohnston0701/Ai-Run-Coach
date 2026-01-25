@@ -2,9 +2,12 @@ package live.airuncoach.airuncoach.network
 
 import live.airuncoach.airuncoach.domain.model.Goal
 import live.airuncoach.airuncoach.domain.model.User
+import live.airuncoach.airuncoach.network.model.AuthResponse
 import live.airuncoach.airuncoach.network.model.CreateGoalRequest
 import live.airuncoach.airuncoach.network.model.LoginRequest
 import live.airuncoach.airuncoach.network.model.RegisterRequest
+import live.airuncoach.airuncoach.network.model.RouteGenerationRequest
+import live.airuncoach.airuncoach.network.model.RouteGenerationResponse
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
@@ -14,10 +17,10 @@ import retrofit2.http.Path
 
 interface ApiService {
     @POST("/api/auth/login")
-    suspend fun login(@Body request: LoginRequest): User
+    suspend fun login(@Body request: LoginRequest): AuthResponse
 
     @POST("/api/auth/register")
-    suspend fun register(@Body request: RegisterRequest): User
+    suspend fun register(@Body request: RegisterRequest): AuthResponse
 
     @GET("/api/users/{id}")
     suspend fun getUser(@Path("id") userId: String): User
@@ -33,4 +36,12 @@ interface ApiService {
     
     @DELETE("/api/goals/{goalId}")
     suspend fun deleteGoal(@Path("goalId") goalId: Long)
+    
+    // AI Route Generation - Premium+ Plans
+    @POST("/api/routes/generate-ai")
+    suspend fun generateAIRoutes(@Body request: RouteGenerationRequest): RouteGenerationResponse
+    
+    // Template Route Generation - Free & Lite Plans
+    @POST("/api/routes/generate-template")
+    suspend fun generateTemplateRoutes(@Body request: RouteGenerationRequest): RouteGenerationResponse
 }
