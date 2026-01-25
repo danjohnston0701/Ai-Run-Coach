@@ -84,19 +84,42 @@ AI Run Coach is an Android fitness tracking app with AI-powered coaching, GPS tr
 
 ## 🚧 In Progress Features
 
-### Backend Implementation for New Features
-**Status:** In Progress
-**Priority:** High
+### Backend Implementation for New Features ✅ COMPLETE
+**Completed:** January 25, 2026
+**Status:** Production Ready
+**Server:** http://localhost:3000
 
-**Backend Requirements:**
+**All backend API endpoints have been implemented and tested!**
 
-**1. Update AI Coach Settings**
+✅ **PUT /api/users/{id}/coach-settings** - Update AI coach settings  
+✅ **GET /api/friends/{userId}** - Get user's friends list  
+✅ **POST /api/friends/{userId}/add** - Add a friend (bidirectional)  
+✅ **DELETE /api/friends/{userId}/{friendId}** - Remove a friend  
+✅ **GET /api/group-runs** - List all group runs with filters  
+✅ **POST /api/group-runs** - Create new group run  
+✅ **POST /api/group-runs/{id}/join** - Join a group run  
+✅ **DELETE /api/group-runs/{id}/leave** - Leave a group run  
+
+**Backend Documentation:** See backend repo at `/Desktop/Ai-Run-Coach-IOS-and-Android/BACKEND_ANDROID_V2_COMPLETE.md`
+
+**Next Steps:**
+1. ✅ Backend implementation COMPLETE
+2. 🔄 **IN PROGRESS**: Replace mock data in Android ViewModels with real API calls
+3. ⏳ Test end-to-end flows (Profile → Coach Settings → Friends → Group Runs)
+4. ⏳ Handle all error states in Android UI
+
+---
+
+**Legacy Backend Requirements (Now Implemented):**
+
+**1. Update AI Coach Settings** ✅
 *   **Method**: `PUT`
 *   **Endpoint**: `/api/users/{id}/coach-settings`
 *   **Request Body**: A JSON object with `coachName`, `coachGender`, `coachAccent`, and `coachTone`.
 *   **Action**: Update the user's record in the `users` table with the new coach settings. Return the updated user object.
+*   **Status**: ✅ COMPLETE - Fully validated with tests
 
-**2. Get Friends List**
+**2. Get Friends List** ✅
 *   **Method**: `GET`
 *   **Endpoint**: `/api/friends/{userId}`
 *   **Action**: Retrieve a list of all friends for the given `{userId}`. This will likely require a join between a `users` table and a `friendships` table. Return an array of friend objects.
