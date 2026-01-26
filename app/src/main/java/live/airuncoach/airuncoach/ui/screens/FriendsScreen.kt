@@ -45,12 +45,7 @@ fun FriendsScreen(onNavigateBack: () -> Unit, onNavigateToFindFriends: () -> Uni
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Colors.textPrimary)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot),
-                actions = {
-                    IconButton(onClick = onNavigateToFindFriends) {
-                        Icon(painterResource(id = R.drawable.icon_play_vector), contentDescription = "Find Friends", tint = Colors.primary)
-                    }
-                }
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot)
             )
         },
         containerColor = Colors.backgroundRoot
