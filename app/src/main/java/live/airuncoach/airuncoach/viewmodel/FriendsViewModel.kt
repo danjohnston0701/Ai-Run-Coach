@@ -65,8 +65,15 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
                 } else {
                     _friendsState.value = FriendsUiState.Error("User not logged in")
                 }
+            } catch (e: retrofit2.HttpException) {
+                val errorMsg = when (e.code()) {
+                    500 -> "Server error: Friends endpoint not implemented or has a bug. Check backend logs."
+                    404 -> "Friends endpoint not found. Backend needs to implement GET /api/friends/{userId}"
+                    else -> "Failed to load friends: ${e.message()}"
+                }
+                _friendsState.value = FriendsUiState.Error(errorMsg)
             } catch (e: Exception) {
-                _friendsState.value = FriendsUiState.Error(e.message ?: "Failed to load friends")
+                _friendsState.value = FriendsUiState.Error("Network error: ${e.message ?: "Failed to load friends"}")
             }
         }
     }
