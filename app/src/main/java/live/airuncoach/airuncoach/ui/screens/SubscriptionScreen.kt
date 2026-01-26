@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -28,60 +30,74 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.Plan
 import live.airuncoach.airuncoach.viewmodel.SubscriptionViewModel
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SubscriptionScreen() {
+fun SubscriptionScreen(onNavigateBack: () -> Unit) {
     val viewModel: SubscriptionViewModel = viewModel()
     val plans by viewModel.plans.collectAsState()
     val selectedPlan by viewModel.selectedPlan.collectAsState()
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Colors.backgroundRoot)
-            .padding(Spacing.lg),
-        horizontalAlignment = Alignment.CenterHorizontally
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Subscription") },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                }
+            )
+        }
     ) {
-        item { PremiumHeader() }
-        item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Colors.backgroundRoot)
+                .padding(Spacing.lg),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            item { PremiumHeader() }
+            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
 
-        item { SectionTitle(title = "Unlock Premium Features") }
-        item { Spacer(modifier = Modifier.height(Spacing.md)) }
-        item { PremiumFeature(icon = R.drawable.icon_profile_vector, title = "AI Coach", description = "Personalized real-time coaching") }
-        item { PremiumFeature(icon = R.drawable.icon_play_vector, title = "Unlimited Routes", description = "Generate unlimited AI routes") }
-        item { PremiumFeature(icon = R.drawable.icon_profile_vector, title = "Group Runs", description = "Create and join group runs") }
-        item { PremiumFeature(icon = R.drawable.icon_chart_vector, title = "Advanced Analytics", description = "Detailed performance insights") }
+            item { SectionTitle(title = "Unlock Premium Features") }
+            item { Spacer(modifier = Modifier.height(Spacing.md)) }
+            item { PremiumFeature(icon = R.drawable.icon_profile_vector, title = "AI Coach", description = "Personalized real-time coaching") }
+            item { PremiumFeature(icon = R.drawable.icon_play_vector, title = "Unlimited Routes", description = "Generate unlimited AI routes") }
+            item { PremiumFeature(icon = R.drawable.icon_profile_vector, title = "Group Runs", description = "Create and join group runs") }
+            item { PremiumFeature(icon = R.drawable.icon_chart_vector, title = "Advanced Analytics", description = "Detailed performance insights") }
 
-        item { Spacer(modifier = Modifier.height(Spacing.lg)) }
-        item { SectionTitle(title = "Choose Your Plan") }
-        item { Spacer(modifier = Modifier.height(Spacing.md)) }
+            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+            item { SectionTitle(title = "Choose Your Plan") }
+            item { Spacer(modifier = Modifier.height(Spacing.md)) }
 
-        items(plans.size) { index ->
-            val plan = plans[index]
-            PlanSelector(plan = plan, isSelected = plan == selectedPlan, onClick = { viewModel.selectPlan(plan) })
-            Spacer(modifier = Modifier.height(Spacing.sm))
-        }
-
-        item { Spacer(modifier = Modifier.height(Spacing.lg)) }
-
-        item { 
-            Button(
-                onClick = { /* TODO: Handle subscription */ },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-                shape = RoundedCornerShape(BorderRadius.lg),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Colors.primary,
-                    contentColor = Colors.buttonText
-                )
-            ) {
-                Text("Subscribe Now", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold))
+            items(plans.size) { index ->
+                val plan = plans[index]
+                PlanSelector(plan = plan, isSelected = plan == selectedPlan, onClick = { viewModel.selectPlan(plan) })
+                Spacer(modifier = Modifier.height(Spacing.sm))
             }
+
+            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+
+            item {
+                Button(
+                    onClick = { /* TODO: Handle subscription */ },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(BorderRadius.lg),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Colors.primary,
+                        contentColor = Colors.buttonText
+                    )
+                ) {
+                    Text("Subscribe Now", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold))
+                }
+            }
+
+            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+
+            item { CouponCodeSection() }
         }
-
-        item { Spacer(modifier = Modifier.height(Spacing.lg)) }
-
-        item { CouponCodeSection() }
     }
 }
 
@@ -212,6 +228,7 @@ fun PlanSelector(plan: Plan, isSelected: Boolean, onClick: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CouponCodeSection() {
     Column(
@@ -234,8 +251,8 @@ fun CouponCodeSection() {
                 label = { Text("Enter code") },
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(BorderRadius.lg),
-                colors = TextFieldDefaults.outlinedTextFieldColors(
-                    textColor = Colors.textPrimary,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Colors.textPrimary,
                     cursorColor = Colors.primary,
                     focusedBorderColor = Colors.primary,
                     unfocusedBorderColor = Colors.textMuted,

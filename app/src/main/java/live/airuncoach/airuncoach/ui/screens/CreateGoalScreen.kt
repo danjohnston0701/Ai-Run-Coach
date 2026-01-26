@@ -31,6 +31,7 @@ enum class GoalType {
     EVENT, DISTANCE_TIME, HEALTH_WELLBEING, CONSISTENCY
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateGoalScreen(
     onDismiss: () -> Unit = {},

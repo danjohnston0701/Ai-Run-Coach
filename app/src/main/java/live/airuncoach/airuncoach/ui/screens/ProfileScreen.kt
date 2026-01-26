@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -34,6 +35,7 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.ProfileViewModel
 import live.airuncoach.airuncoach.viewmodel.ProfileViewModelFactory
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
     onNavigateToLogin: () -> Unit,
@@ -51,6 +53,12 @@ fun ProfileScreen(
     val context = LocalContext.current
     val viewModel: ProfileViewModel = viewModel(factory = ProfileViewModelFactory(context))
     val user by viewModel.user.collectAsState()
+    
+    // Refresh user data when the screen appears
+    DisposableEffect(Unit) {
+        viewModel.refreshUser()
+        onDispose { }
+    }
 
     if (user == null) {
         onNavigateToLogin()
@@ -192,19 +200,6 @@ fun ProfileHeader(user: User) {
             )
         }
     }
-}
-
-@Composable
-fun SectionTitle(title: String) {
-    Text(
-        text = title.uppercase(),
-        style = AppTextStyles.h4,
-        color = Colors.textSecondary,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Spacing.lg)
-            .padding(bottom = Spacing.sm)
-    )
 }
 
 @Composable

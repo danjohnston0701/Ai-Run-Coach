@@ -24,6 +24,7 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.FindFriendsUiState
 import live.airuncoach.airuncoach.viewmodel.FriendsViewModel
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FindFriendsScreen(onNavigateBack: () -> Unit) {
     val viewModel: FriendsViewModel = viewModel()
@@ -56,8 +57,9 @@ fun FindFriendsScreen(onNavigateBack: () -> Unit) {
                     onValueChange = { searchQuery = it },
                     label = { Text("Search by name or referral") },
                     modifier = Modifier.weight(1f),
-                    colors = TextFieldDefaults.outlinedTextFieldColors(
-                        textColor = Colors.textPrimary,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Colors.textPrimary,
+                        unfocusedTextColor = Colors.textPrimary,
                         cursorColor = Colors.primary,
                         focusedBorderColor = Colors.primary,
                         unfocusedBorderColor = Colors.textMuted

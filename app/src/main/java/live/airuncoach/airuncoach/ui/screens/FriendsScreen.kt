@@ -26,6 +26,7 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.FriendsUiState
 import live.airuncoach.airuncoach.viewmodel.FriendsViewModel
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FriendsScreen(onNavigateToFindFriends: () -> Unit) {
     val viewModel: FriendsViewModel = viewModel()
@@ -90,7 +91,7 @@ fun EmptyFriendsState(onNavigateToFindFriends: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(Spacing.sm))
         Text(
-            text = "You haven't added any friends yet. Add friends to share your progress!",
+            text = "You haven\'t added any friends yet. Add friends to share your progress!",
             style = AppTextStyles.body,
             color = Colors.textSecondary,
         )

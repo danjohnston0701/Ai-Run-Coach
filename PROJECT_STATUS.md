@@ -2,8 +2,8 @@
 # AI Run Coach - Project Status & Roadmap
 
 **Last Updated:** January 26, 2026
-**Last Session:** Implemented Profile, Connected Devices, Premium, Friends, Group Runs, and AI Coach Settings screens. Defined backend requirements for these features.
-**Next Priority:** Backend implementation of new APIs, followed by frontend integration.
+**Last Session:** Completed Personal Details, Fitness Level, and Distance Scale screens with full backend integration. All profile settings screens now production-ready with Neon database support.
+**Next Priority:** Events and History screen implementation, Run Session screen completion.
 
 ---
 
@@ -12,10 +12,10 @@
 AI Run Coach is an Android fitness tracking app with AI-powered coaching, GPS tracking, and wearable device integration.
 
 **Total Features:** 58+
-**Completed:** 15 (Branding, GPS, Weather, Dashboard, Icons, Navigation, Create Goal, Goals Integration, Route Generation UI, Profile Screen, Connected Devices Screen, Premium Screen, Friends Screens, Group Runs Screens, AI Coach Settings Screen)
+**Completed:** 18 (Branding, GPS, Weather, Dashboard, Icons, Navigation, Create Goal, Goals Integration, Route Generation UI, Profile Screen, Connected Devices Screen, Premium Screen, Friends Screens, Group Runs Screens, AI Coach Settings Screen, Personal Details Screen, Fitness Level Screen, Distance Scale Screen)
 **Specifications Received:** 9 major feature areas documented
-**In Progress:** Backend implementation for new features
-**Remaining:** 43+ features
+**In Progress:** Events and History screens
+**Remaining:** 40+ features
 
 ---
 
@@ -80,18 +80,66 @@ AI Run Coach is an Android fitness tracking app with AI-powered coaching, GPS tr
 - Redesigned the `GoalsScreen` to include "Active", "Completed", and "Abandoned" tabs.
 - Updated the `GoalsViewModel` to filter goals based on the selected tab.
 
+### Feature 11: Personal Details Screen ✓
+**Completed:** January 26, 2026
+**Status:** Production Ready
+
+**What was done:**
+- Implemented comprehensive `PersonalDetailsScreen` with full user profile editing capabilities
+- Created `PersonalDetailsViewModel` with backend integration via `PUT /api/users/{id}` endpoint
+- Form fields: Full Name, Email, Date of Birth (with auto-formatting), Gender (dropdown), Weight (kg), Height (cm)
+- Real-time state management using Kotlin StateFlow
+- Data persisted to SharedPreferences and synced with Neon database
+- Created `UpdateUserRequest` model for flexible partial updates
+- Updated `User` model with new fields: `dob`, `gender`, `weight`, `height`, `fitnessLevel`, `distanceScale`
+
+### Feature 12: Fitness Level Screen ✓
+**Completed:** January 26, 2026
+**Status:** Production Ready
+
+**What was done:**
+- Implemented `FitnessLevelScreen` with radio button selection UI
+- Created `FitnessLevelViewModel` with backend integration
+- Three fitness levels: Beginner, Intermediate, Advanced
+- Real-time selection with visual feedback (highlighted cards)
+- Data saved to Neon database via `PUT /api/users/{id}` endpoint
+- Persisted locally to SharedPreferences for offline access
+
+### Feature 13: Distance Scale Screen ✓
+**Completed:** January 26, 2026
+**Status:** Production Ready
+
+**What was done:**
+- Implemented `DistanceScaleScreen` with radio button selection UI
+- Created `DistanceScaleViewModel` with backend integration
+- Two options: Kilometers, Miles
+- Real-time selection with visual feedback
+- Data saved to Neon database via `PUT /api/users/{id}` endpoint
+- Persisted locally to SharedPreferences for offline access
+
+### Feature 14: Shared UI Components ✓
+**Completed:** January 26, 2026
+**Status:** Production Ready
+
+**What was done:**
+- Created reusable `SectionTitle` composable component
+- Used across PersonalDetailsScreen, FitnessLevelScreen, and DistanceScaleScreen
+- Consistent styling with uppercase text and proper spacing
+- Improves UI consistency and code reusability
+
 ---
 
 ## 🚧 In Progress Features
 
 ### Backend Implementation for New Features ✅ COMPLETE
-**Completed:** January 25, 2026
+**Completed:** January 26, 2026
 **Status:** Production Ready
 **Server:** http://localhost:3000
 
 **All backend API endpoints have been implemented and tested!**
 
 ✅ **PUT /api/users/{id}/coach-settings** - Update AI coach settings  
+✅ **PUT /api/users/{id}** - Update user profile (Personal Details, Fitness Level, Distance Scale)  
 ✅ **GET /api/friends/{userId}** - Get user's friends list  
 ✅ **POST /api/friends/{userId}/add** - Add a friend (bidirectional)  
 ✅ **DELETE /api/friends/{userId}/{friendId}** - Remove a friend  
@@ -102,44 +150,127 @@ AI Run Coach is an Android fitness tracking app with AI-powered coaching, GPS tr
 
 **Backend Documentation:** See backend repo at `/Desktop/Ai-Run-Coach-IOS-and-Android/BACKEND_ANDROID_V2_COMPLETE.md`
 
-**Next Steps:**
+**Completed Steps:**
 1. ✅ Backend implementation COMPLETE
-2. 🔄 **IN PROGRESS**: Replace mock data in Android ViewModels with real API calls
-3. ⏳ Test end-to-end flows (Profile → Coach Settings → Friends → Group Runs)
-4. ⏳ Handle all error states in Android UI
+2. ✅ **COMPLETE**: Profile settings screens fully integrated with real API calls
+3. ✅ Personal Details, Fitness Level, Distance Scale screens production-ready
+4. ⏳ **TODO**: Replace mock data in Friends and Group Runs ViewModels with real API calls
+5. ⏳ Test end-to-end flows (Friends → Group Runs)
 
 ---
 
-**Legacy Backend Requirements (Now Implemented):**
+**Backend API Endpoints (Implemented):**
 
 **1. Update AI Coach Settings** ✅
 *   **Method**: `PUT`
 *   **Endpoint**: `/api/users/{id}/coach-settings`
-*   **Request Body**: A JSON object with `coachName`, `coachGender`, `coachAccent`, and `coachTone`.
-*   **Action**: Update the user's record in the `users` table with the new coach settings. Return the updated user object.
+*   **Request Body**: JSON object with `coachName`, `coachGender`, `coachAccent`, `coachTone`
+*   **Action**: Update user's AI coach preferences in Neon database
 *   **Status**: ✅ COMPLETE - Fully validated with tests
 
-**2. Get Friends List** ✅
+**2. Update User Profile** ✅
+*   **Method**: `PUT`
+*   **Endpoint**: `/api/users/{id}`
+*   **Request Body**: JSON object with optional fields: `name`, `email`, `dob`, `gender`, `weight`, `height`, `fitnessLevel`, `distanceScale`
+*   **Action**: Partial update of user profile. Only provided fields are updated
+*   **Database**: Neon PostgreSQL `users` table
+*   **Status**: ✅ COMPLETE - Production ready
+*   **Used By**: PersonalDetailsScreen, FitnessLevelScreen, DistanceScaleScreen
+
+**3. Get Friends List** ✅
 *   **Method**: `GET`
 *   **Endpoint**: `/api/friends/{userId}`
-*   **Action**: Retrieve a list of all friends for the given `{userId}`. This will likely require a join between a `users` table and a `friendships` table. Return an array of friend objects.
+*   **Action**: Retrieve friends list from `friendships` table with user details join
+*   **Status**: ✅ COMPLETE - Awaiting frontend integration
 
-**3. Add a Friend**
+**4. Add a Friend** ✅
 *   **Method**: `POST`
 *   **Endpoint**: `/api/friends/{userId}/add`
-*   **Request Body**: A JSON object with `friendId`.
-*   **Action**: Create a new entry in a `friendships` table to establish a connection between the `{userId}` and the `friendId`. Return the newly added friend object.
+*   **Request Body**: JSON object with `friendId`
+*   **Action**: Create bidirectional friendship entries in `friendships` table
+*   **Status**: ✅ COMPLETE - Awaiting frontend integration
 
-**4. Get All Group Runs**
+**5. Get All Group Runs** ✅
 *   **Method**: `GET`
 *   **Endpoint**: `/api/group-runs`
-*   **Action**: Retrieve a list of all group runs from the `group_runs` table. Return an array of group run objects.
+*   **Action**: Retrieve all group runs from `group_runs` table with filters
+*   **Status**: ✅ COMPLETE - Awaiting frontend integration
 
-**5. Create a Group Run**
+**6. Create a Group Run** ✅
 *   **Method**: `POST`
 *   **Endpoint**: `/api/group-runs`
-*   **Request Body**: A JSON object containing all details for a new group run (`name`, `meetingPoint`, `description`, `distance`, `maxParticipants`, `dateTime`).
-*   **Action**: Insert a new record into the `group_runs` table. Return the newly created group run object.
+*   **Request Body**: JSON object with `name`, `meetingPoint`, `description`, `distance`, `maxParticipants`, `dateTime`
+*   **Action**: Insert new group run into `group_runs` table
+*   **Status**: ✅ COMPLETE - Awaiting frontend integration
+
+---
+
+## 🗄️ Neon Database Schema Updates
+
+### Users Table Extensions ✅
+**Status:** Implemented in Neon PostgreSQL
+
+New columns added to support profile features:
+- `dob` (VARCHAR) - Date of birth in dd/mm/yyyy format
+- `gender` (VARCHAR) - User's gender (Male, Female, Non-binary, Prefer not to say)
+- `weight` (DECIMAL) - User's weight in kilograms
+- `height` (DECIMAL) - User's height in centimeters
+- `fitness_level` (VARCHAR) - Beginner, Intermediate, or Advanced
+- `distance_scale` (VARCHAR) - Kilometers or Miles preference
+- `coach_name` (VARCHAR) - Custom AI coach name
+- `coach_gender` (VARCHAR) - AI coach voice gender
+- `coach_accent` (VARCHAR) - AI coach voice accent
+- `coach_tone` (VARCHAR) - AI coach coaching style
+- `subscription_tier` (VARCHAR) - User's subscription level
+- `profile_pic` (TEXT) - Profile picture URL
+
+### Friendships Table ✅
+**Status:** Implemented in Neon PostgreSQL
+
+```sql
+CREATE TABLE friendships (
+    id SERIAL PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    friend_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status VARCHAR(20) DEFAULT 'accepted',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, friend_id)
+);
+```
+
+Features:
+- Bidirectional friendships (requires 2 rows for mutual friendship)
+- Status support for future friend requests feature
+- Indexed on user_id, friend_id, and status for performance
+
+### Group Runs Table ✅
+**Status:** Implemented in Neon PostgreSQL
+
+```sql
+CREATE TABLE group_runs (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    creator_id VARCHAR(255) NOT NULL REFERENCES users(id),
+    meeting_point TEXT NOT NULL,
+    meeting_lat DECIMAL(10, 8),
+    meeting_lng DECIMAL(11, 8),
+    distance DECIMAL(5, 2) NOT NULL,
+    date_time TIMESTAMP NOT NULL,
+    max_participants INTEGER DEFAULT 10,
+    is_public BOOLEAN DEFAULT true,
+    status VARCHAR(20) DEFAULT 'upcoming',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+Features:
+- Full group run management with location coordinates
+- Status tracking (upcoming, in_progress, completed, cancelled)
+- Public/private run support
+- Indexed on creator_id and date_time for performance
 
 ---
 
@@ -166,11 +297,56 @@ AI Run Coach is an Android fitness tracking app with AI-powered coaching, GPS tr
 | **Coach Settings** | ✅ Complete | UI and backend integration complete |
 | **Connected Devices** | ✅ Complete | UI complete, uses placeholder data |
 | **Subscription** | ✅ Complete | UI complete, uses placeholder data |
-| **Personal Details** | 📝 Placeholder | Needs implementation |
-| **Fitness Level** | 📝 Placeholder | Needs implementation |
-| **Distance Scale** | 📝 Placeholder | Needs implementation |
+| **Personal Details** | ✅ Complete | Full backend integration, production ready |
+| **Fitness Level** | ✅ Complete | Full backend integration, production ready |
+| **Distance Scale** | ✅ Complete | Full backend integration, production ready |
 | **Notifications** | 📝 Placeholder | Needs implementation |
 
+
+---
+
+## 📱 Android Implementation Details
+
+### New Models ✅
+- **`UpdateUserRequest`** - Flexible request model for partial user profile updates
+  - All fields optional: `name`, `email`, `dob`, `gender`, `weight`, `height`, `fitnessLevel`, `distanceScale`
+  - Enables targeted updates without affecting unchanged fields
+
+### Updated Models ✅
+- **`User`** - Extended with new profile fields
+  - Personal: `dob`, `gender`, `weight`, `height`
+  - Preferences: `fitnessLevel`, `distanceScale`
+  - Maintains backward compatibility with existing fields
+
+### New ViewModels ✅
+1. **`PersonalDetailsViewModel`**
+   - Manages all user profile fields with StateFlow
+   - Auto-formats date of birth input (dd/mm/yyyy)
+   - Validates and saves data to backend via `PUT /api/users/{id}`
+   - Syncs with SharedPreferences for offline access
+
+2. **`FitnessLevelViewModel`**
+   - Manages fitness level selection (Beginner, Intermediate, Advanced)
+   - Real-time state updates with visual feedback
+   - Persists to Neon database and SharedPreferences
+
+3. **`DistanceScaleViewModel`**
+   - Manages distance preference (Kilometers, Miles)
+   - Real-time state updates with visual feedback
+   - Persists to Neon database and SharedPreferences
+
+### New UI Components ✅
+- **`SectionTitle`** - Reusable section header component
+  - Uppercase styling with consistent spacing
+  - Used across multiple settings screens
+  - Improves UI consistency and maintainability
+
+### Integration Patterns ✅
+- **State Management**: Kotlin StateFlow for reactive UI updates
+- **Data Persistence**: Dual-layer (Backend + SharedPreferences)
+- **Error Handling**: Try-catch blocks with graceful degradation
+- **Form Validation**: Real-time input formatting and validation
+- **Navigation**: Composable navigation with back button support
 
 ---
 
@@ -185,8 +361,11 @@ AI Run Coach is an Android fitness tracking app with AI-powered coaching, GPS tr
 6. Always mark completion dates and status changes
 
 **Important Contexts:**
-- The backend needs to be updated with the new endpoints before the UI can be fully connected to the database.
-- Once the backend is ready, the ViewModels for Friends, Group Runs, and Connected Devices will need to be updated to use the new API calls.
+- ✅ Backend is fully updated with all required endpoints and connected to Neon PostgreSQL database
+- ✅ Profile settings screens (Personal Details, Fitness Level, Distance Scale) are production-ready with full backend integration
+- ⏳ Friends and Group Runs ViewModels still use placeholder data - need to integrate with existing backend APIs
+- ⏳ Connected Devices screen uses placeholder data - awaiting device integration implementation
+- All user profile data is now persisted to Neon database with local SharedPreferences backup
 
 ---
 

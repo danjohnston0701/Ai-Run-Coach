@@ -1,6 +1,7 @@
 
 package live.airuncoach.airuncoach.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -20,6 +22,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
@@ -29,6 +32,7 @@ import live.airuncoach.airuncoach.viewmodel.CoachSettingsViewModel
 import live.airuncoach.airuncoach.viewmodel.CoachSettingsViewModelFactory
 import live.airuncoach.airuncoach.viewmodel.CoachingTone
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CoachSettingsScreen(onNavigateBack: () -> Unit) {
     val context = LocalContext.current
@@ -37,10 +41,11 @@ fun CoachSettingsScreen(onNavigateBack: () -> Unit) {
     val voiceGender by viewModel.voiceGender.collectAsState()
     val accent by viewModel.accent.collectAsState()
     val coachingTone by viewModel.coachingTone.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
-            TopAppBar(
+             TopAppBar(
                 title = { Text("AI Coach Settings", style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
@@ -65,8 +70,9 @@ fun CoachSettingsScreen(onNavigateBack: () -> Unit) {
                     onValueChange = viewModel::onCoachNameChanged,
                     label = { Text("Give your AI coach a personalized name") },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = TextFieldDefaults.outlinedTextFieldColors(
-                        textColor = Colors.textPrimary,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Colors.textPrimary,
+                        unfocusedTextColor = Colors.textPrimary,
                         cursorColor = Colors.primary,
                         focusedBorderColor = Colors.primary,
                         unfocusedBorderColor = Colors.textMuted
@@ -127,8 +133,10 @@ fun CoachSettingsScreen(onNavigateBack: () -> Unit) {
             item {
                 Button(
                     onClick = {
-                        viewModel.saveSettings()
-                        onNavigateBack()
+                        coroutineScope.launch {
+                            viewModel.saveSettings()
+                            onNavigateBack()
+                        }
                     },
                     modifier = Modifier
                         .fillMaxWidth()

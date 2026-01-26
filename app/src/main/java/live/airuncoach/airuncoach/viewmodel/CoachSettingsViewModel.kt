@@ -2,14 +2,13 @@
 package live.airuncoach.airuncoach.viewmodel
 
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.RetrofitClient
@@ -76,24 +75,22 @@ class CoachSettingsViewModel(private val context: Context) : ViewModel() {
         _coachingTone.value = tone
     }
 
-    fun saveSettings() {
-        viewModelScope.launch {
-            val userJson = sharedPrefs.getString("user", null)
-            if (userJson != null) {
-                val user = gson.fromJson(userJson, User::class.java)
-                val request = UpdateCoachSettingsRequest(
-                    coachName = _coachName.value,
-                    coachGender = _voiceGender.value,
-                    coachAccent = _accent.value,
-                    coachTone = _coachingTone.value
-                )
-                try {
-                    val updatedUser = apiService.updateCoachSettings(user.id, request)
-                    val updatedUserJson = gson.toJson(updatedUser)
-                    sharedPrefs.edit().putString("user", updatedUserJson).apply()
-                } catch (e: Exception) {
-                    // Handle error
-                }
+    suspend fun saveSettings() {
+        val userJson = sharedPrefs.getString("user", null)
+        if (userJson != null) {
+            val user = gson.fromJson(userJson, User::class.java)
+            val request = UpdateCoachSettingsRequest(
+                coachName = _coachName.value,
+                coachGender = _voiceGender.value,
+                coachAccent = _accent.value,
+                coachTone = _coachingTone.value
+            )
+            try {
+                val updatedUser = apiService.updateCoachSettings(user.id, request)
+                val updatedUserJson = gson.toJson(updatedUser)
+                sharedPrefs.edit().putString("user", updatedUserJson).apply()
+            } catch (e: Exception) {
+                Log.e("CoachSettingsViewModel", "Failed to save settings", e)
             }
         }
     }

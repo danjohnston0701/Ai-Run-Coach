@@ -21,6 +21,7 @@ import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.CreateGroupRunViewModel
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateGroupRunScreen(onNavigateBack: () -> Unit) {
     val viewModel: CreateGroupRunViewModel = viewModel()
@@ -57,7 +58,8 @@ fun CreateGroupRunScreen(onNavigateBack: () -> Unit) {
                 label = { Text("Run Name *") },
                 modifier = Modifier.fillMaxWidth(),
                 colors = TextFieldDefaults.outlinedTextFieldColors(
-                    textColor = Colors.textPrimary,
+                    focusedTextColor = Colors.textPrimary,
+                    unfocusedTextColor = Colors.textPrimary,
                     cursorColor = Colors.primary,
                     focusedBorderColor = Colors.primary,
                     unfocusedBorderColor = Colors.textMuted
@@ -70,7 +72,8 @@ fun CreateGroupRunScreen(onNavigateBack: () -> Unit) {
                 label = { Text("Meeting Point *") },
                 modifier = Modifier.fillMaxWidth(),
                 colors = TextFieldDefaults.outlinedTextFieldColors(
-                    textColor = Colors.textPrimary,
+                    focusedTextColor = Colors.textPrimary,
+                    unfocusedTextColor = Colors.textPrimary,
                     cursorColor = Colors.primary,
                     focusedBorderColor = Colors.primary,
                     unfocusedBorderColor = Colors.textMuted
@@ -83,7 +86,8 @@ fun CreateGroupRunScreen(onNavigateBack: () -> Unit) {
                 label = { Text("Description") },
                 modifier = Modifier.fillMaxWidth(),
                 colors = TextFieldDefaults.outlinedTextFieldColors(
-                    textColor = Colors.textPrimary,
+                    focusedTextColor = Colors.textPrimary,
+                    unfocusedTextColor = Colors.textPrimary,
                     cursorColor = Colors.primary,
                     focusedBorderColor = Colors.primary,
                     unfocusedBorderColor = Colors.textMuted
@@ -97,7 +101,8 @@ fun CreateGroupRunScreen(onNavigateBack: () -> Unit) {
                     label = { Text("Distance (km)") },
                     modifier = Modifier.weight(1f),
                     colors = TextFieldDefaults.outlinedTextFieldColors(
-                        textColor = Colors.textPrimary,
+                        focusedTextColor = Colors.textPrimary,
+                        unfocusedTextColor = Colors.textPrimary,
                         cursorColor = Colors.primary,
                         focusedBorderColor = Colors.primary,
                         unfocusedBorderColor = Colors.textMuted
@@ -110,7 +115,8 @@ fun CreateGroupRunScreen(onNavigateBack: () -> Unit) {
                     label = { Text("Max Participants") },
                     modifier = Modifier.weight(1f),
                     colors = TextFieldDefaults.outlinedTextFieldColors(
-                        textColor = Colors.textPrimary,
+                        focusedTextColor = Colors.textPrimary,
+                        unfocusedTextColor = Colors.textPrimary,
                         cursorColor = Colors.primary,
                         focusedBorderColor = Colors.primary,
                         unfocusedBorderColor = Colors.textMuted
@@ -124,7 +130,8 @@ fun CreateGroupRunScreen(onNavigateBack: () -> Unit) {
                 label = { Text("Date & Time") },
                 modifier = Modifier.fillMaxWidth(),
                 colors = TextFieldDefaults.outlinedTextFieldColors(
-                    textColor = Colors.textPrimary,
+                    focusedTextColor = Colors.textPrimary,
+                    unfocusedTextColor = Colors.textPrimary,
                     cursorColor = Colors.primary,
                     focusedBorderColor = Colors.primary,
                     unfocusedBorderColor = Colors.textMuted

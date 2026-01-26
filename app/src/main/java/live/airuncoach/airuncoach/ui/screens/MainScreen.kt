@@ -1,9 +1,14 @@
 
+
 package live.airuncoach.airuncoach.ui.screens
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -42,6 +47,7 @@ val items = listOf(
     Screen.Profile,
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(onNavigateToLogin: () -> Unit) {
     val navController = rememberNavController()
@@ -160,7 +166,9 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     }
                 )
             }
-            composable("run_session") { RunSessionScreen() }
+            composable("run_session") { 
+                RunSessionScreen(onNavigateBack = { navController.popBackStack() })
+            }
             composable("create_goal") {
                 CreateGoalScreen(
                     onDismiss = { navController.popBackStack() },
@@ -185,13 +193,13 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             composable("create_group_run") {
                 CreateGroupRunScreen(onNavigateBack = { navController.popBackStack() })
             }
-            composable("coach_settings") { CoachSettingsScreen() }
-            composable("personal_details") { PersonalDetailsScreen() }
-            composable("fitness_level") { FitnessLevelScreen() }
-            composable("distance_scale") { DistanceScaleScreen() }
-            composable("notifications") { NotificationsScreen() }
-            composable("connected_devices") { ConnectedDevicesScreen() }
-            composable("subscription") { SubscriptionScreen() }
+            composable("coach_settings") { CoachSettingsScreen(onNavigateBack = { navController.popBackStack() }) }
+            composable("personal_details") { PersonalDetailsScreen(onNavigateBack = { navController.popBackStack() }) }
+            composable("fitness_level") { FitnessLevelScreen(onNavigateBack = { navController.popBackStack() }) }
+            composable("distance_scale") { DistanceScaleScreen(onNavigateBack = { navController.popBackStack() }) }
+            composable("notifications") { NotificationsScreen(onNavigateBack = { navController.popBackStack() }) }
+            composable("connected_devices") { ConnectedDevicesScreen(onNavigateBack = { navController.popBackStack() }) }
+            composable("subscription") { SubscriptionScreen(onNavigateBack = { navController.popBackStack() }) }
         }
     }
 }

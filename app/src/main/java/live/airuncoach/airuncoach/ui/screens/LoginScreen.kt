@@ -20,7 +20,7 @@ import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.foundation.border
 import androidx.compose.foundation.text.BasicTextField
@@ -64,6 +64,7 @@ import live.airuncoach.airuncoach.viewmodel.LoginState
 import live.airuncoach.airuncoach.viewmodel.LoginViewModel
 import live.airuncoach.airuncoach.viewmodel.LoginViewModelFactory
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LoginScreen(onLoginSuccess: () -> Unit) {
     val context = LocalContext.current

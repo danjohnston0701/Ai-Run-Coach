@@ -40,4 +40,13 @@ class SessionManager(context: Context) {
     fun getAuthToken(): String? {
         return sharedPreferences.getString("auth_token", null)
     }
+
+    /**
+     * Clears the authentication token from the encrypted preferences.
+     */
+    fun clearAuthToken() {
+        sharedPreferences.edit {
+            remove("auth_token")
+        }
+    }
 }

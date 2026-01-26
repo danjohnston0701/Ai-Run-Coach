@@ -4,12 +4,10 @@ package live.airuncoach.airuncoach.viewmodel
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.User
 
@@ -32,13 +30,16 @@ class ProfileViewModel(private val context: Context) : ViewModel() {
             _user.value = gson.fromJson(userJson, User::class.java)
         }
     }
+    
+    // Public method to refresh user data from SharedPreferences
+    fun refreshUser() {
+        loadUser()
+    }
 
     fun logout() {
-        viewModelScope.launch {
-            sessionManager.clearAuthToken()
-            sharedPrefs.edit().remove("user").apply()
-            _user.value = null
-        }
+        sessionManager.clearAuthToken()
+        sharedPrefs.edit().remove("user").apply()
+        _user.value = null
     }
 }
 

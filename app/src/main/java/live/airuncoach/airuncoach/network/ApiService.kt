@@ -13,6 +13,7 @@ import live.airuncoach.airuncoach.network.model.RegisterRequest
 import live.airuncoach.airuncoach.network.model.RouteGenerationRequest
 import live.airuncoach.airuncoach.network.model.RouteGenerationResponse
 import live.airuncoach.airuncoach.network.model.UpdateCoachSettingsRequest
+import live.airuncoach.airuncoach.network.model.UpdateUserRequest
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
@@ -30,6 +31,9 @@ interface ApiService {
     @GET("/api/users/{id}")
     suspend fun getUser(@Path("id") userId: String): User
     
+    @PUT("/api/users/{id}")
+    suspend fun updateUser(@Path("id") userId: String, @Body request: UpdateUserRequest): User
+
     @PUT("/api/users/{id}/coach-settings")
     suspend fun updateCoachSettings(@Path("id") userId: String, @Body request: UpdateCoachSettingsRequest): User
     

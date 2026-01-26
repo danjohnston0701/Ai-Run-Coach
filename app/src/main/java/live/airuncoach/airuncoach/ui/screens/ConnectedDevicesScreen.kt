@@ -1,11 +1,14 @@
 
 package live.airuncoach.airuncoach.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -26,44 +29,58 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.ConnectedDevicesViewModel
 import live.airuncoach.airuncoach.viewmodel.Device
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ConnectedDevicesScreen() {
+fun ConnectedDevicesScreen(onNavigateBack: () -> Unit) {
     val viewModel: ConnectedDevicesViewModel = viewModel()
     val devices by viewModel.devices.collectAsState()
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Colors.backgroundRoot)
-            .padding(Spacing.lg)
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Connected Devices") },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                }
+            )
+        }
     ) {
-        item {
-            Text(
-                text = "Connected Devices",
-                style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
-                color = Colors.textPrimary
-            )
-            Spacer(modifier = Modifier.height(Spacing.sm))
-            Text(
-                text = "Connect your fitness watch to track heart rate during runs and sync health metrics.",
-                style = AppTextStyles.body,
-                color = Colors.textSecondary
-            )
-            Spacer(modifier = Modifier.height(Spacing.lg))
-        }
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Colors.backgroundRoot)
+                .padding(Spacing.lg)
+        ) {
+            item {
+                Text(
+                    text = "Connected Devices",
+                    style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.textPrimary
+                )
+                Spacer(modifier = Modifier.height(Spacing.sm))
+                Text(
+                    text = "Connect your fitness watch to track heart rate during runs and sync health metrics.",
+                    style = AppTextStyles.body,
+                    color = Colors.textSecondary
+                )
+                Spacer(modifier = Modifier.height(Spacing.lg))
+            }
 
-        items(devices) { device ->
-            DeviceCard(device = device)
-            Spacer(modifier = Modifier.height(Spacing.md))
-        }
+            items(devices) { device ->
+                DeviceCard(device = device)
+                Spacer(modifier = Modifier.height(Spacing.md))
+            }
 
-        item { Spacer(modifier = Modifier.height(Spacing.lg)) }
-        
-        item { BluetoothHrSection() }
-        
-        item { Spacer(modifier = Modifier.height(Spacing.lg)) }
-        
-        item { InfoBanner() }
+            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+
+            item { BluetoothHrSection() }
+
+            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+
+            item { InfoBanner() }
+        }
     }
 }
 

@@ -23,6 +23,7 @@ import live.airuncoach.airuncoach.viewmodel.GoalsUiState
 import live.airuncoach.airuncoach.viewmodel.GoalsViewModel
 import live.airuncoach.airuncoach.viewmodel.GoalsViewModelFactory
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GoalsScreen(
     onCreateGoal: () -> Unit = {},
@@ -52,10 +53,14 @@ fun GoalsScreen(
                 containerColor = Colors.backgroundRoot,
                 contentColor = Colors.primary,
                 indicator = { tabPositions ->
-                    TabRowDefaults.Indicator(
-                        Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                        color = Colors.primary
-                    )
+                    if (selectedTab < tabPositions.size) {
+                        TabRowDefaults.Indicator(
+                            color = Colors.primary,
+                            modifier = Modifier
+                                .width(tabPositions[selectedTab].width)
+                                .offset(x = tabPositions[selectedTab].left)
+                        )
+                    }
                 }
             ) {
                 val tabs = listOf("Active", "Completed", "Abandoned")

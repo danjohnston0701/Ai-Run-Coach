@@ -4,10 +4,12 @@ data class User(
     val id: String,
     val email: String,
     val name: String,
+    val location: String? = null,
+    val age: Int? = null,
     val dob: String? = null,
     val gender: String? = null,
-    val height: String? = null,
-    val weight: String? = null,
+    val height: Double? = null,
+    val weight: Double? = null,
     val fitnessLevel: String? = null,
     val desiredFitnessLevel: String? = null,
     val coachName: String = "AI Coach",
@@ -19,5 +21,6 @@ data class User(
     val distanceMaxKm: Float = 50f,
     val distanceDecimalsEnabled: Boolean = false,
     val subscriptionTier: String? = null,
-    val subscriptionStatus: String? = null
+    val subscriptionStatus: String? = null,
+    val distanceScale: String? = null
 )

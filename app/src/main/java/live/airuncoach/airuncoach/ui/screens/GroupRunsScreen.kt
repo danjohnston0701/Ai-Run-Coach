@@ -23,6 +23,7 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.GroupRunsUiState
 import live.airuncoach.airuncoach.viewmodel.GroupRunsViewModel
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GroupRunsScreen(onCreateGroupRun: () -> Unit, onNavigateBack: () -> Unit) {
     val viewModel: GroupRunsViewModel = viewModel()
