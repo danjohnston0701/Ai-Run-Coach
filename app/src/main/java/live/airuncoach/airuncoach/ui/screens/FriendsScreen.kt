@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -25,11 +26,12 @@ import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.FriendsUiState
 import live.airuncoach.airuncoach.viewmodel.FriendsViewModel
+import live.airuncoach.airuncoach.viewmodel.FriendsViewModelFactory
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FriendsScreen(onNavigateToFindFriends: () -> Unit) {
-    val viewModel: FriendsViewModel = viewModel()
+    val viewModel: FriendsViewModel = viewModel(factory = FriendsViewModelFactory(LocalContext.current))
     val friendsState by viewModel.friendsState.collectAsState()
 
     Scaffold(

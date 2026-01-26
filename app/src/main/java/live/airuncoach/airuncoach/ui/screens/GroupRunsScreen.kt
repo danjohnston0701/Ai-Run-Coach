@@ -22,11 +22,13 @@ import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.GroupRunsUiState
 import live.airuncoach.airuncoach.viewmodel.GroupRunsViewModel
+import live.airuncoach.airuncoach.viewmodel.GroupRunsViewModelFactory
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GroupRunsScreen(onCreateGroupRun: () -> Unit, onNavigateBack: () -> Unit) {
-    val viewModel: GroupRunsViewModel = viewModel()
+    val context = LocalContext.current
+    val viewModel: GroupRunsViewModel = viewModel(factory = GroupRunsViewModelFactory(context))
     val groupRunsState by viewModel.groupRunsState.collectAsState()
 
     Scaffold(

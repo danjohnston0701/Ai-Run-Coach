@@ -53,8 +53,6 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
 
     init {
         loadUser()
-        loadGoals()
-
         viewModelScope.launch {
             combine(_allGoals, _selectedTab) { goals, tab ->
                 val filteredGoals = when (tab) {
@@ -71,6 +69,7 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
         val userJson = sharedPrefs.getString("user", null)
         if (userJson != null) {
             _user.value = gson.fromJson(userJson, User::class.java)
+            loadGoals()
         }
     }
 

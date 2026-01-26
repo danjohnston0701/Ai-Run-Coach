@@ -1,6 +1,9 @@
 
 package live.airuncoach.airuncoach.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -53,7 +56,14 @@ fun ProfileScreen(
     val context = LocalContext.current
     val viewModel: ProfileViewModel = viewModel(factory = ProfileViewModelFactory(context))
     val user by viewModel.user.collectAsState()
-    
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+        onResult = { uri: Uri? ->
+            uri?.let { viewModel.uploadProfilePicture(it) }
+        }
+    )
+
     // Refresh user data when the screen appears
     DisposableEffect(Unit) {
         viewModel.refreshUser()
@@ -71,7 +81,7 @@ fun ProfileScreen(
             .padding(vertical = Spacing.lg),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        item { user?.let { ProfileHeader(user = it) } }
+        item { user?.let { ProfileHeader(user = it, onImageClick = { imagePickerLauncher.launch("image/*") }) } }
         item { Spacer(modifier = Modifier.height(Spacing.xl)) }
 
         item { SectionTitle(title = "Friends") }
@@ -142,39 +152,53 @@ fun ProfileScreen(
 }
 
 @Composable
-fun ProfileHeader(user: User) {
+fun ProfileHeader(user: User, onImageClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
-        Box(
-            modifier = Modifier
-                .size(100.dp)
-                .clip(CircleShape)
-                .background(Colors.primary.copy(alpha = 0.2f))
-                .border(4.dp, Colors.primary, CircleShape)
-                .clickable { /* TODO: Open image picker */ },
-            contentAlignment = Alignment.Center
-        ) {
-            if (!user.profilePic.isNullOrBlank()) {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(user.profilePic)
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = "User Profile Picture",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                    error = painterResource(id = R.drawable.ai_coach_avatar),
-                    placeholder = painterResource(id = R.drawable.ai_coach_avatar)
-                )
-            } else {
-                Image(
-                    painter = painterResource(id = R.drawable.ai_coach_avatar),
-                    contentDescription = "AI Coach Avatar",
-                    modifier = Modifier.size(90.dp)
-                )
+        Box(contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .size(85.dp)
+                    .clip(CircleShape)
+                    .background(Colors.primary.copy(alpha = 0.2f))
+                    .border(4.dp, Colors.primary, CircleShape)
+                    .clickable { onImageClick() },
+                contentAlignment = Alignment.Center
+            ) {
+                if (!user.profilePic.isNullOrBlank()) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(user.profilePic)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = "User Profile Picture",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                        error = painterResource(id = R.drawable.icon_profile_vector),
+                        placeholder = painterResource(id = R.drawable.icon_profile_vector)
+                    )
+                } else {
+                    Icon(
+                        painter = painterResource(id = R.drawable.icon_profile_vector),
+                        contentDescription = "User Profile",
+                        modifier = Modifier.size(50.dp),
+                        tint = Colors.primary
+                    )
+                }
             }
+            Icon(
+                painter = painterResource(id = R.drawable.icon_camera_vector),
+                contentDescription = "Edit Profile Picture",
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(28.dp)
+                    .background(Colors.backgroundSecondary, CircleShape)
+                    .border(2.dp, Colors.primary, CircleShape)
+                    .padding(4.dp),
+                tint = Colors.primary
+            )
         }
         Text(
             text = user.name,

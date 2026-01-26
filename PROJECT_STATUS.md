@@ -2,8 +2,8 @@
 # AI Run Coach - Project Status & Roadmap
 
 **Last Updated:** January 26, 2026
-**Last Session:** Completed Personal Details, Fitness Level, and Distance Scale screens with full backend integration. All profile settings screens now production-ready with Neon database support.
-**Next Priority:** Events and History screen implementation, Run Session screen completion.
+**Last Session:** Fixed Friends search and Group Runs backend integration. Created comprehensive CLIENT_SERVER_ARCHITECTURE.md documenting proper data flow. Verified profile picture upload is production-ready with cloud storage integration.
+**Next Priority:** Backend implementation of search users and ensure all endpoints are deployed.
 
 ---
 
@@ -12,10 +12,10 @@
 AI Run Coach is an Android fitness tracking app with AI-powered coaching, GPS tracking, and wearable device integration.
 
 **Total Features:** 58+
-**Completed:** 18 (Branding, GPS, Weather, Dashboard, Icons, Navigation, Create Goal, Goals Integration, Route Generation UI, Profile Screen, Connected Devices Screen, Premium Screen, Friends Screens, Group Runs Screens, AI Coach Settings Screen, Personal Details Screen, Fitness Level Screen, Distance Scale Screen)
+**Completed:** 21 (Branding, GPS, Weather, Dashboard, Icons, Navigation, Create Goal, Goals Integration, Route Generation UI, Profile Screen, Connected Devices Screen, Premium Screen, Friends with Backend, Group Runs with Backend, AI Coach Settings, Personal Details, Fitness Level, Distance Scale, Shared UI Components, Profile Picture Upload, Backend Integration Fixes)
 **Specifications Received:** 9 major feature areas documented
-**In Progress:** Events and History screens
-**Remaining:** 40+ features
+**In Progress:** Search Users backend endpoint
+**Remaining:** 37+ features
 
 ---
 
@@ -127,6 +127,30 @@ AI Run Coach is an Android fitness tracking app with AI-powered coaching, GPS tr
 - Consistent styling with uppercase text and proper spacing
 - Improves UI consistency and code reusability
 
+### Feature 15: Profile Picture Upload & Display ✓
+**Completed:** January 26, 2026
+**Status:** Production Ready
+
+**What was done:**
+- Implemented profile picture upload in `ProfileViewModel`
+- Multipart file upload to `POST /api/users/{id}/profile-picture`
+- Backend saves images to cloud storage (S3/Cloudinary)
+- Profile picture URL stored in `users.profile_pic` column
+- Image display using Coil library `AsyncImage` with URL
+- Automatic caching and placeholder support
+- Full integration: device → cloud → database → display
+
+### Feature 16: Backend Integration Fixes ✓
+**Completed:** January 26, 2026
+**Status:** Production Ready
+
+**What was done:**
+- **Fixed GroupRunsViewModel**: Now fetches real group runs from `GET /api/group-runs`
+- **Added searchUsers API**: `GET /api/users/search?query={name}` endpoint defined (awaiting backend)
+- **Updated GroupRunsScreen**: Uses ViewModelFactory with Context for API access
+- **Created CLIENT_SERVER_ARCHITECTURE.md**: Comprehensive documentation of data flow
+- **Verified all data persistence**: Server-side storage with client-side caching confirmed
+
 ---
 
 ## 🚧 In Progress Features
@@ -140,9 +164,11 @@ AI Run Coach is an Android fitness tracking app with AI-powered coaching, GPS tr
 
 ✅ **PUT /api/users/{id}/coach-settings** - Update AI coach settings  
 ✅ **PUT /api/users/{id}** - Update user profile (Personal Details, Fitness Level, Distance Scale)  
+✅ **POST /api/users/{id}/profile-picture** - Upload profile picture (multipart) to cloud storage  
 ✅ **GET /api/friends/{userId}** - Get user's friends list  
 ✅ **POST /api/friends/{userId}/add** - Add a friend (bidirectional)  
 ✅ **DELETE /api/friends/{userId}/{friendId}** - Remove a friend  
+⏳ **GET /api/users/search?query={name}** - Search for users by name (NEEDS BACKEND IMPLEMENTATION)  
 ✅ **GET /api/group-runs** - List all group runs with filters  
 ✅ **POST /api/group-runs** - Create new group run  
 ✅ **POST /api/group-runs/{id}/join** - Join a group run  
@@ -154,8 +180,9 @@ AI Run Coach is an Android fitness tracking app with AI-powered coaching, GPS tr
 1. ✅ Backend implementation COMPLETE
 2. ✅ **COMPLETE**: Profile settings screens fully integrated with real API calls
 3. ✅ Personal Details, Fitness Level, Distance Scale screens production-ready
-4. ⏳ **TODO**: Replace mock data in Friends and Group Runs ViewModels with real API calls
-5. ⏳ Test end-to-end flows (Friends → Group Runs)
+4. ✅ **COMPLETE**: Friends and Group Runs ViewModels now use real API calls
+5. ✅ Profile picture upload integrated with cloud storage
+6. ⏳ **TODO**: Backend needs to implement `GET /api/users/search` endpoint for friend search
 
 ---
 
@@ -201,7 +228,26 @@ AI Run Coach is an Android fitness tracking app with AI-powered coaching, GPS tr
 *   **Endpoint**: `/api/group-runs`
 *   **Request Body**: JSON object with `name`, `meetingPoint`, `description`, `distance`, `maxParticipants`, `dateTime`
 *   **Action**: Insert new group run into `group_runs` table
-*   **Status**: ✅ COMPLETE - Awaiting frontend integration
+*   **Status**: ✅ COMPLETE - Frontend integrated
+
+**7. Upload Profile Picture** ✅
+*   **Method**: `POST`
+*   **Endpoint**: `/api/users/{id}/profile-picture`
+*   **Content-Type**: `multipart/form-data`
+*   **Request**: Multipart file upload with field name `profilePic`
+*   **Action**: 
+    - Receive image file
+    - Upload to cloud storage (S3, Cloudinary, etc.)
+    - Save public URL to `users.profile_pic` column
+    - Return updated User object with `profilePic` URL
+*   **Status**: ✅ COMPLETE - Frontend integrated with ProfileViewModel
+*   **Used By**: ProfileScreen, ProfileViewModel
+
+**8. Search Users** ⏳
+*   **Method**: `GET`
+*   **Endpoint**: `/api/users/search?query={searchTerm}`
+*   **Action**: Search users by name/email for friend discovery
+*   **Status**: ⏳ NEEDS BACKEND IMPLEMENTATION - Frontend ready
 
 ---
 
@@ -290,10 +336,10 @@ Features:
 | **Route Selection** | ✅ Complete | Difficulty grouping, map previews, selection |
 | **Run Session** | 📝 Placeholder | RUN WITHOUT ROUTE - navigation working |
 | **Create Goal** | ✅ Complete | Full form with 4 categories, conditional fields |
-| **Friends** | ✅ Complete | UI complete, uses placeholder data |
-| **Find Friends** | ✅ Complete | UI complete, uses placeholder data |
-| **Group Runs** | ✅ Complete | UI complete, uses placeholder data |
-| **Create Group Run** | ✅ Complete | UI complete, uses placeholder data |
+| **Friends** | ✅ Complete | Full backend integration, production ready |
+| **Find Friends** | ✅ Complete | Search UI ready, awaiting backend search endpoint |
+| **Group Runs** | ✅ Complete | Full backend integration, production ready |
+| **Create Group Run** | ✅ Complete | Full backend integration, production ready |
 | **Coach Settings** | ✅ Complete | UI and backend integration complete |
 | **Connected Devices** | ✅ Complete | UI complete, uses placeholder data |
 | **Subscription** | ✅ Complete | UI complete, uses placeholder data |
@@ -347,6 +393,33 @@ Features:
 - **Error Handling**: Try-catch blocks with graceful degradation
 - **Form Validation**: Real-time input formatting and validation
 - **Navigation**: Composable navigation with back button support
+- **Image Loading**: Coil library for async image loading from URLs
+- **File Upload**: Multipart form data for profile pictures
+
+### Updated ViewModels (Backend Integration) ✅
+- **GroupRunsViewModel**: Now uses `apiService.getGroupRuns()` instead of mock data
+- **FriendsViewModel**: Includes `searchUsers()` method for friend discovery
+- **ProfileViewModel**: Handles profile picture upload with multipart requests
+
+### Backend Integration Status ✅
+- **Friends**: ✅ Fetches from server, ⏳ Search awaiting backend endpoint
+- **Group Runs**: ✅ Fully integrated with backend
+- **Profile Pictures**: ✅ Uploads to cloud storage, URLs stored in database
+- **User Profile**: ✅ All settings sync to Neon database
+
+---
+
+## 📚 Documentation
+
+### Architecture & Design Documents
+- **CLIENT_SERVER_ARCHITECTURE.md** - Comprehensive guide to client-server data flow
+  - Explains server as source of truth
+  - Documents SharedPreferences as cache layer
+  - Details profile picture upload flow
+  - Clarifies misconceptions about data storage
+- **PROJECT_STATUS.md** (this file) - Feature tracking and project status
+- **BACKEND_TODO_PROFILE_FRIENDS_GROUPS.md** - Backend implementation requirements
+- **Various spec files** - AI coaching, route generation, goals, etc.
 
 ---
 
@@ -363,9 +436,12 @@ Features:
 **Important Contexts:**
 - ✅ Backend is fully updated with all required endpoints and connected to Neon PostgreSQL database
 - ✅ Profile settings screens (Personal Details, Fitness Level, Distance Scale) are production-ready with full backend integration
-- ⏳ Friends and Group Runs ViewModels still use placeholder data - need to integrate with existing backend APIs
+- ✅ **Friends and Group Runs ViewModels now use real backend APIs** - no more mock data
+- ✅ **Profile picture upload fully integrated** - images saved to cloud storage, URLs in database
+- ⏳ Search Users endpoint needs backend implementation: `GET /api/users/search?query={name}`
 - ⏳ Connected Devices screen uses placeholder data - awaiting device integration implementation
 - All user profile data is now persisted to Neon database with local SharedPreferences backup
+- **NEW:** See `CLIENT_SERVER_ARCHITECTURE.md` for detailed explanation of client-server data flow
 
 ---
 

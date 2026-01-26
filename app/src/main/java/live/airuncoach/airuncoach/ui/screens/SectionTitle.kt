@@ -17,7 +17,6 @@ fun SectionTitle(title: String) {
         color = Colors.textSecondary,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = Spacing.lg)
-            .padding(bottom = Spacing.sm)
+            .padding(horizontal = Spacing.lg, vertical = Spacing.sm)
     )
 }

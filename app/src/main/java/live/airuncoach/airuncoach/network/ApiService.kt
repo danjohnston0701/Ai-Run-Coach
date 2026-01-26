@@ -14,11 +14,14 @@ import live.airuncoach.airuncoach.network.model.RouteGenerationRequest
 import live.airuncoach.airuncoach.network.model.RouteGenerationResponse
 import live.airuncoach.airuncoach.network.model.UpdateCoachSettingsRequest
 import live.airuncoach.airuncoach.network.model.UpdateUserRequest
+import okhttp3.MultipartBody
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Multipart
 import retrofit2.http.POST
 import retrofit2.http.PUT
+import retrofit2.http.Part
 import retrofit2.http.Path
 
 interface ApiService {
@@ -30,22 +33,26 @@ interface ApiService {
 
     @GET("/api/users/{id}")
     suspend fun getUser(@Path("id") userId: String): User
-    
+
     @PUT("/api/users/{id}")
     suspend fun updateUser(@Path("id") userId: String, @Body request: UpdateUserRequest): User
 
+    @Multipart
+    @POST("/api/users/{id}/profile-picture")
+    suspend fun uploadProfilePicture(@Path("id") userId: String, @Part profilePic: MultipartBody.Part): User
+
     @PUT("/api/users/{id}/coach-settings")
     suspend fun updateCoachSettings(@Path("id") userId: String, @Body request: UpdateCoachSettingsRequest): User
-    
+
     @GET("/api/goals/{userId}")
     suspend fun getGoals(@Path("userId") userId: String): List<Goal>
-    
+
     @POST("/api/goals")
     suspend fun createGoal(@Body request: CreateGoalRequest): Goal
-    
+
     @PUT("/api/goals/{goalId}")
     suspend fun updateGoal(@Path("goalId") goalId: Long, @Body request: CreateGoalRequest): Goal
-    
+
     @DELETE("/api/goals/{goalId}")
     suspend fun deleteGoal(@Path("goalId") goalId: Long)
 
@@ -55,16 +62,19 @@ interface ApiService {
     @POST("/api/friends/{userId}/add")
     suspend fun addFriend(@Path("userId") userId: String, @Body request: AddFriendRequest): Friend
 
+    @GET("/api/users/search")
+    suspend fun searchUsers(@retrofit2.http.Query("query") query: String): List<Friend>
+
     @GET("/api/group-runs")
     suspend fun getGroupRuns(): List<GroupRun>
 
     @POST("/api/group-runs")
     suspend fun createGroupRun(@Body request: CreateGroupRunRequest): GroupRun
-    
+
     // AI Route Generation - Premium+ Plans
     @POST("/api/routes/generate-ai")
     suspend fun generateAIRoutes(@Body request: RouteGenerationRequest): RouteGenerationResponse
-    
+
     // Template Route Generation - Free & Lite Plans
     @POST("/api/routes/generate-template")
     suspend fun generateTemplateRoutes(@Body request: RouteGenerationRequest): RouteGenerationResponse
