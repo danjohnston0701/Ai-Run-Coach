@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -30,7 +32,7 @@ import live.airuncoach.airuncoach.viewmodel.FriendsViewModelFactory
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FriendsScreen(onNavigateToFindFriends: () -> Unit) {
+fun FriendsScreen(onNavigateBack: () -> Unit, onNavigateToFindFriends: () -> Unit) {
     val viewModel: FriendsViewModel = viewModel(factory = FriendsViewModelFactory(LocalContext.current))
     val friendsState by viewModel.friendsState.collectAsState()
 
@@ -38,6 +40,11 @@ fun FriendsScreen(onNavigateToFindFriends: () -> Unit) {
         topBar = {
             TopAppBar(
                 title = { Text("Friends", style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary) },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Colors.textPrimary)
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot),
                 actions = {
                     IconButton(onClick = onNavigateToFindFriends) {

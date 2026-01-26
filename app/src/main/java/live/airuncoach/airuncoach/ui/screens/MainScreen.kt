@@ -178,8 +178,11 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     }
                 )
             }
-            composable("friends") { 
-                FriendsScreen(onNavigateToFindFriends = { navController.navigate("find_friends") })
+                        composable("friends") {
+                FriendsScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToFindFriends = { navController.navigate("find_friends") }
+                )
             }
             composable("find_friends") { 
                 FindFriendsScreen(onNavigateBack = { navController.popBackStack() })
