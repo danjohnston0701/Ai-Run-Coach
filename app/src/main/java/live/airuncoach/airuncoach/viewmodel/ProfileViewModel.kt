@@ -28,8 +28,12 @@ class ProfileViewModel(private val context: Context) : ViewModel() {
     private val _user = MutableStateFlow<User?>(null)
     val user: StateFlow<User?> = _user.asStateFlow()
 
+    private val _friendCount = MutableStateFlow(0)
+    val friendCount: StateFlow<Int> = _friendCount.asStateFlow()
+
     init {
         loadUser()
+        loadFriendCount()
     }
 
     private fun loadUser() {
@@ -63,15 +67,30 @@ class ProfileViewModel(private val context: Context) : ViewModel() {
         }
     }
 
+    private fun loadFriendCount() {
+        viewModelScope.launch {
+            try {
+                val user = _user.value ?: return@launch
+                val friends = apiService.getFriends(user.id)
+                _friendCount.value = friends.size
+            } catch (e: Exception) {
+                // Silently fail - friend count is not critical
+                _friendCount.value = 0
+            }
+        }
+    }
+
     // Public method to refresh user data from SharedPreferences
     fun refreshUser() {
         loadUser()
+        loadFriendCount()
     }
 
     fun logout() {
         sessionManager.clearAuthToken()
         sharedPrefs.edit().remove("user").apply()
         _user.value = null
+        _friendCount.value = 0
     }
 }
 

@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -113,11 +114,11 @@ fun EmptyFriendsState(onNavigateToFindFriends: () -> Unit) {
 fun FriendsList(friends: List<Friend>) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(Spacing.lg)
+        contentPadding = PaddingValues(Spacing.md),
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         items(friends) { friend ->
             FriendCard(friend = friend)
-            Spacer(modifier = Modifier.height(Spacing.md))
         }
     }
 }
@@ -131,22 +132,81 @@ fun FriendCard(friend: Friend) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(Spacing.lg),
+                .padding(Spacing.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AsyncImage(
-                model = friend.profilePicUrl,
-                contentDescription = "Profile Picture",
+            // Profile Picture
+            Box(
                 modifier = Modifier
-                    .size(50.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
-            )
+                    .background(Colors.primary.copy(alpha = 0.2f)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!friend.profilePic.isNullOrBlank()) {
+                    AsyncImage(
+                        model = friend.profilePic,
+                        contentDescription = "Profile Picture",
+                        modifier = Modifier.fillMaxSize(),
+                        error = painterResource(id = R.drawable.icon_profile_vector)
+                    )
+                } else {
+                    Icon(
+                        painter = painterResource(id = R.drawable.icon_profile_vector),
+                        contentDescription = "Default Avatar",
+                        tint = Colors.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+            
             Spacer(modifier = Modifier.width(Spacing.md))
-            Text(
-                text = friend.name,
-                style = AppTextStyles.h4,
-                color = Colors.textPrimary
-            )
+            
+            // Name and ID
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = friend.name,
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.textPrimary
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "ID: ${friend.id.take(8)}...",
+                    style = AppTextStyles.caption,
+                    color = Colors.textSecondary
+                )
+            }
+            
+            // Action Buttons
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
+            ) {
+                // View Activity Button
+                IconButton(
+                    onClick = { /* TODO: Navigate to friend's activity */ },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.icon_eye),
+                        contentDescription = "View Activity",
+                        tint = Colors.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                
+                // Remove Friend Button
+                IconButton(
+                    onClick = { /* TODO: Remove friend */ },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Remove Friend",
+                        tint = Colors.error,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
         }
     }
 }

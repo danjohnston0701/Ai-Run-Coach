@@ -56,6 +56,7 @@ fun ProfileScreen(
     val context = LocalContext.current
     val viewModel: ProfileViewModel = viewModel(factory = ProfileViewModelFactory(context))
     val user by viewModel.user.collectAsState()
+    val friendCount by viewModel.friendCount.collectAsState()
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
@@ -87,7 +88,7 @@ fun ProfileScreen(
         item { SectionTitle(title = "Friends") }
         item {
             SettingsSection {
-                SettingsItem(icon = R.drawable.icon_profile_vector, text = "My Friends", value = "0 friends", onClick = onNavigateToFriends)
+                SettingsItem(icon = R.drawable.icon_profile_vector, text = "My Friends", value = "$friendCount ${if (friendCount == 1) "friend" else "friends"}", onClick = onNavigateToFriends)
                 SettingsItem(icon = R.drawable.icon_play_vector, text = "Add Friends", onClick = onNavigateToFriends)
                 SettingsItem(icon = R.drawable.icon_profile_vector, text = "Group Runs", onClick = onNavigateToGroupRuns)
             }
