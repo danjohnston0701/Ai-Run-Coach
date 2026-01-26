@@ -162,7 +162,7 @@ fun UserCard(user: Friend) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 AsyncImage(
-                    model = user.profilePicUrl,
+                    model = user.profilePic,
                     contentDescription = "Profile Picture",
                     modifier = Modifier
                         .size(50.dp)
