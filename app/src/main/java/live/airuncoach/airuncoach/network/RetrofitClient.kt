@@ -31,10 +31,10 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
 
     private val okHttpClient = OkHttpClient.Builder()
         .cookieJar(PersistentCookieJar(context))
-        // Increase timeouts for route generation (can take 30+ seconds)
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)  // Route generation can take time
-        .writeTimeout(30, TimeUnit.SECONDS)
+        // Increase timeouts for AI route generation (OpenAI + Google Maps can take 2+ minutes)
+        .connectTimeout(45, TimeUnit.SECONDS)
+        .readTimeout(180, TimeUnit.SECONDS)  // AI route generation can take up to 3 minutes
+        .writeTimeout(45, TimeUnit.SECONDS)
         // Add Bearer token to all requests
         .addInterceptor { chain ->
             val request = chain.request()

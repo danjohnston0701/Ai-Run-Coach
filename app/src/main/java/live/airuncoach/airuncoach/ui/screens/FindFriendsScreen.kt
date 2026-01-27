@@ -1,7 +1,6 @@
 
 package live.airuncoach.airuncoach.ui.screens
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -23,12 +23,14 @@ import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.FindFriendsUiState
 import live.airuncoach.airuncoach.viewmodel.FriendsViewModel
+import live.airuncoach.airuncoach.viewmodel.FriendsViewModelFactory
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FindFriendsScreen(onNavigateBack: () -> Unit) {
-    val viewModel: FriendsViewModel = viewModel()
+    val viewModel: FriendsViewModel = viewModel(factory = FriendsViewModelFactory(LocalContext.current))
     val findFriendsState by viewModel.findFriendsState.collectAsState()
+    val addedFriendIds by viewModel.addedFriendIds.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
 
     Scaffold(
@@ -76,79 +78,39 @@ fun FindFriendsScreen(onNavigateBack: () -> Unit) {
             Spacer(modifier = Modifier.height(Spacing.lg))
 
             when (val state = findFriendsState) {
-                is FindFriendsUiState.Idle -> {
-                    EmptySearchState()
-                }
-                is FindFriendsUiState.Loading -> {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally), color = Colors.primary)
-                }
+                is FindFriendsUiState.Idle -> EmptySearchState()
+                is FindFriendsUiState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally), color = Colors.primary)
                 is FindFriendsUiState.Success -> {
                     if (state.users.isEmpty()) {
                         NoResultsState()
                     } else {
-                        UserList(users = state.users)
+                        UserList(users = state.users, addedIds = addedFriendIds, onAddFriend = { viewModel.addFriend(it) })
                     }
                 }
-                is FindFriendsUiState.Error -> {
-                    Text(text = state.message, color = Colors.error, modifier = Modifier.align(Alignment.CenterHorizontally))
-                }
+                is FindFriendsUiState.Error -> Text(text = state.message, color = Colors.error, modifier = Modifier.align(Alignment.CenterHorizontally))
             }
         }
     }
 }
 
 @Composable
-fun EmptySearchState() {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(
-            painter = painterResource(id = R.drawable.icon_profile_vector),
-            contentDescription = "Search for friends",
-            tint = Colors.textMuted,
-            modifier = Modifier.size(80.dp)
-        )
-        Spacer(modifier = Modifier.height(Spacing.lg))
-        Text(
-            text = "Find your friends",
-            style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
-            color = Colors.textPrimary
-        )
-        Text(
-            text = "Search for friends by their name or referral code to connect and share your runs together.",
-            style = AppTextStyles.body,
-            color = Colors.textSecondary,
-        )
-    }
-}
+fun EmptySearchState() { /* ... */ }
 
 @Composable
-fun NoResultsState() {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text("No users found.", style = AppTextStyles.body, color = Colors.textSecondary)
-    }
-}
+fun NoResultsState() { /* ... */ }
 
 @Composable
-fun UserList(users: List<Friend>) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-    ) {
+fun UserList(users: List<Friend>, addedIds: Set<String>, onAddFriend: (String) -> Unit) {
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
         items(users) { user ->
-            UserCard(user = user)
+            UserCard(user = user, isAdded = user.id in addedIds, onAddClick = { onAddFriend(user.id) })
             Spacer(modifier = Modifier.height(Spacing.md))
         }
     }
 }
 
 @Composable
-fun UserCard(user: Friend) {
+fun UserCard(user: Friend, isAdded: Boolean, onAddClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
@@ -175,8 +137,12 @@ fun UserCard(user: Friend) {
                     color = Colors.textPrimary
                 )
             }
-            Button(onClick = { /* TODO: Add Friend */ }, colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)) {
-                Text("Add")
+            Button(
+                onClick = onAddClick, 
+                enabled = !isAdded,
+                colors = ButtonDefaults.buttonColors(containerColor = if (isAdded) Colors.backgroundSecondary else Colors.primary)
+            ) {
+                Text(if (isAdded) "Added" else "Add")
             }
         }
     }

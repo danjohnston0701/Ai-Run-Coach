@@ -5,26 +5,27 @@ import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.location.LocationServices
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.network.ApiService
-import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.network.model.RouteGenerationRequest
 import live.airuncoach.airuncoach.network.model.RouteOption
+import javax.inject.Inject
 
 /**
  * ViewModel for Route Generation flow
  * Manages user location, route generation, and route selection
  */
-class RouteGenerationViewModel(
-    private val context: Context,
+@HiltViewModel
+class RouteGenerationViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val apiService: ApiService
 ) : ViewModel() {
     
@@ -227,21 +228,4 @@ sealed class RouteGenerationState {
     object Loading : RouteGenerationState()
     data class Success(val routes: List<RouteOption>) : RouteGenerationState()
     data class Error(val message: String) : RouteGenerationState()
-}
-
-/**
- * Factory for creating RouteGenerationViewModel
- */
-class RouteGenerationViewModelFactory(
-    private val context: Context
-) : ViewModelProvider.Factory {
-    @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        if (modelClass.isAssignableFrom(RouteGenerationViewModel::class.java)) {
-            val sessionManager = SessionManager(context)
-            val apiService = RetrofitClient(context, sessionManager).instance
-            return RouteGenerationViewModel(context, apiService) as T
-        }
-        throw IllegalArgumentException("Unknown ViewModel class")
-    }
 }

@@ -1,3 +1,8 @@
 package live.airuncoach.airuncoach.network.model
 
-data class AddFriendRequest(val friendId: String)
+import com.google.gson.annotations.SerializedName
+
+data class AddFriendRequest(
+    @SerializedName("userId") val userId: String,
+    @SerializedName("friendId") val friendId: String
+)

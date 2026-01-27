@@ -5,7 +5,7 @@ package live.airuncoach.airuncoach.domain.model
  * Includes distance, target time, live tracking, and group run settings
  */
 data class RunSetupConfig(
-    val activityType: ActivityType = ActivityType.RUN,
+    val activityType: PhysicalActivityType = PhysicalActivityType.RUN,
     val targetDistance: Float,          // In kilometers
     val hasTargetTime: Boolean = false,
     val targetHours: Int = 0,
@@ -36,7 +36,7 @@ data class RunSetupConfig(
     }
 }
 
-enum class ActivityType {
+enum class PhysicalActivityType {
     RUN,
     WALK
 }

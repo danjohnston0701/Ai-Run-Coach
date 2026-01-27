@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <array name="healthconnect_permissions">
+        <item>androidx.health.connect.permission.READ_SLEEP</item>
+        <item>androidx.health.connect.permission.READ_STRESS</item>
+        <item>androidx.health.connect.permission.READ_HEART_RATE_VARIABILITY</item>
+        <item>androidx.health.connect.permission.READ_RESTING_HEART_RATE</item>
+    </array>
+</resources>

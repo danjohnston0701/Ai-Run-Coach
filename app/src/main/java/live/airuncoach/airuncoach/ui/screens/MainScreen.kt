@@ -167,7 +167,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 )
             }
             composable("run_session") { 
-                RunSessionScreen(onNavigateBack = { navController.popBackStack() })
+                RunSessionScreen(hasRoute = false, onEndRun = { navController.popBackStack() })
             }
             composable("create_goal") {
                 CreateGoalScreen(

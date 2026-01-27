@@ -17,19 +17,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.DistanceScaleViewModel
-import live.airuncoach.airuncoach.viewmodel.DistanceScaleViewModelFactory
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DistanceScaleScreen(onNavigateBack: () -> Unit) {
+fun DistanceScaleScreen(onNavigateBack: () -> Unit, viewModel: DistanceScaleViewModel = hiltViewModel()) {
     val context = LocalContext.current
-    val viewModel: DistanceScaleViewModel = viewModel(factory = DistanceScaleViewModelFactory(context))
     val distanceScale by viewModel.distanceScale.collectAsState()
 
     Scaffold(

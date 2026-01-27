@@ -1,17 +1,16 @@
 
 package live.airuncoach.airuncoach.viewmodel
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.GroupRun
-import live.airuncoach.airuncoach.network.RetrofitClient
+import live.airuncoach.airuncoach.network.ApiService
+import javax.inject.Inject
 
 sealed class GroupRunsUiState {
     object Loading : GroupRunsUiState()
@@ -19,10 +18,10 @@ sealed class GroupRunsUiState {
     data class Error(val message: String) : GroupRunsUiState()
 }
 
-class GroupRunsViewModel(private val context: Context) : ViewModel() {
-
-    private val sessionManager = SessionManager(context)
-    private val apiService = RetrofitClient(context, sessionManager).instance
+@HiltViewModel
+class GroupRunsViewModel @Inject constructor(
+    private val apiService: ApiService
+) : ViewModel() {
 
     private val _groupRunsState = MutableStateFlow<GroupRunsUiState>(GroupRunsUiState.Loading)
     val groupRunsState: StateFlow<GroupRunsUiState> = _groupRunsState.asStateFlow()
@@ -41,17 +40,5 @@ class GroupRunsViewModel(private val context: Context) : ViewModel() {
                 _groupRunsState.value = GroupRunsUiState.Error(e.message ?: "Failed to load group runs")
             }
         }
-    }
-}
-
-class GroupRunsViewModelFactory(
-    private val context: Context
-) : ViewModelProvider.Factory {
-    override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        if (modelClass.isAssignableFrom(GroupRunsViewModel::class.java)) {
-            @Suppress("UNCHECKED_CAST")
-            return GroupRunsViewModel(context) as T
-        }
-        throw IllegalArgumentException("Unknown ViewModel class")
     }
 }

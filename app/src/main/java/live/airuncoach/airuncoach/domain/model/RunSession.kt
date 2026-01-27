@@ -10,7 +10,12 @@ data class RunSession(
     val maxSpeed: Float, // m/s
     val averagePace: String, // min/km format
     val calories: Int,
+    val cadence: Int, // steps per minute
+    val heartRate: Int, // beats per minute
     val routePoints: List<LocationPoint>,
+    val kmSplits: List<KmSplit>,
+    val isStruggling: Boolean = false,
+    val phase: CoachingPhase = CoachingPhase.GENERIC,
     
     // Weather data captured at run start - CRITICAL for weather impact analysis
     val weatherAtStart: WeatherData?,

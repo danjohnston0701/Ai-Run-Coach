@@ -11,11 +11,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.GroupRun
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
@@ -23,13 +22,11 @@ import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.GroupRunsUiState
 import live.airuncoach.airuncoach.viewmodel.GroupRunsViewModel
-import live.airuncoach.airuncoach.viewmodel.GroupRunsViewModelFactory
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GroupRunsScreen(onCreateGroupRun: () -> Unit, onNavigateBack: () -> Unit) {
-    val context = LocalContext.current
-    val viewModel: GroupRunsViewModel = viewModel(factory = GroupRunsViewModelFactory(context))
+    val viewModel: GroupRunsViewModel = hiltViewModel()
     val groupRunsState by viewModel.groupRunsState.collectAsState()
 
     Scaffold(

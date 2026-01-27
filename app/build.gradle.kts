@@ -3,16 +3,17 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.dagger.hilt.android")
 }
 
 android {
     namespace = "live.airuncoach.airuncoach"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "live.airuncoach.airuncoach"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
@@ -65,6 +66,11 @@ android {
 
 dependencies {
 
+    // --- Dagger Hilt ---
+    implementation("com.google.dagger:hilt-android:2.59")
+    ksp("com.google.dagger:hilt-compiler:2.59")
+    implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
+
     // --- Core Architecture Libraries ---
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
@@ -97,6 +103,11 @@ dependencies {
     // --- Image Loading: Coil for profile pictures ---
     implementation("io.coil-kt:coil-compose:2.5.0")
 
+    // --- Charts: Vico for data visualization ---
+    implementation("com.patrykandpatrick.vico:compose:1.13.1")
+    implementation("com.patrykandpatrick.vico:compose-m3:1.13.1")
+    implementation("com.patrykandpatrick.vico:core:1.13.1")
+
     // --- Local Database: Room for offline queue ---
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
@@ -107,6 +118,9 @@ dependencies {
 
     // --- Secure Storage: For saving the auth token ---
     implementation("androidx.security:security-crypto:1.1.0")
+
+    // --- Health Connect: For wellness data ---
+    implementation("androidx.health.connect:connect-client:1.1.0")
 
     // --- Garmin SDK (We will keep this commented out for now to ensure stability) ---
     // implementation("com.garmin.android:connectiq:5.1.0")

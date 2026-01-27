@@ -1,11 +1,9 @@
 package live.airuncoach.airuncoach.ui.screens
 
 import androidx.compose.runtime.*
-import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.viewmodel.RouteGenerationState
 import live.airuncoach.airuncoach.viewmodel.RouteGenerationViewModel
-import live.airuncoach.airuncoach.viewmodel.RouteGenerationViewModelFactory
 
 /**
  * Main Route Generation Screen - Orchestrates the flow between:
@@ -18,10 +16,7 @@ fun RouteGenerationScreen(
     onNavigateBack: () -> Unit = {},
     onRouteSelected: (String) -> Unit = {}
 ) {
-    val context = LocalContext.current
-    val viewModel: RouteGenerationViewModel = viewModel(
-        factory = RouteGenerationViewModelFactory(context)
-    )
+    val viewModel: RouteGenerationViewModel = hiltViewModel()
     
     val uiState by viewModel.uiState.collectAsState()
     val routes by viewModel.routes.collectAsState()

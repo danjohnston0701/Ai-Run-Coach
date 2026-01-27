@@ -26,7 +26,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import live.airuncoach.airuncoach.R
@@ -36,7 +36,6 @@ import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.ProfileViewModel
-import live.airuncoach.airuncoach.viewmodel.ProfileViewModelFactory
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,7 +53,7 @@ fun ProfileScreen(
     onNavigateToSubscription: () -> Unit,
 ) {
     val context = LocalContext.current
-    val viewModel: ProfileViewModel = viewModel(factory = ProfileViewModelFactory(context))
+    val viewModel: ProfileViewModel = hiltViewModel()
     val user by viewModel.user.collectAsState()
     val friendCount by viewModel.friendCount.collectAsState()
 
