@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "framer-motion";
 import { Flame, Mountain, Footprints, Play, MapPin, Loader, History, ArrowRight, Timer, Bell, Menu, User, X, RotateCcw, Mic, MicOff, Settings, Users, Check, Copy, Radio, Target, UserCog, LogOut, Search, Heart, Activity, Calendar } from "lucide-react";
+import { MobileAppComingSoon } from "@/components/MobileAppComingSoon";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -197,6 +198,9 @@ interface UserProfile {
   distanceMaxKm?: number;
   distanceDecimalsEnabled?: boolean;
 }
+
+// Feature flag: Set to true to disable run features and show mobile app coming soon
+const MOBILE_APP_COMING_SOON = true;
 
 export default function Home() {
   const [distance, setDistance] = useState([5]);
@@ -1243,6 +1247,11 @@ export default function Home() {
       setLocation(`/run?${params.toString()}`);
     }
   };
+
+  // Feature flag: Show mobile app coming soon page instead of run features
+  if (MOBILE_APP_COMING_SOON) {
+    return <MobileAppComingSoon userName={profile?.name} lastRunDistance={lastRun?.distance} />;
+  }
 
   return (
     <div className="min-h-screen bg-background p-6 pb-24 font-sans text-foreground">
