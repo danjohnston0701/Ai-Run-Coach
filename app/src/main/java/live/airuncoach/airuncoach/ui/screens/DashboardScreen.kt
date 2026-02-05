@@ -26,46 +26,49 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.Goal
+import live.airuncoach.airuncoach.domain.model.RunSession
 import live.airuncoach.airuncoach.domain.model.WeatherData
+import live.airuncoach.airuncoach.ui.components.TargetTimeCard
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.DashboardViewModel
-import live.airuncoach.airuncoach.viewmodel.DashboardViewModelFactory
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
     onNavigateToRouteGeneration: () -> Unit = {},
     onNavigateToRunSession: () -> Unit = {},
+    onNavigateToPreviousRuns: () -> Unit = {},
     onNavigateToGoals: () -> Unit = {},
     onNavigateToProfile: () -> Unit = {},
     onNavigateToHistory: () -> Unit = {},
-    onCreateGoal: () -> Unit = {}
+    onCreateGoal: () -> Unit = {},
+    viewModel: DashboardViewModel = hiltViewModel()
 ) {
-    val context = LocalContext.current
-    val viewModel: DashboardViewModel = viewModel(
-        factory = DashboardViewModelFactory(context)
-    )
-    
     val user by viewModel.user.collectAsState()
     val garminConnection by viewModel.garminConnection.collectAsState()
     val weatherData by viewModel.weatherData.collectAsState()
@@ -77,6 +80,16 @@ fun DashboardScreen(
     val targetMinutes by viewModel.targetMinutes.collectAsState()
     val targetSeconds by viewModel.targetSeconds.collectAsState()
     val hasLocationPermission by viewModel.hasLocationPermission.collectAsState()
+    val recentRun by viewModel.recentRun.collectAsState()
+    val isAiCoachEnabled by viewModel.isAiCoachEnabled.collectAsState()
+    val activeRunSession by viewModel.activeRunSession.collectAsState()
+
+    // Optimize: Only load data once when screen is first shown
+    LaunchedEffect(Unit) {
+        viewModel.fetchRecentRun()
+        viewModel.refreshGoals()
+        viewModel.checkLocationPermission()
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -84,6 +97,18 @@ fun DashboardScreen(
             .background(Colors.backgroundRoot)
             .padding(vertical = Spacing.lg)
     ) {
+        // Active Run Banner (if run is in progress)
+        val activeRun = activeRunSession
+        if (activeRun != null && activeRun.isActive) {
+            item {
+                ActiveRunBanner(
+                    runSession = activeRun,
+                    onResumeRun = onNavigateToRunSession
+                )
+            }
+            item { Spacer(modifier = Modifier.height(Spacing.md)) }
+        }
+        
         item { 
             WelcomeSection(
                 userName = user?.name,
@@ -95,13 +120,20 @@ fun DashboardScreen(
         item { Spacer(modifier = Modifier.height(Spacing.xl)) }
         
         // Only show Garmin card if device is connected
-        garminConnection?.let { connection ->
-            item { GarminConnectionCard(connection = connection) }
+        garminConnection?.let {
+            item { GarminConnectionCard(connection = it) }
             item { Spacer(modifier = Modifier.height(Spacing.md)) }
         }
         item { GoalCard(goal = goals.firstOrNull(), onClick = onNavigateToGoals, onAddGoal = onCreateGoal) }
         item { Spacer(modifier = Modifier.height(Spacing.md)) }
-        item { weatherData?.let { TimeAndWeatherBar(time = currentTime, weather = it) } }
+        item { 
+            val weather = weatherData
+            if (weather != null) {
+                TimeAndWeatherBar(time = currentTime, weather = weather)
+            } else {
+                NoWeatherDataBar(time = currentTime)
+            }
+        }
         item { Spacer(modifier = Modifier.height(Spacing.xl)) }
         
         // Location permission warning
@@ -123,24 +155,105 @@ fun DashboardScreen(
                 onSecondsChange = viewModel::onTargetSecondsChanged
             )
         }
-        item { Spacer(modifier = Modifier.height(Spacing.xl)) }
+        item { Spacer(modifier = Modifier.height(Spacing.md)) }
+        // AI Coach Toggle
+        item {
+            AiCoachToggle(
+                isEnabled = isAiCoachEnabled,
+                onToggle = viewModel::toggleAiCoach
+            )
+        }
+        item { Spacer(modifier = Modifier.height(Spacing.sm)) }
         item { 
+            val activeRun = activeRunSession
+            val hasActiveRun = activeRun != null && activeRun.isActive
             ActionButtons(
                 onMapMyRun = onNavigateToRouteGeneration,
                 onRunWithoutRoute = onNavigateToRunSession,
-                isEnabled = hasLocationPermission
+                isEnabled = hasLocationPermission && !hasActiveRun
             )
         }
         item { Spacer(modifier = Modifier.height(Spacing.md)) }
         item {
-            viewModel.getLastRunSession()?.let { lastRun ->
-                PreviousRunDashboard(
-                    lastRun = lastRun,
-                    onClick = onNavigateToHistory
+            PreviousRunsCard(
+                recentRun = recentRun,
+                onClick = onNavigateToPreviousRuns
+            )
+        }
+        item { Spacer(modifier = Modifier.height(Spacing.xxl)) }
+    }
+}
+
+@Composable
+fun ActiveRunBanner(runSession: RunSession, onResumeRun: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+            .clickable(onClick = onResumeRun),
+        shape = RoundedCornerShape(BorderRadius.md),
+        colors = CardDefaults.cardColors(
+            containerColor = Colors.primary.copy(alpha = 0.2f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                // Pulsing indicator
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .clip(CircleShape)
+                        .background(Colors.success)
+                )
+                
+                Spacer(modifier = Modifier.width(Spacing.md))
+                
+                Column {
+                    Text(
+                        text = "RUN IN PROGRESS",
+                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.primary
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row {
+                        Text(
+                            text = runSession.getFormattedDuration(),
+                            style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.textPrimary
+                        )
+                        Text(
+                            text = " • ${String.format("%.2f", runSession.distance / 1000)} km",
+                            style = AppTextStyles.body,
+                            color = Colors.textSecondary
+                        )
+                    }
+                }
+            }
+            
+            Button(
+                onClick = onResumeRun,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Colors.primary,
+                    contentColor = Colors.buttonText
+                ),
+                shape = RoundedCornerShape(BorderRadius.sm),
+                modifier = Modifier.height(40.dp)
+            ) {
+                Text(
+                    text = "Resume →",
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold)
                 )
             }
         }
-        item { Spacer(modifier = Modifier.height(Spacing.xxl)) }
     }
 }
 
@@ -289,19 +402,19 @@ fun GoalCard(goal: Goal?, onClick: () -> Unit, onAddGoal: () -> Unit) {
                 .padding(Spacing.lg),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Trophy icon with background
+            // Target icon with rounded square background (matching web app)
             Box(
                 modifier = Modifier
-                    .size(50.dp)
-                    .clip(CircleShape)
-                    .background(Colors.backgroundTertiary),
+                    .size(60.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Colors.primary.copy(alpha = 0.2f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     painter = painterResource(id = R.drawable.icon_target_vector),
                     contentDescription = "Goal Icon",
-                    tint = Colors.textMuted,
-                    modifier = Modifier.size(28.dp)
+                    tint = Colors.primary,
+                    modifier = Modifier.size(32.dp)
                 )
             }
             
@@ -310,21 +423,55 @@ fun GoalCard(goal: Goal?, onClick: () -> Unit, onAddGoal: () -> Unit) {
             Column(modifier = Modifier.weight(1f)) {
                 if (goal != null) {
                     Text(
+                        text = "GOAL",
+                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textMuted
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
                         text = goal.title,
                         style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
                         color = Colors.textPrimary
                     )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    // Format: "5K • Target: 0:22:00"
+                    val targetInfo = buildString {
+                        goal.distanceTarget?.let { append(it) }
+                        goal.timeTargetSeconds?.let { seconds ->
+                            if (isNotEmpty()) append(" • ")
+                            append("Target: ")
+                            val hours = seconds / 3600
+                            val minutes = (seconds % 3600) / 60
+                            val secs = seconds % 60
+                            append(String.format("%d:%02d:%02d", hours, minutes, secs))
+                        }
+                    }
+                    if (targetInfo.isNotEmpty()) {
+                        Text(
+                            text = targetInfo,
+                            style = AppTextStyles.small,
+                            color = Colors.textMuted
+                        )
+                    } else if (goal.description != null) {
+                        Text(
+                            text = goal.description,
+                            style = AppTextStyles.small,
+                            color = Colors.textMuted
+                        )
+                    }
+                } else {
                     Text(
-                        text = goal.description ?: "",
-                        style = AppTextStyles.small,
+                        text = "GOAL",
+                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
                         color = Colors.textMuted
                     )
-                } else {
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "No active goal",
                         style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
                         color = Colors.textPrimary
                     )
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "Set a goal to track your progress",
                         style = AppTextStyles.small,
@@ -333,21 +480,13 @@ fun GoalCard(goal: Goal?, onClick: () -> Unit, onAddGoal: () -> Unit) {
                 }
             }
             
-            // Plus button
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(Colors.primary.copy(alpha = 0.2f))
-                    .clickable { onAddGoal() },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "+",
-                    style = AppTextStyles.h2,
-                    color = Colors.primary
-                )
-            }
+            // Arrow icon (matching web app)
+            Icon(
+                painter = painterResource(id = R.drawable.icon_arrow_left),
+                contentDescription = "View Goal",
+                tint = Colors.textMuted,
+                modifier = Modifier.size(20.dp)
+            )
         }
     }
 }
@@ -380,17 +519,68 @@ fun TimeAndWeatherBar(time: String, weather: WeatherData) {
             style = AppTextStyles.body,
             color = Colors.textMuted
         )
-        Icon(
-            painter = painterResource(id = R.drawable.icon_trending_vector),
-            contentDescription = "Weather",
-            tint = Colors.textMuted,
-            modifier = Modifier.size(20.dp)
+        // Weather icon based on condition
+        Text(
+            text = getWeatherEmoji(weather.condition ?: "Clear"),
+            style = AppTextStyles.body.copy(fontSize = 20.sp),
+            modifier = Modifier.padding(bottom = 2.dp)
         )
         Spacer(modifier = Modifier.width(Spacing.sm))
         Text(
             text = "${weather.temperature.toInt()}°",
             style = AppTextStyles.body,
             color = Colors.textPrimary
+        )
+    }
+}
+
+/**
+ * Returns weather emoji based on condition string from OpenWeatherMap API
+ */
+private fun getWeatherEmoji(condition: String): String {
+    return when (condition.lowercase()) {
+        "clear" -> "☀️"
+        "clouds" -> "☁️"
+        "rain", "drizzle" -> "🌧️"
+        "thunderstorm" -> "⛈️"
+        "snow" -> "❄️"
+        "mist", "smoke", "haze", "fog" -> "🌫️"
+        else -> "🌤️" // Partly cloudy as default
+    }
+}
+
+@Composable
+fun NoWeatherDataBar(time: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+            .background(Colors.backgroundSecondary, shape = RoundedCornerShape(BorderRadius.sm))
+            .padding(horizontal = Spacing.lg, vertical = Spacing.md),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            painter = painterResource(id = R.drawable.icon_timer_vector),
+            contentDescription = "Time",
+            tint = Colors.textMuted,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(Spacing.sm))
+        Text(
+            text = time,
+            style = AppTextStyles.body,
+            color = Colors.textPrimary
+        )
+        Text(
+            text = "  •  ",
+            style = AppTextStyles.body,
+            color = Colors.textMuted
+        )
+        Text(
+            text = "No weather data available",
+            style = AppTextStyles.body,
+            color = Colors.textMuted
         )
     }
 }
@@ -435,148 +625,6 @@ fun TargetDistanceSection(distance: Float, onDistanceChanged: (Float) -> Unit) {
                 inactiveTrackColor = Colors.backgroundTertiary
             )
         )
-    }
-}
-
-@Composable
-fun TargetTimeCard(
-    isEnabled: Boolean,
-    onEnabledChange: (Boolean) -> Unit,
-    hours: String,
-    minutes: String,
-    seconds: String,
-    onHoursChange: (String) -> Unit,
-    onMinutesChange: (String) -> Unit,
-    onSecondsChange: (String) -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Spacing.lg),
-        shape = RoundedCornerShape(BorderRadius.md),
-        colors = CardDefaults.cardColors(
-            containerColor = Colors.backgroundSecondary.copy(alpha = 0.8f)
-        )
-    ) {
-        Column(modifier = Modifier.padding(Spacing.lg)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Clock icon with background
-                Box(
-                    modifier = Modifier
-                        .size(50.dp)
-                        .clip(CircleShape)
-                        .background(Colors.backgroundTertiary),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.icon_timer_vector),
-                        contentDescription = "Target Time",
-                        tint = Colors.primary,
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-                
-                Spacer(modifier = Modifier.width(Spacing.md))
-                
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "TARGET TIME",
-                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                        color = Colors.textPrimary
-                    )
-                    Text(
-                        text = if (isEnabled) "Set your goal time" else "Tap to enable",
-                        style = AppTextStyles.small,
-                        color = Colors.textMuted
-                    )
-                }
-                
-                // Toggle switch styled
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(BorderRadius.full))
-                        .clickable { onEnabledChange(!isEnabled) }
-                        .background(if (isEnabled) Colors.primary else Colors.backgroundTertiary)
-                        .padding(horizontal = Spacing.md, vertical = Spacing.sm),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (isEnabled) "ON" else "OFF",
-                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
-                        color = if (isEnabled) Colors.buttonText else Colors.textMuted
-                    )
-                }
-            }
-            
-            if (isEnabled) {
-                Spacer(modifier = Modifier.height(Spacing.md))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    TimePickerColumn(value = hours, label = "HOURS", onValueChange = onHoursChange)
-                    Text(
-                        text = ":",
-                        style = AppTextStyles.h2,
-                        color = Colors.textMuted,
-                        modifier = Modifier.padding(bottom = 4.dp, start = 4.dp, end = 4.dp)
-                    )
-                    TimePickerColumn(value = minutes, label = "MINUTES", onValueChange = onMinutesChange)
-                    Text(
-                        text = ":",
-                        style = AppTextStyles.h2,
-                        color = Colors.textMuted,
-                        modifier = Modifier.padding(bottom = 4.dp, start = 4.dp, end = 4.dp)
-                    )
-                    TimePickerColumn(value = seconds, label = "SECONDS", onValueChange = onSecondsChange)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun TimePickerColumn(value: String, label: String, onValueChange: (String) -> Unit) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        Text(
-            text = label,
-            style = AppTextStyles.caption.copy(
-                fontSize = androidx.compose.ui.unit.TextUnit(9f, androidx.compose.ui.unit.TextUnitType.Sp),
-                fontWeight = FontWeight.Medium
-            ),
-            color = Colors.textMuted
-        )
-        Box(
-            modifier = Modifier
-                .size(width = 48.dp, height = 40.dp)
-                .clip(RoundedCornerShape(BorderRadius.sm))
-                .background(Colors.backgroundTertiary)
-                .clickable { /* Could open number picker dialog */ },
-            contentAlignment = Alignment.Center
-        ) {
-            androidx.compose.foundation.text.BasicTextField(
-                value = value,
-                onValueChange = onValueChange,
-                textStyle = AppTextStyles.h3.copy(
-                    color = Colors.primary,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    fontWeight = FontWeight.Bold
-                ),
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
-                ),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                cursorBrush = androidx.compose.ui.graphics.SolidColor(Colors.primary)
-            )
-        }
     }
 }
 
@@ -764,6 +812,221 @@ fun PreviousRunDashboard(lastRun: live.airuncoach.airuncoach.domain.model.RunSes
                 style = AppTextStyles.small,
                 color = Colors.primary
             )
+        }
+    }
+}
+
+@Composable
+fun AiCoachToggle(
+    isEnabled: Boolean,
+    onToggle: (Boolean) -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg),
+        shape = RoundedCornerShape(BorderRadius.sm),
+        colors = CardDefaults.cardColors(
+            containerColor = Colors.backgroundSecondary.copy(alpha = 0.4f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.icon_mic_vector),
+                    contentDescription = "AI Coach",
+                    tint = if (isEnabled) Colors.primary else Colors.textMuted,
+                    modifier = Modifier.size(12.dp)
+                )
+
+                Spacer(modifier = Modifier.width(Spacing.xs))
+
+                Text(
+                    text = "AI Coach",
+                    style = AppTextStyles.caption,
+                    color = Colors.textSecondary
+                )
+            }
+
+            Switch(
+                checked = isEnabled,
+                onCheckedChange = onToggle,
+                modifier = Modifier.scale(0.6f),
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Colors.backgroundRoot,
+                    checkedTrackColor = Colors.primary,
+                    uncheckedThumbColor = Colors.textMuted,
+                    uncheckedTrackColor = Colors.backgroundTertiary
+                )
+            )
+        }
+    }
+}
+
+@Composable
+fun PreviousRunsCard(
+    recentRun: RunSession?,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(BorderRadius.md),
+        colors = CardDefaults.cardColors(
+            containerColor = Colors.backgroundSecondary.copy(alpha = 0.6f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.icon_clock_vector),
+                        contentDescription = "Previous Runs",
+                        tint = Colors.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    
+                    Spacer(modifier = Modifier.width(Spacing.sm))
+                    
+                    Text(
+                        text = "PREVIOUS RUNS",
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                }
+            }
+            
+            if (recentRun != null) {
+                Spacer(modifier = Modifier.height(Spacing.lg))
+                
+                // Stats Grid
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    // Distance
+                    Column {
+                        Text(
+                            text = "DISTANCE",
+                            style = AppTextStyles.caption,
+                            color = Colors.textMuted
+                        )
+                        Text(
+                            text = "${String.format("%.2f", recentRun.distance / 1000)} km",
+                            style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.primary
+                        )
+                    }
+                    
+                    // Avg Pace
+                    Column {
+                        Text(
+                            text = "AVG PACE",
+                            style = AppTextStyles.caption,
+                            color = Colors.textMuted
+                        )
+                        Text(
+                            text = recentRun.averagePace,
+                            style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.primary
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(Spacing.md))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    // Date
+                    Column {
+                        Text(
+                            text = "DATE",
+                            style = AppTextStyles.caption,
+                            color = Colors.textMuted
+                        )
+                        Text(
+                            text = recentRun.getFormattedDate(),
+                            style = AppTextStyles.body,
+                            color = Colors.textPrimary
+                        )
+                    }
+                    
+                    // Level
+                    Column {
+                        Text(
+                            text = "LEVEL",
+                            style = AppTextStyles.caption,
+                            color = Colors.textMuted
+                        )
+                        val difficulty = recentRun.getDifficultyLevel()
+                        Text(
+                            text = difficulty,
+                            style = AppTextStyles.body,
+                            color = when (difficulty.lowercase()) {
+                                "easy" -> Colors.success
+                                "hard" -> Colors.error
+                                else -> Colors.warning
+                            },
+                            modifier = Modifier
+                                .background(
+                                    color = when (difficulty.lowercase()) {
+                                        "easy" -> Colors.success.copy(alpha = 0.2f)
+                                        "hard" -> Colors.error.copy(alpha = 0.2f)
+                                        else -> Colors.warning.copy(alpha = 0.2f)
+                                    },
+                                    shape = RoundedCornerShape(4.dp)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(Spacing.lg))
+                
+                // View Run Dashboard Button
+                Button(
+                    onClick = onClick,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Colors.primary.copy(alpha = 0.2f),
+                        contentColor = Colors.primary
+                    ),
+                    shape = RoundedCornerShape(BorderRadius.sm)
+                ) {
+                    Text(
+                        text = "View Run Dashboard →",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold)
+                    )
+                }
+            } else {
+                Spacer(modifier = Modifier.height(Spacing.md))
+                
+                Text(
+                    text = "No previous runs yet. Start your first run!",
+                    style = AppTextStyles.body,
+                    color = Colors.textMuted
+                )
+            }
         }
     }
 }

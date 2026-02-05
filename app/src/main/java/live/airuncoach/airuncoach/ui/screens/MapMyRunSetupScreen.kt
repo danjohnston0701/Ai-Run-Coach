@@ -13,8 +13,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import live.airuncoach.airuncoach.R
+import live.airuncoach.airuncoach.ui.components.TargetTimeCard
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
@@ -37,7 +39,14 @@ fun MapMyRunSetupScreen(
         seconds: Int,
         liveTrackingEnabled: Boolean,
         isGroupRun: Boolean
-    ) -> Unit = { _, _, _, _, _, _, _ -> }
+    ) -> Unit = { _, _, _, _, _, _, _ -> },
+    onStartRunWithoutRoute: (
+        distance: Float,
+        targetTimeEnabled: Boolean,
+        hours: Int,
+        minutes: Int,
+        seconds: Int
+    ) -> Unit = { _, _, _, _, _ -> }
 ) {
     var selectedActivity by remember { mutableStateOf("Run") }
     var targetDistance by remember { mutableStateOf(initialDistance) }
@@ -82,9 +91,9 @@ fun MapMyRunSetupScreen(
                     // Close button
                     IconButton(onClick = onNavigateBack) {
                         Icon(
-                            painter = painterResource(id = R.drawable.icon_play_vector), // Replace with close icon
+                            painter = painterResource(id = R.drawable.icon_x_vector),
                             contentDescription = "Close",
-                            tint = Colors.textMuted,
+                            tint = Colors.textPrimary,
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -165,7 +174,7 @@ fun MapMyRunSetupScreen(
             item { Spacer(modifier = Modifier.height(Spacing.xxl)) }
         }
         
-        // Bottom Button
+        // Bottom Buttons
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -173,50 +182,91 @@ fun MapMyRunSetupScreen(
                 .background(Colors.backgroundRoot)
                 .padding(Spacing.lg)
         ) {
-            Button(
-                onClick = {
-                    val hours = targetHours.toIntOrNull() ?: 0
-                    val minutes = targetMinutes.toIntOrNull() ?: 0
-                    val seconds = targetSeconds.toIntOrNull() ?: 0
-                    onGenerateRoute(
-                        targetDistance,
-                        isTargetTimeEnabled,
-                        hours,
-                        minutes,
-                        seconds,
-                        isLiveTrackingEnabled,
-                        false
-                    )
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(60.dp),
-                shape = RoundedCornerShape(BorderRadius.lg),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Colors.primary,
-                    contentColor = Colors.buttonText
-                )
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(Spacing.sm)
             ) {
-                Icon(
-                    painter = painterResource(id = R.drawable.icon_location_vector),
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(Spacing.sm))
+                // Generate Route Button
+                Button(
+                    onClick = {
+                        val hours = targetHours.toIntOrNull() ?: 0
+                        val minutes = targetMinutes.toIntOrNull() ?: 0
+                        val seconds = targetSeconds.toIntOrNull() ?: 0
+                        onGenerateRoute(
+                            targetDistance,
+                            isTargetTimeEnabled,
+                            hours,
+                            minutes,
+                            seconds,
+                            isLiveTrackingEnabled,
+                            false
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(BorderRadius.lg),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Colors.primary,
+                        contentColor = Colors.buttonText
+                    )
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.icon_location_vector),
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(Spacing.sm))
+                    Text(
+                        text = "GENERATE ROUTE",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+                
+                // Start Run Without Route Button
+                OutlinedButton(
+                    onClick = {
+                        val hours = targetHours.toIntOrNull() ?: 0
+                        val minutes = targetMinutes.toIntOrNull() ?: 0
+                        val seconds = targetSeconds.toIntOrNull() ?: 0
+                        onStartRunWithoutRoute(
+                            targetDistance,
+                            isTargetTimeEnabled,
+                            hours,
+                            minutes,
+                            seconds
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(BorderRadius.lg),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Colors.textPrimary
+                    )
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.icon_play_vector),
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(Spacing.sm))
+                    Text(
+                        text = "START RUN WITHOUT ROUTE",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+                
                 Text(
-                    text = "GENERATE ROUTE",
-                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
+                    text = "Target: ${targetDistance.toInt()} km",
+                    style = AppTextStyles.caption,
+                    color = Colors.textMuted,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Spacing.xs),
+                    textAlign = TextAlign.Center
                 )
             }
-            
-            Text(
-                text = "Target: ${targetDistance.toInt()} km",
-                style = AppTextStyles.caption,
-                color = Colors.textMuted,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .offset(y = (-8).dp)
-            )
         }
     }
 }
