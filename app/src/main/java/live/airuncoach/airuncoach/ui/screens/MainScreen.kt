@@ -94,7 +94,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     // Home is selected when on home, map_my_run_setup, route_generation, or run_session
                     val isSelected = if (screen.route == Screen.Home.route) {
                         currentRoute == Screen.Home.route ||
-                                currentRoute == "map_my_run_setup" ||
+                                currentRoute?.startsWith("map_my_run_setup") == true ||
                                 currentRoute == "route_generation/{distance}/{timeEnabled}/{hours}/{minutes}" ||
                                 currentRoute == "route_generating/{distanceKm}" ||
                                 currentRoute == "route_selection/{distanceKm}" ||
@@ -154,10 +154,10 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 val dashboardViewModel: DashboardViewModel = hiltViewModel()
                 DashboardScreen(
                     onNavigateToRouteGeneration = {
-                        navController.navigate("map_my_run_setup")
+                        navController.navigate("map_my_run_setup/route")
                     },
                     onNavigateToRunSession = {
-                        navController.navigate("map_my_run_setup")
+                        navController.navigate("map_my_run_setup/no_route")
                     },
                     onNavigateToPreviousRuns = {
                         navController.navigate("previous_runs")
@@ -210,10 +210,12 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 )
             }
             // Map My Run Setup Screen (the beautiful redesigned one!)
-            composable("map_my_run_setup") {
+            composable("map_my_run_setup/{mode}") { backStackEntry ->
+                val mode = backStackEntry.arguments?.getString("mode") ?: "route"
                 val viewModel: RouteGenerationViewModel = hiltViewModel(navController.getBackStackEntry(navController.graph.id))
-                
+
                 MapMyRunSetupScreen(
+                    mode = mode,
                     initialDistance = 5f,
                     initialTargetTimeEnabled = false,
                     initialHours = 0,
