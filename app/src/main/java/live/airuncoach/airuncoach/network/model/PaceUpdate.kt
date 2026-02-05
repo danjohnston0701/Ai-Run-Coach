@@ -10,6 +10,8 @@ data class PaceUpdate(
     @SerializedName("elapsedTime") val elapsedTime: Long,
     @SerializedName("coachName") val coachName: String?,
     @SerializedName("coachTone") val coachTone: String?,
+    @SerializedName("coachGender") val coachGender: String?,
+    @SerializedName("coachAccent") val coachAccent: String?,
     @SerializedName("isSplit") val isSplit: Boolean,
     @SerializedName("splitKm") val splitKm: Int?,
     @SerializedName("splitPace") val splitPace: String?,

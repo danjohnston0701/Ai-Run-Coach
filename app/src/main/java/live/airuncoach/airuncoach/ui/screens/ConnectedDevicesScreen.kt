@@ -1,6 +1,8 @@
 
 package live.airuncoach.airuncoach.ui.screens
 
+import android.content.Context
+import android.util.Log
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -17,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -27,13 +30,29 @@ import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.ConnectedDevicesViewModel
-import live.airuncoach.airuncoach.viewmodel.Device
+import live.airuncoach.airuncoach.viewmodel.DeviceUI
+import live.airuncoach.airuncoach.viewmodel.DevicesUiState
+import android.content.Intent
+import android.net.Uri
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConnectedDevicesScreen(onNavigateBack: () -> Unit) {
     val viewModel: ConnectedDevicesViewModel = viewModel()
-    val devices by viewModel.devices.collectAsState()
+    val uiState by viewModel.uiState.collectAsState()
+    val isSyncing by viewModel.isSyncing.collectAsState()
+    val showCompanionPrompt by viewModel.showCompanionPrompt.collectAsState()
+    val context = LocalContext.current
+
+    // Show companion app prompt dialog
+    if (showCompanionPrompt) {
+        GarminCompanionPromptScreen(
+            onDismiss = { viewModel.dismissCompanionPrompt() },
+            onInstall = { viewModel.onCompanionAppInstalled() },
+            onMaybeLater = { viewModel.onMaybeLater() }
+        )
+        return  // Return early to show full-screen prompt
+    }
 
     Scaffold(
         topBar = {
@@ -46,46 +65,108 @@ fun ConnectedDevicesScreen(onNavigateBack: () -> Unit) {
                 }
             )
         }
-    ) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Colors.backgroundRoot)
-                .padding(Spacing.lg)
-        ) {
-            item {
-                Text(
-                    text = "Connected Devices",
-                    style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
-                    color = Colors.textPrimary
-                )
-                Spacer(modifier = Modifier.height(Spacing.sm))
-                Text(
-                    text = "Connect your fitness watch to track heart rate during runs and sync health metrics.",
-                    style = AppTextStyles.body,
-                    color = Colors.textSecondary
-                )
-                Spacer(modifier = Modifier.height(Spacing.lg))
+    ) { paddingValues ->
+        when (uiState) {
+            is DevicesUiState.Loading -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
+                }
             }
-
-            items(devices) { device ->
-                DeviceCard(device = device)
-                Spacer(modifier = Modifier.height(Spacing.md))
+            is DevicesUiState.Error -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text((uiState as DevicesUiState.Error).message, color = Colors.error)
+                        Spacer(modifier = Modifier.height(Spacing.md))
+                        Button(onClick = { viewModel.loadDevices() }) {
+                            Text("Retry")
+                        }
+                    }
+                }
             }
+            is DevicesUiState.Success -> {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Colors.backgroundRoot)
+                        .padding(paddingValues)
+                        .padding(Spacing.lg)
+                ) {
+                    item {
+                        Text(
+                            text = "Connected Devices",
+                            style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.textPrimary
+                        )
+                        Spacer(modifier = Modifier.height(Spacing.sm))
+                        Text(
+                            text = "Connect your fitness watch to track heart rate during runs and sync health metrics.",
+                            style = AppTextStyles.body,
+                            color = Colors.textSecondary
+                        )
+                        Spacer(modifier = Modifier.height(Spacing.lg))
+                    }
 
-            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+                    items((uiState as DevicesUiState.Success).devices) { device ->
+                        DeviceCard(
+                            device = device,
+                            isSyncing = isSyncing,
+                            onConnect = {
+                                if (device.deviceType == "garmin") {
+                                    viewModel.connectGarminAsync(
+                                        onAuthUrlReceived = { authUrl ->
+                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(authUrl))
+                                            context.startActivity(intent)
+                                        },
+                                        onError = { error ->
+                                            // Show error to user
+                                            Log.e("ConnectedDevices", "Garmin auth error: $error")
+                                        }
+                                    )
+                                }
+                            },
+                            onDisconnect = {
+                                device.id?.let { viewModel.disconnectDevice(it) }
+                            },
+                            onSync = {
+                                if (device.deviceType == "garmin") {
+                                    viewModel.syncGarminWellness()
+                                }
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(Spacing.md))
+                    }
 
-            item { BluetoothHrSection() }
+                    item { Spacer(modifier = Modifier.height(Spacing.lg)) }
 
-            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+                    item { BluetoothHrSection() }
 
-            item { InfoBanner() }
+                    item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+
+                    item { InfoBanner() }
+                }
+            }
         }
     }
 }
 
 @Composable
-fun DeviceCard(device: Device) {
+fun DeviceCard(
+    device: DeviceUI,
+    isSyncing: Boolean,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onSync: () -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(BorderRadius.md),
@@ -125,9 +206,11 @@ fun DeviceCard(device: Device) {
             }
             Spacer(modifier = Modifier.height(Spacing.md))
             Row {
-                if (device.connected) {
+                if (device.connected && device.id != null) {
+                    // Connected - show Sync and Disconnect buttons
                     Button(
-                        onClick = { /* TODO: Sync */ },
+                        onClick = onSync,
+                        enabled = !isSyncing,
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(BorderRadius.lg),
                         colors = ButtonDefaults.buttonColors(
@@ -135,11 +218,20 @@ fun DeviceCard(device: Device) {
                             contentColor = Colors.buttonText
                         )
                     ) {
-                        Text("Sync Wellness")
+                        if (isSyncing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = Colors.buttonText
+                            )
+                            Spacer(modifier = Modifier.width(Spacing.sm))
+                        }
+                        Text(if (isSyncing) "Syncing..." else "Sync Wellness")
                     }
                     Spacer(modifier = Modifier.width(Spacing.sm))
                     OutlinedButton(
-                        onClick = { /* TODO: Disconnect */ },
+                        onClick = onDisconnect,
+                        enabled = !isSyncing,
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(BorderRadius.lg),
                         colors = ButtonDefaults.outlinedButtonColors(
@@ -149,9 +241,10 @@ fun DeviceCard(device: Device) {
                     ) {
                         Text("Disconnect")
                     }
-                } else {
+                } else if (device.deviceType == "garmin") {
+                    // Not connected but can connect
                     Button(
-                        onClick = { /* TODO: Connect */ },
+                        onClick = onConnect,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(BorderRadius.lg),
                         colors = ButtonDefaults.buttonColors(
@@ -160,6 +253,16 @@ fun DeviceCard(device: Device) {
                         )
                     ) {
                         Text("Connect")
+                    }
+                } else {
+                    // Coming soon
+                    Button(
+                        onClick = { },
+                        enabled = false,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(BorderRadius.lg)
+                    ) {
+                        Text("Coming Soon")
                     }
                 }
             }

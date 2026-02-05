@@ -1,198 +1,297 @@
 package live.airuncoach.airuncoach.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.foundation.border
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.material3.Snackbar
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.ui.focus.onFocusEvent
+import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.coroutines.launch
+import androidx.core.content.ContextCompat
+import androidx.hilt.navigation.compose.hiltViewModel
+import live.airuncoach.airuncoach.AppRoutes
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
-import live.airuncoach.airuncoach.viewmodel.LoginState
 import live.airuncoach.airuncoach.viewmodel.LoginViewModel
-import live.airuncoach.airuncoach.viewmodel.LoginViewModelFactory
+import androidx.compose.foundation.ExperimentalFoundationApi
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun LoginScreen(onLoginSuccess: () -> Unit) {
+fun LoginScreen(
+    onNavigateToLocationPermission: () -> Unit = {},
+    onNavigateToMain: () -> Unit = {},
+    onNavigateToSignUp: () -> Unit = {},
+    viewModel: LoginViewModel = hiltViewModel()
+) {
     val context = LocalContext.current
-    val sessionManager = remember { SessionManager(context) }
-    val viewModel: LoginViewModel = viewModel(
-        factory = LoginViewModelFactory(context, sessionManager)
-    )
-
     val loginState by viewModel.loginState.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
+    var passwordVisible by remember { mutableStateOf(false) }
+    var isCheckingAuth by remember { mutableStateOf(true) }
+    
+    // Keyboard handling
+    val emailBringIntoView = remember { BringIntoViewRequester() }
+    val passwordBringIntoView = remember { BringIntoViewRequester() }
+    val coroutineScope = rememberCoroutineScope()
 
-    var isLogin by remember { mutableStateOf(true) }
-    var name by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var confirmPassword by remember { mutableStateOf("") }
-
-    // Handle login state changes
-    LaunchedEffect(loginState) {
-        when (loginState) {
-            is LoginState.Success -> {
-                onLoginSuccess()
-            }
-            is LoginState.Error -> {
-                scope.launch {
-                    snackbarHostState.showSnackbar((loginState as LoginState.Error).message)
-                    viewModel.resetState()
+    // Check if already logged in on first load
+    LaunchedEffect(Unit) {
+        try {
+            val sessionManager = SessionManager(context)
+            val token = sessionManager.getAuthToken()
+            
+            android.util.Log.d("LoginScreen", "Checking auth token: ${if (token != null) "EXISTS" else "NULL"}")
+            
+            // Only auto-navigate if we have a valid non-empty token
+            if (!token.isNullOrBlank() && token.length > 10) {
+                android.util.Log.d("LoginScreen", "Valid token found, checking permissions...")
+                
+                // User appears to be logged in, check if location permission is granted
+                val hasLocationPermission = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+                
+                if (hasLocationPermission) {
+                    // Already logged in and has permission, go to main
+                    android.util.Log.d("LoginScreen", "Has location permission, navigating to main")
+                    onNavigateToMain()
+                } else {
+                    // Logged in but needs location permission
+                    android.util.Log.d("LoginScreen", "No location permission, showing permission screen")
+                    onNavigateToLocationPermission()
                 }
+                return@LaunchedEffect
+            } else {
+                android.util.Log.d("LoginScreen", "No valid token, showing login screen")
             }
-            else -> {}
+        } catch (e: Exception) {
+            // If check fails, just continue to show login screen
+            android.util.Log.e("LoginScreen", "Error checking auth: ${e.message}")
+        }
+        isCheckingAuth = false
+    }
+
+    // Navigate on successful login
+    LaunchedEffect(loginState.isLoginSuccessful) {
+        if (loginState.isLoginSuccessful) {
+            android.util.Log.d("LoginScreen", "Login successful, navigating to location permission")
+            // After login, always show location permission screen first
+            onNavigateToLocationPermission()
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    // Show loading while checking auth
+    if (isCheckingAuth) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Colors.backgroundRoot),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator(color = Colors.primary)
+        }
+        return
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Colors.backgroundRoot)
+            .imePadding()
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Colors.backgroundRoot)
                 .verticalScroll(rememberScrollState())
-                .padding(Spacing.xl),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .padding(horizontal = Spacing.xxxl)
+                .padding(top = 80.dp)
+                .padding(bottom = Spacing.xxxl),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(Spacing.xxxxl))
-            
-            Image(
-                painter = painterResource(id = R.drawable.icon),
-                contentDescription = "App Logo",
-                modifier = Modifier.size(80.dp)
-            )
-            
-            Spacer(modifier = Modifier.height(Spacing.lg))
-            
-            Text(
-                text = "AI Run Coach",
-                style = AppTextStyles.h1,
-                color = Colors.textPrimary
-            )
-            
-            Spacer(modifier = Modifier.height(Spacing.sm))
-            
-            Text(
-                text = if (isLogin) "Welcome back! Sign in to continue" else "Create an account to start your journey",
-                style = AppTextStyles.body,
-                color = Colors.textSecondary,
-                textAlign = TextAlign.Center
-            )
-            
+            // Logo
+            Box(
+                modifier = Modifier
+                    .size(120.dp)
+                    .background(
+                        color = Color(0xFF1A2332),
+                        shape = RoundedCornerShape(BorderRadius.xl)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.icon),
+                    contentDescription = "AI Run Coach Logo",
+                    modifier = Modifier.size(80.dp)
+                )
+            }
+
             Spacer(modifier = Modifier.height(Spacing.xxxl))
 
-            // Name field (only for registration)
-            if (!isLogin) {
-                AppTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = "Name",
-                    leadingIcon = R.drawable.icon_person,
-                    enabled = loginState !is LoginState.Loading
-                )
-                Spacer(modifier = Modifier.height(Spacing.lg))
-            }
-
-            // Email field
-            AppTextField(
-                value = email,
-                onValueChange = { email = it },
-                label = "Email",
-                leadingIcon = R.drawable.icon_email,
-                enabled = loginState !is LoginState.Loading
+            // Title
+            Text(
+                text = "AI Run Coach",
+                style = AppTextStyles.h1.copy(fontWeight = FontWeight.Bold),
+                color = Colors.textPrimary
             )
-            
+
+            Spacer(modifier = Modifier.height(Spacing.sm))
+
+            // Subtitle
+            Text(
+                text = "Welcome back! Sign in to continue",
+                style = AppTextStyles.body,
+                color = Colors.textSecondary
+            )
+
+            Spacer(modifier = Modifier.height(Spacing.xxxxl))
+
+            // Email Field
+            Text(
+                text = "Email",
+                style = AppTextStyles.body,
+                color = Colors.textPrimary,
+                modifier = Modifier.align(Alignment.Start)
+            )
+            Spacer(modifier = Modifier.height(Spacing.sm))
+            OutlinedTextField(
+                value = loginState.email,
+                onValueChange = { viewModel.onEmailChange(it) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(Spacing.inputHeight)
+                    .bringIntoViewRequester(emailBringIntoView)
+                    .onFocusEvent { focusState ->
+                        if (focusState.isFocused) {
+                            coroutineScope.launch {
+                                emailBringIntoView.bringIntoView()
+                            }
+                        }
+                    },
+                placeholder = {
+                    Text(
+                        text = "you@example.com",
+                        color = Colors.textMuted,
+                        style = AppTextStyles.body
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        painter = painterResource(id = R.drawable.icon_email),
+                        contentDescription = "Email Icon",
+                        tint = Colors.textMuted,
+                        modifier = Modifier.size(20.dp)
+                    )
+                },
+                textStyle = AppTextStyles.body,
+                shape = RoundedCornerShape(BorderRadius.md),
+                colors = TextFieldDefaults.outlinedTextFieldColors(
+                    containerColor = Colors.backgroundTertiary,
+                    focusedBorderColor = Colors.primary,
+                    unfocusedBorderColor = Color.Transparent,
+                    cursorColor = Colors.primary,
+                    focusedTextColor = Colors.textPrimary,
+                    unfocusedTextColor = Colors.textPrimary
+                ),
+                singleLine = true
+            )
+
             Spacer(modifier = Modifier.height(Spacing.lg))
-            
-            // Password field
-            AppTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = "Password",
-                leadingIcon = R.drawable.icon_lock,
-                isPassword = true,
-                enabled = loginState !is LoginState.Loading
+
+            // Password Field
+            Text(
+                text = "Password",
+                style = AppTextStyles.body,
+                color = Colors.textPrimary,
+                modifier = Modifier.align(Alignment.Start)
             )
-
-            // Confirm password field (only for registration)
-            if (!isLogin) {
-                Spacer(modifier = Modifier.height(Spacing.lg))
-                AppTextField(
-                    value = confirmPassword,
-                    onValueChange = { confirmPassword = it },
-                    label = "Confirm Password",
-                    leadingIcon = R.drawable.icon_lock,
-                    isPassword = true,
-                    enabled = loginState !is LoginState.Loading
-                )
-            }
-
-            Spacer(modifier = Modifier.height(Spacing.xxl))
-
-            // Submit button
-            Button(
-                onClick = {
-                    if (isLogin) {
-                        viewModel.login(email.trim(), password)
-                    } else {
-                        viewModel.register(name.trim(), email.trim(), password, confirmPassword)
+            Spacer(modifier = Modifier.height(Spacing.sm))
+            OutlinedTextField(
+                value = loginState.password,
+                onValueChange = { viewModel.onPasswordChange(it) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(Spacing.inputHeight)
+                    .bringIntoViewRequester(passwordBringIntoView)
+                    .onFocusEvent { focusState ->
+                        if (focusState.isFocused) {
+                            coroutineScope.launch {
+                                passwordBringIntoView.bringIntoView()
+                            }
+                        }
+                    },
+                placeholder = {
+                    Text(
+                        text = "Enter your password",
+                        color = Colors.textMuted,
+                        style = AppTextStyles.body
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        painter = painterResource(id = R.drawable.icon_lock),
+                        contentDescription = "Password Icon",
+                        tint = Colors.textMuted,
+                        modifier = Modifier.size(20.dp)
+                    )
+                },
+                trailingIcon = {
+                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        Icon(
+                            painter = painterResource(
+                                id = if (passwordVisible) R.drawable.icon_eye_off
+                                else R.drawable.icon_eye
+                            ),
+                            contentDescription = if (passwordVisible) "Hide password" else "Show password",
+                            tint = Colors.textMuted,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 },
+                visualTransformation = if (passwordVisible) VisualTransformation.None
+                else PasswordVisualTransformation(),
+                textStyle = AppTextStyles.body,
+                shape = RoundedCornerShape(BorderRadius.md),
+                colors = TextFieldDefaults.outlinedTextFieldColors(
+                    containerColor = Colors.backgroundTertiary,
+                    focusedBorderColor = Colors.primary,
+                    unfocusedBorderColor = Color.Transparent,
+                    cursorColor = Colors.primary,
+                    focusedTextColor = Colors.textPrimary,
+                    unfocusedTextColor = Colors.textPrimary
+                ),
+                singleLine = true
+            )
+
+            Spacer(modifier = Modifier.height(Spacing.xxxl))
+
+            // Sign In Button
+            Button(
+                onClick = { viewModel.login() },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(Spacing.buttonHeight),
@@ -201,146 +300,65 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                     containerColor = Colors.primary,
                     contentColor = Colors.buttonText
                 ),
-                enabled = loginState !is LoginState.Loading
+                enabled = !loginState.isLoading && loginState.email.isNotBlank() && loginState.password.isNotBlank()
             ) {
-                Text(
-                    text = if (loginState is LoginState.Loading) {
-                        "Loading..."
-                    } else {
-                        if (isLogin) "Sign In" else "Create Account"
-                    },
-                    style = AppTextStyles.h4
-                )
+                if (loginState.isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = Colors.buttonText,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text(
+                        text = "Sign In",
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(Spacing.lg))
 
-            // Toggle between login and register
-            val annotatedString = AnnotatedString.Builder().apply {
-                append(if (isLogin) "Don't have an account? " else "Already have an account? ")
-                pushStyle(AppTextStyles.link.toSpanStyle())
-                append(if (isLogin) "Sign Up" else "Sign In")
-                pop()
-            }.toAnnotatedString()
+            // Error message
+            if (loginState.error != null) {
+                Text(
+                    text = loginState.error ?: "",
+                    style = AppTextStyles.small,
+                    color = Colors.error,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(Spacing.md))
+            }
 
-            ClickableText(
+            // Sign Up Link
+            val annotatedString = buildAnnotatedString {
+                withStyle(style = SpanStyle(color = Colors.textSecondary)) {
+                    append("Don't have an account? ")
+                }
+                withStyle(
+                    style = SpanStyle(
+                        color = Colors.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                ) {
+                    append("Sign Up")
+                }
+            }
+
+            Text(
                 text = annotatedString,
-                onClick = {
-                    isLogin = !isLogin
-                    viewModel.resetState()
-                },
-                style = AppTextStyles.body.copy(color = Colors.textSecondary)
+                style = AppTextStyles.body,
+                modifier = Modifier.clickable { onNavigateToSignUp() }
             )
 
             Spacer(modifier = Modifier.height(Spacing.xxxl))
 
+            // Terms and Privacy
             Text(
-                text = "By continuing, you agree to our Terms of Service and Privacy Policy",
+                text = "By continuing, you agree to our Terms of\nService and Privacy Policy",
                 style = AppTextStyles.small,
                 color = Colors.textMuted,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(vertical = Spacing.lg)
+                textAlign = TextAlign.Center
             )
-        }
-
-        // Snackbar for errors
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(Spacing.lg)
-        ) { data ->
-            Snackbar(
-                snackbarData = data,
-                containerColor = Colors.error,
-                contentColor = Colors.textPrimary
-            )
-        }
-    }
-}
-
-@Composable
-fun AppTextField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    label: String,
-    leadingIcon: Int,
-    isPassword: Boolean = false,
-    enabled: Boolean = true
-) {
-    var passwordVisible by remember { mutableStateOf(false) }
-    var isFocused by remember { mutableStateOf(false) }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(
-                width = 1.dp,
-                color = if (isFocused) Colors.primary else Colors.border,
-                shape = RoundedCornerShape(BorderRadius.sm)
-            )
-            .background(Color.Transparent)
-            .padding(horizontal = Spacing.md, vertical = Spacing.sm)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Leading icon
-            Icon(
-                painter = painterResource(id = leadingIcon),
-                contentDescription = null,
-                tint = if (enabled) Colors.textMuted else Colors.textMuted.copy(alpha = 0.5f),
-                modifier = Modifier.size(24.dp)
-            )
-
-            Spacer(modifier = Modifier.width(Spacing.sm))
-
-            // Text field
-            Box(modifier = Modifier.weight(1f)) {
-                BasicTextField(
-                    value = value,
-                    onValueChange = onValueChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = AppTextStyles.body.copy(color = Colors.textPrimary),
-                    visualTransformation = if (isPassword && !passwordVisible) PasswordVisualTransformation() else VisualTransformation.None,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = if (isPassword) KeyboardType.Password else KeyboardType.Text
-                    ),
-                    singleLine = true,
-                    enabled = enabled,
-                    cursorBrush = androidx.compose.ui.graphics.SolidColor(Colors.primary),
-                    decorationBox = { innerTextField ->
-                        Box(
-                            modifier = Modifier.fillMaxWidth(),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            if (value.isEmpty()) {
-                                Text(
-                                    text = label,
-                                    style = AppTextStyles.body,
-                                    color = Colors.textMuted
-                                )
-                            }
-                            innerTextField()
-                        }
-                    }
-                )
-            }
-
-            // Trailing icon (password visibility toggle)
-            if (isPassword) {
-                Spacer(modifier = Modifier.width(Spacing.sm))
-                val icon = if (passwordVisible) R.drawable.icon_eye_off else R.drawable.icon_eye
-                Icon(
-                    painter = painterResource(id = icon),
-                    contentDescription = if (passwordVisible) "Hide password" else "Show password",
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clickable { passwordVisible = !passwordVisible },
-                    tint = Colors.textMuted
-                )
-            }
         }
     }
 }

@@ -31,6 +31,8 @@ import java.util.*
  */
 @Composable
 fun RawDataTab(runSession: RunSession) {
+    var showAllPoints by remember { mutableStateOf(false) }
+    
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -146,11 +148,13 @@ fun RawDataTab(runSession: RunSession) {
         runSession.weatherAtStart?.let { weather ->
             item {
                 RawDataSection("Weather at Start") {
-                    RawDataRow("Condition", weather.condition)
+                    RawDataRow("Condition", weather.condition ?: weather.description)
                     RawDataRow("Temperature (°C)", String.format("%.1f", weather.temperature))
                     RawDataRow("Temperature (°F)", String.format("%.1f", weather.temperature * 9/5 + 32))
-                    RawDataRow("Feels Like (°C)", String.format("%.1f", weather.feelsLike))
-                    RawDataRow("Feels Like (°F)", String.format("%.1f", weather.feelsLike * 9/5 + 32))
+                    weather.feelsLike?.let {
+                        RawDataRow("Feels Like (°C)", String.format("%.1f", it))
+                        RawDataRow("Feels Like (°F)", String.format("%.1f", it * 9/5 + 32))
+                    }
                     RawDataRow("Humidity (%)", weather.humidity.toString())
                     RawDataRow("Wind Speed (m/s)", String.format("%.1f", weather.windSpeed))
                     RawDataRow("Wind Speed (km/h)", String.format("%.1f", weather.windSpeed * 3.6))
@@ -167,7 +171,7 @@ fun RawDataTab(runSession: RunSession) {
         runSession.weatherAtEnd?.let { weather ->
             item {
                 RawDataSection("Weather at End") {
-                    RawDataRow("Condition", weather.condition)
+                    RawDataRow("Condition", weather.condition ?: weather.description)
                     RawDataRow("Temperature (°C)", String.format("%.1f", weather.temperature))
                     RawDataRow("Humidity (%)", weather.humidity.toString())
                     RawDataRow("Wind Speed (m/s)", String.format("%.1f", weather.windSpeed))
@@ -207,8 +211,6 @@ fun RawDataTab(runSession: RunSession) {
                 )
             }
         }
-
-        var showAllPoints by remember { mutableStateOf(false) }
         
         if (showAllPoints) {
             item {

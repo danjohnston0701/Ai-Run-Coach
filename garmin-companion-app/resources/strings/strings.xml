@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<strings>
+    <string id="AppName">AI Run Coach</string>
+    <string id="Ready">Ready to Start</string>
+    <string id="Connecting">Connecting...</string>
+    <string id="NotConnected">Not Connected</string>
+    <string id="OpenPhone">Open phone app</string>
+    <string id="StartRun">Start Run</string>
+    <string id="PauseRun">Pause</string>
+    <string id="ResumeRun">Resume</string>
+    <string id="FinishRun">Finish</string>
+    <string id="Distance">Distance</string>
+    <string id="Time">Time</string>
+    <string id="Pace">Pace</string>
+    <string id="HeartRate">Heart Rate</string>
+    <string id="Cadence">Cadence</string>
+</strings>

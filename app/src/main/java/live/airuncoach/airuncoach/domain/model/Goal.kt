@@ -1,7 +1,7 @@
 package live.airuncoach.airuncoach.domain.model
 
 data class Goal(
-    val id: Long? = null,
+    val id: String? = null,
     val userId: String,
     val type: String, // EVENT, DISTANCE_TIME, HEALTH_WELLBEING, CONSISTENCY
     val title: String,

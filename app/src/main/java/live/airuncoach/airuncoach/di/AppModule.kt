@@ -16,28 +16,21 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object AppModule {
 
-    @Provides
     @Singleton
-    fun provideSessionManager(
-        @ApplicationContext context: Context
-    ): SessionManager {
+    @Provides
+    fun provideSessionManager(@ApplicationContext context: Context): SessionManager {
         return SessionManager(context)
     }
 
-    @Provides
     @Singleton
-    fun provideApiService(
-        @ApplicationContext context: Context,
-        sessionManager: SessionManager
-    ): ApiService {
+    @Provides
+    fun provideApiService(sessionManager: SessionManager, @ApplicationContext context: Context): ApiService {
         return RetrofitClient(context, sessionManager).instance
     }
 
-    @Provides
     @Singleton
-    fun provideHealthConnectRepository(
-        @ApplicationContext context: Context
-    ): HealthConnectRepository {
+    @Provides
+    fun provideHealthConnectRepository(@ApplicationContext context: Context): HealthConnectRepository {
         return HealthConnectRepository(context)
     }
 }

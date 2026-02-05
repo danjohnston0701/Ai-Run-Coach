@@ -79,14 +79,34 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
                 _goalsState.value = GoalsUiState.Loading
                 val userId = _user.value?.id
                 if (userId != null) {
+                    android.util.Log.d("GoalsViewModel", "📡 Fetching goals for user: $userId")
                     val goals = apiService.getGoals(userId)
                     _allGoals.value = goals
+                    android.util.Log.d("GoalsViewModel", "✅ Successfully loaded ${goals.size} goals")
                 } else {
                     _goalsState.value = GoalsUiState.Error("User not logged in")
                 }
+            } catch (e: retrofit2.HttpException) {
+                val errorBody = try {
+                    e.response()?.errorBody()?.string() ?: "No error body"
+                } catch (ex: Exception) {
+                    "Could not read error body"
+                }
+                android.util.Log.e("GoalsViewModel", "❌ HTTP ${e.code()} error loading goals: $errorBody", e)
+                
+                val userMessage = when (e.code()) {
+                    404 -> "🔧 Goals feature not available. The backend needs to be updated. Please contact support."
+                    401, 403 -> "Authentication expired. Please log in again."
+                    500 -> "Server error. Please try again later."
+                    else -> "Failed to load goals (HTTP ${e.code()}). Please check your connection."
+                }
+                _goalsState.value = GoalsUiState.Error(userMessage)
+            } catch (e: java.net.UnknownHostException) {
+                android.util.Log.e("GoalsViewModel", "❌ Network error: Cannot reach server", e)
+                _goalsState.value = GoalsUiState.Error("Cannot reach server. Please check your internet connection.")
             } catch (e: Exception) {
                 _goalsState.value = GoalsUiState.Error(e.message ?: "Failed to load goals")
-                android.util.Log.e("GoalsViewModel", "Failed to load goals: ${e.message}", e)
+                android.util.Log.e("GoalsViewModel", "❌ Failed to load goals: ${e.javaClass.simpleName} - ${e.message}", e)
             }
         }
     }
@@ -145,7 +165,7 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    fun deleteGoal(goalId: Long) {
+    fun deleteGoal(goalId: String) {
         viewModelScope.launch {
             try {
                 apiService.deleteGoal(goalId)

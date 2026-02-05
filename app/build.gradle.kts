@@ -4,6 +4,7 @@ plugins {
     id("com.google.devtools.ksp")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.dagger.hilt.android")
+    kotlin("plugin.serialization") version "2.1.0"
 }
 
 android {
@@ -99,14 +100,14 @@ dependencies {
     // --- Google Maps: For route display and navigation ---
     implementation("com.google.android.gms:play-services-maps:18.2.0")
     implementation("com.google.maps.android:maps-compose:4.3.0")
+    implementation("com.google.maps.android:android-maps-utils:3.8.2")
 
     // --- Image Loading: Coil for profile pictures ---
     implementation("io.coil-kt:coil-compose:2.5.0")
 
-    // --- Charts: Vico for data visualization ---
+    // --- Charts ---
     implementation("com.patrykandpatrick.vico:compose:1.13.1")
     implementation("com.patrykandpatrick.vico:compose-m3:1.13.1")
-    implementation("com.patrykandpatrick.vico:core:1.13.1")
 
     // --- Local Database: Room for offline queue ---
     implementation("androidx.room:room-runtime:2.6.1")
@@ -122,8 +123,13 @@ dependencies {
     // --- Health Connect: For wellness data ---
     implementation("androidx.health.connect:connect-client:1.1.0")
 
-    // --- Garmin SDK (We will keep this commented out for now to ensure stability) ---
-    // implementation("com.garmin.android:connectiq:5.1.0")
+    // --- Garmin OAuth Dependencies ---
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
+    
+    // OAuth 1.0a signing (for Garmin Connect API)
+    implementation("se.akerfeldt:okhttp-signpost:1.1.0")
+    implementation("oauth.signpost:signpost-core:2.1.1")
 
     // --- Testing Libraries ---
     testImplementation("junit:junit:4.13.2")

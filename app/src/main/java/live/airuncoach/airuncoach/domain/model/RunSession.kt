@@ -48,6 +48,39 @@ data class RunSession(
         }
     }
     
+    fun getDifficultyLevel(): String {
+        // Calculate difficulty based on pace (min/km)
+        val pace = averagePace ?: return "unknown"
+        
+        // Check if pace has the expected format before splitting
+        if (!pace.contains("'") && !pace.contains("/")) {
+            return "unknown"
+        }
+        
+        val paceComponents = pace.split("'")
+        if (paceComponents.size >= 2) {
+            val minutes = paceComponents[0].toIntOrNull() ?: 0
+            val seconds = paceComponents[1].replace("\"", "").replace("/km", "").trim().toIntOrNull() ?: 0
+            val totalSeconds = minutes * 60 + seconds
+            
+            return when {
+                totalSeconds < 300 -> "easy"      // < 5:00/km
+                totalSeconds < 360 -> "moderate"  // 5:00-6:00/km
+                else -> "hard"                    // > 6:00/km
+            }
+        } else {
+            return "unknown"
+        }
+    }
+    
+    fun getFormattedDate(): String {
+        val date = java.util.Date(startTime)
+        val format = java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault())
+        return format.format(date)
+    }
+    
+    // @Serializable data class below
+    
     /**
      * Calculates route similarity score with another run (0.0 to 1.0)
      * Used for weather impact analysis - compare similar routes with different weather

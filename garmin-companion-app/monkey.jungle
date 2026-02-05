@@ -1,0 +1,28 @@
+# Garmin Connect IQ Build Configuration
+# This file defines the build targets and source files
+
+# Project information
+project.manifest = manifest.xml
+
+# Base settings for all devices
+base.sourcePath = source
+base.resourcePath = resources
+
+# Device-specific builds
+fenix7.sourcePath = $(base.sourcePath)
+fenix7.resourcePath = $(base.resourcePath)
+
+fenix6.sourcePath = $(base.sourcePath)
+fenix6.resourcePath = $(base.resourcePath)
+
+fr955.sourcePath = $(base.sourcePath)
+fr955.resourcePath = $(base.resourcePath)
+
+fr265.sourcePath = $(base.sourcePath)
+fr265.resourcePath = $(base.resourcePath)
+
+venu3.sourcePath = $(base.sourcePath)
+venu3.resourcePath = $(base.resourcePath)
+
+# Language settings
+base.lang = eng

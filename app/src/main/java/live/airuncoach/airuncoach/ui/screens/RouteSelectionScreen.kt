@@ -1,6 +1,6 @@
 package live.airuncoach.airuncoach.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,278 +9,160 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import live.airuncoach.airuncoach.R
-import live.airuncoach.airuncoach.ui.components.RouteMapPreview
-import live.airuncoach.airuncoach.network.model.RouteOption
-import live.airuncoach.airuncoach.ui.theme.AppTextStyles
-import live.airuncoach.airuncoach.ui.theme.BorderRadius
-import live.airuncoach.airuncoach.ui.theme.Colors
-import live.airuncoach.airuncoach.ui.theme.Spacing
+import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.GoogleMap
+import com.google.android.gms.maps.MapView
+import com.google.android.gms.maps.model.*
+import com.google.maps.android.PolyUtil
+import live.airuncoach.airuncoach.domain.model.GeneratedRoute
+import live.airuncoach.airuncoach.domain.model.RouteDifficulty
+import kotlin.math.atan
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RouteSelectionScreen(
-    routes: List<RouteOption>,
-    targetDistance: Float,
-    aiCoachEnabled: Boolean = true,
-    onAiCoachToggle: () -> Unit = {},
-    onNavigateBack: () -> Unit = {},
-    onRouteSelected: (RouteOption) -> Unit = {},
-    onRegenerateRoutes: () -> Unit = {}
+    routes: List<GeneratedRoute>,
+    distanceKm: Double,
+    selectedRouteId: String?,
+    onRouteSelected: (String) -> Unit,
+    onStartRun: () -> Unit,
+    onBack: () -> Unit,
+    onRegenerateRoutes: () -> Unit,
+    aiCoachEnabled: Boolean,
+    onAiCoachToggle: (Boolean) -> Unit
 ) {
-    var selectedRoute by remember { mutableStateOf<RouteOption?>(null) }
-    
-    // Group routes by difficulty
-    val easyRoutes = routes.filter { it.difficulty.equals("easy", ignoreCase = true) }
-    val moderateRoutes = routes.filter { it.difficulty.equals("moderate", ignoreCase = true) }
-    val hardRoutes = routes.filter { it.difficulty.equals("hard", ignoreCase = true) }
-    
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Colors.backgroundRoot)
-    ) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = if (selectedRoute != null) 160.dp else 80.dp)
-        ) {
-            item {
-                // Header
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(Spacing.lg)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = onNavigateBack) {
-                            Icon(
-                                painter = painterResource(id = android.R.drawable.ic_menu_close_clear_cancel),
-                                contentDescription = "Back",
-                                tint = Colors.textMuted
-                            )
-                        }
-                        
-                        Spacer(modifier = Modifier.weight(1f))
-                        
-                        IconButton(onClick = { /* Group run placeholder */ }) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.icon_profile_vector),
-                                contentDescription = "Group Run",
-                                tint = Colors.textMuted
-                            )
-                        }
-                    }
-                    
-                    Spacer(modifier = Modifier.height(Spacing.md))
-                    
-                    Text(
-                        text = "CHOOSE YOUR ROUTE",
-                        style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
-                        color = Colors.textPrimary
-                    )
-                    
-                    Column(
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
                         Text(
-                            text = "Select from ${routes.size} route options for your ${targetDistance.toInt()}km run",
-                            style = AppTextStyles.body,
-                            color = Colors.textSecondary
+                            "SELECT YOUR ROUTE",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
                         )
-                        
-                        Spacer(modifier = Modifier.height(Spacing.sm))
-                        
-                        // AI Coach toggle - clickable
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(BorderRadius.full))
-                                .background(if (aiCoachEnabled) Colors.backgroundSecondary else Colors.backgroundTertiary)
-                                .clickable { onAiCoachToggle() }
-                                .padding(horizontal = Spacing.md, vertical = Spacing.xs)
-                        ) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.icon_profile_vector),
-                                contentDescription = "AI Coach Toggle",
-                                tint = if (aiCoachEnabled) Colors.primary else Colors.textMuted,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(Spacing.xs))
-                            Text(
-                                text = "AI Coach",
-                                style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
-                                color = if (aiCoachEnabled) Colors.primary else Colors.textMuted
-                            )
-                            Spacer(modifier = Modifier.width(Spacing.xs))
-                            Text(
-                                text = if (aiCoachEnabled) "On" else "Off",
-                                style = AppTextStyles.caption,
-                                color = if (aiCoachEnabled) Colors.primary else Colors.textMuted
-                            )
-                        }
+                        Text(
+                            "Choose from ${routes.size} routes",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF8B9AA8)
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color(0xFF0A1628)
+                )
+            )
+        },
+        containerColor = Color(0xFF0A1628)
+    ) { padding ->
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Group routes by difficulty
+                val easyRoutes = routes.filter { it.difficulty == RouteDifficulty.EASY }
+                val moderateRoutes = routes.filter { it.difficulty == RouteDifficulty.MODERATE }
+                val hardRoutes = routes.filter { it.difficulty == RouteDifficulty.HARD }
+
+                // Easy Routes
+                if (easyRoutes.isNotEmpty()) {
+                    item {
+                        DifficultyHeader("EASY ROUTES", Color(0xFFFFD700))
+                    }
+                    items(easyRoutes) { route ->
+                        RouteCard(
+                            route = route,
+                            isSelected = route.id == selectedRouteId,
+                            onSelect = { onRouteSelected(route.id) }
+                        )
                     }
                 }
-            }
-            
-            item { Spacer(modifier = Modifier.height(Spacing.md)) }
-            
-            // Route Legend
-            item {
-                RouteLegend()
-            }
-            
-            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
-            
-            // EASY ROUTES
-            if (easyRoutes.isNotEmpty()) {
+
+                // Moderate Routes
+                if (moderateRoutes.isNotEmpty()) {
+                    item {
+                        DifficultyHeader("MODERATE ROUTES", Color(0xFFFFD700))
+                    }
+                    items(moderateRoutes) { route ->
+                        RouteCard(
+                            route = route,
+                            isSelected = route.id == selectedRouteId,
+                            onSelect = { onRouteSelected(route.id) }
+                        )
+                    }
+                }
+
+                // Hard Routes
+                if (hardRoutes.isNotEmpty()) {
+                    item {
+                        DifficultyHeader("HARD ROUTES", Color(0xFFFFD700))
+                    }
+                    items(hardRoutes) { route ->
+                        RouteCard(
+                            route = route,
+                            isSelected = route.id == selectedRouteId,
+                            onSelect = { onRouteSelected(route.id) }
+                        )
+                    }
+                }
+
+                // Spacer for bottom button
                 item {
-                    Text(
-                        text = "EASY ROUTES",
-                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                        color = Color(0xFF10B981),
-                        modifier = Modifier.padding(horizontal = Spacing.lg)
-                    )
-                    Spacer(modifier = Modifier.height(Spacing.md))
-                }
-                
-                items(easyRoutes) { route ->
-                    RouteCard(
-                        route = route,
-                        isSelected = selectedRoute?.id == route.id,
-                        onRouteClick = {
-                            selectedRoute = if (selectedRoute?.id == route.id) null else route
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(Spacing.md))
+                    Spacer(Modifier.height(100.dp))
                 }
             }
-            
-            // MODERATE ROUTES
-            if (moderateRoutes.isNotEmpty()) {
-                item {
-                    Spacer(modifier = Modifier.height(Spacing.md))
-                    Text(
-                        text = "MODERATE ROUTES",
-                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                        color = Color(0xFFF59E0B),
-                        modifier = Modifier.padding(horizontal = Spacing.lg)
-                    )
-                    Spacer(modifier = Modifier.height(Spacing.md))
-                }
-                
-                items(moderateRoutes) { route ->
-                    RouteCard(
-                        route = route,
-                        isSelected = selectedRoute?.id == route.id,
-                        onRouteClick = {
-                            selectedRoute = if (selectedRoute?.id == route.id) null else route
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(Spacing.md))
-                }
-            }
-            
-            // HARD ROUTES
-            if (hardRoutes.isNotEmpty()) {
-                item {
-                    Spacer(modifier = Modifier.height(Spacing.md))
-                    Text(
-                        text = "HARD ROUTES",
-                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                        color = Color(0xFFEF4444),
-                        modifier = Modifier.padding(horizontal = Spacing.lg)
-                    )
-                    Spacer(modifier = Modifier.height(Spacing.md))
-                }
-                
-                items(hardRoutes) { route ->
-                    RouteCard(
-                        route = route,
-                        isSelected = selectedRoute?.id == route.id,
-                        onRouteClick = {
-                            selectedRoute = if (selectedRoute?.id == route.id) null else route
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(Spacing.md))
-                }
-            }
-            
-            // Regenerate button
-            item {
-                OutlinedButton(
-                    onClick = onRegenerateRoutes,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.lg)
-                        .height(56.dp),
-                    shape = RoundedCornerShape(BorderRadius.md),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = Colors.primary
-                    ),
-                    border = androidx.compose.foundation.BorderStroke(2.dp, Colors.primary)
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.icon_play_vector), // Replace with refresh icon
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(Spacing.sm))
-                    Text(
-                        text = "Regenerate Routes",
-                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
-                    )
-                }
-            }
-            
-            item { Spacer(modifier = Modifier.height(Spacing.xxl)) }
-        }
-        
-        // Bottom action button
-        AnimatedVisibility(
-            visible = selectedRoute != null,
-            modifier = Modifier.align(Alignment.BottomCenter)
-        ) {
-            Column(
+
+            // Bottom: Start Run Button
+            Box(
                 modifier = Modifier
+                    .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .background(Colors.backgroundRoot)
-                    .padding(Spacing.lg)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color(0xFF0A1628))
+                        )
+                    )
+                    .padding(16.dp)
             ) {
                 Button(
-                    onClick = { selectedRoute?.let { onRouteSelected(it) } },
+                    onClick = onStartRun,
+                    enabled = selectedRouteId != null,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(60.dp),
-                    shape = RoundedCornerShape(BorderRadius.lg),
+                        .height(56.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Colors.primary,
-                        contentColor = Colors.buttonText
-                    )
+                        containerColor = Color(0xFF00E5FF),
+                        disabledContainerColor = Color(0xFF1A2634)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.icon_play_vector),
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(Spacing.sm))
                     Text(
-                        text = "PREPARE RUN SESSION",
-                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
+                        "START RUN",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (selectedRouteId != null) Color.Black else Color.Gray
                     )
                 }
             }
@@ -289,217 +171,290 @@ fun RouteSelectionScreen(
 }
 
 @Composable
-fun RouteLegend() {
-    Row(
+fun DifficultyHeader(title: String, color: Color) {
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = Spacing.lg)
-            .clip(RoundedCornerShape(BorderRadius.sm))
-            .background(Colors.backgroundSecondary)
-            .padding(Spacing.md),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
+            .padding(vertical = 8.dp)
     ) {
-        // Start indicator
-        Box(
-            modifier = Modifier
-                .size(16.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF3B82F6))
-        )
-        Spacer(modifier = Modifier.width(Spacing.xs))
         Text(
-            text = "Start",
-            style = AppTextStyles.body,
-            color = Colors.textPrimary
-        )
-        
-        Spacer(modifier = Modifier.width(Spacing.lg))
-        
-        // Route line
-        Box(
-            modifier = Modifier
-                .width(40.dp)
-                .height(3.dp)
-                .background(
-                    brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
-                        listOf(Color(0xFF3B82F6), Color(0xFF10B981))
-                    )
-                )
-        )
-        
-        Spacer(modifier = Modifier.width(Spacing.lg))
-        
-        // Finish indicator
-        Box(
-            modifier = Modifier
-                .size(16.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF10B981))
-        )
-        Spacer(modifier = Modifier.width(Spacing.xs))
-        Text(
-            text = "Finish",
-            style = AppTextStyles.body,
-            color = Colors.textPrimary
+            text = title,
+            color = color,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp
         )
     }
 }
 
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun RouteCard(
-    route: RouteOption,
+    route: GeneratedRoute,
     isSelected: Boolean,
-    onRouteClick: () -> Unit
+    onSelect: () -> Unit
 ) {
-    val difficultyColor = when (route.difficulty.lowercase()) {
-        "easy" -> Color(0xFF10B981)
-        "moderate" -> Color(0xFFF59E0B)
-        "hard" -> Color(0xFFEF4444)
-        else -> Colors.primary
+    // Debug logging
+    Log.d("RouteCard", "Route ${route.id}: distance=${route.distance}km, elevGain=${route.elevationGain}m, elevLoss=${route.elevationLoss}m")
+    
+    val borderColor = if (isSelected) Color(0xFF00E5FF) else Color.Transparent
+    val difficultyColor = when (route.difficulty) {
+        RouteDifficulty.EASY -> Color(0xFF34A853)
+        RouteDifficulty.MODERATE -> Color(0xFFFFA726)
+        RouteDifficulty.HARD -> Color(0xFFEF5350)
     }
+    
+    // Calculate average gradient angle in degrees (CORRECT formula using atan)
+    val maxClimb = if (route.distance > 0 && route.elevationGain > 0) {
+        val angle = (atan(route.elevationGain / route.distance) * (180.0 / Math.PI)).format(1)
+        Log.d("RouteCard", "Climb angle: ${route.elevationGain}m / ${route.distance}m = $angle°")
+        angle
+    } else {
+        "0.0"
+    }
+    val maxDescent = if (route.distance > 0 && route.elevationLoss > 0) {
+        val angle = (atan(route.elevationLoss / route.distance) * (180.0 / Math.PI)).format(1)
+        Log.d("RouteCard", "Descent angle: ${route.elevationLoss}m / ${route.distance}m = $angle°")
+        angle
+    } else {
+        "0.0"
+    }
+    
+    // Store GoogleMap reference for zoom controls
+    var googleMapRef by remember { mutableStateOf<GoogleMap?>(null) }
     
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = Spacing.lg)
-            .then(
-                if (isSelected) {
-                    Modifier.border(3.dp, Colors.primary, RoundedCornerShape(BorderRadius.lg))
-                } else {
-                    Modifier
-                }
-            ),
-        shape = RoundedCornerShape(BorderRadius.lg),
-        colors = CardDefaults.cardColors(
-            containerColor = Colors.backgroundSecondary
-        ),
-        onClick = {
-            android.util.Log.d("RouteCard", "Route clicked: ${route.id}")
-            onRouteClick()
-        }
+            .border(3.dp, borderColor, RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2634)),
+        shape = RoundedCornerShape(12.dp)
     ) {
         Column {
-            // Map View with actual route
+            // Map View - Clickable to select route
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(200.dp)
+                    .clickable(onClick = onSelect) // Map click also selects route
             ) {
-                // Render actual Google Map with route - clicking map also selects route
-                RouteMapPreview(
-                    encodedPolyline = route.polyline,
-                    modifier = Modifier.fillMaxSize(),
-                    onMapClick = {
-                        android.util.Log.d("RouteCard", "Map clicked for route: ${route.id}")
-                        onRouteClick()
-                    }
+                AndroidView(
+                    factory = { context ->
+                        MapView(context).apply {
+                            onCreate(null)
+                            onResume()
+                            getMapAsync { googleMap ->
+                                googleMapRef = googleMap // Store reference for zoom controls
+                                try {
+                                    // Decode polyline
+                                    val points = PolyUtil.decode(route.polyline)
+                                    
+                                    if (points.isNotEmpty()) {
+                                        // Add polyline to map
+                                        val polylineOptions = PolylineOptions()
+                                            .addAll(points)
+                                            .width(8f)
+                                            .color(android.graphics.Color.parseColor("#00E5FF"))
+                                            .geodesic(true)
+                                        
+                                        googleMap.addPolyline(polylineOptions)
+                                        
+                                        // Add start marker (blue)
+                                        googleMap.addMarker(
+                                            MarkerOptions()
+                                                .position(points.first())
+                                                .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE))
+                                                .title("Start")
+                                        )
+                                        
+                                        // Add finish marker (green)
+                                        googleMap.addMarker(
+                                            MarkerOptions()
+                                                .position(points.last())
+                                                .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN))
+                                                .title("Finish")
+                                        )
+                                        
+                                        // Calculate bounds and zoom
+                                        val boundsBuilder = LatLngBounds.Builder()
+                                        points.forEach { boundsBuilder.include(it) }
+                                        val bounds = boundsBuilder.build()
+                                        
+                                        googleMap.moveCamera(
+                                            CameraUpdateFactory.newLatLngBounds(bounds, 100)
+                                        )
+                                        
+                                        // Disable map interactions (zoom controls handle this)
+                                        googleMap.uiSettings.isScrollGesturesEnabled = false
+                                        googleMap.uiSettings.isZoomGesturesEnabled = false
+                                        googleMap.uiSettings.isTiltGesturesEnabled = false
+                                        googleMap.uiSettings.isRotateGesturesEnabled = false
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("RouteCard", "Error rendering map", e)
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
                 )
-                // Difficulty badge
+                
+                // Difficulty Badge (top left)
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .padding(Spacing.md)
-                        .clip(RoundedCornerShape(BorderRadius.full))
-                        .background(difficultyColor)
-                        .padding(horizontal = Spacing.md, vertical = Spacing.sm)
+                        .padding(12.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(difficultyColor.copy(alpha = 0.9f))
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(Color.White)
+                        )
+                        Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "● ${route.difficulty.uppercase()}",
-                            style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
-                            color = Color.White
+                            text = route.difficulty.name,
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
                 
-                // Selected badge
+                // Selected Badge (top right)
                 if (isSelected) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(Spacing.md)
-                            .clip(RoundedCornerShape(BorderRadius.full))
-                            .background(Colors.primary)
-                            .padding(horizontal = Spacing.md, vertical = Spacing.sm)
+                            .padding(12.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFF00E5FF))
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
                         Text(
                             text = "Selected",
-                            style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
-                            color = Colors.buttonText
+                            color = Color.Black,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
                 
-                // Map controls removed - gestures disabled to allow scrolling
+                // Zoom controls (bottom right) - REMOVED FULLSCREEN ICON
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // Zoom in button
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.White)
+                            .clickable {
+                                googleMapRef?.let { map ->
+                                    map.animateCamera(CameraUpdateFactory.zoomIn())
+                                    Log.d("RouteCard", "Zoom in")
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("+", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                    }
+                    // Zoom out button
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.White)
+                            .clickable {
+                                googleMapRef?.let { map ->
+                                    map.animateCamera(CameraUpdateFactory.zoomOut())
+                                    Log.d("RouteCard", "Zoom out")
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("−", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                    }
+                }
             }
             
-            // Route details
-            Column(modifier = Modifier.padding(Spacing.lg)) {
-                // Distance and elevation row
+            // Route Details Section (with SELECT ROUTE visual indicator)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF0F1A2A))
+                    .clickable(onClick = onSelect) // Bottom section also selects
+            ) {
+                // Distance and Elevation
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column {
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.icon_location_vector),
-                                contentDescription = null,
-                                tint = Colors.textPrimary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(Spacing.xs))
-                            Text(
-                                text = "%.1f km".format(route.distance),
-                                style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
-                                color = Colors.textPrimary
-                            )
-                        }
-                    }
-                    
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🛣️", fontSize = 20.sp)
+                        Spacer(Modifier.width(8.dp))
                         Text(
-                            text = "⛰️",
-                            style = AppTextStyles.body
+                            text = "${route.distance.format(1)} km",
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
                         )
-                        Spacer(modifier = Modifier.width(Spacing.xs))
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("⛰️", fontSize = 18.sp)
+                        Spacer(Modifier.width(8.dp))
                         Text(
-                            text = "${route.elevationGain}m",
-                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
-                            color = Colors.textPrimary
+                            text = "${route.elevationGain.roundToInt()}m",
+                            color = Color(0xFF8B9AA8),
+                            fontSize = 16.sp
                         )
                     }
                 }
                 
-                Spacer(modifier = Modifier.height(Spacing.sm))
-                
-                // Gradient info
+                // Climb and Descent
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    RouteMetric(
-                        label = "Steepest climb",
-                        value = "%.1f°".format(route.maxGradientDegrees),
-                        color = Color(0xFF10B981)
+                    Text(
+                        text = "↗ Steepest climb: $maxClimb°",
+                        color = Color(0xFF34A853),
+                        fontSize = 13.sp
                     )
-                    
-                    RouteMetric(
-                        label = "Steepest descent",
-                        value = "%.1f°".format(route.maxGradientDegrees),
-                        color = Color(0xFFF59E0B)
+                    Text(
+                        text = "↘ Steepest descent: $maxDescent°",
+                        color = Color(0xFFFFA726),
+                        fontSize = 13.sp
                     )
                 }
                 
-                // Additional info if present
-                if (route.description.contains("major roads", ignoreCase = true)) {
-                    Spacer(modifier = Modifier.height(Spacing.sm))
+                // SELECT ROUTE indicator (visual cue for users)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isSelected) Color(0xFF00E5FF) else Color(0xFF1A2634))
+                        .padding(12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
                     Text(
-                        text = "Includes major roads",
-                        style = AppTextStyles.small,
-                        color = Colors.textMuted
+                        text = if (isSelected) "✓ ROUTE SELECTED" else "TAP TO SELECT ROUTE",
+                        color = if (isSelected) Color.Black else Color(0xFF8B9AA8),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
                     )
                 }
             }
@@ -507,36 +462,4 @@ fun RouteCard(
     }
 }
 
-@Composable
-fun MapControlButton(icon: Int, onClick: () -> Unit) {
-    IconButton(
-        onClick = onClick,
-        modifier = Modifier
-            .size(32.dp)
-            .clip(RoundedCornerShape(BorderRadius.sm))
-            .background(Colors.backgroundRoot.copy(alpha = 0.9f))
-    ) {
-        Icon(
-            painter = painterResource(id = icon),
-            contentDescription = null,
-            tint = Colors.textPrimary,
-            modifier = Modifier.size(16.dp)
-        )
-    }
-}
-
-@Composable
-fun RouteMetric(label: String, value: String, color: Color) {
-    Column {
-        Text(
-            text = value,
-            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
-            color = color
-        )
-        Text(
-            text = label,
-            style = AppTextStyles.small,
-            color = Colors.textMuted
-        )
-    }
-}
+private fun Double.format(decimals: Int): String = "%.${decimals}f".format(this)

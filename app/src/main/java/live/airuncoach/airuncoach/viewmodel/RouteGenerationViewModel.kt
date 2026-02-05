@@ -1,231 +1,183 @@
 package live.airuncoach.airuncoach.viewmodel
 
-import android.Manifest
-import android.content.Context
-import android.content.pm.PackageManager
-import androidx.core.content.ContextCompat
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.android.gms.location.LocationServices
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
+import live.airuncoach.airuncoach.domain.model.GeneratedRoute
+import live.airuncoach.airuncoach.domain.model.LatLng
+import live.airuncoach.airuncoach.domain.model.RouteDifficulty
+import live.airuncoach.airuncoach.domain.model.TurnInstruction
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.model.RouteGenerationRequest
 import live.airuncoach.airuncoach.network.model.RouteOption
+import live.airuncoach.airuncoach.network.model.IntelligentRouteRequest
+import live.airuncoach.airuncoach.network.model.IntelligentRoute
+import java.net.ConnectException
+import java.net.SocketTimeoutException
 import javax.inject.Inject
 
-/**
- * ViewModel for Route Generation flow
- * Manages user location, route generation, and route selection
- */
 @HiltViewModel
 class RouteGenerationViewModel @Inject constructor(
-    @ApplicationContext private val context: Context,
     private val apiService: ApiService
 ) : ViewModel() {
-    
-    // UI State
-    private val _uiState = MutableStateFlow<RouteGenerationState>(RouteGenerationState.Setup)
-    val uiState: StateFlow<RouteGenerationState> = _uiState.asStateFlow()
-    
-    // User location
-    private val _userLocation = MutableStateFlow<Pair<Double, Double>?>(null)
-    val userLocation: StateFlow<Pair<Double, Double>?> = _userLocation.asStateFlow()
-    
-    // AI Coach enabled state
-    private val _aiCoachEnabled = MutableStateFlow(true) // Default enabled
-    val aiCoachEnabled: StateFlow<Boolean> = _aiCoachEnabled.asStateFlow()
-    
-    // Generated routes
-    private val _routes = MutableStateFlow<List<RouteOption>>(emptyList())
-    val routes: StateFlow<List<RouteOption>> = _routes.asStateFlow()
-    
-    // Selected route
-    private val _selectedRoute = MutableStateFlow<RouteOption?>(null)
-    val selectedRoute: StateFlow<RouteOption?> = _selectedRoute.asStateFlow()
-    
-    // Error message
-    private val _errorMessage = MutableStateFlow<String?>(null)
-    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
-    
-    init {
-        // Get user location on init
-        getUserLocation()
-    }
-    
-    /**
-     * Get user's current location
-     */
-    fun getUserLocation() {
+
+    private val _routes = MutableStateFlow<List<GeneratedRoute>>(emptyList())
+    val routes: StateFlow<List<GeneratedRoute>> = _routes.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+
+    fun generateRoutes(request: RouteGenerationRequest) {
         viewModelScope.launch {
+            _isLoading.value = true
+            _error.value = null
             try {
-                // Check location permission
-                val fineLocationPermission = ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.ACCESS_FINE_LOCATION
-                )
-                
-                if (fineLocationPermission != PackageManager.PERMISSION_GRANTED) {
-                    _errorMessage.value = "Location permission required"
-                    return@launch
-                }
-                
-                val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
-                val location = fusedLocationClient.lastLocation.await()
-                
-                // Force Cambridge, NZ for emulator testing (emulator defaults to California)
-                // Check if we're on emulator by seeing if location is near Mountain View, CA
-                val isEmulatorLocation = location != null && 
-                    (location.latitude > 37.0 && location.latitude < 38.0) &&
-                    (location.longitude < -121.0 && location.longitude > -123.0)
-                
-                if (location != null && !isEmulatorLocation) {
-                    android.util.Log.d("RouteGen", "📍 Using actual device location: ${location.latitude}, ${location.longitude}")
-                    _userLocation.value = Pair(location.latitude, location.longitude)
-                } else {
-                    // Default location for emulator/testing (Cambridge, New Zealand)
-                    android.util.Log.d("RouteGen", "📍 Using fallback location: Cambridge, NZ")
-                    _userLocation.value = Pair(-37.898367, 175.484444)
-                }
+                val response = apiService.generateAIRoutes(request)
+                _routes.value = response.routes.map { it.toGeneratedRoute() }
             } catch (e: Exception) {
-                _errorMessage.value = "Failed to get location: ${e.message}"
-                // Default location fallback (Cambridge, New Zealand)
-                _userLocation.value = Pair(-37.898367, 175.484444)
+                _error.value = e.message
+            } finally {
+                _isLoading.value = false
             }
         }
     }
-    
+
     /**
-     * Generate routes from backend
+     * Generate intelligent routes using GraphHopper + OSM intelligence
+     * Returns 3 validated circuit routes with no dead ends
      */
-    fun generateRoutes(
-        distance: Float,
+    fun generateIntelligentRoutes(
+        latitude: Double,
+        longitude: Double,
+        distanceKm: Double,
         activityType: String = "run",
-        targetTimeEnabled: Boolean = false,
-        hours: Int = 0,
-        minutes: Int = 0,
-        seconds: Int = 0,
-        liveTrackingEnabled: Boolean = false,
-        isGroupRun: Boolean = false
+        preferTrails: Boolean = true,
+        avoidHills: Boolean = false,
+        targetTime: Int? = null,
+        aiCoachEnabled: Boolean = true
     ) {
         viewModelScope.launch {
+            _isLoading.value = true
+            _error.value = null
+            
+            Log.d("RouteGeneration", "🚀 Starting route generation...")
+            Log.d("RouteGeneration", "📍 Location: ($latitude, $longitude)")
+            Log.d("RouteGeneration", "📏 Distance: ${distanceKm}km")
+            
             try {
-                android.util.Log.d("RouteGen", "🗺️ Starting route generation for ${distance}km")
-                _uiState.value = RouteGenerationState.Loading
-                _errorMessage.value = null
-                
-                // Get user location if not already available
-                if (_userLocation.value == null) {
-                    android.util.Log.d("RouteGen", "📍 Getting user location...")
-                    getUserLocation()
-                }
-                
-                val location = _userLocation.value ?: run {
-                    android.util.Log.e("RouteGen", "❌ Location not available")
-                    _errorMessage.value = "Location not available"
-                    _uiState.value = RouteGenerationState.Setup
-                    return@launch
-                }
-                
-                android.util.Log.d("RouteGen", "📍 Using location: ${location.first}, ${location.second}")
-                
-                val request = RouteGenerationRequest(
-                    startLat = location.first,
-                    startLng = location.second,
-                    distance = distance.toDouble(),
+                val request = IntelligentRouteRequest(
+                    latitude = latitude,
+                    longitude = longitude,
+                    distanceKm = distanceKm,
                     activityType = activityType,
-                    avoidHills = false
+                    preferTrails = preferTrails,
+                    avoidHills = avoidHills,
+                    targetTime = targetTime,
+                    aiCoachEnabled = aiCoachEnabled
                 )
                 
-                android.util.Log.d("RouteGen", "🤖 Calling AI Route Generation API:")
-                android.util.Log.d("RouteGen", "   📍 Location: ${request.startLat}, ${request.startLng}")
-                android.util.Log.d("RouteGen", "   📏 Distance: ${request.distance}km")
-                android.util.Log.d("RouteGen", "   🎨 OpenAI designing intelligent circuits")
-                android.util.Log.d("RouteGen", "   ✨ Google executing routes with navigation")
-                val response = apiService.generateAIRoutes(request)
+                Log.d("RouteGeneration", "📡 Sending request to backend...")
+                val response = apiService.generateIntelligentRoutes(request)
                 
-                android.util.Log.d("RouteGen", "✅ Got ${response.routes.size} routes from API")
-                
-                if (response.routes.isEmpty()) {
-                    android.util.Log.w("RouteGen", "⚠️ No routes returned from API")
-                    _errorMessage.value = "No routes generated. Try adjusting distance."
-                    _uiState.value = RouteGenerationState.Setup
-                } else {
-                    _routes.value = response.routes
-                    _uiState.value = RouteGenerationState.Success(response.routes)
-                    android.util.Log.d("RouteGen", "🎉 Route generation successful!")
-                }
-                
+                Log.d("RouteGeneration", "✅ Received ${response.routes.size} routes")
+                _routes.value = response.routes.map { it.toGeneratedRoute() }
+                Log.d("RouteGeneration", "🎉 Routes converted successfully!")
+            } catch (e: SocketTimeoutException) {
+                val errorMsg = "Timeout: Backend or GraphHopper is slow"
+                _error.value = errorMsg
+                Log.e("RouteGeneration", "⏱️ TIMEOUT ERROR", e)
+            } catch (e: ConnectException) {
+                val errorMsg = "Cannot connect to backend"
+                _error.value = errorMsg
+                Log.e("RouteGeneration", "🔌 CONNECTION ERROR", e)
             } catch (e: Exception) {
-                android.util.Log.e("RouteGen", "❌ Route generation failed: ${e.message}", e)
-                _errorMessage.value = "Failed to generate routes: ${e.message}"
-                _uiState.value = RouteGenerationState.Error(e.message ?: "Unknown error")
+                _error.value = e.message ?: "Failed to generate routes"
+                Log.e("RouteGeneration", "❌ ERROR: ${e.message}", e)
+                e.printStackTrace()
+            } finally {
+                _isLoading.value = false
+                Log.d("RouteGeneration", "🏁 Generation finished")
             }
         }
     }
     
-    /**
-     * Select a route
-     */
-    fun selectRoute(route: RouteOption) {
-        _selectedRoute.value = route
-    }
-    
-    /**
-     * Clear selected route
-     */
-    fun clearSelectedRoute() {
-        _selectedRoute.value = null
-    }
-    
-    /**
-     * Regenerate routes with same parameters
-     */
-    fun regenerateRoutes() {
-        // Will trigger route generation again
-        _uiState.value = RouteGenerationState.Setup
+    fun clearRoutes() {
         _routes.value = emptyList()
-        _selectedRoute.value = null
     }
-    
-    /**
-     * Reset to setup state
-     */
-    fun resetToSetup() {
-        _uiState.value = RouteGenerationState.Setup
-        _routes.value = emptyList()
-        _selectedRoute.value = null
-        _errorMessage.value = null
-    }
-    
-    /**
-     * Clear error message
-     */
-    fun clearError() {
-        _errorMessage.value = null
-    }
-    
-    /**
-     * Toggle AI Coach enabled/disabled
-     * When disabled, AI features (voice coaching, real-time feedback) are turned off
-     */
-    fun toggleAiCoach() {
-        _aiCoachEnabled.value = !_aiCoachEnabled.value
-        android.util.Log.d("RouteGen", "🤖 AI Coach ${if (_aiCoachEnabled.value) "ENABLED" else "DISABLED"}")
-    }
-}
 
-/**
- * UI State for route generation flow
- */
-sealed class RouteGenerationState {
-    object Setup : RouteGenerationState()
-    object Loading : RouteGenerationState()
-    data class Success(val routes: List<RouteOption>) : RouteGenerationState()
-    data class Error(val message: String) : RouteGenerationState()
+    private fun RouteOption.toGeneratedRoute(): GeneratedRoute {
+        return GeneratedRoute(
+            id = this.id,
+            name = this.name,
+            distance = this.distance,
+            duration = this.estimatedTime,
+            polyline = this.polyline,
+            waypoints = this.waypoints.map { LatLng(it.lat, it.lng) },
+            difficulty = when (this.difficulty.lowercase()) {
+                "easy" -> RouteDifficulty.EASY
+                "moderate" -> RouteDifficulty.MODERATE
+                "hard" -> RouteDifficulty.HARD
+                else -> RouteDifficulty.MODERATE
+            },
+            elevationGain = this.elevationGain,
+            elevationLoss = this.elevationLoss,
+            maxGradientPercent = this.maxGradientPercent,
+            maxGradientDegrees = this.maxGradientDegrees,
+            instructions = this.turnByTurn,
+            turnInstructions = this.turnInstructions.map { 
+                TurnInstruction(
+                    instruction = it.instruction,
+                    latitude = it.lat,
+                    longitude = it.lng,
+                    distance = it.distance ?: 0.0
+                )
+            },
+            backtrackRatio = this.circuitQuality.backtrackRatio,
+            angularSpread = this.circuitQuality.angularSpread,
+            templateName = this.name,
+            hasMajorRoads = false // Could be inferred from description or added to API response
+        )
+    }
+
+    /**
+     * Convert IntelligentRoute (from GraphHopper) to GeneratedRoute (for UI)
+     */
+    private fun IntelligentRoute.toGeneratedRoute(): GeneratedRoute {
+        val distanceKm = (distance ?: 5000.0) / 1000.0
+        val durationMinutes = (estimatedTime ?: 30.0) / 60
+        val difficultyStr = difficulty ?: "moderate"
+        
+        return GeneratedRoute(
+            id = this.id ?: "unknown",
+            name = "Route ${(distanceKm).toInt()}km - ${difficultyStr.replaceFirstChar { it.uppercase() }}",
+            distance = distanceKm, // Convert meters to kilometers
+            duration = durationMinutes, // Convert seconds to minutes
+            polyline = this.polyline ?: "",
+            waypoints = emptyList(), // GraphHopper routes are circuits, waypoints in polyline
+            difficulty = when (difficultyStr.lowercase()) {
+                "easy" -> RouteDifficulty.EASY
+                "moderate" -> RouteDifficulty.MODERATE
+                "hard" -> RouteDifficulty.HARD
+                else -> RouteDifficulty.MODERATE
+            },
+            elevationGain = this.elevationGain ?: 0.0, // Already in meters
+            elevationLoss = this.elevationLoss ?: 0.0, // Already in meters
+            maxGradientPercent = 0.0, // Could be calculated from elevation data
+            maxGradientDegrees = 0.0,
+            instructions = listOf("Circuit route - %.1f km, ~$durationMinutes minutes".format(distanceKm)),
+            turnInstructions = emptyList(), // Turn-by-turn available from backend if needed
+            backtrackRatio = 1.0 - (qualityScore ?: 0.5), // Quality score inverted
+            angularSpread = (popularityScore ?: 0.5) * 360.0, // Use popularity as spread indicator
+            templateName = "Intelligent Route",
+            hasMajorRoads = false // GraphHopper uses foot/hike profile
+        )
+    }
 }

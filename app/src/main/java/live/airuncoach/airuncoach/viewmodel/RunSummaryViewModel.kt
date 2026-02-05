@@ -44,12 +44,48 @@ class RunSummaryViewModel @Inject constructor(
     private val _analysisState = MutableStateFlow<RunSummaryUiState>(RunSummaryUiState.Loading)
     val analysisState: StateFlow<RunSummaryUiState> = _analysisState.asStateFlow()
     
+    private val _isLoadingRun = MutableStateFlow(false)
+    val isLoadingRun: StateFlow<Boolean> = _isLoadingRun.asStateFlow()
+    
+    private val _loadError = MutableStateFlow<String?>(null)
+    val loadError: StateFlow<String?> = _loadError.asStateFlow()
+    
     // Target info from run setup
     private var targetDistance: Double? = null
     private var targetTime: Long? = null
 
     /**
+     * Load run by ID from backend API
+     */
+    fun loadRunById(runId: String) {
+        viewModelScope.launch {
+            _isLoadingRun.value = true
+            _loadError.value = null
+            
+            try {
+                val session = apiService.getRunById(runId)
+                _runSession.value = session
+                
+                // Initialize struggle points (empty for now - can be enhanced later)
+                _strugglePoints.value = emptyList()
+                
+                _isLoadingRun.value = false
+            } catch (e: Exception) {
+                val errorMsg = if (e.message?.contains("401") == true || e.message?.contains("Unauthorized") == true) {
+                    "Session expired. Please log in again."
+                } else {
+                    e.message ?: "Failed to load run data"
+                }
+                _loadError.value = errorMsg
+                _isLoadingRun.value = false
+                android.util.Log.e("RunSummaryViewModel", "Error loading run: $errorMsg", e)
+            }
+        }
+    }
+    
+    /**
      * Initialize the summary with run data and detected struggle points
+     * (Used when coming directly from RunTrackingService)
      */
     fun initializeRunSummary(
         runSession: RunSession,
@@ -141,12 +177,21 @@ class RunSummaryViewModel @Inject constructor(
                     apiService.getGoals(user?.id ?: "")
                         .filter { it.isActive }
                         .map { goal ->
+                            // Determine target based on goal type
+                            val target = when (goal.type) {
+                                "EVENT" -> goal.eventName ?: "Unknown Event"
+                                "DISTANCE_TIME" -> goal.distanceTarget ?: "Unknown Distance"
+                                "HEALTH_WELLBEING" -> goal.healthTarget ?: "Health Goal"
+                                "CONSISTENCY" -> "${goal.weeklyRunTarget ?: 0} runs/week"
+                                else -> goal.title
+                            }
+                            
                             GoalData(
                                 type = goal.type,
-                                target = goal.target,
-                                current = goal.current?.toString(),
-                                deadline = goal.deadline?.toString(),
-                                progress = goal.progress
+                                target = target,
+                                current = goal.currentProgress.toString(),
+                                deadline = goal.targetDate,
+                                progress = goal.currentProgress
                             )
                         }
                 } catch (e: Exception) {
@@ -190,22 +235,22 @@ class RunSummaryViewModel @Inject constructor(
                     weatherAtStart = session.weatherAtStart?.let { weather ->
                         WeatherConditions(
                             temperature = weather.temperature,
-                            feelsLike = weather.feelsLike,
-                            humidity = weather.humidity,
+                            feelsLike = weather.feelsLike ?: weather.temperature,
+                            humidity = weather.humidity.toInt(),
                             windSpeed = weather.windSpeed,
                             windDirection = weather.windDirection,
-                            condition = weather.condition,
+                            condition = weather.condition ?: weather.description,
                             uvIndex = weather.uvIndex
                         )
                     },
                     weatherAtEnd = session.weatherAtEnd?.let { weather ->
                         WeatherConditions(
                             temperature = weather.temperature,
-                            feelsLike = weather.feelsLike,
-                            humidity = weather.humidity,
+                            feelsLike = weather.feelsLike ?: weather.temperature,
+                            humidity = weather.humidity.toInt(),
                             windSpeed = weather.windSpeed,
                             windDirection = weather.windDirection,
-                            condition = weather.condition,
+                            condition = weather.condition ?: weather.description,
                             uvIndex = weather.uvIndex
                         )
                     },
@@ -290,7 +335,7 @@ class RunSummaryViewModel @Inject constructor(
      */
     private fun determineExperienceLevel(user: User?): String? {
         return user?.fitnessLevel?.let { level ->
-            when (level.toLowerCase(Locale.ROOT)) {
+            when (level.lowercase()) {
                 "beginner" -> "beginner"
                 "intermediate" -> "intermediate"
                 "advanced" -> "advanced"

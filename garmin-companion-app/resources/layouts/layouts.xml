@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<layouts>
+    <layout id="StartLayout">
+        <label x="center" y="30" text="@Strings.AppName" color="Graphics.COLOR_WHITE" font="Graphics.FONT_LARGE" />
+    </layout>
+    
+    <layout id="RunLayout">
+        <!-- Main run screen layout -->
+        <label x="center" y="20" id="hrLabel" color="Graphics.COLOR_WHITE" font="Graphics.FONT_NUMBER_HOT" />
+        <label x="center" y="70" id="hrZoneLabel" color="Graphics.COLOR_LT_GRAY" font="Graphics.FONT_TINY" />
+        <label x="50" y="110" id="distanceLabel" color="Graphics.COLOR_WHITE" font="Graphics.FONT_MEDIUM" />
+        <label x="170" y="110" id="paceLabel" color="Graphics.COLOR_WHITE" font="Graphics.FONT_MEDIUM" />
+        <label x="50" y="145" id="timeLabel" color="Graphics.COLOR_LT_GRAY" font="Graphics.FONT_TINY" />
+        <label x="170" y="145" id="cadenceLabel" color="Graphics.COLOR_LT_GRAY" font="Graphics.FONT_TINY" />
+        <label x="center" y="180" id="coachingLabel" color="Graphics.COLOR_YELLOW" font="Graphics.FONT_TINY" justification="Graphics.TEXT_JUSTIFY_CENTER" />
+    </layout>
+</layouts>

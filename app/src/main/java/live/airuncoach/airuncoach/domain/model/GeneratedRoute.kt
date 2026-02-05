@@ -7,12 +7,12 @@ data class GeneratedRoute(
     val id: String,
     val name: String,                       // "North Loop Route"
     val distance: Double,                   // Distance in kilometers (e.g., 5.23)
-    val duration: Int,                      // Duration in minutes (e.g., 52)
+    val duration: Double,                    // Duration in minutes (can be decimal)
     val polyline: String,                   // Google encoded polyline
     val waypoints: List<LatLng>,            // Waypoints used for generation
     val difficulty: RouteDifficulty,        // EASY, MODERATE, HARD
-    val elevationGain: Int,                 // Total elevation gain in meters
-    val elevationLoss: Int,                 // Total elevation loss in meters
+    val elevationGain: Double,                // Total elevation gain in meters (can be decimal)
+    val elevationLoss: Double,              // Total elevation loss in meters (can be decimal)
     val maxGradientPercent: Double,         // Steepest gradient percentage (e.g., 8.5)
     val maxGradientDegrees: Double,         // Steepest gradient in degrees (e.g., 4.9)
     val instructions: List<String>,         // Turn-by-turn text instructions
@@ -31,8 +31,8 @@ data class GeneratedRoute(
      * Returns formatted duration
      */
     fun getFormattedDuration(): String {
-        val hours = duration / 60
-        val minutes = duration % 60
+        val hours = (duration / 60).toInt()
+        val minutes = (duration % 60).toInt()
         return if (hours > 0) {
             "${hours}h ${minutes}m"
         } else {

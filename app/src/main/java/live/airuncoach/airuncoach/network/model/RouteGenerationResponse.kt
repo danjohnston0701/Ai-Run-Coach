@@ -26,13 +26,13 @@ data class RouteOption(
     val distance: Double,  // in kilometers
     
     @SerializedName("estimatedTime")
-    val estimatedTime: Int,  // in minutes
+    val estimatedTime: Double,  // in minutes (GraphHopper returns decimal values)
     
     @SerializedName("elevationGain")
-    val elevationGain: Int,  // in meters
+    val elevationGain: Double,  // in meters (GraphHopper returns decimal values)
     
     @SerializedName("elevationLoss")
-    val elevationLoss: Int,  // in meters
+    val elevationLoss: Double,  // in meters (GraphHopper returns decimal values)
     
     @SerializedName("maxGradientPercent")
     val maxGradientPercent: Double,

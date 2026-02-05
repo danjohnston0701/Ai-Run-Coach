@@ -69,17 +69,22 @@ fun PaceChart(
 
             if (chartEntries.isNotEmpty()) {
                 val chartEntryModelProducer = remember { ChartEntryModelProducer(chartEntries) }
+                val model = chartEntryModelProducer.getModel()
                 
-                ProvideChartStyle {
-                    Chart(
-                        chart = lineChart(),
-                        model = chartEntryModelProducer.getModel(),
-                        startAxis = rememberStartAxis(),
-                        bottomAxis = rememberBottomAxis(),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp)
-                    )
+                if (model != null) {
+                    ProvideChartStyle {
+                        Chart(
+                            chart = lineChart(),
+                            model = model,
+                            startAxis = rememberStartAxis(),
+                            bottomAxis = rememberBottomAxis(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp)
+                        )
+                    }
+                } else {
+                    EmptyChartPlaceholder("No pace data available")
                 }
             }
         }
@@ -127,17 +132,22 @@ fun ElevationChart(
 
             if (chartEntries.isNotEmpty()) {
                 val chartEntryModelProducer = remember { ChartEntryModelProducer(chartEntries) }
+                val model = chartEntryModelProducer.getModel()
                 
-                ProvideChartStyle {
-                    Chart(
-                        chart = lineChart(),
-                        model = chartEntryModelProducer.getModel(),
-                        startAxis = rememberStartAxis(),
-                        bottomAxis = rememberBottomAxis(),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp)
-                    )
+                if (model != null) {
+                    ProvideChartStyle {
+                        Chart(
+                            chart = lineChart(),
+                            model = model,
+                            startAxis = rememberStartAxis(),
+                            bottomAxis = rememberBottomAxis(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp)
+                        )
+                    }
+                } else {
+                    EmptyChartPlaceholder("No elevation data available")
                 }
             }
         }
@@ -186,17 +196,22 @@ fun SplitsChart(
 
             if (chartEntries.isNotEmpty()) {
                 val chartEntryModelProducer = remember { ChartEntryModelProducer(chartEntries) }
+                val model = chartEntryModelProducer.getModel()
                 
-                ProvideChartStyle {
-                    Chart(
-                        chart = columnChart(),
-                        model = chartEntryModelProducer.getModel(),
-                        startAxis = rememberStartAxis(),
-                        bottomAxis = rememberBottomAxis(),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp)
-                    )
+                if (model != null) {
+                    ProvideChartStyle {
+                        Chart(
+                            chart = columnChart(),
+                            model = model,
+                            startAxis = rememberStartAxis(),
+                            bottomAxis = rememberBottomAxis(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp)
+                        )
+                    }
+                } else {
+                    EmptyChartPlaceholder("No split data available")
                 }
             }
         }

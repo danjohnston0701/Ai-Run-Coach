@@ -43,8 +43,21 @@ class ProfileViewModel @Inject constructor(
 
     private fun loadUser() {
         val userJson = sharedPrefs.getString("user", null)
+        android.util.Log.d("ProfileViewModel", "🔍 Loading user from SharedPreferences")
+        android.util.Log.d("ProfileViewModel", "User JSON exists: ${userJson != null}")
         if (userJson != null) {
-            _user.value = gson.fromJson(userJson, User::class.java)
+            try {
+                val user = gson.fromJson(userJson, User::class.java)
+                _user.value = user
+                android.util.Log.d("ProfileViewModel", "✅ User loaded: ${user.name} (ID: ${user.id})")
+            } catch (e: Exception) {
+                android.util.Log.e("ProfileViewModel", "❌ Failed to parse user JSON: ${e.message}")
+                android.util.Log.e("ProfileViewModel", "JSON was: $userJson")
+            }
+        } else {
+            android.util.Log.w("ProfileViewModel", "⚠️ No user data found in SharedPreferences")
+            val token = sessionManager.getAuthToken()
+            android.util.Log.w("ProfileViewModel", "Auth token exists: ${token != null}")
         }
     }
 
@@ -57,17 +70,21 @@ class ProfileViewModel @Inject constructor(
                 inputStream?.close()
 
                 if (imageBytes != null) {
-                    val requestFile = imageBytes.toRequestBody("image/jpeg".toMediaTypeOrNull())
-                    val body = MultipartBody.Part.createFormData("profilePic", "profile.jpg", requestFile)
+                    // Convert to base64
+                    val base64Image = android.util.Base64.encodeToString(imageBytes, android.util.Base64.NO_WRAP)
+                    val imageData = "data:image/jpeg;base64,$base64Image"
 
-                    val updatedUser = apiService.uploadProfilePicture(user.id, body)
+                    val request = live.airuncoach.airuncoach.network.model.UploadProfilePictureRequest(imageData)
+                    val updatedUser = apiService.uploadProfilePicture(user.id, request)
 
                     val userJson = gson.toJson(updatedUser)
                     sharedPrefs.edit().putString("user", userJson).apply()
                     _user.value = updatedUser
+                    
+                    android.util.Log.d("ProfileViewModel", "✅ Profile picture uploaded successfully")
                 }
             } catch (e: Exception) {
-                // Handle error
+                android.util.Log.e("ProfileViewModel", "❌ Failed to upload profile picture: ${e.message}", e)
             }
         }
     }

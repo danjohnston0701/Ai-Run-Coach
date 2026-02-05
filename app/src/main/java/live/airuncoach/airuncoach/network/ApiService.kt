@@ -7,6 +7,8 @@ import live.airuncoach.airuncoach.network.model.PhaseCoachingResponse
 import live.airuncoach.airuncoach.network.model.TalkToCoachResponse
 import live.airuncoach.airuncoach.network.model.HeartRateCoachingResponse
 import live.airuncoach.airuncoach.network.model.*
+import live.airuncoach.airuncoach.domain.model.ConnectedDevice
+import live.airuncoach.airuncoach.domain.model.WellnessSyncResponse
 import okhttp3.MultipartBody
 import retrofit2.http.*
 
@@ -36,7 +38,7 @@ interface ApiService {
     suspend fun createGoal(@Body request: CreateGoalRequest): Goal
 
     @DELETE("/api/goals/{id}")
-    suspend fun deleteGoal(@Path("id") goalId: Long)
+    suspend fun deleteGoal(@Path("id") goalId: String)
 
     @GET("/api/friends/{userId}")
     suspend fun getFriends(@Path("userId") userId: String): List<Friend>
@@ -68,18 +70,39 @@ interface ApiService {
     @GET("/api/group-runs")
     suspend fun getGroupRuns(): List<GroupRun>
 
-    @Multipart
+    @GET("/api/events/grouped")
+    suspend fun getEventsGrouped(): Map<String, List<Event>>
+
+    @GET("/api/routes/{id}")
+    suspend fun getRoute(@Path("id") routeId: String): Route
+
     @POST("/api/users/{id}/profile-picture")
-    suspend fun uploadProfilePicture(@Path("id") userId: String, @Part profilePicture: MultipartBody.Part): User
+    suspend fun uploadProfilePicture(@Path("id") userId: String, @Body request: UploadProfilePictureRequest): User
 
     @POST("/api/routes/generate-ai-routes")
     suspend fun generateAIRoutes(@Body request: RouteGenerationRequest): RouteGenerationResponse
 
+    @POST("/api/routes/generate-intelligent")
+    suspend fun generateIntelligentRoutes(@Body request: IntelligentRouteRequest): IntelligentRouteResponse
+
     @POST("/api/coaching/run-analysis")
     suspend fun getRunAnalysis(@Body request: RunAnalysisRequest): RunAnalysisResponse
+    
+    @POST("/api/runs")
+    suspend fun uploadRun(@Body request: UploadRunRequest): UploadRunResponse
+    
+    @GET("/api/runs/{id}")
+    suspend fun getRunById(@Path("id") runId: String): RunSession
 
     @DELETE("/api/runs/{runId}")
     suspend fun deleteRun(@Path("runId") runId: String)
+
+    // Garmin OAuth
+    @GET("/api/auth/garmin")
+    suspend fun initiateGarminAuth(@Query("app_redirect") appRedirect: String): GarminAuthResponse
+    
+    @GET("/api/runs/user/{userId}")
+    suspend fun getRunsForUser(@Path("userId") userId: String): List<RunSession>
 
     // ========== FITNESS & FRESHNESS ==========
     
@@ -219,6 +242,23 @@ interface ApiService {
 
     @PUT("/api/notifications/read-all")
     suspend fun markAllNotificationsRead()
+    
+    // ========== CONNECTED DEVICES & GARMIN ==========
+    
+    @GET("/api/connected-devices")
+    suspend fun getConnectedDevices(): List<ConnectedDevice>
+    
+    @POST("/api/connected-devices")
+    suspend fun connectDevice(@Body request: Map<String, String>): ConnectedDevice
+    
+    @DELETE("/api/connected-devices/{id}")
+    suspend fun disconnectDevice(@Path("id") deviceId: String): Map<String, Boolean>
+    
+    @GET("/api/auth/garmin")
+    suspend fun startGarminAuth(@Query("app_redirect") appRedirect: String = "airuncoach://connected-devices"): String
+    
+    @POST("/api/garmin/wellness/sync")
+    suspend fun syncGarminWellness(@Body date: Map<String, String> = emptyMap()): WellnessSyncResponse
 }
 
 /**

@@ -330,7 +330,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onBack = { navController.popBackStack() },
                     onRegenerateRoutes = {
                         viewModel.clearRoutes()
-                        navController.navigate("run_setup/route") {
+                        navController.navigate("map_my_run_setup/route") {
                             popUpTo("route_selection/${distanceKm.toInt()}") { inclusive = true }
                         }
                     },

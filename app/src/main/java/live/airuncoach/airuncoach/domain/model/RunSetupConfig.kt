@@ -2,7 +2,7 @@ package live.airuncoach.airuncoach.domain.model
 
 /**
  * Configuration for setting up a run session
- * Includes distance, target time, live tracking, and group run settings
+ * Includes distance, target time, live tracking, group run settings, and route
  */
 data class RunSetupConfig(
     val activityType: PhysicalActivityType = PhysicalActivityType.RUN,
@@ -14,7 +14,8 @@ data class RunSetupConfig(
     val liveTrackingEnabled: Boolean = false,
     val liveTrackingObservers: List<String> = emptyList(), // User IDs
     val isGroupRun: Boolean = false,
-    val groupRunParticipants: List<String> = emptyList()   // User IDs
+    val groupRunParticipants: List<String> = emptyList(),   // User IDs
+    val route: GeneratedRoute? = null   // Generated route with polyline and turn instructions
 ) {
     /**
      * Get formatted target time string

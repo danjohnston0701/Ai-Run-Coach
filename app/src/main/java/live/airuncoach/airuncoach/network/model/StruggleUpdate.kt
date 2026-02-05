@@ -11,5 +11,7 @@ data class StruggleUpdate(
     @SerializedName("currentGrade") val currentGrade: Double?,
     @SerializedName("totalElevationGain") val totalElevationGain: Double?,
     @SerializedName("coachName") val coachName: String?,
-    @SerializedName("coachTone") val coachTone: String?
+    @SerializedName("coachTone") val coachTone: String?,
+    @SerializedName("coachGender") val coachGender: String?,
+    @SerializedName("coachAccent") val coachAccent: String?
 )

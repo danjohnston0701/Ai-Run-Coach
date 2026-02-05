@@ -84,17 +84,22 @@ fun HeartRatePaceCorrelationChart(
 
             if (chartEntries.isNotEmpty()) {
                 val chartEntryModelProducer = remember { ChartEntryModelProducer(chartEntries) }
+                val model = chartEntryModelProducer.getModel()
                 
-                ProvideChartStyle {
-                    Chart(
-                        chart = lineChart(),
-                        model = chartEntryModelProducer.getModel(),
-                        startAxis = rememberStartAxis(),
-                        bottomAxis = rememberBottomAxis(),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp)
-                    )
+                if (model != null) {
+                    ProvideChartStyle {
+                        Chart(
+                            chart = lineChart(),
+                            model = model,
+                            startAxis = rememberStartAxis(),
+                            bottomAxis = rememberBottomAxis(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp)
+                        )
+                    }
+                } else {
+                    EmptyChartPlaceholder("No pace data available")
                 }
             }
             
@@ -594,7 +599,7 @@ private fun CadenceGauge(cadence: Int) {
                     .align(Alignment.CenterStart)
                     .fillMaxHeight()
                     .fillMaxWidth(170f / 200f)
-                    .padding(end = (1f - 180f / 200f) * 100)
+                    .padding(end = ((1f - 180f / 200f) * 100).dp)
             ) {
                 Box(
                     modifier = Modifier
@@ -726,7 +731,7 @@ private fun WeatherSnapshot(
             color = Colors.textPrimary
         )
         Text(
-            weather.condition,
+            weather.description,
             style = AppTextStyles.caption,
             color = Colors.textSecondary
         )

@@ -4,21 +4,29 @@ package live.airuncoach.airuncoach.viewmodel
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import live.airuncoach.airuncoach.data.HealthConnectRepository
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.*
 import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.network.model.PreRunBriefingRequest
+import live.airuncoach.airuncoach.network.model.StartLocation
+import live.airuncoach.airuncoach.network.model.WeatherPayload
 import live.airuncoach.airuncoach.service.RunTrackingService
+import live.airuncoach.airuncoach.utils.AudioPlayerHelper
 import live.airuncoach.airuncoach.utils.SpeechRecognizerHelper
 import live.airuncoach.airuncoach.utils.SpeechState
+import live.airuncoach.airuncoach.utils.SpeechStatus
 import live.airuncoach.airuncoach.utils.TextToSpeechHelper
 import javax.inject.Inject
 
@@ -34,7 +42,11 @@ data class RunState(
     val isMuted: Boolean = false,
     val coachText: String = "GPS locked! Tap 'Start Run' when you're ready.",
     val speechState: SpeechState = SpeechState(),
-    val wellnessContext: WellnessContext? = null
+    val wellnessContext: WellnessContext? = null,
+    val isLoadingBriefing: Boolean = false,
+    val latestCoachMessage: String? = null,
+    val isStopping: Boolean = false,
+    val backendRunId: String? = null
 )
 
 @HiltViewModel
@@ -53,13 +65,16 @@ class RunSessionViewModel @Inject constructor(
 
     private val speechRecognizerHelper = SpeechRecognizerHelper(context)
     private val textToSpeechHelper = TextToSpeechHelper(context)
+    private val audioPlayerHelper = AudioPlayerHelper(context)
 
     private val sharedPrefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
     private var user: User? = null
+    private var runConfig: live.airuncoach.airuncoach.domain.model.RunSetupConfig? = null
 
     init {
         loadUser()
+        loadAiCoachPreference()
         viewModelScope.launch {
             runSession.collect { session ->
                 session?.let { 
@@ -76,6 +91,16 @@ class RunSessionViewModel @Inject constructor(
                 }
             }
         }
+        
+        // Listen for upload completion
+        viewModelScope.launch {
+            RunTrackingService.uploadComplete.collect { backendRunId ->
+                backendRunId?.let {
+                    Log.d("RunSessionViewModel", "Upload complete with backend ID: $it")
+                    _runState.update { state -> state.copy(backendRunId = it, isStopping = false) }
+                }
+            }
+        }
     }
 
     private fun loadUser() {
@@ -83,6 +108,19 @@ class RunSessionViewModel @Inject constructor(
         if (userJson != null) {
             user = gson.fromJson(userJson, User::class.java)
         }
+    }
+    
+    private fun loadAiCoachPreference() {
+        val isEnabled = sharedPrefs.getBoolean("ai_coach_enabled", true)
+        _runState.update { it.copy(isCoachEnabled = isEnabled) }
+        android.util.Log.d("RunSessionViewModel", "AI Coach ${if (isEnabled) "enabled" else "disabled (navigation only)"}")
+        
+        /*
+         * AI Coach Toggle Behavior:
+         * - ENABLED: Full AI coaching (pre-run briefing, realtime insights, generic coaching, navigation)
+         * - DISABLED with Route: Navigation instructions only, no coaching insights
+         * - DISABLED without Route: No AI prompts at all
+         */
     }
 
     fun getHealthConnectPermissionsContract(): ActivityResultContract<Set<String>, Set<String>> {
@@ -97,15 +135,148 @@ class RunSessionViewModel @Inject constructor(
     }
 
     fun prepareRun() {
-        // TODO: Prepare run by getting pre-run briefing
+        viewModelScope.launch {
+            // Skip AI coaching if disabled
+            if (!_runState.value.isCoachEnabled) {
+                _runState.update {
+                    it.copy(coachText = "Ready to run! Tap Start when you're ready.")
+                }
+                return@launch
+            }
+
+            try {
+                _runState.update { it.copy(
+                    coachText = "Getting your personalized briefing...",
+                    isLoadingBriefing = true
+                )}
+                
+                // Add timeout to prevent hanging
+                withTimeout(15000) { // 15 second timeout
+                    
+                    // Get route data from runConfig if available
+                    val route = runConfig?.route
+                    val distance = route?.distance ?: runConfig?.targetDistance?.toDouble() ?: 5.0
+                    val elevationGain = route?.elevationGain?.toInt() ?: 0
+                    val elevationLoss = route?.elevationLoss?.toInt() ?: 0
+                    val maxGradientDegrees = route?.maxGradientDegrees ?: 0.0
+                    val difficulty = route?.difficulty?.name?.lowercase() ?: "moderate"
+                    
+                    // Get first turn instruction if available
+                    val firstTurnInstruction = route?.turnInstructions?.firstOrNull()?.instruction
+                    
+                    // Get start location from route waypoints
+                    val startLat = route?.waypoints?.firstOrNull()?.latitude ?: 0.0
+                    val startLng = route?.waypoints?.firstOrNull()?.longitude ?: 0.0
+                    
+                    // Calculate target time in seconds if set
+                    val targetTimeSeconds = if (runConfig?.hasTargetTime == true) {
+                        runConfig?.getTotalTargetSeconds()
+                    } else null
+                    
+                    Log.d("RunSessionViewModel", "Preparing briefing: distance=$distance km, elevation=$elevationGain m, maxGradient=$maxGradientDegrees°")
+                    
+                    val request = PreRunBriefingRequest(
+                        startLocation = StartLocation(startLat, startLng),
+                        distance = distance,
+                        elevationGain = elevationGain,
+                        elevationLoss = elevationLoss,
+                        maxGradientDegrees = maxGradientDegrees,
+                        difficulty = difficulty,
+                        activityType = runConfig?.activityType?.name?.lowercase() ?: "run",
+                        targetTime = targetTimeSeconds,
+                        firstTurnInstruction = firstTurnInstruction,
+                        weather = WeatherPayload(
+                            temp = 20, // TODO: Get real weather data
+                            condition = "clear",
+                            windSpeed = 0
+                        )
+                    )
+                    
+                    val briefing = apiService.getPreRunBriefing(request)
+                    
+                    // Update UI with briefing text
+                    _runState.update { it.copy(
+                        coachText = briefing.text,
+                        latestCoachMessage = briefing.text,
+                        isLoadingBriefing = false
+                    )}
+                    
+                    // Play OpenAI TTS audio if available and not muted
+                    if (!_runState.value.isMuted) {
+                        if (briefing.audio != null && briefing.format != null) {
+                            Log.d("RunSessionViewModel", "Playing OpenAI TTS audio (${briefing.format})")
+                            audioPlayerHelper.playAudio(briefing.audio, briefing.format)
+                        } else {
+                            Log.d("RunSessionViewModel", "Falling back to Android TTS")
+                            textToSpeechHelper.speak(briefing.text)
+                        }
+                    }
+                } // End of withTimeout
+            } catch (e: TimeoutCancellationException) {
+                Log.w("RunSessionViewModel", "Pre-run briefing timed out")
+                _runState.update { 
+                    it.copy(
+                        coachText = "Ready to run! Tap Start when you're ready.",
+                        isLoadingBriefing = false
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("RunSessionViewModel", "Failed to get pre-run briefing", e)
+                _runState.update { 
+                    it.copy(
+                        coachText = "Ready to run! Tap Start when you're ready.",
+                        isLoadingBriefing = false
+                    )
+                }
+            }
+        }
+    }
+
+    fun setRunConfig(config: live.airuncoach.airuncoach.domain.model.RunSetupConfig) {
+        runConfig = config
+        // Update UI with target distance if set
+        if (config.hasTargetTime) {
+            val targetTimeStr = config.getFormattedTargetTime()
+            _runState.update { it.copy(
+                coachText = "Target: ${config.targetDistance} km in $targetTimeStr. Ready to start!"
+            )}
+        } else {
+            _runState.update { it.copy(
+                coachText = "Target: ${config.targetDistance} km. Ready to start!"
+            )}
+        }
     }
 
     fun startRun() {
-        val intent = Intent(context, RunTrackingService::class.java).apply {
-            action = RunTrackingService.ACTION_START_TRACKING
+        try {
+            val intent = Intent(context, RunTrackingService::class.java).apply {
+                action = RunTrackingService.ACTION_START_TRACKING
+                // Pass target distance and time to service if configured
+                runConfig?.let {
+                    putExtra(RunTrackingService.EXTRA_TARGET_DISTANCE, it.targetDistance.toDouble())
+                    // Calculate target time in milliseconds if set
+                    if (it.hasTargetTime) {
+                        val targetTimeMs = (it.targetHours * 3600000L) + (it.targetMinutes * 60000L)
+                        putExtra(RunTrackingService.EXTRA_TARGET_TIME, targetTimeMs)
+                    }
+                }
+            }
+            
+            // Start service in foreground mode (Android O+)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            
+            _runState.update { it.copy(isRunning = true, isPaused = false) }
+            android.util.Log.d("RunSessionViewModel", "Run tracking service started")
+        } catch (e: Exception) {
+            android.util.Log.e("RunSessionViewModel", "Failed to start run tracking service", e)
+            _runState.update { it.copy(
+                coachText = "Failed to start run. Please try again."
+            )}
         }
-        context.startService(intent)
-        _runState.update { it.copy(isRunning = true, isPaused = false) }
     }
 
     fun pauseRun() {
@@ -129,11 +300,88 @@ class RunSessionViewModel @Inject constructor(
             action = RunTrackingService.ACTION_STOP_TRACKING
         }
         context.startService(intent)
-        _runState.update { it.copy(isRunning = false, isPaused = false) }
+        _runState.update { it.copy(isRunning = false, isPaused = false, isStopping = true) }
     }
 
     fun startListening() {
         speechRecognizerHelper.startListening()
+        _runState.update { it.copy(coachText = "Listening...") }
+        
+        // Collect speech recognition results
+        viewModelScope.launch {
+            speechRecognizerHelper.speechState.collect { speechState ->
+                when (speechState.status) {
+                    SpeechStatus.LISTENING -> {
+                        _runState.update { it.copy(coachText = "Listening...") }
+                    }
+                    SpeechStatus.IDLE -> {
+                        if (speechState.text.isNotEmpty()) {
+                            _runState.update { it.copy(coachText = "You said: ${speechState.text}") }
+                            sendMessageToCoach(speechState.text)
+                        }
+                    }
+                    SpeechStatus.ERROR -> {
+                        _runState.update { 
+                            it.copy(coachText = "Sorry, I couldn't hear you. Try again!") 
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private fun sendMessageToCoach(message: String) {
+        viewModelScope.launch {
+            try {
+                _runState.update { it.copy(coachText = "Thinking...") }
+                
+                val request = live.airuncoach.airuncoach.network.model.TalkToCoachRequest(
+                    message = message,
+                    context = CoachingContext(
+                        distance = runSession.value?.getDistanceInKm(),
+                        duration = (runSession.value?.duration?.div(1000))?.toInt(),
+                        pace = runSession.value?.averagePace,
+                        totalDistance = runSession.value?.getDistanceInKm(),
+                        heartRate = runSession.value?.heartRate?.takeIf { it > 0 },
+                        cadence = runSession.value?.cadence?.takeIf { it > 0 },
+                        elevation = runSession.value?.totalElevationGain,
+                        elevationChange = null,
+                        currentGrade = null,
+                        totalElevationGain = runSession.value?.totalElevationGain,
+                        weather = runSession.value?.weatherAtStart,
+                        phase = runSession.value?.phase,
+                        isStruggling = runSession.value?.isStruggling,
+                        activityType = "run",
+                        userFitnessLevel = null,
+                        coachTone = user?.coachTone,
+                        coachAccent = null,
+                        wellness = _runState.value.wellnessContext
+                    )
+                )
+                
+                val response = apiService.talkToCoach(request)
+                
+                // Update UI with response
+                _runState.update { it.copy(
+                    coachText = response.message,
+                    latestCoachMessage = response.message
+                )}
+                
+                // Play OpenAI TTS audio if available, otherwise fall back to Android TTS
+                if (!_runState.value.isMuted) {
+                    if (response.audio != null && response.format != null) {
+                        audioPlayerHelper.playAudio(response.audio!!, response.format!!)
+                    } else {
+                        textToSpeechHelper.speak(response.message)
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _runState.update { 
+                    it.copy(coachText = "Sorry, I couldn't process that. Keep going!") 
+                }
+            }
+        }
     }
 
     fun toggleCoach() {
@@ -142,5 +390,10 @@ class RunSessionViewModel @Inject constructor(
 
     fun toggleMute() {
         _runState.update { it.copy(isMuted = !it.isMuted) }
+    }
+    
+    override fun onCleared() {
+        super.onCleared()
+        textToSpeechHelper.destroy()
     }
 }

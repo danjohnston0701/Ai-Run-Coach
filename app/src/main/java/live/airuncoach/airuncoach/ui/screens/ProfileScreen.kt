@@ -15,8 +15,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,22 +60,87 @@ fun ProfileScreen(
     val viewModel: ProfileViewModel = hiltViewModel()
     val user by viewModel.user.collectAsState()
     val friendCount by viewModel.friendCount.collectAsState()
-
-    val imagePickerLauncher = rememberLauncherForActivityResult(
+    
+    var showImagePickerDialog by remember { mutableStateOf(false) }
+    
+    val cameraUri = remember { mutableStateOf<Uri?>(null) }
+    
+    val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
         onResult = { uri: Uri? ->
             uri?.let { viewModel.uploadProfilePicture(it) }
         }
     )
+    
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture(),
+        onResult = { success ->
+            if (success) {
+                cameraUri.value?.let { viewModel.uploadProfilePicture(it) }
+            }
+        }
+    )
 
     // Refresh user data when the screen appears
-    DisposableEffect(Unit) {
+    LaunchedEffect(Unit) {
         viewModel.refreshUser()
-        onDispose { }
     }
 
+    // Show loading state if user data hasn't loaded yet
     if (user == null) {
-        onNavigateToLogin()
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Colors.backgroundRoot),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                CircularProgressIndicator(color = Colors.primary)
+                Spacer(modifier = Modifier.height(Spacing.md))
+                Text(
+                    text = "Loading profile...",
+                    style = AppTextStyles.body,
+                    color = Colors.textSecondary
+                )
+            }
+        }
+        return
+    }
+    
+    // Image Picker Dialog
+    if (showImagePickerDialog) {
+        AlertDialog(
+            onDismissRequest = { showImagePickerDialog = false },
+            title = { Text("Choose Profile Photo", color = Colors.textPrimary) },
+            text = { Text("Select a source for your profile photo", color = Colors.textSecondary) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showImagePickerDialog = false
+                    // Create temp file for camera
+                    val photoFile = java.io.File(context.cacheDir, "profile_${System.currentTimeMillis()}.jpg")
+                    cameraUri.value = androidx.core.content.FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        photoFile
+                    )
+                    cameraLauncher.launch(cameraUri.value)
+                }) {
+                    Text("Take Photo", color = Colors.primary)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showImagePickerDialog = false
+                    galleryLauncher.launch("image/*")
+                }) {
+                    Text("Choose from Gallery", color = Colors.primary)
+                }
+            },
+            containerColor = Colors.backgroundSecondary
+        )
     }
 
     LazyColumn(
@@ -81,7 +150,7 @@ fun ProfileScreen(
             .padding(vertical = Spacing.lg),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        item { user?.let { ProfileHeader(user = it, onImageClick = { imagePickerLauncher.launch("image/*") }) } }
+        item { user?.let { ProfileHeader(user = it, onImageClick = { showImagePickerDialog = true }) } }
         item { Spacer(modifier = Modifier.height(Spacing.xl)) }
 
         item { SectionTitle(title = "Friends") }
@@ -125,7 +194,10 @@ fun ProfileScreen(
 
         item {
             Button(
-                onClick = { viewModel.logout() },
+                onClick = { 
+                    viewModel.logout()
+                    onNavigateToLogin()
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = Spacing.lg)
