@@ -5,7 +5,34 @@
 
 ---
 
-## 🚀 Simulator Status
+## 🚀 Quick Start
+
+### Launch Simulator (Easy Way):
+
+```bash
+./launch-garmin-simulator.sh
+```
+
+This script automatically:
+- ✅ Starts the Connect IQ Simulator
+- ✅ Loads the Fenix 7 device
+- ✅ Loads your AI Run Coach app
+- ✅ Shows you the controls
+
+### Manual Start (If Needed):
+
+```bash
+# Start simulator
+/Users/danieljohnston/Library/Application\ Support/Garmin/ConnectIQ/Sdks/connectiq-sdk-mac-8.4.0-2025-12-03-5122605dc/bin/connectiq &
+
+# Load app on Fenix 7
+cd garmin-companion-app
+/Users/danieljohnston/Library/Application\ Support/Garmin/ConnectIQ/Sdks/connectiq-sdk-mac-8.4.0-2025-12-03-5122605dc/bin/monkeydo bin/AiRunCoach.prg fenix7
+```
+
+---
+
+## 🎮 Simulator Status
 
 ### What's Running:
 - ✅ **Connect IQ Simulator** launched
