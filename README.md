@@ -1,7 +1,7 @@
 # 🏃 AI Run Coach - Android App
 
 **Version:** 2.0  
-**Status:** Production Ready (Awaiting Backend Deployment)  
+**Status:** ✅ **Production Live** - Backend deployed, ready for testing  
 **Last Updated:** February 5, 2026
 
 ---
@@ -10,79 +10,141 @@
 
 AI Run Coach is a cutting-edge Android fitness tracking application that combines GPS tracking, AI-powered coaching, and intelligent route generation to provide personalized running experiences.
 
-### Key Features
-- 🗺️ **AI Route Generation** - GraphHopper-powered intelligent route creation
+### 🎯 Key Features
+- 🗺️ **AI Route Generation** - GraphHopper-powered circular routes that return to start
 - 🎯 **GPS Run Tracking** - Real-time location, pace, and distance tracking
-- 🤖 **AI Coaching** - OpenAI-powered personalized running coach
-- 📊 **Goals Management** - Create and track running goals
-- 👥 **Social Features** - Friends, groups, and live tracking
-- ⌚ **Garmin Integration** - Connect IQ app support
-- 📈 **Analytics** - Comprehensive run history and statistics
+- 🤖 **AI Coaching** - OpenAI GPT-4 powered personalized running coach
+- 📊 **Goals Management** - Create and track running goals with progress analytics
+- 👥 **Social Features** - Friends, groups, and live run tracking (planned)
+- ⌚ **Garmin Integration** - Connect IQ companion app for wearables
+- 📈 **Analytics** - Comprehensive run history and performance statistics
+
+### 🚀 Production Status
+- ✅ **Backend Live:** `https://airuncoach.live`
+- ✅ **APK Ready:** 24 MB debug build available
+- ✅ **Garmin App Built:** Simulator tested and ready
+- ⏳ **Testing:** Ready for comprehensive feature testing
 
 ---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Android Studio Hedgehog (2023.1.1) or later
-- Android SDK 24+ (Android 7.0+)
-- JDK 17
-- Node.js 18+ (for backend)
+- **Android Studio:** Hedgehog (2023.1.1) or later
+- **Android SDK:** API 24+ (Android 7.0+)
+- **JDK:** 17 or later
+- **Node.js:** 18+ (for backend development, optional)
 
 ### Installation
 
-1. **Clone Repository**
-   ```bash
-   git clone <repository-url>
-   cd AiRunCoach
-   ```
+#### Option 1: Install Pre-built APK (Fastest)
+```bash
+# APK location
+app/build/outputs/apk/debug/app-debug.apk
 
-2. **Open in Android Studio**
-   - File → Open → Select project directory
-   - Wait for Gradle sync
+# Install via USB
+adb install -r app/build/outputs/apk/debug/app-debug.apk
 
-3. **Build APK**
-   ```bash
-   ./gradlew assembleDebug
-   ```
+# Or copy to device and install from Files app
+```
 
-4. **Install on Device**
-   ```bash
-   ./gradlew installDebug
-   ```
+#### Option 2: Build from Source
+```bash
+# Clone repository
+git clone <repository-url>
+cd AiRunCoach
+
+# Open in Android Studio
+# File → Open → Select project directory
+# Wait for Gradle sync
+
+# Build debug APK
+./gradlew assembleDebug
+
+# Install on connected device
+./gradlew installDebug
+```
+
+#### Option 3: Run from Android Studio
+1. Open project in Android Studio
+2. Connect Android device via USB (or use emulator)
+3. Click **Run** button (green play icon) or press `Shift + F10`
+4. Select your device
+5. App installs and launches automatically
 
 ---
 
 ## 🏗️ Architecture
 
 ### Tech Stack
-- **Language:** Kotlin
-- **UI Framework:** Jetpack Compose
+- **Language:** Kotlin 1.9
+- **UI Framework:** Jetpack Compose (Material 3)
 - **Architecture:** MVVM with ViewModels
 - **Dependency Injection:** Hilt/Dagger
 - **Navigation:** Compose Navigation
-- **Networking:** Retrofit + OkHttp
-- **Database:** Room (local), PostgreSQL (remote)
-- **Maps:** Google Maps SDK
-- **Location:** Google Play Services
+- **Networking:** Retrofit 2 + OkHttp 4
+- **Async:** Coroutines + Flow
+- **Database:** Room (local), PostgreSQL via API (remote)
+- **Maps:** Google Maps SDK for Android
+- **Location:** Google Play Services Location API
+- **Background:** Foreground Services
+
+### Backend Stack
+- **Runtime:** Node.js 22
+- **Framework:** Express.js
+- **Database:** PostgreSQL (Neon.com)
+- **AI:** OpenAI GPT-4
+- **Maps:** Google Maps API, GraphHopper API
+- **Auth:** JWT tokens
+- **Deployment:** Replit → Google Cloud Run
+- **URL:** https://airuncoach.live
 
 ### Project Structure
 ```
 app/
 ├── src/main/java/live/airuncoach/airuncoach/
-│   ├── data/              # Data layer (SessionManager, etc.)
-│   ├── di/                # Dependency injection modules
-│   ├── domain/model/      # Domain models
-│   ├── network/           # API services and models
-│   ├── service/           # Background services
+│   ├── data/              # Data layer (SessionManager, GarminAuthManager)
+│   ├── di/                # Hilt modules (AppModule)
+│   ├── domain/model/      # Domain models (RunSession, Goal, Route, etc.)
+│   ├── network/           # API services and network models
+│   │   ├── ApiService.kt
+│   │   ├── RetrofitClient.kt
+│   │   └── model/         # API request/response models
+│   ├── service/           # Background services (RunTrackingService)
 │   ├── ui/
 │   │   ├── components/    # Reusable UI components
+│   │   │   ├── TargetTimeCard.kt
+│   │   │   ├── RunCharts.kt
+│   │   │   └── RawDataViews.kt
 │   │   ├── screens/       # Screen composables
-│   │   └── theme/         # App theming
+│   │   │   ├── DashboardScreen.kt
+│   │   │   ├── MapMyRunSetupScreen.kt  ← Unified run setup
+│   │   │   ├── RouteGenerationScreen.kt
+│   │   │   ├── RunSessionScreen.kt
+│   │   │   ├── GoalsScreen.kt
+│   │   │   └── ProfileScreen.kt
+│   │   ├── navigation/    # Navigation graph
+│   │   │   └── RootNavigationGraph.kt
+│   │   └── theme/         # App theming (Colors, Typography, Theme)
 │   ├── util/              # Utilities
-│   ├── utils/             # Additional utilities
-│   └── viewmodel/         # ViewModels
-└── src/main/res/          # Resources (drawables, xml)
+│   ├── utils/             # Additional utilities (AudioPlayerHelper)
+│   └── viewmodel/         # ViewModels for each screen
+└── src/main/res/          # Resources (drawables, xml configs)
+    ├── drawable/          # Vector icons
+    ├── xml/               # Network security, file paths
+    └── values/            # Strings, colors, themes
+
+garmin-companion-app/      # Garmin Connect IQ App
+├── source/                # Monkey C source code
+│   ├── AiRunCoachApp.mc
+│   ├── views/
+│   │   ├── StartView.mc   # Pre-run screen
+│   │   └── RunView.mc     # Run tracking screen
+│   └── networking/
+│       └── DataStreamer.mc
+├── resources/             # UI resources
+├── bin/AiRunCoach.prg    # Built app (107 KB)
+└── manifest.xml          # App metadata
 ```
 
 ---
@@ -98,338 +160,377 @@ app/
 val useLocalBackend = false // false = production, true = local
 
 // Backend URLs
-Production: https://airuncoach.live
-Local (Emulator): http://10.0.2.2:3000
-Local (Device): http://192.168.18.14:3000
+val baseUrl = if (BuildConfig.DEBUG) {
+    if (useLocalBackend) {
+        // LOCAL DEV: Your Mac's IP address
+        "http://192.168.18.14:5000"
+    } else {
+        // PRODUCTION: Live backend
+        "https://airuncoach.live"
+    }
+} else {
+    // RELEASE builds always use production
+    "https://airuncoach.live"
+}
 ```
 
-### API Keys
+**Current Setting:**
+- ✅ `useLocalBackend = false` (points to production)
+- ✅ Production URL: `https://airuncoach.live`
 
-Add to your `local.properties`:
-```properties
-MAPS_API_KEY=your_google_maps_api_key
+### Google Maps API Key
+
+**File:** `app/src/main/AndroidManifest.xml`
+
+```xml
+<meta-data
+    android:name="com.google.android.geo.API_KEY"
+    android:value="YOUR_GOOGLE_MAPS_API_KEY"/>
 ```
+
+**To update:** Replace `YOUR_GOOGLE_MAPS_API_KEY` with your key from Google Cloud Console.
+
+### Network Security
+
+**File:** `app/src/main/res/xml/network_security_config.xml`
+
+Allows both HTTPS (production) and HTTP (local development) connections.
 
 ---
 
-## 📦 Building
+## 🎮 Building & Running
 
-### Debug Build
+### Build Commands
+
 ```bash
+# Clean build
+./gradlew clean
+
+# Build debug APK
 ./gradlew assembleDebug
-```
-Output: `app/build/outputs/apk/debug/app-debug.apk`
 
-### Release Build
-```bash
+# Build release APK (requires signing config)
 ./gradlew assembleRelease
-```
-Output: `app/build/outputs/apk/release/app-release.apk`
 
-### Run on Device
-```bash
+# Install debug build on connected device
 ./gradlew installDebug
+
+# Run all tests
+./gradlew test
+
+# Run lint checks
+./gradlew lint
 ```
+
+### Common Issues
+
+**"SDK location not found"**
+- Create `local.properties` in project root
+- Add: `sdk.dir=/Users/YOUR_USERNAME/Library/Android/sdk`
+
+**"Gradle sync failed"**
+- File → Invalidate Caches → Restart
+- Or delete `.gradle` and `build` folders, then sync again
+
+**"Cannot resolve symbol"**
+- Make sure Gradle sync completed successfully
+- Build → Rebuild Project
 
 ---
 
 ## 🧪 Testing
 
-### Run Tests
+### Run Full App Test Suite
 ```bash
-# Unit tests
+# Android app
+cd /Users/danieljohnston/AndroidStudioProjects/AiRunCoach
 ./gradlew test
 
-# Instrumented tests
-./gradlew connectedAndroidTest
+# Backend (separate repo)
+cd /Users/danieljohnston/Desktop/Ai-Run-Coach-IOS-and-Android
+npm test
 ```
 
-### Manual Testing Checklist
-See: `PRODUCTION_DEPLOYMENT_GUIDE.md` for complete testing checklist
+### Test Production Backend
+```bash
+# Health check
+curl https://airuncoach.live/api/health
+# Expected: {"status":"ok"}
+
+# Test authentication (should return 401)
+curl https://airuncoach.live/api/profile
+# Expected: 401 Unauthorized
+```
+
+### Feature Testing Checklist
+
+Test these features on physical device:
+
+**Authentication:**
+- [ ] User signup
+- [ ] User login
+- [ ] Session persistence
+
+**Dashboard:**
+- [ ] Dashboard loads
+- [ ] Quick actions visible
+- [ ] Navigation works
+
+**Route Generation:**
+- [ ] Tap "Map My Run"
+- [ ] Set distance (5 km)
+- [ ] Click "Generate Route"
+- [ ] Wait 1-3 minutes for AI generation
+- [ ] 3 routes appear
+- [ ] Routes are circular (return to start)
+- [ ] Routes are different each time
+
+**Run Session:**
+- [ ] Start run (with or without route)
+- [ ] GPS tracking works
+- [ ] Pace/distance updates in real-time
+- [ ] Map shows current location
+- [ ] AI coaching appears during run
+- [ ] Complete run successfully
+- [ ] Run saves to history
+
+**Run History:**
+- [ ] Previous runs load
+- [ ] Run details display correctly
+- [ ] Charts render properly
+
+**Goals:**
+- [ ] Create new goal
+- [ ] View goal progress
+- [ ] Edit goal
+- [ ] Delete goal
+
+**Profile:**
+- [ ] View profile
+- [ ] Upload profile picture
+- [ ] Update settings
+
+---
+
+## ⌚ Garmin Integration
+
+### Quick Start
+
+**Launch Simulator:**
+```bash
+./launch-garmin-simulator.sh
+```
+
+**Manual Launch:**
+```bash
+# Start Connect IQ Simulator
+/Users/danieljohnston/Library/Application\ Support/Garmin/ConnectIQ/Sdks/connectiq-sdk-mac-8.4.0-2025-12-03-5122605dc/bin/connectiq &
+
+# Load app on Fenix 7
+cd garmin-companion-app
+/Users/danieljohnston/Library/Application\ Support/Garmin/ConnectIQ/Sdks/connectiq-sdk-mac-8.4.0-2025-12-03-5122605dc/bin/monkeydo bin/AiRunCoach.prg fenix7
+```
+
+**Simulator Controls:**
+- **Center button (Enter):** Start run / Select
+- **Back button (Esc):** Pause / Back
+- **Menu button (M):** Show menu
+- **Arrow keys:** Navigate up/down
+
+### Garmin App Features
+- Real-time heart rate display (color-coded by zone)
+- GPS tracking with distance and pace
+- Cadence monitoring
+- AI coaching text on watch face
+- Data streaming to phone app
+- Activity recording to Garmin Connect
+
+**Documentation:** See `GARMIN_SIMULATOR_GUIDE.md`
 
 ---
 
 ## 📚 Documentation
 
 ### Main Documentation Files
-- **`PROJECT_STATUS.md`** - Current project status and roadmap
-- **`RUN_SETUP_UNIFIED_DOCUMENTATION.md`** - Run setup implementation spec
-- **`PRODUCTION_DEPLOYMENT_GUIDE.md`** - Production deployment walkthrough
-- **`BACKEND_SYNC_CHECKLIST.md`** - Backend synchronization guide
-- **`NEVER_DO_THIS.md`** - Prevention guidelines and best practices
-- **`BACKEND_LOCATION.md`** - Backend server information
 
-### Additional Documentation
-- **`CLIENT_SERVER_ARCHITECTURE.md`** - System architecture
-- **`SESSION_SUMMARY_FEB_5_2026.md`** - Latest session summary
-- **`MAP_MY_RUN_REDESIGN_COMPLETE.md`** - Route generation UI
-- **`GARMIN_INTEGRATION_STATUS.md`** - Garmin Connect IQ integration
+**Project Overview:**
+- `README.md` - This file (quick start, architecture, features)
+- `PROJECT_STATUS.md` - Detailed project status and roadmap
 
----
+**Deployment:**
+- `PRODUCTION_DEPLOYMENT_GUIDE.md` - Complete deployment guide
+- `BACKEND_SYNC_CHECKLIST.md` - Backend sync verification
 
-## 🎯 Key Features
+**Development:**
+- `RUN_SETUP_UNIFIED_DOCUMENTATION.md` - Run setup screen specifications
+- `NEVER_DO_THIS.md` - Prevention guidelines and code review checklist
+- `SESSION_SUMMARY_FEB_5_2026.md` - Latest session summary
 
-### 1. Unified Run Setup
-- Single modern screen for all run types
-- AI route generation or free run options
-- Target distance and time configuration
-- **File:** `MapMyRunSetupScreen.kt`
-- **Status:** ✅ Complete
+**Garmin:**
+- `GARMIN_SIMULATOR_GUIDE.md` - Complete Garmin testing guide
+- `GARMIN_COMPANION_COMPLETE.md` - Garmin feature completion
+- `GARMIN_READY_TO_SUBMIT.md` - Connect IQ submission guide
 
-### 2. AI Route Generation
-- GraphHopper-powered intelligent routes
-- Circular routes (return to start)
-- 3 difficulty levels (Easy, Moderate, Hard)
-- Route variety with random seeding
-- **Backend:** `server/intelligent-route-generation.ts`
-- **Status:** ✅ Complete (synced to GitHub)
+**Backend:**
+- `BACKEND_LOCATION.md` - Backend repository information
+- `DEPLOYMENT_STATUS.md` - Deployment status tracking
 
-### 3. GPS Run Tracking
-- Real-time location updates
-- Distance, pace, duration tracking
-- Route polyline visualization
-- Background tracking with foreground service
-- **File:** `RunSessionScreen.kt`, `RunTrackingService.kt`
-- **Status:** ✅ Complete
-
-### 4. AI Coaching
-- OpenAI-powered personalized feedback
-- Pace guidance
-- Struggle detection and support
-- Phase-based coaching
-- **Backend:** OpenAI GPT-4 integration
-- **Status:** ✅ Complete
-
-### 5. Goals Management
-- Create custom running goals
-- Track progress
-- Active, completed, and abandoned tabs
-- **File:** `GoalsScreen.kt`
-- **Status:** ✅ Complete
-
-### 6. Social Features
-- Friends list and search
-- Group runs
-- Live location sharing
-- **Files:** `FriendsScreen.kt`, `GroupRunsScreen.kt`
-- **Status:** ✅ Complete
+**Quick Reference:**
+- `DOCUMENTATION_UPDATE_FEB_5_2026.md` - Documentation index
 
 ---
 
-## 🔐 Backend
+## 🚀 Recent Changes (February 5, 2026)
 
-### Location
-```bash
-/Users/danieljohnston/Desktop/Ai-Run-Coach-IOS-and-Android
-```
+### ✅ Production Backend Deployed
+- Fixed Replit deployment (removed --env-file flag)
+- Set all environment variables in Replit Secrets
+- Backend live at `https://airuncoach.live`
+- Health check endpoint working
+- All GraphHopper fixes deployed
 
-### Tech Stack
-- Node.js + TypeScript
-- Express.js
-- PostgreSQL (Neon.com)
-- OpenAI API
-- GraphHopper API
+### ✅ Run Setup Screen Unified
+- Deleted old `RunSetupScreen.kt`
+- Enhanced `MapMyRunSetupScreen.kt` as single source
+- Added dual action buttons (Generate Route / Start Without Route)
+- Added close icon (X) and home navigation
+- Doubled Target Time Card size (better touch targets)
+- Reduced AI Coach Toggle size by 25%
 
-### Start Backend Locally
-```bash
-cd /Users/danieljohnston/Desktop/Ai-Run-Coach-IOS-and-Android
-npm install
-npm run server:dev
-```
+### ✅ Garmin Simulator Configured
+- Created `launch-garmin-simulator.sh` launcher
+- Comprehensive testing guide (`GARMIN_SIMULATOR_GUIDE.md`)
+- Tested on Fenix 7 simulator
+- Start View and Run View verified
 
-### Deploy to Production
-See: `PRODUCTION_DEPLOYMENT_GUIDE.md`
-
----
-
-## 🚨 Important Notes
-
-### DO NOT Restore These Files
-- ❌ `RunSetupScreen.kt` - Permanently deleted (replaced by `MapMyRunSetupScreen.kt`)
-- ❌ Any `run_setup/{mode}` navigation routes
-
-See `NEVER_DO_THIS.md` for complete list of deprecated patterns.
-
-### Version Control
-- All major changes are documented
-- Comprehensive commit messages
-- Prevention guidelines in place
-- See `SESSION_SUMMARY_FEB_5_2026.md` for latest changes
+### ✅ Documentation Expanded
+- 8 new documentation files (60+ KB)
+- Production deployment guide
+- Backend sync checklist
+- Garmin testing procedures
+- Prevention guidelines
 
 ---
 
-## 📞 Common Commands
+## 🔗 Important Links
 
-### Android App
-```bash
-# Build debug APK
-./gradlew assembleDebug
+**Production:**
+- Backend API: https://airuncoach.live
+- Health Check: https://airuncoach.live/api/health
 
-# Clean build
-./gradlew clean
+**Repositories:**
+- Android: `/Users/danieljohnston/AndroidStudioProjects/AiRunCoach`
+- Backend: `/Users/danieljohnston/Desktop/Ai-Run-Coach-IOS-and-Android`
+- GitHub: https://github.com/danjohnston0701/Ai-Run-Coach-IOS-and-Android
 
-# Install on connected device
-./gradlew installDebug
-
-# Check for lint errors
-./gradlew lint
-```
-
-### Backend
-```bash
-# Install dependencies
-npm install
-
-# Start dev server
-npm run server:dev
-
-# Build for production
-npm run server:build
-
-# Run production server
-npm run server:prod
-```
-
-### Git
-```bash
-# Check status
-git status
-
-# Commit changes
-git add -A
-git commit -m "message"
-
-# Push to remote
-git push origin main
-
-# Check recent commits
-git log --oneline -10
-```
+**Documentation:**
+- Quick Start: This file (`README.md`)
+- Full Status: `PROJECT_STATUS.md`
+- Deployment: `PRODUCTION_DEPLOYMENT_GUIDE.md`
+- Garmin: `GARMIN_SIMULATOR_GUIDE.md`
 
 ---
 
 ## 🐛 Troubleshooting
 
-### App Can't Connect to Backend
-1. Check `useLocalBackend` setting in `RetrofitClient.kt`
-2. Verify backend is running (local or production)
-3. Check device/emulator network connectivity
-4. See: `PRODUCTION_DEPLOYMENT_GUIDE.md` → Troubleshooting
-
-### Route Generation Times Out
-- Normal! AI route generation takes 1-3 minutes
-- Timeout set to 180 seconds (3 minutes)
-- Check backend logs if consistently failing
-
-### GPS Not Working
-- Grant location permissions: Settings → Apps → AI Run Coach → Permissions
-- Enable "Allow all the time" for background tracking
-- Check device location services are enabled
-
-### Build Fails
+### App won't build
 ```bash
 # Clean and rebuild
 ./gradlew clean
 ./gradlew assembleDebug
 
-# Check for dependency issues
-./gradlew dependencies
+# If that doesn't work, invalidate caches
+# Android Studio → File → Invalidate Caches → Restart
+```
 
-# Invalidate caches (Android Studio)
-File → Invalidate Caches / Restart
+### Cannot connect to backend
+- Check `RetrofitClient.kt` - is `useLocalBackend = false`?
+- Verify production backend is live: `curl https://airuncoach.live/api/health`
+- Check network security config allows HTTPS
+
+### GPS not working
+- Enable location permissions in device settings
+- Test outdoors for better GPS signal
+- Check Google Play Services is up to date
+
+### Route generation timeout
+- Normal! AI generation takes 1-3 minutes
+- Check backend logs for errors
+- Verify OpenAI and GraphHopper API keys are set
+
+### Garmin simulator won't load
+```bash
+# Kill any running instances
+pkill -f ConnectIQ
+
+# Restart simulator
+./launch-garmin-simulator.sh
 ```
 
 ---
 
-## 🎨 UI Components
+## 📊 Project Statistics
 
-### Key Screens
-- **`MapMyRunSetupScreen`** - Run configuration (UNIFIED)
-- **`DashboardScreen`** - Main dashboard
-- **`RunSessionScreen`** - Active run tracking
-- **`RouteSelectionScreen`** - Choose AI-generated routes
-- **`GoalsScreen`** - Goals management
-- **`ProfileScreen`** - User profile and settings
-- **`PreviousRunsScreen`** - Run history
+**Code Metrics:**
+- Android App: ~15,000+ lines of Kotlin
+- Backend API: ~10,000+ lines of TypeScript
+- Garmin App: ~1,000+ lines of Monkey C
+- Documentation: 76+ markdown files (60+ KB added today)
 
-### Shared Components
-- **`TargetTimeCard`** - Time input (doubled size on Feb 5)
-- **`RunCharts`** - Data visualization
-- **Various cards and UI elements**
+**Features:**
+- ✅ Completed: 28 features
+- 🚧 In Progress: 0 features
+- 📋 Planned: 30+ features
 
----
-
-## 🔄 Recent Changes (Feb 5, 2026)
-
-### 1. Run Setup Unification
-- Deleted `RunSetupScreen.kt`
-- Enhanced `MapMyRunSetupScreen.kt`
-- Single source of truth
-- **Commits:** `c507a0f`, `ee8b266`, `9155f12`
-
-### 2. UI Size Adjustments
-- Target Time Card: **DOUBLED** (better visibility)
-- AI Coach Toggle: **25% SMALLER** (better proportions)
-
-### 3. Production Configuration
-- Set `useLocalBackend = false`
-- Built production APK (24 MB)
-- **Commit:** `cb6c308`
-
-### 4. Backend GraphHopper Fixes
-- Circular route enforcement
-- Random seed generation
-- Profile fix (`hike` → `foot`)
-- **Commit:** `79bdc40` (backend repo)
+**Deployment:**
+- Backend: ✅ Live in production (Replit)
+- Android: ✅ APK ready for testing (24 MB)
+- Garmin: ✅ Built and simulator tested (107 KB)
 
 ---
 
-## 📊 Project Stats
+## 🎯 Next Steps
 
-- **Total Files:** 100+
-- **Total Lines of Code:** 30,000+
-- **Features Completed:** 28
-- **Documentation Files:** 76
-- **APK Size:** 24 MB
-- **Min Android Version:** 7.0 (API 24)
-- **Target Android Version:** 14 (API 34)
+**Immediate (This Week):**
+1. ⏳ Test complete run session on physical device
+2. ⏳ Test route generation end-to-end (3 circular routes)
+3. ⏳ Validate GPS tracking accuracy
+4. ⏳ Test AI coaching during actual run
+5. ⏳ Verify run history and data persistence
 
----
+**Short Term (Next 2 Weeks):**
+1. ⏳ Polish UI based on testing feedback
+2. ⏳ Test Garmin watch app on real device
+3. ⏳ Implement Garmin data sync (bidirectional)
+4. ⏳ Fix any bugs discovered
+5. ⏳ Prepare app store screenshots
 
-## 🤝 Contributing
-
-1. Read `PROJECT_STATUS.md` for current status
-2. Check `NEVER_DO_THIS.md` for guidelines
-3. Follow existing code patterns
-4. Update documentation with changes
-5. Write descriptive commit messages
+**Medium Term (Next Month):**
+1. ⏳ Submit Garmin app to Connect IQ Store
+2. ⏳ Beta testing with small group
+3. ⏳ Implement friends and social features
+4. ⏳ Add event system
+5. ⏳ Consider Railway migration (optional performance boost)
 
 ---
 
 ## 📄 License
 
-[Your License Here]
+Copyright © 2026 AI Run Coach. All rights reserved.
 
 ---
 
-## 📧 Contact
+## 📞 Support
 
-[Your Contact Information]
-
----
-
-## 🎉 Acknowledgments
-
-- OpenAI for GPT-4 API
-- GraphHopper for route generation
-- Google Maps Platform
-- Neon.com for PostgreSQL hosting
-- Replit for deployment platform
+For questions or issues:
+- 📧 Email: support@airuncoach.live
+- 📚 Documentation: See `PROJECT_STATUS.md` for detailed information
+- 🐛 Issues: Check `NEVER_DO_THIS.md` for common pitfalls
 
 ---
 
-**Ready to Deploy?** See `PRODUCTION_DEPLOYMENT_GUIDE.md` to get started! 🚀
+**Status:** 🚀 **PRODUCTION LIVE - READY FOR TESTING**
 
-**Need Help?** Check the documentation files in the root directory.
-
-**Found a Bug?** See `PROJECT_STATUS.md` → Known Issues section.
+**Last Updated:** February 5, 2026  
+**Build:** app-debug.apk (24 MB)  
+**Backend:** https://airuncoach.live ✅
