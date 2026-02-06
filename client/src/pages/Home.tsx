@@ -20,7 +20,6 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { GpsHelpDialog } from "@/components/GpsHelpDialog";
 import { WeatherWidget } from "@/components/WeatherWidget";
 import { GoalWidget } from "@/components/GoalWidget";
-import { useEntitlement, hasPremiumAccess } from "@/hooks/useSubscription";
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -280,8 +279,7 @@ export default function Home() {
   }
 
   // Entitlement check for paywall (premium features only)
-  const { data: entitlementData } = useEntitlement(profile?.id || null);
-  const isPremiumUser = hasPremiumAccess(entitlementData);
+  const isPremiumUser = true;
 
   useEffect(() => {
     loadCoachSettingsFromProfile().then(setCoachSettings);
@@ -1176,13 +1174,6 @@ export default function Home() {
   };
 
   const handleMapRunClick = () => {
-    // Check premium access before allowing AI route generation
-    if (!isPremiumUser) {
-      toast.error("Premium access required for AI route generation");
-      setLocation("/pricing");
-      return;
-    }
-    
     // Initialize pre-run modal with current homepage settings for Map My Run
     setPreRunMode("mapmyrun");
     setPreRunDistanceEnabled(true);
@@ -1226,13 +1217,7 @@ export default function Home() {
       setLocation(`/route-preview?${params.toString()}`);
     } else {
       // Start free run session
-      const canUseAiCoach = isPremiumUser && aiCoachEnabled;
-      if (!isPremiumUser && aiCoachEnabled) {
-        toast("AI Coach is a premium feature. Starting run without AI coaching.", {
-          description: "Upgrade to get real-time voice coaching",
-          action: { label: "View Plans", onClick: () => setLocation("/pricing") },
-        });
-      }
+      const canUseAiCoach = aiCoachEnabled;
       
       const params = new URLSearchParams({
         distance: finalDistance.toString(),

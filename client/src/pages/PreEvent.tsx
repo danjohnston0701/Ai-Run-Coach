@@ -196,7 +196,7 @@ export default function PreEvent() {
   const [targetTime, setTargetTime] = useState({ h: 0, m: 30, s: 0 });
   const [aiCoachEnabled, setAiCoachEnabled] = useState(true);
   const [coachName, setCoachName] = useState("Your AI Coach");
-  const [isPremiumUser, setIsPremiumUser] = useState(false);
+  const isPremiumUser = true;
   const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -207,17 +207,6 @@ export default function PreEvent() {
       if (parsed.id) setUserId(parsed.id);
     }
   }, []);
-
-  useEffect(() => {
-    if (userId) {
-      fetch(`/api/entitlement/${userId}`)
-        .then(res => res.json())
-        .then(data => {
-          setIsPremiumUser(data.hasPremiumAccess === true);
-        })
-        .catch(() => {});
-    }
-  }, [userId]);
 
   useEffect(() => {
     const fetchEvent = async () => {

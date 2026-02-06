@@ -39,15 +39,8 @@ The application follows a monorepo structure with `/client` for the frontend, `/
 - **Hybrid Storage Pattern**: Implements a `dbSynced` flag and automatic migration of unsynced local data to the database upon login or app load.
 - **Session Persistence**: Active run sessions are auto-saved every 5 seconds to local storage with a 12-hour expiration, allowing users to resume interrupted runs.
 
-### Subscription & Payment System
-- **Provider**: Stripe for payment processing.
-- **Plans**: Early Bird 30-Day Trial and Standard Monthly Subscription.
-- **Entitlement System**: Manages access to premium features (AI route generation, AI voice coaching) based on subscription, one-time payments, or coupon redemptions.
-- **Coupon System**: Allows for admin-created, redeemable coupons for free access.
-- **Paywall**: Enforced both client-side via hooks and server-side for defense in depth.
-
 ### User Interface & Features
-- **Pages**: Landing Page, Profile Setup (onboarding), Home (run configuration), Run Session (live tracking), Run History, Run Insights (detailed post-run analysis), Events (browse public events by country), Authentication (Login, Pre-registration), Pricing.
+- **Pages**: Landing Page, Profile Setup (onboarding), Home (run configuration), Run Session (live tracking), Run History, Run Insights (detailed post-run analysis), Events (browse public events by country), Authentication (Login, Pre-registration).
 - **Run Insights**: Displays real-time data, pace gradient maps, km splits, conditional heart rate, and elevation profiles. Features Garmin-style expandable performance charts (pace, heart rate, elevation, cadence) with time/distance toggle and brand color styling.
 - **AI Run Analysis**: Post-run feature that generates comprehensive AI coaching insights including highlights, struggles, personal bests, demographic comparison, and actionable tips. Analysis is cached in the database for instant retrieval on return visits.
 - **Social Sharing**: Generates branded images for Facebook/Instagram sharing with run summaries (map, distance, time, pace, difficulty, branding) using HTML Canvas.
@@ -59,8 +52,6 @@ The application follows a monorepo structure with `/client` for the frontend, `/
 - **OpenAI API**: For AI coaching, route waypoint design, and performance analysis.
 - **Google Maps Platform**: Includes Places API, Directions API, and Elevation API for route generation and weather.
 - **OpenStreetMap**: Map tile provider for Leaflet.
-- **Stripe**: Payment processing for subscriptions.
-
 ### Database
 - **PostgreSQL**: Primary data store.
 
