@@ -55,7 +55,8 @@ async function buildAll() {
     define: {
       "process.env.NODE_ENV": '"production"',
     },
-    minify: true,
+    minify: false,
+    treeShaking: false,  // ADD THIS LINE
     external: externals,
     logLevel: "info",
   });
