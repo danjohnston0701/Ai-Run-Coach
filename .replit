@@ -43,3 +43,8 @@ waitForPort = 5000
 [agent]
 mockupState = "FULLSTACK"
 integrations = ["stripe:2.0.0"]
+
+[userenv]
+
+[userenv.shared]
+EXPO_PUBLIC_API_URL = "https://airuncoach.live"
