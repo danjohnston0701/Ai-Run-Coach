@@ -3064,6 +3064,17 @@ export async function registerRoutes(
     }
   });
 
+  // Get all group runs (list view)
+  app.get("/api/group-runs", async (req, res) => {
+    try {
+      const groupRuns = await storage.getAllGroupRuns();
+      res.json(groupRuns);
+    } catch (error) {
+      console.error("Get all group runs error:", error);
+      res.status(500).json({ error: "Failed to fetch group runs" });
+    }
+  });
+
   app.get("/api/group-runs/:id", async (req, res) => {
     try {
       const groupRun = await storage.getGroupRun(req.params.id);

@@ -163,6 +163,7 @@ export interface IStorage {
   getGroupRun(id: string): Promise<GroupRun | undefined>;
   getGroupRunByToken(token: string): Promise<GroupRun | undefined>;
   getUserGroupRuns(userId: string): Promise<GroupRun[]>;
+  getAllGroupRuns(): Promise<GroupRun[]>;
   updateGroupRun(id: string, data: Partial<InsertGroupRun>): Promise<GroupRun | undefined>;
   
   // Group Run Participants
@@ -1191,6 +1192,15 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
+
+
+  async getAllGroupRuns(): Promise<GroupRun[]> {
+    return withRetry(async () => {
+      return await db.select().from(groupRuns)
+        .orderBy(desc(groupRuns.plannedStartAt))
+        .limit(100);
+    });
+  }
   async getUserGroupRuns(userId: string): Promise<GroupRun[]> {
     return withRetry(async () => {
       return await db.select().from(groupRuns)
