@@ -140,6 +140,32 @@ export async function registerRoutes(
   });
 
   // Routes endpoints
+
+  // Upload profile picture
+  app.post("/api/users/:id/profile-picture", async (req, res) => {
+    try {
+      const { imageData } = req.body;
+      
+      if (!imageData) {
+        return res.status(400).json({ error: "No image data provided" });
+      }
+
+      // Update user profile picture
+      const updated = await storage.updateUser(req.params.id, {
+        profilePic: imageData
+      });
+
+      if (!updated) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const { password, ...userWithoutPassword } = updated;
+      res.json(userWithoutPassword);
+    } catch (error: any) {
+      console.error("Upload profile picture error:", error);
+      res.status(500).json({ error: "Failed to upload profile picture" });
+    }
+  });
   app.post("/api/routes", async (req, res) => {
     try {
       const data = insertRouteSchema.parse(req.body);
