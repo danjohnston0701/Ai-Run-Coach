@@ -82,9 +82,10 @@ fun RouteSelectionScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // Group routes by difficulty
-                val easyRoutes = routes.filter { it.difficulty == RouteDifficulty.EASY }
-                val moderateRoutes = routes.filter { it.difficulty == RouteDifficulty.MODERATE }
-                val hardRoutes = routes.filter { it.difficulty == RouteDifficulty.HARD }
+                // Sort routes by distance (low to high) within each difficulty
+                val easyRoutes = routes.filter { it.difficulty == RouteDifficulty.EASY }.sortedBy { it.distance }
+                val moderateRoutes = routes.filter { it.difficulty == RouteDifficulty.MODERATE }.sortedBy { it.distance }
+                val hardRoutes = routes.filter { it.difficulty == RouteDifficulty.HARD }.sortedBy { it.distance }
 
                 // Easy Routes
                 if (easyRoutes.isNotEmpty()) {
