@@ -40,13 +40,13 @@ interface ApiService {
     @DELETE("/api/goals/{id}")
     suspend fun deleteGoal(@Path("id") goalId: String)
 
-    @GET("/api/friends/{userId}")
+    @GET("/api/users/{userId}/friends")
     suspend fun getFriends(@Path("userId") userId: String): List<Friend>
 
     @GET("/api/users/search")
     suspend fun searchUsers(@Query("query") query: String): List<Friend> 
 
-    @POST("/api/friends")
+    @POST("/api/friend-requests")
     suspend fun addFriend(@Body request: AddFriendRequest): Friend
 
     @POST("/api/coaching/pace-update")
@@ -79,7 +79,7 @@ interface ApiService {
     @POST("/api/users/{id}/profile-picture")
     suspend fun uploadProfilePicture(@Path("id") userId: String, @Body request: UploadProfilePictureRequest): User
 
-    @POST("/api/routes/generate-ai-routes")
+    @POST("/api/routes/generate-options")
     suspend fun generateAIRoutes(@Body request: RouteGenerationRequest): RouteGenerationResponse
 
     @POST("/api/routes/generate-intelligent")
@@ -101,7 +101,7 @@ interface ApiService {
     @GET("/api/auth/garmin")
     suspend fun initiateGarminAuth(@Query("app_redirect") appRedirect: String): GarminAuthResponse
     
-    @GET("/api/runs/user/{userId}")
+    @GET("/api/users/{userId}/runs")
     suspend fun getRunsForUser(@Path("userId") userId: String): List<RunSession>
 
     // ========== FITNESS & FRESHNESS ==========
