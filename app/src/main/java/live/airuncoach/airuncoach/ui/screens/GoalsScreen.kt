@@ -18,7 +18,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.offset
+
 import androidx.lifecycle.viewmodel.compose.viewModel
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.Goal
@@ -108,13 +108,15 @@ fun GoalsScreen(
                 contentColor = Colors.primary,
                 indicator = { tabPositions ->
                     if (selectedTab < tabPositions.size) {
-                        TabRowDefaults.SecondaryIndicator(
+                        Box(
                             modifier = Modifier
-                                .width(tabPositions[selectedTab].width)
+                                .fillMaxWidth()
+                                .wrapContentSize(Alignment.BottomStart)
                                 .offset(x = tabPositions[selectedTab].left)
-                                .padding(horizontal = 24.dp),
-                            height = 4.dp,
-                            color = Colors.primary
+                                .width(tabPositions[selectedTab].width)
+                                .padding(horizontal = 16.dp)
+                                .height(3.dp)
+                                .background(Colors.primary)
                         )
                     }
                 },
