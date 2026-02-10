@@ -18,7 +18,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.ui.theme.*
 import live.airuncoach.airuncoach.viewmodel.ConnectedDevicesViewModel
 
@@ -39,7 +39,7 @@ data class DeviceInfo(
 fun ConnectedDevicesScreen(
     onNavigateBack: () -> Unit,
     onNavigateToGarminConnect: () -> Unit = {},
-    viewModel: ConnectedDevicesViewModel = viewModel()
+    viewModel: ConnectedDevicesViewModel = hiltViewModel()
 ) {
     val garminConnectionStatus by viewModel.garminConnectionStatus.collectAsState()
     
