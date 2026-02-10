@@ -6,6 +6,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import live.airuncoach.airuncoach.data.GarminAuthManager
 import live.airuncoach.airuncoach.data.HealthConnectRepository
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.network.ApiService
@@ -32,5 +33,11 @@ object AppModule {
     @Provides
     fun provideHealthConnectRepository(@ApplicationContext context: Context): HealthConnectRepository {
         return HealthConnectRepository(context)
+    }
+
+    @Singleton
+    @Provides
+    fun provideGarminAuthManager(@ApplicationContext context: Context): GarminAuthManager {
+        return GarminAuthManager(context)
     }
 }
