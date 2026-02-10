@@ -1,12 +1,13 @@
 package live.airuncoach.airuncoach.viewmodel
 
-import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -16,10 +17,10 @@ import javax.inject.Inject
 
 @HiltViewModel
 class ConnectedDevicesViewModel @Inject constructor(
-    application: Application,
+    @ApplicationContext private val context: Context,
     private val garminAuthManager: GarminAuthManager,
     private val apiService: ApiService
-) : AndroidViewModel(application) {
+) : ViewModel() {
 
     private val _garminConnectionStatus = MutableStateFlow("disconnected")
     val garminConnectionStatus: StateFlow<String> = _garminConnectionStatus
@@ -56,7 +57,7 @@ class ConnectedDevicesViewModel @Inject constructor(
                 // Open the auth URL in browser
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(response.authUrl))
                 intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                getApplication<Application>().startActivity(intent)
+                context.startActivity(intent)
             } catch (e: Exception) {
                 Log.e(TAG, "Error initiating Garmin connection", e)
                 _garminConnectionStatus.value = "error"
