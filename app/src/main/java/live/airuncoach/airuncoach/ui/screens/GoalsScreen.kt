@@ -127,7 +127,9 @@ fun GoalsScreen(
                     Tab(
                         selected = selectedTab == index,
                         onClick = { viewModel.selectTab(index) },
-                        modifier = Modifier.padding(vertical = 12.dp)
+                        modifier = Modifier.padding(vertical = 12.dp),
+                        selectedContentColor = Colors.primary,
+                        unselectedContentColor = Color(0xFF8B9AA8) // Lighter gray for better visibility
                     ) {
                         Row(
                             horizontalArrangement = Arrangement.Center,
@@ -138,7 +140,7 @@ fun GoalsScreen(
                                 style = AppTextStyles.body.copy(
                                     fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
                                 ),
-                                color = if (selectedTab == index) Colors.primary else Colors.textMuted
+                                color = if (selectedTab == index) Colors.primary else Color(0xFF8B9AA8)
                             )
                             // Show count badge
                             val count = when (goalsState) {
