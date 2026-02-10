@@ -222,13 +222,9 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     initialMinutes = 0,
                     initialSeconds = 0,
                     onNavigateBack = { navController.popBackStack() },
-                    onGenerateRoute = { distance, hasTime, hours, minutes, seconds, liveTracking, groupRun ->
-                        // Calculate target time in minutes for backend
+                    onGenerateRoute = { distance, hasTime, hours, minutes, seconds, liveTracking, groupRun, latitude, longitude ->
+                        // Generate routes with GPS location from setup screen
                         val targetTimeMinutes = if (hasTime) hours * 60 + minutes else null
-                        
-                        // TODO: Get actual location - for now using dummy coordinates
-                        val latitude = 37.7749  // San Francisco as placeholder
-                        val longitude = -122.4194
                         
                         viewModel.generateIntelligentRoutes(
                             latitude = latitude,
@@ -275,6 +271,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 val viewModel: RouteGenerationViewModel = hiltViewModel(navController.getBackStackEntry(navController.graph.id))
                 val routes by viewModel.routes.collectAsState()
                 val isLoading by viewModel.isLoading.collectAsState()
+                val error by viewModel.error.collectAsState()
                 
                 // Always show the loading screen content
                 RouteGeneratingLoadingScreen(
@@ -282,14 +279,17 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     coachName = "Coach Carter"
                 )
                 
-                // Auto-navigate when routes are ready
-                LaunchedEffect(routes.size, isLoading) {
-                    Log.d("RouteNavigation", "📊 Routes size: ${routes.size}, isLoading: $isLoading")
+                // Auto-navigate when routes are ready OR if there's an error
+                LaunchedEffect(routes.size, isLoading, error) {
+                    Log.d("RouteNavigation", "📊 Routes size: ${routes.size}, isLoading: $isLoading, error: $error")
                     if (routes.isNotEmpty() && !isLoading) {
                         Log.d("RouteNavigation", "✨ AUTO-NAVIGATING to route selection with ${routes.size} routes")
                         navController.navigate("route_selection/${distanceKm.toInt()}") {
                             popUpTo("route_generating/${distanceKm.toInt()}") { inclusive = true }
                         }
+                    } else if (error != null && !isLoading) {
+                        Log.d("RouteNavigation", "❌ ERROR occurred, navigating back to route generation")
+                        navController.popBackStack()
                     }
                 }
             }
@@ -338,6 +338,18 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onAiCoachToggle = { aiCoachEnabled = it }
                 )
             }
+            // Run session WITHOUT a route
+            composable("run_session") {
+                RunSessionScreen(
+                    hasRoute = false,
+                    onEndRun = { runId ->
+                        navController.navigate("run_summary/$runId") {
+                            popUpTo("run_session") { inclusive = true }
+                        }
+                    }
+                )
+            }
+            // Run session WITH a route
             composable("run_session/{routeId}") { backStackEntry ->
                 val routeId = backStackEntry.arguments?.getString("routeId") ?: ""
                 RunSessionScreen(
@@ -400,7 +412,15 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             composable("fitness_level") { FitnessLevelScreen(onNavigateBack = { navController.popBackStack() }) }
             composable("distance_scale") { DistanceScaleScreen(onNavigateBack = { navController.popBackStack() }) }
             composable("notifications") { NotificationsScreen(onNavigateBack = { navController.popBackStack() }) }
-            composable("connected_devices") { ConnectedDevicesScreen(onNavigateBack = { navController.popBackStack() }) }
+            composable("connected_devices") { 
+                ConnectedDevicesScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToGarminConnect = { navController.navigate("garmin_connect") }
+                )
+            }
+            composable("garmin_connect") { 
+                GarminConnectScreen(onNavigateBack = { navController.popBackStack() })
+            }
             composable("subscription") { SubscriptionScreen(onNavigateBack = { navController.popBackStack() }) }
         }
     }

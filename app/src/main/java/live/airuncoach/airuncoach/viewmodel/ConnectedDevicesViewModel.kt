@@ -32,11 +32,18 @@ class ConnectedDevicesViewModel @Inject constructor(
         }
     }
 
-    fun connectGarmin() {
+    fun connectGarmin(historyDays: Int = 30) {
         viewModelScope.launch {
             garminAuthManager.startOAuthFlow().onSuccess { authUrl ->
+                // Append history days parameter to auth URL
+                val fullAuthUrl = if (authUrl.contains("?")) {
+                    "$authUrl&history_days=$historyDays"
+                } else {
+                    "$authUrl?history_days=$historyDays"
+                }
+                
                 // Open OAuth URL in browser
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(authUrl))
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fullAuthUrl))
                 intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 getApplication<Application>().startActivity(intent)
             }.onFailure {

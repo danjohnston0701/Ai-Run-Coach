@@ -38,6 +38,7 @@ data class DeviceInfo(
 @Composable
 fun ConnectedDevicesScreen(
     onNavigateBack: () -> Unit,
+    onNavigateToGarminConnect: () -> Unit = {},
     viewModel: ConnectedDevicesViewModel = viewModel()
 ) {
     val garminConnectionStatus by viewModel.garminConnectionStatus.collectAsState()
@@ -73,7 +74,7 @@ fun ConnectedDevicesScreen(
                 supportsPostRunSync = true,
                 isAvailableOnAndroid = true,
                 isConnected = garminConnectionStatus == "connected",
-                onConnect = { viewModel.connectGarmin() }
+                onConnect = onNavigateToGarminConnect
             ),
             DeviceInfo(
                 name = "COROS",
