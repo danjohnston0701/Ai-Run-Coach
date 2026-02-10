@@ -1,6 +1,8 @@
 package live.airuncoach.airuncoach.network
 
 import android.content.Context
+import android.os.Build
+import android.util.Log
 import live.airuncoach.airuncoach.BuildConfig
 import live.airuncoach.airuncoach.data.SessionManager
 import okhttp3.Cookie
@@ -61,22 +63,27 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
             }
             
             // Log response details for debugging
-            android.util.Log.d("RetrofitClient", "📡 Response from ${request.url.encodedPath}: ${response.code}")
+            Log.d("RetrofitClient", "📡 Response from ${request.url.encodedPath}: ${response.code}")
+            
+            // Detect if API is returning HTML instead of JSON (indicates endpoint not implemented)
+            val contentType = response.header("Content-Type") ?: ""
+            if (contentType.contains("text/html", ignoreCase = true)) {
+                Log.e("RetrofitClient", "⚠️ Backend returning HTML instead of JSON!")
+                Log.e("RetrofitClient", "📍 Endpoint: ${request.url}")
+                Log.e("RetrofitClient", "📦 Content-Type: $contentType")
+                Log.e("RetrofitClient", "💡 This usually means the endpoint is not implemented on the backend")
+                
+                // Peek at response body to confirm it's HTML
+                val bodyPreview = response.peekBody(200).string()
+                if (bodyPreview.contains("<!DOCTYPE html>", ignoreCase = true)) {
+                    Log.e("RetrofitClient", "✅ Confirmed: Backend served HTML (frontend app)")
+                }
+            }
             
             // Log raw response body for login/register endpoints
             if (request.url.encodedPath.contains("/login") || request.url.encodedPath.contains("/register")) {
                 val responseBody = response.peekBody(Long.MAX_VALUE).string()
-                android.util.Log.d("RetrofitClient", "📦 RAW RESPONSE BODY: $responseBody")
-            }
-            
-            // Detect if API is returning HTML instead of JSON (indicates misconfigured backend)
-            if (!response.isSuccessful && response.code == 404) {
-                val contentType = response.header("Content-Type") ?: ""
-                if (contentType.contains("text/html", ignoreCase = true)) {
-                    android.util.Log.e("RetrofitClient", "❌ Backend returning HTML for API endpoint! Backend may be misconfigured.")
-                    android.util.Log.e("RetrofitClient", "📍 Endpoint: ${request.url}")
-                    android.util.Log.e("RetrofitClient", "💡 Check PRODUCTION_BACKEND_FIX.md for troubleshooting steps")
-                }
+                Log.d("RetrofitClient", "📦 RAW RESPONSE BODY: $responseBody")
             }
             
             response
@@ -112,10 +119,10 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
                     "http://192.168.18.14:3000"
                 }
             } else {
-                "https://airuncoach.live"  // Production backend
+                "https://ai-run-coach.replit.app"  // Production backend (Replit)
             }
         } else {
-            "https://airuncoach.live"
+            "https://ai-run-coach.replit.app"
         }
         
         // Log which backend we're connecting to
@@ -168,15 +175,8 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
                     }
                     .build()
                 
-                // Determine base URL
-                val baseUrl = if (BuildConfig.DEBUG) {
-                    val isEmulator = android.os.Build.FINGERPRINT.contains("generic") ||
-                                        android.os.Build.MODEL.contains("Emulator") ||
-                                        android.os.Build.MODEL.contains("Android SDK")
-                    if (isEmulator) "http://10.0.2.2:3000" else "http://192.168.18.14:3000"
-                } else {
-                    "https://airuncoach.live"
-                }
+                // Determine base URL - ALWAYS use production for Garmin (OAuth requires consistent callback URLs)
+                val baseUrl = "https://ai-run-coach.replit.app"
                 
                 // Build Retrofit
                 val retrofit = Retrofit.Builder()
@@ -207,12 +207,12 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
         // Helper to get the base URL being used
         fun getBaseUrl(): String {
             return if (BuildConfig.DEBUG) {
-                val isEmulator = android.os.Build.FINGERPRINT.contains("generic") ||
-                                    android.os.Build.MODEL.contains("Emulator") ||
-                                    android.os.Build.MODEL.contains("Android SDK")
+                val isEmulator = Build.FINGERPRINT.contains("generic") ||
+                                    Build.MODEL.contains("Emulator") ||
+                                    Build.MODEL.contains("Android SDK")
                 if (isEmulator) "http://10.0.2.2:3000" else "http://192.168.18.14:3000"
             } else {
-                "https://airuncoach.live"
+                "https://ai-run-coach.replit.app"
             }
         }
         
