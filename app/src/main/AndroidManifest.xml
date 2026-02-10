@@ -79,6 +79,16 @@
                     android:host="garmin"
                     android:pathPrefix="/auth-complete" />
             </intent-filter>
+            
+            <!-- Deep link for connected devices (OAuth success redirect) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="airuncoach"
+                    android:host="connected-devices" />
+            </intent-filter>
 
         </activity>
 
