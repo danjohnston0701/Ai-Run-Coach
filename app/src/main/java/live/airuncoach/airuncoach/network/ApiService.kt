@@ -99,7 +99,10 @@ interface ApiService {
 
     // Garmin OAuth
     @GET("/api/auth/garmin")
-    suspend fun initiateGarminAuth(@Query("app_redirect") appRedirect: String): GarminAuthResponse
+    suspend fun initiateGarminAuth(
+        @Query("app_redirect") appRedirect: String,
+        @Query("history_days") historyDays: Int = 30
+    ): GarminAuthResponse
     
     @GET("/api/users/{userId}/runs")
     suspend fun getRunsForUser(@Path("userId") userId: String): List<RunSession>
