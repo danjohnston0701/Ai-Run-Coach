@@ -262,6 +262,9 @@ interface ApiService {
     
     @POST("/api/garmin/wellness/sync")
     suspend fun syncGarminWellness(@Body date: Map<String, String> = emptyMap()): WellnessSyncResponse
+    
+    @POST("/api/garmin/upload-run")
+    suspend fun uploadRunToGarmin(@Body request: GarminUploadRequest): GarminUploadResponse
 }
 
 /**
