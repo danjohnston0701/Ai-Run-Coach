@@ -8,7 +8,7 @@ data class RunSession(
     val distance: Double, // meters
     val averageSpeed: Float, // m/s
     val maxSpeed: Float, // m/s
-    val averagePace: String, // min/km format
+    val averagePace: String?, // min/km format - nullable as API may not always provide
     val calories: Int,
     val cadence: Int, // steps per minute
     val heartRate: Int, // beats per minute
@@ -31,6 +31,10 @@ data class RunSession(
     // Route identification for comparison
     val routeHash: String?, // Hash of route coordinates for similarity matching
     val routeName: String?, // User-defined or auto-generated route name
+    
+    // External sync source (e.g., "garmin", "strava", null for native runs)
+    val externalSource: String? = null,
+    val externalId: String? = null,
     
     val isActive: Boolean = false
 ) {

@@ -16,8 +16,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import live.airuncoach.airuncoach.R
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.ui.theme.*
@@ -86,10 +88,10 @@ fun GarminConnectScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            Icons.Default.Favorite,
-                            contentDescription = "Garmin",
-                            tint = Color(0xFFFF5252),
-                            modifier = Modifier.size(40.dp)
+                            painter = painterResource(id = R.drawable.ic_garmin_logo),
+                            contentDescription = "Garmin Connect",
+                            tint = Color.Unspecified, // Don't tint the logo
+                            modifier = Modifier.size(48.dp)
                         )
                     }
                     Spacer(modifier = Modifier.height(16.dp))

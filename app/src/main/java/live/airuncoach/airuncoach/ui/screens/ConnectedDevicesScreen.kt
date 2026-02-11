@@ -15,9 +15,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import live.airuncoach.airuncoach.R
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.ui.theme.*
 import live.airuncoach.airuncoach.viewmodel.ConnectedDevicesViewModel
@@ -25,7 +27,8 @@ import live.airuncoach.airuncoach.viewmodel.ConnectedDevicesViewModel
 data class DeviceInfo(
     val name: String,
     val description: String,
-    val icon: ImageVector,
+    val icon: ImageVector? = null,
+    val iconDrawable: Int? = null, // For custom logos like Garmin
     val supportsRealtimeHR: Boolean,
     val supportsPostRunSync: Boolean,
     val isAvailableOnAndroid: Boolean,
@@ -69,7 +72,7 @@ fun ConnectedDevicesScreen(
             DeviceInfo(
                 name = "Garmin",
                 description = "Connect via Garmin Connect OAuth for activity sync and health data",
-                icon = Icons.Default.Favorite,
+                iconDrawable = R.drawable.ic_garmin_logo, // Garmin Connect logo
                 supportsRealtimeHR = false,
                 supportsPostRunSync = true,
                 isAvailableOnAndroid = true,
@@ -262,12 +265,23 @@ fun DeviceCard(device: DeviceInfo, isConnected: Boolean) {
                         .background(Colors.backgroundTertiary, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        device.icon,
-                        contentDescription = null,
-                        tint = Colors.textMuted,
-                        modifier = Modifier.size(28.dp)
-                    )
+                    if (device.iconDrawable != null) {
+                        // Use drawable resource (e.g., Garmin logo)
+                        Icon(
+                            painter = painterResource(id = device.iconDrawable),
+                            contentDescription = null,
+                            tint = Color.Unspecified, // Don't tint logos
+                            modifier = Modifier.size(32.dp)
+                        )
+                    } else if (device.icon != null) {
+                        // Use ImageVector icon
+                        Icon(
+                            device.icon,
+                            contentDescription = null,
+                            tint = Colors.textMuted,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {

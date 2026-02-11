@@ -13,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -25,6 +26,9 @@ import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.PreviousRunsViewModel
 import live.airuncoach.airuncoach.viewmodel.WeatherImpactData
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun PreviousRunsScreen(
@@ -464,11 +468,22 @@ fun RunListItem(run: RunSession, onClick: () -> Unit) {
                     )
                     Spacer(modifier = Modifier.width(Spacing.sm))
                     Text(
-                        text = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-                            .format(java.util.Date(run.startTime)),
+                        text = SimpleDateFormat("HH:mm", Locale.getDefault())
+                            .format(Date(run.startTime)),
                         style = AppTextStyles.body,
                         color = Colors.textMuted
                     )
+                    
+                    // Garmin badge if synced from Garmin
+                    if (run.externalSource == "garmin") {
+                        Spacer(modifier = Modifier.width(Spacing.sm))
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_garmin_logo),
+                            contentDescription = "Synced from Garmin Connect",
+                            tint = Color.Unspecified,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
                 
                 Icon(
@@ -541,7 +556,7 @@ fun RunListItem(run: RunSession, onClick: () -> Unit) {
                     )
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
-                            text = run.averagePace.replace("/km", ""),
+                            text = run.averagePace?.replace("/km", "") ?: "--:--",
                             style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
                             color = Colors.primary
                         )
