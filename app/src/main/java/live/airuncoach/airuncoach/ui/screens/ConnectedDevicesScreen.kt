@@ -46,8 +46,23 @@ fun ConnectedDevicesScreen(
 ) {
     val garminConnectionStatus by viewModel.garminConnectionStatus.collectAsState()
     
-    // Available devices
-    val devices = remember {
+    // Garmin - Available now
+    val garminDevice = remember(garminConnectionStatus) {
+        DeviceInfo(
+            name = "Garmin",
+            description = "Connect via Garmin Connect OAuth for activity sync and health data",
+            iconDrawable = R.drawable.ic_garmin_logo, // Garmin Connect logo
+            supportsRealtimeHR = true, // Real-time data via Garmin Connect IQ app
+            supportsPostRunSync = true,
+            isAvailableOnAndroid = true,
+            requiresAppInstall = true, // Garmin Companion App recommended
+            isConnected = garminConnectionStatus == "connected",
+            onConnect = onNavigateToGarminConnect
+        )
+    }
+    
+    // Coming Soon devices
+    val comingSoonDevices = remember {
         listOf(
             DeviceInfo(
                 name = "Apple Watch",
@@ -70,17 +85,6 @@ fun ConnectedDevicesScreen(
                 onConnect = {}
             ),
             DeviceInfo(
-                name = "Garmin",
-                description = "Connect via Garmin Connect OAuth for activity sync and health data",
-                iconDrawable = R.drawable.ic_garmin_logo, // Garmin Connect logo
-                supportsRealtimeHR = true, // Real-time data via Garmin Connect IQ app
-                supportsPostRunSync = true,
-                isAvailableOnAndroid = true,
-                requiresAppInstall = true, // Garmin Companion App recommended
-                isConnected = garminConnectionStatus == "connected",
-                onConnect = onNavigateToGarminConnect
-            ),
-            DeviceInfo(
                 name = "COROS",
                 description = "Connect via COROS API for post-run activity sync",
                 icon = Icons.Default.Place,
@@ -100,6 +104,8 @@ fun ConnectedDevicesScreen(
             )
         )
     }
+    
+    val devices = listOf(garminDevice) + comingSoonDevices
     
     val connectedDevices = devices.filter { it.isConnected }
     val availableDevices = devices.filterNot { it.isConnected }
@@ -156,85 +162,48 @@ fun ConnectedDevicesScreen(
                 }
             }
             
-            // Real-Time Heart Rate Info Card
+            
+            // Garmin Section (Available or Connected)
             item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = Colors.backgroundSecondary
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .background(Color(0x33FF5252), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.Favorite,
-                                contentDescription = null,
-                                tint = Color(0xFFFF5252),
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Text(
-                                "Real-Time Heart Rate",
-                                style = AppTextStyles.h3,
-                                color = Colors.textPrimary
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                "Get live heart rate data during runs and heart rate zone coaching from your AI coach",
-                                style = AppTextStyles.caption,
-                                color = Colors.textSecondary
-                            )
-                        }
-                    }
-                }
+                Text(
+                    if (garminDevice.isConnected) "Connected" else "Available Now",
+                    style = AppTextStyles.h3,
+                    color = Colors.textPrimary,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
             }
             
-            // Connected Devices Section
-            if (connectedDevices.isNotEmpty()) {
-                item {
+            item {
+                DeviceCard(
+                    device = garminDevice,
+                    isConnected = garminDevice.isConnected
+                )
+            }
+            
+            // Coming Soon Section
+            item {
+                Column {
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "Connected",
+                        "Coming Soon",
                         style = AppTextStyles.h3,
-                        color = Colors.textPrimary,
-                        modifier = Modifier.padding(top = 8.dp)
+                        color = Colors.textPrimary
                     )
-                }
-                
-                items(connectedDevices) { device ->
-                    DeviceCard(
-                        device = device,
-                        isConnected = true
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "Additional device integrations in development",
+                        style = AppTextStyles.caption,
+                        color = Colors.textSecondary
                     )
                 }
             }
             
-            // Available Devices Section
-            if (availableDevices.isNotEmpty()) {
-                item {
-                    Text(
-                        if (connectedDevices.isEmpty()) "Available Devices" else "More Devices",
-                        style = AppTextStyles.h3,
-                        color = Colors.textPrimary,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                }
-                
-                items(availableDevices) { device ->
-                    DeviceCard(device = device, isConnected = false)
-                }
+            items(comingSoonDevices) { device ->
+                DeviceCard(
+                    device = device,
+                    isConnected = false,
+                    isComingSoon = true
+                )
             }
             
             item { Spacer(modifier = Modifier.height(16.dp)) }
@@ -243,7 +212,7 @@ fun ConnectedDevicesScreen(
 }
 
 @Composable
-fun DeviceCard(device: DeviceInfo, isConnected: Boolean) {
+fun DeviceCard(device: DeviceInfo, isConnected: Boolean, isComingSoon: Boolean = false) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -359,6 +328,39 @@ fun DeviceCard(device: DeviceInfo, isConnected: Boolean) {
                         style = AppTextStyles.caption,
                         color = Colors.textMuted
                     )
+                }
+            } else if (isComingSoon) {
+                // Coming Soon badge for future integrations
+                Spacer(modifier = Modifier.height(16.dp))
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Colors.backgroundTertiary,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Info,
+                                contentDescription = null,
+                                tint = Colors.textMuted,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "Coming Soon",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
+                                color = Colors.textMuted
+                            )
+                        }
+                    }
                 }
             } else {
                 // Connect button for available devices
