@@ -3,6 +3,7 @@ package live.airuncoach.airuncoach.ui.screens
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -14,21 +15,28 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.android.gms.location.LocationServices
-import kotlinx.coroutines.tasks.await
+import com.google.android.gms.location.Priority
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.RouteGenerationViewModel
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -48,6 +56,9 @@ fun RouteGenerationScreen(
     var avoidHills by remember { mutableStateOf(false) }
     var currentLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var hasLocationPermission by remember { mutableStateOf(false) }
+    var locationRefreshTrigger by remember { mutableStateOf(0) }
+    var isGettingLocation by remember { mutableStateOf(false) }
+    var gpsError by remember { mutableStateOf<String?>(null) }
     
     // Check permission status
     LaunchedEffect(Unit) {
@@ -65,18 +76,48 @@ fun RouteGenerationScreen(
                 permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
     }
     
-    // Get current location
-    LaunchedEffect(hasLocationPermission) {
+    // Get current location - request fresh location instead of using cached lastLocation
+    LaunchedEffect(hasLocationPermission, locationRefreshTrigger) {
         if (hasLocationPermission) {
+            isGettingLocation = true
             try {
                 val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+                
+                Log.d("RouteGen", "🔄 Requesting fresh GPS location...")
+                
+                // Request a fresh location update with high accuracy GPS
                 @SuppressLint("MissingPermission")
-                val location = fusedLocationClient.lastLocation.await()
+                val location = suspendCancellableCoroutine { continuation ->
+                    fusedLocationClient.getCurrentLocation(
+                        Priority.PRIORITY_HIGH_ACCURACY,
+                        null
+                    ).addOnSuccessListener { location ->
+                        continuation.resume(location)
+                    }.addOnFailureListener { e ->
+                        Log.w("RouteGen", "Fresh location failed, trying lastLocation", e)
+                        // Fallback to lastLocation if fresh location fails
+                        fusedLocationClient.lastLocation.addOnSuccessListener { lastLoc ->
+                            continuation.resume(lastLoc)
+                        }.addOnFailureListener {
+                            continuation.resume(null)
+                        }
+                    }
+                }
+                
                 if (location != null) {
-                    currentLocation = Pair(location.latitude, location.longitude)
+                    val lat = location.latitude
+                    val lng = location.longitude
+                    currentLocation = Pair(lat, lng)
+                    gpsError = null
+                    Log.d("RouteGen", "✅ Got fresh GPS location: $lat, $lng")
+                } else {
+                    gpsError = "Unable to acquire GPS signal"
+                    Log.e("RouteGen", "❌ GPS location is null - GPS may be disabled or signal is too weak")
                 }
             } catch (e: Exception) {
-                android.util.Log.e("RouteGen", "Error getting location", e)
+                Log.e("RouteGen", "❌ Error getting location", e)
+            } finally {
+                isGettingLocation = false
             }
         }
     }
@@ -153,23 +194,157 @@ fun RouteGenerationScreen(
                     colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
                 ) {
                     Row(
-                        modifier = Modifier.padding(Spacing.md),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(Spacing.md),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            Icons.Default.LocationOn,
-                            contentDescription = null,
-                            tint = if (currentLocation != null) Colors.primary else Colors.textSecondary
-                        )
-                        Spacer(Modifier.width(Spacing.sm))
-                        Text(
-                            text = if (currentLocation != null) {
-                                "Using your current location"
-                            } else {
-                                "Getting location..."
-                            },
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (isGettingLocation) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp,
+                                        color = Colors.primary
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Default.LocationOn,
+                                        contentDescription = null,
+                                        tint = if (currentLocation != null) Colors.primary else Colors.textSecondary
+                                    )
+                                }
+                                Spacer(Modifier.width(Spacing.sm))
+                                Text(
+                                    text = when {
+                                        isGettingLocation -> "Acquiring GPS location..."
+                                        currentLocation != null -> "GPS location confirmed"
+                                        else -> "Waiting for GPS..."
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (currentLocation != null && !isGettingLocation) FontWeight.Medium else FontWeight.Normal
+                                )
+                            }
+                            
+                            // Show actual coordinates for verification
+                            currentLocation?.let { (lat, lng) ->
+                                Spacer(Modifier.height(Spacing.xs))
+                                Text(
+                                    text = "📍 %.6f, %.6f".format(lat, lng),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Colors.textSecondary,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                            
+                            // Show helpful hint while getting location
+                            if (isGettingLocation) {
+                                Spacer(Modifier.height(Spacing.xs))
+                                Text(
+                                    text = "Please ensure GPS is enabled and you're outdoors for best accuracy",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Colors.textSecondary,
+                                    fontStyle = FontStyle.Italic
+                                )
+                            }
+                        }
+                        
+                        // Refresh location button
+                        if (!isGettingLocation) {
+                            IconButton(
+                                onClick = { locationRefreshTrigger++ },
+                                enabled = hasLocationPermission
+                            ) {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "Refresh location",
+                                    tint = if (hasLocationPermission) Colors.primary else Colors.textSecondary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // GPS Error Screen
+            gpsError?.let { _ ->
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Colors.error.copy(alpha = 0.1f)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(Spacing.lg),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "📡",
+                                style = MaterialTheme.typography.displayMedium
+                            )
+                            Spacer(Modifier.height(Spacing.md))
+                            Text(
+                                text = "GPS Signal Too Weak",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = Colors.error
+                            )
+                            Spacer(Modifier.height(Spacing.sm))
+                            Text(
+                                text = "Unable to acquire an accurate GPS location to generate your route.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Colors.textPrimary,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(Spacing.md))
+                            Text(
+                                text = "Please try the following:",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = Colors.textPrimary
+                            )
+                            Spacer(Modifier.height(Spacing.sm))
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+                            ) {
+                                Text(
+                                    text = "• Move outdoors with clear sky visibility",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Colors.textSecondary
+                                )
+                                Text(
+                                    text = "• Check that Location Services are enabled",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Colors.textSecondary
+                                )
+                                Text(
+                                    text = "• Ensure GPS is set to 'High Accuracy' mode",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Colors.textSecondary
+                                )
+                                Text(
+                                    text = "• Wait a few moments for GPS to acquire satellites",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Colors.textSecondary
+                                )
+                            }
+                            Spacer(Modifier.height(Spacing.md))
+                            Button(
+                                onClick = { locationRefreshTrigger++ },
+                                colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null)
+                                Spacer(Modifier.width(Spacing.sm))
+                                Text("Try Again", fontWeight = FontWeight.Bold, color = Colors.buttonText)
+                            }
+                        }
                     }
                 }
             }
@@ -273,18 +448,39 @@ fun RouteGenerationScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
-                    enabled = currentLocation != null && !isLoading,
+                    enabled = currentLocation != null && !isLoading && !isGettingLocation,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Colors.primary
                     )
                 ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = Colors.buttonText
-                        )
-                    } else {
-                        Text("Generate 3 Route Options", fontWeight = FontWeight.Bold, color = Colors.buttonText)
+                    Row(
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        when {
+                            isLoading -> {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    color = Colors.buttonText
+                                )
+                                Spacer(Modifier.width(Spacing.sm))
+                                Text("Generating Routes...", fontWeight = FontWeight.Bold, color = Colors.buttonText)
+                            }
+                            isGettingLocation -> {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    color = Colors.buttonText
+                                )
+                                Spacer(Modifier.width(Spacing.sm))
+                                Text("Confirming GPS Location...", fontWeight = FontWeight.Bold, color = Colors.buttonText)
+                            }
+                            currentLocation == null -> {
+                                Text("Waiting for GPS...", fontWeight = FontWeight.Bold, color = Colors.buttonText)
+                            }
+                            else -> {
+                                Text("Generate 3 Route Options", fontWeight = FontWeight.Bold, color = Colors.buttonText)
+                            }
+                        }
                     }
                 }
             }
@@ -294,13 +490,40 @@ fun RouteGenerationScreen(
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = Colors.error.copy(alpha = 0.1f))
+                        colors = CardDefaults.cardColors(containerColor = Colors.error.copy(alpha = 0.1f)),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text(
-                            text = errorMessage,
-                            modifier = Modifier.padding(Spacing.md),
-                            color = Colors.error
-                        )
+                        Column(
+                            modifier = Modifier.padding(Spacing.md)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "⚠️",
+                                    style = MaterialTheme.typography.titleLarge
+                                )
+                                Spacer(Modifier.width(Spacing.sm))
+                                Text(
+                                    text = "Unable to Generate Routes",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Colors.error
+                                )
+                            }
+                            Spacer(Modifier.height(Spacing.sm))
+                            Text(
+                                text = errorMessage,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Colors.textPrimary
+                            )
+                            Spacer(Modifier.height(Spacing.md))
+                            Text(
+                                text = "💡 Try: Reducing distance, moving to a different location, or changing route preferences",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Colors.textSecondary
+                            )
+                        }
                     }
                 }
             }

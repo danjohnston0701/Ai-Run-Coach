@@ -110,3 +110,4 @@ Thumbs.db
 
 # Android Profiling
 *.hprof
+.idea/firebender/chat_history.db*

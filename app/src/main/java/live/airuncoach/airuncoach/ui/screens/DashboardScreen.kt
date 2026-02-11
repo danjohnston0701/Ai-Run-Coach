@@ -793,7 +793,7 @@ fun PreviousRunDashboard(lastRun: live.airuncoach.airuncoach.domain.model.RunSes
                 // Pace
                 Column {
                     Text(
-                        text = lastRun.averagePace,
+                        text = lastRun.averagePace ?: "--:--",
                         style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
                         color = Colors.primary
                     )
@@ -944,7 +944,7 @@ fun PreviousRunsCard(
                             color = Colors.textMuted
                         )
                         Text(
-                            text = recentRun.averagePace,
+                            text = recentRun.averagePace ?: "--:--",
                             style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
                             color = Colors.primary
                         )

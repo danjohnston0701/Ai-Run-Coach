@@ -341,10 +341,14 @@ class GarminAuthManager(private val context: Context) {
      * Parse OAuth response (form-encoded)
      */
     private fun parseOAuthResponse(response: String): Map<String, String> {
-        return response.split("&").associate { pair ->
-            val (key, value) = pair.split("=")
-            key to value
-        }
+        return response.split("&").mapNotNull { pair ->
+            val parts = pair.split("=", limit = 2)
+            if (parts.size == 2) {
+                parts[0] to parts[1]
+            } else {
+                null
+            }
+        }.toMap()
     }
     
     /**

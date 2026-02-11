@@ -17,6 +17,7 @@ import live.airuncoach.airuncoach.network.model.RouteGenerationRequest
 import live.airuncoach.airuncoach.network.model.RouteOption
 import live.airuncoach.airuncoach.network.model.IntelligentRouteRequest
 import live.airuncoach.airuncoach.network.model.IntelligentRoute
+import retrofit2.HttpException
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import javax.inject.Inject
@@ -68,9 +69,11 @@ class RouteGenerationViewModel @Inject constructor(
             _isLoading.value = true
             _error.value = null
             
-            Log.d("RouteGeneration", "🚀 Starting route generation...")
+            Log.d("RouteGeneration", "🚀 Starting GraphHopper route generation...")
             Log.d("RouteGeneration", "📍 Location: ($latitude, $longitude)")
             Log.d("RouteGeneration", "📏 Distance: ${distanceKm}km")
+            Log.d("RouteGeneration", "🌲 Prefer trails: $preferTrails")
+            Log.d("RouteGeneration", "⛰️ Avoid hills: $avoidHills")
             
             try {
                 val request = IntelligentRouteRequest(
@@ -84,23 +87,44 @@ class RouteGenerationViewModel @Inject constructor(
                     aiCoachEnabled = aiCoachEnabled
                 )
                 
-                Log.d("RouteGeneration", "📡 Sending request to backend...")
+                Log.d("RouteGeneration", "📡 Sending request to /api/routes/generate-intelligent...")
                 val response = apiService.generateIntelligentRoutes(request)
                 
-                Log.d("RouteGeneration", "✅ Received ${response.routes.size} routes")
+                Log.d("RouteGeneration", "✅ Received ${response.routes.size} routes from GraphHopper")
                 _routes.value = response.routes.map { it.toGeneratedRoute() }
                 Log.d("RouteGeneration", "🎉 Routes converted successfully!")
             } catch (e: SocketTimeoutException) {
-                val errorMsg = "Timeout: Backend or GraphHopper is slow"
+                val errorMsg = "Request timed out. The backend or routing service may be slow. Please try again."
                 _error.value = errorMsg
                 Log.e("RouteGeneration", "⏱️ TIMEOUT ERROR", e)
             } catch (e: ConnectException) {
-                val errorMsg = "Cannot connect to backend"
+                val errorMsg = "Cannot connect to backend. Please check your internet connection."
                 _error.value = errorMsg
                 Log.e("RouteGeneration", "🔌 CONNECTION ERROR", e)
+            } catch (e: HttpException) {
+                // Handle HTTP errors with better messages
+                val errorMsg = when (e.code()) {
+                    400 -> "Unable to generate routes in this area. The location may not have enough suitable paths or roads for a ${distanceKm}km route."
+                    404 -> "Route generation service not found. Please try again later."
+                    500 -> "Server error while generating routes. Please try again."
+                    503 -> "Route generation service is temporarily unavailable. Please try again later."
+                    else -> "Failed to generate routes (HTTP ${e.code()}). Please try again."
+                }
+                _error.value = errorMsg
+                Log.e("RouteGeneration", "❌ HTTP ERROR ${e.code()}: ${e.message()}", e)
+                
+                // Try to get error body for more details
+                try {
+                    val errorBody = e.response()?.errorBody()?.string()
+                    if (errorBody != null) {
+                        Log.e("RouteGeneration", "Error response: $errorBody")
+                    }
+                } catch (ex: Exception) {
+                    Log.e("RouteGeneration", "Could not read error body", ex)
+                }
             } catch (e: Exception) {
-                _error.value = e.message ?: "Failed to generate routes"
-                Log.e("RouteGeneration", "❌ ERROR: ${e.message}", e)
+                _error.value = "An unexpected error occurred while generating routes. Please try again."
+                Log.e("RouteGeneration", "❌ UNEXPECTED ERROR: ${e.message}", e)
                 e.printStackTrace()
             } finally {
                 _isLoading.value = false
@@ -115,7 +139,7 @@ class RouteGenerationViewModel @Inject constructor(
 
     private fun RouteOption.toGeneratedRoute(): GeneratedRoute {
         return GeneratedRoute(
-            id = this.id,
+            id = this.id ?: "route-${System.currentTimeMillis()}",
             name = this.name,
             distance = this.distance,
             duration = this.estimatedTime,
@@ -127,23 +151,23 @@ class RouteGenerationViewModel @Inject constructor(
                 "hard" -> RouteDifficulty.HARD
                 else -> RouteDifficulty.MODERATE
             },
-            elevationGain = this.elevationGain,
-            elevationLoss = this.elevationLoss,
-            maxGradientPercent = this.maxGradientPercent,
-            maxGradientDegrees = this.maxGradientDegrees,
-            instructions = this.turnByTurn,
-            turnInstructions = this.turnInstructions.map { 
+            elevationGain = this.elevation?.gain ?: 0.0,
+            elevationLoss = this.elevation?.loss ?: 0.0,
+            maxGradientPercent = 0.0,
+            maxGradientDegrees = 0.0,
+            instructions = emptyList(),
+            turnInstructions = this.turnInstructions?.map { 
                 TurnInstruction(
                     instruction = it.instruction,
                     latitude = it.lat,
                     longitude = it.lng,
                     distance = it.distance ?: 0.0
                 )
-            },
-            backtrackRatio = this.circuitQuality.backtrackRatio,
-            angularSpread = this.circuitQuality.angularSpread,
+            } ?: emptyList(),
+            backtrackRatio = 0.0,
+            angularSpread = 0.0,
             templateName = this.name,
-            hasMajorRoads = false // Could be inferred from description or added to API response
+            hasMajorRoads = this.hasMajorRoads ?: false
         )
     }
 

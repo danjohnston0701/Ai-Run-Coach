@@ -3,9 +3,11 @@ package live.airuncoach.airuncoach.viewmodel
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
+import com.google.gson.JsonSyntaxException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,6 +17,7 @@ import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.network.model.UploadProfilePictureRequest
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -74,17 +77,20 @@ class ProfileViewModel @Inject constructor(
                     val base64Image = android.util.Base64.encodeToString(imageBytes, android.util.Base64.NO_WRAP)
                     val imageData = "data:image/jpeg;base64,$base64Image"
 
-                    val request = live.airuncoach.airuncoach.network.model.UploadProfilePictureRequest(imageData)
+                    val request = UploadProfilePictureRequest(imageData)
                     val updatedUser = apiService.uploadProfilePicture(user.id, request)
 
                     val userJson = gson.toJson(updatedUser)
                     sharedPrefs.edit().putString("user", userJson).apply()
                     _user.value = updatedUser
                     
-                    android.util.Log.d("ProfileViewModel", "✅ Profile picture uploaded successfully")
+                    Log.d("ProfileViewModel", "✅ Profile picture uploaded successfully")
                 }
+            } catch (e: JsonSyntaxException) {
+                Log.e("ProfileViewModel", "❌ Backend returned HTML instead of JSON - endpoint not deployed")
+                Log.e("ProfileViewModel", "💡 The profile picture upload endpoint needs to be deployed to the backend server")
             } catch (e: Exception) {
-                android.util.Log.e("ProfileViewModel", "❌ Failed to upload profile picture: ${e.message}", e)
+                Log.e("ProfileViewModel", "❌ Failed to upload profile picture: ${e.message}", e)
             }
         }
     }

@@ -221,7 +221,7 @@ class RunSummaryViewModel @Inject constructor(
                     runId = session.id,
                     distance = session.distance,
                     duration = session.duration,
-                    averagePace = session.averagePace,
+                    averagePace = session.averagePace ?: "0:00",
                     averageHeartRate = if (session.heartRate > 0) session.heartRate else null,
                     maxHeartRate = null, // TODO: Track max HR during run
                     averageCadence = if (session.cadence > 0) session.cadence else null,
@@ -387,7 +387,7 @@ class RunSummaryViewModel @Inject constructor(
         
         val distance = String.format("%.2f km", session.getDistanceInKm())
         val duration = session.getFormattedDuration()
-        val pace = session.averagePace
+        val pace = session.averagePace ?: "N/A"
         
         return """
             🏃‍♂️ Just finished an amazing run! 

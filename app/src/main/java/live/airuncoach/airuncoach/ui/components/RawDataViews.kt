@@ -100,8 +100,8 @@ fun RawDataTab(runSession: RunSession) {
                 RawDataRow("Max Speed (m/s)", String.format("%.3f", runSession.maxSpeed))
                 RawDataRow("Max Speed (km/h)", String.format("%.2f", runSession.maxSpeed * 3.6))
                 RawDataRow("Max Speed (mph)", String.format("%.2f", runSession.maxSpeed * 2.23694))
-                RawDataRow("Average Pace (min/km)", runSession.averagePace)
-                RawDataRow("Average Pace (min/mi)", convertPaceToMiles(runSession.averagePace))
+                RawDataRow("Average Pace (min/km)", runSession.averagePace ?: "N/A")
+                RawDataRow("Average Pace (min/mi)", runSession.averagePace?.let { convertPaceToMiles(it) } ?: "N/A")
             }
         }
 

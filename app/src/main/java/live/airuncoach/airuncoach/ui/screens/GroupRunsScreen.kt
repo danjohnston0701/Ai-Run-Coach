@@ -68,8 +68,63 @@ fun GroupRunsScreen(onCreateGroupRun: () -> Unit, onNavigateBack: () -> Unit) {
                     }
                 }
                 is GroupRunsUiState.Error -> {
-                    Text(text = state.message, color = Colors.error, modifier = Modifier.align(Alignment.Center))
+                    ErrorGroupRunsState(
+                        errorMessage = state.message,
+                        onRetry = { viewModel.loadGroupRuns() },
+                        modifier = Modifier.align(Alignment.Center)
+                    )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun ErrorGroupRunsState(
+    errorMessage: String,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(Spacing.xl),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        // Icon
+        Icon(
+            painter = painterResource(id = R.drawable.icon_x_circle),
+            contentDescription = "Error",
+            tint = Colors.warning,
+            modifier = Modifier.size(64.dp)
+        )
+        
+        Spacer(modifier = Modifier.height(Spacing.lg))
+        
+        // Error message
+        Text(
+            text = errorMessage,
+            style = AppTextStyles.body,
+            color = Colors.textSecondary,
+            modifier = Modifier.padding(horizontal = Spacing.lg)
+        )
+        
+        Spacer(modifier = Modifier.height(Spacing.xl))
+        
+        // Retry button (only show if not a "coming soon" message)
+        if (!errorMessage.contains("coming soon", ignoreCase = true)) {
+            Button(
+                onClick = onRetry,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Colors.primary
+                )
+            ) {
+                Text(
+                    text = "Retry",
+                    color = Colors.buttonText,
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
+                )
             }
         }
     }

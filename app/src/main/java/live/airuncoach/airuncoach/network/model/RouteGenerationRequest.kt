@@ -16,8 +16,14 @@ data class RouteGenerationRequest(
     @SerializedName("startLng")
     val startLng: Double,
     
-    @SerializedName("distance")
+    @SerializedName("targetDistance")
     val distance: Double,  // in kilometers
+    
+    @SerializedName("useAI")
+    val useAI: Boolean = true,  // Use AI-powered route generation
+    
+    @SerializedName("userId")
+    val userId: String? = null,  // Optional user ID for personalization
     
     @SerializedName("activityType")
     val activityType: String = "run",  // "run" or "walk"

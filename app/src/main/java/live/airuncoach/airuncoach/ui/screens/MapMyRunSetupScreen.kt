@@ -1,26 +1,41 @@
 package live.airuncoach.airuncoach.ui.screens
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.pm.PackageManager
+import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.tasks.await
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.ui.components.TargetTimeCard
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
+import kotlin.coroutines.resume
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -39,8 +54,10 @@ fun MapMyRunSetupScreen(
         minutes: Int,
         seconds: Int,
         liveTrackingEnabled: Boolean,
-        isGroupRun: Boolean
-    ) -> Unit = { _, _, _, _, _, _, _ -> },
+        isGroupRun: Boolean,
+        latitude: Double,
+        longitude: Double
+    ) -> Unit = { _, _, _, _, _, _, _, _, _ -> },
     onStartRunWithoutRoute: (
         distance: Float,
         targetTimeEnabled: Boolean,
@@ -49,6 +66,7 @@ fun MapMyRunSetupScreen(
         seconds: Int
     ) -> Unit = { _, _, _, _, _ -> }
 ) {
+    val context = LocalContext.current
     var selectedActivity by remember { mutableStateOf("Run") }
     var targetDistance by remember { mutableStateOf(initialDistance) }
     var isTargetTimeEnabled by remember { mutableStateOf(initialTargetTimeEnabled) }
@@ -56,6 +74,71 @@ fun MapMyRunSetupScreen(
     var targetMinutes by remember { mutableStateOf(initialMinutes.toString().padStart(2, '0')) }
     var targetSeconds by remember { mutableStateOf(initialSeconds.toString().padStart(2, '0')) }
     var isLiveTrackingEnabled by remember { mutableStateOf(false) }
+    
+    // GPS State
+    var currentLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    var hasLocationPermission by remember { mutableStateOf(false) }
+    var isGettingLocation by remember { mutableStateOf(false) }
+    var gpsError by remember { mutableStateOf<String?>(null) }
+    
+    // Check permission status
+    LaunchedEffect(Unit) {
+        hasLocationPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+    
+    // Permission launcher
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+    }
+    
+    // Get current location - request fresh location instead of using cached lastLocation
+    LaunchedEffect(hasLocationPermission) {
+        if (hasLocationPermission) {
+            isGettingLocation = true
+            gpsError = null
+            try {
+                val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+                
+                Log.d("MapSetup", "🔄 Requesting fresh GPS location...")
+                
+                @SuppressLint("MissingPermission")
+                val location = suspendCancellableCoroutine { continuation ->
+                    fusedLocationClient.getCurrentLocation(
+                        Priority.PRIORITY_HIGH_ACCURACY,
+                        null
+                    ).addOnSuccessListener { location ->
+                        continuation.resume(location)
+                    }.addOnFailureListener { e ->
+                        Log.w("MapSetup", "Fresh location failed, trying lastLocation", e)
+                        fusedLocationClient.lastLocation.addOnSuccessListener { lastLoc ->
+                            continuation.resume(lastLoc)
+                        }.addOnFailureListener {
+                            continuation.resume(null)
+                        }
+                    }
+                }
+                
+                if (location != null) {
+                    currentLocation = Pair(location.latitude, location.longitude)
+                    Log.d("MapSetup", "✅ Got fresh GPS location: ${location.latitude}, ${location.longitude}")
+                } else {
+                    gpsError = "Unable to acquire GPS signal"
+                    Log.e("MapSetup", "❌ GPS location is null")
+                }
+            } catch (e: Exception) {
+                gpsError = "Error getting GPS location"
+                Log.e("MapSetup", "❌ Error getting location", e)
+            } finally {
+                isGettingLocation = false
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -102,6 +185,92 @@ fun MapMyRunSetupScreen(
             }
             
             item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+            
+            // GPS Location Status Card
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (currentLocation != null) Colors.backgroundSecondary else Colors.error.copy(alpha = 0.1f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(Spacing.md),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isGettingLocation) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = Colors.primary
+                            )
+                        } else {
+                            Icon(
+                                Icons.Default.LocationOn,
+                                contentDescription = null,
+                                tint = if (currentLocation != null) Colors.primary else Colors.error
+                            )
+                        }
+                        
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = when {
+                                    isGettingLocation -> "Acquiring GPS location..."
+                                    currentLocation != null -> "GPS location confirmed"
+                                    gpsError != null -> "GPS signal unavailable"
+                                    !hasLocationPermission -> "Location permission required"
+                                    else -> "Waiting for GPS..."
+                                },
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
+                                color = if (currentLocation != null) Colors.textPrimary else Colors.error
+                            )
+                            
+                            if (currentLocation != null) {
+                                Text(
+                                    text = "Ready to start",
+                                    style = AppTextStyles.caption,
+                                    color = Colors.textSecondary
+                                )
+                            } else if (!hasLocationPermission) {
+                                Text(
+                                    text = "Grant permission to continue",
+                                    style = AppTextStyles.caption,
+                                    color = Colors.textSecondary
+                                )
+                            } else {
+                                Text(
+                                    text = "Please wait for GPS signal",
+                                    style = AppTextStyles.caption,
+                                    color = Colors.textSecondary
+                                )
+                            }
+                        }
+                        
+                        if (!hasLocationPermission) {
+                            Button(
+                                onClick = {
+                                    locationPermissionLauncher.launch(
+                                        arrayOf(
+                                            Manifest.permission.ACCESS_FINE_LOCATION,
+                                            Manifest.permission.ACCESS_COARSE_LOCATION
+                                        )
+                                    )
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
+                            ) {
+                                Text("Grant", color = Colors.buttonText)
+                            }
+                        }
+                    }
+                }
+            }
+            
+            item { Spacer(modifier = Modifier.height(Spacing.md)) }
             
             // Activity Type Selector
             item {
@@ -191,19 +360,24 @@ fun MapMyRunSetupScreen(
                 if (mode == "route") {
                     Button(
                         onClick = {
-                            val hours = targetHours.toIntOrNull() ?: 0
-                            val minutes = targetMinutes.toIntOrNull() ?: 0
-                            val seconds = targetSeconds.toIntOrNull() ?: 0
-                            onGenerateRoute(
-                                targetDistance,
-                                isTargetTimeEnabled,
-                                hours,
-                                minutes,
-                                seconds,
-                                isLiveTrackingEnabled,
-                                false
-                            )
+                            currentLocation?.let { (lat, lng) ->
+                                val hours = targetHours.toIntOrNull() ?: 0
+                                val minutes = targetMinutes.toIntOrNull() ?: 0
+                                val seconds = targetSeconds.toIntOrNull() ?: 0
+                                onGenerateRoute(
+                                    targetDistance,
+                                    isTargetTimeEnabled,
+                                    hours,
+                                    minutes,
+                                    seconds,
+                                    isLiveTrackingEnabled,
+                                    false,
+                                    lat,
+                                    lng
+                                )
+                            }
                         },
+                        enabled = currentLocation != null && !isGettingLocation,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(56.dp),
@@ -213,16 +387,34 @@ fun MapMyRunSetupScreen(
                             contentColor = Colors.buttonText
                         )
                     ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.icon_location_vector),
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(Spacing.sm))
-                        Text(
-                            text = "GENERATE ROUTES",
-                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
-                        )
+                        if (isGettingLocation) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Colors.buttonText,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(Spacing.sm))
+                            Text(
+                                text = "ACQUIRING GPS...",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                            )
+                        } else if (currentLocation == null) {
+                            Text(
+                                text = "WAITING FOR GPS SIGNAL",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                            )
+                        } else {
+                            Icon(
+                                painter = painterResource(id = R.drawable.icon_location_vector),
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(Spacing.sm))
+                            Text(
+                                text = "GENERATE ROUTES",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
                     }
                 }
                 
@@ -241,6 +433,7 @@ fun MapMyRunSetupScreen(
                                 seconds
                             )
                         },
+                        enabled = currentLocation != null && !isGettingLocation,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(56.dp),
@@ -250,16 +443,34 @@ fun MapMyRunSetupScreen(
                             contentColor = Colors.buttonText
                         )
                     ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.icon_navigation_vector),
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(Spacing.sm))
-                        Text(
-                            text = "START RUN",
-                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
-                        )
+                        if (isGettingLocation) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Colors.buttonText,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(Spacing.sm))
+                            Text(
+                                text = "ACQUIRING GPS...",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                            )
+                        } else if (currentLocation == null) {
+                            Text(
+                                text = "WAITING FOR GPS SIGNAL",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                            )
+                        } else {
+                            Icon(
+                                painter = painterResource(id = R.drawable.icon_navigation_vector),
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(Spacing.sm))
+                            Text(
+                                text = "START RUN",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
                     }
                 }
                 

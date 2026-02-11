@@ -82,7 +82,7 @@ class RunSessionViewModel @Inject constructor(
                         it.copy(
                             time = session.getFormattedDuration(),
                             distance = String.format("%.2f", session.getDistanceInKm()),
-                            pace = session.averagePace,
+                            pace = session.averagePace ?: "0:00",
                             cadence = session.cadence.toString(),
                             heartRate = session.heartRate.toString(),
                             isRunning = session.isActive && !it.isPaused

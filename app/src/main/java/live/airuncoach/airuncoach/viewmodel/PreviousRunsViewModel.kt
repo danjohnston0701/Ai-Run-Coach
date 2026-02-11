@@ -194,9 +194,10 @@ class PreviousRunsViewModel @Inject constructor(
                 return@launch
             }
             
-            // Calculate overall average pace
-            val totalPaceSeconds = runs.mapNotNull { parsePaceToSeconds(it.averagePace) }.sum()
-            val avgPaceSeconds = totalPaceSeconds / runs.size
+            // Calculate overall average pace (filter out null paces first)
+            val validPaces = runs.mapNotNull { it.averagePace }.mapNotNull { parsePaceToSeconds(it) }
+            val totalPaceSeconds = validPaces.sum()
+            val avgPaceSeconds = if (validPaces.isNotEmpty()) totalPaceSeconds / validPaces.size else 0
             val overallPace = formatSecondsTopace(avgPaceSeconds)
             
             // Simplified weather impact (in a real app, this would analyze weather data)

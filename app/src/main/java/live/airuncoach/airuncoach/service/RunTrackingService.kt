@@ -38,7 +38,7 @@ import live.airuncoach.airuncoach.data.UserPreferences
 import live.airuncoach.airuncoach.utils.TextToSpeechHelper
 import live.airuncoach.airuncoach.utils.AudioPlayerHelper
 import live.airuncoach.airuncoach.domain.model.User
-import live.airuncoach.airuncoach.network.model.StrugglePoint
+import live.airuncoach.airuncoach.domain.model.StrugglePoint
 import retrofit2.HttpException
 import java.security.MessageDigest
 import java.util.*

@@ -3,42 +3,43 @@ package live.airuncoach.airuncoach.network.model
 import com.google.gson.annotations.SerializedName
 
 /**
- * Response from route generation endpoint V2
- * POST /api/routes/generate-options-v2
+ * Response from route generation endpoint
+ * POST /api/routes/generate-options
+ * Returns multiple AI-generated route options
  */
 data class RouteGenerationResponse(
+    @SerializedName("success")
+    val success: Boolean,
+    
     @SerializedName("routes")
-    val routes: List<RouteOption>
+    val routes: List<RouteOption>,
+    
+    @SerializedName("targetDistance")
+    val targetDistance: Double,
+    
+    @SerializedName("generationMethod")
+    val generationMethod: String,
+    
+    @SerializedName("startLocationLabel")
+    val startLocationLabel: String
 )
 
 /**
- * Individual route option from backend V2
- * Enhanced with geographic features and terrain diversity
+ * Individual route option from backend
+ * AI-generated route with GraphHopper/Google Maps
  */
 data class RouteOption(
-    @SerializedName("id")
-    val id: String,
+    @SerializedName("dbId")
+    val id: String?,
     
-    @SerializedName("name")
+    @SerializedName("routeName")
     val name: String,
     
-    @SerializedName("distance")
+    @SerializedName("actualDistance")
     val distance: Double,  // in kilometers
     
-    @SerializedName("estimatedTime")
-    val estimatedTime: Double,  // in minutes (GraphHopper returns decimal values)
-    
-    @SerializedName("elevationGain")
-    val elevationGain: Double,  // in meters (GraphHopper returns decimal values)
-    
-    @SerializedName("elevationLoss")
-    val elevationLoss: Double,  // in meters (GraphHopper returns decimal values)
-    
-    @SerializedName("maxGradientPercent")
-    val maxGradientPercent: Double,
-    
-    @SerializedName("maxGradientDegrees")
-    val maxGradientDegrees: Double,
+    @SerializedName("duration")
+    val estimatedTime: Double,  // in minutes
     
     @SerializedName("difficulty")
     val difficulty: String,  // "easy", "moderate", "hard"
@@ -49,27 +50,25 @@ data class RouteOption(
     @SerializedName("waypoints")
     val waypoints: List<WaypointDto>,
     
-    @SerializedName("description")
-    val description: String,
-    
-    @SerializedName("turnByTurn")
-    val turnByTurn: List<String>,
+    @SerializedName("elevation")
+    val elevation: ElevationDto? = null,
     
     @SerializedName("turnInstructions")
-    val turnInstructions: List<TurnInstructionDto>,
+    val turnInstructions: List<TurnInstructionDto>? = null,
     
-    @SerializedName("circuitQuality")
-    val circuitQuality: CircuitQualityDto,
+    @SerializedName("hasMajorRoads")
+    val hasMajorRoads: Boolean? = null
+)
+
+data class ElevationDto(
+    @SerializedName("gain")
+    val gain: Double?,
     
-    // V2 Enhanced Fields
-    @SerializedName("terrainTypes")
-    val terrainTypes: List<String>? = null,  // e.g., ["trail", "park", "road"]
+    @SerializedName("loss")
+    val loss: Double?,
     
-    @SerializedName("featureTypes")
-    val featureTypes: List<String>? = null,  // e.g., ["park", "waterfront", "poi"]
-    
-    @SerializedName("checkpoints")
-    val checkpoints: List<WaypointCheckpointDto>? = null
+    @SerializedName("profile")
+    val profile: List<Any>? = null
 )
 
 data class WaypointDto(
