@@ -73,9 +73,10 @@ fun ConnectedDevicesScreen(
                 name = "Garmin",
                 description = "Connect via Garmin Connect OAuth for activity sync and health data",
                 iconDrawable = R.drawable.ic_garmin_logo, // Garmin Connect logo
-                supportsRealtimeHR = false,
+                supportsRealtimeHR = true, // Real-time data via Garmin Connect IQ app
                 supportsPostRunSync = true,
                 isAvailableOnAndroid = true,
+                requiresAppInstall = true, // Garmin Companion App recommended
                 isConnected = garminConnectionStatus == "connected",
                 onConnect = onNavigateToGarminConnect
             ),
@@ -322,7 +323,7 @@ fun DeviceCard(device: DeviceInfo, isConnected: Boolean) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FeatureBadge(
-                    text = "Real-time HR",
+                    text = if (device.name == "Garmin") "Real-time data" else "Real-time HR",
                     isSupported = device.supportsRealtimeHR
                 )
                 FeatureBadge(
@@ -336,7 +337,7 @@ fun DeviceCard(device: DeviceInfo, isConnected: Boolean) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     InfoBadge(
-                        text = "Requires app install",
+                        text = if (device.name == "Garmin") "Garmin Companion App recommended" else "Requires app install",
                         color = Color(0xFFFFA726)
                     )
                 }

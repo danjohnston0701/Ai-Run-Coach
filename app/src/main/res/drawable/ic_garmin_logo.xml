@@ -1,20 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Garmin Connect Logo - Simplified vector version -->
+<!-- Garmin Connect Logo - Simplified -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="48dp"
     android:height="48dp"
     android:viewportWidth="48"
     android:viewportHeight="48">
     
-    <!-- Background rounded square -->
+    <!-- Background - Garmin cyan blue rounded square -->
     <path
         android:fillColor="#00A0DC"
-        android:pathData="M8,0 L40,0 Q48,0 48,8 L48,40 Q48,48 40,48 L8,48 Q0,48 0,40 L0,8 Q0,0 8,0 Z"/>
+        android:pathData="M8,0 h32 a8,8 0,0,1 8,8 v32 a8,8 0,0,1 -8,8 h-32 a8,8 0,0,1 -8,-8 v-32 a8,8 0,0,1 8,-8 z"/>
     
-    <!-- Garmin "C" symbol in white -->
+    <!-- White "C" symbol -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M24,12 A12,12 0 1,1 24,36 A12,12 0 0,1 24,12 Z
-                         M24,16 A8,8 0 1,0 24,32 A8,8 0 0,0 24,16 Z
-                         M28,20 L28,28 A4,4 0 0,1 20,28 L20,20 Z"/>
+        android:pathData="M24,10 A14,14 0,1,1 24,38 A14,14 0,1,1 24,10 M24,16 A8,8 0,1,0 24,32 A8,8 0,1,0 24,16 Z"/>
+        
 </vector>
