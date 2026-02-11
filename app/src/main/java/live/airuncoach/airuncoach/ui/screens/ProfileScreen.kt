@@ -45,7 +45,11 @@ import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.ProfileViewModel
+import live.airuncoach.airuncoach.data.UserPreferences
 import java.io.File
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,6 +70,11 @@ fun ProfileScreen(
     val viewModel: ProfileViewModel = hiltViewModel()
     val user by viewModel.user.collectAsState()
     val friendCount by viewModel.friendCount.collectAsState()
+    
+    // User preferences for Garmin auto-sync
+    val userPreferences = remember { UserPreferences(context) }
+    val autoSyncToGarmin by userPreferences.autoSyncToGarmin.collectAsState(initial = true)
+    val coroutineScope = rememberCoroutineScope()
     
     var showImagePickerDialog by remember { mutableStateOf(false) }
     
@@ -220,6 +229,17 @@ fun ProfileScreen(
         item {
             SettingsSection {
                 SettingsItem(icon = R.drawable.icon_timer_vector, text = "Connected Devices", onClick = onNavigateToConnectedDevices)
+                SettingsToggleItem(
+                    icon = R.drawable.ic_garmin_logo,
+                    text = "Auto-sync to Garmin Connect",
+                    subtitle = "Automatically upload runs to your Garmin account",
+                    checked = autoSyncToGarmin,
+                    onCheckedChange = { enabled ->
+                        coroutineScope.launch {
+                            userPreferences.setAutoSyncToGarmin(enabled)
+                        }
+                    }
+                )
                 SettingsItem(icon = R.drawable.icon_play_vector, text = "Subscription", value = user?.subscriptionTier ?: "Free", onClick = onNavigateToSubscription)
             }
         }
@@ -397,5 +417,60 @@ fun SettingsItem(icon: Int, text: String, value: String? = null, onClick: () -> 
                 modifier = Modifier.size(16.dp)
             )
         }
+    }
+}
+
+@Composable
+fun SettingsToggleItem(
+    icon: Int,
+    text: String,
+    subtitle: String? = null,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(Spacing.lg),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f)
+        ) {
+            Icon(
+                painter = painterResource(id = icon),
+                contentDescription = text,
+                tint = Color(0xFF00A0DC), // Garmin cyan
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(Spacing.md))
+            Column {
+                Text(
+                    text = text,
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
+                    color = Colors.textPrimary
+                )
+                if (subtitle != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = subtitle,
+                        style = AppTextStyles.caption,
+                        color = Colors.textSecondary
+                    )
+                }
+            }
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFF00A0DC), // Garmin cyan
+                uncheckedThumbColor = Color.White,
+                uncheckedTrackColor = Colors.textMuted
+            )
+        )
     }
 }

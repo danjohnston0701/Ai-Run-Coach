@@ -25,6 +25,7 @@ import com.google.android.gms.location.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import live.airuncoach.airuncoach.MainActivity
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.data.WeatherRepository
@@ -33,9 +34,11 @@ import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.network.model.*
 import live.airuncoach.airuncoach.data.SessionManager
+import live.airuncoach.airuncoach.data.UserPreferences
 import live.airuncoach.airuncoach.utils.TextToSpeechHelper
 import live.airuncoach.airuncoach.utils.AudioPlayerHelper
 import live.airuncoach.airuncoach.domain.model.User
+import live.airuncoach.airuncoach.network.model.StrugglePoint
 import retrofit2.HttpException
 import java.security.MessageDigest
 import java.util.*
@@ -554,7 +557,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 tss = 0, // Backend will calculate
                 gap = null, // Backend will calculate
                 isPublic = true,
-                strugglePoints = emptyList(), // TODO: Add actual struggle point data
+                strugglePoints = emptyList<StrugglePoint>(),
                 kmSplits = runSession.kmSplits,
                 terrainType = runSession.terrainType.name.lowercase(),
                 userComments = null,
@@ -569,6 +572,9 @@ class RunTrackingService : Service(), SensorEventListener {
             
             // Update the run session with the backend ID
             _currentRunSession.value = _currentRunSession.value?.copy(id = response.id)
+            
+            // Auto-upload to Garmin Connect if enabled
+            tryAutoUploadToGarmin(response.id)
 
         } catch (e: HttpException) {
             // Handle 401 Unauthorized errors
@@ -582,6 +588,48 @@ class RunTrackingService : Service(), SensorEventListener {
             // Log error but don't crash - run is saved locally
             android.util.Log.e("RunTrackingService", "Failed to upload run to backend", e)
             // TODO: Save to local queue for retry later
+        }
+    }
+    
+    /**
+     * Auto-upload run to Garmin Connect if user has auto-sync enabled
+     * Silent background operation - doesn't interrupt user if it fails
+     */
+    private suspend fun tryAutoUploadToGarmin(runId: String) {
+        try {
+            // Check if auto-sync is enabled
+            val userPreferences = UserPreferences(this)
+            val autoSyncEnabled = userPreferences.autoSyncToGarmin.first()
+            
+            if (!autoSyncEnabled) {
+                Log.d("GarminSync", "Auto-sync disabled, skipping upload")
+                return
+            }
+            
+            // Check if user has Garmin connected
+            val connectedDevices = apiService.getConnectedDevices()
+            val hasGarmin = connectedDevices.any { it.deviceType == "garmin" && it.isActive }
+            
+            if (!hasGarmin) {
+                Log.d("GarminSync", "No Garmin device connected, skipping upload")
+                return
+            }
+            
+            // Upload to Garmin in background
+            Log.d("GarminSync", "Auto-uploading run $runId to Garmin Connect...")
+            val response = apiService.uploadRunToGarmin(
+                GarminUploadRequest(runId)
+            )
+            
+            if (response.success) {
+                Log.d("GarminSync", "✅ Run synced to Garmin: ${response.garminActivityId}")
+            } else {
+                Log.w("GarminSync", "⚠️ Upload response not successful: ${response.message}")
+            }
+            
+        } catch (e: Exception) {
+            // Silent failure - log only, don't interrupt user
+            Log.e("GarminSync", "Failed to auto-upload to Garmin (silent failure): ${e.message}")
         }
     }
 

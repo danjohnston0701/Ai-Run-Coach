@@ -10,6 +10,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -483,6 +485,34 @@ fun RunListItem(run: RunSession, onClick: () -> Unit) {
                             tint = Color.Unspecified,
                             modifier = Modifier.size(20.dp)
                         )
+                    }
+                    
+                    // Garmin badge if AI Run Coach run was uploaded TO Garmin
+                    if (run.uploadedToGarmin == true && run.externalSource != "garmin") {
+                        Spacer(modifier = Modifier.width(Spacing.sm))
+                        Row(
+                            modifier = Modifier
+                                .background(
+                                    color = Color(0xFF00A0DC).copy(alpha = 0.1f),
+                                    shape = RoundedCornerShape(4.dp)
+                                )
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_garmin_logo),
+                                contentDescription = null,
+                                tint = Color.Unspecified,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Synced",
+                                modifier = Modifier.size(12.dp),
+                                tint = Color(0xFF00A0DC)
+                            )
+                        }
                     }
                 }
                 

@@ -36,6 +36,10 @@ data class RunSession(
     val externalSource: String? = null,
     val externalId: String? = null,
     
+    // Garmin upload tracking (for AI Run Coach runs uploaded TO Garmin)
+    val uploadedToGarmin: Boolean? = null,
+    val garminActivityId: String? = null,
+
     val isActive: Boolean = false
 ) {
     fun getDistanceInKm(): Double = distance / 1000.0
