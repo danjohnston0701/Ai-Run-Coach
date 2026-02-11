@@ -34,7 +34,8 @@ data class DeviceInfo(
     val isAvailableOnAndroid: Boolean,
     val requiresAppInstall: Boolean = false,
     val isConnected: Boolean = false,
-    val onConnect: () -> Unit
+    val onConnect: () -> Unit,
+    val onDisconnect: () -> Unit = {} // For disconnecting devices
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,7 +58,8 @@ fun ConnectedDevicesScreen(
             isAvailableOnAndroid = true,
             requiresAppInstall = true, // Garmin Companion App recommended
             isConnected = garminConnectionStatus == "connected",
-            onConnect = onNavigateToGarminConnect
+            onConnect = onNavigateToGarminConnect,
+            onDisconnect = { viewModel.disconnectGarmin() }
         )
     }
     
@@ -106,9 +108,6 @@ fun ConnectedDevicesScreen(
     }
     
     val devices = listOf(garminDevice) + comingSoonDevices
-    
-    val connectedDevices = devices.filter { it.isConnected }
-    val availableDevices = devices.filterNot { it.isConnected }
 
     Scaffold(
         topBar = {
@@ -362,26 +361,81 @@ fun DeviceCard(device: DeviceInfo, isConnected: Boolean, isComingSoon: Boolean =
                         }
                     }
                 }
+            } else if (isConnected) {
+                // Connected - show disconnect button
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Connected status badge
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF4CAF50).copy(alpha = 0.15f),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(12.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Color(0xFF4CAF50),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "Connected",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                                color = Color(0xFF4CAF50)
+                            )
+                        }
+                    }
+                    
+                    // Disconnect button
+                    Button(
+                        onClick = device.onDisconnect,
+                        modifier = Modifier.height(48.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFEF5350),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            "Disconnect",
+                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                }
             } else {
                 // Connect button for available devices
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(
                     onClick = device.onConnect,
-                    modifier = Modifier.height(40.dp),
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isConnected) Colors.backgroundTertiary else Colors.primary,
-                        contentColor = if (isConnected) Colors.textMuted else Color.Black
+                        containerColor = Colors.primary,
+                        contentColor = Color.Black
                     ),
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Icon(
-                        if (isConnected) Icons.Default.Check else Icons.Default.Add,
+                        Icons.Default.Add,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        if (isConnected) "Connected" else "Connect",
+                        "Connect",
                         style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
                     )
                 }

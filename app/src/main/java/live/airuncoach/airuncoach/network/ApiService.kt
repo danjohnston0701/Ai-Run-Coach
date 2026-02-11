@@ -250,12 +250,12 @@ interface ApiService {
     
     @GET("/api/connected-devices")
     suspend fun getConnectedDevices(): List<ConnectedDevice>
-    
+
     @POST("/api/connected-devices")
     suspend fun connectDevice(@Body request: Map<String, String>): ConnectedDevice
     
-    @DELETE("/api/connected-devices/{id}")
-    suspend fun disconnectDevice(@Path("id") deviceId: String): Map<String, Boolean>
+    @DELETE("/api/connected-devices/{deviceId}")
+    suspend fun disconnectDevice(@Path("deviceId") deviceId: String)
     
     @GET("/api/auth/garmin")
     suspend fun startGarminAuth(@Query("app_redirect") appRedirect: String = "airuncoach://connected-devices"): String
