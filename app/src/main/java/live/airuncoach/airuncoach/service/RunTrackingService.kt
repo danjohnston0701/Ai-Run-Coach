@@ -386,7 +386,35 @@ class RunTrackingService : Service(), SensorEventListener {
         // Check for 500m milestones and trigger coaching
         check500mMilestones()
         
-        _currentRunSession.value = RunSession(UUID.randomUUID().toString(), startTime, null, duration, totalDistance, avgSpeed, maxSpeed, calculatePace(avgSpeed), calculateCalories(totalDistance, duration), currentCadence, currentHeartRate, routePoints.toList(), kmSplits.toList(), isStruggling, phase, weatherAtStart, null, totalElevationGain, totalElevationLoss, calculateAverageGradient(), calculateMaxGradient(), determineTerrainType(calculateAverageGradient()), generateRouteHash(), null, true)
+        _currentRunSession.value = RunSession(
+            id = UUID.randomUUID().toString(),
+            startTime = startTime,
+            endTime = null,
+            duration = duration,
+            distance = totalDistance,
+            averageSpeed = avgSpeed,
+            maxSpeed = maxSpeed,
+            averagePace = calculatePace(avgSpeed),
+            calories = calculateCalories(totalDistance, duration),
+            cadence = currentCadence,
+            heartRate = currentHeartRate,
+            routePoints = routePoints.toList(),
+            kmSplits = kmSplits.toList(),
+            isStruggling = isStruggling,
+            phase = phase,
+            weatherAtStart = weatherAtStart,
+            weatherAtEnd = null,
+            totalElevationGain = totalElevationGain,
+            totalElevationLoss = totalElevationLoss,
+            averageGradient = calculateAverageGradient(),
+            maxGradient = calculateMaxGradient(),
+            terrainType = determineTerrainType(calculateAverageGradient()),
+            routeHash = generateRouteHash(),
+            routeName = null,
+            externalSource = null, // Not synced from external source
+            externalId = null,
+            isActive = true
+        )
     }
     
     private fun calculateAverageGradient(): Float = if (totalDistance == 0.0) 0f else ((totalElevationGain - totalElevationLoss) / totalDistance * 100).toFloat()
@@ -501,11 +529,11 @@ class RunTrackingService : Service(), SensorEventListener {
     
     private suspend fun uploadRunToBackend(runSession: RunSession) {
         try {
-            val uploadRequest = live.airuncoach.airuncoach.network.model.UploadRunRequest(
+            val uploadRequest = UploadRunRequest(
                 routeId = null, // TODO: Add if user selected a saved route
                 distance = runSession.distance,
                 duration = runSession.duration,
-                avgPace = runSession.averagePace,
+                avgPace = runSession.averagePace ?: "0:00",
                 avgHeartRate = if (runSession.heartRate > 0) runSession.heartRate else null,
                 maxHeartRate = null, // TODO: Track max HR
                 minHeartRate = null, // TODO: Track min HR
