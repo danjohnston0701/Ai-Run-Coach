@@ -260,22 +260,22 @@ fun DeviceCard(device: DeviceInfo, isConnected: Boolean) {
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .background(Colors.backgroundTertiary, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (device.iconDrawable != null) {
-                        // Use drawable resource (e.g., Garmin logo)
-                        Icon(
-                            painter = painterResource(id = device.iconDrawable),
-                            contentDescription = null,
-                            tint = Color.Unspecified, // Don't tint logos
-                            modifier = Modifier.size(32.dp)
-                        )
-                    } else if (device.icon != null) {
-                        // Use ImageVector icon
+                // Garmin logo - no background, just the logo
+                if (device.iconDrawable != null) {
+                    Icon(
+                        painter = painterResource(id = device.iconDrawable),
+                        contentDescription = null,
+                        tint = Color.Unspecified, // Don't tint logos
+                        modifier = Modifier.size(56.dp) // Full size for logo
+                    )
+                } else if (device.icon != null) {
+                    // Other devices - circular background with icon
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .background(Colors.backgroundTertiary, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(
                             device.icon,
                             contentDescription = null,
