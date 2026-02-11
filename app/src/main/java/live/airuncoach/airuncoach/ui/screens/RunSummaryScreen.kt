@@ -250,6 +250,24 @@ fun RunSummaryScreen(
                             bottomAxis = rememberBottomAxis(),
                         )
                     }
+                    
+                    // "Powered by Garmin" attribution (required for Garmin brand guidelines)
+                    if (runSession?.externalSource == "garmin") {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 24.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Powered by Garmin",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

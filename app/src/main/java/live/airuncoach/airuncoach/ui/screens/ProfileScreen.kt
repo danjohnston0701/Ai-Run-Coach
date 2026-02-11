@@ -1,6 +1,8 @@
 
 package live.airuncoach.airuncoach.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -30,6 +32,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -40,6 +45,7 @@ import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.ProfileViewModel
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,6 +83,19 @@ fun ProfileScreen(
         onResult = { success ->
             if (success) {
                 cameraUri.value?.let { viewModel.uploadProfilePicture(it) }
+            }
+        }
+    )
+    
+    // Camera permission launcher - must be declared after cameraLauncher
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { isGranted ->
+            if (isGranted) {
+                // Permission granted, launch camera
+                cameraUri.value?.let { uri ->
+                    cameraLauncher.launch(uri)
+                }
             }
         }
     )
@@ -120,13 +139,27 @@ fun ProfileScreen(
                 TextButton(onClick = {
                     showImagePickerDialog = false
                     // Create temp file for camera
-                    val photoFile = java.io.File(context.cacheDir, "profile_${System.currentTimeMillis()}.jpg")
-                    cameraUri.value = androidx.core.content.FileProvider.getUriForFile(
+                    val photoFile = File(context.cacheDir, "profile_${System.currentTimeMillis()}.jpg")
+                    cameraUri.value = FileProvider.getUriForFile(
                         context,
                         "${context.packageName}.fileprovider",
                         photoFile
                     )
-                    cameraLauncher.launch(cameraUri.value)
+                    
+                    // Check camera permission
+                    when {
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.CAMERA
+                        ) == PackageManager.PERMISSION_GRANTED -> {
+                            // Permission already granted, launch camera
+                            cameraLauncher.launch(cameraUri.value)
+                        }
+                        else -> {
+                            // Request permission
+                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                        }
+                    }
                 }) {
                     Text("Take Photo", color = Colors.primary)
                 }
@@ -213,11 +246,23 @@ fun ProfileScreen(
         }
         item { Spacer(modifier = Modifier.height(Spacing.md)) }
         item {
-            Text(
-                text = "AI Run Coach v1.0.0",
-                style = AppTextStyles.caption,
-                color = Colors.textMuted
-            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "AI Run Coach v1.0.0",
+                    style = AppTextStyles.caption,
+                    color = Colors.textMuted
+                )
+                // "Powered by Garmin" attribution (required for Garmin brand guidelines)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Health data powered by Garmin",
+                    style = AppTextStyles.caption.copy(fontSize = 11.sp),
+                    color = Colors.textMuted.copy(alpha = 0.8f)
+                )
+            }
         }
         item { Spacer(modifier = Modifier.height(Spacing.xxl)) }
     }
