@@ -402,13 +402,51 @@ export class DatabaseStorage implements IStorage {
 
   // Run Analysis
   async getRunAnalysis(runId: string): Promise<RunAnalysis | undefined> {
-    const [analysis] = await db.select().from(runAnalyses).where(eq(runAnalyses.runId, runId));
-    return analysis || undefined;
+    try {
+      const [analysis] = await db.select().from(runAnalyses).where(eq(runAnalyses.runId, runId));
+      return analysis || undefined;
+    } catch (error: any) {
+      // Fallback for older DBs without run_analyses.analysis column
+      const msg = String(error?.message || "");
+      if (error?.code === "42703" || msg.includes("run_analyses") || msg.includes("analysis")) {
+        const [run] = await db.select().from(runs).where(eq(runs.id, runId));
+        if (!run?.aiInsights) return undefined;
+        try {
+          const parsed = typeof run.aiInsights === "string" ? JSON.parse(run.aiInsights) : run.aiInsights;
+          return {
+            id: "legacy",
+            runId,
+            analysis: parsed,
+            createdAt: new Date()
+          } as RunAnalysis;
+        } catch {
+          return undefined;
+        }
+      }
+      throw error;
+    }
   }
 
   async createRunAnalysis(runId: string, analysis: any): Promise<RunAnalysis> {
-    const [newAnalysis] = await db.insert(runAnalyses).values({ runId, analysis }).returning();
-    return newAnalysis;
+    try {
+      const [newAnalysis] = await db.insert(runAnalyses).values({ runId, analysis }).returning();
+      return newAnalysis;
+    } catch (error: any) {
+      // Fallback: persist analysis JSON into runs.aiInsights for legacy DBs
+      const msg = String(error?.message || "");
+      if (error?.code === "42703" || msg.includes("run_analyses") || msg.includes("analysis")) {
+        await db.update(runs)
+          .set({ aiInsights: JSON.stringify(analysis) })
+          .where(eq(runs.id, runId));
+        return {
+          id: "legacy",
+          runId,
+          analysis,
+          createdAt: new Date()
+        } as RunAnalysis;
+      }
+      throw error;
+    }
   }
 
   // Connected Devices
