@@ -411,7 +411,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       externalId: run.externalId || null,
       uploadedToGarmin: run.uploadedToGarmin || false,
       garminActivityId: run.garminActivityId || null,
-      isActive: false
+      isActive: false,
+      aiInsights: run.aiInsights || null,
+      aiCoachingNotes: run.aiCoachingNotes || null
     };
   }
 
