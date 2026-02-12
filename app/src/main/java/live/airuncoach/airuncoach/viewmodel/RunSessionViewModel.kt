@@ -32,6 +32,7 @@ import live.airuncoach.airuncoach.utils.SpeechRecognizerHelper
 import live.airuncoach.airuncoach.utils.SpeechState
 import live.airuncoach.airuncoach.utils.SpeechStatus
 import live.airuncoach.airuncoach.utils.TextToSpeechHelper
+import java.util.Locale
 import javax.inject.Inject
 
 data class RunState(
@@ -160,11 +161,16 @@ class RunSessionViewModel @Inject constructor(
                     
                     // Get route data from runConfig if available
                     val route = runConfig?.route
+                    val hasRoute = route != null
                     val distance = route?.distance ?: runConfig?.targetDistance?.toDouble() ?: 5.0
                     val elevationGain = route?.elevationGain?.toInt() ?: 0
                     val elevationLoss = route?.elevationLoss?.toInt() ?: 0
                     val maxGradientDegrees = route?.maxGradientDegrees ?: 0.0
-                    val difficulty = route?.difficulty?.name?.lowercase() ?: "moderate"
+                    val difficulty = if (hasRoute) {
+                        route?.difficulty?.name?.lowercase() ?: "moderate"
+                    } else {
+                        "unknown"
+                    }
                     
                     // Get first turn instruction if available
                     val firstTurnInstruction = route?.turnInstructions?.firstOrNull()?.instruction
@@ -182,6 +188,12 @@ class RunSessionViewModel @Inject constructor(
                     // Calculate target time in seconds if set
                     val targetTimeSeconds = if (runConfig?.hasTargetTime == true) {
                         runConfig?.getTotalTargetSeconds()
+                    } else null
+                    val targetPace = if (targetTimeSeconds != null && distance > 0) {
+                        val paceSeconds = (targetTimeSeconds / distance).toInt()
+                        val minutes = paceSeconds / 60
+                        val seconds = paceSeconds % 60
+                        String.format(Locale.getDefault(), "%d:%02d", minutes, seconds)
                     } else null
                     
                     Log.d("RunSessionViewModel", "Preparing briefing: distance=$distance km, elevation=$elevationGain m, maxGradient=$maxGradientDegrees°")
@@ -217,8 +229,10 @@ class RunSessionViewModel @Inject constructor(
                         elevationLoss = elevationLoss,
                         maxGradientDegrees = maxGradientDegrees,
                         difficulty = difficulty,
+                        hasRoute = hasRoute,
                         activityType = runConfig?.activityType?.name?.lowercase() ?: "run",
                         targetTime = targetTimeSeconds,
+                        targetPace = targetPace,
                         firstTurnInstruction = firstTurnInstruction,
                         weather = weatherPayload,
                         wellness = wellnessPayload

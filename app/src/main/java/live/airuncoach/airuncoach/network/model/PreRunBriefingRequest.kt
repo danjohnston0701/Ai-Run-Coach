@@ -9,8 +9,10 @@ data class PreRunBriefingRequest(
     @SerializedName("elevationLoss") val elevationLoss: Int,
     @SerializedName("maxGradientDegrees") val maxGradientDegrees: Double,
     @SerializedName("difficulty") val difficulty: String,
+    @SerializedName("hasRoute") val hasRoute: Boolean,
     @SerializedName("activityType") val activityType: String,
     @SerializedName("targetTime") val targetTime: Int?,
+    @SerializedName("targetPace") val targetPace: String?,
     @SerializedName("firstTurnInstruction") val firstTurnInstruction: String?,
     @SerializedName("weather") val weather: WeatherPayload?,
     @SerializedName("wellness") val wellness: WellnessPayload? = null
