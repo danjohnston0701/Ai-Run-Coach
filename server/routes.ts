@@ -357,6 +357,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       heartRate: run.avgHeartRate || 0,
       routePoints: Array.isArray(run.gpsTrack) ? run.gpsTrack : [],
       kmSplits: Array.isArray(run.kmSplits) ? run.kmSplits : [],
+      heartRateData: Array.isArray(run.heartRateData) ? run.heartRateData : [],
+      paceData: Array.isArray(run.paceData) ? run.paceData : [],
       strugglePoints: Array.isArray(run.strugglePoints) ? run.strugglePoints : [],
       userComments: run.userComments || null,
       name: run.name || null,
