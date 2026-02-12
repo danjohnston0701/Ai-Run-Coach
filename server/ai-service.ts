@@ -961,6 +961,15 @@ Analyze this run comprehensively using all available data from the runner's Garm
 - Elevation Loss: ${runData.elevationLoss || garminActivity?.elevationLoss || 0}m
 `;
 
+  if (runData.targetTime || runData.targetDistance) {
+    const targetMinutes = runData.targetTime ? Math.round(runData.targetTime / 60000) : null;
+    prompt += `- Target Distance: ${runData.targetDistance ? `${runData.targetDistance}km` : 'N/A'}\n`;
+    prompt += `- Target Time: ${targetMinutes ? `${targetMinutes} minutes` : 'N/A'}\n`;
+    if (typeof runData.wasTargetAchieved === "boolean") {
+      prompt += `- Target Achieved: ${runData.wasTargetAchieved ? "Yes" : "No"}\n`;
+    }
+  }
+
   // Add Garmin activity metrics if available
   if (garminActivity) {
     prompt += `

@@ -393,6 +393,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       heartRateData: normalizeNumericSeries(run.heartRateData),
       paceData: normalizeNumericSeries(run.paceData),
       strugglePoints: Array.isArray(run.strugglePoints) ? run.strugglePoints : [],
+      aiCoachingNotes: Array.isArray(run.aiCoachingNotes) ? run.aiCoachingNotes : [],
       userComments: run.userComments || null,
       name: run.name || null,
       difficulty: run.difficulty || null,
@@ -411,9 +412,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       externalId: run.externalId || null,
       uploadedToGarmin: run.uploadedToGarmin || false,
       garminActivityId: run.garminActivityId || null,
-      isActive: false,
-      aiInsights: run.aiInsights || null,
-      aiCoachingNotes: run.aiCoachingNotes || null
+      targetDistance: run.targetDistance || null,
+      targetTime: run.targetTime || null,
+      wasTargetAchieved: typeof run.wasTargetAchieved === "boolean" ? run.wasTargetAchieved : null,
+      isActive: false
     };
   }
 
