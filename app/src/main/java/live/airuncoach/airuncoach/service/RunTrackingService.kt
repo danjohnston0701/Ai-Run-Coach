@@ -15,6 +15,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.location.Location
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
@@ -128,9 +129,9 @@ class RunTrackingService : Service(), SensorEventListener {
     override fun onCreate() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-        notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         weatherRepository = WeatherRepository(this)
-        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
         heartRateSensor = sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE)
         
@@ -178,7 +179,7 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     private fun acquireWakeLock() {
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val powerManager = getSystemService(POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AiRunCoach::RunTrackingWakeLock").apply { acquire(10 * 60 * 60 * 1000L) }
     }
 
@@ -190,18 +191,18 @@ class RunTrackingService : Service(), SensorEventListener {
 
     private fun startTracking() {
         if (isTracking) {
-            android.util.Log.w("RunTrackingService", "Already tracking, ignoring start request")
+            Log.w("RunTrackingService", "Already tracking, ignoring start request")
             return
         }
 
-        android.util.Log.d("RunTrackingService", "Starting tracking...")
+        Log.d("RunTrackingService", "Starting tracking...")
         
         // CRITICAL: Call startForeground IMMEDIATELY to avoid ANR
         try {
             startForeground(NOTIFICATION_ID, createNotification("Starting run...", "Initializing GPS"))
-            android.util.Log.d("RunTrackingService", "Foreground service started successfully")
+            Log.d("RunTrackingService", "Foreground service started successfully")
         } catch (e: Exception) {
-            android.util.Log.e("RunTrackingService", "Failed to start foreground service", e)
+            Log.e("RunTrackingService", "Failed to start foreground service", e)
             stopSelf()
             return
         }
@@ -234,34 +235,34 @@ class RunTrackingService : Service(), SensorEventListener {
             requestLocationUpdates()
             startSensorTracking()
             startTimer()  // Start independent timer
-            android.util.Log.d("RunTrackingService", "Tracking: GPS, sensors, and timer started")
+            Log.d("RunTrackingService", "Tracking: GPS, sensors, and timer started")
         } catch (e: Exception) {
-            android.util.Log.e("RunTrackingService", "Failed to start sensors", e)
+            Log.e("RunTrackingService", "Failed to start sensors", e)
         }
         
         // Fetch weather in background (non-blocking)
         serviceScope.launch { 
             try {
                 weatherAtStart = weatherRepository.getCurrentWeather()
-                android.util.Log.d("RunTrackingService", "Weather fetched: $weatherAtStart")
+                Log.d("RunTrackingService", "Weather fetched: $weatherAtStart")
             } catch (e: Exception) {
-                android.util.Log.e("RunTrackingService", "Failed to fetch weather", e)
+                Log.e("RunTrackingService", "Failed to fetch weather", e)
             }
         }
     }
 
     private fun requestLocationUpdates() {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            android.util.Log.e("RunTrackingService", "Location permission not granted - stopping service")
+            Log.e("RunTrackingService", "Location permission not granted - stopping service")
             stopSelf()
             return
         }
         try {
             val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, LOCATION_UPDATE_INTERVAL).apply { setMinUpdateIntervalMillis(LOCATION_FASTEST_INTERVAL); setWaitForAccurateLocation(true) }.build()
             fusedLocationClient.requestLocationUpdates(req, locationCallback, Looper.getMainLooper())
-            android.util.Log.d("RunTrackingService", "Location updates requested successfully")
+            Log.d("RunTrackingService", "Location updates requested successfully")
         } catch (e: Exception) {
-            android.util.Log.e("RunTrackingService", "Failed to request location updates", e)
+            Log.e("RunTrackingService", "Failed to request location updates", e)
             stopSelf()
         }
     }
@@ -273,13 +274,13 @@ class RunTrackingService : Service(), SensorEventListener {
                 stepCounterSensor?.let {
                     try {
                         sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
-                        android.util.Log.d("RunTrackingService", "Step counter sensor registered")
+                        Log.d("RunTrackingService", "Step counter sensor registered")
                     } catch (e: Exception) {
-                        android.util.Log.e("RunTrackingService", "Failed to register step counter", e)
+                        Log.e("RunTrackingService", "Failed to register step counter", e)
                     }
                 }
             } else {
-                android.util.Log.w("RunTrackingService", "ACTIVITY_RECOGNITION permission not granted - skipping step counter")
+                Log.w("RunTrackingService", "ACTIVITY_RECOGNITION permission not granted - skipping step counter")
             }
         }
 
@@ -288,13 +289,13 @@ class RunTrackingService : Service(), SensorEventListener {
             heartRateSensor?.let {
                 try {
                     sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
-                    android.util.Log.d("RunTrackingService", "Heart rate sensor registered")
+                    Log.d("RunTrackingService", "Heart rate sensor registered")
                 } catch (e: Exception) {
-                    android.util.Log.e("RunTrackingService", "Failed to register heart rate sensor", e)
+                    Log.e("RunTrackingService", "Failed to register heart rate sensor", e)
                 }
             }
         } else {
-            android.util.Log.w("RunTrackingService", "BODY_SENSORS permission not granted - skipping heart rate sensor")
+            Log.w("RunTrackingService", "BODY_SENSORS permission not granted - skipping heart rate sensor")
         }
     }
 
@@ -308,7 +309,7 @@ class RunTrackingService : Service(), SensorEventListener {
             val distanceIncrement = calculateDistance(prevPoint, newPoint)
 
             // Log location info for debugging
-            android.util.Log.d("RunTrackingService", "Location update - accuracy: ${location.accuracy}m, speed: ${location.speed}m/s, distance: ${distanceIncrement}m")
+            Log.d("RunTrackingService", "Location update - accuracy: ${location.accuracy}m, speed: ${location.speed}m/s, distance: ${distanceIncrement}m")
 
             // Accept location if accuracy is reasonable OR if we're still in the first few locations (to get started)
             val isFirstLocations = routePoints.size < 5
@@ -416,7 +417,11 @@ class RunTrackingService : Service(), SensorEventListener {
             routeName = null,
             externalSource = null, // Not synced from external source
             externalId = null,
-            isActive = true
+            isActive = true,
+            aiCoachingNotes = emptyList(),
+            targetDistance = targetDistance,
+            targetTime = targetTime,
+            wasTargetAchieved = calculateWasTargetAchieved()
         )
     }
     
@@ -450,14 +455,14 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     // Timer handler for updating session every second
-    private val timerHandler = android.os.Handler(Looper.getMainLooper())
+    private val timerHandler = Handler(Looper.getMainLooper())
     private var timerRunnable: Runnable? = null
     
     private fun startTimer() {
         timerRunnable = object : Runnable {
             override fun run() {
                 if (!isTracking) {
-                    android.util.Log.d("RunTrackingService", "Timer stopped - not tracking")
+                    Log.d("RunTrackingService", "Timer stopped - not tracking")
                     return
                 }
                 
@@ -468,19 +473,19 @@ class RunTrackingService : Service(), SensorEventListener {
                     // Schedule next update in 1 second
                     timerHandler.postDelayed(this, 1000)
                 } catch (e: Exception) {
-                    android.util.Log.e("RunTrackingService", "Timer update failed", e)
+                    Log.e("RunTrackingService", "Timer update failed", e)
                 }
             }
         }
         timerHandler.post(timerRunnable!!)
-        android.util.Log.d("RunTrackingService", "Timer started")
+        Log.d("RunTrackingService", "Timer started")
     }
     
     private fun stopTimer() {
         timerRunnable?.let {
             timerHandler.removeCallbacks(it)
         }
-        android.util.Log.d("RunTrackingService", "Timer stopped")
+        Log.d("RunTrackingService", "Timer stopped")
     }
 
     private fun pauseTracking() { 
@@ -507,7 +512,7 @@ class RunTrackingService : Service(), SensorEventListener {
         sensorManager.unregisterListener(this)
         stopTimer()
         
-        android.util.Log.d("RunTrackingService", "Stopped all tracking")
+        Log.d("RunTrackingService", "Stopped all tracking")
         
         serviceScope.launch {
             // Get end weather and finalize run
@@ -579,14 +584,14 @@ class RunTrackingService : Service(), SensorEventListener {
         } catch (e: HttpException) {
             // Handle 401 Unauthorized errors
             if (e.code() == 401) {
-                android.util.Log.e("RunTrackingService", "❌ 401 Unauthorized - run not uploaded (session expired)")
+                Log.e("RunTrackingService", "❌ 401 Unauthorized - run not uploaded (session expired)")
                 // Don't crash - run is saved locally
             } else {
-                android.util.Log.e("RunTrackingService", "HTTP ${e.code()} error uploading run: ${e.message()}")
+                Log.e("RunTrackingService", "HTTP ${e.code()} error uploading run: ${e.message()}")
             }
         } catch (e: Exception) {
             // Log error but don't crash - run is saved locally
-            android.util.Log.e("RunTrackingService", "Failed to upload run to backend", e)
+            Log.e("RunTrackingService", "Failed to upload run to backend", e)
             // TODO: Save to local queue for retry later
         }
     }
@@ -681,8 +686,9 @@ class RunTrackingService : Service(), SensorEventListener {
     
     private fun check500mMilestones() {
         val current500m = (totalDistance / 500).toInt()
-        if (current500m > last500mMilestone) {
-            last500mMilestone = current500m
+        // Only trigger the 500m summary once, at the first 0.5km mark.
+        if (last500mMilestone == 0 && current500m >= 1) {
+            last500mMilestone = 1
             serviceScope.launch {
                 try {
                     val update = PhaseCoachingUpdate(
