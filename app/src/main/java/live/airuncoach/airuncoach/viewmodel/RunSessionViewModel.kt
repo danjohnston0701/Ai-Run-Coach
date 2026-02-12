@@ -4,6 +4,7 @@ package live.airuncoach.airuncoach.viewmodel
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.util.Log
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.lifecycle.ViewModel
@@ -17,10 +18,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import live.airuncoach.airuncoach.data.HealthConnectRepository
 import live.airuncoach.airuncoach.data.SessionManager
+import live.airuncoach.airuncoach.data.WeatherRepository
 import live.airuncoach.airuncoach.domain.model.*
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.model.PreRunBriefingRequest
 import live.airuncoach.airuncoach.network.model.StartLocation
+import live.airuncoach.airuncoach.network.model.TalkToCoachRequest
+import live.airuncoach.airuncoach.network.model.WellnessPayload
 import live.airuncoach.airuncoach.network.model.WeatherPayload
 import live.airuncoach.airuncoach.service.RunTrackingService
 import live.airuncoach.airuncoach.utils.AudioPlayerHelper
@@ -66,11 +70,12 @@ class RunSessionViewModel @Inject constructor(
     private val speechRecognizerHelper = SpeechRecognizerHelper(context)
     private val textToSpeechHelper = TextToSpeechHelper(context)
     private val audioPlayerHelper = AudioPlayerHelper(context)
+    private val weatherRepository = WeatherRepository(context)
 
     private val sharedPrefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
     private var user: User? = null
-    private var runConfig: live.airuncoach.airuncoach.domain.model.RunSetupConfig? = null
+    private var runConfig: RunSetupConfig? = null
 
     init {
         loadUser()
@@ -113,7 +118,7 @@ class RunSessionViewModel @Inject constructor(
     private fun loadAiCoachPreference() {
         val isEnabled = sharedPrefs.getBoolean("ai_coach_enabled", true)
         _runState.update { it.copy(isCoachEnabled = isEnabled) }
-        android.util.Log.d("RunSessionViewModel", "AI Coach ${if (isEnabled) "enabled" else "disabled (navigation only)"}")
+        Log.d("RunSessionViewModel", "AI Coach ${if (isEnabled) "enabled" else "disabled (navigation only)"}")
         
         /*
          * AI Coach Toggle Behavior:
@@ -164,9 +169,15 @@ class RunSessionViewModel @Inject constructor(
                     // Get first turn instruction if available
                     val firstTurnInstruction = route?.turnInstructions?.firstOrNull()?.instruction
                     
-                    // Get start location from route waypoints
-                    val startLat = route?.waypoints?.firstOrNull()?.latitude ?: 0.0
-                    val startLng = route?.waypoints?.firstOrNull()?.longitude ?: 0.0
+                    // Get start location from route waypoints, fallback to current GPS
+                    var startLat = route?.waypoints?.firstOrNull()?.latitude
+                    var startLng = route?.waypoints?.firstOrNull()?.longitude
+                    if (startLat == null || startLng == null) {
+                        val currentLocation = weatherRepository.getCurrentLocation()
+                        startLat = currentLocation?.latitude
+                        startLng = currentLocation?.longitude
+                    }
+                    val startLocation = StartLocation(startLat ?: 0.0, startLng ?: 0.0)
                     
                     // Calculate target time in seconds if set
                     val targetTimeSeconds = if (runConfig?.hasTargetTime == true) {
@@ -175,8 +186,32 @@ class RunSessionViewModel @Inject constructor(
                     
                     Log.d("RunSessionViewModel", "Preparing briefing: distance=$distance km, elevation=$elevationGain m, maxGradient=$maxGradientDegrees°")
                     
+                    val weather = weatherRepository.getCurrentWeather()
+                    val weatherPayload = weather?.let {
+                        WeatherPayload(
+                            temp = it.temperature.toInt(),
+                            condition = it.description,
+                            windSpeed = it.windSpeed.toInt()
+                        )
+                    }
+                    val wellnessPayload = _runState.value.wellnessContext?.let {
+                        WellnessPayload(
+                            sleepHours = it.sleepHours,
+                            sleepQuality = it.sleepQuality,
+                            sleepScore = it.sleepScore,
+                            bodyBattery = it.bodyBattery,
+                            stressLevel = it.stressLevel,
+                            stressQualifier = it.stressQualifier,
+                            hrvStatus = it.hrvStatus,
+                            hrvFeedback = it.hrvFeedback,
+                            restingHeartRate = it.restingHeartRate,
+                            readinessScore = it.readinessScore,
+                            readinessRecommendation = it.readinessRecommendation
+                        )
+                    }
+
                     val request = PreRunBriefingRequest(
-                        startLocation = StartLocation(startLat, startLng),
+                        startLocation = startLocation,
                         distance = distance,
                         elevationGain = elevationGain,
                         elevationLoss = elevationLoss,
@@ -185,11 +220,8 @@ class RunSessionViewModel @Inject constructor(
                         activityType = runConfig?.activityType?.name?.lowercase() ?: "run",
                         targetTime = targetTimeSeconds,
                         firstTurnInstruction = firstTurnInstruction,
-                        weather = WeatherPayload(
-                            temp = 20, // TODO: Get real weather data
-                            condition = "clear",
-                            windSpeed = 0
-                        )
+                        weather = weatherPayload,
+                        wellness = wellnessPayload
                     )
                     
                     val briefing = apiService.getPreRunBriefing(request)
@@ -232,7 +264,7 @@ class RunSessionViewModel @Inject constructor(
         }
     }
 
-    fun setRunConfig(config: live.airuncoach.airuncoach.domain.model.RunSetupConfig) {
+    fun setRunConfig(config: RunSetupConfig) {
         runConfig = config
         // Update UI with target distance if set
         if (config.hasTargetTime) {
@@ -263,16 +295,16 @@ class RunSessionViewModel @Inject constructor(
             }
             
             // Start service in foreground mode (Android O+)
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
             }
             
             _runState.update { it.copy(isRunning = true, isPaused = false) }
-            android.util.Log.d("RunSessionViewModel", "Run tracking service started")
+            Log.d("RunSessionViewModel", "Run tracking service started")
         } catch (e: Exception) {
-            android.util.Log.e("RunSessionViewModel", "Failed to start run tracking service", e)
+            Log.e("RunSessionViewModel", "Failed to start run tracking service", e)
             _runState.update { it.copy(
                 coachText = "Failed to start run. Please try again."
             )}
@@ -335,7 +367,7 @@ class RunSessionViewModel @Inject constructor(
             try {
                 _runState.update { it.copy(coachText = "Thinking...") }
                 
-                val request = live.airuncoach.airuncoach.network.model.TalkToCoachRequest(
+                val request = TalkToCoachRequest(
                     message = message,
                     context = CoachingContext(
                         distance = runSession.value?.getDistanceInKm(),

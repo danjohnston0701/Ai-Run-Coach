@@ -3,6 +3,7 @@ package live.airuncoach.airuncoach.data
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.location.Location
 import androidx.core.app.ActivityCompat
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
@@ -53,7 +54,7 @@ class WeatherRepository(private val context: Context) {
      * Gets the device's current GPS location
      * @return Android Location object, or null if unable to get location
      */
-    private suspend fun getCurrentLocation(): android.location.Location? {
+    suspend fun getCurrentLocation(): Location? {
         // Check permissions
         if (ActivityCompat.checkSelfPermission(
                 context,
