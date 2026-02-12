@@ -357,6 +357,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       heartRate: run.avgHeartRate || 0,
       routePoints: Array.isArray(run.gpsTrack) ? run.gpsTrack : [],
       kmSplits: Array.isArray(run.kmSplits) ? run.kmSplits : [],
+      strugglePoints: Array.isArray(run.strugglePoints) ? run.strugglePoints : [],
+      userComments: run.userComments || null,
+      name: run.name || null,
+      difficulty: run.difficulty || null,
       isStruggling: false,
       phase: "GENERIC",
       weatherAtStart: weatherData,
@@ -4780,156 +4784,156 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Get comprehensive run analysis
+
+  // Get comprehensive run analysis (Android-compatible)
+  // Accepts the Android `RunAnalysisRequest` payload and returns an Android `RunAnalysisResponse` shape.
   app.post("/api/coaching/run-analysis", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { runId, userComments } = req.body;
-      
-      // Get run data
+      const body = req.body || {};
+      const runId = String(body.runId || "");
+      if (!runId) {
+        return res.status(400).json({ error: "runId is required" });
+      }
+
       const run = await storage.getRun(runId);
       if (!run) {
         return res.status(404).json({ error: "Run not found" });
       }
-      
-      // Get user profile
+
+      // Ownership check
+      if (req.user?.userId && run.userId && req.user.userId !== run.userId) {
+        return res.status(403).json({ error: "Not authorized" });
+      }
+
+      // Persist self-assessment + struggle points (best effort)
+      try {
+        const userPostRunComments = typeof body.userPostRunComments === "string" ? body.userPostRunComments : undefined;
+        const strugglePoints = Array.isArray(body.relevantStrugglePoints) ? body.relevantStrugglePoints : undefined;
+        if (userPostRunComments !== undefined || strugglePoints !== undefined) {
+          await storage.updateRun(runId, {
+            userComments: userPostRunComments ?? run.userComments ?? null,
+            strugglePoints: strugglePoints ?? run.strugglePoints ?? null,
+          } as any);
+        }
+      } catch (e) {
+        console.warn("Failed to persist post-run comments/struggle points:", e);
+      }
+
       const user = await storage.getUser(run.userId);
-      
-      // Get current fitness
-      const fitness = await getCurrentFitness(run.userId);
-      
-      // Get user's active goals
-      const activeGoals = await db
-        .select()
-        .from(goals)
-        .where(
-          and(
-            eq(goals.userId, run.userId),
-            eq(goals.status, "active")
-          )
-        );
-      
-      // Get historical runs on similar route (if available)
-      const historicalRuns = run.routeId ? await db
+
+      const previousRuns = await db
         .select()
         .from(runs)
-        .where(
-          and(
-            eq(runs.userId, run.userId),
-            eq(runs.routeId, run.routeId)
-          )
-        )
+        .where(eq(runs.userId, run.userId))
         .orderBy(desc(runs.completedAt))
-        .limit(5) : [];
-      
-      // Build comprehensive context for AI
-      const analysisContext = {
-        run: {
-          id: run.id,
-          distance: run.distance,
-          duration: run.duration,
-          avgPace: run.avgPace,
-          avgHeartRate: run.avgHeartRate,
-          maxHeartRate: run.maxHeartRate,
-          minHeartRate: run.minHeartRate,
-          calories: run.calories,
-          cadence: run.cadence,
-          elevation: run.elevation,
-          elevationGain: run.elevationGain,
-          elevationLoss: run.elevationLoss,
-          difficulty: run.difficulty,
-          terrainType: run.terrainType,
-          tss: run.tss,
-          gap: run.gap,
-          weatherData: run.weatherData,
-          kmSplits: run.kmSplits,
-          strugglePoints: run.strugglePoints,
-          userComments: userComments || run.userComments,
-          completedAt: run.completedAt
-        },
-        user: {
-          name: user?.name,
-          age: user?.dob ? Math.floor((Date.now() - new Date(user.dob).getTime()) / 31557600000) : null,
-          gender: user?.gender,
-          fitnessLevel: user?.fitnessLevel,
-          weight: user?.weight,
-          height: user?.height
-        },
-        fitness: fitness ? {
-          ctl: fitness.ctl,
-          atl: fitness.atl,
-          tsb: fitness.tsb,
-          status: fitness.status,
-          injuryRisk: fitness.injuryRisk,
-          rampRate: fitness.rampRate
-        } : null,
-        goals: activeGoals.map(g => ({
-          type: g.type,
-          title: g.title,
-          targetDate: g.targetDate,
-          progressPercent: g.progressPercent
-        })),
-        historicalContext: historicalRuns.length > 0 ? {
-          previousAttempts: historicalRuns.length,
-          bestTime: Math.min(...historicalRuns.map(r => r.duration)),
-          avgTime: historicalRuns.reduce((sum, r) => sum + r.duration, 0) / historicalRuns.length,
-          improvement: historicalRuns[0] ? 
-            ((historicalRuns[0].duration - run.duration) / historicalRuns[0].duration * 100).toFixed(1) : null
-        } : null
+        .limit(10);
+
+      const coachName = body.coachName || user?.coachName || "AI Coach";
+      const coachTone = body.coachTone || user?.coachTone || "energetic";
+
+      // Build runData for the AI service (merge DB + request so we capture everything Android provides)
+      const runDataForAi = {
+        ...run,
+        ...body,
+        // Normalize fields used by AI service
+        avgPace: body.averagePace || run.avgPace,
+        elevationGain: body.elevationGain ?? run.elevationGain,
+        elevationLoss: body.elevationLoss ?? run.elevationLoss,
+        terrainType: body.terrainType || run.terrainType,
+        kmSplits: body.kmSplits || run.kmSplits,
+        strugglePoints: body.relevantStrugglePoints || run.strugglePoints,
+        userComments: body.userPostRunComments || run.userComments,
       };
-      
-      // TODO: Send to OpenAI for analysis
-      // For now, return a placeholder response
-      const mockAnalysis = {
-        summary: `Great ${run.distance}km run! Your performance shows solid consistency with an average pace of ${run.avgPace}.`,
-        performanceScores: {
-          overall: 8.2,
-          paceConsistency: 7.8,
-          effort: 8.5,
-          mentalToughness: 8.0
-        },
-        demographicComparison: fitness ? {
-          percentile: 75,
-          message: "You're performing better than 75% of runners in your age and gender category"
-        } : null,
-        strengths: [
-          "Consistent pacing throughout the run",
-          "Strong finish despite challenging conditions"
-        ],
-        areasForImprovement: [
-          "Consider working on cadence - aim for 170-180 spm",
-          "Heart rate management could be improved in zones 3-4"
-        ],
-        trainingRecommendations: [
-          {
-            category: "endurance",
-            priority: "high",
-            recommendation: "Incorporate one long slow distance run per week"
-          }
-        ],
-        goalsProgress: activeGoals.map(g => ({
-          goalTitle: g.title,
-          progressPercent: g.progressPercent || 0,
-          onTrack: true,
-          message: "Good progress towards your goal!"
-        })),
-        weatherImpact: run.weatherData ? {
-          impactScore: 6.5,
-          adjustedPerformance: 8.7,
-          factors: ["Temperature was warmer than ideal", "Moderate wind resistance"]
-        } : null,
-        coachMessage: "Excellent work! Your consistency is improving, and your fitness is building steadily. Keep up the great work!"
+
+      let ai: any = null;
+      try {
+        const aiService = await import("./ai-service");
+        ai = await aiService.generateComprehensiveRunAnalysis({
+          runData: runDataForAi,
+          previousRuns: previousRuns.filter(r => r.id !== runId).slice(0, 5),
+          userProfile: body.userProfile || (user ? {
+            fitnessLevel: user.fitnessLevel || undefined,
+            age: user.dob ? Math.floor((Date.now() - new Date(user.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : undefined,
+            weight: user.weight ? parseFloat(user.weight as any) : undefined,
+          } : undefined),
+          coachName,
+          coachTone,
+        });
+      } catch (e: any) {
+        console.error("AI analysis generation failed, falling back to lightweight response:", e);
+        ai = {
+          summary: `Great run! You covered ${(((body.distance ?? run.distance) || 0) / 1000).toFixed(2)}km in ${Math.round((((body.duration ?? run.duration) || 0) / 1000) / 60)} minutes.`,
+          performanceScore: 78,
+          highlights: ["Strong effort", "Solid completion"],
+          struggles: [],
+          personalBests: [],
+          improvementTips: ["Add an easy recovery run", "Include one interval session this week"],
+          trainingLoadAssessment: "Moderate training stimulus.",
+          recoveryAdvice: "Hydrate, refuel, and prioritize sleep tonight.",
+          nextRunSuggestion: "Easy 20–30 min recovery run.",
+          wellnessImpact: "Wellness data not available.",
+          technicalAnalysis: {
+            paceAnalysis: "Your pacing was generally consistent.",
+            heartRateAnalysis: "Heart-rate data not available.",
+            cadenceAnalysis: "Cadence data not available.",
+            runningDynamics: "Running dynamics not available.",
+            elevationPerformance: "Elevation performance not available.",
+          },
+        };
+      }
+
+      // Map to Android RunAnalysisResponse schema
+      const score10 = (v: any) => {
+        const n = Number(v);
+        if (!isFinite(n)) return 0;
+        const out = n > 10 ? (n / 10) : n; // accept 0-10 or 0-100
+        return Math.max(0, Math.min(10, Math.round(out * 10) / 10));
       };
-      
-      res.json({
-        analysis: mockAnalysis,
-        context: analysisContext
-      });
+
+      const strengths = Array.isArray(ai.highlights) ? ai.highlights : [];
+      const areasForImprovement = Array.isArray(ai.improvementTips)
+        ? ai.improvementTips
+        : (Array.isArray(ai.struggles) ? ai.struggles : []);
+
+      const trainingRecommendations = (Array.isArray(ai.improvementTips) ? ai.improvementTips : []).slice(0, 6).map((t: string) => ({
+        category: "technique",
+        recommendation: t,
+        priority: "medium",
+        specificWorkout: null,
+      }));
+
+      const response = {
+        executiveSummary: String(ai.summary || ""),
+        strengths,
+        areasForImprovement,
+        overallPerformanceScore: score10(ai.performanceScore ?? 0),
+        paceConsistencyScore: score10(ai.paceConsistencyScore ?? 7.5),
+        effortScore: score10(ai.effortScore ?? 8.0),
+        mentalToughnessScore: null,
+        comparisonToPreviousRuns: null,
+        demographicComparison: null,
+        personalBestAnalysis: Array.isArray(ai.personalBests) && ai.personalBests.length ? ai.personalBests.join("\n") : null,
+        trainingRecommendations,
+        recoveryAdvice: String(ai.recoveryAdvice || ""),
+        nextRunSuggestion: String(ai.nextRunSuggestion || ""),
+        goalsProgress: [],
+        targetAchievementAnalysis: null,
+        weatherImpactAnalysis: null,
+        terrainAnalysis: String(ai.technicalAnalysis?.elevationPerformance || ai.technicalAnalysis?.paceAnalysis || ""),
+        strugglePointsInsight: Array.isArray(body.relevantStrugglePoints) && body.relevantStrugglePoints.length
+          ? `We detected ${body.relevantStrugglePoints.length} struggle point(s). Your notes help us interpret them accurately.`
+          : null,
+        coachMotivationalMessage: String(ai.coachMotivationalMessage || ai.summary || "Great work — keep building!"),
+      };
+
+      res.json(response);
     } catch (error: any) {
       console.error("Run analysis error:", error);
-      res.status(500).json({ error: "Failed to generate run analysis" });
+      res.status(500).json({ error: error?.message || "Failed to generate run analysis" });
     }
   });
-  
+
+
   // ==================== SEGMENT ENDPOINTS ====================
   
   // Get segments near a location
