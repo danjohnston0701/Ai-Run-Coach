@@ -312,6 +312,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Helper function to transform database run to Android format
   function transformRunForAndroid(run: any) {
+  function normalizeDistanceMeters(run: any): number {
+    let d = run.distance || 0;
+    if (!d) return 0;
+    // If already meters (typical), leave as-is.
+    if (d > 1000) return d;
+
+    const hasSplits = Array.isArray(run.kmSplits) && run.kmSplits.length > 0;
+    const hasPace = typeof run.avgPace === "string" && run.avgPace.length > 0;
+    const hasTrack = Array.isArray(run.gpsTrack) && run.gpsTrack.length > 1;
+    if (hasSplits || hasPace || hasTrack) return d * 1000;
+    return d;
+  }
+
   function normalizeNumericSeries(series: any): number[] {
     if (!series) return [];
     const raw = Array.isArray(series)
@@ -368,8 +381,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       startTime: startTime,
       endTime: endTime,
       duration: durationMs,
-      distance: run.distance || 0,
-      averageSpeed: run.distance && run.duration ? (run.distance / (run.duration / 1000)) : 0,
+      distance: normalizeDistanceMeters(run),
+      averageSpeed: normalizeDistanceMeters(run) && run.duration ? (normalizeDistanceMeters(run) / (run.duration / 1000)) : 0,
       maxSpeed: 0, // Calculate from gpsTrack if needed
       averagePace: run.avgPace || "0'00\"/km",
       calories: run.calories || 0,
