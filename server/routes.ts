@@ -312,6 +312,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Helper function to transform database run to Android format
   function transformRunForAndroid(run: any) {
+  function normalizeNumericSeries(series: any): number[] {
+    if (!series) return [];
+    const raw = Array.isArray(series)
+      ? series
+      : (Array.isArray(series?.samples) ? series.samples : []);
+
+    return raw
+      .map((entry: any) => {
+        if (typeof entry === "number") return entry;
+        if (typeof entry?.value === "number") return entry.value;
+        if (typeof entry?.bpm === "number") return entry.bpm;
+        if (typeof entry?.heartRate === "number") return entry.heartRate;
+        if (typeof entry?.paceSeconds === "number") return entry.paceSeconds;
+        if (typeof entry?.pace === "number") return entry.pace;
+        if (typeof entry?.speed === "number") return entry.speed;
+        return null;
+      })
+      .filter((v: any) => typeof v === "number") as number[];
+  }
+
     // Convert completedAt timestamp to milliseconds
     const completedAtMs = run.completedAt ? new Date(run.completedAt).getTime() : Date.now();
     
@@ -357,8 +377,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       heartRate: run.avgHeartRate || 0,
       routePoints: Array.isArray(run.gpsTrack) ? run.gpsTrack : [],
       kmSplits: Array.isArray(run.kmSplits) ? run.kmSplits : [],
-      heartRateData: Array.isArray(run.heartRateData) ? run.heartRateData : [],
-      paceData: Array.isArray(run.paceData) ? run.paceData : [],
+      heartRateData: normalizeNumericSeries(run.heartRateData),
+      paceData: normalizeNumericSeries(run.paceData),
       strugglePoints: Array.isArray(run.strugglePoints) ? run.strugglePoints : [],
       userComments: run.userComments || null,
       name: run.name || null,
