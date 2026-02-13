@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -47,6 +48,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import live.airuncoach.airuncoach.R
+import live.airuncoach.airuncoach.domain.model.GarminConnection
 import live.airuncoach.airuncoach.domain.model.Goal
 import live.airuncoach.airuncoach.domain.model.RunSession
 import live.airuncoach.airuncoach.domain.model.WeatherData
@@ -56,6 +58,9 @@ import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.DashboardViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -67,7 +72,9 @@ fun DashboardScreen(
     onNavigateToProfile: () -> Unit = {},
     onNavigateToHistory: () -> Unit = {},
     onCreateGoal: () -> Unit = {},
-    viewModel: DashboardViewModel = hiltViewModel()
+    viewModel: DashboardViewModel = hiltViewModel(),
+    // Key to trigger refresh when returning from other screens
+    refreshKey: Int = 0
 ) {
     val user by viewModel.user.collectAsState()
     val garminConnection by viewModel.garminConnection.collectAsState()
@@ -89,6 +96,13 @@ fun DashboardScreen(
         viewModel.fetchRecentRun()
         viewModel.refreshGoals()
         viewModel.checkLocationPermission()
+    }
+
+    // Refresh runs when returning from other screens (e.g., after completing a run)
+    LaunchedEffect(refreshKey) {
+        if (refreshKey > 0) {
+            viewModel.fetchRecentRun()
+        }
     }
 
     LazyColumn(
@@ -317,7 +331,7 @@ fun WelcomeSection(userName: String?, profilePicUrl: String?, aiCoachName: Strin
 }
 
 @Composable
-fun GarminConnectionCard(connection: live.airuncoach.airuncoach.domain.model.GarminConnection) {
+fun GarminConnectionCard(connection: GarminConnection) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -636,7 +650,7 @@ fun LocationPermissionWarning() {
             .padding(horizontal = Spacing.lg),
         shape = RoundedCornerShape(BorderRadius.md),
         colors = CardDefaults.cardColors(
-            containerColor = androidx.compose.ui.graphics.Color(0xFFEF4444).copy(alpha = 0.15f)
+            containerColor = Color(0xFFEF4444).copy(alpha = 0.15f)
         )
     ) {
         Row(
@@ -648,7 +662,7 @@ fun LocationPermissionWarning() {
             Icon(
                 painter = painterResource(id = R.drawable.icon_location_vector),
                 contentDescription = "Warning",
-                tint = androidx.compose.ui.graphics.Color(0xFFEF4444),
+                tint = Color(0xFFEF4444),
                 modifier = Modifier.size(32.dp)
             )
             Spacer(modifier = Modifier.width(Spacing.md))
@@ -656,7 +670,7 @@ fun LocationPermissionWarning() {
                 Text(
                     text = "Location Required",
                     style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                    color = androidx.compose.ui.graphics.Color(0xFFEF4444)
+                    color = Color(0xFFEF4444)
                 )
                 Text(
                     text = "Enable location services to generate routes and track runs",
@@ -728,7 +742,7 @@ fun ActionButtons(onMapMyRun: () -> Unit, onRunWithoutRoute: () -> Unit, isEnabl
 }
 
 @Composable
-fun PreviousRunDashboard(lastRun: live.airuncoach.airuncoach.domain.model.RunSession, onClick: () -> Unit) {
+fun PreviousRunDashboard(lastRun: RunSession, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -749,8 +763,8 @@ fun PreviousRunDashboard(lastRun: live.airuncoach.airuncoach.domain.model.RunSes
             
             // Date and time
             Text(
-                text = java.text.SimpleDateFormat("MMM dd, yyyy • HH:mm", java.util.Locale.getDefault())
-                    .format(java.util.Date(lastRun.startTime)),
+                text = SimpleDateFormat("MMM dd, yyyy • HH:mm", Locale.getDefault())
+                    .format(Date(lastRun.startTime)),
                 style = AppTextStyles.body,
                 color = Colors.textMuted
             )
@@ -907,7 +921,7 @@ fun PreviousRunsCard(
                     Spacer(modifier = Modifier.width(Spacing.sm))
                     
                     Text(
-                        text = "PREVIOUS RUNS",
+                        text = "MOST RECENT RUN",
                         style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
                         color = Colors.textPrimary
                     )
@@ -916,115 +930,30 @@ fun PreviousRunsCard(
             
             if (recentRun != null) {
                 Spacer(modifier = Modifier.height(Spacing.lg))
-                
-                // Stats Grid
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    // Distance
-                    Column {
-                        Text(
-                            text = "DISTANCE",
-                            style = AppTextStyles.caption,
-                            color = Colors.textMuted
-                        )
-                        Text(
-                            text = "${String.format("%.2f", recentRun.distance / 1000)} km",
-                            style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
-                            color = Colors.primary
-                        )
-                    }
-                    
-                    // Avg Pace
-                    Column {
-                        Text(
-                            text = "AVG PACE",
-                            style = AppTextStyles.caption,
-                            color = Colors.textMuted
-                        )
-                        Text(
-                            text = recentRun.averagePace ?: "--:--",
-                            style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
-                            color = Colors.primary
-                        )
-                    }
-                }
-                
+
+                // Use the same tile as Run History
+                RunListItem(run = recentRun, onClick = onClick)
+
                 Spacer(modifier = Modifier.height(Spacing.md))
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    // Date
-                    Column {
-                        Text(
-                            text = "DATE",
-                            style = AppTextStyles.caption,
-                            color = Colors.textMuted
-                        )
-                        Text(
-                            text = recentRun.getFormattedDate(),
-                            style = AppTextStyles.body,
-                            color = Colors.textPrimary
-                        )
-                    }
-                    
-                    // Level
-                    Column {
-                        Text(
-                            text = "LEVEL",
-                            style = AppTextStyles.caption,
-                            color = Colors.textMuted
-                        )
-                        val difficulty = recentRun.getDifficultyLevel()
-                        Text(
-                            text = difficulty,
-                            style = AppTextStyles.body,
-                            color = when (difficulty.lowercase()) {
-                                "easy" -> Colors.success
-                                "hard" -> Colors.error
-                                else -> Colors.warning
-                            },
-                            modifier = Modifier
-                                .background(
-                                    color = when (difficulty.lowercase()) {
-                                        "easy" -> Colors.success.copy(alpha = 0.2f)
-                                        "hard" -> Colors.error.copy(alpha = 0.2f)
-                                        else -> Colors.warning.copy(alpha = 0.2f)
-                                    },
-                                    shape = RoundedCornerShape(4.dp)
-                                )
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(Spacing.lg))
-                
-                // View Run Dashboard Button
-                Button(
-                    onClick = onClick,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Colors.primary.copy(alpha = 0.2f),
-                        contentColor = Colors.primary
-                    ),
-                    shape = RoundedCornerShape(BorderRadius.sm)
-                ) {
-                    Text(
-                        text = "View Run Dashboard →",
-                        style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold)
-                    )
-                }
+
+                Text(
+                    text = "Click to see all previous runs",
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                    color = Colors.primary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onClick)
+                )
             } else {
                 Spacer(modifier = Modifier.height(Spacing.md))
                 
                 Text(
-                    text = "No previous runs yet. Start your first run!",
+                    text = "No previous runs yet. Click to see all previous runs.",
                     style = AppTextStyles.body,
-                    color = Colors.textMuted
+                    color = Colors.textMuted,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onClick)
                 )
             }
         }

@@ -237,6 +237,7 @@ class RunTrackingService : Service(), SensorEventListener {
         
         // Now safely initialize everything else
         isTracking = true
+        _uploadComplete.value = null
         _isServiceRunning.value = true
         startTime = System.currentTimeMillis()
         lastSplitTime = startTime
@@ -620,6 +621,7 @@ class RunTrackingService : Service(), SensorEventListener {
             
             // Update the run session with the backend ID
             _currentRunSession.value = _currentRunSession.value?.copy(id = response.id)
+            _uploadComplete.value = response.id
             
             // Auto-upload to Garmin Connect if enabled
             tryAutoUploadToGarmin(response.id)

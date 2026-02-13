@@ -153,8 +153,10 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             startDestination = Screen.Home.route,
             Modifier.padding(innerPadding)
         ) {
-            composable(Screen.Home.route) {
+            composable(Screen.Home.route) { backStackEntry ->
                 val dashboardViewModel: DashboardViewModel = hiltViewModel()
+                // Use backStackEntry as refresh key - it changes when navigating back
+                val refreshKey = backStackEntry.lifecycle.currentState.hashCode()
                 DashboardScreen(
                     onNavigateToRouteGeneration = {
                         navController.navigate("map_my_run_setup/route")
@@ -176,7 +178,8 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     },
                     onCreateGoal = {
                         navController.navigate("create_goal")
-                    }
+                    },
+                    refreshKey = refreshKey
                 )
             }
             composable(Screen.History.route) { 
