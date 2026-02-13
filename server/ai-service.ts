@@ -1,0 +1,1207 @@
+import OpenAI from "openai";
+import { COACHING_PHASE_PROMPT, determinePhase, type CoachingPhase } from "../shared/coaching-statements";
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
+
+const normalizeCoachTone = (tone?: string): string => {
+  if (!tone) return "energetic";
+  return tone.trim().toLowerCase();
+};
+
+const toneDirective = (tone?: string): string => {
+  const normalized = normalizeCoachTone(tone);
+  switch (normalized) {
+    case "energetic":
+      return "Sound lively and motivating. Use short, punchy sentences. Vary phrasing.";
+    case "motivational":
+    case "inspirational":
+      return "Sound inspiring and uplifting. Emphasize belief, progress, and resilience.";
+    case "supportive":
+    case "encouraging":
+      return "Warm, reassuring, and steady. Encourage without pressure.";
+    case "calm":
+      return "Calm, steady, and grounded. Use soothing language.";
+    case "professional":
+    case "factual":
+    case "instructive":
+      return "Clear, concise, and practical. Focus on actionable guidance.";
+    case "abrupt":
+      return "Direct and concise. Keep it short and decisive.";
+    case "friendly":
+      return "Upbeat and personable. Use friendly, encouraging phrasing.";
+    default:
+      return "Encouraging and positive with varied phrasing.";
+  }
+};
+
+export interface CoachingContext {
+  distance?: number;
+  duration?: number;
+  pace?: string;
+  heartRate?: number;
+  elevation?: number;
+  elevationChange?: string;
+  weather?: any;
+  phase?: CoachingPhase;
+  isStruggling?: boolean;
+  cadence?: number;
+  activityType?: string;
+  userFitnessLevel?: string;
+  coachTone?: string;
+  coachAccent?: string;
+  totalDistance?: number;
+}
+
+export async function getCoachingResponse(message: string, context: CoachingContext): Promise<string> {
+  const systemPrompt = buildCoachingSystemPrompt(context);
+  
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: message }
+    ],
+    max_tokens: 150,
+    temperature: 0.7,
+  });
+
+  return completion.choices[0].message.content || "Keep going, you're doing great!";
+}
+
+export async function generatePreRunCoaching(params: {
+  distance: number;
+  elevationGain: number;
+  elevationLoss: number;
+  difficulty: string;
+  activityType: string;
+  weather: any;
+  coachName: string;
+  coachTone: string;
+}): Promise<string> {
+  const { distance, elevationGain, elevationLoss, difficulty, activityType, weather, coachName, coachTone } = params;
+  
+  const weatherInfo = weather 
+    ? `Weather: ${weather.temp || 'N/A'}°C, ${weather.condition || 'clear'}, wind ${weather.windSpeed || 0} km/h.`
+    : 'Weather data unavailable.';
+  
+  const prompt = `You are ${coachName}, an AI running coach. Your coaching style is ${coachTone}.
+
+Generate a brief pre-run briefing (2-3 sentences max) for this upcoming ${activityType}:
+- Distance: ${distance?.toFixed(1) || '?'}km
+- Difficulty: ${difficulty}
+- Elevation gain: ${Math.round(elevationGain || 0)}m, loss: ${Math.round(elevationLoss || 0)}m
+- ${weatherInfo}
+
+Be encouraging, specific to the conditions, and give one actionable tip. Speak naturally as if talking directly to the runner.`;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep responses brief, encouraging, and actionable. ${toneDirective(coachTone)}` },
+      { role: "user", content: prompt }
+    ],
+    max_tokens: 120,
+    temperature: 0.8,
+  });
+
+  return completion.choices[0].message.content || "Take it easy at the start and find your rhythm. Good luck!";
+}
+
+export async function generatePaceUpdate(params: {
+  distance: number;
+  targetDistance: number;
+  currentPace: string;
+  elapsedTime: number;
+  coachName: string;
+  coachTone: string;
+  isSplit: boolean;
+  splitKm?: number;
+  splitPace?: string;
+  currentGrade?: number;
+  totalElevationGain?: number;
+  isOnHill?: boolean;
+  kmSplits?: Array<{ km: number; time: number; pace: string }>;
+}): Promise<string> {
+  const { distance, targetDistance, currentPace, elapsedTime, coachName, coachTone, isSplit, splitKm, splitPace, currentGrade, totalElevationGain, isOnHill, kmSplits } = params;
+  
+  const progress = Math.round((distance / targetDistance) * 100);
+  const timeMin = Math.floor(elapsedTime / 60);
+  
+  // Build terrain context
+  let terrainContext = '';
+  if (currentGrade !== undefined && Math.abs(currentGrade) > 2) {
+    if (currentGrade > 5) {
+      terrainContext = `Currently climbing a steep ${currentGrade.toFixed(1)}% grade hill. `;
+    } else if (currentGrade > 2) {
+      terrainContext = `Currently on a gentle ${currentGrade.toFixed(1)}% uphill. `;
+    } else if (currentGrade < -5) {
+      terrainContext = `Currently descending a steep ${Math.abs(currentGrade).toFixed(1)}% grade. `;
+    } else if (currentGrade < -2) {
+      terrainContext = `Currently on a gentle ${Math.abs(currentGrade).toFixed(1)}% downhill. `;
+    }
+  }
+  if (totalElevationGain && totalElevationGain > 0) {
+    terrainContext += `Total elevation climbed so far: ${Math.round(totalElevationGain)}m. `;
+  }
+  
+  // Build pace trend context for splits
+  let paceTrend = '';
+  if (isSplit && kmSplits && kmSplits.length >= 2) {
+    const lastTwo = kmSplits.slice(-2);
+    if (lastTwo.length === 2) {
+      const prevTime = lastTwo[0].time;
+      const currTime = lastTwo[1].time;
+      const diff = currTime - prevTime;
+      if (diff > 10) {
+        paceTrend = 'Runner is slowing down compared to previous kilometer. ';
+      } else if (diff < -10) {
+        paceTrend = 'Runner is speeding up compared to previous kilometer. ';
+      } else {
+        paceTrend = 'Runner is maintaining consistent pace. ';
+      }
+    }
+  }
+  
+  let prompt: string;
+  if (isSplit && splitKm && splitPace) {
+    prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
+    
+The runner just completed kilometer ${splitKm} with a split pace of ${splitPace}/km. They're at ${progress}% of their ${targetDistance}km run.
+${terrainContext}${paceTrend}
+
+Give a brief (1-2 sentences) split update. ${isOnHill ? 'Acknowledge the hill effort. ' : ''}Mention their pace and give quick encouragement or pacing advice. ${paceTrend ? 'Comment on their pace trend if relevant.' : ''}`;
+  } else {
+    prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
+    
+500m pace check: Runner is at ${distance.toFixed(2)}km, pace ${currentPace}/km, ${timeMin} minutes in.
+${terrainContext}
+
+Give a very brief (1 sentence) pace update with encouragement.${isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
+  }
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief (1-2 sentences max). Be elevation-aware when hills are mentioned. ${toneDirective(coachTone)}` },
+      { role: "user", content: prompt }
+    ],
+    max_tokens: 80,
+    temperature: 0.7,
+  });
+
+  return completion.choices[0].message.content || (isSplit ? `Kilometer ${splitKm} done at ${splitPace}. Keep it up!` : "Looking good, keep this pace!");
+}
+
+export async function generateRunSummary(runData: any): Promise<any> {
+  const prompt = `Analyze this run and provide a brief summary with highlights, struggles, and tips:
+Run Data:
+- Distance: ${runData.distance}km
+- Duration: ${runData.duration} minutes
+- Average Pace: ${runData.avgPace}
+- Elevation Gain: ${runData.elevationGain || 0}m
+- Activity Type: ${runData.activityType || 'run'}
+- Weather: ${JSON.stringify(runData.weather || {})}
+
+Provide response as JSON with fields: highlights (array), struggles (array), tips (array), overallScore (1-10), summary (string)`;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: "You are an expert running coach providing post-run analysis. Respond only with valid JSON." },
+      { role: "user", content: prompt }
+    ],
+    max_tokens: 500,
+    temperature: 0.7,
+  });
+
+  try {
+    const content = completion.choices[0].message.content || "{}";
+    return JSON.parse(content.replace(/```json\n?|\n?```/g, ''));
+  } catch {
+    return {
+      highlights: ["Completed your run!"],
+      struggles: [],
+      tips: ["Keep up the great work!"],
+      overallScore: 7,
+      summary: "Great effort on your run today!"
+    };
+  }
+}
+
+export async function generatePhaseCoaching(params: {
+  phase: 'warmUp' | 'midRun' | 'lateRun' | 'finalPush';
+  distance: number;
+  targetDistance?: number;
+  elapsedTime: number;
+  currentPace?: string;
+  currentGrade?: number;
+  totalElevationGain?: number;
+  coachName: string;
+  coachTone: string;
+  activityType?: string;
+}): Promise<string> {
+  const { phase, distance, targetDistance, elapsedTime, currentPace, currentGrade, totalElevationGain, coachName, coachTone, activityType } = params;
+  
+  const timeMin = Math.floor(elapsedTime / 60);
+  const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
+  
+  const phaseDescriptions: Record<string, string> = {
+    warmUp: 'The runner is in the warm-up phase, getting into their rhythm.',
+    midRun: 'The runner is in the middle of their run, working hard.',
+    lateRun: 'The runner is in the late phase, possibly getting tired.',
+    finalPush: 'The runner is approaching the finish, time for final encouragement.',
+  };
+  
+  let terrainInfo = '';
+  if (currentGrade && Math.abs(currentGrade) > 2) {
+    terrainInfo = currentGrade > 0 ? `Currently climbing (${currentGrade.toFixed(1)}% grade). ` : `Currently descending (${Math.abs(currentGrade).toFixed(1)}% grade). `;
+  }
+  if (totalElevationGain && totalElevationGain > 0) {
+    terrainInfo += `Total climb so far: ${Math.round(totalElevationGain)}m. `;
+  }
+  
+  const prompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.
+
+Phase: ${phaseDescriptions[phase]}
+Runner Status:
+- Distance covered: ${distance.toFixed(2)}km${targetDistance ? ` (${progress}% of ${targetDistance}km)` : ''}
+- Time elapsed: ${timeMin} minutes
+${currentPace ? `- Current pace: ${currentPace}/km` : ''}
+${terrainInfo}
+
+Give a brief (1-2 sentences) phase-appropriate coaching message. Be ${coachTone} and encouraging. Consider their current terrain if on a hill.`;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful. ${toneDirective(coachTone)}` },
+      { role: "user", content: prompt }
+    ],
+    max_tokens: 80,
+    temperature: 0.8,
+  });
+
+  return completion.choices[0].message.content || "You're doing great, keep it up!";
+}
+
+export async function generateStruggleCoaching(params: {
+  distance: number;
+  elapsedTime: number;
+  currentPace: string;
+  baselinePace: string;
+  paceDropPercent: number;
+  currentGrade?: number;
+  totalElevationGain?: number;
+  coachName: string;
+  coachTone: string;
+}): Promise<string> {
+  const { distance, elapsedTime, currentPace, baselinePace, paceDropPercent, currentGrade, totalElevationGain, coachName, coachTone } = params;
+  
+  const timeMin = Math.floor(elapsedTime / 60);
+  
+  let terrainContext = '';
+  if (currentGrade && currentGrade > 3) {
+    terrainContext = `They're currently on a ${currentGrade.toFixed(1)}% uphill which may explain the slowdown. `;
+  } else if (totalElevationGain && totalElevationGain > 50) {
+    terrainContext = `They've climbed ${Math.round(totalElevationGain)}m so far, which is contributing to fatigue. `;
+  }
+  
+  const prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
+
+The runner is struggling. Their pace has dropped ${Math.round(paceDropPercent)}% from their baseline.
+- Current pace: ${currentPace}/km (baseline was ${baselinePace}/km)
+- Distance: ${distance.toFixed(2)}km
+- Time: ${timeMin} minutes
+${terrainContext}
+
+Give a brief (1-2 sentences) supportive message to help them through this tough moment. Acknowledge their struggle, but encourage them to push through or adjust their strategy.`;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Be supportive during tough moments. Keep it brief. ${toneDirective(coachTone)}` },
+      { role: "user", content: prompt }
+    ],
+    max_tokens: 80,
+    temperature: 0.7,
+  });
+
+  return completion.choices[0].message.content || "I can see you're working hard. Take a breath and find your rhythm again.";
+}
+
+export async function generatePreRunSummary(routeData: any, weatherData: any): Promise<any> {
+  const prompt = `Generate a pre-run coaching summary for this route:
+Route:
+- Distance: ${routeData.distance}km
+- Elevation Gain: ${routeData.elevationGain || 0}m
+- Difficulty: ${routeData.difficulty}
+- Terrain: ${routeData.terrainType || 'mixed'}
+
+Weather:
+- Temperature: ${weatherData?.current?.temperature || 'N/A'}°C
+- Conditions: ${weatherData?.current?.condition || 'N/A'}
+- Wind: ${weatherData?.current?.windSpeed || 0} km/h
+
+Provide response as JSON with: tips (array of 3-4 coaching tips), warnings (array of any concerns), suggestedPace (string), hydrationAdvice (string), warmupSuggestion (string)`;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: "You are an expert running coach providing pre-run advice. Respond only with valid JSON." },
+      { role: "user", content: prompt }
+    ],
+    max_tokens: 400,
+    temperature: 0.7,
+  });
+
+  try {
+    const content = completion.choices[0].message.content || "{}";
+    return JSON.parse(content.replace(/```json\n?|\n?```/g, ''));
+  } catch {
+    return {
+      tips: ["Start at an easy pace", "Focus on your breathing", "Enjoy the run!"],
+      warnings: [],
+      suggestedPace: "comfortable",
+      hydrationAdvice: "Stay hydrated",
+      warmupSuggestion: "5 minutes of light jogging"
+    };
+  }
+}
+
+export async function getElevationCoaching(elevationData: { change: string; grade: number; upcoming?: string }): Promise<string> {
+  const prompt = `As a running coach, give a brief (1-2 sentences) tip for this terrain:
+- Current: ${elevationData.change} (${Math.abs(elevationData.grade)}% grade)
+- Upcoming: ${elevationData.upcoming || 'similar terrain'}`;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: "You are an encouraging running coach. Keep responses brief and actionable." },
+      { role: "user", content: prompt }
+    ],
+    max_tokens: 60,
+    temperature: 0.8,
+  });
+
+  return completion.choices[0].message.content || "Adjust your effort for the terrain!";
+}
+
+export async function generateTTS(text: string, voice: string = "alloy"): Promise<Buffer> {
+  const response = await openai.audio.speech.create({
+    model: "tts-1",
+    voice: voice as any,
+    input: text,
+  });
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return buffer;
+}
+
+function buildCoachingSystemPrompt(context: CoachingContext): string {
+  let prompt = `You are an AI running coach. Be encouraging, brief (1-2 sentences max), and specific to the runner's current situation.`;
+  
+  if (context.coachTone) {
+    prompt += ` Your tone should be ${context.coachTone}.`;
+    prompt += ` ${toneDirective(context.coachTone)}`;
+  }
+  
+  const currentPhase = context.phase || (context.distance !== undefined 
+    ? determinePhase(context.distance, context.totalDistance || null)
+    : 'generic');
+  
+  prompt += `\n\n${COACHING_PHASE_PROMPT}`;
+  prompt += `\n\nCURRENT PHASE: ${currentPhase.toUpperCase()}`;
+  
+  if (context.distance !== undefined) {
+    prompt += ` (Runner is at ${context.distance.toFixed(2)}km`;
+    if (context.totalDistance) {
+      const percent = (context.distance / context.totalDistance) * 100;
+      prompt += ` of ${context.totalDistance.toFixed(1)}km total, ${percent.toFixed(0)}% complete`;
+    }
+    prompt += ')';
+  }
+  
+  if (context.elevationChange) {
+    prompt += ` The runner is currently on ${context.elevationChange} terrain.`;
+  }
+  
+  if (context.isStruggling && currentPhase === 'late') {
+    prompt += ' The runner appears to be struggling. Be extra supportive with fatigue-appropriate advice.';
+  } else if (context.isStruggling) {
+    prompt += ' The runner appears to be struggling. Be supportive but remember phase-appropriate advice only.';
+  }
+  
+  if (context.weather?.current?.temperature) {
+    prompt += ` Current temperature: ${context.weather.current.temperature}°C.`;
+  }
+  
+  if (context.heartRate) {
+    const maxHR = 190;
+    const hrPercent = (context.heartRate / maxHR) * 100;
+    let zone = 'Zone 1 (Recovery)';
+    let zoneAdvice = 'easy effort';
+    
+    if (hrPercent >= 90) {
+      zone = 'Zone 5 (Maximum)';
+      zoneAdvice = 'maximum effort - only sustainable briefly';
+    } else if (hrPercent >= 80) {
+      zone = 'Zone 4 (Threshold)';
+      zoneAdvice = 'high intensity - building speed endurance';
+    } else if (hrPercent >= 70) {
+      zone = 'Zone 3 (Tempo)';
+      zoneAdvice = 'moderate-hard effort - building aerobic capacity';
+    } else if (hrPercent >= 60) {
+      zone = 'Zone 2 (Aerobic)';
+      zoneAdvice = 'comfortable effort - fat burning zone';
+    }
+    
+    prompt += ` Current heart rate: ${context.heartRate} BPM (${zone}, ${zoneAdvice}).`;
+    
+    if (hrPercent >= 90) {
+      prompt += ' The runner may need to slow down to recover.';
+    } else if (hrPercent >= 85) {
+      prompt += ' Heart rate is elevated - monitor effort level.';
+    }
+  }
+  
+  return prompt;
+}
+
+export interface RouteGenerationParams {
+  startLat: number;
+  startLng: number;
+  distance: number;
+  difficulty: string;
+  activityType?: string;
+  terrainPreference?: string;
+  avoidHills?: boolean;
+}
+
+export interface GeneratedRoute {
+  id: string;
+  name: string;
+  distance: number;
+  difficulty: string;
+  startLat: number;
+  startLng: number;
+  endLat: number;
+  endLng: number;
+  waypoints: { lat: number; lng: number }[];
+  elevation: number;
+  elevationGain: number;
+  estimatedTime: number;
+  terrainType: string;
+  polyline: string;
+  description: string;
+}
+
+export async function generateRouteOptions(params: RouteGenerationParams): Promise<GeneratedRoute[]> {
+  const { startLat, startLng, distance, difficulty, activityType = 'run' } = params;
+  
+  // Generate 2-3 route options using AI to suggest waypoints
+  const prompt = `Generate 3 different running route options starting from coordinates (${startLat}, ${startLng}).
+Target distance: ${distance}km
+Difficulty: ${difficulty}
+Activity: ${activityType}
+
+For each route, provide:
+1. A creative name
+2. 3-5 waypoint coordinates that create a loop back to start
+3. Estimated elevation gain (in meters)
+4. Terrain description (trail, road, mixed, park)
+5. Brief description
+
+Respond in JSON format:
+{
+  "routes": [
+    {
+      "name": "Route Name",
+      "waypoints": [{"lat": 51.5, "lng": -0.1}, ...],
+      "elevationGain": 50,
+      "terrainType": "mixed",
+      "description": "Brief description"
+    }
+  ]
+}`;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You are a running route planner. Generate realistic waypoints near the starting location that create approximately the requested distance as a loop. Respond only with valid JSON." },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 1000,
+      temperature: 0.8,
+    });
+
+    const content = completion.choices[0].message.content || "{}";
+    const parsed = JSON.parse(content.replace(/```json\n?|\n?```/g, ''));
+    
+    const generatedRoutes: GeneratedRoute[] = [];
+    
+    for (let i = 0; i < (parsed.routes || []).length; i++) {
+      const route = parsed.routes[i];
+      const waypoints = route.waypoints || [];
+      
+      // Get directions from Google Maps to get actual polyline and distance
+      const directionsData = await getGoogleDirections(startLat, startLng, waypoints);
+      
+      const routeId = `route_${Date.now()}_${i}`;
+      generatedRoutes.push({
+        id: routeId,
+        name: route.name || `Route ${i + 1}`,
+        distance: directionsData.distance || distance,
+        difficulty: difficulty,
+        startLat: startLat,
+        startLng: startLng,
+        endLat: startLat,
+        endLng: startLng,
+        waypoints: waypoints,
+        elevation: route.elevationGain || 0,
+        elevationGain: route.elevationGain || 0,
+        estimatedTime: Math.round((directionsData.distance || distance) * (activityType === 'walk' ? 12 : 6)),
+        terrainType: route.terrainType || 'mixed',
+        polyline: directionsData.polyline || '',
+        description: route.description || ''
+      });
+    }
+    
+    return generatedRoutes;
+  } catch (error) {
+    console.error("Route generation error:", error);
+    // Return a simple fallback route
+    return [{
+      id: `route_${Date.now()}`,
+      name: "Quick Route",
+      distance: distance,
+      difficulty: difficulty,
+      startLat: startLat,
+      startLng: startLng,
+      endLat: startLat,
+      endLng: startLng,
+      waypoints: [],
+      elevation: 0,
+      elevationGain: 0,
+      estimatedTime: Math.round(distance * 6),
+      terrainType: "road",
+      polyline: "",
+      description: "A simple out-and-back route"
+    }];
+  }
+}
+
+async function getGoogleDirections(startLat: number, startLng: number, waypoints: { lat: number; lng: number }[]): Promise<{ distance: number; polyline: string }> {
+  if (!GOOGLE_MAPS_API_KEY || waypoints.length === 0) {
+    return { distance: 0, polyline: '' };
+  }
+
+  try {
+    const origin = `${startLat},${startLng}`;
+    const destination = origin; // Loop back
+    const waypointStr = waypoints.map(w => `${w.lat},${w.lng}`).join('|');
+    
+    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&waypoints=${waypointStr}&mode=walking&key=${GOOGLE_MAPS_API_KEY}`;
+    
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (data.routes && data.routes.length > 0) {
+      const route = data.routes[0];
+      const totalDistance = route.legs.reduce((sum: number, leg: any) => sum + leg.distance.value, 0) / 1000;
+      return {
+        distance: Math.round(totalDistance * 10) / 10,
+        polyline: route.overview_polyline?.points || ''
+      };
+    }
+  } catch (error) {
+    console.error("Google Directions API error:", error);
+  }
+  
+  return { distance: 0, polyline: '' };
+}
+
+/**
+ * Wellness-aware pre-run coaching that incorporates Garmin data
+ */
+export interface WellnessContext {
+  sleepHours?: number;
+  sleepQuality?: string;
+  sleepScore?: number;
+  bodyBattery?: number;
+  stressLevel?: number;
+  stressQualifier?: string;
+  hrvStatus?: string;
+  hrvFeedback?: string;
+  restingHeartRate?: number;
+  readinessScore?: number;
+  readinessRecommendation?: string;
+}
+
+export async function generateWellnessAwarePreRunBriefing(params: {
+  distance: number;
+  elevationGain: number;
+  difficulty: string;
+  activityType: string;
+  weather: any;
+  coachName: string;
+  coachTone: string;
+  wellness: WellnessContext;
+}): Promise<{
+  briefing: string;
+  intensityAdvice: string;
+  warnings: string[];
+  readinessInsight: string;
+}> {
+  const { distance, elevationGain, difficulty, activityType, weather, coachName, coachTone, wellness } = params;
+  
+  const weatherInfo = weather 
+    ? `Weather: ${weather.temp || weather.temperature || 'N/A'}°C, ${weather.condition || 'clear'}, wind ${weather.windSpeed || 0} km/h.`
+    : 'Weather data unavailable.';
+  
+  // Build wellness context string
+  let wellnessContext = '';
+  if (wellness.sleepHours !== undefined) {
+    wellnessContext += `\n- Sleep: ${wellness.sleepHours.toFixed(1)} hours (${wellness.sleepQuality || 'N/A'})`;
+    if (wellness.sleepScore) wellnessContext += `, score: ${wellness.sleepScore}/100`;
+  }
+  if (wellness.bodyBattery !== undefined) {
+    wellnessContext += `\n- Body Battery: ${wellness.bodyBattery}/100`;
+  }
+  if (wellness.stressLevel !== undefined) {
+    wellnessContext += `\n- Stress: ${wellness.stressQualifier || 'N/A'} (${wellness.stressLevel}/100)`;
+  }
+  if (wellness.hrvStatus) {
+    wellnessContext += `\n- HRV Status: ${wellness.hrvStatus}`;
+    if (wellness.hrvFeedback) wellnessContext += ` - ${wellness.hrvFeedback}`;
+  }
+  if (wellness.restingHeartRate) {
+    wellnessContext += `\n- Resting HR: ${wellness.restingHeartRate} bpm`;
+  }
+  if (wellness.readinessScore !== undefined) {
+    wellnessContext += `\n- Overall Readiness: ${wellness.readinessScore}/100`;
+  }
+  
+  const prompt = `You are ${coachName}, an AI running coach. Your coaching style is ${coachTone}.
+
+Generate a personalized pre-run briefing that considers the runner's current wellness state from their Garmin data.
+
+ROUTE:
+- Distance: ${distance?.toFixed(1) || '?'}km
+- Difficulty: ${difficulty}
+- Elevation gain: ${Math.round(elevationGain || 0)}m
+- ${weatherInfo}
+
+CURRENT WELLNESS STATUS (from Garmin):${wellnessContext || '\n- No wellness data available'}
+
+Based on this data, provide:
+1. A brief personalized briefing (2-3 sentences) that acknowledges their current state
+2. Specific intensity advice based on their readiness/recovery
+3. Any warnings if their wellness indicators suggest caution
+4. A readiness insight explaining how their body data affects today's run
+
+Respond as JSON with fields: briefing, intensityAdvice, warnings (array), readinessInsight`;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: `You are ${coachName}, a ${coachTone} running coach who uses biometric data for personalized coaching. Respond only with valid JSON. ${toneDirective(coachTone)}` },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 400,
+      temperature: 0.7,
+    });
+
+    const content = completion.choices[0].message.content || "{}";
+    const parsed = JSON.parse(content.replace(/```json\n?|\n?```/g, ''));
+    
+    return {
+      briefing: parsed.briefing || "Ready for your run! Let's get started.",
+      intensityAdvice: parsed.intensityAdvice || "Listen to your body today.",
+      warnings: parsed.warnings || [],
+      readinessInsight: parsed.readinessInsight || "Your body is ready for this run.",
+    };
+  } catch (error) {
+    console.error("Error generating wellness-aware briefing:", error);
+    return {
+      briefing: "Ready for your run! Take it easy at the start and find your rhythm.",
+      intensityAdvice: "Start conservatively and adjust based on how you feel.",
+      warnings: [],
+      readinessInsight: "Listen to your body and adjust intensity as needed.",
+    };
+  }
+}
+
+/**
+ * Enhanced coaching context that includes wellness data
+ */
+export interface EnhancedCoachingContext extends CoachingContext {
+  wellness?: WellnessContext;
+  targetHeartRateZone?: number;
+}
+
+export async function getWellnessAwareCoachingResponse(
+  message: string, 
+  context: EnhancedCoachingContext
+): Promise<string> {
+  const systemPrompt = buildEnhancedCoachingSystemPrompt(context);
+  
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: message }
+    ],
+    max_tokens: 150,
+    temperature: 0.7,
+  });
+
+  return completion.choices[0].message.content || "Keep going, you're doing great!";
+}
+
+function buildEnhancedCoachingSystemPrompt(context: EnhancedCoachingContext): string {
+  let prompt = buildCoachingSystemPrompt(context);
+  
+  // Add wellness context if available
+  if (context.wellness) {
+    const w = context.wellness;
+    let wellnessInfo = '\n\nRUNNER WELLNESS CONTEXT (from Garmin):';
+    
+    if (w.readinessScore !== undefined) {
+      wellnessInfo += `\n- Today's readiness: ${w.readinessScore}/100`;
+    }
+    if (w.bodyBattery !== undefined) {
+      wellnessInfo += `\n- Body Battery: ${w.bodyBattery}/100`;
+    }
+    if (w.sleepQuality) {
+      wellnessInfo += `\n- Last night's sleep: ${w.sleepQuality}`;
+    }
+    if (w.stressQualifier) {
+      wellnessInfo += `\n- Current stress: ${w.stressQualifier}`;
+    }
+    if (w.hrvStatus) {
+      wellnessInfo += `\n- HRV status: ${w.hrvStatus}`;
+    }
+    
+    prompt += wellnessInfo;
+    prompt += '\n\nUse this wellness data to personalize your coaching. If readiness is low, encourage an easier effort. If Body Battery is high, they may be able to push harder.';
+  }
+  
+  // Add heart rate zone guidance if available
+  if (context.targetHeartRateZone) {
+    prompt += `\n\nTARGET HR ZONE: Zone ${context.targetHeartRateZone}. `;
+    switch (context.targetHeartRateZone) {
+      case 1: prompt += 'Recovery zone - keep it very easy.'; break;
+      case 2: prompt += 'Aerobic zone - conversational pace.'; break;
+      case 3: prompt += 'Tempo zone - comfortably hard.'; break;
+      case 4: prompt += 'Threshold zone - hard but sustainable.'; break;
+      case 5: prompt += 'Maximum zone - very hard, short intervals.'; break;
+    }
+    
+    if (context.heartRate) {
+      const currentZone = getHeartRateZone(context.heartRate, 220 - 30); // Assume age 30 for now
+      if (currentZone > context.targetHeartRateZone) {
+        prompt += ' Runner is ABOVE target zone - encourage them to slow down.';
+      } else if (currentZone < context.targetHeartRateZone) {
+        prompt += ' Runner is BELOW target zone - they can push a bit harder if they feel good.';
+      }
+    }
+  }
+  
+  return prompt;
+}
+
+function getHeartRateZone(hr: number, maxHr: number): number {
+  const percent = (hr / maxHr) * 100;
+  if (percent < 60) return 1;
+  if (percent < 70) return 2;
+  if (percent < 80) return 3;
+  if (percent < 90) return 4;
+  return 5;
+}
+
+/**
+ * Generate real-time coaching message based on current HR and wellness context
+ */
+export async function generateHeartRateCoaching(params: {
+  currentHR: number;
+  avgHR: number;
+  maxHR: number;
+  targetZone?: number;
+  elapsedMinutes: number;
+  coachName: string;
+  coachTone: string;
+  wellness?: WellnessContext;
+}): Promise<string> {
+  const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes, coachName, coachTone, wellness } = params;
+  
+  const currentZone = getHeartRateZone(currentHR, maxHR);
+  const percentMax = Math.round((currentHR / maxHR) * 100);
+  
+  const zoneNames = ['', 'Recovery', 'Aerobic', 'Tempo', 'Threshold', 'Maximum'];
+  
+  let wellnessContext = '';
+  if (wellness) {
+    if (wellness.bodyBattery !== undefined && wellness.bodyBattery < 30) {
+      wellnessContext = 'Their Body Battery is low today. ';
+    }
+    if (wellness.sleepQuality === 'Poor' || wellness.sleepQuality === 'Very Poor') {
+      wellnessContext += 'They had poor sleep last night. ';
+    }
+    if (wellness.hrvStatus === 'LOW') {
+      wellnessContext += 'HRV is below baseline. ';
+    }
+  }
+  
+  const prompt = `You are ${coachName}, a ${coachTone} running coach giving real-time heart rate guidance.
+
+Current stats (${elapsedMinutes} minutes into run):
+- Heart Rate: ${currentHR} bpm (${percentMax}% of max)
+- Current Zone: Zone ${currentZone} (${zoneNames[currentZone]})
+- Average HR: ${avgHR} bpm
+${targetZone ? `- Target Zone: Zone ${targetZone} (${zoneNames[targetZone]})` : ''}
+${wellnessContext ? `\nWellness context: ${wellnessContext}` : ''}
+
+Give a brief (1-2 sentences) heart rate coaching tip. ${
+  targetZone && currentZone !== targetZone 
+    ? currentZone > targetZone 
+      ? 'They need to slow down to hit their target zone.' 
+      : 'They can pick up the pace if feeling good.'
+    : ''
+}`;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: `You are ${coachName}, giving brief real-time HR coaching. Keep it to 1-2 short sentences. ${toneDirective(coachTone)}` },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 60,
+      temperature: 0.7,
+    });
+
+    return completion.choices[0].message.content || `Heart rate at ${currentHR}, Zone ${currentZone}. Keep it steady!`;
+  } catch {
+    return `Heart rate at ${currentHR} bpm, Zone ${currentZone}. ${currentZone > 3 ? 'Consider easing up.' : 'Looking good!'}`;
+  }
+}
+
+/**
+ * Comprehensive post-run analysis using all Garmin data
+ */
+export interface GarminActivityData {
+  activityType?: string;
+  durationInSeconds?: number;
+  distanceInMeters?: number;
+  averageHeartRate?: number;
+  maxHeartRate?: number;
+  averagePace?: number;
+  averageCadence?: number;
+  maxCadence?: number;
+  averageStrideLength?: number;
+  groundContactTime?: number;
+  verticalOscillation?: number;
+  verticalRatio?: number;
+  elevationGain?: number;
+  elevationLoss?: number;
+  aerobicTrainingEffect?: number;
+  anaerobicTrainingEffect?: number;
+  vo2Max?: number;
+  recoveryTime?: number;
+  activeKilocalories?: number;
+  averagePower?: number;
+  heartRateZones?: any;
+  laps?: any[];
+  splits?: any[];
+}
+
+export interface GarminWellnessData {
+  // Sleep
+  totalSleepSeconds?: number;
+  deepSleepSeconds?: number;
+  lightSleepSeconds?: number;
+  remSleepSeconds?: number;
+  sleepScore?: number;
+  sleepQuality?: string;
+  // Stress/Recovery
+  averageStressLevel?: number;
+  bodyBatteryCurrent?: number;
+  bodyBatteryHigh?: number;
+  bodyBatteryLow?: number;
+  // HRV
+  hrvWeeklyAvg?: number;
+  hrvLastNightAvg?: number;
+  hrvStatus?: string;
+  // Activity
+  steps?: number;
+  restingHeartRate?: number;
+  readinessScore?: number;
+  // Respiration/SpO2
+  avgSpO2?: number;
+  avgWakingRespirationValue?: number;
+}
+
+export interface ComprehensiveRunAnalysis {
+  summary: string;
+  performanceScore: number; // 1-100
+  highlights: string[];
+  struggles: string[];
+  personalBests: string[];
+  improvementTips: string[];
+  trainingLoadAssessment: string;
+  recoveryAdvice: string;
+  nextRunSuggestion: string;
+  wellnessImpact: string;
+  technicalAnalysis: {
+    paceAnalysis: string;
+    heartRateAnalysis: string;
+    cadenceAnalysis: string;
+    runningDynamics: string;
+    elevationPerformance: string;
+  };
+  garminInsights: {
+    trainingEffect: string;
+    vo2MaxTrend: string;
+    recoveryTime: string;
+  };
+}
+
+export async function generateComprehensiveRunAnalysis(params: {
+  runData: any;
+  garminActivity?: GarminActivityData;
+  wellness?: GarminWellnessData;
+  previousRuns?: any[];
+  userProfile?: { fitnessLevel?: string; age?: number; weight?: number };
+  coachName: string;
+  coachTone: string;
+}): Promise<ComprehensiveRunAnalysis> {
+  const { runData, garminActivity, wellness, previousRuns, userProfile, coachName, coachTone } = params;
+  
+  // Build comprehensive prompt with all available data
+  let prompt = `You are ${coachName}, an expert AI running coach with a ${coachTone} style. 
+Analyze this run comprehensively using all available data from the runner's Garmin device and wellness metrics.
+
+## RUN DATA:
+- Distance: ${runData.distance || garminActivity?.distanceInMeters ? ((garminActivity?.distanceInMeters || 0) / 1000).toFixed(2) : '?'}km
+- Duration: ${runData.duration ? Math.floor(runData.duration / 60) : garminActivity?.durationInSeconds ? Math.floor(garminActivity.durationInSeconds / 60) : '?'} minutes
+- Average Pace: ${runData.avgPace || (garminActivity?.averagePace ? `${Math.floor(garminActivity.averagePace)}:${Math.floor((garminActivity.averagePace % 1) * 60).toString().padStart(2, '0')}` : 'N/A')}/km
+- Activity Type: ${runData.activityType || garminActivity?.activityType || 'Running'}
+- Elevation Gain: ${runData.elevationGain || garminActivity?.elevationGain || 0}m
+- Elevation Loss: ${runData.elevationLoss || garminActivity?.elevationLoss || 0}m
+`;
+
+  if (runData.targetTime || runData.targetDistance) {
+    const targetMinutes = runData.targetTime ? Math.round(runData.targetTime / 60000) : null;
+    prompt += `- Target Distance: ${runData.targetDistance ? `${runData.targetDistance}km` : 'N/A'}\n`;
+    prompt += `- Target Time: ${targetMinutes ? `${targetMinutes} minutes` : 'N/A'}\n`;
+    if (typeof runData.wasTargetAchieved === "boolean") {
+      prompt += `- Target Achieved: ${runData.wasTargetAchieved ? "Yes" : "No"}\n`;
+    }
+  }
+
+  // Add Garmin activity metrics if available
+  if (garminActivity) {
+    prompt += `
+## GARMIN ACTIVITY METRICS:
+`;
+    if (garminActivity.averageHeartRate) {
+      prompt += `- Average Heart Rate: ${garminActivity.averageHeartRate} bpm\n`;
+    }
+    if (garminActivity.maxHeartRate) {
+      prompt += `- Max Heart Rate: ${garminActivity.maxHeartRate} bpm\n`;
+    }
+    if (garminActivity.averageCadence) {
+      prompt += `- Average Cadence: ${Math.round(garminActivity.averageCadence)} spm\n`;
+    }
+    if (garminActivity.averageStrideLength) {
+      prompt += `- Average Stride Length: ${(garminActivity.averageStrideLength * 100).toFixed(0)}cm\n`;
+    }
+    if (garminActivity.groundContactTime) {
+      prompt += `- Ground Contact Time: ${Math.round(garminActivity.groundContactTime)}ms\n`;
+    }
+    if (garminActivity.verticalOscillation) {
+      prompt += `- Vertical Oscillation: ${garminActivity.verticalOscillation.toFixed(1)}cm\n`;
+    }
+    if (garminActivity.verticalRatio) {
+      prompt += `- Vertical Ratio: ${garminActivity.verticalRatio.toFixed(1)}%\n`;
+    }
+    if (garminActivity.averagePower) {
+      prompt += `- Average Running Power: ${Math.round(garminActivity.averagePower)}W\n`;
+    }
+    if (garminActivity.aerobicTrainingEffect) {
+      prompt += `- Aerobic Training Effect: ${garminActivity.aerobicTrainingEffect.toFixed(1)}/5.0\n`;
+    }
+    if (garminActivity.anaerobicTrainingEffect) {
+      prompt += `- Anaerobic Training Effect: ${garminActivity.anaerobicTrainingEffect.toFixed(1)}/5.0\n`;
+    }
+    if (garminActivity.vo2Max) {
+      prompt += `- Estimated VO2 Max: ${garminActivity.vo2Max.toFixed(0)} ml/kg/min\n`;
+    }
+    if (garminActivity.recoveryTime) {
+      prompt += `- Recommended Recovery: ${garminActivity.recoveryTime} hours\n`;
+    }
+    if (garminActivity.activeKilocalories) {
+      prompt += `- Active Calories: ${garminActivity.activeKilocalories} kcal\n`;
+    }
+  }
+
+  // Add wellness context if available
+  if (wellness) {
+    prompt += `
+## PRE-RUN WELLNESS STATE (from Garmin):
+`;
+    if (wellness.totalSleepSeconds) {
+      const sleepHours = wellness.totalSleepSeconds / 3600;
+      prompt += `- Sleep: ${sleepHours.toFixed(1)} hours`;
+      if (wellness.sleepScore) prompt += ` (score: ${wellness.sleepScore}/100)`;
+      if (wellness.sleepQuality) prompt += ` - ${wellness.sleepQuality}`;
+      prompt += '\n';
+      if (wellness.deepSleepSeconds && wellness.remSleepSeconds) {
+        const deepHours = wellness.deepSleepSeconds / 3600;
+        const remHours = wellness.remSleepSeconds / 3600;
+        prompt += `  - Deep sleep: ${deepHours.toFixed(1)}h, REM: ${remHours.toFixed(1)}h\n`;
+      }
+    }
+    if (wellness.bodyBatteryCurrent !== undefined) {
+      prompt += `- Body Battery: ${wellness.bodyBatteryCurrent}/100`;
+      if (wellness.bodyBatteryHigh && wellness.bodyBatteryLow) {
+        prompt += ` (range today: ${wellness.bodyBatteryLow}-${wellness.bodyBatteryHigh})`;
+      }
+      prompt += '\n';
+    }
+    if (wellness.averageStressLevel !== undefined) {
+      prompt += `- Average Stress Level: ${wellness.averageStressLevel}/100\n`;
+    }
+    if (wellness.hrvStatus) {
+      prompt += `- HRV Status: ${wellness.hrvStatus}`;
+      if (wellness.hrvLastNightAvg) prompt += ` (last night avg: ${wellness.hrvLastNightAvg.toFixed(0)}ms)`;
+      prompt += '\n';
+    }
+    if (wellness.restingHeartRate) {
+      prompt += `- Resting Heart Rate: ${wellness.restingHeartRate} bpm\n`;
+    }
+    if (wellness.readinessScore !== undefined) {
+      prompt += `- Body Readiness Score: ${wellness.readinessScore}/100\n`;
+    }
+    if (wellness.avgSpO2) {
+      prompt += `- Blood Oxygen (SpO2): ${wellness.avgSpO2}%\n`;
+    }
+    if (wellness.steps) {
+      prompt += `- Steps before run: ${wellness.steps}\n`;
+    }
+  }
+
+  // Add historical context if available
+  if (previousRuns && previousRuns.length > 0) {
+    prompt += `
+## RECENT RUN HISTORY (last ${previousRuns.length} runs):
+`;
+    previousRuns.slice(0, 5).forEach((run, i) => {
+      prompt += `${i + 1}. ${run.distance?.toFixed(1) || '?'}km at ${run.avgPace || 'N/A'}/km`;
+      if (run.avgHeartRate) prompt += `, ${run.avgHeartRate}bpm`;
+      prompt += '\n';
+    });
+  }
+
+  prompt += `
+## ANALYSIS REQUIRED:
+Based on ALL the data above, provide a comprehensive JSON analysis with these fields:
+{
+  "summary": "2-3 sentence personalized summary of the run",
+  "performanceScore": <1-100 based on effort, conditions, and wellness>,
+  "highlights": ["3-5 positive aspects of the run"],
+  "struggles": ["any challenges or areas of concern"],
+  "personalBests": ["any notable achievements or improvements"],
+  "improvementTips": ["3-4 specific, actionable tips for next time"],
+  "trainingLoadAssessment": "Assessment of training stimulus based on training effect",
+  "recoveryAdvice": "Specific recovery recommendations based on wellness and effort",
+  "nextRunSuggestion": "What type of run to do next based on recovery needs",
+  "wellnessImpact": "How their wellness state affected performance",
+  "technicalAnalysis": {
+    "paceAnalysis": "Pace consistency and efficiency analysis",
+    "heartRateAnalysis": "HR zones and cardiovascular response",
+    "cadenceAnalysis": "Step rate assessment",
+    "runningDynamics": "Assessment of stride, ground contact, oscillation",
+    "elevationPerformance": "How they handled hills"
+  },
+  "garminInsights": {
+    "trainingEffect": "Interpretation of aerobic/anaerobic training effect",
+    "vo2MaxTrend": "VO2 max context and what it means",
+    "recoveryTime": "Why recovery time is what it is"
+  }
+}
+
+Be specific, use the actual numbers from the data, and provide actionable insights.`;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { 
+          role: "system", 
+          content: `You are ${coachName}, an expert running coach with deep knowledge of exercise physiology and Garmin metrics. Provide detailed, personalized analysis using all available biometric data. Respond only with valid JSON. ${toneDirective(coachTone)}` 
+        },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 1500,
+      temperature: 0.7,
+    });
+
+    const content = completion.choices[0].message.content || "{}";
+    const parsed = JSON.parse(content.replace(/```json\n?|\n?```/g, ''));
+    
+    return {
+      summary: parsed.summary || "Great run today!",
+      performanceScore: parsed.performanceScore || 75,
+      highlights: parsed.highlights || ["Completed your run!"],
+      struggles: parsed.struggles || [],
+      personalBests: parsed.personalBests || [],
+      improvementTips: parsed.improvementTips || ["Keep up the great work!"],
+      trainingLoadAssessment: parsed.trainingLoadAssessment || "Moderate training load.",
+      recoveryAdvice: parsed.recoveryAdvice || "Get adequate rest and hydration.",
+      nextRunSuggestion: parsed.nextRunSuggestion || "An easy recovery run in 24-48 hours.",
+      wellnessImpact: parsed.wellnessImpact || "Your wellness state supported this effort.",
+      technicalAnalysis: {
+        paceAnalysis: parsed.technicalAnalysis?.paceAnalysis || "Pace data not available.",
+        heartRateAnalysis: parsed.technicalAnalysis?.heartRateAnalysis || "Heart rate data not available.",
+        cadenceAnalysis: parsed.technicalAnalysis?.cadenceAnalysis || "Cadence data not available.",
+        runningDynamics: parsed.technicalAnalysis?.runningDynamics || "Running dynamics not available.",
+        elevationPerformance: parsed.technicalAnalysis?.elevationPerformance || "Elevation data not available.",
+      },
+      garminInsights: {
+        trainingEffect: parsed.garminInsights?.trainingEffect || "Training effect data not available.",
+        vo2MaxTrend: parsed.garminInsights?.vo2MaxTrend || "VO2 max data not available.",
+        recoveryTime: parsed.garminInsights?.recoveryTime || "Recovery time estimate not available.",
+      },
+    };
+  } catch (error) {
+    console.error("Error generating comprehensive run analysis:", error);
+    return {
+      summary: "Great effort on your run today!",
+      performanceScore: 70,
+      highlights: ["Completed your run", "Stayed consistent"],
+      struggles: [],
+      personalBests: [],
+      improvementTips: ["Keep training consistently", "Focus on recovery"],
+      trainingLoadAssessment: "Training load recorded.",
+      recoveryAdvice: "Rest well and stay hydrated.",
+      nextRunSuggestion: "Take a rest day or do an easy run.",
+      wellnessImpact: "Unable to assess wellness impact.",
+      technicalAnalysis: {
+        paceAnalysis: "Analysis unavailable.",
+        heartRateAnalysis: "Analysis unavailable.",
+        cadenceAnalysis: "Analysis unavailable.",
+        runningDynamics: "Analysis unavailable.",
+        elevationPerformance: "Analysis unavailable.",
+      },
+      garminInsights: {
+        trainingEffect: "Data unavailable.",
+        vo2MaxTrend: "Data unavailable.",
+        recoveryTime: "Data unavailable.",
+      },
+    };
+  }
+}
