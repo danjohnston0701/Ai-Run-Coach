@@ -305,6 +305,7 @@ class RunSessionViewModel @Inject constructor(
                         val targetTimeMs = (it.targetHours * 3600000L) + (it.targetMinutes * 60000L)
                         putExtra(RunTrackingService.EXTRA_TARGET_TIME, targetTimeMs)
                     }
+                    putExtra(RunTrackingService.EXTRA_HAS_ROUTE, it.route != null)
                 }
             }
             

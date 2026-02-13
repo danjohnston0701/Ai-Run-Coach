@@ -47,7 +47,16 @@ interface ApiService {
     suspend fun searchUsers(@Query("query") query: String): List<Friend> 
 
     @POST("/api/friend-requests")
-    suspend fun addFriend(@Body request: AddFriendRequest): Friend
+    suspend fun sendFriendRequest(@Body request: Map<String, String>)
+    
+    @GET("/api/friend-requests/{userId}")
+    suspend fun getFriendRequests(@Path("userId") userId: String): FriendRequestsResponse
+    
+    @POST("/api/friend-requests/{id}/accept")
+    suspend fun acceptFriendRequest(@Path("id") requestId: String)
+    
+    @POST("/api/friend-requests/{id}/decline")
+    suspend fun declineFriendRequest(@Path("id") requestId: String)
 
     @POST("/api/coaching/pace-update")
     suspend fun getPaceUpdate(@Body request: PaceUpdate): PaceUpdateResponse
@@ -63,6 +72,9 @@ interface ApiService {
     
     @POST("/api/coaching/hr-coaching")
     suspend fun getHeartRateCoaching(@Body request: HeartRateCoachingRequest): HeartRateCoachingResponse
+
+    @POST("/api/ai/elevation-coaching")
+    suspend fun getElevationCoaching(@Body request: ElevationCoachingRequest): ElevationCoachingResponse
 
     @POST("/api/coaching/pre-run-briefing-audio")
     suspend fun getPreRunBriefing(@Body request: PreRunBriefingRequest): PreRunBriefingResponse
@@ -87,9 +99,31 @@ interface ApiService {
 
     @POST("/api/coaching/run-analysis")
     suspend fun getRunAnalysis(@Body request: RunAnalysisRequest): RunAnalysisResponse
+
+    // AI analysis (new comprehensive flow)
+    @GET("/api/runs/{id}/analysis")
+    suspend fun getRunAnalysisRecord(@Path("id") runId: String): RunAnalysisRecord?
+
+    @POST("/api/runs/{id}/analysis")
+    suspend fun saveRunAnalysis(
+        @Path("id") runId: String,
+        @Body request: SaveRunAnalysisRequest
+    ): RunAnalysisRecord
+
+    @POST("/api/runs/{id}/comprehensive-analysis")
+    suspend fun getComprehensiveRunAnalysis(@Path("id") runId: String): ComprehensiveAnalysisResponse
+
+    @POST("/api/runs/{id}/ai-insights")
+    suspend fun getBasicRunInsights(
+        @Path("id") runId: String,
+        @Body request: Map<String, String> = emptyMap()
+    ): BasicRunInsights
     
     @POST("/api/runs")
     suspend fun uploadRun(@Body request: UploadRunRequest): UploadRunResponse
+
+    @POST("/api/runs/sync-progress")
+    suspend fun updateRunProgress(@Body request: UpdateRunProgressRequest)
     
     @GET("/api/runs/{id}")
     suspend fun getRunById(@Path("id") runId: String): RunSession
@@ -113,10 +147,10 @@ interface ApiService {
     suspend fun getFitnessTrend(
         @Path("userId") userId: String,
         @Query("days") days: Int = 90
-    ): live.airuncoach.airuncoach.domain.model.FitnessTrend
+    ): FitnessTrend
 
     @GET("/api/fitness/current/{userId}")
-    suspend fun getCurrentFitness(@Path("userId") userId: String): live.airuncoach.airuncoach.domain.model.DailyFitness
+    suspend fun getCurrentFitness(@Path("userId") userId: String): DailyFitness
 
     // ========== SEGMENTS ==========
     
@@ -125,28 +159,28 @@ interface ApiService {
         @Query("lat") latitude: Double,
         @Query("lng") longitude: Double,
         @Query("radius") radiusMeters: Int = 5000
-    ): List<live.airuncoach.airuncoach.domain.model.NearbySegment>
+    ): List<NearbySegment>
 
     @GET("/api/segments/{segmentId}")
-    suspend fun getSegment(@Path("segmentId") segmentId: String): live.airuncoach.airuncoach.domain.model.Segment
+    suspend fun getSegment(@Path("segmentId") segmentId: String): Segment
 
     @GET("/api/segments/{segmentId}/leaderboard")
     suspend fun getSegmentLeaderboard(
         @Path("segmentId") segmentId: String,
         @Query("period") period: String = "all_time" // all_time, year, month
-    ): live.airuncoach.airuncoach.domain.model.SegmentLeaderboard
+    ): SegmentLeaderboard
 
     @POST("/api/segments/{segmentId}/efforts")
     suspend fun submitSegmentEffort(
         @Path("segmentId") segmentId: String,
-        @Body effort: live.airuncoach.airuncoach.domain.model.SegmentEffort
+        @Body effort: SegmentEffort
     )
 
     @POST("/api/segments")
-    suspend fun createSegment(@Body segment: live.airuncoach.airuncoach.domain.model.Segment): live.airuncoach.airuncoach.domain.model.Segment
+    suspend fun createSegment(@Body segment: Segment): Segment
 
     @GET("/api/runs/{runId}/segments")
-    suspend fun getSegmentsForRun(@Path("runId") runId: String): List<live.airuncoach.airuncoach.domain.model.SegmentMatch>
+    suspend fun getSegmentsForRun(@Path("runId") runId: String): List<SegmentMatch>
 
     // ========== TRAINING PLANS ==========
     
@@ -154,16 +188,16 @@ interface ApiService {
     suspend fun getTrainingPlans(
         @Query("goal") goal: String,
         @Query("level") level: String
-    ): List<live.airuncoach.airuncoach.domain.model.TrainingPlan>
+    ): List<TrainingPlan>
 
     @GET("/api/training-plans/{planId}")
-    suspend fun getTrainingPlan(@Path("planId") planId: String): live.airuncoach.airuncoach.domain.model.TrainingPlan
+    suspend fun getTrainingPlan(@Path("planId") planId: String): TrainingPlan
 
     @POST("/api/training-plans/{userId}/generate")
     suspend fun generateAITrainingPlan(
         @Path("userId") userId: String,
-        @Body goal: live.airuncoach.airuncoach.domain.model.TrainingGoal
-    ): live.airuncoach.airuncoach.domain.model.TrainingPlan
+        @Body goal: TrainingGoal
+    ): TrainingPlan
 
     @POST("/api/training-plans/{planId}/enroll")
     suspend fun enrollInPlan(@Path("planId") planId: String)
@@ -176,7 +210,7 @@ interface ApiService {
     )
 
     @GET("/api/training-plans/{planId}/progress")
-    suspend fun getPlanProgress(@Path("planId") planId: String): live.airuncoach.airuncoach.domain.model.PlanProgress
+    suspend fun getPlanProgress(@Path("planId") planId: String): PlanProgress
 
     // ========== SOCIAL FEED ==========
     
@@ -184,7 +218,7 @@ interface ApiService {
     suspend fun getFeed(
         @Query("page") page: Int = 0,
         @Query("limit") limit: Int = 20
-    ): List<live.airuncoach.airuncoach.domain.model.FeedActivity>
+    ): List<FeedActivity>
 
     @POST("/api/feed/{activityId}/kudos")
     suspend fun giveKudos(@Path("activityId") activityId: String)
@@ -196,18 +230,18 @@ interface ApiService {
     suspend fun addComment(
         @Path("activityId") activityId: String,
         @Body comment: String
-    ): live.airuncoach.airuncoach.domain.model.ActivityComment
+    ): ActivityComment
 
     @POST("/api/feed/post")
-    suspend fun createPost(@Body activity: live.airuncoach.airuncoach.domain.model.FeedActivity)
+    suspend fun createPost(@Body activity: FeedActivity)
 
     // ========== CLUBS ==========
     
     @GET("/api/clubs")
-    suspend fun getClubs(@Query("query") query: String?): List<live.airuncoach.airuncoach.domain.model.Club>
+    suspend fun getClubs(@Query("query") query: String?): List<Club>
 
     @GET("/api/clubs/{clubId}")
-    suspend fun getClub(@Path("clubId") clubId: String): live.airuncoach.airuncoach.domain.model.Club
+    suspend fun getClub(@Path("clubId") clubId: String): Club
 
     @POST("/api/clubs/{clubId}/join")
     suspend fun joinClub(@Path("clubId") clubId: String)
@@ -218,13 +252,13 @@ interface ApiService {
     // ========== CHALLENGES ==========
     
     @GET("/api/challenges")
-    suspend fun getChallenges(): List<live.airuncoach.airuncoach.domain.model.Challenge>
+    suspend fun getChallenges(): List<Challenge>
 
     @POST("/api/challenges/{challengeId}/join")
     suspend fun joinChallenge(@Path("challengeId") challengeId: String)
 
     @GET("/api/challenges/{challengeId}/leaderboard")
-    suspend fun getChallengeLeaderboard(@Path("challengeId") challengeId: String): List<live.airuncoach.airuncoach.domain.model.ChallengeRank>
+    suspend fun getChallengeLeaderboard(@Path("challengeId") challengeId: String): List<ChallengeRank>
 
     // ========== HEATMAP ==========
     
@@ -238,7 +272,7 @@ interface ApiService {
     // ========== NOTIFICATIONS ==========
     
     @GET("/api/notifications")
-    suspend fun getNotifications(): List<live.airuncoach.airuncoach.domain.model.Notification>
+    suspend fun getNotifications(): List<Notification>
 
     @PUT("/api/notifications/{notificationId}/read")
     suspend fun markNotificationRead(@Path("notificationId") notificationId: String)

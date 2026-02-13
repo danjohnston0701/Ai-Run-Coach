@@ -77,6 +77,7 @@ class RunTrackingService : Service(), SensorEventListener {
     // Run data
     private var targetDistance: Double? = null // For mapped runs
     private var targetTime: Long? = null     // For time-based goals (milliseconds)
+    private var hasRoute: Boolean = false
     private val routePoints = mutableListOf<LocationPoint>()
     private val kmSplits = mutableListOf<KmSplit>()
     private var lastKmSplit = 0
@@ -95,6 +96,20 @@ class RunTrackingService : Service(), SensorEventListener {
     private val paceHistory = ArrayList<Float>()
     private var lastStruggleTriggerTime: Long = 0
     private var isStruggling = false
+
+    // Elevation coaching
+    private var lastElevationCoachingTime: Long = 0
+    private var lastHillTopAckTime: Long = 0
+    private var slopeDirection: Int = 0 // 1 = uphill, -1 = downhill, 0 = flat/unknown
+    private var slopeDistanceMeters: Double = 0.0
+    private var downhillFinishTriggered: Boolean = false
+
+    // Heart rate coaching
+    private var hrSum: Long = 0
+    private var hrCount: Int = 0
+    private var maxHr: Int = 0
+    private var lastHrCoachingTime: Long = 0
+    private var lastHrCoachingMinute: Int = -1
     
     // Weather and terrain
     private var weatherAtStart: WeatherData? = null
@@ -108,6 +123,17 @@ class RunTrackingService : Service(), SensorEventListener {
         private const val LOCATION_UPDATE_INTERVAL = 2000L
         private const val LOCATION_FASTEST_INTERVAL = 1000L
         private const val STRUGGLE_COOLDOWN_MS = 120_000 // 2 minutes
+        private const val ELEVATION_COOLDOWN_MS = 120_000 // 2 minutes
+        private const val HILL_TOP_COOLDOWN_MS = 180_000 // 3 minutes
+        private const val HR_COOLDOWN_MS = 180_000 // 3 minutes
+
+        private const val UPHILL_GRADE_THRESHOLD = 3.0
+        private const val STEEP_UPHILL_GRADE_THRESHOLD = 6.0
+        private const val DOWNHILL_GRADE_THRESHOLD = -3.0
+        private const val HILL_TOP_MIN_DISTANCE_M = 200.0
+        private const val UPHILL_MIN_DISTANCE_M = 150.0
+        private const val DOWNHILL_MIN_DISTANCE_M = 200.0
+        private const val DOWNHILL_FINISH_DISTANCE_KM = 1.0
         
         const val ACTION_START_TRACKING = "ACTION_START_TRACKING"
         const val ACTION_STOP_TRACKING = "ACTION_STOP_TRACKING"
@@ -115,6 +141,7 @@ class RunTrackingService : Service(), SensorEventListener {
         const val ACTION_RESUME_TRACKING = "ACTION_RESUME_TRACKING"
         const val EXTRA_TARGET_DISTANCE = "EXTRA_TARGET_DISTANCE"
         const val EXTRA_TARGET_TIME = "EXTRA_TARGET_TIME"
+        const val EXTRA_HAS_ROUTE = "EXTRA_HAS_ROUTE"
         
         private val _currentRunSession = MutableStateFlow<RunSession?>(null)
         val currentRunSession: StateFlow<RunSession?> = _currentRunSession
@@ -168,6 +195,7 @@ class RunTrackingService : Service(), SensorEventListener {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         targetDistance = intent?.getDoubleExtra(EXTRA_TARGET_DISTANCE, 0.0)?.takeIf { it > 0 }
         targetTime = intent?.getLongExtra(EXTRA_TARGET_TIME, 0)?.takeIf { it > 0 }
+        hasRoute = intent?.getBooleanExtra(EXTRA_HAS_ROUTE, false) == true
 
         when (intent?.action) {
             ACTION_START_TRACKING -> startTracking()
@@ -229,6 +257,16 @@ class RunTrackingService : Service(), SensorEventListener {
         paceHistory.clear()
         lastStruggleTriggerTime = 0
         isStruggling = false
+        lastElevationCoachingTime = 0
+        lastHillTopAckTime = 0
+        slopeDirection = 0
+        slopeDistanceMeters = 0.0
+        downhillFinishTriggered = false
+        hrSum = 0
+        hrCount = 0
+        maxHr = 0
+        lastHrCoachingTime = 0
+        lastHrCoachingMinute = -1
 
         // Start location and sensors
         try {
@@ -319,6 +357,8 @@ class RunTrackingService : Service(), SensorEventListener {
                 if (newPoint.altitude != null && prevPoint.altitude != null) {
                     val elevChange = newPoint.altitude - prevPoint.altitude
                     if (elevChange > 0) totalElevationGain += elevChange else totalElevationLoss += abs(elevChange)
+                    val gradePercent = (elevChange / distanceIncrement) * 100
+                    updateElevationCoaching(distanceIncrement, gradePercent)
                 }
                 routePoints.add(newPoint)
                 if (location.speed > maxSpeed) maxSpeed = location.speed
@@ -389,6 +429,9 @@ class RunTrackingService : Service(), SensorEventListener {
         
         // Check for 500m milestones and trigger coaching
         check500mMilestones()
+        
+        // Check for heart rate coaching
+        maybeTriggerHeartRateCoaching()
         
         _currentRunSession.value = RunSession(
             id = UUID.randomUUID().toString(),
@@ -817,6 +860,126 @@ class RunTrackingService : Service(), SensorEventListener {
         }
     }
 
+    private fun maybeTriggerHeartRateCoaching() {
+        if (currentHeartRate <= 0) return
+        val now = System.currentTimeMillis()
+        val elapsedMinutes = ((now - startTime) / 60000).toInt()
+        if (elapsedMinutes <= 0) return
+        if (elapsedMinutes % 3 != 0) return
+        if (elapsedMinutes == lastHrCoachingMinute) return
+        if (now - lastHrCoachingTime < HR_COOLDOWN_MS) return
+
+        val avgHr = if (hrCount > 0) (hrSum / hrCount).toInt() else currentHeartRate
+        val maxHrValue = maxHr.takeIf { it > 0 } ?: currentHeartRate
+
+        lastHrCoachingTime = now
+        lastHrCoachingMinute = elapsedMinutes
+
+        serviceScope.launch {
+            try {
+                val request = HeartRateCoachingRequest(
+                    currentHR = currentHeartRate,
+                    avgHR = avgHr,
+                    maxHR = maxHrValue,
+                    targetZone = 0, // Unknown; backend should avoid assumptions
+                    elapsedMinutes = elapsedMinutes,
+                    coachName = currentUser?.coachName,
+                    coachTone = currentUser?.coachTone
+                )
+                val response = apiService.getHeartRateCoaching(request)
+                coachingHistory.add("HR: ${response.message}")
+
+                if (!isMuted) {
+                    playCoachingAudio(response.audio, response.format, response.message)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    private fun updateElevationCoaching(distanceIncrement: Double, gradePercent: Double) {
+        val now = System.currentTimeMillis()
+        val direction = when {
+            gradePercent >= UPHILL_GRADE_THRESHOLD -> 1
+            gradePercent <= DOWNHILL_GRADE_THRESHOLD -> -1
+            else -> 0
+        }
+
+        if (direction == slopeDirection) {
+            slopeDistanceMeters += distanceIncrement
+        } else {
+            // Hill-top acknowledgement when leaving a sustained uphill
+            if (slopeDirection == 1 &&
+                slopeDistanceMeters >= HILL_TOP_MIN_DISTANCE_M &&
+                now - lastHillTopAckTime > HILL_TOP_COOLDOWN_MS
+            ) {
+                triggerElevationCoaching("hill_top", gradePercent, slopeDistanceMeters)
+                lastHillTopAckTime = now
+            }
+            slopeDirection = direction
+            slopeDistanceMeters = distanceIncrement
+        }
+
+        val hasElevationContext = hasRoute || abs(gradePercent) >= UPHILL_GRADE_THRESHOLD
+        if (!hasElevationContext) return
+        if (now - lastElevationCoachingTime < ELEVATION_COOLDOWN_MS) return
+
+        if (direction == 1 &&
+            gradePercent >= STEEP_UPHILL_GRADE_THRESHOLD &&
+            slopeDistanceMeters >= UPHILL_MIN_DISTANCE_M
+        ) {
+            lastElevationCoachingTime = now
+            triggerElevationCoaching("uphill", gradePercent, slopeDistanceMeters)
+        } else if (direction == -1 &&
+            slopeDistanceMeters >= DOWNHILL_MIN_DISTANCE_M
+        ) {
+            val remainingDistanceKm = targetDistance?.let { it - (totalDistance / 1000.0) }
+            if (!downhillFinishTriggered &&
+                hasRoute &&
+                remainingDistanceKm != null &&
+                remainingDistanceKm <= DOWNHILL_FINISH_DISTANCE_KM
+            ) {
+                downhillFinishTriggered = true
+                lastElevationCoachingTime = now
+                triggerElevationCoaching("downhill_finish", gradePercent, slopeDistanceMeters)
+                return
+            }
+            lastElevationCoachingTime = now
+            triggerElevationCoaching("downhill", gradePercent, slopeDistanceMeters)
+        }
+    }
+
+    private fun triggerElevationCoaching(eventType: String, gradePercent: Double, segmentDistanceMeters: Double) {
+        serviceScope.launch {
+            try {
+                val request = ElevationCoachingRequest(
+                    eventType = eventType,
+                    distance = totalDistance / 1000.0,
+                    elapsedTime = System.currentTimeMillis() - startTime,
+                    currentGrade = gradePercent,
+                    segmentDistanceMeters = segmentDistanceMeters,
+                    totalElevationGain = totalElevationGain,
+                    totalElevationLoss = totalElevationLoss,
+                    hasRoute = hasRoute,
+                    coachName = currentUser?.coachName,
+                    coachTone = currentUser?.coachTone,
+                    coachGender = currentUser?.coachGender,
+                    coachAccent = currentUser?.coachAccent,
+                    activityType = "run"
+                )
+                val response = apiService.getElevationCoaching(request)
+                coachingHistory.add("Elevation: ${response.message}")
+
+                if (!isMuted) {
+                    playCoachingAudio(response.audio, response.format, response.message)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     override fun onSensorChanged(event: SensorEvent?) {
         when (event?.sensor?.type) {
             Sensor.TYPE_STEP_COUNTER -> {
@@ -826,7 +989,13 @@ class RunTrackingService : Service(), SensorEventListener {
                 if (tD > 2000) { currentCadence=(sD*60000/tD).toInt(); initialStepCount=steps; lastStepTimestamp=System.currentTimeMillis() }
             }
             Sensor.TYPE_HEART_RATE -> {
-                currentHeartRate = event.values[0].toInt()
+                val hr = event.values[0].toInt()
+                if (hr > 0) {
+                    currentHeartRate = hr
+                    hrSum += hr
+                    hrCount += 1
+                    if (hr > maxHr) maxHr = hr
+                }
             }
         }
     }
