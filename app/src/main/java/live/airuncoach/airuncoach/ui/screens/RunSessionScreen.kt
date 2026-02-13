@@ -3,6 +3,7 @@ package live.airuncoach.airuncoach.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -35,7 +36,6 @@ import com.google.maps.android.PolyUtil
 import com.google.maps.android.compose.*
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.RunSession
-import live.airuncoach.airuncoach.service.RunTrackingService
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
@@ -54,12 +54,19 @@ fun RunSessionScreen(
     val runSession by viewModel.runSession.collectAsState()
     var showMap by remember { mutableStateOf(hasRoute) }
     var routePolyline by remember { mutableStateOf<String?>(null) }
+    var showPauseConfirm by remember { mutableStateOf(false) }
+    var showStopConfirm by remember { mutableStateOf(false) }
+    val isRunActive = runState.isRunning || runState.isPaused
     
     // Navigate to summary when upload completes
     LaunchedEffect(runState.backendRunId) {
         runState.backendRunId?.let { backendId ->
             onEndRun(backendId)
         }
+    }
+
+    BackHandler(enabled = isRunActive) {
+        // Block back navigation during an active run.
     }
 
     val cameraPositionState = rememberCameraPositionState {
@@ -110,8 +117,9 @@ fun RunSessionScreen(
             TopBarSection(
                 isCoachEnabled = runState.isCoachEnabled,
                 isMuted = runState.isMuted,
+                actionsEnabled = !isRunActive,
+                micEnabled = true,
                 onCoachToggle = { viewModel.toggleCoach() },
-                onMuteToggle = { viewModel.toggleMute() },
                 onMicClick = {
                     when (PackageManager.PERMISSION_GRANTED) {
                         ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) -> {
@@ -143,9 +151,9 @@ fun RunSessionScreen(
                 isPaused = runState.isPaused,
                 isStopping = runState.isStopping,
                 onStart = { viewModel.startRun() },
-                onPause = { viewModel.pauseRun() },
+                onPause = { showPauseConfirm = true },
                 onResume = { viewModel.resumeRun() },
-                onStop = { viewModel.stopRun() }
+                onStop = { showStopConfirm = true }
             )
 
             Spacer(modifier = Modifier.height(Spacing.md))
@@ -155,6 +163,7 @@ fun RunSessionScreen(
                 MapSection(
                     showMap = showMap,
                     onToggleMap = { showMap = !showMap },
+                    interactionEnabled = !isRunActive,
                     cameraPositionState = cameraPositionState,
                     runSession = runSession,
                     routePolyline = routePolyline
@@ -171,14 +180,65 @@ fun RunSessionScreen(
             )
         }
     }
+
+    if (showPauseConfirm) {
+        AlertDialog(
+            onDismissRequest = { showPauseConfirm = false },
+            title = { Text("Pause run?") },
+            text = { Text("This will pause tracking until you resume.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showPauseConfirm = false
+                        viewModel.pauseRun()
+                    }
+                ) {
+                    Text("Pause")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPauseConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showStopConfirm) {
+        AlertDialog(
+            onDismissRequest = { showStopConfirm = false },
+            title = { Text("Stop run?") },
+            text = { Text("This will end the session and save your run.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showStopConfirm = false
+                        viewModel.stopRun()
+                    },
+                    enabled = !runState.isStopping
+                ) {
+                    Text("Stop")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showStopConfirm = false },
+                    enabled = !runState.isStopping
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 @Composable
 fun TopBarSection(
     isCoachEnabled: Boolean,
     isMuted: Boolean,
+    actionsEnabled: Boolean,
+    micEnabled: Boolean,
     onCoachToggle: () -> Unit,
-    onMuteToggle: () -> Unit,
     onMicClick: () -> Unit,
     onShareClick: () -> Unit,
     onCloseClick: () -> Unit
@@ -226,7 +286,7 @@ fun TopBarSection(
                 modifier = Modifier
                     .clip(RoundedCornerShape(20.dp))
                     .background(if (isCoachEnabled) Colors.primary.copy(alpha = 0.2f) else Color.Gray.copy(alpha = 0.2f))
-                    .clickable(onClick = onCoachToggle)
+                    .clickable(enabled = actionsEnabled, onClick = onCoachToggle)
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Row(
@@ -256,7 +316,8 @@ fun TopBarSection(
         ) {
             IconButton(
                 onClick = onMicClick,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(36.dp),
+                enabled = micEnabled
             ) {
                 Icon(
                     painter = painterResource(id = R.drawable.icon_mic_vector),
@@ -267,7 +328,8 @@ fun TopBarSection(
 
             IconButton(
                 onClick = onShareClick,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(36.dp),
+                enabled = actionsEnabled
             ) {
                 Icon(
                     painter = painterResource(id = R.drawable.icon_share_vector),
@@ -278,7 +340,8 @@ fun TopBarSection(
 
             IconButton(
                 onClick = onCloseClick,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(36.dp),
+                enabled = actionsEnabled
             ) {
                 Icon(
                     painter = painterResource(id = R.drawable.icon_x_vector),
@@ -308,6 +371,7 @@ fun MetricsRow(
         MetricItem("DISTANCE", distance, unit = "km")
         MetricItem("AVG PACE", pace, unit = "/km")
         MetricItem("CADENCE", cadence, unit = "spm")
+        MetricItem("HR", heartRate, unit = "bpm")
     }
 }
 
@@ -421,6 +485,7 @@ fun ControlButtons(
 fun MapSection(
     showMap: Boolean,
     onToggleMap: () -> Unit,
+    interactionEnabled: Boolean,
     cameraPositionState: CameraPositionState,
     runSession: RunSession?,
     routePolyline: String?
@@ -436,7 +501,7 @@ fun MapSection(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
                 .background(Colors.backgroundSecondary)
-                .clickable(onClick = onToggleMap)
+                .clickable(enabled = interactionEnabled, onClick = onToggleMap)
                 .padding(horizontal = Spacing.md, vertical = Spacing.sm),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically

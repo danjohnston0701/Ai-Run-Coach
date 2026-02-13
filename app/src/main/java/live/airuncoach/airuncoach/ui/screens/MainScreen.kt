@@ -103,6 +103,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     } else {
                         currentDestination?.hierarchy?.any { it.route == screen.route } == true
                     }
+                    val isRunSessionRoute = currentRoute?.startsWith("run_session") == true
                     NavigationBarItem(
                         icon = {
                             Icon(
@@ -120,7 +121,9 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                             )
                         },
                         selected = isSelected,
+                        enabled = !isRunSessionRoute,
                         onClick = {
+                            if (isRunSessionRoute) return@NavigationBarItem
                             navController.navigate(screen.route) {
                                 popUpTo(Screen.Home.route) {
                                     inclusive = false
@@ -212,7 +215,10 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             // Map My Run Setup Screen (the beautiful redesigned one!)
             composable("map_my_run_setup/{mode}") { backStackEntry ->
                 val mode = backStackEntry.arguments?.getString("mode") ?: "route"
-                val viewModel: RouteGenerationViewModel = hiltViewModel(navController.getBackStackEntry(navController.graph.id))
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry(navController.graph.id)
+                }
+                val viewModel: RouteGenerationViewModel = hiltViewModel(parentEntry)
 
                 MapMyRunSetupScreen(
                     mode = mode,
@@ -268,7 +274,10 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             composable("route_generating/{distanceKm}") { backStackEntry ->
                 val distanceKm = backStackEntry.arguments?.getString("distanceKm")?.toDoubleOrNull() ?: 5.0
                 // Get activity-scoped ViewModel (SAME instance as setup screen!)
-                val viewModel: RouteGenerationViewModel = hiltViewModel(navController.getBackStackEntry(navController.graph.id))
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry(navController.graph.id)
+                }
+                val viewModel: RouteGenerationViewModel = hiltViewModel(parentEntry)
                 val routes by viewModel.routes.collectAsState()
                 val isLoading by viewModel.isLoading.collectAsState()
                 val error by viewModel.error.collectAsState()
@@ -298,7 +307,10 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             composable("route_selection/{distanceKm}") { backStackEntry ->
                 val distanceKm = backStackEntry.arguments?.getString("distanceKm")?.toDoubleOrNull() ?: 5.0
                 // Get activity-scoped ViewModel (SAME instance as setup and loading screens!)
-                val viewModel: RouteGenerationViewModel = hiltViewModel(navController.getBackStackEntry(navController.graph.id))
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry(navController.graph.id)
+                }
+                val viewModel: RouteGenerationViewModel = hiltViewModel(parentEntry)
                 val routes by viewModel.routes.collectAsState()
                 var selectedRouteId by remember { mutableStateOf<String?>(null) }
                 var aiCoachEnabled by remember { mutableStateOf(true) }
@@ -391,12 +403,8 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             }
             composable("friends") {
                 FriendsScreen(
-                    onNavigateBack = { navController.popBackStack() },
-                    onNavigateToFindFriends = { navController.navigate("find_friends") }
+                    onNavigateBack = { navController.popBackStack() }
                 )
-            }
-            composable("find_friends") {
-                FindFriendsScreen(onNavigateBack = { navController.popBackStack() })
             }
             composable("group_runs") {
                 GroupRunsScreen(
