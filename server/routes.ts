@@ -3415,7 +3415,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Enhanced pre-run briefing with TTS audio
   app.post("/api/coaching/pre-run-briefing-audio", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { text, distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, activityType, weather: clientWeather, targetPace, wellness: clientWellness, turnInstructions, startLocation } = req.body;
+      const { text, distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, hasRoute, activityType, weather: clientWeather, targetPace, wellness: clientWellness, turnInstructions, startLocation } = req.body;
       
       // Get user's coach settings
       const user = await storage.getUser(req.user!.userId);
@@ -3575,25 +3575,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
         
-        // Enhanced elevation insights with max incline
-        if (elevationGain && elevationGain > 0) {
-          const elevLoss = elevationLoss || elevationGain;
-          const maxIncline = maxGradientDegrees ? Math.round(maxGradientDegrees) : 0;
-          const inclineText = maxIncline > 0 ? ` The steepest section reaches ${maxIncline} degrees.` : '';
-          
-          if (elevationGain > 150) {
-            parts.push(`This is a challenging course with ${Math.round(elevationGain)} metres of climbing and ${Math.round(elevLoss)} metres of descent.${inclineText} Pace yourself on the uphills and use the downhills to recover. Save some energy for the bigger climbs.`);
-          } else if (elevationGain > 100) {
-            parts.push(`Expect ${Math.round(elevationGain)} metres of climbing with ${Math.round(elevLoss)} metres of descent.${inclineText} There are some challenging hills ahead. Shorten your stride on the climbs and lean slightly forward.`);
-          } else if (elevationGain > 50) {
-            parts.push(`You'll encounter ${Math.round(elevationGain)} metres of gentle elevation gain.${inclineText} Some rolling terrain ahead, nothing too demanding.`);
-          } else if (elevationGain > 20) {
-            parts.push(`Mostly flat with minor undulations of about ${Math.round(elevationGain)} metres total gain.${inclineText}`);
+        // Enhanced elevation insights with max incline (only when route is known)
+        if (hasRoute) {
+          if (elevationGain && elevationGain > 0) {
+            const elevLoss = elevationLoss || elevationGain;
+            const maxIncline = maxGradientDegrees ? Math.round(maxGradientDegrees) : 0;
+            const inclineText = maxIncline > 0 ? ` The steepest section reaches ${maxIncline} degrees.` : '';
+            
+            if (elevationGain > 150) {
+              parts.push(`This is a challenging course with ${Math.round(elevationGain)} metres of climbing and ${Math.round(elevLoss)} metres of descent.${inclineText} Pace yourself on the uphills and use the downhills to recover. Save some energy for the bigger climbs.`);
+            } else if (elevationGain > 100) {
+              parts.push(`Expect ${Math.round(elevationGain)} metres of climbing with ${Math.round(elevLoss)} metres of descent.${inclineText} There are some challenging hills ahead. Shorten your stride on the climbs and lean slightly forward.`);
+            } else if (elevationGain > 50) {
+              parts.push(`You'll encounter ${Math.round(elevationGain)} metres of gentle elevation gain.${inclineText} Some rolling terrain ahead, nothing too demanding.`);
+            } else if (elevationGain > 20) {
+              parts.push(`Mostly flat with minor undulations of about ${Math.round(elevationGain)} metres total gain.${inclineText}`);
+            } else {
+              parts.push(`This route is essentially flat. Great for maintaining a consistent pace.`);
+            }
           } else {
-            parts.push(`This route is essentially flat. Great for maintaining a consistent pace.`);
+            parts.push(`This is a flat route. Perfect for steady pacing.`);
           }
-        } else {
-          parts.push(`This is a flat route. Perfect for steady pacing.`);
         }
         
         // Weather
@@ -3738,19 +3740,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const mapCoachVoice = (coachGender?: string, coachAccent?: string, coachTone?: string): string => {
     const tone = normalizeCoachTone(coachTone);
     const accent = normalizeCoachAccent(coachAccent);
+    const isAmerican = accent === 'american';
+    const isBritish = accent === 'british';
+    const isIrish = accent === 'irish';
+    const isScottish = accent === 'scottish';
+    const isAustralian = accent === 'australian';
+    const isNewZealand = accent === 'new zealand' || accent === 'newzealand' || accent === 'nz';
+    const isCommonwealth = isBritish || isIrish || isScottish;
+    const isOceania = isAustralian || isNewZealand;
+
     if (coachGender === 'male') {
       if (tone === "energetic") return 'echo';
       if (tone === "motivational" || tone === "inspirational") return 'alloy';
       if (tone === "calm" || tone === "supportive" || tone === "encouraging") return 'onyx';
-      if (accent === 'american') return 'echo';
-      if (accent === 'british') return 'alloy';
+      if (isAmerican) return 'echo';
+      if (isCommonwealth) return 'alloy';
+      if (isOceania) return 'onyx';
       return 'onyx';
     } else {
       if (tone === "energetic") return 'shimmer';
       if (tone === "motivational" || tone === "inspirational") return 'nova';
       if (tone === "calm" || tone === "supportive" || tone === "encouraging") return 'fable';
-      if (accent === 'american') return 'shimmer';
-      if (accent === 'british') return 'nova';
+      if (isAmerican) return 'shimmer';
+      if (isCommonwealth) return 'nova';
+      if (isOceania) return 'fable';
       return 'fable';
     }
   };

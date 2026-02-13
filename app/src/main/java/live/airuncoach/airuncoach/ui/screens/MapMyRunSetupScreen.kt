@@ -25,16 +25,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.tasks.await
 import live.airuncoach.airuncoach.R
+import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
+import live.airuncoach.airuncoach.domain.model.RunSetupConfig
 import live.airuncoach.airuncoach.ui.components.TargetTimeCard
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
+import live.airuncoach.airuncoach.viewmodel.RunSessionViewModel
 import kotlin.coroutines.resume
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,6 +70,8 @@ fun MapMyRunSetupScreen(
     ) -> Unit = { _, _, _, _, _ -> }
 ) {
     val context = LocalContext.current
+    val runSessionViewModel: RunSessionViewModel = hiltViewModel()
+    val runState by runSessionViewModel.runState.collectAsState()
     var selectedActivity by remember { mutableStateOf("Run") }
     var targetDistance by remember { mutableStateOf(initialDistance) }
     var isTargetTimeEnabled by remember { mutableStateOf(initialTargetTimeEnabled) }
@@ -74,6 +79,7 @@ fun MapMyRunSetupScreen(
     var targetMinutes by remember { mutableStateOf(initialMinutes.toString().padStart(2, '0')) }
     var targetSeconds by remember { mutableStateOf(initialSeconds.toString().padStart(2, '0')) }
     var isLiveTrackingEnabled by remember { mutableStateOf(false) }
+    var hasPreparedBriefing by remember { mutableStateOf(false) }
     
     // GPS State
     var currentLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
@@ -137,6 +143,12 @@ fun MapMyRunSetupScreen(
             } finally {
                 isGettingLocation = false
             }
+        }
+    }
+
+    LaunchedEffect(runState.isLoadingBriefing, runState.latestCoachMessage) {
+        if (!runState.isLoadingBriefing && runState.latestCoachMessage != null) {
+            hasPreparedBriefing = true
         }
     }
 
@@ -340,6 +352,34 @@ fun MapMyRunSetupScreen(
                     onSetupGroupRun = { /* Navigate to group run setup */ }
                 )
             }
+
+            if (mode == "no_route") {
+                item { Spacer(modifier = Modifier.height(Spacing.md)) }
+
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Spacing.lg),
+                        shape = RoundedCornerShape(BorderRadius.md),
+                        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary.copy(alpha = 0.8f))
+                    ) {
+                        Column(modifier = Modifier.padding(Spacing.lg)) {
+                            Text(
+                                text = "AI Summary",
+                                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                                color = Colors.textPrimary
+                            )
+                            Spacer(modifier = Modifier.height(Spacing.sm))
+                            Text(
+                                text = runState.latestCoachMessage ?: "Tap Prepare Run to generate your summary.",
+                                style = AppTextStyles.body,
+                                color = Colors.textSecondary
+                            )
+                        }
+                    }
+                }
+            }
             
             item { Spacer(modifier = Modifier.height(Spacing.xxl)) }
         }
@@ -425,15 +465,28 @@ fun MapMyRunSetupScreen(
                             val hours = targetHours.toIntOrNull() ?: 0
                             val minutes = targetMinutes.toIntOrNull() ?: 0
                             val seconds = targetSeconds.toIntOrNull() ?: 0
-                            onStartRunWithoutRoute(
-                                targetDistance,
-                                isTargetTimeEnabled,
-                                hours,
-                                minutes,
-                                seconds
+
+                            val config = RunSetupConfig(
+                                activityType = if (selectedActivity == "Walk") {
+                                    PhysicalActivityType.WALK
+                                } else {
+                                    PhysicalActivityType.RUN
+                                },
+                                targetDistance = targetDistance,
+                                hasTargetTime = isTargetTimeEnabled,
+                                targetHours = hours,
+                                targetMinutes = minutes,
+                                targetSeconds = seconds,
+                                liveTrackingEnabled = isLiveTrackingEnabled,
+                                liveTrackingObservers = emptyList(),
+                                isGroupRun = false,
+                                groupRunParticipants = emptyList()
                             )
+                            runSessionViewModel.setRunConfig(config)
+                            runSessionViewModel.fetchWellnessData()
+                            runSessionViewModel.prepareRun()
                         },
-                        enabled = currentLocation != null && !isGettingLocation,
+                        enabled = currentLocation != null && !isGettingLocation && !runState.isLoadingBriefing,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(56.dp),
@@ -443,7 +496,18 @@ fun MapMyRunSetupScreen(
                             contentColor = Colors.buttonText
                         )
                     ) {
-                        if (isGettingLocation) {
+                        if (runState.isLoadingBriefing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Colors.buttonText,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(Spacing.sm))
+                            Text(
+                                text = "PREPARING SUMMARY...",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                            )
+                        } else if (isGettingLocation) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
                                 color = Colors.buttonText,
@@ -467,10 +531,41 @@ fun MapMyRunSetupScreen(
                             )
                             Spacer(modifier = Modifier.width(Spacing.sm))
                             Text(
-                                text = "START RUN",
+                                text = "PREPARE RUN",
                                 style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
                             )
                         }
+                    }
+
+                    Button(
+                        onClick = {
+                            val hours = targetHours.toIntOrNull() ?: 0
+                            val minutes = targetMinutes.toIntOrNull() ?: 0
+                            val seconds = targetSeconds.toIntOrNull() ?: 0
+                            onStartRunWithoutRoute(
+                                targetDistance,
+                                isTargetTimeEnabled,
+                                hours,
+                                minutes,
+                                seconds
+                            )
+                        },
+                        enabled = hasPreparedBriefing && currentLocation != null && !isGettingLocation,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = RoundedCornerShape(BorderRadius.lg),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Colors.primary,
+                            contentColor = Colors.buttonText,
+                            disabledContainerColor = Colors.backgroundTertiary,
+                            disabledContentColor = Colors.textMuted
+                        )
+                    ) {
+                        Text(
+                            text = "START RUN",
+                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                        )
                     }
                 }
                 

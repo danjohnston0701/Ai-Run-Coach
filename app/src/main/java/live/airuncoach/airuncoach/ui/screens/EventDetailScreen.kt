@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.media.MediaPlayer
 import android.util.Base64
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -88,7 +89,7 @@ fun EventDetailScreen(
                     currentLocation = Pair(location.latitude, location.longitude)
                 }
             } catch (e: Exception) {
-                android.util.Log.e("EventDetail", "Error getting location", e)
+                Log.e("EventDetail", "Error getting location", e)
             }
         }
     }
@@ -102,7 +103,7 @@ fun EventDetailScreen(
                 
                 // Fetch route details
                 route = apiService.getRoute(event.routeId)
-                android.util.Log.d("EventDetail", "✅ Loaded route: ${route?.distance} km")
+                Log.d("EventDetail", "✅ Loaded route: ${route?.distance} km")
                 
                 // Use default weather for now (can be enhanced later with weather API)
                 weatherData = WeatherData(
@@ -114,7 +115,7 @@ fun EventDetailScreen(
                 )
                 
             } catch (e: Exception) {
-                android.util.Log.e("EventDetail", "❌ Failed to load event details: ${e.message}", e)
+                Log.e("EventDetail", "❌ Failed to load event details: ${e.message}", e)
                 error = "Failed to load event details: ${e.message}"
             } finally {
                 isLoading = false
@@ -141,8 +142,10 @@ fun EventDetailScreen(
                     elevationLoss = (r.elevationLoss ?: 0.0).toInt(),
                     maxGradientDegrees = calculateMaxGradient(r),
                     difficulty = r.difficulty ?: event.difficulty ?: "moderate",
+                    hasRoute = true,
                     activityType = event.eventType,
                     targetTime = null, // User can set this later
+                    targetPace = null,
                     firstTurnInstruction = "Start at ${event.city}",
                     weather = WeatherPayload(
                         temp = weather.temperature.toInt(),
@@ -155,10 +158,10 @@ fun EventDetailScreen(
                 briefingText = response.text
                 briefingAudio = response.audio
                 
-                android.util.Log.d("EventDetail", "✅ Generated pre-run briefing")
+                Log.d("EventDetail", "✅ Generated pre-run briefing")
                 
             } catch (e: Exception) {
-                android.util.Log.e("EventDetail", "❌ Failed to generate briefing: ${e.message}", e)
+                Log.e("EventDetail", "❌ Failed to generate briefing: ${e.message}", e)
                 error = "Failed to generate briefing: ${e.message}"
             } finally {
                 isLoadingBriefing = false
@@ -193,7 +196,7 @@ fun EventDetailScreen(
                 isPlayingAudio = true
             }
         } catch (e: Exception) {
-            android.util.Log.e("EventDetail", "❌ Failed to play audio: ${e.message}", e)
+            Log.e("EventDetail", "❌ Failed to play audio: ${e.message}", e)
             isPlayingAudio = false
         }
     }
