@@ -266,11 +266,15 @@ class RunSessionViewModel @Inject constructor(
                             Log.d("RunSessionViewModel", "Playing OpenAI TTS audio (${briefing.format})")
                             audioPlayerHelper.playAudio(briefing.audio, briefing.format) {
                                 isBriefingAudioPlaying = false
+                                // Clear coach text after audio completes, ready for next prompt
+                                _runState.update { it.copy(coachText = "") }
                             }
                         } else {
                             Log.d("RunSessionViewModel", "Falling back to Android TTS")
                             textToSpeechHelper.speak(briefing.text)
                             isBriefingAudioPlaying = false
+                            // Clear coach text after TTS completes (immediate in this case)
+                            _runState.update { it.copy(coachText = "") }
                         }
                     } else if (_runState.value.isMuted) {
                         Log.d("RunSessionViewModel", "Audio muted - skipping playback")
@@ -447,10 +451,14 @@ class RunSessionViewModel @Inject constructor(
                     if (response.audio != null && response.format != null) {
                         audioPlayerHelper.playAudio(response.audio!!, response.format!!) {
                             isBriefingAudioPlaying = false
+                            // Clear coach text after audio completes
+                            _runState.update { it.copy(coachText = "") }
                         }
                     } else {
                         textToSpeechHelper.speak(response.message)
                         isBriefingAudioPlaying = false
+                        // Clear coach text after TTS completes
+                        _runState.update { it.copy(coachText = "") }
                     }
                 }
             } catch (e: Exception) {
