@@ -331,14 +331,16 @@ class RunSessionViewModel @Inject constructor(
     }
 
     fun startRun() {
-        // Clear any coach text and audio state to prevent any coaching audio when starting the run
-        // The pre-run briefing already played when the screen loaded
-        isBriefingAudioPlaying = false
-        isPrepareRunInProgress = false
-        _runState.update { it.copy(
-            coachText = "",
-            latestCoachMessage = ""
-        )}
+        // Only clear coach state if no briefing audio is currently playing
+        // This allows the pre-run briefing to finish naturally if still playing
+        // But prevents any new coaching triggers when starting the run
+        if (!isBriefingAudioPlaying) {
+            isPrepareRunInProgress = false
+            _runState.update { it.copy(
+                coachText = "",
+                latestCoachMessage = ""
+            )}
+        }
         
         try {
             val intent = Intent(context, RunTrackingService::class.java).apply {
