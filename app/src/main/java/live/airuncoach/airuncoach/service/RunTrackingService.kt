@@ -87,6 +87,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private var lastSplitTime: Long = 0
     private var totalDistance: Double = 0.0
     private var maxSpeed: Float = 0f
+    private var currentPace: String = "0:00" // Real-time/instant pace based on recent GPS
     private var isTracking = false
     private var currentCadence: Int = 0
     private var currentHeartRate: Int = 0
@@ -371,6 +372,14 @@ class RunTrackingService : Service(), SensorEventListener {
             val isFirstLocations = routePoints.size < 5
             if ((location.accuracy < 20f || isFirstLocations) && distanceIncrement >= 5.0) {
                 val currentPaceSeconds = if (location.speed > 0) 1000f / location.speed else 0f
+                // Update current real-time pace (convert from seconds/km to pace string)
+                currentPace = if (currentPaceSeconds > 0) {
+                    val minutes = (currentPaceSeconds / 60).toInt()
+                    val seconds = (currentPaceSeconds % 60).toInt()
+                    String.format("%d:%02d", minutes, seconds)
+                } else {
+                    "0:00"
+                }
                 totalDistance += distanceIncrement
                 if (newPoint.altitude != null && prevPoint.altitude != null) {
                     val elevChange = newPoint.altitude - prevPoint.altitude
@@ -473,6 +482,7 @@ class RunTrackingService : Service(), SensorEventListener {
             averageSpeed = avgSpeed,
             maxSpeed = if (hasMovedEnough) maxSpeed else 0f,
             averagePace = calculatePace(avgSpeed),
+            currentPace = currentPace,
             calories = calculateCalories(displayDistance, duration),
             cadence = currentCadence,
             heartRate = currentHeartRate,

@@ -38,7 +38,8 @@ import javax.inject.Inject
 data class RunState(
     val time: String = "00:00",
     val distance: String = "0.00",
-    val pace: String = "0:00",
+    val pace: String = "0:00", // Average pace for the run
+    val currentPace: String = "0:00", // Real-time/instant pace from recent GPS
     val cadence: String = "0",
     val heartRate: String = "0",
     val isRunning: Boolean = false,
@@ -90,6 +91,7 @@ class RunSessionViewModel @Inject constructor(
                             time = session.getFormattedDuration(),
                             distance = String.format("%.2f", session.getDistanceInKm()),
                             pace = session.averagePace ?: "0:00",
+                            currentPace = session.currentPace ?: "0:00",
                             cadence = session.cadence.toString(),
                             heartRate = session.heartRate.toString(),
                             isRunning = session.isActive && !it.isPaused

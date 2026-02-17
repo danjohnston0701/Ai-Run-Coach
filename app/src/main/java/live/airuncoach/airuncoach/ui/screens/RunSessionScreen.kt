@@ -229,7 +229,8 @@ fun RunSessionScreen(
                         FreeRunEliteDashboard(
                             time = runState.time,
                             distanceKmStr = runState.distance,
-                            paceStr = runState.pace,
+                            paceStr = runState.pace, //Avg Pace
+                            currentPaceStr = runState.currentPace, //Realtime Pace
                             cadenceStr = runState.cadence,
                             heartRateStr = runState.heartRate,
                             aiCoachMessage = runState.latestCoachMessage,
@@ -281,6 +282,7 @@ fun RunSessionScreen(
                             time = runState.time,
                             distanceKmStr = runState.distance,
                             paceStr = runState.pace,
+                            currentPaceStr = runState.currentPace,
                             cadenceStr = runState.cadence,
                             heartRateStr = runState.heartRate,
                             aiCoachMessage = runState.latestCoachMessage,
@@ -995,7 +997,8 @@ fun TinyChip(title: String, value: String, tint: Color) {
 fun FreeRunEliteDashboard(
     time: String,
     distanceKmStr: String,
-    paceStr: String,
+    paceStr: String, // Average pace for the run
+    currentPaceStr: String, // Real-time/instant pace from recent GPS
     cadenceStr: String,
     heartRateStr: String,
     aiCoachMessage: String?,
@@ -1005,7 +1008,8 @@ fun FreeRunEliteDashboard(
     modifier: Modifier = Modifier
 ) {
     val distanceKm = distanceKmStr.toFloatOrNull() ?: 0f
-    val paceSec = parsePaceToSeconds(paceStr)
+    val paceSec = parsePaceToSeconds(paceStr) // Average pace
+    val currentPaceSec = parsePaceToSeconds(currentPaceStr) // Real-time pace
     val cadence = cadenceStr.toIntOrNull() ?: 0
     val hr = heartRateStr.toIntOrNull() ?: 0
 
@@ -1183,7 +1187,8 @@ fun MiniElevationSparkline(
 fun FreeRunEliteDashboard(
     time: String,
     distanceKmStr: String,
-    paceStr: String,
+    paceStr: String, // Average pace for the run
+    currentPaceStr: String, // Real-time/instant pace from recent GPS
     cadenceStr: String,
     heartRateStr: String,
     aiCoachMessage: String?,
@@ -1251,11 +1256,12 @@ fun FreeRunEliteDashboard(
                         baseColor = Color(0xFF34D399)
                     )
 
+                    // LIVE PACE (real-time)
                     MetricRing(
-                        label = "Avg Pace (/km)",
-                        value = paceStr,
+                        label = "Pace (/km)",
+                        value = currentPaceStr,
                         unit = "",
-                        baseColor = Color(0xFF60A5FA)
+                        baseColor = Color(0xFF3B82F6) // blue
                     )
                 }
 
@@ -1271,12 +1277,12 @@ fun FreeRunEliteDashboard(
                         baseColor = Color(0xFFFBBF24) // Yellow - was teal
                     )
 
+                    // AVG PACE
                     MetricRing(
-                        label = "Pace Zone",
-                        value = paceZoneLabel(paceZone(parsePaceToSeconds(paceStr))),
+                        label = "Avg Pace (/km)",
+                        value = paceStr,
                         unit = "",
-                        baseColor = Color(0xFFEC4899), // Pink/Purple - was yellow
-                        isSmallValue = true // Flag for smaller text on Pace Zone
+                        baseColor = Color(0xFF10B981) // green
                     )
                 }
             }

@@ -14,6 +14,7 @@ data class RunSession(
     val averageSpeed: Float, // m/s
     val maxSpeed: Float, // m/s
     val averagePace: String?, // min/km format - nullable as API may not always provide
+    val currentPace: String? = null, // Real-time/instant pace from recent GPS data
     val calories: Int,
     val cadence: Int, // steps per minute
     val heartRate: Int, // beats per minute
