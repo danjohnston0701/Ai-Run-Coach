@@ -443,7 +443,11 @@ class RunTrackingService : Service(), SensorEventListener {
         
         // Clamp distance to 0 if under threshold (filters GPS drift when stationary)
         val displayDistance = if (hasMovedEnough) totalDistance else 0.0
-        val avgSpeed = if (duration > 0 && hasMovedEnough) (displayDistance / (duration / 1000.0)).toFloat() else 0f
+        // FIX: Distance is in meters, convert to km for proper pace calculation
+        // avgSpeed in km/h = (distance in km) / (time in hours)
+        val displayDistanceKm = displayDistance / 1000.0
+        val durationHours = duration / 3600000.0
+        val avgSpeed = if (duration > 0 && hasMovedEnough && durationHours > 0) (displayDistanceKm / durationHours).toFloat() else 0f
         
         val phase = determinePhase(displayDistance / 1000.0, targetDistance)
         
@@ -499,7 +503,12 @@ class RunTrackingService : Service(), SensorEventListener {
     
     private fun generateRouteHash(): String = MessageDigest.getInstance("MD5").digest(routePoints.joinToString(",") { "${String.format("%.4f", it.latitude)},${String.format("%.4f", it.longitude)}" }.toByteArray()).joinToString("") { "%02x".format(it) }
 
-    private fun calculatePace(speedMps: Float): String = if (speedMps <= 0) "0:00" else "${(1000.0/speedMps/60).toInt()}:${String.format("%02d", (1000.0/speedMps%60).toInt())}"
+    private fun calculatePace(speedKmh: Float): String = if (speedKmh <= 0) "0:00" else {
+        val paceMinPerKm = 60.0 / speedKmh
+        val minutes = paceMinPerKm.toInt()
+        val seconds = ((paceMinPerKm - minutes) * 60).toInt()
+        "${minutes}:${String.format("%02d", seconds)}"
+    }
 
     private fun calculateCalories(distMeters: Double, durationMillis: Long): Int = (70 * (distMeters / 1000.0)).toInt()
 
