@@ -254,6 +254,9 @@ class RunSessionViewModel @Inject constructor(
                     
                     val briefing = apiService.getPreRunBriefing(request)
                     
+                    // Debug: Log what we received from the API
+                    Log.d("RunSessionViewModel", "Pre-run briefing response - audio: ${briefing.audio?.take(50)}, format: ${briefing.format}, text: ${briefing.text?.take(100)}")
+                    
                     // Update UI with briefing text
                     _runState.update { it.copy(
                         coachText = briefing.text,
