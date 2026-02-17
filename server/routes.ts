@@ -473,9 +473,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
       
+      // Convert timestamp fields from numbers to Date objects for database compatibility
+      const processedRunData = {
+        ...runData,
+        completedAt: runData.completedAt ? new Date(runData.completedAt) : undefined,
+        startTime: runData.startTime ? new Date(runData.startTime) : undefined,
+        endTime: runData.endTime ? new Date(runData.endTime) : undefined,
+      };
+      
       // Create run with TSS
       const run = await storage.createRun({
-        ...runData,
+        ...processedRunData,
         userId,
         tss,
       });
