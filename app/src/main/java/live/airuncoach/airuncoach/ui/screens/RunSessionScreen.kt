@@ -152,7 +152,12 @@ fun RunSessionScreen(
             viewModel.setRunConfig(config)
             routePolyline = config.route?.polyline
         }
-        viewModel.prepareRun()
+        
+        // Only prepare run (show pre-run briefing) if NOT resuming an active run
+        // This prevents the briefing from playing again when resuming from Dashboard
+        if (!runState.isRunning && !runState.isPaused) {
+            viewModel.prepareRun()
+        }
     }
 
     // ✅ NEW ARCHITECTURE

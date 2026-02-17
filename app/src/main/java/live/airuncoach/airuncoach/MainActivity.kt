@@ -2,6 +2,7 @@ package live.airuncoach.airuncoach
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -22,6 +24,7 @@ import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.data.GarminAuthManager
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.network.RetrofitClient
+import live.airuncoach.airuncoach.service.RunTrackingService
 import live.airuncoach.airuncoach.ui.navigation.RootNavigationGraph
 import live.airuncoach.airuncoach.ui.theme.AiRunCoachTheme
 
@@ -66,21 +69,35 @@ class MainActivity : ComponentActivity() {
             defaultHandler?.uncaughtException(thread, throwable)
         }
         
+        // Check if this is launching from an active run notification
+        val launchToActiveRun = intent?.getBooleanExtra(RunTrackingService.EXTRA_ACTIVE_RUN, false) == true
+        Log.d("MainActivity", "Launch to active run: $launchToActiveRun")
+
         try {
-            android.util.Log.d("MainActivity", "Setting content...")
+            Log.d("MainActivity", "Setting content...")
             setContent {
-                android.util.Log.d("MainActivity", "Inside setContent composable")
+                Log.d("MainActivity", "Inside setContent composable")
                 AiRunCoachTheme {
-                    android.util.Log.d("MainActivity", "Theme applied")
+                    Log.d("MainActivity", "Theme applied")
                     Surface(
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.background
                     ) {
-                        android.util.Log.d("MainActivity", "Creating navigation...")
+                        Log.d("MainActivity", "Creating navigation...")
                         val navController = rememberNavController()
-                        android.util.Log.d("MainActivity", "NavController created")
+                        Log.d("MainActivity", "NavController created")
+                        
+                        // Navigate to active run if launched from notification
+                        LaunchedEffect(navController, launchToActiveRun) {
+                            if (launchToActiveRun) {
+                                navController.navigate("run_session") {
+                                    popUpTo("run_session") { inclusive = true }
+                                }
+                            }
+                        }
+                        
                         RootNavigationGraph(navController = navController)
-                        android.util.Log.d("MainActivity", "Navigation graph set up")
+                        Log.d("MainActivity", "Navigation graph set up")
                     }
                 }
             }
