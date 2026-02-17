@@ -50,6 +50,7 @@ fun CreateGroupRunScreen(onNavigateBack: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .padding(Spacing.lg)
         ) {
             OutlinedTextField(

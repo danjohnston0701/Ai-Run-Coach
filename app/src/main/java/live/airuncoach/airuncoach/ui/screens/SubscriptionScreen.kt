@@ -53,6 +53,7 @@ fun SubscriptionScreen(onNavigateBack: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .background(Colors.backgroundRoot)
+                .imePadding()
                 .padding(Spacing.lg),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
