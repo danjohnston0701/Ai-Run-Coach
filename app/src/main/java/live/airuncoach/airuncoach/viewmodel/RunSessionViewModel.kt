@@ -257,10 +257,11 @@ class RunSessionViewModel @Inject constructor(
                     // Debug: Log what we received from the API
                     Log.d("RunSessionViewModel", "Pre-run briefing response - audio: ${briefing.audio?.take(50)}, format: ${briefing.format}, text: ${briefing.text?.take(100)}")
                     
-                    // Update UI with briefing text
+                    // Update UI with briefing text (use empty string if null)
+                    val briefingText = briefing.text ?: ""
                     _runState.update { it.copy(
-                        coachText = briefing.text,
-                        latestCoachMessage = briefing.text,
+                        coachText = briefingText,
+                        latestCoachMessage = briefingText,
                         isLoadingBriefing = false
                     )}
                     
