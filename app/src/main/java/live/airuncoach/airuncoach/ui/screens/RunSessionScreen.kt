@@ -218,27 +218,30 @@ fun RunSessionScreen(
                 when {
                     hasRoute -> {
 
-                        PremiumMetricsRow3(
+                        // 1️⃣ Elite Rings Dashboard (same as Free Mode)
+                        FreeRunEliteDashboard(
                             time = runState.time,
-                            distance = runState.distance,
-                            pace = runState.pace
+                            distanceKmStr = runState.distance,
+                            paceStr = runState.pace,
+                            cadenceStr = runState.cadence,
+                            heartRateStr = runState.heartRate,
+                            aiCoachMessage = runState.latestCoachMessage,
+                            aiSpeaking = runState.latestCoachMessage != null || runState.isLoadingBriefing,
+                            isRunning = runState.isRunning,
+                            isLoadingBriefing = runState.isLoadingBriefing
                         )
 
-                        MapSection(
-                            showMap = showMap,
-                            onToggleMap = { showMap = !showMap },
-                            interactionEnabled = !isRunActive,
-                            cameraPositionState = cameraPositionState,
+                        // 2️⃣ Route Map (NEW ELITE VERSION)
+                        EliteRouteMap(
                             runSession = runSession,
                             routePolyline = routePolyline
                         )
 
-                        CoachMessageSectionPremium(
-                            coachText = runState.latestCoachMessage
-                                ?: runState.coachText,
-                            aiIsSpeaking = runState.latestCoachMessage != null,
-                            isRunning = runState.isRunning,
-                            isLoadingBriefing = runState.isLoadingBriefing
+                        // 3️⃣ AI Coach Panel (navigation + insights)
+                        AiCoachLivePanel(
+                            message = runState.latestCoachMessage,
+                            isLoading = runState.isLoadingBriefing,
+                            modifier = Modifier.padding(horizontal = Spacing.md)
                         )
                     }
 
@@ -2132,6 +2135,115 @@ fun ControlButtons(
         }
     }
 }
+
+@Composable
+fun EliteRouteMap(
+    runSession: RunSession?,
+    routePolyline: String?
+) {
+    var isFullScreen by remember { mutableStateOf(false) }
+    var isUserInteracting by remember { mutableStateOf(false) }
+
+    val cameraPositionState = rememberCameraPositionState()
+
+    // 🔁 Auto-follow latest location
+    val latestPoint = runSession?.routePoints?.lastOrNull()
+
+    LaunchedEffect(latestPoint) {
+        if (latestPoint != null && !isUserInteracting) {
+            cameraPositionState.animate(
+                update = CameraUpdateFactory.newLatLngZoom(
+                    LatLng(latestPoint.latitude, latestPoint.longitude),
+                    17f
+                ),
+                durationMs = 1000
+            )
+        }
+    }
+
+    // 🧠 Detect manual map interaction
+    LaunchedEffect(cameraPositionState.isMoving) {
+        if (cameraPositionState.isMoving) {
+            isUserInteracting = true
+
+            // Re-enable auto-follow after 8 seconds
+            kotlinx.coroutines.delay(8000)
+            isUserInteracting = false
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(if (isFullScreen) 500.dp else 280.dp)
+            .padding(horizontal = Spacing.lg)
+            .clip(RoundedCornerShape(18.dp))
+    ) {
+
+        GoogleMap(
+            modifier = Modifier.fillMaxSize(),
+            cameraPositionState = cameraPositionState
+        ) {
+
+            // Planned route
+            routePolyline?.let { polyline ->
+                val routeCoordinates = PolyUtil.decode(polyline)
+                Polyline(
+                    points = routeCoordinates,
+                    color = Colors.primary,
+                    width = 10f
+                )
+            }
+
+            // Actual path
+            runSession?.let { session ->
+                val actualPath =
+                    session.routePoints.map { LatLng(it.latitude, it.longitude) }
+
+                if (actualPath.isNotEmpty()) {
+                    Polyline(
+                        points = actualPath,
+                        color = Color(0xFF10B981),
+                        width = 12f
+                    )
+
+                    session.routePoints.lastOrNull()?.let {
+                        Marker(
+                            state = MarkerState(
+                                position = LatLng(it.latitude, it.longitude)
+                            ),
+                            title = "Current Position"
+                        )
+                    }
+                }
+            }
+        }
+
+        // 🔘 Fullscreen toggle
+        IconButton(
+            onClick = { isFullScreen = !isFullScreen },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(12.dp)
+                .background(
+                    Colors.backgroundSecondary.copy(alpha = 0.85f),
+                    CircleShape
+                )
+        ) {
+            Icon(
+                painter = painterResource(
+                    id = if (isFullScreen)
+                        R.drawable.icon_chevron_down_vector
+                    else
+                        R.drawable.icon_chevron_up_vector
+                ),
+                contentDescription = "Toggle Map Size",
+                tint = Colors.textPrimary
+            )
+        }
+    }
+}
+
 
 @Composable
 fun MapSection(

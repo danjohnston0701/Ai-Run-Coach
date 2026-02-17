@@ -98,6 +98,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private val paceHistory = ArrayList<Float>()
     private var lastStruggleTriggerTime: Long = 0
     private var isStruggling = false
+    private val strugglePointsList = mutableListOf<StrugglePoint>()
 
     // Elevation coaching
     private var lastElevationCoachingTime: Long = 0
@@ -264,6 +265,7 @@ class RunTrackingService : Service(), SensorEventListener {
         paceHistory.clear()
         lastStruggleTriggerTime = 0
         isStruggling = false
+        strugglePointsList.clear()
         lastElevationCoachingTime = 0
         lastHillTopAckTime = 0
         slopeDirection = 0
@@ -490,6 +492,7 @@ class RunTrackingService : Service(), SensorEventListener {
             externalId = null,
             isActive = true,
             aiCoachingNotes = coachingHistory.toList(),
+            strugglePoints = strugglePointsList.toList(),
             targetDistance = targetDistance,
             targetTime = targetTime,
             wasTargetAchieved = calculateWasTargetAchieved()
@@ -646,7 +649,6 @@ class RunTrackingService : Service(), SensorEventListener {
                 tss = 0, // Backend will calculate
                 gap = null, // Backend will calculate
                 isPublic = true,
-                strugglePoints = emptyList<StrugglePoint>(),
                 kmSplits = runSession.kmSplits,
                 terrainType = runSession.terrainType.name.lowercase(),
                 userComments = null,
@@ -654,6 +656,8 @@ class RunTrackingService : Service(), SensorEventListener {
                 targetDistance = targetDistance,
                 targetTime = targetTime,
                 wasTargetAchieved = calculateWasTargetAchieved(),
+                // Struggle points detected during the run
+                strugglePoints = runSession.strugglePoints,
                 // AI coaching notes from the run
                 aiCoachingNotes = runSession.aiCoachingNotes.ifEmpty { null }
             )
@@ -875,6 +879,24 @@ class RunTrackingService : Service(), SensorEventListener {
     }
     
     private fun triggerStruggleCoaching() {
+        val paceDropPercent = if (baselinePace > 0f) {
+            ((_currentRunSession.value?.averageSpeed ?: 0f) - baselinePace) / baselinePace * 100.0
+        } else 0.0
+        
+        // Add struggle point to the list for post-run summary
+        val strugglePoint = StrugglePoint(
+            id = UUID.randomUUID().toString(),
+            timestamp = System.currentTimeMillis() - startTime,
+            distanceMeters = totalDistance,
+            paceAtStruggle = _currentRunSession.value?.averagePace ?: "0:00",
+            baselinePace = calculatePace(baselinePace),
+            paceDropPercent = paceDropPercent,
+            currentGrade = calculateAverageGradient().toDouble(),
+            heartRate = if (currentHeartRate > 0) currentHeartRate else null,
+            location = routePoints.lastOrNull()
+        )
+        strugglePointsList.add(strugglePoint)
+        
         serviceScope.launch {
             try {
                 val update = StruggleUpdate(
@@ -893,6 +915,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     coachAccent = currentUser?.coachAccent
                 )
                 val response = apiService.getStruggleCoaching(update)
+                // Note: Struggle point already added above before launching coroutine
                 coachingHistory.add(AiCoachingNote(
                     time = System.currentTimeMillis() - startTime,
                     message = "Struggle: ${response.message}"
