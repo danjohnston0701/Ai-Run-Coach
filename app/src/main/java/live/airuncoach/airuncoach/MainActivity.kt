@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.data.GarminAuthManager
 import live.airuncoach.airuncoach.data.SessionManager
@@ -88,10 +89,22 @@ class MainActivity : ComponentActivity() {
                         Log.d("MainActivity", "NavController created")
                         
                         // Navigate to active run if launched from notification
+                        // Only navigate after navigation graph is set up (when graph is not empty)
                         LaunchedEffect(navController, launchToActiveRun) {
+                            // Add delay to ensure navigation graph is ready
+                            delay(100)
                             if (launchToActiveRun) {
-                                navController.navigate("run_session") {
-                                    popUpTo("run_session") { inclusive = true }
+                                try {
+                                    // Check if destination exists before navigating
+                                    val currentBackStackEntry = navController.currentBackStackEntry
+                                    val currentRoute = currentBackStackEntry?.destination?.route
+                                    if (currentRoute != null && currentRoute != "run_session") {
+                                        navController.navigate("run_session") {
+                                            popUpTo(0) { inclusive = true }
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("MainActivity", "Navigation failed", e)
                                 }
                             }
                         }
