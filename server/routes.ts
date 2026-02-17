@@ -3508,6 +3508,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(req.user!.userId);
       const coachName = user?.coachName || 'Coach';
       const coachTone = user?.coachTone || 'encouraging';
+      const coachGender = user?.coachGender || 'female';
+      const coachAccent = user?.coachAccent || 'british';
 
       // Get today's wellness data
       const today = new Date().toISOString().split('T')[0];
