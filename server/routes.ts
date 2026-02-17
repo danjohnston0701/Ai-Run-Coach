@@ -479,6 +479,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         completedAt: runData.completedAt ? new Date(runData.completedAt) : undefined,
         startTime: runData.startTime ? new Date(runData.startTime) : undefined,
         endTime: runData.endTime ? new Date(runData.endTime) : undefined,
+        // Convert aiCoachingNotes timestamps if present
+        aiCoachingNotes: runData.aiCoachingNotes?.map((note: any) => ({
+          ...note,
+          time: note.time ? new Date(note.time) : undefined,
+        })),
+        // Convert strugglePoints timestamps if present
+        strugglePoints: runData.strugglePoints?.map((sp: any) => ({
+          ...sp,
+          timestamp: sp.timestamp ? new Date(sp.timestamp) : undefined,
+        })),
       };
       
       // Create run with TSS
