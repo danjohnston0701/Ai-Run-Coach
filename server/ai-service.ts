@@ -237,11 +237,13 @@ export async function generatePhaseCoaching(params: {
   currentPace?: string;
   currentGrade?: number;
   totalElevationGain?: number;
+  heartRate?: number;
+  cadence?: number;
   coachName: string;
   coachTone: string;
   activityType?: string;
 }): Promise<string> {
-  const { phase, distance, targetDistance, elapsedTime, currentPace, currentGrade, totalElevationGain, coachName, coachTone, activityType } = params;
+  const { phase, distance, targetDistance, elapsedTime, currentPace, currentGrade, totalElevationGain, heartRate, cadence, coachName, coachTone, activityType } = params;
   
   const timeMin = Math.floor(elapsedTime / 60);
   const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
@@ -260,7 +262,21 @@ export async function generatePhaseCoaching(params: {
   if (totalElevationGain && totalElevationGain > 0) {
     terrainInfo += `Total climb so far: ${Math.round(totalElevationGain)}m. `;
   }
-  
+
+  // Build heart rate info if available
+  let hrInfo = '';
+  if (heartRate && heartRate > 0) {
+    const hrZone = getHeartRateZone(heartRate);
+    hrInfo = `Heart rate: ${heartRate} bpm (${hrZone} zone). `;
+  }
+
+  // Build cadence info if available
+  let cadenceInfo = '';
+  if (cadence && cadence > 0) {
+    const cadenceAssessment = cadence >= 170 ? 'excellent' : cadence >= 160 ? 'good' : cadence >= 150 ? 'moderate' : 'needs work';
+    cadenceInfo = `Cadence: ${cadence} spm (${cadenceAssessment}). `;
+  }
+
   const prompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.
 
 Phase: ${phaseDescriptions[phase]}
@@ -268,6 +284,8 @@ Runner Status:
 - Distance covered: ${distance.toFixed(2)}km${targetDistance ? ` (${progress}% of ${targetDistance}km)` : ''}
 - Time elapsed: ${timeMin} minutes
 ${currentPace ? `- Current pace: ${currentPace}/km` : ''}
+${hrInfo}
+${cadenceInfo}
 ${terrainInfo}
 
 Give a brief (1-2 sentences) phase-appropriate coaching message. Be ${coachTone} and encouraging. Consider their current terrain if on a hill.`;
@@ -283,6 +301,19 @@ Give a brief (1-2 sentences) phase-appropriate coaching message. Be ${coachTone}
   });
 
   return completion.choices[0].message.content || "You're doing great, keep it up!";
+}
+
+// Helper function to determine heart rate zone
+function getHeartRateZone(hr: number): string {
+  // Assuming max HR around 190-200 for general population
+  const maxHR = 190;
+  const percentage = (hr / maxHR) * 100;
+
+  if (percentage < 60) return 'Zone 1 (Recovery)';
+  if (percentage < 70) return 'Zone 2 (Aerobic)';
+  if (percentage < 80) return 'Zone 3 (Tempo)';
+  if (percentage < 90) return 'Zone 4 (Threshold)';
+  return 'Zone 5 (Maximum)';
 }
 
 export async function generateStruggleCoaching(params: {
@@ -639,6 +670,130 @@ export interface WellnessContext {
   readinessRecommendation?: string;
 }
 
+/**
+ * Weather Impact Analysis data for positive condition matching
+ */
+export interface WeatherImpactData {
+  hasEnoughData: boolean;
+  runsAnalyzed: number;
+  overallAvgPace: number | null;
+  temperatureAnalysis?: BucketAnalysis[];
+  humidityAnalysis?: BucketAnalysis[];
+  windAnalysis?: BucketAnalysis[];
+  conditionAnalysis?: ConditionAnalysis[];
+  timeOfDayAnalysis?: BucketAnalysis[];
+  insights?: {
+    bestCondition?: InsightItem;
+    worstCondition?: InsightItem;
+  };
+}
+
+interface BucketAnalysis {
+  range: string;
+  label: string;
+  avgPace: number | null;
+  runCount: number;
+  paceVsAvg: number | null;
+}
+
+interface ConditionAnalysis {
+  condition: string;
+  avgPace: number;
+  runCount: number;
+  paceVsAvg: number;
+}
+
+interface InsightItem {
+  label: string;
+  type: string;
+  improvement?: string;
+  slowdown?: string;
+}
+
+/**
+ * Analyze current conditions against historical weather impact data
+ * Returns a positive insight if current conditions match user's best running conditions
+ */
+function analyzePositiveWeatherConditions(
+  weather: any,
+  weatherImpact?: WeatherImpactData
+): string {
+  if (!weatherImpact || !weatherImpact.hasEnoughData || !weatherImpact.insights?.bestCondition) {
+    return '';
+  }
+
+  const insights = weatherImpact.insights;
+  const currentHour = new Date().getHours();
+  
+  // Determine current time of day
+  let currentTimeOfDay = '';
+  if (currentHour >= 5 && currentHour < 9) currentTimeOfDay = 'Morning';
+  else if (currentHour >= 9 && currentHour < 12) currentTimeOfDay = 'Late Morning';
+  else if (currentHour >= 12 && currentHour < 14) currentTimeOfDay = 'Midday';
+  else if (currentHour >= 14 && currentTimeOfDay < 17) currentTimeOfDay = 'Afternoon';
+  else if (currentHour >= 17 && currentHour < 20) currentTimeOfDay = 'Evening';
+  else currentTimeOfDay = 'Night';
+
+  // Check current temperature against temperature analysis
+  const currentTemp = weather?.temp || weather?.temperature;
+  let tempMatch = '';
+  if (currentTemp && weatherImpact.temperatureAnalysis) {
+    for (const bucket of weatherImpact.temperatureAnalysis) {
+      if (bucket.paceVsAvg !== null && bucket.paceVsAvg < -5 && bucket.label) {
+        // This is a fast bucket (more than 5% faster than average)
+        const range = bucket.range.toLowerCase();
+        if (range.includes('-') && range.includes('°c')) {
+          const parts = range.replace('°c', '').split('-');
+          if (parts.length === 2) {
+            const min = parseFloat(parts[0].trim());
+            const max = parseFloat(parts[1].trim());
+            if (currentTemp >= min && currentTemp <= max) {
+              tempMatch = `${bucket.label} (${bucket.paceVsAvg.toFixed(0)}% faster)`;
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Check weather condition
+  let conditionMatch = '';
+  if (weatherImpact.conditionAnalysis) {
+    const currentCondition = (weather?.condition || '').toLowerCase();
+    for (const cond of weatherImpact.conditionAnalysis) {
+      if (cond.paceVsAvg < -5 && cond.condition.toLowerCase().includes(currentCondition.split(' ')[0])) {
+        conditionMatch = `${cond.condition} (${cond.paceVsAvg.toFixed(0)}% faster)`;
+        break;
+      }
+    }
+  }
+
+  // Check time of day
+  let timeMatch = '';
+  if (weatherImpact.timeOfDayAnalysis) {
+    for (const bucket of weatherImpact.timeOfDayAnalysis) {
+      if (bucket.paceVsAvg !== null && bucket.paceVsAvg < -5 && 
+          bucket.label && bucket.label.toLowerCase().includes(currentTimeOfDay.toLowerCase())) {
+        timeMatch = `${bucket.label} (${bucket.paceVsAvg.toFixed(0)}% faster)`;
+        break;
+      }
+    }
+  }
+
+  // Build positive insight message
+  const matches: string[] = [];
+  if (tempMatch) matches.push(tempMatch);
+  if (conditionMatch) matches.push(conditionMatch);
+  if (timeMatch) matches.push(timeMatch);
+
+  if (matches.length > 0) {
+    return `\n✓ WEATHER ADVANTAGE: Based on your historical data, you're a strong performer in these conditions! ${matches.join(', ')}. Make it count!`;
+  }
+
+  return '';
+}
+
 export async function generateWellnessAwarePreRunBriefing(params: {
   distance: number;
   elevationGain: number;
@@ -648,18 +803,52 @@ export async function generateWellnessAwarePreRunBriefing(params: {
   coachName: string;
   coachTone: string;
   wellness: WellnessContext;
+  hasRoute?: boolean;
+  targetTime?: number;
+  targetPace?: string;
+  weatherImpact?: WeatherImpactData;
 }): Promise<{
   briefing: string;
   intensityAdvice: string;
   warnings: string[];
   readinessInsight: string;
+  weatherAdvantage?: string;
 }> {
-  const { distance, elevationGain, difficulty, activityType, weather, coachName, coachTone, wellness } = params;
-  
-  const weatherInfo = weather 
+  const { distance, elevationGain, difficulty, activityType, weather, coachName, coachTone, wellness, hasRoute = true, targetTime, targetPace, weatherImpact } = params;
+
+  // Analyze positive weather conditions BEFORE building the prompt
+  const weatherAdvantage = analyzePositiveWeatherConditions(weather, weatherImpact);
+
+  const weatherInfo = weather
     ? `Weather: ${weather.temp || weather.temperature || 'N/A'}°C, ${weather.condition || 'clear'}, wind ${weather.windSpeed || 0} km/h.`
     : 'Weather data unavailable.';
-  
+
+  // Build route info based on whether there's a route
+  let routeInfo = '';
+  if (hasRoute === true) {
+    // Route-based run - include terrain/elevation info ONLY when hasRoute is explicitly true
+    routeInfo = `
+ROUTE:
+- Distance: ${distance?.toFixed(1) || '?'}km
+- Difficulty: ${difficulty}
+- Elevation gain: ${Math.round(elevationGain || 0)}m
+- Terrain: ${elevationGain > 100 ? 'hilly' : elevationGain > 50 ? 'rolling' : 'generally flat'}`;
+  } else {
+    // Free run (no route) - NO terrain mention at all
+    routeInfo = `
+RUN (No planned route):
+- Distance: ${distance?.toFixed(1) || '?'}km
+- Type: Free run / Training run`;
+  }
+
+  // Add target pace info if user has a target time/pace
+  if (targetTime && targetPace) {
+    const targetMinutes = Math.floor(targetTime / 60);
+    const targetSeconds = targetTime % 60;
+    routeInfo += `
+- Target: Complete ${distance?.toFixed(1) || '?'}km in ${targetMinutes}:${targetSeconds.toString().padStart(2, '0')} (target pace: ${targetPace}/km)`;
+  }
+
   // Build wellness context string
   let wellnessContext = '';
   if (wellness.sleepHours !== undefined) {
@@ -686,20 +875,18 @@ export async function generateWellnessAwarePreRunBriefing(params: {
   const prompt = `You are ${coachName}, an AI running coach. Your coaching style is ${coachTone}.
 
 Generate a personalized pre-run briefing that considers the runner's current wellness state from their Garmin data.
-
-ROUTE:
-- Distance: ${distance?.toFixed(1) || '?'}km
-- Difficulty: ${difficulty}
-- Elevation gain: ${Math.round(elevationGain || 0)}m
+${routeInfo}
 - ${weatherInfo}
 
 CURRENT WELLNESS STATUS (from Garmin):${wellnessContext || '\n- No wellness data available'}
 
 Based on this data, provide:
 1. A brief personalized briefing (2-3 sentences) that acknowledges their current state
-2. Specific intensity advice based on their readiness/recovery
+2. Specific intensity advice based on their readiness/recovery - if they have a target pace, advise what pace to aim for
 3. Any warnings if their wellness indicators suggest caution
 4. A readiness insight explaining how their body data affects today's run
+
+CRITICAL: For runs marked "RUN (No planned route)" - do NOT mention terrain, elevation, hills, flat, or any route characteristics. This is a free run with NO planned path. Only mention distance, time goals, and current weather/wellness.
 
 Respond as JSON with fields: briefing, intensityAdvice, warnings (array), readinessInsight`;
 
@@ -722,6 +909,7 @@ Respond as JSON with fields: briefing, intensityAdvice, warnings (array), readin
       intensityAdvice: parsed.intensityAdvice || "Listen to your body today.",
       warnings: parsed.warnings || [],
       readinessInsight: parsed.readinessInsight || "Your body is ready for this run.",
+      weatherAdvantage: weatherAdvantage || undefined,
     };
   } catch (error) {
     console.error("Error generating wellness-aware briefing:", error);
@@ -730,6 +918,7 @@ Respond as JSON with fields: briefing, intensityAdvice, warnings (array), readin
       intensityAdvice: "Start conservatively and adjust based on how you feel.",
       warnings: [],
       readinessInsight: "Listen to your body and adjust intensity as needed.",
+      weatherAdvantage: weatherAdvantage || undefined,
     };
   }
 }
@@ -985,7 +1174,11 @@ export async function generateComprehensiveRunAnalysis(params: {
 Analyze this run comprehensively using all available data from the runner's Garmin device and wellness metrics.
 
 ## RUN DATA:
-- Distance: ${runData.distance || garminActivity?.distanceInMeters ? ((garminActivity?.distanceInMeters || 0) / 1000).toFixed(2) : '?'}km
+- Distance: ${
+  (runData.distanceInMeters || runData.distance || garminActivity?.distanceInMeters)
+    ? ((runData.distanceInMeters || runData.distance || garminActivity?.distanceInMeters || 0) / 1000).toFixed(2)
+    : '?'
+}km
 - Duration: ${runData.duration ? Math.floor(runData.duration / 60) : garminActivity?.durationInSeconds ? Math.floor(garminActivity.durationInSeconds / 60) : '?'} minutes
 - Average Pace: ${runData.avgPace || (garminActivity?.averagePace ? `${Math.floor(garminActivity.averagePace)}:${Math.floor((garminActivity.averagePace % 1) * 60).toString().padStart(2, '0')}` : 'N/A')}/km
 - Activity Type: ${runData.activityType || garminActivity?.activityType || 'Running'}

@@ -482,7 +482,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Update fitness metrics asynchronously (don't block response)
       if (run.completedAt && tss > 0) {
-        const runDate = run.completedAt.toISOString().split('T')[0];
+        const completedAtDate = typeof run.completedAt === 'number'
+          ? new Date(run.completedAt)
+          : run.completedAt;
+        const runDate = completedAtDate.toISOString().split('T')[0];
         updateDailyFitness(userId, runDate, tss).catch(err => {
           console.error("Failed to update fitness metrics:", err);
         });
@@ -597,7 +600,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
       // Get latest wellness metrics for the run date
-      const runDate = run.runDate || (run.completedAt ? new Date(run.completedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+      const runDate = run.runDate || (run.completedAt ? (typeof run.completedAt === 'number' ? new Date(run.completedAt) : run.completedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
       const wellness = await db.query.garminWellnessMetrics.findFirst({
         where: and(
           eq(garminWellnessMetrics.userId, userId),
@@ -3320,27 +3323,185 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // END GARMIN WEBHOOK ENDPOINTS
   // ==========================================
 
+  // Helper function to calculate weather impact from runs
+  async function calculateWeatherImpact(userId: string, runs: any[]) {
+    if (runs.length < 3) {
+      return { hasEnoughData: false, runsAnalyzed: runs.length, overallAvgPace: null };
+    }
+
+    // Parse pace strings to seconds
+    const parsePace = (paceStr: string | null): number | null => {
+      if (!paceStr) return null;
+      const match = paceStr.match(/(\d+):(\d+)/);
+      if (match) {
+        return parseInt(match[1]) * 60 + parseInt(match[2]);
+      }
+      return null;
+    };
+
+    // Calculate overall average pace
+    const paces = runs.map(r => parsePace(r.avgPace)).filter((p): p is number => p !== null);
+    if (paces.length === 0) {
+      return { hasEnoughData: false, runsAnalyzed: runs.length, overallAvgPace: null };
+    }
+    const avgPaceSeconds = Math.round(paces.reduce((a, b) => a + b, 0) / paces.length);
+
+    // Group runs by time of day
+    const timeOfDayBuckets: Record<string, { totalPace: number; count: number }> = {
+      'Morning': { totalPace: 0, count: 0 },
+      'Late Morning': { totalPace: 0, count: 0 },
+      'Afternoon': { totalPace: 0, count: 0 },
+      'Evening': { totalPace: 0, count: 0 },
+      'Night': { totalPace: 0, count: 0 },
+    };
+
+    // Group runs by weather condition (from weatherData)
+    const conditionBuckets: Record<string, { totalPace: number; count: number }> = {};
+
+    // Group runs by temperature range
+    const tempBuckets: Record<string, { totalPace: number; count: number }> = {};
+
+    runs.forEach(run => {
+      const pace = parsePace(run.avgPace);
+      if (!pace) return;
+
+      // Time of day from completedAt
+      if (run.completedAt) {
+        const date = new Date(run.completedAt);
+        const hour = date.getHours();
+        let timeLabel = '';
+        if (hour >= 5 && hour < 9) timeLabel = 'Morning';
+        else if (hour >= 9 && hour < 12) timeLabel = 'Late Morning';
+        else if (hour >= 12 && hour < 17) timeLabel = 'Afternoon';
+        else if (hour >= 17 && hour < 20) timeLabel = 'Evening';
+        else timeLabel = 'Night';
+        
+        if (timeOfDayBuckets[timeLabel]) {
+          timeOfDayBuckets[timeLabel].totalPace += pace;
+          timeOfDayBuckets[timeLabel].count++;
+        }
+      }
+
+      // Weather condition from weatherData
+      const condition = run.weatherData?.condition || run.weatherData?.description || 'Clear';
+      if (!conditionBuckets[condition]) {
+        conditionBuckets[condition] = { totalPace: 0, count: 0 };
+      }
+      conditionBuckets[condition].totalPace += pace;
+      conditionBuckets[condition].count++;
+
+      // Temperature from weatherData
+      const temp = run.weatherData?.temperature;
+      if (temp !== undefined && temp !== null) {
+        let tempLabel = '';
+        if (temp < 5) tempLabel = 'Cold (<5°C)';
+        else if (temp < 10) tempLabel = 'Cool (5-10°C)';
+        else if (temp < 15) tempLabel = 'Mild (10-15°C)';
+        else if (temp < 20) tempLabel = 'Warm (15-20°C)';
+        else tempLabel = 'Hot (>20°C)';
+        
+        if (!tempBuckets[tempLabel]) {
+          tempBuckets[tempLabel] = { totalPace: 0, count: 0 };
+        }
+        tempBuckets[tempLabel].totalPace += pace;
+        tempBuckets[tempLabel].count++;
+      }
+    });
+
+    // Calculate pace vs average for each bucket
+    const calculatePaceVsAvg = (bucket: { totalPace: number; count: number }): number | null => {
+      if (bucket.count < 1) return null;
+      const bucketAvg = bucket.totalPace / bucket.count;
+      return ((avgPaceSeconds - bucketAvg) / avgPaceSeconds) * 100;
+    };
+
+    // Build time of day analysis
+    const timeOfDayAnalysis = Object.entries(timeOfDayBuckets)
+      .filter(([_, b]) => b.count > 0)
+      .map(([label, bucket]) => ({
+        range: label,
+        label,
+        avgPace: Math.round(bucket.totalPace / bucket.count),
+        runCount: bucket.count,
+        paceVsAvg: calculatePaceVsAvg(bucket),
+      }))
+      .sort((a, b) => (b.paceVsAvg || 0) - (a.paceVsAvg || 0));
+
+    // Build condition analysis
+    const conditionAnalysis = Object.entries(conditionBuckets)
+      .filter(([_, b]) => b.count > 0)
+      .map(([condition, bucket]) => ({
+        condition,
+        avgPace: Math.round(bucket.totalPace / bucket.count),
+        runCount: bucket.count,
+        paceVsAvg: calculatePaceVsAvg(bucket) || 0,
+      }))
+      .sort((a, b) => a.paceVsAvg - b.paceVsAvg);
+
+    // Build temperature analysis
+    const temperatureAnalysis = Object.entries(tempBuckets)
+      .filter(([_, b]) => b.count > 0)
+      .map(([label, bucket]) => ({
+        range: label,
+        label,
+        avgPace: Math.round(bucket.totalPace / bucket.count),
+        runCount: bucket.count,
+        paceVsAvg: calculatePaceVsAvg(bucket),
+      }))
+      .sort((a, b) => (b.paceVsAvg || 0) - (a.paceVsAvg || 0));
+
+    // Find best and worst conditions
+    const validTimeAnalysis = timeOfDayAnalysis.filter(t => t.paceVsAvg !== null);
+    const validConditionAnalysis = conditionAnalysis.filter(c => c.paceVsAvg !== null);
+    
+    const bestTime = validTimeAnalysis.find(t => t.paceVsAvg! < 0);
+    const worstTime = validTimeAnalysis.find(t => t.paceVsAvg! > 0);
+    const bestCondition = validConditionAnalysis.find(c => c.paceVsAvg < 0);
+    const worstCondition = validConditionAnalysis.find(c => c.paceVsAvg > 0);
+
+    return {
+      hasEnoughData: true,
+      runsAnalyzed: runs.length,
+      overallAvgPace: avgPaceSeconds,
+      temperatureAnalysis,
+      conditionAnalysis,
+      timeOfDayAnalysis,
+      insights: {
+        bestCondition: bestCondition ? {
+          label: bestCondition.condition,
+          type: 'condition',
+          improvement: Math.abs(bestCondition.paceVsAvg).toFixed(0),
+        } : undefined,
+        worstCondition: worstCondition ? {
+          label: worstCondition.condition,
+          type: 'condition',
+          slowdown: Math.abs(worstCondition.paceVsAvg).toFixed(0),
+        } : undefined,
+      },
+    };
+  }
+
   // Wellness-aware pre-run briefing with Garmin data
   app.post("/api/coaching/pre-run-briefing", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { distance, elevationGain, difficulty, activityType, weather } = req.body;
-      
+      const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, hasRoute, activityType, targetTime, targetPace, weather } = req.body;
+
       // Get user's coach settings
       const user = await storage.getUser(req.user!.userId);
       const coachName = user?.coachName || 'Coach';
       const coachTone = user?.coachTone || 'encouraging';
-      
+
       // Get today's wellness data
       const today = new Date().toISOString().split('T')[0];
       let wellness: any = {};
-      
+
       const todayWellness = await db.query.garminWellnessMetrics.findFirst({
         where: (m, { and, eq }) => and(
           eq(m.userId, req.user!.userId),
           eq(m.date, today)
         ),
       });
-      
+
       if (todayWellness) {
         wellness = {
           sleepHours: todayWellness.totalSleepSeconds ? todayWellness.totalSleepSeconds / 3600 : undefined,
@@ -3356,8 +3517,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
           readinessRecommendation: todayWellness.readinessRecommendation,
         };
       }
-      
-      // Generate wellness-aware briefing
+
+      // Get weather impact data for positive condition matching
+      let weatherImpactData = null;
+      try {
+        // Try to get cached weather impact or calculate fresh
+        const runs = await db.query.runs.findMany({
+          where: eq(runs.userId, req.user!.userId),
+          orderBy: desc(runs.completedAt),
+          limit: 30,
+        });
+        
+        // Calculate weather impact from recent runs if we have enough data
+        if (runs.length >= 3) {
+          weatherImpactData = await calculateWeatherImpact(req.user!.userId, runs);
+        }
+      } catch (err) {
+        console.error("Error getting weather impact data:", err);
+        // Continue without weather impact - not critical
+      }
+
+      // Generate wellness-aware briefing - only include route info when explicitly set to true
+      // IMPORTANT: Free runs should NOT mention terrain/elevation
       const aiService = await import("./ai-service");
       const briefing = await aiService.generateWellnessAwarePreRunBriefing({
         distance: distance || 5,
@@ -3368,6 +3549,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         coachName,
         coachTone,
         wellness,
+        hasRoute: hasRoute === true, // Only true if explicitly true - all other values become false
+        targetTime: targetTime,
+        targetPace: targetPace,
+        weatherImpact: weatherImpactData,
       });
       
       res.json({
