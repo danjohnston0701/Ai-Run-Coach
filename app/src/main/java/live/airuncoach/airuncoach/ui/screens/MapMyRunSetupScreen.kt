@@ -174,6 +174,7 @@ fun MapMyRunSetupScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
+                .imePadding() // Auto-scroll to keep text fields visible when keyboard opens
                 .padding(bottom = 104.dp) // space for bottom CTA
         ) {
 
