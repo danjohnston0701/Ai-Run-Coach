@@ -66,6 +66,7 @@ import java.util.Locale
 @Composable
 fun DashboardScreen(
     onNavigateToRouteGeneration: () -> Unit = {},
+    onNavigateToFreeRunSetup: () -> Unit = {},
     onNavigateToRunSession: () -> Unit = {},
     onNavigateToPreviousRuns: () -> Unit = {},
     onNavigateToGoals: () -> Unit = {},
@@ -183,7 +184,7 @@ fun DashboardScreen(
             val hasActiveRun = activeRun != null && activeRun.isActive
             ActionButtons(
                 onMapMyRun = onNavigateToRouteGeneration,
-                onRunWithoutRoute = onNavigateToRunSession,
+                onRunWithoutRoute = onNavigateToFreeRunSetup,
                 isEnabled = hasLocationPermission && !hasActiveRun
             )
         }

@@ -152,6 +152,11 @@ interface ApiService {
     @GET("/api/fitness/current/{userId}")
     suspend fun getCurrentFitness(@Path("userId") userId: String): DailyFitness
 
+    // ========== WEATHER IMPACT ANALYSIS ==========
+    
+    @GET("/api/users/{userId}/weather-impact")
+    suspend fun getWeatherImpact(@Path("userId") userId: String): WeatherImpactData
+
     // ========== SEGMENTS ==========
     
     @GET("/api/segments/nearby")

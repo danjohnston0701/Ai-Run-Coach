@@ -90,6 +90,11 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.compose.animation:animation")
+    implementation("androidx.compose.ui:ui-text")
+
 
     // --- Networking: Retrofit for API calls ---
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
@@ -109,8 +114,6 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.5.0")
 
     // --- Charts ---
-    implementation("com.patrykandpatrick.vico:compose:1.13.1")
-    implementation("com.patrykandpatrick.vico:compose-m3:1.13.1")
 
     // --- Local Database: Room for offline queue ---
     implementation("androidx.room:room-runtime:2.6.1")

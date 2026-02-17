@@ -10,6 +10,8 @@ data class PhaseCoachingUpdate(
     @SerializedName("currentPace") val currentPace: String,
     @SerializedName("currentGrade") val currentGrade: Double?,
     @SerializedName("totalElevationGain") val totalElevationGain: Double?,
+    @SerializedName("heartRate") val heartRate: Int?,
+    @SerializedName("cadence") val cadence: Int?,
     @SerializedName("coachName") val coachName: String?,
     @SerializedName("coachTone") val coachTone: String?,
     @SerializedName("coachGender") val coachGender: String?,

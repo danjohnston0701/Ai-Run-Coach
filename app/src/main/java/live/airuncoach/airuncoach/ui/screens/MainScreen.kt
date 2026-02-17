@@ -80,9 +80,17 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
         }
     }
 
+    // Hide bottom navigation during run session
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+    val isRunSession = currentRoute?.startsWith("run_session") == true
+
     Scaffold(
         containerColor = Colors.backgroundRoot,
         bottomBar = {
+            // Completely hide navigation bar during run session
+            if (isRunSession) return@Scaffold
+            
             NavigationBar(
                 containerColor = Colors.backgroundRoot.copy(alpha = 0.95f),
                 tonalElevation = 8.dp
@@ -125,12 +133,12 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         onClick = {
                             if (isRunSessionRoute) return@NavigationBarItem
                             navController.navigate(screen.route) {
+                                // Pop everything up to and including home to clear the back stack
                                 popUpTo(Screen.Home.route) {
-                                    inclusive = false
-                                    saveState = true
+                                    inclusive = true
                                 }
                                 launchSingleTop = true
-                                restoreState = true
+                                restoreState = false
                             }
                         },
                         colors = NavigationBarItemDefaults.colors(
@@ -161,8 +169,13 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onNavigateToRouteGeneration = {
                         navController.navigate("map_my_run_setup/route")
                     },
-                    onNavigateToRunSession = {
+                    onNavigateToFreeRunSetup = {
                         navController.navigate("map_my_run_setup/no_route")
+                    },
+                    onNavigateToRunSession = {
+                        navController.navigate("run_session") {
+                            popUpTo("map_my_run_setup") { inclusive = true }
+                        }
                     },
                     onNavigateToPreviousRuns = {
                         navController.navigate("previous_runs")
@@ -361,6 +374,13 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         navController.navigate("run_summary/$runId") {
                             popUpTo("run_session") { inclusive = true }
                         }
+                    },
+                    onCancel = {
+                        // Clear run config and go back to dashboard
+                        RunConfigHolder.clearConfig()
+                        navController.navigate(Screen.Home.route) {
+                            popUpTo(Screen.Home.route) { inclusive = true }
+                        }
                     }
                 )
             }
@@ -373,12 +393,19 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         navController.navigate("run_summary/$runId") {
                             popUpTo("run_session/{routeId}") { inclusive = true }
                         }
+                    },
+                    onCancel = {
+                        // Clear run config and go back to dashboard
+                        RunConfigHolder.clearConfig()
+                        navController.navigate(Screen.Home.route) {
+                            popUpTo(Screen.Home.route) { inclusive = true }
+                        }
                     }
                 )
             }
             composable("run_summary/{runId}") { backStackEntry ->
                 val runId = backStackEntry.arguments?.getString("runId")
-                RunSummaryScreen(
+                RunSummaryScreenFlagship(
                     runId = runId ?: "",
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToLogin = {

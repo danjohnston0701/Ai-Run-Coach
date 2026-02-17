@@ -1,5 +1,10 @@
 package live.airuncoach.airuncoach.domain.model
 
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.math.abs
+
 data class RunSession(
     val id: String,
     val startTime: Long,
@@ -40,7 +45,26 @@ data class RunSession(
     val uploadedToGarmin: Boolean? = null,
     val garminActivityId: String? = null,
 
-    val isActive: Boolean = false
+    val isActive: Boolean = false,
+
+    // Post-run UX + analysis context
+    val name: String? = null, // user-facing run name (editable)
+    val difficulty: String? = null, // backend-provided difficulty (easy/moderate/hard)
+    val userComments: String? = null, // user's self-assessment / notes
+    val strugglePoints: List<StrugglePoint> = emptyList(), // detected pace-drop events
+
+    // Optional time-series data (present for some sources like Garmin)
+    // Keep nullable to avoid Gson setting non-null lists to null when fields are absent.
+    val heartRateData: List<Int>? = null,
+    val paceData: List<Double>? = null,
+
+    // AI coaching notes captured during the run (optional)
+    val aiCoachingNotes: List<AiCoachingNote> = emptyList(),
+
+    // Run goals for target tracking (optional)
+    val targetDistance: Double? = null, // kilometers
+    val targetTime: Long? = null, // milliseconds
+    val wasTargetAchieved: Boolean? = null
 ) {
     fun getDistanceInKm(): Double = distance / 1000.0
     
@@ -82,8 +106,8 @@ data class RunSession(
     }
     
     fun getFormattedDate(): String {
-        val date = java.util.Date(startTime)
-        val format = java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault())
+        val date = Date(startTime)
+        val format = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
         return format.format(date)
     }
     
@@ -103,7 +127,7 @@ data class RunSession(
         var factors = 0
         
         // Distance similarity (within 10%)
-        val distanceDiff = kotlin.math.abs(distance - other.distance) / distance
+        val distanceDiff = abs(distance - other.distance) / distance
         if (distanceDiff < 0.1) {
             similarityScore += (1 - distanceDiff * 10).toFloat()
             factors++
@@ -111,7 +135,7 @@ data class RunSession(
         
         // Elevation gain similarity (within 20%)
         if (totalElevationGain > 0 && other.totalElevationGain > 0) {
-            val elevationDiff = kotlin.math.abs(totalElevationGain - other.totalElevationGain) / totalElevationGain
+            val elevationDiff = abs(totalElevationGain - other.totalElevationGain) / totalElevationGain
             if (elevationDiff < 0.2) {
                 similarityScore += (1 - elevationDiff * 5).toFloat()
                 factors++

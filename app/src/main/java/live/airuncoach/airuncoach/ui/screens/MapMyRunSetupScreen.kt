@@ -32,7 +32,6 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
 import live.airuncoach.airuncoach.domain.model.RunSetupConfig
-import live.airuncoach.airuncoach.ui.components.TargetTimeCard
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
@@ -72,21 +71,28 @@ fun MapMyRunSetupScreen(
     val context = LocalContext.current
     val runSessionViewModel: RunSessionViewModel = hiltViewModel()
     val runState by runSessionViewModel.runState.collectAsState()
-    var selectedActivity by remember { mutableStateOf("Run") }
+
+    // Minor metadata
+    var activityMode by remember { mutableStateOf(ActivityMode.RUN) }
+
+    // Core inputs
     var targetDistance by remember { mutableStateOf(initialDistance) }
+
     var isTargetTimeEnabled by remember { mutableStateOf(initialTargetTimeEnabled) }
     var targetHours by remember { mutableStateOf(initialHours.toString().padStart(2, '0')) }
     var targetMinutes by remember { mutableStateOf(initialMinutes.toString().padStart(2, '0')) }
     var targetSeconds by remember { mutableStateOf(initialSeconds.toString().padStart(2, '0')) }
+
+    // Social toggles
     var isLiveTrackingEnabled by remember { mutableStateOf(false) }
-    var hasPreparedBriefing by remember { mutableStateOf(false) }
-    
+    var isGroupRunEnabled by remember { mutableStateOf(false) } // visual toggle only for now
+
     // GPS State
     var currentLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var hasLocationPermission by remember { mutableStateOf(false) }
     var isGettingLocation by remember { mutableStateOf(false) }
     var gpsError by remember { mutableStateOf<String?>(null) }
-    
+
     // Check permission status
     LaunchedEffect(Unit) {
         hasLocationPermission = ContextCompat.checkSelfPermission(
@@ -94,7 +100,7 @@ fun MapMyRunSetupScreen(
             Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
     }
-    
+
     // Permission launcher
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -102,24 +108,24 @@ fun MapMyRunSetupScreen(
         hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
                 permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
     }
-    
-    // Get current location - request fresh location instead of using cached lastLocation
+
+    // Get current location (fresh)
     LaunchedEffect(hasLocationPermission) {
         if (hasLocationPermission) {
             isGettingLocation = true
             gpsError = null
             try {
                 val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
-                
+
                 Log.d("MapSetup", "🔄 Requesting fresh GPS location...")
-                
+
                 @SuppressLint("MissingPermission")
                 val location = suspendCancellableCoroutine { continuation ->
                     fusedLocationClient.getCurrentLocation(
                         Priority.PRIORITY_HIGH_ACCURACY,
                         null
-                    ).addOnSuccessListener { location ->
-                        continuation.resume(location)
+                    ).addOnSuccessListener { loc ->
+                        continuation.resume(loc)
                     }.addOnFailureListener { e ->
                         Log.w("MapSetup", "Fresh location failed, trying lastLocation", e)
                         fusedLocationClient.lastLocation.addOnSuccessListener { lastLoc ->
@@ -129,10 +135,10 @@ fun MapMyRunSetupScreen(
                         }
                     }
                 }
-                
+
                 if (location != null) {
                     currentLocation = Pair(location.latitude, location.longitude)
-                    Log.d("MapSetup", "✅ Got fresh GPS location: ${location.latitude}, ${location.longitude}")
+                    Log.d("MapSetup", "✅ Got GPS: ${location.latitude}, ${location.longitude}")
                 } else {
                     gpsError = "Unable to acquire GPS signal"
                     Log.e("MapSetup", "❌ GPS location is null")
@@ -146,182 +152,83 @@ fun MapMyRunSetupScreen(
         }
     }
 
-    LaunchedEffect(runState.isLoadingBriefing, runState.latestCoachMessage) {
-        if (!runState.isLoadingBriefing && runState.latestCoachMessage != null) {
-            hasPreparedBriefing = true
-        }
-    }
+    // Header copy by mode
+    val title = if (mode != "route") "MAP MY RUN SETUP" else "RUN SETUP"
+    val subtitle = if (mode == "route") "Configure your AI-generated route" else "Set your run basics"
+
+    // Button enablement
+    val gpsReady = currentLocation != null && !isGettingLocation
+    val canProceed = gpsReady && hasLocationPermission
+
+    // Parse HH/MM/SS safely
+    val hoursInt = targetHours.toIntOrNull() ?: 0
+    val minutesInt = targetMinutes.toIntOrNull() ?: 0
+    val secondsInt = targetSeconds.toIntOrNull() ?: 0
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Colors.backgroundRoot)
     ) {
+
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = 100.dp)  // Space for bottom button
+                .padding(bottom = 104.dp) // space for bottom CTA
         ) {
+
             item {
-                // Header with close button
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.lg, vertical = Spacing.md),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "MAP MY RUN SETUP",
-                            style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
-                            color = Colors.textPrimary
-                        )
-                        Text(
-                            text = "Configure your AI-generated route",
-                            style = AppTextStyles.body,
-                            color = Colors.textSecondary
-                        )
-                    }
-                    
-                    // Close button
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.icon_x_vector),
-                            contentDescription = "Close",
-                            tint = Colors.textPrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                }
+                SetupHeader(
+                    title = title,
+                    subtitle = subtitle,
+                    gpsLocked = currentLocation != null,
+                    onClose = onNavigateBack
+                )
             }
-            
+
+            // GPS alert only when acquiring/error/permission-needed
+            item {
+                Spacer(modifier = Modifier.height(Spacing.sm))
+                GpsAlertIfNeeded(
+                    isGettingLocation = isGettingLocation,
+                    gpsError = gpsError,
+                    hasPermission = hasLocationPermission,
+                    onGrantPermission = {
+                        locationPermissionLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION
+                            )
+                        )
+                    }
+                )
+            }
+
             item { Spacer(modifier = Modifier.height(Spacing.lg)) }
-            
-            // GPS Location Status Card
+
+            // Compact mode toggle (Run/Walk) — minor metadata
             item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.lg),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (currentLocation != null) Colors.backgroundSecondary else Colors.error.copy(alpha = 0.1f)
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(Spacing.md),
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (isGettingLocation) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                                color = Colors.primary
-                            )
-                        } else {
-                            Icon(
-                                Icons.Default.LocationOn,
-                                contentDescription = null,
-                                tint = if (currentLocation != null) Colors.primary else Colors.error
-                            )
-                        }
-                        
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = when {
-                                    isGettingLocation -> "Acquiring GPS location..."
-                                    currentLocation != null -> "GPS location confirmed"
-                                    gpsError != null -> "GPS signal unavailable"
-                                    !hasLocationPermission -> "Location permission required"
-                                    else -> "Waiting for GPS..."
-                                },
-                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
-                                color = if (currentLocation != null) Colors.textPrimary else Colors.error
-                            )
-                            
-                            if (currentLocation != null) {
-                                Text(
-                                    text = "Ready to start",
-                                    style = AppTextStyles.caption,
-                                    color = Colors.textSecondary
-                                )
-                            } else if (!hasLocationPermission) {
-                                Text(
-                                    text = "Grant permission to continue",
-                                    style = AppTextStyles.caption,
-                                    color = Colors.textSecondary
-                                )
-                            } else {
-                                Text(
-                                    text = "Please wait for GPS signal",
-                                    style = AppTextStyles.caption,
-                                    color = Colors.textSecondary
-                                )
-                            }
-                        }
-                        
-                        if (!hasLocationPermission) {
-                            Button(
-                                onClick = {
-                                    locationPermissionLauncher.launch(
-                                        arrayOf(
-                                            Manifest.permission.ACCESS_FINE_LOCATION,
-                                            Manifest.permission.ACCESS_COARSE_LOCATION
-                                        )
-                                    )
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
-                            ) {
-                                Text("Grant", color = Colors.buttonText)
-                            }
-                        }
-                    }
-                }
+                CompactModeRow(
+                    mode = activityMode,
+                    onModeChanged = { activityMode = it }
+                )
             }
-            
-            item { Spacer(modifier = Modifier.height(Spacing.md)) }
-            
-            // Activity Type Selector
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.lg),
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.md)
-                ) {
-                    ActivityTypeButton(
-                        text = "Run",
-                        isSelected = selectedActivity == "Run",
-                        onClick = { selectedActivity = "Run" },
-                        modifier = Modifier.weight(1f)
-                    )
-                    ActivityTypeButton(
-                        text = "Walk",
-                        isSelected = selectedActivity == "Walk",
-                        onClick = { selectedActivity = "Walk" },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-            
+
             item { Spacer(modifier = Modifier.height(Spacing.xl)) }
-            
-            // Target Distance
+
+            // Target distance — KEEP functionally & visually close to your original (as requested)
             item {
                 TargetDistanceCard(
                     distance = targetDistance,
                     onDistanceChanged = { targetDistance = it }
                 )
             }
-            
-            item { Spacer(modifier = Modifier.height(Spacing.md)) }
-            
-            // Target Time
+
+            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+
+            // Target time — same function, more compact / less heavy
             item {
-                TargetTimeCard(
+                CompactTargetTimeSection(
                     isEnabled = isTargetTimeEnabled,
                     onEnabledChange = { isTargetTimeEnabled = it },
                     hours = targetHours,
@@ -332,59 +239,39 @@ fun MapMyRunSetupScreen(
                     onSecondsChange = { if (it.length <= 2) targetSeconds = it }
                 )
             }
-            
-            item { Spacer(modifier = Modifier.height(Spacing.md)) }
-            
-            // Live Tracking
+
+            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+
+            // Social — redesigned into a single clean section
             item {
-                LiveTrackingCard(
-                    isEnabled = isLiveTrackingEnabled,
-                    onToggle = { isLiveTrackingEnabled = it },
-                    onAddObservers = { /* Navigate to friend selector */ }
-                )
-            }
-            
-            item { Spacer(modifier = Modifier.height(Spacing.md)) }
-            
-            // Run with Friends
-            item {
-                RunWithFriendsCard(
-                    onSetupGroupRun = { /* Navigate to group run setup */ }
+                SocialSection(
+                    liveTrackingEnabled = isLiveTrackingEnabled,
+                    onToggleLiveTracking = { isLiveTrackingEnabled = it },
+                    onManageLiveTracking = { /* Navigate to observers */ },
+
+                    groupRunEnabled = isGroupRunEnabled,
+                    onToggleGroupRun = { isGroupRunEnabled = it },
+                    onManageGroupRun = { /* Navigate to group run setup */ }
                 )
             }
 
             if (mode == "no_route") {
-                item { Spacer(modifier = Modifier.height(Spacing.md)) }
+                item { Spacer(modifier = Modifier.height(Spacing.lg)) }
 
+                // Keep AI Summary as OPTIONAL context, not a gate
                 item {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = Spacing.lg),
-                        shape = RoundedCornerShape(BorderRadius.md),
-                        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary.copy(alpha = 0.8f))
-                    ) {
-                        Column(modifier = Modifier.padding(Spacing.lg)) {
-                            Text(
-                                text = "AI Summary",
-                                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                                color = Colors.textPrimary
-                            )
-                            Spacer(modifier = Modifier.height(Spacing.sm))
-                            Text(
-                                text = runState.latestCoachMessage ?: "Tap Prepare Run to generate your summary.",
-                                style = AppTextStyles.body,
-                                color = Colors.textSecondary
-                            )
-                        }
-                    }
+                    AiSummaryCard(
+                        text = runState.latestCoachMessage
+                            ?: "Your coach will generate a briefing once you prepare your run.",
+                        isLoading = runState.isLoadingBriefing
+                    )
                 }
             }
-            
+
             item { Spacer(modifier = Modifier.height(Spacing.xxl)) }
         }
-        
-        // Bottom Buttons
+
+        // Bottom CTA — single, clean action. Removes “Prepare → Start” gating.
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -396,179 +283,81 @@ fun MapMyRunSetupScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(Spacing.sm)
             ) {
-                // Show "Generate Route" button if mode is "route"
+
                 if (mode == "route") {
-                    Button(
+                    PrimaryCtaButton(
+                        text = when {
+                            !hasLocationPermission -> "GRANT LOCATION"
+                            isGettingLocation -> "ACQUIRING GPS…"
+                            currentLocation == null -> "WAITING FOR GPS SIGNAL"
+                            else -> "GENERATE ROUTES"
+                        },
+                        leadingIconRes = if (hasLocationPermission && currentLocation != null && !isGettingLocation)
+                            R.drawable.icon_location_vector else null,
+                        enabled = canProceed,
                         onClick = {
                             currentLocation?.let { (lat, lng) ->
-                                val hours = targetHours.toIntOrNull() ?: 0
-                                val minutes = targetMinutes.toIntOrNull() ?: 0
-                                val seconds = targetSeconds.toIntOrNull() ?: 0
                                 onGenerateRoute(
                                     targetDistance,
                                     isTargetTimeEnabled,
-                                    hours,
-                                    minutes,
-                                    seconds,
+                                    hoursInt,
+                                    minutesInt,
+                                    secondsInt,
                                     isLiveTrackingEnabled,
-                                    false,
+                                    isGroupRunEnabled,
                                     lat,
                                     lng
                                 )
                             }
-                        },
-                        enabled = currentLocation != null && !isGettingLocation,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp),
-                        shape = RoundedCornerShape(BorderRadius.lg),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Colors.primary,
-                            contentColor = Colors.buttonText
-                        )
-                    ) {
-                        if (isGettingLocation) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = Colors.buttonText,
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(modifier = Modifier.width(Spacing.sm))
-                            Text(
-                                text = "ACQUIRING GPS...",
-                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
-                            )
-                        } else if (currentLocation == null) {
-                            Text(
-                                text = "WAITING FOR GPS SIGNAL",
-                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
-                            )
-                        } else {
-                            Icon(
-                                painter = painterResource(id = R.drawable.icon_location_vector),
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(Spacing.sm))
-                            Text(
-                                text = "GENERATE ROUTES",
-                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
-                            )
                         }
-                    }
-                }
-                
-                // Show "Start Run" button if mode is "no_route"
-                if (mode == "no_route") {
-                    Button(
+                    )
+                } else {
+                    // no_route mode: single start run action
+                    PrimaryCtaButton(
+                        text = when {
+                            !hasLocationPermission -> "GRANT LOCATION"
+                            isGettingLocation -> "ACQUIRING GPS…"
+                            currentLocation == null -> "WAITING FOR GPS SIGNAL"
+                            else -> "PREPARE RUN"
+                        },
+                        leadingIconRes = if (hasLocationPermission && currentLocation != null && !isGettingLocation)
+                            R.drawable.icon_navigation_vector else null,
+                        enabled = canProceed && !runState.isStopping,
                         onClick = {
-                            val hours = targetHours.toIntOrNull() ?: 0
-                            val minutes = targetMinutes.toIntOrNull() ?: 0
-                            val seconds = targetSeconds.toIntOrNull() ?: 0
-
+                            // Fire-and-forget prep (no gating). Run session UI should show loading/coach status.
                             val config = RunSetupConfig(
-                                activityType = if (selectedActivity == "Walk") {
+                                activityType = if (activityMode == ActivityMode.WALK) {
                                     PhysicalActivityType.WALK
                                 } else {
                                     PhysicalActivityType.RUN
                                 },
                                 targetDistance = targetDistance,
                                 hasTargetTime = isTargetTimeEnabled,
-                                targetHours = hours,
-                                targetMinutes = minutes,
-                                targetSeconds = seconds,
+                                targetHours = hoursInt,
+                                targetMinutes = minutesInt,
+                                targetSeconds = secondsInt,
                                 liveTrackingEnabled = isLiveTrackingEnabled,
                                 liveTrackingObservers = emptyList(),
-                                isGroupRun = false,
+                                isGroupRun = isGroupRunEnabled,
                                 groupRunParticipants = emptyList()
                             )
                             runSessionViewModel.setRunConfig(config)
                             runSessionViewModel.fetchWellnessData()
-                            runSessionViewModel.prepareRun()
-                        },
-                        enabled = currentLocation != null && !isGettingLocation && !runState.isLoadingBriefing,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp),
-                        shape = RoundedCornerShape(BorderRadius.lg),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Colors.primary,
-                            contentColor = Colors.buttonText
-                        )
-                    ) {
-                        if (runState.isLoadingBriefing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = Colors.buttonText,
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(modifier = Modifier.width(Spacing.sm))
-                            Text(
-                                text = "PREPARING SUMMARY...",
-                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
-                            )
-                        } else if (isGettingLocation) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = Colors.buttonText,
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(modifier = Modifier.width(Spacing.sm))
-                            Text(
-                                text = "ACQUIRING GPS...",
-                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
-                            )
-                        } else if (currentLocation == null) {
-                            Text(
-                                text = "WAITING FOR GPS SIGNAL",
-                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
-                            )
-                        } else {
-                            Icon(
-                                painter = painterResource(id = R.drawable.icon_navigation_vector),
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(Spacing.sm))
-                            Text(
-                                text = "PREPARE RUN",
-                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
-                            )
-                        }
-                    }
+                            // NOTE: prepareRun() is now called in RunSessionScreen when it loads
+                            // to avoid duplicate API calls
 
-                    Button(
-                        onClick = {
-                            val hours = targetHours.toIntOrNull() ?: 0
-                            val minutes = targetMinutes.toIntOrNull() ?: 0
-                            val seconds = targetSeconds.toIntOrNull() ?: 0
+                            // Navigate immediately
                             onStartRunWithoutRoute(
                                 targetDistance,
                                 isTargetTimeEnabled,
-                                hours,
-                                minutes,
-                                seconds
+                                hoursInt,
+                                minutesInt,
+                                secondsInt
                             )
-                        },
-                        enabled = hasPreparedBriefing && currentLocation != null && !isGettingLocation,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp),
-                        shape = RoundedCornerShape(BorderRadius.lg),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Colors.primary,
-                            contentColor = Colors.buttonText,
-                            disabledContainerColor = Colors.backgroundTertiary,
-                            disabledContentColor = Colors.textMuted
-                        )
-                    ) {
-                        Text(
-                            text = "START RUN",
-                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
-                        )
-                    }
+                        }
+                    )
                 }
-                
+
                 Text(
                     text = "Target: ${targetDistance.toInt()} km",
                     style = AppTextStyles.caption,
@@ -583,28 +372,253 @@ fun MapMyRunSetupScreen(
     }
 }
 
+/* =====================================================================================
+   HEADER + GPS
+===================================================================================== */
+
 @Composable
-fun ActivityTypeButton(
-    text: String,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
+private fun SetupHeader(
+    title: String,
+    subtitle: String,
+    gpsLocked: Boolean,
+    onClose: () -> Unit
 ) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.height(50.dp),
-        shape = RoundedCornerShape(BorderRadius.md),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (isSelected) Colors.primary else Colors.backgroundSecondary,
-            contentColor = if (isSelected) Colors.buttonText else Colors.textPrimary
-        )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg, vertical = Spacing.md),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
     ) {
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+                color = Colors.textPrimary
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = subtitle,
+                style = AppTextStyles.body,
+                color = Colors.textSecondary
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Subtle locked indicator only (not a big "GPS confirmed" card)
+            if (gpsLocked) {
+                Pill(
+                    text = "GPS Locked",
+                    icon = Icons.Default.LocationOn,
+                    containerColor = Colors.primary.copy(alpha = 0.16f),
+                    contentColor = Colors.primary
+                )
+            }
+        }
+
+        IconButton(onClick = onClose) {
+            Icon(
+                painter = painterResource(id = R.drawable.icon_x_vector),
+                contentDescription = "Close",
+                tint = Colors.textPrimary,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun GpsAlertIfNeeded(
+    isGettingLocation: Boolean,
+    gpsError: String?,
+    hasPermission: Boolean,
+    onGrantPermission: () -> Unit
+) {
+    // Requirement:
+    // - keep red alert while acquiring GPS
+    // - do NOT show “GPS confirmed” when secure
+    // - still handle permission errors gracefully
+
+    val show = !hasPermission || isGettingLocation || gpsError != null
+    if (!show) return
+
+    val title = when {
+        !hasPermission -> "Location permission required"
+        isGettingLocation -> "Acquiring GPS location…"
+        else -> "GPS signal unavailable"
+    }
+    val subtitle = when {
+        !hasPermission -> "Grant permission to continue"
+        isGettingLocation -> "Please wait for GPS signal"
+        else -> gpsError ?: "Please try again"
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg),
+        shape = RoundedCornerShape(BorderRadius.md),
+        colors = CardDefaults.cardColors(containerColor = Colors.error.copy(alpha = 0.12f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (isGettingLocation) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = Colors.error
+                )
+            } else {
+                Icon(
+                    Icons.Default.LocationOn,
+                    contentDescription = null,
+                    tint = Colors.error,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(Spacing.sm))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                    color = Colors.error
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    style = AppTextStyles.caption,
+                    color = Colors.textSecondary
+                )
+            }
+
+            if (!hasPermission) {
+                Button(
+                    onClick = onGrantPermission,
+                    shape = RoundedCornerShape(BorderRadius.full),
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
+                ) {
+                    Text("Grant", color = Colors.buttonText, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Pill(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    containerColor: androidx.compose.ui.graphics.Color,
+    contentColor: androidx.compose.ui.graphics.Color
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(BorderRadius.full))
+            .background(containerColor)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+        }
         Text(
             text = text,
-            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+            style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+            color = contentColor
         )
     }
 }
+
+/* =====================================================================================
+   MODE TOGGLE (Run/Walk) — compact, minor UI
+===================================================================================== */
+
+private enum class ActivityMode { RUN, WALK }
+
+@Composable
+private fun CompactModeRow(
+    mode: ActivityMode,
+    onModeChanged: (ActivityMode) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = "Mode",
+            style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+            color = Colors.textSecondary
+        )
+
+        ModePillToggle(
+            left = "RUN",
+            right = "WALK",
+            selectedLeft = (mode == ActivityMode.RUN),
+            onSelectLeft = { onModeChanged(ActivityMode.RUN) },
+            onSelectRight = { onModeChanged(ActivityMode.WALK) }
+        )
+    }
+}
+
+@Composable
+private fun ModePillToggle(
+    left: String,
+    right: String,
+    selectedLeft: Boolean,
+    onSelectLeft: () -> Unit,
+    onSelectRight: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(BorderRadius.full))
+            .background(Colors.backgroundSecondary.copy(alpha = 0.8f))
+            .padding(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val leftBg = if (selectedLeft) Colors.primary.copy(alpha = 0.20f) else androidx.compose.ui.graphics.Color.Transparent
+        val leftFg = if (selectedLeft) Colors.primary else Colors.textMuted
+
+        val rightBg = if (!selectedLeft) Colors.primary.copy(alpha = 0.20f) else androidx.compose.ui.graphics.Color.Transparent
+        val rightFg = if (!selectedLeft) Colors.primary else Colors.textMuted
+
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(BorderRadius.full))
+                .background(leftBg)
+                .clickable(onClick = onSelectLeft)
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(left, style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = leftFg)
+        }
+
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(BorderRadius.full))
+                .background(rightBg)
+                .clickable(onClick = onSelectRight)
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(right, style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = rightFg)
+        }
+    }
+}
+
+/* =====================================================================================
+   TARGET DISTANCE — unchanged (your original)
+===================================================================================== */
 
 @Composable
 fun TargetDistanceCard(distance: Float, onDistanceChanged: (Float) -> Unit) {
@@ -662,93 +676,79 @@ fun TargetDistanceCard(distance: Float, onDistanceChanged: (Float) -> Unit) {
     }
 }
 
+/* =====================================================================================
+   TARGET TIME — compact replacement (same function, cleaner visual weight)
+===================================================================================== */
+
 @Composable
-fun LiveTrackingCard(
+private fun CompactTargetTimeSection(
     isEnabled: Boolean,
-    onToggle: (Boolean) -> Unit,
-    onAddObservers: () -> Unit
+    onEnabledChange: (Boolean) -> Unit,
+    hours: String,
+    minutes: String,
+    seconds: String,
+    onHoursChange: (String) -> Unit,
+    onMinutesChange: (String) -> Unit,
+    onSecondsChange: (String) -> Unit
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = Spacing.lg),
         shape = RoundedCornerShape(BorderRadius.md),
-        colors = CardDefaults.cardColors(
-            containerColor = Colors.backgroundSecondary.copy(alpha = 0.8f)
-        )
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary.copy(alpha = 0.65f))
     ) {
         Column(modifier = Modifier.padding(Spacing.lg)) {
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(50.dp)
-                        .clip(CircleShape)
-                        .background(Colors.backgroundTertiary),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.icon_location_vector),
-                        contentDescription = "Live Tracking",
-                        tint = Colors.primary,
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-                
-                Spacer(modifier = Modifier.width(Spacing.md))
-                
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Live Tracking",
+                        text = "Target Time",
                         style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
                         color = Colors.textPrimary
                     )
                     Text(
-                        text = "Share your location with friends",
+                        text = "Optional pacing goal",
                         style = AppTextStyles.small,
                         color = Colors.textMuted
                     )
                 }
-                
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(BorderRadius.full))
-                        .clickable { onToggle(!isEnabled) }
-                        .background(if (isEnabled) Colors.primary else Colors.backgroundTertiary)
-                        .padding(horizontal = Spacing.md, vertical = Spacing.sm),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (isEnabled) "ON" else "OFF",
-                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
-                        color = if (isEnabled) Colors.buttonText else Colors.textMuted
-                    )
-                }
+
+                Switch(
+                    checked = isEnabled,
+                    onCheckedChange = onEnabledChange
+                )
             }
-            
+
             if (isEnabled) {
                 Spacer(modifier = Modifier.height(Spacing.md))
-                Divider(color = Colors.backgroundTertiary)
-                Spacer(modifier = Modifier.height(Spacing.md))
-                
-                Button(
-                    onClick = onAddObservers,
+
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(BorderRadius.md),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Colors.primary.copy(alpha = 0.2f),
-                        contentColor = Colors.primary
-                    )
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.icon_profile_vector),
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
+                    TimeField(
+                        label = "HH",
+                        value = hours,
+                        onValueChange = onHoursChange,
+                        modifier = Modifier.weight(1f)
                     )
-                    Spacer(modifier = Modifier.width(Spacing.sm))
-                    Text("Add Observers", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold))
+                    TimeField(
+                        label = "MM",
+                        value = minutes,
+                        onValueChange = onMinutesChange,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TimeField(
+                        label = "SS",
+                        value = seconds,
+                        onValueChange = onSecondsChange,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
         }
@@ -756,59 +756,233 @@ fun LiveTrackingCard(
 }
 
 @Composable
-fun RunWithFriendsCard(onSetupGroupRun: () -> Unit) {
+private fun TimeField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { raw ->
+            val filtered = raw.filter { it.isDigit() }.take(2)
+            onValueChange(filtered)
+        },
+        modifier = modifier,
+        singleLine = true,
+        textStyle = AppTextStyles.body.copy(
+            color = Colors.textPrimary,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        ),
+        label = { Text(label, color = Colors.textMuted) },
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = Colors.primary.copy(alpha = 0.65f),
+            unfocusedBorderColor = Colors.backgroundTertiary,
+            focusedLabelColor = Colors.primary,
+            unfocusedLabelColor = Colors.textMuted,
+            cursorColor = Colors.primary
+        ),
+        shape = RoundedCornerShape(BorderRadius.md)
+    )
+}
+
+/* =====================================================================================
+   SOCIAL — redesigned (Live Tracking + Group Run)
+===================================================================================== */
+
+@Composable
+private fun SocialSection(
+    liveTrackingEnabled: Boolean,
+    onToggleLiveTracking: (Boolean) -> Unit,
+    onManageLiveTracking: () -> Unit,
+
+    groupRunEnabled: Boolean,
+    onToggleGroupRun: (Boolean) -> Unit,
+    onManageGroupRun: () -> Unit
+) {
+    Column(modifier = Modifier.padding(horizontal = Spacing.lg)) {
+        Text(
+            text = "Social",
+            style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+            color = Colors.textPrimary
+        )
+        Spacer(modifier = Modifier.height(Spacing.sm))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(BorderRadius.md),
+            colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary.copy(alpha = 0.65f))
+        ) {
+            Column(modifier = Modifier.padding(vertical = 6.dp)) {
+
+                SocialRowToggle(
+                    title = "Live Tracking",
+                    subtitle = "Share your live location",
+                    enabled = liveTrackingEnabled,
+                    onToggle = { onToggleLiveTracking(it) },
+                    onManage = onManageLiveTracking
+                )
+
+                Divider(color = Colors.backgroundTertiary.copy(alpha = 0.6f))
+
+                SocialRowToggle(
+                    title = "Group Run",
+                    subtitle = "Invite friends to join",
+                    enabled = groupRunEnabled,
+                    onToggle = { onToggleGroupRun(it) },
+                    onManage = onManageGroupRun
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SocialRowToggle(
+    title: String,
+    subtitle: String,
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+    onManage: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Small icon chip (minimal)
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(Colors.backgroundTertiary.copy(alpha = 0.7f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.icon_profile_vector),
+                contentDescription = null,
+                tint = Colors.primary,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.width(Spacing.md))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                color = Colors.textPrimary
+            )
+            Text(
+                text = subtitle,
+                style = AppTextStyles.small,
+                color = Colors.textMuted
+            )
+        }
+
+        Switch(
+            checked = enabled,
+            onCheckedChange = onToggle
+        )
+/*
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // Manage chevron (only useful when enabled)
+        val manageAlpha = if (enabled) 1f else 0.35f
+        Icon(
+            painter = painterResource(id = R.drawable.icon_play_vector),
+            contentDescription = "Manage",
+            tint = Colors.textMuted.copy(alpha = manageAlpha),
+            modifier = Modifier
+                .size(22.dp)
+                .clickable(enabled = enabled) { onManage() }
+        )
+        */
+    }
+}
+
+/* =====================================================================================
+   OPTIONAL AI SUMMARY (no longer blocks Start Run)
+===================================================================================== */
+
+@Composable
+private fun AiSummaryCard(
+    text: String,
+    isLoading: Boolean
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = Spacing.lg)
-            .clickable(onClick = onSetupGroupRun),
+            .padding(horizontal = Spacing.lg),
         shape = RoundedCornerShape(BorderRadius.md),
-        colors = CardDefaults.cardColors(
-            containerColor = Colors.backgroundSecondary.copy(alpha = 0.8f)
-        )
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary.copy(alpha = 0.55f))
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(Spacing.lg),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(50.dp)
-                    .clip(CircleShape)
-                    .background(Colors.primary.copy(alpha = 0.2f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    painter = painterResource(id = R.drawable.icon_profile_vector),
-                    contentDescription = "Run with Friends",
-                    tint = Colors.primary,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-            
-            Spacer(modifier = Modifier.width(Spacing.md))
-            
-            Column(modifier = Modifier.weight(1f)) {
+        Column(modifier = Modifier.padding(Spacing.lg)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Run with Friends",
+                    text = "Coach Briefing",
                     style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                    color = Colors.textPrimary
+                    color = Colors.textPrimary,
+                    modifier = Modifier.weight(1f)
                 )
-                Text(
-                    text = "Create a group run and invite friends",
-                    style = AppTextStyles.small,
-                    color = Colors.textMuted
-                )
+
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = Colors.primary
+                    )
+                }
             }
-            
-            Icon(
-                painter = painterResource(id = R.drawable.icon_play_vector),
-                contentDescription = "Navigate",
-                tint = Colors.textMuted,
-                modifier = Modifier.size(24.dp)
+            Spacer(modifier = Modifier.height(Spacing.sm))
+            Text(
+                text = text,
+                style = AppTextStyles.body,
+                color = Colors.textSecondary
             )
         }
+    }
+}
+
+/* =====================================================================================
+   CTA BUTTON (single, clean)
+===================================================================================== */
+
+@Composable
+private fun PrimaryCtaButton(
+    text: String,
+    leadingIconRes: Int?,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp),
+        shape = RoundedCornerShape(BorderRadius.lg),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Colors.primary,
+            contentColor = Colors.buttonText,
+            disabledContainerColor = Colors.backgroundTertiary,
+            disabledContentColor = Colors.textMuted
+        )
+    ) {
+        if (leadingIconRes != null) {
+            Icon(
+                painter = painterResource(id = leadingIconRes),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(Spacing.sm))
+        }
+        Text(
+            text = text,
+            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+        )
     }
 }

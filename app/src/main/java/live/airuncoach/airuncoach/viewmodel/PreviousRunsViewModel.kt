@@ -1,6 +1,7 @@
 package live.airuncoach.airuncoach.viewmodel
 
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
@@ -14,19 +15,8 @@ import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.RunSession
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.network.model.WeatherImpactData
 import javax.inject.Inject
-
-data class WeatherConditionImpact(
-    val condition: String,
-    val percentageDiff: Float
-)
-
-data class WeatherImpactData(
-    val totalRuns: Int,
-    val bestCondition: WeatherConditionImpact,
-    val toughestCondition: WeatherConditionImpact,
-    val overallAveragePace: String
-)
 
 @HiltViewModel
 class PreviousRunsViewModel @Inject constructor(
@@ -188,57 +178,21 @@ class PreviousRunsViewModel @Inject constructor(
     
     fun calculateWeatherImpact() {
         viewModelScope.launch {
-            val runs = _runs.value
-            if (runs.isEmpty()) {
+            val userId = getUserId()
+            if (userId == null) {
+                Log.e("PreviousRunsViewModel", "Cannot fetch weather impact: userId is null")
                 _weatherImpactData.value = null
                 return@launch
             }
             
-            // Calculate overall average pace (filter out null paces first)
-            val validPaces = runs.mapNotNull { it.averagePace }.mapNotNull { parsePaceToSeconds(it) }
-            val totalPaceSeconds = validPaces.sum()
-            val avgPaceSeconds = if (validPaces.isNotEmpty()) totalPaceSeconds / validPaces.size else 0
-            val overallPace = formatSecondsTopace(avgPaceSeconds)
-            
-            // Simplified weather impact (in a real app, this would analyze weather data)
-            // For now, create mock data based on time of day
-            val bestCondition = WeatherConditionImpact(
-                condition = "Night (8pm+)",
-                percentageDiff = 75.5f
-            )
-            
-            val toughestCondition = WeatherConditionImpact(
-                condition = "Evening (5-8pm)",
-                percentageDiff = 45.3f
-            )
-            
-            _weatherImpactData.value = WeatherImpactData(
-                totalRuns = runs.size,
-                bestCondition = bestCondition,
-                toughestCondition = toughestCondition,
-                overallAveragePace = overallPace
-            )
-        }
-    }
-    
-    private fun parsePaceToSeconds(pace: String): Int? {
-        return try {
-            val parts = pace.replace("/km", "").replace("\"", "").split("'")
-            if (parts.size == 2) {
-                val minutes = parts[0].trim().toIntOrNull() ?: 0
-                val seconds = parts[1].trim().toIntOrNull() ?: 0
-                minutes * 60 + seconds
-            } else {
-                null
+            try {
+                val weatherImpact = apiService.getWeatherImpact(userId)
+                _weatherImpactData.value = weatherImpact
+                Log.d("PreviousRunsViewModel", "Weather impact fetched: ${weatherImpact.runsAnalyzed} runs analyzed")
+            } catch (e: Exception) {
+                Log.e("PreviousRunsViewModel", "Error fetching weather impact", e)
+                _weatherImpactData.value = null
             }
-        } catch (e: Exception) {
-            null
         }
-    }
-    
-    private fun formatSecondsTopace(totalSeconds: Int): String {
-        val minutes = totalSeconds / 60
-        val seconds = totalSeconds % 60
-        return String.format("%d:%02d /km", minutes, seconds)
     }
 }

@@ -77,6 +77,7 @@ class RunSessionViewModel @Inject constructor(
     private val gson = Gson()
     private var user: User? = null
     private var runConfig: RunSetupConfig? = null
+    private var isBriefingAudioPlaying = false // Guard against duplicate audio playback
 
     init {
         loadUser()
@@ -140,13 +141,23 @@ class RunSessionViewModel @Inject constructor(
         }
     }
 
+    private var isPrepareRunInProgress = false // Guard against multiple prepareRun calls
+
     fun prepareRun() {
+        // Prevent multiple simultaneous calls
+        if (isPrepareRunInProgress) {
+            Log.d("RunSessionViewModel", "prepareRun already in progress, skipping duplicate call")
+            return
+        }
+        
+        isPrepareRunInProgress = true
         viewModelScope.launch {
             // Skip AI coaching if disabled
             if (!_runState.value.isCoachEnabled) {
                 _runState.update {
                     it.copy(coachText = "Ready to run! Tap Start when you're ready.")
                 }
+                isPrepareRunInProgress = false
                 return@launch
             }
 
@@ -161,7 +172,8 @@ class RunSessionViewModel @Inject constructor(
                     
                     // Get route data from runConfig if available
                     val route = runConfig?.route
-                    val hasRoute = route != null
+                    // Explicitly determine hasRoute - must be false if no route
+                    val hasRoute = route != null && route.distance > 0
                     val distance = route?.distance ?: runConfig?.targetDistance?.toDouble() ?: 5.0
                     val elevationGain = route?.elevationGain?.toInt() ?: 0
                     val elevationLoss = route?.elevationLoss?.toInt() ?: 0
@@ -247,19 +259,29 @@ class RunSessionViewModel @Inject constructor(
                         isLoadingBriefing = false
                     )}
                     
-                    // Play OpenAI TTS audio if available and not muted
-                    if (!_runState.value.isMuted) {
+                    // Play OpenAI TTS audio if available and not muted - with guard against duplicates
+                    if (!isBriefingAudioPlaying && !_runState.value.isMuted) {
+                        isBriefingAudioPlaying = true
                         if (briefing.audio != null && briefing.format != null) {
                             Log.d("RunSessionViewModel", "Playing OpenAI TTS audio (${briefing.format})")
-                            audioPlayerHelper.playAudio(briefing.audio, briefing.format)
+                            audioPlayerHelper.playAudio(briefing.audio, briefing.format) {
+                                isBriefingAudioPlaying = false
+                            }
                         } else {
                             Log.d("RunSessionViewModel", "Falling back to Android TTS")
                             textToSpeechHelper.speak(briefing.text)
+                            isBriefingAudioPlaying = false
                         }
+                    } else if (_runState.value.isMuted) {
+                        Log.d("RunSessionViewModel", "Audio muted - skipping playback")
                     }
+                    
+                    // Reset the flag to allow re-triggering if needed
+                    isPrepareRunInProgress = false
                 } // End of withTimeout
             } catch (e: TimeoutCancellationException) {
                 Log.w("RunSessionViewModel", "Pre-run briefing timed out")
+                isBriefingAudioPlaying = false
                 _runState.update { 
                     it.copy(
                         coachText = "Ready to run! Tap Start when you're ready.",
@@ -268,6 +290,7 @@ class RunSessionViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 Log.e("RunSessionViewModel", "Failed to get pre-run briefing", e)
+                isBriefingAudioPlaying = false
                 _runState.update { 
                     it.copy(
                         coachText = "Ready to run! Tap Start when you're ready.",
@@ -280,16 +303,20 @@ class RunSessionViewModel @Inject constructor(
 
     fun setRunConfig(config: RunSetupConfig) {
         runConfig = config
-        // Update UI with target distance if set
-        if (config.hasTargetTime) {
-            val targetTimeStr = config.getFormattedTargetTime()
-            _runState.update { it.copy(
-                coachText = "Target: ${config.targetDistance} km in $targetTimeStr. Ready to start!"
-            )}
-        } else {
-            _runState.update { it.copy(
-                coachText = "Target: ${config.targetDistance} km. Ready to start!"
-            )}
+        // Only update coachText if we don't already have a briefing loaded
+        // This prevents overwriting the AI briefing when config is set
+        if (_runState.value.coachText.isEmpty() || 
+            _runState.value.coachText.contains("Ready to run")) {
+            if (config.hasTargetTime) {
+                val targetTimeStr = config.getFormattedTargetTime()
+                _runState.update { it.copy(
+                    coachText = "Target: ${config.targetDistance} km in $targetTimeStr. Ready to start!"
+                )}
+            } else {
+                _runState.update { it.copy(
+                    coachText = "Target: ${config.targetDistance} km. Ready to start!"
+                )}
+            }
         }
     }
 
@@ -414,12 +441,16 @@ class RunSessionViewModel @Inject constructor(
                     latestCoachMessage = response.message
                 )}
                 
-                // Play OpenAI TTS audio if available, otherwise fall back to Android TTS
-                if (!_runState.value.isMuted) {
+                // Play OpenAI TTS audio if available, otherwise fall back to Android TTS - with guard against duplicates
+                if (!isBriefingAudioPlaying && !_runState.value.isMuted) {
+                    isBriefingAudioPlaying = true
                     if (response.audio != null && response.format != null) {
-                        audioPlayerHelper.playAudio(response.audio!!, response.format!!)
+                        audioPlayerHelper.playAudio(response.audio!!, response.format!!) {
+                            isBriefingAudioPlaying = false
+                        }
                     } else {
                         textToSpeechHelper.speak(response.message)
+                        isBriefingAudioPlaying = false
                     }
                 }
             } catch (e: Exception) {

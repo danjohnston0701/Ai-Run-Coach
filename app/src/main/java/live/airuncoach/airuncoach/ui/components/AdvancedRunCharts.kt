@@ -10,20 +10,23 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.Canvas
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.patrykandpatrick.vico.compose.axis.horizontal.rememberBottomAxis
-import com.patrykandpatrick.vico.compose.axis.vertical.rememberStartAxis
-import com.patrykandpatrick.vico.compose.chart.Chart
-import com.patrykandpatrick.vico.compose.chart.line.lineChart
-import com.patrykandpatrick.vico.compose.style.ProvideChartStyle
-import com.patrykandpatrick.vico.core.entry.ChartEntryModelProducer
-import com.patrykandpatrick.vico.core.entry.FloatEntry
+import live.airuncoach.airuncoach.analytics.calculateEfficiencyScore
+import live.airuncoach.airuncoach.analytics.analyzeSplits
+import live.airuncoach.airuncoach.analytics.calculateFatigueIndex
+import live.airuncoach.airuncoach.analytics.calculateTrainingLoad
+import live.airuncoach.airuncoach.analytics.estimateVO2Max
+import live.airuncoach.airuncoach.analytics.getFitnessLevel
+import live.airuncoach.airuncoach.analytics.calculateEffortZones
+import live.airuncoach.airuncoach.analytics.SplitType
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.KmSplit
 import live.airuncoach.airuncoach.domain.model.LocationPoint
@@ -41,7 +44,16 @@ fun HeartRatePaceCorrelationChart(
     routePoints: List<LocationPoint>,
     modifier: Modifier = Modifier
 ) {
-    if (routePoints.isEmpty()) {
+    // Filter valid HR + pace
+    val data = remember(routePoints) {
+        routePoints.mapNotNull { point ->
+            val hr = point.heartRate ?: return@mapNotNull null
+            val pace = point.speed ?: return@mapNotNull null
+            if (hr > 0 && pace > 0) pace to hr.toFloat() else null
+        }
+    }
+
+    if (data.size < 5) {
         EmptyChartPlaceholder("Heart rate data not available", modifier)
         return
     }
@@ -51,60 +63,66 @@ fun HeartRatePaceCorrelationChart(
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
     ) {
         Column(modifier = Modifier.padding(Spacing.lg)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    painterResource(id = R.drawable.icon_timer_vector),
-                    contentDescription = null,
-                    tint = Colors.error,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(Spacing.sm))
-                Text(
-                    "Heart Rate Efficiency",
-                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                    color = Colors.textPrimary
-                )
-            }
-            Spacer(modifier = Modifier.height(Spacing.sm))
+
             Text(
-                "How hard you're working for your pace",
-                style = AppTextStyles.caption,
-                color = Colors.textSecondary
+                "Heart Rate Efficiency",
+                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                color = Colors.textPrimary
             )
+
             Spacer(modifier = Modifier.height(Spacing.md))
 
-            // Create scatter plot: X = pace, Y = heart rate
-            val chartEntries = remember(routePoints) {
-                routePoints.mapIndexedNotNull { index, point ->
-                    val hr = 150 // TODO: Get actual HR from point
-                    val pace = point.speed ?: return@mapIndexedNotNull null
-                    FloatEntry(x = pace, y = hr.toFloat())
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(220.dp)
+            ) {
+                val padding = 40f
+                val width = size.width - padding * 2
+                val height = size.height - padding * 2
+
+                val minX = data.minOf { it.first }
+                val maxX = data.maxOf { it.first }
+                val minY = data.minOf { it.second }
+                val maxY = data.maxOf { it.second }
+
+                val xRange = (maxX - minX).takeIf { it != 0f } ?: 1f
+                val yRange = (maxY - minY).takeIf { it != 0f } ?: 1f
+
+                fun scaleX(x: Float) =
+                    padding + ((x - minX) / xRange) * width
+
+                fun scaleY(y: Float) =
+                    size.height - padding - ((y - minY) / yRange) * height
+
+                // Axes
+                drawLine(
+                    color = Colors.border,
+                    start = Offset(padding, padding),
+                    end = Offset(padding, size.height - padding)
+                )
+
+                drawLine(
+                    color = Colors.border,
+                    start = Offset(padding, size.height - padding),
+                    end = Offset(size.width - padding, size.height - padding)
+                )
+
+                // Scatter points
+                data.forEach { (pace, hr) ->
+                    drawCircle(
+                        color = Colors.error,
+                        radius = 6f,
+                        center = Offset(scaleX(pace), scaleY(hr))
+                    )
                 }
             }
 
-            if (chartEntries.isNotEmpty()) {
-                val chartEntryModelProducer = remember { ChartEntryModelProducer(chartEntries) }
-                val model = chartEntryModelProducer.getModel()
-                
-                if (model != null) {
-                    ProvideChartStyle {
-                        Chart(
-                            chart = lineChart(),
-                            model = model,
-                            startAxis = rememberStartAxis(),
-                            bottomAxis = rememberBottomAxis(),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp)
-                        )
-                    }
-                } else {
-                    EmptyChartPlaceholder("No pace data available")
-                }
-            }
-            
             Spacer(modifier = Modifier.height(Spacing.md))
-            EfficiencyInsightCard(calculateEfficiencyScore(routePoints))
+
+            EfficiencyInsightCard(
+                score = calculateEfficiencyScore(routePoints)
+            )
         }
     }
 }
@@ -768,111 +786,6 @@ private fun EfficiencyInsightCard(score: Float) {
     }
 }
 
-// Calculation Functions
-
-private fun calculateEfficiencyScore(routePoints: List<LocationPoint>): Float {
-    // TODO: Actual calculation based on HR/pace correlation
-    return 0.75f
-}
-
-private data class SplitAnalysisResult(
-    val firstHalfAvg: String,
-    val secondHalfAvg: String,
-    val type: SplitType,
-    val verdict: String,
-    val recommendation: String
-)
-
-private enum class SplitType {
-    NEGATIVE, POSITIVE, EVEN
-}
-
-private fun analyzeSplits(kmSplits: List<KmSplit>): SplitAnalysisResult {
-    val midpoint = kmSplits.size / 2
-    val firstHalf = kmSplits.take(midpoint)
-    val secondHalf = kmSplits.drop(midpoint)
-    
-    val firstAvg = firstHalf.map { it.time }.average()
-    val secondAvg = secondHalf.map { it.time }.average()
-    
-    val diff = ((secondAvg - firstAvg) / firstAvg * 100).toFloat()
-    
-    val type = when {
-        diff < -2 -> SplitType.NEGATIVE
-        diff > 2 -> SplitType.POSITIVE
-        else -> SplitType.EVEN
-    }
-    
-    val verdict = when (type) {
-        SplitType.NEGATIVE -> "Negative Split! 🎉"
-        SplitType.POSITIVE -> "Positive Split"
-        SplitType.EVEN -> "Even Pacing"
-    }
-    
-    val recommendation = when (type) {
-        SplitType.NEGATIVE -> "Excellent! You finished strong and managed your energy well."
-        SplitType.POSITIVE -> "Consider starting slower to conserve energy for the finish."
-        SplitType.EVEN -> "Good pacing strategy. Very consistent throughout."
-    }
-    
-    return SplitAnalysisResult(
-        firstHalfAvg = formatTime(firstAvg.toLong()),
-        secondHalfAvg = formatTime(secondAvg.toLong()),
-        type = type,
-        verdict = verdict,
-        recommendation = recommendation
-    )
-}
-
-private fun calculateFatigueIndex(kmSplits: List<KmSplit>): Float {
-    if (kmSplits.size < 2) return 0f
-    
-    val fastestTime = kmSplits.minOf { it.time }
-    val slowestTime = kmSplits.maxOf { it.time }
-    
-    return ((slowestTime - fastestTime) / fastestTime.toFloat() * 100)
-}
-
-private fun calculateTrainingLoad(runSession: RunSession): Int {
-    // Simplified TSS calculation
-    val duration = runSession.duration / 1000 / 60 // minutes
-    val intensity = when {
-        runSession.heartRate > 170 -> 1.5f
-        runSession.heartRate > 150 -> 1.2f
-        else -> 1.0f
-    }
-    
-    return (duration * intensity * (runSession.distance / 1000)).toInt()
-}
-
-private fun estimateVO2Max(runSession: RunSession, age: Int): Float {
-    // Simplified VO2 Max estimation from pace
-    val avgSpeedKmh = (runSession.distance / 1000) / (runSession.duration / 1000.0 / 3600.0)
-    val vo2Max = (avgSpeedKmh * 3.5f) + 15f // Simplified formula
-    
-    return vo2Max.toFloat()
-}
-
-private fun getFitnessLevel(vo2Max: Float, age: Int): String {
-    // Simplified fitness classification
-    return when {
-        vo2Max > 50 -> "Excellent"
-        vo2Max > 40 -> "Good"
-        vo2Max > 35 -> "Average"
-        else -> "Below Average"
-    }
-}
-
-private fun calculateEffortZones(routePoints: List<LocationPoint>): List<Pair<String, Float>> {
-    // TODO: Calculate actual effort distribution
-    return listOf(
-        "Easy" to 0.3f,
-        "Moderate" to 0.5f,
-        "Hard" to 0.15f,
-        "Max" to 0.05f
-    )
-}
-
 private fun getEffortColor(zone: String): Color {
     return when (zone) {
         "Easy" -> Color(0xFF66BB6A)
@@ -883,9 +796,27 @@ private fun getEffortColor(zone: String): Color {
     }
 }
 
-private fun formatTime(millis: Long): String {
-    val totalSeconds = millis / 1000
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
-    return String.format("%d:%02d", minutes, seconds)
+@Composable
+private fun EmptyChartPlaceholder(
+    message: String,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(200.dp)
+                .padding(Spacing.lg),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = message,
+                style = AppTextStyles.body,
+                color = Colors.textMuted
+            )
+        }
+    }
 }

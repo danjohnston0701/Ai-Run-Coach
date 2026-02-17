@@ -71,8 +71,10 @@ class RunTrackingService : Service(), SensorEventListener {
     private var currentUser: User? = null
     private var lastPhase: CoachingPhase? = null
     private var last500mMilestone = 0
-    private val coachingHistory = mutableListOf<String>() // Track what coaching has been given
+    private val coachingHistory = mutableListOf<AiCoachingNote>() // Track what coaching has been given with timestamps
     private var isMuted = false // User can mute coach
+    private var lastCoachingTime: Long = 0 // Cooldown between coaching events
+    private val COACHING_COOLDOWN_MS = 30_000L // 30 second minimum gap between coaching
     
     // Run data
     private var targetDistance: Double? = null // For mapped runs
@@ -244,6 +246,9 @@ class RunTrackingService : Service(), SensorEventListener {
         routePoints.clear()
         kmSplits.clear()
         lastKmSplit = 0
+        last500mMilestone = 0  // Reset for new run
+        lastPhase = null        // Reset for new run - allow first phase change to trigger
+        lastCoachingTime = 0   // Reset cooldown for new run
         totalDistance = 0.0
         maxSpeed = 0f
         totalElevationGain = 0.0
@@ -341,7 +346,14 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun onNewLocation(location: Location) {
         if (!isTracking) return
 
-        val newPoint = LocationPoint(location.latitude, location.longitude, location.altitude.takeIf { location.hasAltitude() }, location.accuracy, location.speed.takeIf { location.hasSpeed() } ?: 0f, location.time)
+        val newPoint = LocationPoint(
+            latitude = location.latitude,
+            longitude = location.longitude,
+            timestamp = location.time,
+            speed = location.speed.takeIf { location.hasSpeed() },
+            altitude = location.altitude.takeIf { location.hasAltitude() },
+            heartRate = null
+        )
 
         if (routePoints.isNotEmpty()) {
             val prevPoint = routePoints.last()
@@ -351,8 +363,9 @@ class RunTrackingService : Service(), SensorEventListener {
             Log.d("RunTrackingService", "Location update - accuracy: ${location.accuracy}m, speed: ${location.speed}m/s, distance: ${distanceIncrement}m")
 
             // Accept location if accuracy is reasonable OR if we're still in the first few locations (to get started)
+            // Only count distance increments >= 5m to filter GPS drift
             val isFirstLocations = routePoints.size < 5
-            if ((location.accuracy < 20f || isFirstLocations) && distanceIncrement > 2.0) {
+            if ((location.accuracy < 20f || isFirstLocations) && distanceIncrement >= 5.0) {
                 val currentPaceSeconds = if (location.speed > 0) 1000f / location.speed else 0f
                 totalDistance += distanceIncrement
                 if (newPoint.altitude != null && prevPoint.altitude != null) {
@@ -408,6 +421,7 @@ class RunTrackingService : Service(), SensorEventListener {
             kmSplits.add(split)
             lastKmSplit = currentKm
             lastSplitTime = now
+            Log.d("RunTrackingService", "Reached ${currentKm}km - triggering split coaching")
             triggerKmSplitCoaching(split) // Trigger AI coaching for km split
         }
     }
@@ -422,8 +436,16 @@ class RunTrackingService : Service(), SensorEventListener {
 
     private fun updateRunSession() {
         val duration = System.currentTimeMillis() - startTime
-        val avgSpeed = if (duration > 0) (totalDistance / (duration / 1000.0)).toFloat() else 0f
-        val phase = determinePhase(totalDistance / 1000.0, targetDistance)
+        
+        // Only show distance/pace after user has moved at least 5 meters (filters GPS drift)
+        val minDistanceMeters = 5.0
+        val hasMovedEnough = totalDistance >= minDistanceMeters
+        
+        // Clamp distance to 0 if under threshold (filters GPS drift when stationary)
+        val displayDistance = if (hasMovedEnough) totalDistance else 0.0
+        val avgSpeed = if (duration > 0 && hasMovedEnough) (displayDistance / (duration / 1000.0)).toFloat() else 0f
+        
+        val phase = determinePhase(displayDistance / 1000.0, targetDistance)
         
         // Check for phase changes and trigger coaching
         checkPhaseChange(phase)
@@ -439,11 +461,11 @@ class RunTrackingService : Service(), SensorEventListener {
             startTime = startTime,
             endTime = null,
             duration = duration,
-            distance = totalDistance,
+            distance = displayDistance,
             averageSpeed = avgSpeed,
-            maxSpeed = maxSpeed,
+            maxSpeed = if (hasMovedEnough) maxSpeed else 0f,
             averagePace = calculatePace(avgSpeed),
-            calories = calculateCalories(totalDistance, duration),
+            calories = calculateCalories(displayDistance, duration),
             cadence = currentCadence,
             heartRate = currentHeartRate,
             routePoints = routePoints.toList(),
@@ -452,17 +474,17 @@ class RunTrackingService : Service(), SensorEventListener {
             phase = phase,
             weatherAtStart = weatherAtStart,
             weatherAtEnd = null,
-            totalElevationGain = totalElevationGain,
-            totalElevationLoss = totalElevationLoss,
-            averageGradient = calculateAverageGradient(),
-            maxGradient = calculateMaxGradient(),
-            terrainType = determineTerrainType(calculateAverageGradient()),
+            totalElevationGain = if (hasMovedEnough) totalElevationGain else 0.0,
+            totalElevationLoss = if (hasMovedEnough) totalElevationLoss else 0.0,
+            averageGradient = if (hasMovedEnough) calculateAverageGradient() else 0f,
+            maxGradient = if (hasMovedEnough) calculateMaxGradient() else 0f,
+            terrainType = if (hasMovedEnough) determineTerrainType(calculateAverageGradient()) else TerrainType.FLAT,
             routeHash = generateRouteHash(),
             routeName = null,
             externalSource = null, // Not synced from external source
             externalId = null,
             isActive = true,
-            aiCoachingNotes = emptyList(),
+            aiCoachingNotes = coachingHistory.toList(),
             targetDistance = targetDistance,
             targetTime = targetTime,
             wasTargetAchieved = calculateWasTargetAchieved()
@@ -558,25 +580,33 @@ class RunTrackingService : Service(), SensorEventListener {
         
         Log.d("RunTrackingService", "Stopped all tracking")
         
-        serviceScope.launch {
-            // Get end weather and finalize run
-            weatherAtEnd = weatherRepository.getCurrentWeather()
-            _currentRunSession.value?.let { session ->
-                val finalSession = session.copy(
-                    endTime = System.currentTimeMillis(),
-                    weatherAtEnd = weatherAtEnd,
-                    isActive = false
-                )
-                _currentRunSession.value = finalSession
-                
-                // Upload run to backend
-                uploadRunToBackend(finalSession)
+        // Create a separate coroutine scope that won't be cancelled immediately
+        val uploadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        
+        uploadScope.launch {
+            coroutineScope {
+                try {
+                    // Get end weather and finalize run
+                    weatherAtEnd = weatherRepository.getCurrentWeather()
+                    _currentRunSession.value?.let { session ->
+                        val finalSession = session.copy(
+                            endTime = System.currentTimeMillis(),
+                            weatherAtEnd = weatherAtEnd,
+                            isActive = false
+                        )
+                        _currentRunSession.value = finalSession
+                        
+                        // Upload run to backend (this will set _uploadComplete when done)
+                        uploadRunToBackend(finalSession)
+                    }
+                } finally {
+                    // Only stop the service after upload completes or fails
+                    releaseWakeLock()
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                }
             }
         }
-        
-        releaseWakeLock()
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
     }
     
     private suspend fun uploadRunToBackend(runSession: RunSession) {
@@ -613,7 +643,9 @@ class RunTrackingService : Service(), SensorEventListener {
                 // Run goals - target tracking
                 targetDistance = targetDistance,
                 targetTime = targetTime,
-                wasTargetAchieved = calculateWasTargetAchieved()
+                wasTargetAchieved = calculateWasTargetAchieved(),
+                // AI coaching notes from the run
+                aiCoachingNotes = runSession.aiCoachingNotes.ifEmpty { null }
             )
             
             val response = apiService.uploadRun(uploadRequest)
@@ -630,17 +662,24 @@ class RunTrackingService : Service(), SensorEventListener {
             // Handle 401 Unauthorized errors
             if (e.code() == 401) {
                 Log.e("RunTrackingService", "❌ 401 Unauthorized - run not uploaded (session expired)")
-                // Don't crash - run is saved locally
+                // Use local ID so navigation still happens - run will be saved locally
+                _uploadComplete.value = runSession.id
+            } else if (e.code() >= 500) {
+                // Server error - use local ID, don't try to fetch from backend
+                Log.e("RunTrackingService", "HTTP ${e.code()} server error - using local ID")
+                _uploadComplete.value = runSession.id
             } else {
                 Log.e("RunTrackingService", "HTTP ${e.code()} error uploading run: ${e.message()}")
+                _uploadComplete.value = runSession.id
             }
         } catch (e: Exception) {
             // Log error but don't crash - run is saved locally
             Log.e("RunTrackingService", "Failed to upload run to backend", e)
-            // TODO: Save to local queue for retry later
+            // Use local ID so navigation still happens - run will be saved locally
+            _uploadComplete.value = runSession.id
         }
     }
-    
+
     /**
      * Auto-upload run to Garmin Connect if user has auto-sync enabled
      * Silent background operation - doesn't interrupt user if it fails
@@ -732,8 +771,12 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun check500mMilestones() {
         val current500m = (totalDistance / 500).toInt()
         // Only trigger the 500m summary once, at the first 0.5km mark.
-        if (last500mMilestone == 0 && current500m >= 1) {
+        // Also check cooldown to prevent duplicate coaching events
+        val now = System.currentTimeMillis()
+        if (last500mMilestone == 0 && current500m >= 1 && (now - lastCoachingTime) > COACHING_COOLDOWN_MS) {
             last500mMilestone = 1
+            lastCoachingTime = now
+            Log.d("RunTrackingService", "Reached 500m - triggering initial coaching")
             serviceScope.launch {
                 try {
                     val update = PhaseCoachingUpdate(
@@ -744,6 +787,8 @@ class RunTrackingService : Service(), SensorEventListener {
                         currentPace = _currentRunSession.value?.averagePace ?: "0:00",
                         currentGrade = calculateAverageGradient().toDouble(),
                         totalElevationGain = totalElevationGain,
+                        heartRate = currentHeartRate.takeIf { it > 0 },
+                        cadence = currentCadence.takeIf { it > 0 },
                         coachName = currentUser?.coachName,
                         coachTone = currentUser?.coachTone,
                         coachGender = currentUser?.coachGender,
@@ -751,22 +796,32 @@ class RunTrackingService : Service(), SensorEventListener {
                         activityType = "run"
                     )
                     val response = apiService.getPhaseCoaching(update)
-                    coachingHistory.add("500m: ${response.message}")
-                    
+                    coachingHistory.add(AiCoachingNote(
+                        time = System.currentTimeMillis() - startTime,
+                        message = "500m: ${response.message}"
+                    ))
+                    Log.d("RunTrackingService", "500m coaching response: ${response.message}")
+
                     // Play OpenAI TTS audio if available, otherwise fall back to Android TTS
                     if (!isMuted) {
                         playCoachingAudio(response.audio, response.format, response.message)
                     }
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e("RunTrackingService", "Failed to get 500m coaching", e)
                 }
             }
         }
     }
     
     private fun checkPhaseChange(newPhase: CoachingPhase) {
-        if (newPhase != lastPhase && lastPhase != null) {
+        val now = System.currentTimeMillis()
+        // Allow trigger when:
+        // 1. Phase changed AND (first phase OR cooldown passed)
+        // This ensures first phase change (null -> EARLY) triggers coaching
+        if (newPhase != lastPhase && (lastPhase == null || (now - lastCoachingTime) > COACHING_COOLDOWN_MS)) {
             lastPhase = newPhase
+            lastCoachingTime = now
+            Log.d("RunTrackingService", "Phase changed to $newPhase at ${totalDistance/1000.0}km - triggering coaching")
             serviceScope.launch {
                 try {
                     val update = PhaseCoachingUpdate(
@@ -777,6 +832,8 @@ class RunTrackingService : Service(), SensorEventListener {
                         currentPace = _currentRunSession.value?.averagePace ?: "0:00",
                         currentGrade = calculateAverageGradient().toDouble(),
                         totalElevationGain = totalElevationGain,
+                        heartRate = currentHeartRate.takeIf { it > 0 },
+                        cadence = currentCadence.takeIf { it > 0 },
                         coachName = currentUser?.coachName,
                         coachTone = currentUser?.coachTone,
                         coachGender = currentUser?.coachGender,
@@ -784,14 +841,18 @@ class RunTrackingService : Service(), SensorEventListener {
                         activityType = "run"
                     )
                     val response = apiService.getPhaseCoaching(update)
-                    coachingHistory.add("Phase change: ${response.message}")
-                    
+                    coachingHistory.add(AiCoachingNote(
+                        time = System.currentTimeMillis() - startTime,
+                        message = "Phase change: ${response.message}"
+                    ))
+                    Log.d("RunTrackingService", "Phase coaching response: ${response.message}")
+
                     // Play OpenAI TTS audio if available, otherwise fall back to Android TTS
                     if (!isMuted) {
                         playCoachingAudio(response.audio, response.format, response.message)
                     }
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e("RunTrackingService", "Failed to get phase coaching", e)
                 }
             }
         }
@@ -817,7 +878,10 @@ class RunTrackingService : Service(), SensorEventListener {
                     coachAccent = currentUser?.coachAccent
                 )
                 val response = apiService.getStruggleCoaching(update)
-                coachingHistory.add("Struggle: ${response.message}")
+                coachingHistory.add(AiCoachingNote(
+                    time = System.currentTimeMillis() - startTime,
+                    message = "Struggle: ${response.message}"
+                ))
                 
                 // Play OpenAI TTS audio if available, otherwise fall back to Android TTS
                 if (!isMuted) {
@@ -850,14 +914,18 @@ class RunTrackingService : Service(), SensorEventListener {
                     kmSplits = kmSplits.toList()
                 )
                 val response = apiService.getPaceUpdate(update)
-                coachingHistory.add("Km ${split.km}: ${response.message}")
-                
+                coachingHistory.add(AiCoachingNote(
+                    time = System.currentTimeMillis() - startTime,
+                    message = "Km ${split.km}: ${response.message}"
+                ))
+                Log.d("RunTrackingService", "Km ${split.km} split coaching: ${response.message}")
+
                 // Play OpenAI TTS audio if available, otherwise fall back to Android TTS
                 if (!isMuted) {
                     playCoachingAudio(response.audio, response.format, response.message)
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("RunTrackingService", "Failed to get km split coaching", e)
             }
         }
     }
@@ -889,7 +957,10 @@ class RunTrackingService : Service(), SensorEventListener {
                     coachTone = currentUser?.coachTone
                 )
                 val response = apiService.getHeartRateCoaching(request)
-                coachingHistory.add("HR: ${response.message}")
+                coachingHistory.add(AiCoachingNote(
+                    time = System.currentTimeMillis() - startTime,
+                    message = "HR: ${response.message}"
+                ))
 
                 if (!isMuted) {
                     playCoachingAudio(response.audio, response.format, response.message)
@@ -971,7 +1042,10 @@ class RunTrackingService : Service(), SensorEventListener {
                     activityType = "run"
                 )
                 val response = apiService.getElevationCoaching(request)
-                coachingHistory.add("Elevation: ${response.message}")
+                coachingHistory.add(AiCoachingNote(
+                    time = System.currentTimeMillis() - startTime,
+                    message = "Elevation: ${response.message}"
+                ))
 
                 if (!isMuted) {
                     playCoachingAudio(response.audio, response.format, response.message)

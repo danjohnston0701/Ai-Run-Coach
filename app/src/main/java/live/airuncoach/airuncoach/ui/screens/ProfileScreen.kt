@@ -195,11 +195,10 @@ fun ProfileScreen(
         item { user?.let { ProfileHeader(user = it, onImageClick = { showImagePickerDialog = true }) } }
         item { Spacer(modifier = Modifier.height(Spacing.xl)) }
 
-        item { SectionTitle(title = "Friends") }
+        item { SectionTitle(title = "Social") }
         item {
             SettingsSection {
-                SettingsItem(icon = R.drawable.icon_profile_vector, text = "My Friends", value = "$friendCount ${if (friendCount == 1) "friend" else "friends"}", onClick = onNavigateToFriends)
-                SettingsItem(icon = R.drawable.icon_play_vector, text = "Add Friends", onClick = onNavigateToFriends)
+                SettingsItem(icon = R.drawable.icon_profile_vector, text = "Friends", value = "$friendCount ${if (friendCount == 1) "friend" else "friends"}", onClick = onNavigateToFriends)
                 SettingsItem(icon = R.drawable.icon_profile_vector, text = "Group Runs", onClick = onNavigateToGroupRuns)
             }
         }

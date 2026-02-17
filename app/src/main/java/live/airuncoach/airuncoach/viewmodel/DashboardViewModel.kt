@@ -3,6 +3,8 @@ package live.airuncoach.airuncoach.viewmodel
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.location.Location
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -11,6 +13,7 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.google.gson.Gson
+import com.google.gson.JsonSyntaxException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.Dispatchers
+import live.airuncoach.airuncoach.BuildConfig
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.GarminConnection
 import live.airuncoach.airuncoach.domain.model.Goal
@@ -26,6 +30,9 @@ import live.airuncoach.airuncoach.domain.model.RunSession
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.domain.model.WeatherData
 import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.network.WeatherRetrofitClient
+import live.airuncoach.airuncoach.service.RunTrackingService
+import retrofit2.HttpException
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
@@ -78,7 +85,7 @@ class DashboardViewModel @Inject constructor(
     
     // Track active run session
     val activeRunSession: StateFlow<RunSession?> = 
-        live.airuncoach.airuncoach.service.RunTrackingService.currentRunSession
+        RunTrackingService.currentRunSession
 
     private val sharedPrefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
@@ -91,7 +98,7 @@ class DashboardViewModel @Inject constructor(
             try {
                 loadUser()
             } catch (e: Exception) {
-                android.util.Log.e("DashboardViewModel", "Error loading user: ${e.message}", e)
+                Log.e("DashboardViewModel", "Error loading user: ${e.message}", e)
             }
         }
         
@@ -99,7 +106,7 @@ class DashboardViewModel @Inject constructor(
             try {
                 updateTime()
             } catch (e: Exception) {
-                android.util.Log.e("DashboardViewModel", "Error updating time: ${e.message}", e)
+                Log.e("DashboardViewModel", "Error updating time: ${e.message}", e)
             }
         }
         
@@ -107,7 +114,7 @@ class DashboardViewModel @Inject constructor(
             try {
                 checkLocationPermission()
             } catch (e: Exception) {
-                android.util.Log.e("DashboardViewModel", "Error checking location permission: ${e.message}", e)
+                Log.e("DashboardViewModel", "Error checking location permission: ${e.message}", e)
             }
         }
         
@@ -115,7 +122,7 @@ class DashboardViewModel @Inject constructor(
             try {
                 loadAiCoachPreference()
             } catch (e: Exception) {
-                android.util.Log.e("DashboardViewModel", "Error loading AI coach preference: ${e.message}", e)
+                Log.e("DashboardViewModel", "Error loading AI coach preference: ${e.message}", e)
             }
         }
         
@@ -123,7 +130,7 @@ class DashboardViewModel @Inject constructor(
             try {
                 loadWeather()
             } catch (e: Exception) {
-                android.util.Log.e("DashboardViewModel", "Error loading weather: ${e.message}", e)
+                Log.e("DashboardViewModel", "Error loading weather: ${e.message}", e)
             }
         }
     }
@@ -139,14 +146,14 @@ class DashboardViewModel @Inject constructor(
                 val location = getCurrentLocation()
                 
                 if (location != null) {
-                    android.util.Log.d("DashboardViewModel", "Location: ${location.latitude}, ${location.longitude}")
+                    Log.d("DashboardViewModel", "Location: ${location.latitude}, ${location.longitude}")
                     
                     // Fetch weather for actual device location
-                    val weather = live.airuncoach.airuncoach.network.WeatherRetrofitClient.weatherApiService
+                    val weather = WeatherRetrofitClient.weatherApiService
                         .getCurrentWeather(
                             latitude = location.latitude,
                             longitude = location.longitude,
-                            apiKey = live.airuncoach.airuncoach.BuildConfig.WEATHER_API_KEY,
+                            apiKey = BuildConfig.WEATHER_API_KEY,
                             units = "metric"
                         )
                     
@@ -157,20 +164,20 @@ class DashboardViewModel @Inject constructor(
                         humidity = weather.main.humidity.toDouble(),
                         windSpeed = weather.wind.speed
                     )
-                    android.util.Log.d("DashboardViewModel", "Weather loaded for location: ${weather.main.temperature}°C, ${weather.weather.firstOrNull()?.description}")
+                    Log.d("DashboardViewModel", "Weather loaded for location: ${weather.main.temperature}°C, ${weather.weather.firstOrNull()?.description}")
                 } else {
-                    android.util.Log.w("DashboardViewModel", "Location unavailable, using default weather")
+                    Log.w("DashboardViewModel", "Location unavailable, using default weather")
                     setDefaultWeather()
                 }
             } catch (e: Exception) {
-                android.util.Log.e("DashboardViewModel", "Failed to load weather: ${e.message}", e)
+                Log.e("DashboardViewModel", "Failed to load weather: ${e.message}", e)
                 // Don't crash - just set null weather
                 _weatherData.value = null
             }
         }
     }
     
-    private suspend fun getCurrentLocation(): android.location.Location? {
+    private suspend fun getCurrentLocation(): Location? {
         // Check if location permissions are granted
         if (ContextCompat.checkSelfPermission(
                 context,
@@ -181,7 +188,7 @@ class DashboardViewModel @Inject constructor(
                 Manifest.permission.ACCESS_COARSE_LOCATION
             ) != PackageManager.PERMISSION_GRANTED
         ) {
-            android.util.Log.w("DashboardViewModel", "Location permission not granted")
+            Log.w("DashboardViewModel", "Location permission not granted")
             return null
         }
         
@@ -193,12 +200,12 @@ class DashboardViewModel @Inject constructor(
                 cancellationToken.token
             ).await()
         } catch (e: Exception) {
-            android.util.Log.w("DashboardViewModel", "Failed to get current location, trying last known location")
+            Log.w("DashboardViewModel", "Failed to get current location, trying last known location")
             try {
                 // Fallback to last known location
                 fusedLocationClient.lastLocation.await()
             } catch (e: Exception) {
-                android.util.Log.e("DashboardViewModel", "Failed to get last known location: ${e.message}")
+                Log.e("DashboardViewModel", "Failed to get last known location: ${e.message}")
                 null
             }
         }
@@ -214,18 +221,24 @@ class DashboardViewModel @Inject constructor(
             val userJson = sharedPrefs.getString("user", null)
             if (userJson != null) {
                 _user.value = gson.fromJson(userJson, User::class.java)
-                android.util.Log.d("DashboardViewModel", "User loaded: ${_user.value?.name}")
+                Log.d("DashboardViewModel", "User loaded: ${_user.value?.name}")
                 // Load goals after user is loaded
                 try {
                     loadGoals()
                 } catch (e: Exception) {
-                    android.util.Log.e("DashboardViewModel", "Error loading goals: ${e.message}", e)
+                    Log.e("DashboardViewModel", "Error loading goals: ${e.message}", e)
+                }
+                // Load recent run once user is available
+                try {
+                    fetchRecentRun()
+                } catch (e: Exception) {
+                    Log.e("DashboardViewModel", "Error loading recent run: ${e.message}", e)
                 }
             } else {
-                android.util.Log.w("DashboardViewModel", "No user data found in SharedPreferences")
+                Log.w("DashboardViewModel", "No user data found in SharedPreferences")
             }
         } catch (e: Exception) {
-            android.util.Log.e("DashboardViewModel", "Error in loadUser: ${e.message}", e)
+            Log.e("DashboardViewModel", "Error in loadUser: ${e.message}", e)
         }
     }
     
@@ -233,44 +246,44 @@ class DashboardViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val userId = _user.value?.id
-                android.util.Log.d("DashboardViewModel", "=== LOADING GOALS ===")
-                android.util.Log.d("DashboardViewModel", "User ID: $userId")
+                Log.d("DashboardViewModel", "=== LOADING GOALS ===")
+                Log.d("DashboardViewModel", "User ID: $userId")
                 if (userId != null) {
-                    android.util.Log.d("DashboardViewModel", "Fetching goals from API...")
+                    Log.d("DashboardViewModel", "Fetching goals from API...")
                     val allGoals = apiService.getGoals(userId)
-                    android.util.Log.d("DashboardViewModel", "API returned ${allGoals.size} goals")
+                    Log.d("DashboardViewModel", "API returned ${allGoals.size} goals")
                     // Filter to only show active goals on dashboard
                     val activeGoals = allGoals.filter { it.isActive && !it.isCompleted }
                     _goals.value = activeGoals
-                    android.util.Log.d("DashboardViewModel", "✅ Loaded ${activeGoals.size} active goals (${allGoals.size} total)")
+                    Log.d("DashboardViewModel", "✅ Loaded ${activeGoals.size} active goals (${allGoals.size} total)")
                     
                     // Log each goal
                     activeGoals.forEachIndexed { index, goal ->
-                        android.util.Log.d("DashboardViewModel", "Goal $index: ${goal.title} - ${goal.type}")
+                        Log.d("DashboardViewModel", "Goal $index: ${goal.title} - ${goal.type}")
                     }
                 } else {
-                    android.util.Log.w("DashboardViewModel", "❌ Cannot load goals: User ID is null")
-                    android.util.Log.w("DashboardViewModel", "User object: ${_user.value}")
+                    Log.w("DashboardViewModel", "❌ Cannot load goals: User ID is null")
+                    Log.w("DashboardViewModel", "User object: ${_user.value}")
                 }
-            } catch (e: com.google.gson.JsonSyntaxException) {
-                android.util.Log.e("DashboardViewModel", "❌ JSON parsing error loading goals: ${e.message}", e)
-                android.util.Log.e("DashboardViewModel", "Backend may have returned HTML or invalid JSON")
+            } catch (e: JsonSyntaxException) {
+                Log.e("DashboardViewModel", "❌ JSON parsing error loading goals: ${e.message}", e)
+                Log.e("DashboardViewModel", "Backend may have returned HTML or invalid JSON")
                 _goals.value = emptyList()
-            } catch (e: retrofit2.HttpException) {
+            } catch (e: HttpException) {
                 val errorBody = try {
                     e.response()?.errorBody()?.string() ?: "No error body"
                 } catch (ex: Exception) {
                     "Could not read error body"
                 }
-                android.util.Log.e("DashboardViewModel", "❌ HTTP ${e.code()} loading goals: ${e.message()}", e)
-                android.util.Log.e("DashboardViewModel", "Error body: $errorBody")
+                Log.e("DashboardViewModel", "❌ HTTP ${e.code()} loading goals: ${e.message()}", e)
+                Log.e("DashboardViewModel", "Error body: $errorBody")
                 if (e.code() == 404) {
                     // No goals yet - this is okay
                     _goals.value = emptyList()
-                    android.util.Log.d("DashboardViewModel", "No goals found (404) - setting empty list")
+                    Log.d("DashboardViewModel", "No goals found (404) - setting empty list")
                 }
             } catch (e: Exception) {
-                android.util.Log.e("DashboardViewModel", "❌ Failed to load goals: ${e.javaClass.simpleName} - ${e.message}", e)
+                Log.e("DashboardViewModel", "❌ Failed to load goals: ${e.javaClass.simpleName} - ${e.message}", e)
                 e.printStackTrace()
             }
         }
@@ -286,7 +299,7 @@ class DashboardViewModel @Inject constructor(
             Manifest.permission.ACCESS_COARSE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
         
-        android.util.Log.d("DashboardViewModel", "Location permission status: $hasPermission")
+        Log.d("DashboardViewModel", "Location permission status: $hasPermission")
         _hasLocationPermission.value = hasPermission
     }
 
@@ -320,15 +333,15 @@ class DashboardViewModel @Inject constructor(
             try {
                 val userId = _user.value?.id
                 if (userId != null) {
-                    android.util.Log.d("DashboardViewModel", "Fetching runs for user: $userId")
+                    Log.d("DashboardViewModel", "Fetching runs for user: $userId")
                     val runs = apiService.getRunsForUser(userId)
                     _recentRun.value = runs.maxByOrNull { it.startTime }
-                    android.util.Log.d("DashboardViewModel", "Fetched ${runs.size} runs, most recent: ${_recentRun.value?.id}")
+                    Log.d("DashboardViewModel", "Fetched ${runs.size} runs, most recent: ${_recentRun.value?.id}")
                 } else {
-                    android.util.Log.w("DashboardViewModel", "Cannot fetch runs: User ID is null")
+                    Log.w("DashboardViewModel", "Cannot fetch runs: User ID is null")
                 }
             } catch (e: Exception) {
-                android.util.Log.e("DashboardViewModel", "Failed to fetch recent run: ${e.message}", e)
+                Log.e("DashboardViewModel", "Failed to fetch recent run: ${e.message}", e)
             }
         }
     }
@@ -341,7 +354,7 @@ class DashboardViewModel @Inject constructor(
     fun toggleAiCoach(enabled: Boolean) {
         _isAiCoachEnabled.value = enabled
         sharedPrefs.edit().putBoolean("ai_coach_enabled", enabled).apply()
-        android.util.Log.d("DashboardViewModel", "AI Coach ${if (enabled) "enabled" else "disabled"}")
+        Log.d("DashboardViewModel", "AI Coach ${if (enabled) "enabled" else "disabled"}")
     }
 
     fun getLastRunSession(): RunSession? {

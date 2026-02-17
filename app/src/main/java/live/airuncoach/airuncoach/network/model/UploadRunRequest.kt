@@ -1,5 +1,6 @@
 package live.airuncoach.airuncoach.network.model
 
+import live.airuncoach.airuncoach.domain.model.AiCoachingNote
 import live.airuncoach.airuncoach.domain.model.KmSplit
 import live.airuncoach.airuncoach.domain.model.LocationPoint
 import live.airuncoach.airuncoach.domain.model.StrugglePoint
@@ -31,5 +32,6 @@ data class UploadRunRequest(
     val userComments: String?,
     val targetDistance: Double?,
     val targetTime: Long?,
-    val wasTargetAchieved: Boolean?
+    val wasTargetAchieved: Boolean?,
+    val aiCoachingNotes: List<AiCoachingNote>? = null
 )
