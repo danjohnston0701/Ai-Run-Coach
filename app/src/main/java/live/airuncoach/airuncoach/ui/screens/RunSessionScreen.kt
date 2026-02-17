@@ -37,6 +37,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Scaffold
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.ExploreOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,6 +53,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -82,6 +87,8 @@ import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
+import com.google.maps.android.SphericalUtil
+
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.RunSession
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
@@ -2143,55 +2150,129 @@ fun EliteRouteMap(
 ) {
     var isFullScreen by remember { mutableStateOf(false) }
     var isUserInteracting by remember { mutableStateOf(false) }
+    var compassLocked by remember { mutableStateOf(true) }
 
     val cameraPositionState = rememberCameraPositionState()
 
-    // 🔁 Auto-follow latest location
     val latestPoint = runSession?.routePoints?.lastOrNull()
 
-    LaunchedEffect(latestPoint) {
-        if (latestPoint != null && !isUserInteracting) {
-            cameraPositionState.animate(
-                update = CameraUpdateFactory.newLatLngZoom(
-                    LatLng(latestPoint.latitude, latestPoint.longitude),
-                    17f
-                ),
-                durationMs = 1000
-            )
+    val plannedRoute = remember(routePolyline) {
+        routePolyline?.let { PolyUtil.decode(it) }.orEmpty()
+    }
+
+    val turnCues = remember(plannedRoute) {
+        buildTurnCues(plannedRoute)
+    }
+
+    val arrowMarkers = remember(plannedRoute) {
+        buildArrowMarkers(plannedRoute, spacingMeters = 70.0)
+    }
+
+    val runnerLatLng = latestPoint?.let {
+        LatLng(it.latitude, it.longitude)
+    }
+
+    val navState = remember(runnerLatLng, plannedRoute, turnCues) {
+        if (runnerLatLng != null && plannedRoute.isNotEmpty())
+            computeNavState(runnerLatLng, plannedRoute, turnCues)
+        else
+            NavState()
+    }
+
+    // 🔁 Auto-follow + ⅓ bottom framing
+    LaunchedEffect(latestPoint, compassLocked) {
+        latestPoint?.let { point ->
+            if (!isUserInteracting) {
+
+                val target = LatLng(point.latitude, point.longitude)
+
+                val cameraPosition = CameraPosition.Builder()
+                    .target(target)
+                    .zoom(17f)
+                    .bearing(if (compassLocked) point.bearing ?: 0f else 0f)
+                    .tilt(45f)
+                    .build()
+
+                cameraPositionState.animate(
+                    update = CameraUpdateFactory.newCameraPosition(cameraPosition),
+                    durationMs = 1000
+                )
+            }
         }
     }
 
-    // 🧠 Detect manual map interaction
+    // Detect manual interaction
     LaunchedEffect(cameraPositionState.isMoving) {
         if (cameraPositionState.isMoving) {
             isUserInteracting = true
-
-            // Re-enable auto-follow after 8 seconds
             kotlinx.coroutines.delay(8000)
             isUserInteracting = false
         }
     }
 
+    // Turn trigger logic
+    var lastTurnIdPre by remember { mutableStateOf<Int?>(null) }
+    var lastTurnIdNow by remember { mutableStateOf<Int?>(null) }
+
+    LaunchedEffect(navState.nextTurn, navState.distanceToNextTurnM) {
+        val turn = navState.nextTurn ?: return@LaunchedEffect
+        val distance = navState.distanceToNextTurnM
+        val id = turn.routeIndex
+
+        // 100m warning
+        if (distance <= 100.0 && lastTurnIdPre != id) {
+            lastTurnIdPre = id
+
+            // 🔊 Hook into your TTS system here
+            // viewModel.speak("In 100 meters, ${turn.instruction.lowercase()}.")
+        }
+
+        // Turn now
+        if (distance <= 18.0 && lastTurnIdNow != id) {
+            lastTurnIdNow = id
+
+            // 🔊 viewModel.speak("${turn.instruction} now.")
+        }
+    }
+
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(if (isFullScreen) 500.dp else 280.dp)
+            .height(if (isFullScreen) 520.dp else 280.dp)
             .padding(horizontal = Spacing.lg)
             .clip(RoundedCornerShape(18.dp))
     ) {
 
         GoogleMap(
             modifier = Modifier.fillMaxSize(),
-            cameraPositionState = cameraPositionState
+            cameraPositionState = cameraPositionState,
+            uiSettings = com.google.maps.android.compose.MapUiSettings(
+                compassEnabled = true,
+                zoomControlsEnabled = false,
+                tiltGesturesEnabled = true,
+                rotationGesturesEnabled = true
+            )
         ) {
 
             // Planned route
-            routePolyline?.let { polyline ->
-                val routeCoordinates = PolyUtil.decode(polyline)
+            if (plannedRoute.isNotEmpty()) {
                 Polyline(
-                    points = routeCoordinates,
+                    points = plannedRoute,
                     color = Colors.primary,
                     width = 10f
+                )
+            }
+
+// 🔁 Direction arrows along route
+            arrowMarkers.forEach { (pos, heading) ->
+                Marker(
+                    state = MarkerState(position = pos),
+                    title = null,
+                    // Optional: use arrow icon if you have one
+                    // icon = BitmapDescriptorFactory.fromResource(R.drawable.map_arrow_small),
+                    flat = true,
+                    rotation = heading
                 )
             }
 
@@ -2207,7 +2288,7 @@ fun EliteRouteMap(
                         width = 12f
                     )
 
-                    session.routePoints.lastOrNull()?.let {
+                    latestPoint?.let {
                         Marker(
                             state = MarkerState(
                                 position = LatLng(it.latitude, it.longitude)
@@ -2219,7 +2300,56 @@ fun EliteRouteMap(
             }
         }
 
-        // 🔘 Fullscreen toggle
+        // 🧭 Next Turn Overlay (Top Center)
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 12.dp)
+        ) {
+            NextTurnOverlay(nav = navState)
+        }
+
+
+        // 🔘 Recenter Button
+        FloatingActionButton(
+            onClick = {
+                isUserInteracting = false
+            },
+            containerColor = Colors.primary,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+                .size(56.dp)
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.icon_navigation_vector),
+                contentDescription = "Recenter",
+                tint = Colors.backgroundRoot
+            )
+        }
+
+        // 🔄 Compass Lock Toggle
+        IconButton(
+            onClick = { compassLocked = !compassLocked },
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(12.dp)
+                .background(
+                    Colors.backgroundSecondary.copy(alpha = 0.85f),
+                    CircleShape
+                )
+        ) {
+            Icon(
+                imageVector = if (compassLocked)
+                    Icons.Filled.Explore
+                else
+                    Icons.Filled.ExploreOff,
+                contentDescription = "Compass Lock",
+                tint = Colors.textPrimary
+            )
+        }
+
+        // 🔘 Fullscreen Toggle
         IconButton(
             onClick = { isFullScreen = !isFullScreen },
             modifier = Modifier
@@ -2245,94 +2375,232 @@ fun EliteRouteMap(
 }
 
 
-@Composable
-fun MapSection(
-    showMap: Boolean,
-    onToggleMap: () -> Unit,
-    interactionEnabled: Boolean,
-    cameraPositionState: CameraPositionState,
-    runSession: RunSession?,
-    routePolyline: String?
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Spacing.md)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
-                .background(Colors.backgroundSecondary)
-                .clickable(enabled = interactionEnabled, onClick = onToggleMap)
-                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(
-                    painter = painterResource(id = R.drawable.icon_navigation_vector),
-                    contentDescription = "Navigation",
-                    tint = Colors.primary,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = if (showMap) "HIDE MAP" else "SHOW MAP",
-                    style = AppTextStyles.body,
-                    color = Colors.textPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
+/* =====================================================================================
+   MAP - DATA MODELS & HELPERS
+===================================================================================== */
+
+
+private data class TurnCue(
+    val routeIndex: Int,          // index in route list
+    val position: LatLng,         // where the turn occurs
+    val deltaDegrees: Double,     // signed heading change
+    val instruction: String       // "Turn left", "Turn right", etc.
+)
+
+private data class NavState(
+    val nextTurn: TurnCue? = null,
+    val distanceToNextTurnM: Double = Double.POSITIVE_INFINITY
+)
+
+private fun normalize180(deg: Double): Double {
+    var d = deg
+    while (d > 180) d -= 360
+    while (d < -180) d += 360
+    return d
+}
+
+private fun classifyTurn(deltaDeg: Double): String {
+    val a = kotlin.math.abs(deltaDeg)
+    return when {
+        a < 20 -> "Continue straight"
+        deltaDeg > 0 -> { // right turn (clockwise heading increase)
+            when {
+                a < 45 -> "Bear right"
+                a < 120 -> "Turn right"
+                else -> "Sharp right"
             }
-            Icon(
-                painter = painterResource(id = if (showMap) R.drawable.icon_chevron_up_vector else R.drawable.icon_chevron_down_vector),
-                contentDescription = if (showMap) "Collapse" else "Expand",
-                tint = Colors.textPrimary,
-                modifier = Modifier.size(20.dp)
-            )
         }
-
-        AnimatedVisibility(
-            visible = showMap,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut()
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(300.dp)
-                    .clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp))
-            ) {
-                GoogleMap(
-                    modifier = Modifier.fillMaxSize(),
-                    cameraPositionState = cameraPositionState
-                ) {
-                    // Planned route
-                    routePolyline?.let { polyline ->
-                        val routeCoordinates = PolyUtil.decode(polyline)
-                        Polyline(points = routeCoordinates, color = Colors.primary, width = 8f)
-                    }
-
-                    // Actual path
-                    runSession?.let { session ->
-                        val actualPathLatLngs = session.routePoints.map { LatLng(it.latitude, it.longitude) }
-                        if (actualPathLatLngs.isNotEmpty()) {
-                            Polyline(points = actualPathLatLngs, color = Color(0xFF10B981), width = 10f)
-                        }
-
-                        session.routePoints.lastOrNull()?.let {
-                            Marker(
-                                state = MarkerState(position = LatLng(it.latitude, it.longitude)),
-                                title = "Current Location",
-                                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
-                            )
-                        }
-                    }
-                }
+        else -> { // left turn
+            when {
+                a < 45 -> "Bear left"
+                a < 120 -> "Turn left"
+                else -> "Sharp left"
             }
         }
     }
 }
+
+/**
+ * Turn detection:
+ * - Walk route points
+ * - Compute heading changes
+ * - If change exceeds threshold, record a turn cue at that vertex
+ */
+private fun buildTurnCues(
+    route: List<LatLng>,
+    minTurnAngleDeg: Double = 28.0,
+    minSpacingMeters: Double = 35.0
+): List<TurnCue> {
+    if (route.size < 5) return emptyList()
+
+    val cues = mutableListOf<TurnCue>()
+    var lastCuePos: LatLng? = null
+
+    for (i in 2 until route.size - 2) {
+        val p0 = route[i - 2]
+        val p1 = route[i]
+        val p2 = route[i + 2]
+
+        val h1 = SphericalUtil.computeHeading(p0, p1)   // -180..180
+        val h2 = SphericalUtil.computeHeading(p1, p2)
+
+        val delta = normalize180(h2 - h1)
+        val absDelta = kotlin.math.abs(delta)
+
+        if (absDelta >= minTurnAngleDeg) {
+            val pos = route[i]
+            val tooClose = lastCuePos?.let { SphericalUtil.computeDistanceBetween(it, pos) < minSpacingMeters } ?: false
+            if (!tooClose) {
+                val instr = classifyTurn(delta)
+                cues += TurnCue(
+                    routeIndex = i,
+                    position = pos,
+                    deltaDegrees = delta,
+                    instruction = instr
+                )
+                lastCuePos = pos
+            }
+        }
+    }
+
+    return cues
+}
+
+/**
+ * Find the closest route index to current position.
+ * This is O(n) but usually fine for typical route lengths.
+ * (Later you can optimize by searching near lastIndex.)
+ */
+private fun closestRouteIndex(
+    current: LatLng,
+    route: List<LatLng>
+): Int {
+    var bestIdx = 0
+    var bestDist = Double.POSITIVE_INFINITY
+
+    for (i in route.indices) {
+        val d = SphericalUtil.computeDistanceBetween(current, route[i])
+        if (d < bestDist) {
+            bestDist = d
+            bestIdx = i
+        }
+    }
+    return bestIdx
+}
+
+/**
+ * Pick the next turn cue whose routeIndex is ahead of the runner (by index).
+ */
+private fun computeNavState(
+    current: LatLng,
+    route: List<LatLng>,
+    cues: List<TurnCue>
+): NavState {
+    if (route.isEmpty() || cues.isEmpty()) return NavState()
+
+    val idx = closestRouteIndex(current, route)
+    val next = cues.firstOrNull { it.routeIndex > idx } ?: return NavState()
+
+    val dist = SphericalUtil.computeDistanceBetween(current, next.position)
+    return NavState(nextTurn = next, distanceToNextTurnM = dist)
+}
+
+/**
+ * Arrow markers along route: place markers every N meters.
+ */
+private fun buildArrowMarkers(
+    route: List<LatLng>,
+    spacingMeters: Double = 70.0
+): List<Pair<LatLng, Float>> {
+    if (route.size < 2) return emptyList()
+
+    val markers = mutableListOf<Pair<LatLng, Float>>()
+    var carry = 0.0
+
+    for (i in 0 until route.size - 1) {
+        val a = route[i]
+        val b = route[i + 1]
+        val segDist = SphericalUtil.computeDistanceBetween(a, b)
+        val heading = SphericalUtil.computeHeading(a, b).toFloat()
+
+        var t = (spacingMeters - carry) / segDist
+        while (t in 0.0..1.0) {
+            val pos = SphericalUtil.interpolate(a, b, t)
+            markers += pos to heading
+            t += spacingMeters / segDist
+        }
+
+        // update carry
+        val used = (segDist - ((1.0 - ((spacingMeters - carry) / segDist)).coerceIn(0.0, 1.0) * segDist)).coerceAtLeast(0.0)
+        val remainder = segDist % spacingMeters
+        carry = if (segDist + carry >= spacingMeters) remainder else carry + segDist
+    }
+
+    return markers
+}
+
+/* =====================================================================================
+   MAP - NEXT TURN HUD OVERLAY COMPOSABLE
+===================================================================================== */
+
+@Composable
+private fun NextTurnOverlay(
+    nav: NavState,
+    modifier: Modifier = Modifier
+) {
+    val turn = nav.nextTurn ?: return
+    val dist = nav.distanceToNextTurnM
+
+    // If straight, no arrow needed — but you can still show instruction.
+    val show = dist.isFinite() && dist <= 350.0
+    if (!show) return
+
+    // Use signed delta to rotate a "straight arrow" into left/right feel.
+    // If you have dedicated turn-left/turn-right assets, swap icons instead.
+    val rotation = when {
+        turn.instruction.contains("left", ignoreCase = true) -> -90f
+        turn.instruction.contains("right", ignoreCase = true) -> 90f
+        else -> 0f
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Colors.backgroundSecondary.copy(alpha = 0.88f))
+            .padding(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+
+            Icon(
+                painter = painterResource(id = R.drawable.icon_navigation_vector), // replace with a big arrow icon if you have it
+                contentDescription = null,
+                tint = Colors.primary,
+                modifier = Modifier
+                    .size(28.dp)
+                    .graphicsLayer { rotationZ = rotation }
+            )
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = turn.instruction,
+                    style = AppTextStyles.body,
+                    color = Colors.textPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "${dist.toInt()} m",
+                    style = AppTextStyles.caption,
+                    color = Colors.textMuted
+                )
+            }
+        }
+    }
+}
+
 
 /* =====================================================================================
    HELPERS / HEURISTICS (safe placeholders until you wire real Garmin signals)

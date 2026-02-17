@@ -3555,8 +3555,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         weatherImpact: weatherImpactData,
       });
       
+      // Map the briefing text to 'text' field for client compatibility
+      // Also generate TTS audio if we have text
+      const briefingText = briefing.briefing;
+      
+      // Generate TTS audio for the briefing
+      const audioBuffer = briefingText ? await aiService.generateTTS(briefingText, mapCoachVoice(coachGender, coachAccent, coachTone)) : null;
+      
       res.json({
-        ...briefing,
+        audio: audioBuffer ? audioBuffer.toString('base64') : null,
+        format: audioBuffer ? 'mp3' : null,
+        voice: mapCoachVoice(coachGender, coachAccent, coachTone),
+        text: briefingText,
         wellness,
         garminConnected: Object.keys(wellness).length > 0,
       });

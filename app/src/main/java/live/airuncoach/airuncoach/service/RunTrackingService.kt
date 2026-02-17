@@ -355,7 +355,8 @@ class RunTrackingService : Service(), SensorEventListener {
             timestamp = location.time,
             speed = location.speed.takeIf { location.hasSpeed() },
             altitude = location.altitude.takeIf { location.hasAltitude() },
-            heartRate = null
+            heartRate = null,
+            bearing = location.bearing.takeIf { location.hasBearing() }
         )
 
         if (routePoints.isNotEmpty()) {
