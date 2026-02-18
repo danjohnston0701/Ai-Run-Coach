@@ -175,7 +175,6 @@ fun MapMyRunSetupScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(bottom = 104.dp) // space for bottom CTA
-                .imePadding() // Auto-scroll to keep text fields visible when keyboard opens
         ) {
 
             item {

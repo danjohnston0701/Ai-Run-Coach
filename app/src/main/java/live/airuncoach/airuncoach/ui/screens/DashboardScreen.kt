@@ -111,7 +111,6 @@ fun DashboardScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Colors.backgroundRoot)
-            .imePadding() // Auto-scroll to keep text fields visible when keyboard opens
             .padding(vertical = Spacing.lg)
     ) {
         // Active Run Banner (if run is in progress)
