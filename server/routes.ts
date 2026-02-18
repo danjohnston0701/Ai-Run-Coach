@@ -444,14 +444,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/runs/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
+      console.log(`[GET /api/runs/${req.params.id}] Fetching run for user: ${req.user?.userId}`);
       const run = await storage.getRun(req.params.id);
       if (!run) {
+        console.error(`[GET /api/runs/${req.params.id}] Run NOT FOUND in database`);
         return res.status(404).json({ error: "Run not found" });
       }
+      console.log(`[GET /api/runs/${req.params.id}] Run found - userId: ${run.userId}, distance: ${run.distanceInMeters}`);
       const transformedRun = transformRunForAndroid(run);
       res.json(transformedRun);
     } catch (error: any) {
-      console.error("Get run error:", error);
+      console.error("[GET /api/runs/:id] Get run error:", error);
       res.status(500).json({ error: "Failed to get run" });
     }
   });
@@ -492,11 +495,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       
       // Create run with TSS
+      console.log(`[POST /api/runs] Creating run for user: ${userId}`);
       const run = await storage.createRun({
         ...processedRunData,
         userId,
         tss,
       });
+      console.log(`[POST /api/runs] Run created successfully with ID: ${run.id}`);
       
       // Update fitness metrics asynchronously (don't block response)
       if (run.completedAt && tss > 0) {
@@ -505,7 +510,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           : run.completedAt;
         const runDate = completedAtDate.toISOString().split('T')[0];
         updateDailyFitness(userId, runDate, tss).catch(err => {
-          console.error("Failed to update fitness metrics:", err);
+          console.error("Error updating daily fitness:", err.message || err);
         });
       }
       

@@ -80,10 +80,11 @@ class RunSummaryViewModel @Inject constructor(
                 
                 _isLoadingRun.value = false
             } catch (e: Exception) {
-                val errorMsg = if (e.message?.contains("401") == true || e.message?.contains("Unauthorized") == true) {
-                    "Session expired. Please log in again."
-                } else {
-                    e.message ?: "Failed to load run data"
+                val errorMsg = when {
+                    e.message?.contains("404") == true -> "Run not found. It may have been deleted or not saved properly."
+                    e.message?.contains("401") == true || e.message?.contains("Unauthorized") == true -> "Session expired. Please log in again."
+                    e.message?.contains("network") == true -> "Network error. Please check your connection."
+                    else -> e.message ?: "Failed to load run data"
                 }
                 _loadError.value = errorMsg
                 _isLoadingRun.value = false
