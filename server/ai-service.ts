@@ -872,6 +872,33 @@ RUN (No planned route):
     wellnessContext += `\n- Overall Readiness: ${wellness.readinessScore}/100`;
   }
   
+  // Build readiness guidance based on score
+  let readinessGuidance = '';
+  if (wellness.readinessScore !== undefined) {
+    const score = wellness.readinessScore;
+    if (score >= 90) {
+      readinessGuidance = `
+READINESS COACHING GUIDANCE (use this to personalize the readinessInsight):
+- Score 90-100: They are fully charged and primed for an excellent run! Encourage them to push for a strong performance. Suggest they can aim for their target pace or even slightly faster if feeling great.
+- Example: "Your body is fully recovered and ready to crush it! This is a great day to chase a personal best or really push the pace."`;
+    } else if (score >= 70) {
+      readinessGuidance = `
+READINESS COACHING GUIDANCE (use this to personalize the readinessInsight):
+- Score 70-89: They are in good shape for a solid run. Encourage balanced pacing - they can push but should stay within themselves.
+- Example: "You're in good shape today. Great conditions for a quality run. Stick to your target pace and you'll have a strong session."`;
+    } else if (score >= 50) {
+      readinessGuidance = `
+READINESS COACHING GUIDANCE (use this to personalize the readinessInsight):
+- Score 50-69: They are looking a bit tired or under-recovered. Recommend starting slow and easing into the run. Focus on feeling good rather than pace.
+- Example: "Your body is showing some fatigue today. Let's start at an easy pace and build into it. Don't worry about pace - focus on how you feel."`;
+    } else {
+      readinessGuidance = `
+READINESS COACHING GUIDANCE (use this to personalize the readinessInsight):
+- Score below 50: They are significantly under-recovered. Recommend a very easy, recovery-focused run or considering a rest day.
+- Example: "Your body needs recovery today. Consider an easy walk or very light jog, or even a rest day. Listen to your body - there's no shame in taking it easy."`;
+    }
+  }
+  
   const prompt = `You are ${coachName}, an AI running coach. Your coaching style is ${coachTone}.
 
 Generate a personalized pre-run briefing that considers the runner's current wellness state from their Garmin data.
@@ -879,6 +906,7 @@ ${routeInfo}
 - ${weatherInfo}
 
 CURRENT WELLNESS STATUS (from Garmin):${wellnessContext || '\n- No wellness data available'}
+${readinessGuidance}
 
 Based on this data, provide:
 1. A brief personalized briefing (2-3 sentences) that acknowledges their current state
