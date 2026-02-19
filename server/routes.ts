@@ -3633,9 +3633,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Enhanced pre-run briefing with TTS audio
+  // Uses AI-powered generateWellnessAwarePreRunBriefing() for intelligent, personalized content,
+  // then generates OpenAI TTS audio from the AI response. Best of both worlds.
   app.post("/api/coaching/pre-run-briefing-audio", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { text, distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, hasRoute, activityType, weather: clientWeather, targetPace, wellness: clientWellness, turnInstructions, startLocation } = req.body;
+      const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, hasRoute, activityType, 
+              weather: clientWeather, targetPace, targetTime, wellness: clientWellness, 
+              turnInstructions, startLocation } = req.body;
       
       // Get user's coach settings
       const user = await storage.getUser(req.user!.userId);
@@ -3644,7 +3648,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const coachAccent = user?.coachAccent || 'british';
       const coachName = user?.coachName || 'Coach';
       const voice = mapCoachVoice(coachGender, coachAccent, coachTone);
-      const toneForPersonality = normalizeCoachTone(coachTone);
       
       // Fetch weather if not provided
       let weather = clientWeather;
@@ -3667,8 +3670,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Fetch wellness data if not provided
-      let wellnessData = clientWellness;
-      if (!wellnessData) {
+      let wellnessData: any = clientWellness || {};
+      if (!clientWellness) {
         try {
           const today = new Date().toISOString().split('T')[0];
           const todayWellness = await db.query.garminWellnessMetrics.findFirst({
@@ -3690,237 +3693,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
-      // Street abbreviation expander
-      const expandStreetAbbreviations = (text: string): string => {
-        const abbreviations: Record<string, string> = {
-          'St': 'Street', 'Rd': 'Road', 'Ave': 'Avenue', 'Blvd': 'Boulevard',
-          'Dr': 'Drive', 'Ln': 'Lane', 'Ct': 'Court', 'Pl': 'Place',
-          'Cir': 'Circle', 'Pkwy': 'Parkway', 'Hwy': 'Highway', 'Trl': 'Trail',
-          'Ter': 'Terrace', 'Way': 'Way', 'Sq': 'Square', 'Cres': 'Crescent',
-          'Pde': 'Parade', 'Esp': 'Esplanade', 'Cl': 'Close', 'Gr': 'Grove',
-        };
-        let result = text;
-        for (const [abbr, full] of Object.entries(abbreviations)) {
-          // Match abbreviations at word boundaries (end of words or before comma/period)
-          result = result.replace(new RegExp(`\\b${abbr}\\b(?=[,.]|\\s|$)`, 'g'), full);
+      // Fetch weather impact data
+      let weatherImpact: any;
+      if (startLocation?.lat && startLocation?.lng) {
+        try {
+          weatherImpact = await analyzeWeatherImpact(
+            startLocation.lat,
+            startLocation.lng,
+            distance || 5
+          );
+        } catch (e) {
+          console.log('Weather impact analysis failed');
         }
-        return result;
-      };
-      
-      // Get personality variations based on tone
-      const getPersonalityOpener = () => {
-        const openers: Record<string, string[]> = {
-          energetic: [
-            "Alright, let's do this!",
-            "Hey champion, time to crush it!",
-            "Get ready to feel amazing!",
-            "This is going to be epic!",
-          ],
-          calm: [
-            "Take a deep breath, we're about to begin.",
-            "Let's flow into this run together.",
-            "Center yourself, and let's go.",
-          ],
-          motivational: [
-            "Today is YOUR day!",
-            "Every step makes you stronger!",
-            "You've got this, believe in yourself!",
-          ],
-          professional: [
-            "Let me brief you on today's session.",
-            "Here's your route analysis.",
-            "Your session overview follows.",
-          ],
-          friendly: [
-            "Hey there! Ready for some fun?",
-            "Good to see you lacing up!",
-            "Let's make this a great one!",
-          ],
-        };
-        const toneOpeners = openers[toneForPersonality] || openers.energetic;
-        return toneOpeners[Math.floor(Math.random() * toneOpeners.length)];
-      };
-      
-      const getPersonalityCloser = () => {
-        const closers: Record<string, string[]> = {
-          energetic: [
-            "Now let's GO! Show me what you've got!",
-            "Time to light it up! Let's crush this!",
-            "You're going to absolutely smash it!",
-          ],
-          calm: [
-            "Trust your training. Enjoy the journey.",
-            "Move with grace. The run is yours.",
-            "Find your rhythm and flow.",
-          ],
-          motivational: [
-            "Remember why you started. Now finish strong!",
-            "You're capable of amazing things. Prove it today!",
-            "This is your moment. Own it!",
-          ],
-          professional: [
-            "Execute the plan. Good luck.",
-            "Stay focused on your targets. You're prepared.",
-            "Follow the strategy. Strong finish ahead.",
-          ],
-          friendly: [
-            "Have fun out there! Enjoy every step!",
-            "Make some great memories! See you at the finish!",
-            "Go enjoy yourself! You've earned this!",
-          ],
-        };
-        const toneClosers = closers[toneForPersonality] || closers.energetic;
-        return toneClosers[Math.floor(Math.random() * toneClosers.length)];
-      };
-      
-      // Build comprehensive briefing text if not provided
-      let briefingText = text;
-      
-      if (!briefingText) {
-        const parts: string[] = [];
-        
-        // Personality opener
-        parts.push(getPersonalityOpener());
-        
-        // Distance with personality
-        if (distance) {
-          if (toneForPersonality === 'energetic') {
-            parts.push(`We've got ${distance.toFixed(1)} kilometres ahead!`);
-          } else if (toneForPersonality === 'calm') {
-            parts.push(`Today's ${activityType === 'walk' ? 'walk' : 'run'} covers ${distance.toFixed(1)} kilometres.`);
-          } else if (toneForPersonality === 'motivational') {
-            parts.push(`${distance.toFixed(1)} kilometres of opportunity await you!`);
-          } else {
-            parts.push(`Today's ${activityType === 'walk' ? 'walk' : 'run'} is ${distance.toFixed(1)} kilometres.`);
-          }
-        }
-        
-        // Enhanced elevation insights with max incline (only when route is known)
-        if (hasRoute) {
-          if (elevationGain && elevationGain > 0) {
-            const elevLoss = elevationLoss || elevationGain;
-            const maxIncline = maxGradientDegrees ? Math.round(maxGradientDegrees) : 0;
-            const inclineText = maxIncline > 0 ? ` The steepest section reaches ${maxIncline} degrees.` : '';
-            
-            if (elevationGain > 150) {
-              parts.push(`This is a challenging course with ${Math.round(elevationGain)} metres of climbing and ${Math.round(elevLoss)} metres of descent.${inclineText} Pace yourself on the uphills and use the downhills to recover. Save some energy for the bigger climbs.`);
-            } else if (elevationGain > 100) {
-              parts.push(`Expect ${Math.round(elevationGain)} metres of climbing with ${Math.round(elevLoss)} metres of descent.${inclineText} There are some challenging hills ahead. Shorten your stride on the climbs and lean slightly forward.`);
-            } else if (elevationGain > 50) {
-              parts.push(`You'll encounter ${Math.round(elevationGain)} metres of gentle elevation gain.${inclineText} Some rolling terrain ahead, nothing too demanding.`);
-            } else if (elevationGain > 20) {
-              parts.push(`Mostly flat with minor undulations of about ${Math.round(elevationGain)} metres total gain.${inclineText}`);
-            } else {
-              parts.push(`This route is essentially flat. Great for maintaining a consistent pace.`);
-            }
-          } else {
-            parts.push(`This is a flat route. Perfect for steady pacing.`);
-          }
-        }
-        
-        // Weather
-        if (weather) {
-          const temp = weather.temp || weather.temperature;
-          const condition = weather.condition?.toLowerCase() || '';
-          const windSpeed = weather.windSpeed || 0;
-          
-          if (condition.includes('rain')) {
-            parts.push(`It's ${temp} degrees with rain. Wear waterproof layers and watch for slippery surfaces.`);
-          } else if (condition.includes('cloud')) {
-            parts.push(`It's ${temp} degrees and overcast. Good conditions for running.`);
-          } else if (condition.includes('sun') || condition.includes('clear')) {
-            parts.push(`It's ${temp} degrees and sunny. Stay hydrated and consider sun protection.`);
-          } else {
-            parts.push(`Current temperature is ${temp} degrees.`);
-          }
-          
-          if (windSpeed > 20) {
-            parts.push(`Strong winds at ${windSpeed} kilometres per hour. Use it to your advantage on downwind sections.`);
-          } else if (windSpeed > 10) {
-            parts.push(`Light wind at ${windSpeed} kilometres per hour.`);
-          }
-        }
-        
-        // Target pace
-        if (targetPace) {
-          parts.push(`Your target pace is ${targetPace}.`);
-        }
-        
-        // Wellness data
-        const wellnessData = clientWellness || {};
-        if (wellnessData.readinessScore) {
-          if (wellnessData.readinessScore >= 80) {
-            parts.push(`Your body readiness is excellent at ${wellnessData.readinessScore}. You're primed for a great session.`);
-          } else if (wellnessData.readinessScore >= 60) {
-            parts.push(`Body readiness is ${wellnessData.readinessScore}. You're in good shape for this run.`);
-          } else if (wellnessData.readinessScore >= 40) {
-            parts.push(`Body readiness is ${wellnessData.readinessScore}. Consider taking it a bit easier today.`);
-          } else {
-            parts.push(`Body readiness is low at ${wellnessData.readinessScore}. Listen to your body and don't push too hard.`);
-          }
-        }
-        
-        if (wellnessData.bodyBattery) {
-          if (wellnessData.bodyBattery >= 70) {
-            parts.push(`Body battery is at ${wellnessData.bodyBattery}%. You've got plenty of energy.`);
-          } else if (wellnessData.bodyBattery >= 40) {
-            parts.push(`Body battery is at ${wellnessData.bodyBattery}%. Pace yourself wisely.`);
-          } else {
-            parts.push(`Body battery is low at ${wellnessData.bodyBattery}%. Consider a lighter effort.`);
-          }
-        }
-        
-        // First 2 navigation instructions (excluding waypoints less than 5m apart)
-        if (turnInstructions && Array.isArray(turnInstructions) && turnInstructions.length > 0) {
-          if (toneForPersonality === 'energetic') {
-            parts.push(`Here's your game plan to get started!`);
-          } else if (toneForPersonality === 'calm') {
-            parts.push(`Let me guide you through the first few turns.`);
-          } else {
-            parts.push(`Here's how to get started.`);
-          }
-          
-          // Filter out waypoints less than 5m apart and take only first 2
-          let waypointCount = 0;
-          let lastDistance = -5; // Start at -5 so first waypoint at 0m is included
-          
-          for (const turn of turnInstructions) {
-            // Skip waypoints less than 5m from the previous one
-            if (turn.distance - lastDistance < 5) continue;
-            
-            // Only include first 2 waypoints
-            if (waypointCount >= 2) break;
-            
-            const distanceText = turn.distance >= 1000 
-              ? `${(turn.distance / 1000).toFixed(1)} kilometres`
-              : `${Math.round(turn.distance)} metres`;
-            
-            // Expand street abbreviations for natural speech
-            const rawInstruction = turn.instruction || 'Continue on the route';
-            const instruction = expandStreetAbbreviations(rawInstruction);
-            parts.push(`In ${distanceText}, ${instruction}.`);
-            
-            lastDistance = turn.distance;
-            waypointCount++;
-          }
-        }
-        
-        // Personality-based motivational close
-        parts.push(getPersonalityCloser());
-        
-        briefingText = parts.join(' ');
       }
       
-      // Generate TTS audio
       const aiService = await import("./ai-service");
-      const audioBuffer = await aiService.generateTTS(briefingText, voice);
-      const base64Audio = audioBuffer.toString('base64');
       
+      // Use the AI-powered briefing function for intelligent, personalized content
+      const aiBriefing = await aiService.generateWellnessAwarePreRunBriefing({
+        distance: distance || 5,
+        elevationGain: elevationGain || 0,
+        difficulty: difficulty || 'unknown',
+        activityType: activityType || 'run',
+        weather,
+        coachName,
+        coachTone,
+        wellness: wellnessData,
+        hasRoute: hasRoute || false,
+        targetTime: targetTime || null,
+        targetPace: targetPace || null,
+        weatherImpact,
+      });
+      
+      // Build natural speech text from AI response
+      const speechParts: string[] = [];
+      if (aiBriefing.briefing) speechParts.push(aiBriefing.briefing);
+      if (aiBriefing.intensityAdvice) speechParts.push(aiBriefing.intensityAdvice);
+      // Include warnings if any
+      if (aiBriefing.warnings && aiBriefing.warnings.length > 0) {
+        speechParts.push(aiBriefing.warnings.join('. '));
+      }
+      const speechText = speechParts.join(' ');
+      
+      // Generate OpenAI TTS audio from AI-generated text
+      let base64Audio: string | null = null;
+      try {
+        const audioBuffer = await aiService.generateTTS(speechText, voice);
+        base64Audio = audioBuffer.toString('base64');
+      } catch (ttsError) {
+        console.warn("Pre-run briefing TTS failed, returning text only:", ttsError);
+      }
+      
+      // Return both structured AI fields AND audio
       res.json({
+        // AI-generated structured fields (for on-screen display)
+        briefing: aiBriefing.briefing,
+        intensityAdvice: aiBriefing.intensityAdvice,
+        warnings: aiBriefing.warnings,
+        readinessInsight: aiBriefing.readinessInsight,
+        weatherAdvantage: aiBriefing.weatherAdvantage,
+        // OpenAI TTS audio
         audio: base64Audio,
         format: 'mp3',
         voice,
-        text: briefingText,
+        // Combined text for fallback
+        text: speechText,
       });
     } catch (error: any) {
       console.error("Pre-run briefing audio error:", error);
