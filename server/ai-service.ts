@@ -1127,7 +1127,7 @@ function buildEnhancedCoachingSystemPrompt(context: EnhancedCoachingContext): st
   return prompt;
 }
 
-function getHeartRateZone(hr: number, maxHr: number): number {
+function getHeartRateZoneNumber(hr: number, maxHr: number): number {
   const percent = (hr / maxHr) * 100;
   if (percent < 60) return 1;
   if (percent < 70) return 2;
@@ -1151,7 +1151,7 @@ export async function generateHeartRateCoaching(params: {
 }): Promise<string> {
   const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes, coachName, coachTone, wellness } = params;
   
-  const currentZone = getHeartRateZone(currentHR, maxHR);
+  const currentZone = getHeartRateZoneNumber(currentHR, maxHR);
   const percentMax = Math.round((currentHR / maxHR) * 100);
   
   const zoneNames = ['', 'Recovery', 'Aerobic', 'Tempo', 'Threshold', 'Maximum'];
