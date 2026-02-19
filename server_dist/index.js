@@ -1758,20 +1758,30 @@ READINESS COACHING GUIDANCE (use this to personalize the readinessInsight):
   }
   const prompt = `You are ${coachName}, an AI running coach. Your coaching style is ${coachTone}.
 
-Generate a personalized pre-run briefing that considers the runner's current wellness state from their Garmin data.
+Generate a personalized pre-run briefing for an upcoming run.
 ${routeInfo}
 - ${weatherInfo}
+${weatherAdvantage}
 
 CURRENT WELLNESS STATUS (from Garmin):${wellnessContext || "\n- No wellness data available"}
 ${readinessGuidance}
 
 Based on this data, provide:
-1. A brief personalized briefing (2-3 sentences) that acknowledges their current state
-2. Specific intensity advice based on their readiness/recovery - if they have a target pace, advise what pace to aim for
-3. Any warnings if their wellness indicators suggest caution
-4. A readiness insight explaining how their body data affects today's run
+1. "briefing": A personalized pre-run briefing (4-5 sentences). You MUST include these specific details:
+   - The planned distance: "${distance?.toFixed(1) || "5.0"}km"
+   ${weather && weather.temp !== void 0 ? `- The weather: "${weather.temp || weather.temperature}\xB0C and ${weather.condition || "clear"}"` : "- Weather data is not available, do not mention weather"}
+   ${targetPace ? `- Their target pace: "${targetPace}/km"` : "- No target pace set, suggest they run at a comfortable effort"}
+   ${targetTime ? `- Their target time: "${Math.floor((targetTime || 0) / 60)}:${((targetTime || 0) % 60).toString().padStart(2, "0")}"` : ""}
+   - Their wellness/recovery state if Garmin data is available above
+   ${weatherAdvantage ? "- The weather advantage noted above" : ""}
+   Include the actual numbers - do NOT give a vague or generic briefing.
+2. "intensityAdvice": Specific intensity advice. ${targetPace ? `They are targeting ${targetPace}/km - say whether to stick to it, go easier, or push harder based on their wellness.` : "Suggest an appropriate effort level based on their wellness."}
+3. "warnings": Array of any warnings if their wellness indicators suggest caution. Empty array if none.
+4. "readinessInsight": How their body data affects today's run.
 
-CRITICAL: For runs marked "RUN (No planned route)" - do NOT mention terrain, elevation, hills, flat, or any route characteristics. This is a free run with NO planned path. Only mention distance, time goals, and current weather/wellness.
+CRITICAL RULES:
+- For runs marked "RUN (No planned route)" - do NOT mention terrain, elevation, hills, flat, or any route characteristics.
+- Include the specific distance, pace, and time numbers in the briefing text. The runner wants to hear their actual plan confirmed.
 
 Respond as JSON with fields: briefing, intensityAdvice, warnings (array), readinessInsight`;
   try {
@@ -1781,7 +1791,7 @@ Respond as JSON with fields: briefing, intensityAdvice, warnings (array), readin
         { role: "system", content: `You are ${coachName}, a ${coachTone} running coach who uses biometric data for personalized coaching. Respond only with valid JSON. ${toneDirective(coachTone)}` },
         { role: "user", content: prompt }
       ],
-      max_tokens: 400,
+      max_tokens: 600,
       temperature: 0.7
     });
     const content = completion.choices[0].message.content || "{}";
@@ -9395,6 +9405,7 @@ async function registerRoutes(app2) {
   app2.post("/api/coaching/pre-run-briefing", authMiddleware, async (req, res) => {
     try {
       const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, hasRoute, activityType, targetTime, targetPace, weather } = req.body;
+      console.log(`[Pre-run briefing] Request data - distance: ${distance}, targetTime: ${targetTime}, targetPace: ${targetPace}, hasRoute: ${hasRoute}, weather: ${JSON.stringify(weather)}`);
       const user = await storage.getUser(req.user.userId);
       const coachName = user?.coachName || "Coach";
       const coachTone = user?.coachTone || "encouraging";

@@ -1,0 +1,31 @@
+what TTS process created the pre run summary?
+
+Thoday it was really dull and had no data for distance, target time, target pace, weather....
+
+2026-02-20 06:43:49.948 24470-24642 RetrofitClient          live.airuncoach.airuncoach           D  📡 Response from /api/coaching/pre-run-briefing: 200
+2026-02-20 06:43:49.951 24470-24470 RunSessionViewModel     live.airuncoach.airuncoach           D  Pre-run briefing response - audio: //PkxABirDnsA1nQAFOJBaJ5acuOwe2oeY55yRG8sDkFHzDLM9, format: mp3, text: Hey there, champ! You're feeling a bit under-recovered today. Let's ease into this run and focus on 
+2026-02-20 06:43:49.951 24470-24470 RunSessionViewModel     live.airuncoach.airuncoach           D  Playing OpenAI TTS audio (mp3)
+2026-02-20 06:43:49.964 24470-24470 MediaPlayer-JNI         live.airuncoach.airuncoach           V  native_setup
+2026-02-20 06:43:49.964 24470-24470 MediaPlayerNative       live.airuncoach.airuncoach           V  constructor
+2026-02-20 06:43:49.967 24470-24470 AudioSystem             live.airuncoach.airuncoach           D  onNewServiceWithAdapter: media.audio_flinger service obtained 0xb400006fd9cbbf30
+2026-02-20 06:43:49.967 24470-24470 AudioSystem             live.airuncoach.airuncoach           D  getService: checking for service media.audio_flinger: 0xb400007049c91270
+2026-02-20 06:43:49.967 24470-24470 MediaPlayerNative       live.airuncoach.airuncoach           V  setListener
+2026-02-20 06:43:49.967 24470-24470 MediaPlayer-JNI         live.airuncoach.airuncoach           V  get_session_id()
+2026-02-20 06:43:49.968 24470-24470 MediaPlayer-JNI         live.airuncoach.airuncoach           V  setParameter: key 1400
+2026-02-20 06:43:49.968 24470-24470 MediaPlayerNative       live.airuncoach.airuncoach           V  MediaPlayer::setParameter(1400)
+2026-02-20 06:43:49.973 24470-24470 MediaPlayer-JNI         live.airuncoach.airuncoach           V  setDataSourceFD: fd 160
+2026-02-20 06:43:49.973 24470-24470 MediaPlayerNative       live.airuncoach.airuncoach           V  setDataSource(160, 0, 576460752303423487)
+2026-02-20 06:43:49.975  2372-20755 MediaPlayerService      mediaserver                          V  Create new client(1122) from AttributionSourceState{pid: 24470, uid: 10548, deviceId: 0, packageName: live.airuncoach.airuncoach, attributionTag: (null), token: binder:0xb400007d065d4a80, renouncedPermissions: [], next: []}, 
+2026-02-20 06:43:49.976  2372-20755 MediaPlayerService      mediaserver                          V  setDataSource fd=24 (/data/data/live.airuncoach.airuncoach/cache/tts_audio1822908498012102310.mp3), offset=0, length=576460752303423487
+2026-02-20 06:43:49.981 24470-24470 MediaPlayerNative       live.airuncoach.airuncoach           V  setVideoSurfaceTexture
+2026-02-20 06:43:49.981 24470-24470 MediaPlayerNative       live.airuncoach.airuncoach           V  prepare
+2026-02-20 06:43:49.996 24470-24483 MediaPlayerNative       live.airuncoach.airuncoach           V  message received msg=200, ext1=10973, ext2=0
+2026-02-20 06:43:49.996 24470-24483 MediaPlayerNative       live.airuncoach.airuncoach           W  info/warning (10973, 0)
+2026-02-20 06:43:49.997 24470-24487 MediaPlayerNative       live.airuncoach.airuncoach           V  message received msg=1, ext1=0, ext2=0
+2026-02-20 06:43:49.997 24470-24487 MediaPlayerNative       live.airuncoach.airuncoach           V  MediaPlayer::notify() prepared
+2026-02-20 06:43:49.997 24470-24487 MediaPlayerNative       live.airuncoach.airuncoach           V  signal application thread
+2026-02-20 06:43:49.997 24470-24470 MediaPlayerNative       live.airuncoach.airuncoach           V  prepare complete - status=0
+2026-02-20 06:43:49.997 24470-24470 MediaPlayerNative       live.airuncoach.airuncoach           V  invoke 80
+2026-02-20 06:43:49.998 24470-24470 MediaPlayerNative       live.airuncoach.airuncoach           V  invoke 76
+2026-02-20 06:43:50.000 24470-24470 MediaPlayer-JNI         live.airuncoach.airuncoach           V  start
+2026-02-20 06:43:50.000 24470-24470 MediaPlayerNative       live.airuncoach.airuncoach           V  start

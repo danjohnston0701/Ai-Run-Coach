@@ -3509,6 +3509,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, hasRoute, activityType, targetTime, targetPace, weather } = req.body;
 
+      console.log(`[Pre-run briefing] Request data - distance: ${distance}, targetTime: ${targetTime}, targetPace: ${targetPace}, hasRoute: ${hasRoute}, weather: ${JSON.stringify(weather)}`);
+
       // Get user's coach settings
       const user = await storage.getUser(req.user!.userId);
       const coachName = user?.coachName || 'Coach';
