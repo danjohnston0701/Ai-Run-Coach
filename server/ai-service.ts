@@ -361,6 +361,103 @@ Give a brief (1-2 sentences) supportive message to help them through this tough 
   return completion.choices[0].message.content || "I can see you're working hard. Take a breath and find your rhythm again.";
 }
 
+// Cadence/Stride Coaching - analyzes overstriding/understriding
+type StrideZone = 'OVERSTRIDING' | 'UNDERSTRIDING' | 'OPTIMAL';
+
+export async function generateCadenceCoaching(params: {
+  cadence: number;
+  strideLength: number;
+  strideZone: StrideZone;
+  currentPace: string;
+  speed: number;
+  distance: number;
+  elapsedTime: number;
+  heartRate?: number;
+  userHeight?: number;
+  userWeight?: number;
+  userAge?: number;
+  optimalCadenceMin: number;
+  optimalCadenceMax: number;
+  optimalStrideLengthMin: number;
+  optimalStrideLengthMax: number;
+  coachName?: string;
+  coachTone?: string;
+}): Promise<string> {
+  const { cadence, strideLength, strideZone, currentPace, speed, distance, elapsedTime,
+    heartRate, userHeight, userWeight, userAge,
+    optimalCadenceMin, optimalCadenceMax, optimalStrideLengthMin, optimalStrideLengthMax,
+    coachName = 'Coach', coachTone = 'energetic' } = params;
+  
+  const strideCm = Math.round(strideLength * 100);
+  const optMinCm = Math.round(optimalStrideLengthMin * 100);
+  const optMaxCm = Math.round(optimalStrideLengthMax * 100);
+  const timeMin = Math.floor(elapsedTime / 60000);
+  
+  let physicalContext = '';
+  if (userHeight) physicalContext += `Runner height: ${userHeight > 3 ? userHeight : (userHeight * 100).toFixed(0)}cm. `;
+  if (userWeight) physicalContext += `Weight: ${userWeight}kg. `;
+  if (userAge) physicalContext += `Age: ${userAge}. `;
+  
+  let zoneAnalysis = '';
+  if (strideZone === 'OVERSTRIDING') {
+    zoneAnalysis = `OVERSTRIDING DETECTED: Cadence ${cadence} spm with stride length ${strideCm}cm — this is above the optimal range of ${optMinCm}-${optMaxCm}cm for their height.
+
+Overstriding means their foot is landing too far ahead of their center of mass, creating a braking force with each step. This:
+- Increases impact on knees and shins (injury risk)
+- Wastes energy fighting the braking force
+- Reduces running efficiency
+
+The runner needs to SHORTEN their stride and INCREASE their cadence. Provide elite-level coaching on HOW to do this:
+1. Focus on landing with foot beneath hips, not out front
+2. Think "quick, light steps" — aim for ${optimalCadenceMin}-${optimalCadenceMax} spm
+3. Lean slightly forward from ankles (not waist)
+4. Imagine running on hot coals — minimize ground contact time
+5. Arms drive the cadence — quicker arms = quicker feet`;
+  } else if (strideZone === 'UNDERSTRIDING') {
+    zoneAnalysis = `UNDERSTRIDING DETECTED: Cadence ${cadence} spm with stride length ${strideCm}cm — their cadence is too low for their pace of ${currentPace}/km.
+
+Understriding means they're shuffling with too-short steps at a low turnover rate. This:
+- Wastes energy on vertical oscillation (bouncing up and down)
+- Reduces forward propulsion
+- Can cause calf and Achilles fatigue
+
+The runner needs to find a more efficient cadence. Provide coaching on HOW to increase cadence:
+1. Use a mental metronome — aim for ${optimalCadenceMin}-${optimalCadenceMax} steps per minute
+2. Push off more powerfully from the balls of their feet
+3. Drive knees forward (not up) with each stride
+4. Keep arms pumping actively — they set the rhythm
+5. Think "smooth and powerful" not "short and choppy"`;
+  } else {
+    zoneAnalysis = `Cadence ${cadence} spm with stride ${strideCm}cm is in the optimal zone. Brief positive reinforcement.`;
+  }
+  
+  const prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
+
+${zoneAnalysis}
+
+Runner Data:
+- Current cadence: ${cadence} spm
+- Stride length: ${strideCm}cm (optimal range: ${optMinCm}-${optMaxCm}cm)
+- Current pace: ${currentPace}/km
+- Distance: ${distance.toFixed(1)}km, time: ${timeMin} minutes
+${heartRate ? `- Heart rate: ${heartRate} bpm` : ''}
+${physicalContext}
+
+Give a coaching message (3-4 sentences). First, tell them their cadence and stride length. Then explain what ${strideZone === 'OPTIMAL' ? 'this means (good form!)' : `${strideZone.toLowerCase()} means and why it matters`}. Finally, give ${strideZone === 'OPTIMAL' ? 'brief encouragement to maintain it' : '2-3 specific, actionable technique tips they can apply RIGHT NOW during this run'}. Be specific with numbers. No emojis.`;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: `You are ${coachName}, an elite ${coachTone} running biomechanics coach. You specialize in cadence optimization and stride analysis. Give specific, actionable technique coaching — tell the runner exactly what to change and how. Reference actual numbers. No emojis. Keep it to 3-4 sentences that can be spoken in under 20 seconds.` },
+      { role: "user", content: prompt }
+    ],
+    max_tokens: 200,
+    temperature: 0.7,
+  });
+
+  return completion.choices[0].message.content || `Your cadence is ${cadence} steps per minute with a stride length of ${strideCm}cm. ${strideZone === 'OVERSTRIDING' ? 'Try shortening your stride and landing under your hips.' : strideZone === 'UNDERSTRIDING' ? 'Try picking up your cadence with quicker, more powerful steps.' : 'Great form, keep it up!'}`;
+}
+
 export async function generatePreRunSummary(routeData: any, weatherData: any): Promise<any> {
   const prompt = `Generate a pre-run coaching summary for this route:
 Route:

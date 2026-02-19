@@ -3888,6 +3888,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Cadence/Stride Coaching with TTS - analyzes overstriding/understriding
+  app.post("/api/coaching/cadence-coaching", async (req: Request, res: Response) => {
+    try {
+      const aiService = await import("./ai-service");
+      const message = await aiService.generateCadenceCoaching(req.body);
+      
+      // Generate TTS audio with user's voice settings (resilient - falls back to text-only)
+      let base64Audio: string | null = null;
+      try {
+        const { coachGender, coachAccent, coachTone } = req.body;
+        const voice = mapCoachVoice(coachGender, coachAccent, coachTone);
+        const audioBuffer = await aiService.generateTTS(message, voice);
+        base64Audio = audioBuffer.toString('base64');
+      } catch (ttsError) {
+        console.warn("Cadence coaching TTS failed, returning text only:", ttsError);
+      }
+      
+      res.json({ 
+        message,
+        audio: base64Audio,
+        format: 'mp3'
+      });
+    } catch (error: any) {
+      console.error("Cadence coaching error:", error);
+      res.status(500).json({ error: "Failed to get cadence coaching" });
+    }
+  });
+
   // Phase Coaching with TTS
   app.post("/api/coaching/phase-coaching", async (req: Request, res: Response) => {
     try {
