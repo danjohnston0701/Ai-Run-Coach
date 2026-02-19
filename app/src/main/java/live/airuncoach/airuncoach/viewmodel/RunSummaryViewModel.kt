@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.domain.model.*
 import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.service.RunTrackingService
 import live.airuncoach.airuncoach.network.model.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -59,7 +60,9 @@ class RunSummaryViewModel @Inject constructor(
     private var targetTime: Long? = null
 
     /**
-     * Load run by ID from backend API
+     * Load run by ID from backend API.
+     * Falls back to local run data from RunTrackingService if the backend fetch fails
+     * (e.g. 404 after a failed upload, or NumberFormatException from date parsing).
      */
     fun loadRunById(runId: String) {
         viewModelScope.launch {
@@ -80,15 +83,29 @@ class RunSummaryViewModel @Inject constructor(
                 
                 _isLoadingRun.value = false
             } catch (e: Exception) {
-                val errorMsg = when {
-                    e.message?.contains("404") == true -> "Run not found. It may have been deleted or not saved properly."
-                    e.message?.contains("401") == true || e.message?.contains("Unauthorized") == true -> "Session expired. Please log in again."
-                    e.message?.contains("network") == true -> "Network error. Please check your connection."
-                    else -> e.message ?: "Failed to load run data"
+                Log.w("RunSummaryViewModel", "Backend fetch failed for run $runId, trying local data", e)
+                
+                // Fallback: try to use the local run data from RunTrackingService
+                val localSession = RunTrackingService.currentRunSession?.value
+                if (localSession != null && localSession.distance > 0) {
+                    Log.d("RunSummaryViewModel", "Using local run data (distance: ${localSession.distance}m)")
+                    _runSession.value = localSession
+                    _strugglePoints.value = localSession.strugglePoints.ifEmpty { inferStrugglePointsFromSplits(localSession) }
+                    _userPostRunComments.value = localSession.userComments.orEmpty()
+                    _analysisState.value = AiAnalysisState.Idle
+                    _isLoadingRun.value = false
+                } else {
+                    // No local data available either - show error
+                    val errorMsg = when {
+                        e.message?.contains("404") == true -> "Run not found. It may have been deleted or not saved properly."
+                        e.message?.contains("401") == true || e.message?.contains("Unauthorized") == true -> "Session expired. Please log in again."
+                        e.message?.contains("network") == true -> "Network error. Please check your connection."
+                        else -> e.message ?: "Failed to load run data"
+                    }
+                    _loadError.value = errorMsg
+                    _isLoadingRun.value = false
+                    Log.e("RunSummaryViewModel", "Error loading run (no local fallback): $errorMsg", e)
                 }
-                _loadError.value = errorMsg
-                _isLoadingRun.value = false
-                Log.e("RunSummaryViewModel", "Error loading run: $errorMsg", e)
             }
         }
     }

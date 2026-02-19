@@ -3,6 +3,11 @@ package live.airuncoach.airuncoach.network
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import com.google.gson.*
+import com.google.gson.reflect.TypeToken
+import com.google.gson.stream.JsonReader
+import com.google.gson.stream.JsonToken
+import com.google.gson.stream.JsonWriter
 import live.airuncoach.airuncoach.BuildConfig
 import live.airuncoach.airuncoach.data.SessionManager
 import okhttp3.Cookie
@@ -11,7 +16,105 @@ import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.TimeUnit
+
+/**
+ * Custom Gson TypeAdapterFactory that intercepts Long fields and handles
+ * both numeric timestamps AND ISO 8601 date strings like "1970-01-01T00:00:05.493Z".
+ *
+ * This is needed because the backend sometimes returns ISO date strings for
+ * fields that the Android model expects as Long (epoch millis).
+ *
+ * Uses TypeAdapterFactory (not registerTypeAdapter) so it works with both
+ * Kotlin primitive long and boxed java.lang.Long fields.
+ */
+class IsoDateLongAdapterFactory : TypeAdapterFactory {
+    override fun <T> create(gson: Gson, type: TypeToken<T>): TypeAdapter<T>? {
+        // Only intercept Long types (both primitive and boxed)
+        if (type.rawType != Long::class.java && type.rawType != java.lang.Long::class.java) {
+            return null
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        return object : TypeAdapter<T>() {
+            override fun write(out: JsonWriter, value: T?) {
+                if (value == null) {
+                    out.nullValue()
+                } else {
+                    out.value(value as Long)
+                }
+            }
+
+            override fun read(reader: JsonReader): T? {
+                if (reader.peek() == JsonToken.NULL) {
+                    reader.nextNull()
+                    @Suppress("UNCHECKED_CAST")
+                    return null as T?
+                }
+
+                return when (reader.peek()) {
+                    JsonToken.NUMBER -> {
+                        @Suppress("UNCHECKED_CAST")
+                        reader.nextLong() as T
+                    }
+                    JsonToken.STRING -> {
+                        val dateStr = reader.nextString()
+                        @Suppress("UNCHECKED_CAST")
+                        parseIsoDateToLong(dateStr) as T
+                    }
+                    else -> {
+                        reader.skipValue()
+                        @Suppress("UNCHECKED_CAST")
+                        0L as T
+                    }
+                }
+            }
+        } as TypeAdapter<T>
+    }
+
+    private fun parseIsoDateToLong(dateStr: String): Long {
+        // Try parsing as a plain number first
+        try {
+            return dateStr.toLong()
+        } catch (_: NumberFormatException) { /* not a number, try date formats */ }
+
+        // Normalize: remove extra spaces (e.g. "1970-01-01 T00:00:05.493Z" -> "1970-01-01T00:00:05.493Z")
+        val normalized = dateStr.replace(" T", "T").replace("  ", " ").trim()
+
+        // Try multiple ISO 8601 formats
+        val formats = listOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+            "yyyy-MM-dd'T'HH:mm:ssZ",
+            "yyyy-MM-dd HH:mm:ss"
+        )
+
+        for (format in formats) {
+            try {
+                val sdf = SimpleDateFormat(format, Locale.US)
+                sdf.timeZone = TimeZone.getTimeZone("UTC")
+                val date = sdf.parse(normalized)
+                if (date != null) {
+                    return date.time
+                }
+            } catch (_: Exception) { /* try next format */ }
+        }
+
+        Log.w("IsoDateLongAdapter", "Could not parse date string: $dateStr, returning 0")
+        return 0L
+    }
+}
+
+/** Shared Gson instance configured with the ISO date adapter for all Retrofit clients */
+private fun createGsonWithDateAdapter(): Gson {
+    return GsonBuilder()
+        .registerTypeAdapterFactory(IsoDateLongAdapterFactory())
+        .create()
+}
 
 class PersistentCookieJar(private val context: Context) : CookieJar {
     private val cookieStore = mutableMapOf<String, List<Cookie>>()
@@ -131,7 +234,7 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
         
         val retrofit = Retrofit.Builder()
             .baseUrl(baseUrl)
-            .addConverterFactory(GsonConverterFactory.create())
+            .addConverterFactory(GsonConverterFactory.create(createGsonWithDateAdapter()))
             .client(okHttpClient)
             .build()
 
@@ -178,11 +281,11 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
                 // Determine base URL - ALWAYS use production for Garmin (OAuth requires consistent callback URLs)
                 val baseUrl = "https://ai-run-coach.replit.app"
                 
-                // Build Retrofit
+                // Build Retrofit with custom Gson that handles ISO date strings in Long fields
                 val retrofit = Retrofit.Builder()
                     .client(client)
                     .baseUrl(baseUrl)
-                    .addConverterFactory(GsonConverterFactory.create())
+                    .addConverterFactory(GsonConverterFactory.create(createGsonWithDateAdapter()))
                     .build()
                     
                 INSTANCE = retrofit.create(ApiService::class.java)

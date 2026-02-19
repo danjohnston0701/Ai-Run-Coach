@@ -28,6 +28,7 @@ import live.airuncoach.airuncoach.network.model.WellnessPayload
 import live.airuncoach.airuncoach.network.model.WeatherPayload
 import live.airuncoach.airuncoach.service.RunTrackingService
 import live.airuncoach.airuncoach.utils.AudioPlayerHelper
+import live.airuncoach.airuncoach.utils.CoachingAudioQueue
 import live.airuncoach.airuncoach.utils.SpeechRecognizerHelper
 import live.airuncoach.airuncoach.utils.SpeechState
 import live.airuncoach.airuncoach.utils.SpeechStatus
@@ -110,6 +111,18 @@ class RunSessionViewModel @Inject constructor(
                 }
             }
         }
+
+        // Listen for coaching text updates from the service (for on-screen display)
+        viewModelScope.launch {
+            RunTrackingService.latestCoachingText.collect { text ->
+                if (text != null) {
+                    _runState.update { it.copy(latestCoachMessage = text) }
+                } else if (_runState.value.isRunning) {
+                    // Clear coaching text when audio finishes (but only during run)
+                    _runState.update { it.copy(latestCoachMessage = "") }
+                }
+            }
+        }
     }
 
     private fun loadUser() {
@@ -170,7 +183,7 @@ class RunSessionViewModel @Inject constructor(
                 )}
                 
                 // Add timeout to prevent hanging
-                withTimeout(15000) { // 15 second timeout
+                withTimeout(30000) { // 30 second timeout (audio endpoint generates LLM text + OpenAI TTS)
                     
                     // Get route data from runConfig if available
                     val route = runConfig?.route
@@ -255,33 +268,31 @@ class RunSessionViewModel @Inject constructor(
                     val briefing = apiService.getPreRunBriefing(request)
                     
                     // Debug: Log what we received from the API
-                    Log.d("RunSessionViewModel", "Pre-run briefing response - audio: ${briefing.audio?.take(50)}, format: ${briefing.format}, text: ${briefing.text?.take(100)}")
+                    Log.d("RunSessionViewModel", "Pre-run briefing response - audio: ${briefing.audio?.take(50)}, format: ${briefing.format}, briefing: ${briefing.briefing?.take(100)}")
                     
-                    // Update UI with briefing text (use empty string if null)
-                    val briefingText = briefing.text ?: ""
+                    // Build full display text from structured AI response
+                    val displayText = briefing.getFullBriefingText()
+                    val speechText = briefing.getSpeechText()
+
                     _runState.update { it.copy(
-                        coachText = briefingText,
-                        latestCoachMessage = briefingText,
+                        coachText = displayText,
+                        latestCoachMessage = displayText,
                         isLoadingBriefing = false
                     )}
                     
-                    // Play OpenAI TTS audio if available and not muted - with guard against duplicates
+                    // Enqueue pre-run briefing audio via shared queue (prevents overlap)
                     if (!isBriefingAudioPlaying && !_runState.value.isMuted) {
                         isBriefingAudioPlaying = true
-                        if (briefing.audio != null && briefing.format != null) {
-                            Log.d("RunSessionViewModel", "Playing OpenAI TTS audio (${briefing.format})")
-                            audioPlayerHelper.playAudio(briefing.audio, briefing.format) {
+                        CoachingAudioQueue.enqueue(
+                            context = context,
+                            base64Audio = briefing.audio,
+                            format = briefing.format,
+                            fallbackText = speechText,
+                            onComplete = {
                                 isBriefingAudioPlaying = false
-                                // Clear coach text after audio completes, ready for next prompt
                                 _runState.update { it.copy(coachText = "") }
                             }
-                        } else {
-                            Log.d("RunSessionViewModel", "Falling back to Android TTS")
-                            textToSpeechHelper.speak(briefing.text)
-                            isBriefingAudioPlaying = false
-                            // Clear coach text after TTS completes (immediate in this case)
-                            _runState.update { it.copy(coachText = "") }
-                        }
+                        )
                     } else if (_runState.value.isMuted) {
                         Log.d("RunSessionViewModel", "Audio muted - skipping playback")
                     }
@@ -292,6 +303,7 @@ class RunSessionViewModel @Inject constructor(
             } catch (e: TimeoutCancellationException) {
                 Log.w("RunSessionViewModel", "Pre-run briefing timed out")
                 isBriefingAudioPlaying = false
+                isPrepareRunInProgress = false
                 _runState.update { 
                     it.copy(
                         coachText = "Ready to run! Tap Start when you're ready.",
@@ -301,6 +313,7 @@ class RunSessionViewModel @Inject constructor(
             } catch (e: Exception) {
                 Log.e("RunSessionViewModel", "Failed to get pre-run briefing", e)
                 isBriefingAudioPlaying = false
+                isPrepareRunInProgress = false
                 _runState.update { 
                     it.copy(
                         coachText = "Ready to run! Tap Start when you're ready.",
@@ -327,6 +340,27 @@ class RunSessionViewModel @Inject constructor(
                     coachText = "Target: ${config.targetDistance} km. Ready to start!"
                 )}
             }
+        }
+    }
+
+    /**
+     * Start a simulated 5km run for testing all AI coaching features.
+     * Triggers the real coaching pipeline with fake GPS/HR/cadence data.
+     * Only available in debug builds.
+     */
+    fun startSimulatedRun() {
+        // Let the pre-run briefing continue playing
+        _runState.update { it.copy(isRunning = true) }
+
+        try {
+            val intent = Intent(context, RunTrackingService::class.java).apply {
+                action = RunTrackingService.ACTION_START_SIMULATION
+                putExtra(RunTrackingService.EXTRA_TARGET_DISTANCE, 5000.0)
+                putExtra(RunTrackingService.EXTRA_TARGET_TIME, 22 * 60 * 1000L) // 22 min
+            }
+            context.startForegroundService(intent)
+        } catch (e: Exception) {
+            Log.e("RunSessionViewModel", "Failed to start simulation", e)
         }
     }
 

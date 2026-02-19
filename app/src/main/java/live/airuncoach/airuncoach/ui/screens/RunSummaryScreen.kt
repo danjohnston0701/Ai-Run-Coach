@@ -76,6 +76,7 @@ import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.KmSplit
 import live.airuncoach.airuncoach.domain.model.LocationPoint
 import live.airuncoach.airuncoach.domain.model.RunSession
+import live.airuncoach.airuncoach.domain.model.StrugglePoint
 import live.airuncoach.airuncoach.domain.model.WeatherData
 import live.airuncoach.airuncoach.network.model.BasicRunInsights
 import live.airuncoach.airuncoach.network.model.ComprehensiveRunAnalysis
@@ -117,6 +118,7 @@ fun RunSummaryScreenFlagship(
     val isLoadingRun by viewModel.isLoadingRun.collectAsState()
     val loadError by viewModel.loadError.collectAsState()
     val userPostRunComments by viewModel.userPostRunComments.collectAsState()
+    val strugglePoints by viewModel.strugglePoints.collectAsState()
     val isAdmin = viewModel.isAdminUser()
 
     val context = LocalContext.current
@@ -173,6 +175,7 @@ fun RunSummaryScreenFlagship(
                             run = runSession!!,
                             lastRunForDelta = lastRunForDelta,
                             analysisState = analysisState,
+                            strugglePoints = strugglePoints,
                             comments = userPostRunComments,
                             onCommentsChange = viewModel::updatePostRunComments,
                             onGenerateAi = { viewModel.generateAIAnalysis() },
@@ -312,6 +315,7 @@ private fun SummaryTabFlagship(
     run: RunSession,
     lastRunForDelta: RunSession?,
     analysisState: AiAnalysisState,
+    strugglePoints: List<StrugglePoint> = emptyList(),
     comments: String,
     onCommentsChange: (String) -> Unit,
     onGenerateAi: () -> Unit,
@@ -351,6 +355,24 @@ private fun SummaryTabFlagship(
         item {
             if (run.kmSplits.isNotEmpty()) {
                 KmSplitsCardFlagship(run.kmSplits)
+            }
+        }
+
+        // Struggle Point Analysis
+        if (strugglePoints.isNotEmpty()) {
+            item {
+                Text(
+                    text = "Struggle Points",
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.textPrimary
+                )
+                Spacer(modifier = Modifier.height(Spacing.sm))
+                strugglePoints.forEachIndexed { index, point ->
+                    StrugglePointRow(point = point, index = index + 1)
+                    if (index < strugglePoints.size - 1) {
+                        Spacer(modifier = Modifier.height(Spacing.sm))
+                    }
+                }
             }
         }
 
@@ -2276,4 +2298,48 @@ private fun buildPaceSeriesVico2(
     }
 
     return LabeledSeries(x, y, labels)
+}
+
+/* ============================ STRUGGLE POINT ROW ============================ */
+
+@Composable
+private fun StrugglePointRow(point: StrugglePoint, index: Int) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(Spacing.md)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Struggle #$index",
+                    style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.warning
+                )
+                Text(
+                    text = String.format(Locale.US, "%.1f km", point.distanceMeters / 1000.0),
+                    style = AppTextStyles.caption,
+                    color = Colors.textMuted
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Pace dropped ${String.format(Locale.US, "%.0f%%", point.paceDropPercent)} " +
+                       "(${point.paceAtStruggle} vs ${point.baselinePace})",
+                style = AppTextStyles.caption,
+                color = Colors.textSecondary
+            )
+            if (point.heartRate != null && point.heartRate > 0) {
+                Text(
+                    text = "Heart rate: ${point.heartRate} bpm",
+                    style = AppTextStyles.caption,
+                    color = Colors.textMuted
+                )
+            }
+        }
+    }
 }

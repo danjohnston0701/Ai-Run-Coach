@@ -180,7 +180,8 @@ fun RunSessionScreen(
                 onPause = { showPauseConfirm = true },
                 onResume = { viewModel.resumeRun() },
                 onStop = { showStopConfirm = true },
-                onCancel = onCancel
+                onCancel = onCancel,
+                onSimulate = { viewModel.startSimulatedRun() }
             )
         }
 
@@ -1861,7 +1862,8 @@ fun ControlButtons(
     onPause: () -> Unit,
     onResume: () -> Unit,
     onStop: () -> Unit,
-    onCancel: () -> Unit = {}
+    onCancel: () -> Unit = {},
+    onSimulate: (() -> Unit)? = null
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1949,6 +1951,27 @@ fun ControlButtons(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Start Run",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.backgroundRoot
+                    )
+                }
+            }
+
+            // Simulate Run button (debug builds only)
+            if (onSimulate != null && live.airuncoach.airuncoach.BuildConfig.DEBUG) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onSimulate,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Colors.warning
+                    ),
+                    shape = RoundedCornerShape(24.dp)
+                ) {
+                    Text(
+                        text = "Simulate 5km Run",
                         style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
                         color = Colors.backgroundRoot
                     )

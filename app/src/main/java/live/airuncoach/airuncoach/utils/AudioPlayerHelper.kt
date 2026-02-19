@@ -169,11 +169,23 @@ class AudioPlayerHelper(private val context: Context) {
      */
     fun stop() {
         currentJob?.cancel()
-        mediaPlayer?.apply {
-            if (isPlaying) {
-                stop()
+        try {
+            mediaPlayer?.apply {
+                try {
+                    if (isPlaying) {
+                        stop()
+                    }
+                } catch (e: IllegalStateException) {
+                    Log.w("AudioPlayerHelper", "MediaPlayer in invalid state during stop", e)
+                }
+                try {
+                    release()
+                } catch (e: Exception) {
+                    Log.w("AudioPlayerHelper", "Error releasing MediaPlayer", e)
+                }
             }
-            release()
+        } catch (e: Exception) {
+            Log.w("AudioPlayerHelper", "Error stopping audio", e)
         }
         mediaPlayer = null
     }

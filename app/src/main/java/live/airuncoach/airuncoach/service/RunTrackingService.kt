@@ -36,6 +36,8 @@ import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.network.model.*
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.data.UserPreferences
+import live.airuncoach.airuncoach.utils.CoachingAudioQueue
+import live.airuncoach.airuncoach.utils.RunSimulator
 import live.airuncoach.airuncoach.utils.TextToSpeechHelper
 import live.airuncoach.airuncoach.utils.AudioPlayerHelper
 import live.airuncoach.airuncoach.domain.model.User
@@ -75,6 +77,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private var isMuted = false // User can mute coach
     private var lastCoachingTime: Long = 0 // Cooldown between coaching events
     private val COACHING_COOLDOWN_MS = 30_000L // 30 second minimum gap between coaching
+    private var hasCoachingFiredThisTick = false // Only one coaching trigger per location update
     
     // Run data
     private var targetDistance: Double? = null // For mapped runs
@@ -114,6 +117,17 @@ class RunTrackingService : Service(), SensorEventListener {
     private var maxHr: Int = 0
     private var lastHrCoachingTime: Long = 0
     private var lastHrCoachingMinute: Int = -1
+
+    // Cadence/stride coaching
+    private var lastCadenceCoachingTime: Long = 0
+    private var hasCadenceCoachingFired = false
+    private var lastStrideZone: String = "OPTIMAL"
+    private var baselineCadence: Int = 0
+    private var cadenceSamplesForBaseline: Int = 0
+    private val recentStrideLengths = mutableListOf<Double>()
+
+    // Simulation mode
+    private var isSimulating = false
     
     // Weather and terrain
     private var weatherAtStart: WeatherData? = null
@@ -143,6 +157,7 @@ class RunTrackingService : Service(), SensorEventListener {
         const val ACTION_STOP_TRACKING = "ACTION_STOP_TRACKING"
         const val ACTION_PAUSE_TRACKING = "ACTION_PAUSE_TRACKING"
         const val ACTION_RESUME_TRACKING = "ACTION_RESUME_TRACKING"
+        const val ACTION_START_SIMULATION = "ACTION_START_SIMULATION"
         const val EXTRA_TARGET_DISTANCE = "EXTRA_TARGET_DISTANCE"
         const val EXTRA_TARGET_TIME = "EXTRA_TARGET_TIME"
         const val EXTRA_HAS_ROUTE = "EXTRA_HAS_ROUTE"
@@ -156,6 +171,10 @@ class RunTrackingService : Service(), SensorEventListener {
         
         private val _uploadComplete = MutableStateFlow<String?>(null) // Backend run ID when upload completes
         val uploadComplete: StateFlow<String?> = _uploadComplete
+
+        // Coaching text broadcast to UI (set when coaching plays, cleared when audio finishes)
+        private val _latestCoachingText = MutableStateFlow<String?>(null)
+        val latestCoachingText: StateFlow<String?> = _latestCoachingText
     }
 
     override fun onCreate() {
@@ -178,6 +197,9 @@ class RunTrackingService : Service(), SensorEventListener {
         
         // Initialize Audio Player for OpenAI TTS
         audioPlayerHelper = AudioPlayerHelper(this)
+
+        // Initialize the shared audio queue (handles both OpenAI TTS and device TTS fallback)
+        CoachingAudioQueue.init(this)
         
         // Load user profile for coach settings
         serviceScope.launch {
@@ -207,6 +229,7 @@ class RunTrackingService : Service(), SensorEventListener {
             ACTION_STOP_TRACKING -> stopTracking()
             ACTION_PAUSE_TRACKING -> pauseTracking()
             ACTION_RESUME_TRACKING -> resumeTracking()
+            ACTION_START_SIMULATION -> startSimulation()
         }
         return START_STICKY
     }
@@ -264,6 +287,13 @@ class RunTrackingService : Service(), SensorEventListener {
         lastStepTimestamp = 0
         baselinePace = 0f
         paceHistory.clear()
+        hasCadenceCoachingFired = false
+        lastCadenceCoachingTime = 0
+        lastStrideZone = "OPTIMAL"
+        baselineCadence = 0
+        cadenceSamplesForBaseline = 0
+        recentStrideLengths.clear()
+        hasCoachingFiredThisTick = false
         lastStruggleTriggerTime = 0
         isStruggling = false
         strugglePointsList.clear()
@@ -297,6 +327,101 @@ class RunTrackingService : Service(), SensorEventListener {
                 Log.e("RunTrackingService", "Failed to fetch weather", e)
             }
         }
+    }
+
+    // ==================== SIMULATION MODE ====================
+
+    private fun startSimulation() {
+        if (isTracking || isSimulating) return
+        isSimulating = true
+
+        // Start like a normal run
+        startTracking()
+
+        // Feed simulated locations
+        val simulator = RunSimulator()
+        serviceScope.launch {
+            while (isSimulating && isTracking) {
+                val point = simulator.nextPoint()
+                if (point == null) {
+                    // Simulation complete
+                    Log.d("RunTrackingService", "Simulation complete, stopping")
+                    withContext(Dispatchers.Main) { stopTracking() }
+                    break
+                }
+                currentHeartRate = point.heartRate
+                currentCadence = point.cadence
+                withContext(Dispatchers.Main) { onNewLocation(point.location) }
+                delay(simulator.tickIntervalMs)
+            }
+        }
+    }
+
+    // ==================== STRIDE ANALYSIS (shared by all coaching triggers) ====================
+
+    data class StrideSnapshot(
+        val cadence: Int,
+        val strideLength: Double, // metres
+        val strideZone: String, // "OPTIMAL", "OVERSTRIDING", "UNDERSTRIDING"
+        val optimalMin: Double,
+        val optimalMax: Double,
+        val terrainContext: String, // "flat", "uphill", "downhill"
+        val isFatigued: Boolean
+    )
+
+    private fun getCurrentStrideAnalysis(): StrideSnapshot? {
+        if (currentCadence <= 0) return null
+
+        val currentSpeed = if (routePoints.size >= 2) {
+            val last = routePoints.last()
+            val prev = routePoints[routePoints.size - 2]
+            val timeDelta = (last.timestamp - prev.timestamp) / 1000.0
+            if (timeDelta > 0) {
+                val dist = calculateDistance(prev, last)
+                dist / timeDelta
+            } else 0.0
+        } else 0.0
+
+        if (currentSpeed <= 0.5) return null // Too slow to calculate
+
+        val strideLength = currentSpeed / (currentCadence / 60.0)
+        recentStrideLengths.add(strideLength)
+        if (recentStrideLengths.size > 30) recentStrideLengths.removeAt(0)
+
+        // Height-based optimal stride range (or use default 1.70m)
+        val heightM = (currentUser?.height?.toDouble() ?: 170.0) / 100.0
+        val optimalMin = heightM * 0.35
+        val optimalMax = heightM * 0.45
+
+        // Terrain context
+        val grade = calculateAverageGradient().toDouble()
+        val terrain = when {
+            grade > UPHILL_GRADE_THRESHOLD -> "uphill"
+            grade < DOWNHILL_GRADE_THRESHOLD -> "downhill"
+            else -> "flat"
+        }
+
+        // Stride zone with terrain adjustment
+        val zone = when {
+            terrain == "uphill" -> "OPTIMAL" // Shorter strides uphill are natural
+            strideLength > heightM * 0.50 -> "OVERSTRIDING"
+            strideLength > optimalMax -> "OVERSTRIDING"
+            currentCadence < 155 && terrain == "flat" -> "UNDERSTRIDING"
+            currentCadence < 160 && terrain == "flat" && currentSpeed > 2.78 -> "UNDERSTRIDING" // faster than 6:00/km
+            else -> "OPTIMAL"
+        }
+
+        // Fatigue detection: cadence drops > 8 spm from baseline on flat terrain
+        val isFatigued = baselineCadence > 0 && terrain == "flat" && (baselineCadence - currentCadence) > 8
+
+        // Build baseline from first 2km
+        if (totalDistance < 2000 && currentCadence > 0) {
+            baselineCadence = if (cadenceSamplesForBaseline == 0) currentCadence
+            else ((baselineCadence.toLong() * cadenceSamplesForBaseline + currentCadence) / (cadenceSamplesForBaseline + 1)).toInt()
+            cadenceSamplesForBaseline++
+        }
+
+        return StrideSnapshot(currentCadence, strideLength, zone, optimalMin, optimalMax, terrain, isFatigued)
     }
 
     private fun requestLocationUpdates() {
@@ -464,14 +589,26 @@ class RunTrackingService : Service(), SensorEventListener {
         
         val phase = determinePhase(displayDistance / 1000.0, targetDistance)
         
-        // Check for phase changes and trigger coaching
+        // Reset per-tick flag - only one coaching trigger fires per location update
+        hasCoachingFiredThisTick = false
+
+        // Check for phase changes and trigger coaching (includes 500m check-in)
         checkPhaseChange(phase)
-        
-        // Check for 500m milestones and trigger coaching
-        check500mMilestones()
-        
+
+        // Check for 500m milestones (skipped if phase change just fired)
+        if (!hasCoachingFiredThisTick) {
+            check500mMilestones()
+        }
+
         // Check for heart rate coaching
-        maybeTriggerHeartRateCoaching()
+        if (!hasCoachingFiredThisTick) {
+            maybeTriggerHeartRateCoaching()
+        }
+
+        // Check for cadence/stride coaching
+        if (!hasCoachingFiredThisTick) {
+            maybeTriggerCadenceCoaching()
+        }
         
         _currentRunSession.value = RunSession(
             id = UUID.randomUUID().toString(),
@@ -595,6 +732,7 @@ class RunTrackingService : Service(), SensorEventListener {
 
     private fun stopTracking() {
         isTracking = false
+        isSimulating = false
         _isServiceRunning.value = false
         
         // Stop GPS, sensors, and timer
@@ -634,75 +772,101 @@ class RunTrackingService : Service(), SensorEventListener {
     }
     
     private suspend fun uploadRunToBackend(runSession: RunSession) {
-        try {
-            val uploadRequest = UploadRunRequest(
-                routeId = null, // TODO: Add if user selected a saved route
-                distance = runSession.distance,
-                duration = runSession.duration,
-                avgPace = runSession.averagePace ?: "0:00",
-                avgHeartRate = if (runSession.heartRate > 0) runSession.heartRate else null,
-                maxHeartRate = null, // TODO: Track max HR
-                minHeartRate = null, // TODO: Track min HR
-                calories = runSession.calories,
-                cadence = if (runSession.cadence > 0) runSession.cadence else null,
-                elevation = runSession.totalElevationGain,
-                difficulty = when {
-                    runSession.totalElevationGain > 200 -> "hard"
-                    runSession.totalElevationGain > 100 -> "moderate"
-                    else -> "easy"
-                },
-                startLat = runSession.routePoints.firstOrNull()?.latitude ?: 0.0,
-                startLng = runSession.routePoints.firstOrNull()?.longitude ?: 0.0,
-                gpsTrack = runSession.routePoints,
-                completedAt = System.currentTimeMillis(),
-                elevationGain = runSession.totalElevationGain,
-                elevationLoss = runSession.totalElevationLoss,
-                tss = 0, // Backend will calculate
-                gap = null, // Backend will calculate
-                isPublic = true,
-                kmSplits = runSession.kmSplits,
-                terrainType = runSession.terrainType.name.lowercase(),
-                userComments = null,
-                // Run goals - target tracking
-                targetDistance = targetDistance,
-                targetTime = targetTime,
-                wasTargetAchieved = calculateWasTargetAchieved(),
-                // Struggle points detected during the run
-                strugglePoints = runSession.strugglePoints,
-                // AI coaching notes from the run
-                aiCoachingNotes = runSession.aiCoachingNotes.ifEmpty { null }
-            )
-            
-            val response = apiService.uploadRun(uploadRequest)
-            Log.d("RunTrackingService", "Run uploaded successfully: ${response.id}")
-            
-            // Update the run session with the backend ID
-            _currentRunSession.value = _currentRunSession.value?.copy(id = response.id)
-            _uploadComplete.value = response.id
-            
-            // Auto-upload to Garmin Connect if enabled
-            tryAutoUploadToGarmin(response.id)
+        val uploadRequest = UploadRunRequest(
+            routeId = null, // TODO: Add if user selected a saved route
+            distance = runSession.distance,
+            duration = runSession.duration,
+            avgPace = runSession.averagePace ?: "0:00",
+            avgHeartRate = if (runSession.heartRate > 0) runSession.heartRate else null,
+            maxHeartRate = null, // TODO: Track max HR
+            minHeartRate = null, // TODO: Track min HR
+            calories = runSession.calories,
+            cadence = if (runSession.cadence > 0) runSession.cadence else null,
+            elevation = runSession.totalElevationGain,
+            difficulty = when {
+                runSession.totalElevationGain > 200 -> "hard"
+                runSession.totalElevationGain > 100 -> "moderate"
+                else -> "easy"
+            },
+            startLat = runSession.routePoints.firstOrNull()?.latitude ?: 0.0,
+            startLng = runSession.routePoints.firstOrNull()?.longitude ?: 0.0,
+            gpsTrack = runSession.routePoints,
+            completedAt = System.currentTimeMillis(),
+            elevationGain = runSession.totalElevationGain,
+            elevationLoss = runSession.totalElevationLoss,
+            tss = 0, // Backend will calculate
+            gap = null, // Backend will calculate
+            isPublic = true,
+            kmSplits = runSession.kmSplits,
+            terrainType = runSession.terrainType.name.lowercase(),
+            userComments = null,
+            // Run goals - target tracking
+            targetDistance = targetDistance,
+            targetTime = targetTime,
+            wasTargetAchieved = calculateWasTargetAchieved(),
+            // Struggle points detected during the run
+            strugglePoints = runSession.strugglePoints,
+            // AI coaching notes from the run
+            aiCoachingNotes = runSession.aiCoachingNotes.ifEmpty { null }
+        )
 
-        } catch (e: HttpException) {
-            // Handle 401 Unauthorized errors
-            if (e.code() == 401) {
-                Log.e("RunTrackingService", "❌ 401 Unauthorized - run not uploaded (session expired)")
-                // Use local ID so navigation still happens - run will be saved locally
-                _uploadComplete.value = runSession.id
-            } else if (e.code() >= 500) {
-                // Server error - use local ID, don't try to fetch from backend
-                Log.e("RunTrackingService", "HTTP ${e.code()} server error - using local ID")
-                _uploadComplete.value = runSession.id
-            } else {
-                Log.e("RunTrackingService", "HTTP ${e.code()} error uploading run: ${e.message()}")
-                _uploadComplete.value = runSession.id
+        // Retry up to 3 times with exponential backoff for server errors
+        val maxRetries = 3
+        var lastException: Exception? = null
+
+        for (attempt in 1..maxRetries) {
+            try {
+                val response = apiService.uploadRun(uploadRequest)
+                Log.d("RunTrackingService", "Run uploaded successfully (attempt $attempt): ${response.id}")
+                
+                // Update the run session with the backend ID
+                _currentRunSession.value = _currentRunSession.value?.copy(id = response.id)
+                _uploadComplete.value = response.id
+                
+                // Auto-upload to Garmin Connect if enabled
+                tryAutoUploadToGarmin(response.id)
+                return // Success - exit
+
+            } catch (e: HttpException) {
+                lastException = e
+                when {
+                    e.code() == 401 -> {
+                        // Auth error - no point retrying
+                        Log.e("RunTrackingService", "❌ 401 Unauthorized - run not uploaded (session expired)")
+                        _uploadComplete.value = runSession.id
+                        return
+                    }
+                    e.code() in 400..499 -> {
+                        // Client error - no point retrying
+                        Log.e("RunTrackingService", "HTTP ${e.code()} client error uploading run: ${e.message()}")
+                        _uploadComplete.value = runSession.id
+                        return
+                    }
+                    e.code() >= 500 && attempt < maxRetries -> {
+                        // Server error - retry with backoff
+                        val delayMs = (attempt * 2000).toLong()
+                        Log.w("RunTrackingService", "HTTP ${e.code()} server error (attempt $attempt/$maxRetries), retrying in ${delayMs}ms...")
+                        delay(delayMs)
+                    }
+                    else -> {
+                        Log.e("RunTrackingService", "HTTP ${e.code()} error after $maxRetries attempts")
+                    }
+                }
+            } catch (e: Exception) {
+                lastException = e
+                if (attempt < maxRetries) {
+                    val delayMs = (attempt * 2000).toLong()
+                    Log.w("RunTrackingService", "Upload failed (attempt $attempt/$maxRetries): ${e.message}, retrying in ${delayMs}ms...")
+                    delay(delayMs)
+                } else {
+                    Log.e("RunTrackingService", "Failed to upload run after $maxRetries attempts", e)
+                }
             }
-        } catch (e: Exception) {
-            // Log error but don't crash - run is saved locally
-            Log.e("RunTrackingService", "Failed to upload run to backend", e)
-            // Use local ID so navigation still happens - run will be saved locally
-            _uploadComplete.value = runSession.id
         }
+
+        // All retries exhausted - fall back to local ID
+        Log.e("RunTrackingService", "Upload failed after $maxRetries retries, using local ID", lastException)
+        _uploadComplete.value = runSession.id
     }
 
     /**
@@ -769,6 +933,8 @@ class RunTrackingService : Service(), SensorEventListener {
         sensorManager.unregisterListener(this)
         textToSpeechHelper.destroy() // Clean up Android TTS
         audioPlayerHelper.destroy() // Clean up OpenAI TTS audio player
+        CoachingAudioQueue.stopAll() // Stop any queued coaching audio
+        _latestCoachingText.value = null
         serviceScope.cancel()
         Log.d("RunTrackingService", "Service destroyed")
     }
@@ -777,17 +943,20 @@ class RunTrackingService : Service(), SensorEventListener {
      * Play coaching audio using OpenAI TTS if available, otherwise fall back to Android TTS
      */
     private fun playCoachingAudio(base64Audio: String?, format: String?, fallbackText: String) {
-        if (base64Audio != null && format != null) {
-            // Play OpenAI TTS audio
-            Log.d("RunTrackingService", "Playing OpenAI TTS audio ($format)")
-            audioPlayerHelper.playAudio(base64Audio, format) {
-                Log.d("RunTrackingService", "OpenAI TTS playback completed")
+        // Broadcast text to UI
+        _latestCoachingText.value = fallbackText
+
+        // Enqueue via shared audio queue (prevents overlap with other coaching)
+        CoachingAudioQueue.enqueue(
+            context = this,
+            base64Audio = base64Audio,
+            format = format,
+            fallbackText = fallbackText,
+            onComplete = {
+                // Clear coaching text when audio finishes
+                _latestCoachingText.value = null
             }
-        } else {
-            // Fall back to Android TTS
-            Log.d("RunTrackingService", "Falling back to Android TTS")
-            textToSpeechHelper.speak(fallbackText)
-        }
+        )
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -1016,6 +1185,77 @@ class RunTrackingService : Service(), SensorEventListener {
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+            }
+        }
+    }
+
+    private fun maybeTriggerCadenceCoaching() {
+        if (currentCadence <= 0) return
+        if (totalDistance < 1000) return // Need at least 1km of data
+
+        val stride = getCurrentStrideAnalysis() ?: return
+        val now = System.currentTimeMillis()
+        val CADENCE_COOLDOWN_MS = 120_000L // 2 minutes
+
+        // Determine if we should fire cadence coaching
+        val shouldFire = when {
+            // First time detecting non-optimal stride
+            !hasCadenceCoachingFired && stride.strideZone != "OPTIMAL" -> true
+            // Zone changed since last coaching
+            hasCadenceCoachingFired && stride.strideZone != lastStrideZone && stride.strideZone != "OPTIMAL" -> true
+            // Fatigue detected
+            stride.isFatigued && (now - lastCadenceCoachingTime) > CADENCE_COOLDOWN_MS -> true
+            else -> false
+        }
+
+        if (!shouldFire) return
+        if ((now - lastCadenceCoachingTime) < CADENCE_COOLDOWN_MS) return
+        if ((now - lastCoachingTime) < COACHING_COOLDOWN_MS) return
+
+        hasCadenceCoachingFired = true
+        lastCadenceCoachingTime = now
+        lastCoachingTime = now
+        lastStrideZone = stride.strideZone
+        hasCoachingFiredThisTick = true
+
+        serviceScope.launch {
+            try {
+                val request = CadenceCoachingRequest(
+                    cadence = stride.cadence,
+                    strideLength = stride.strideLength,
+                    strideZone = stride.strideZone,
+                    currentPace = currentPace,
+                    speed = if (routePoints.size >= 2) {
+                        val last = routePoints.last()
+                        val prev = routePoints[routePoints.size - 2]
+                        val dt = (last.timestamp - prev.timestamp) / 1000.0
+                        if (dt > 0) calculateDistance(prev, last) / dt else 0.0
+                    } else 0.0,
+                    distance = totalDistance / 1000.0,
+                    elapsedTime = System.currentTimeMillis() - startTime,
+                    heartRate = if (currentHeartRate > 0) currentHeartRate else null,
+                    userHeight = currentUser?.height?.let { it / 100.0 },
+                    userWeight = currentUser?.weight?.toDouble(),
+                    userAge = currentUser?.age,
+                    optimalCadenceMin = 160,
+                    optimalCadenceMax = 180,
+                    optimalStrideLengthMin = stride.optimalMin,
+                    optimalStrideLengthMax = stride.optimalMax,
+                    coachName = currentUser?.coachName,
+                    coachTone = currentUser?.coachTone,
+                    coachGender = currentUser?.coachGender,
+                    coachAccent = currentUser?.coachAccent
+                )
+                val response = apiService.getCadenceCoaching(request)
+                coachingHistory.add(AiCoachingNote(
+                    time = System.currentTimeMillis() - startTime,
+                    message = "Cadence: ${response.message}"
+                ))
+                if (!isMuted) {
+                    playCoachingAudio(response.audio, response.format, response.message)
+                }
+            } catch (e: Exception) {
+                Log.e("RunTrackingService", "Failed to get cadence coaching", e)
             }
         }
     }
