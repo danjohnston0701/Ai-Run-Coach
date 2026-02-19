@@ -1,0 +1,6 @@
+modules = ["nodejs-20"]
+[deployment]
+build = ["sh", "-c", "npm run build"]
+run = ["sh", "-c", "npm run start"]
+deploymentTarget = "cloudrun"
+publicDir = "dist"
