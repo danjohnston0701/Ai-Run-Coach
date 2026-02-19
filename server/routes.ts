@@ -3828,8 +3828,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Pace Update Coaching with TTS
   app.post("/api/coaching/pace-update", async (req: Request, res: Response) => {
     try {
+      // Save original tone for consistent voice selection, use effectiveTone for AI personality only
+      const { coachGender, coachAccent, coachTone: baseTone } = req.body;
       const effectiveTone = getPhaseTone(
-        req.body.coachTone,
+        baseTone,
         req.body.distance,
         req.body.targetDistance,
         req.body.phase
@@ -3839,9 +3841,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const aiService = await import("./ai-service");
       const message = await aiService.generatePaceUpdate(req.body);
       
-      // Generate TTS audio with user's voice settings
-      const { coachName, coachGender, coachAccent } = req.body;
-      const voice = mapCoachVoice(coachGender, coachAccent, effectiveTone);
+      // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
+      const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
       const audioBuffer = await aiService.generateTTS(message, voice);
       const base64Audio = audioBuffer.toString('base64');
       
@@ -3860,8 +3861,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Struggle Coaching with TTS
   app.post("/api/coaching/struggle-coaching", async (req: Request, res: Response) => {
     try {
+      // Save original tone for consistent voice selection, use effectiveTone for AI personality only
+      const { coachGender, coachAccent, coachTone: baseTone } = req.body;
       const effectiveTone = getPhaseTone(
-        req.body.coachTone,
+        baseTone,
         req.body.distance,
         req.body.targetDistance,
         req.body.phase
@@ -3871,9 +3874,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const aiService = await import("./ai-service");
       const message = await aiService.generateStruggleCoaching(req.body);
       
-      // Generate TTS audio with user's voice settings
-      const { coachName, coachGender, coachAccent } = req.body;
-      const voice = mapCoachVoice(coachGender, coachAccent, effectiveTone);
+      // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
+      const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
       const audioBuffer = await aiService.generateTTS(message, voice);
       const base64Audio = audioBuffer.toString('base64');
       
@@ -3919,8 +3921,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Phase Coaching with TTS
   app.post("/api/coaching/phase-coaching", async (req: Request, res: Response) => {
     try {
+      // Save original tone for consistent voice selection, use effectiveTone for AI personality only
+      const { coachGender, coachAccent, coachTone: baseTone } = req.body;
       const effectiveTone = getPhaseTone(
-        req.body.coachTone,
+        baseTone,
         req.body.distance,
         req.body.targetDistance,
         req.body.phase
@@ -3930,9 +3934,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const aiService = await import("./ai-service");
       const message = await aiService.generatePhaseCoaching(req.body);
       
-      // Generate TTS audio with user's voice settings
-      const { coachName, coachGender, coachAccent } = req.body;
-      const voice = mapCoachVoice(coachGender, coachAccent, effectiveTone);
+      // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
+      const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
       const audioBuffer = await aiService.generateTTS(message, voice);
       const base64Audio = audioBuffer.toString('base64');
       
@@ -3986,17 +3989,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         context.phase
       );
 
-      // Add coach settings to context
+      // Add coach settings to context - effectiveTone drives AI personality
       context.coachTone = effectiveTone;
       context.coachName = coachName;
       
       const aiService = await import("./ai-service");
       const response = await aiService.getWellnessAwareCoachingResponse(message, context);
       
-      // Generate TTS audio with user's voice settings
+      // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
       const coachGender = user?.coachGender || 'female';
       const coachAccent = user?.coachAccent || 'british';
-      const voice = mapCoachVoice(coachGender, coachAccent, effectiveTone);
+      const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
       const audioBuffer = await aiService.generateTTS(response, voice);
       const base64Audio = audioBuffer.toString('base64');
       
@@ -4059,10 +4062,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         wellness,
       });
       
-      // Generate TTS audio with user's voice settings
+      // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
       const coachGender = user?.coachGender || 'female';
       const coachAccent = user?.coachAccent || 'british';
-      const voice = mapCoachVoice(coachGender, coachAccent, effectiveTone);
+      const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
       const audioBuffer = await aiService.generateTTS(response, voice);
       const base64Audio = audioBuffer.toString('base64');
       
