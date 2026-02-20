@@ -355,7 +355,7 @@ class RunSessionViewModel @Inject constructor(
         try {
             val intent = Intent(context, RunTrackingService::class.java).apply {
                 action = RunTrackingService.ACTION_START_SIMULATION
-                putExtra(RunTrackingService.EXTRA_TARGET_DISTANCE, 5000.0)
+                putExtra(RunTrackingService.EXTRA_TARGET_DISTANCE, 5.0) // 5 km (not meters!)
                 putExtra(RunTrackingService.EXTRA_TARGET_TIME, 22 * 60 * 1000L) // 22 min
             }
             context.startForegroundService(intent)

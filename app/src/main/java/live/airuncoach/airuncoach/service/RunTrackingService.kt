@@ -129,6 +129,10 @@ class RunTrackingService : Service(), SensorEventListener {
     // Simulation mode
     private var isSimulating = false
     
+    // Speed-based average (for simulation where wall-clock time is compressed)
+    private var speedReadingSum: Double = 0.0
+    private var speedReadingCount: Int = 0
+    
     // Weather and terrain
     private var weatherAtStart: WeatherData? = null
     private var weatherAtEnd: WeatherData? = null
@@ -307,13 +311,17 @@ class RunTrackingService : Service(), SensorEventListener {
         maxHr = 0
         lastHrCoachingTime = 0
         lastHrCoachingMinute = -1
+        speedReadingSum = 0.0
+        speedReadingCount = 0
 
-        // Start location and sensors
+        // Start location and sensors (skip real GPS/sensors during simulation — simulator feeds locations directly)
         try {
-            requestLocationUpdates()
-            startSensorTracking()
+            if (!isSimulating) {
+                requestLocationUpdates()
+                startSensorTracking()
+            }
             startTimer()  // Start independent timer
-            Log.d("RunTrackingService", "Tracking: GPS, sensors, and timer started")
+            Log.d("RunTrackingService", "Tracking: ${if (isSimulating) "simulation mode (no real GPS)" else "GPS, sensors,"} and timer started")
         } catch (e: Exception) {
             Log.e("RunTrackingService", "Failed to start sensors", e)
         }
@@ -496,9 +504,14 @@ class RunTrackingService : Service(), SensorEventListener {
             // Only count distance increments >= 5m to filter GPS drift
             val isFirstLocations = routePoints.size < 5
             if ((location.accuracy < 20f || isFirstLocations) && distanceIncrement >= 5.0) {
-                val currentPaceSeconds = if (location.speed > 0) 1000f / location.speed else 0f
+                // Calculate pace from our own distance/time (more reliable than GPS speed which can be noisy/wrong)
+                val timeSinceLastPoint = (newPoint.timestamp - prevPoint.timestamp) / 1000.0 // seconds
+                val currentPaceSeconds = if (timeSinceLastPoint > 0 && distanceIncrement > 0) {
+                    (1000.0 * timeSinceLastPoint / distanceIncrement).toFloat() // seconds per km
+                } else 0f
+                
                 // Update current real-time pace (convert from seconds/km to pace string)
-                currentPace = if (currentPaceSeconds > 0) {
+                currentPace = if (currentPaceSeconds > 0 && currentPaceSeconds < 3600) { // sanity check: < 60 min/km
                     val minutes = (currentPaceSeconds / 60).toInt()
                     val seconds = (currentPaceSeconds % 60).toInt()
                     String.format("%d:%02d", minutes, seconds)
@@ -506,6 +519,11 @@ class RunTrackingService : Service(), SensorEventListener {
                     "0:00"
                 }
                 totalDistance += distanceIncrement
+                // Accumulate speed readings for speed-based avg pace (essential for simulation where wall-clock time is compressed)
+                if (location.hasSpeed() && location.speed > 0.5f) {
+                    speedReadingSum += location.speed
+                    speedReadingCount++
+                }
                 if (newPoint.altitude != null && prevPoint.altitude != null) {
                     val elevChange = newPoint.altitude - prevPoint.altitude
                     if (elevChange > 0) totalElevationGain += elevChange else totalElevationLoss += abs(elevChange)
@@ -555,7 +573,8 @@ class RunTrackingService : Service(), SensorEventListener {
         if (currentKm > lastKmSplit) {
             val now = System.currentTimeMillis()
             val splitTime = now - lastSplitTime
-            val split = KmSplit(km = currentKm, time = splitTime, pace = calculatePace(1000f / (splitTime / 1000f)))
+            val splitSpeedKmh = (1000f / (splitTime / 1000f)) * 3.6f // m/s → km/h
+            val split = KmSplit(km = currentKm, time = splitTime, pace = calculatePace(splitSpeedKmh))
             kmSplits.add(split)
             lastKmSplit = currentKm
             lastSplitTime = now
@@ -581,11 +600,16 @@ class RunTrackingService : Service(), SensorEventListener {
         
         // Clamp distance to 0 if under threshold (filters GPS drift when stationary)
         val displayDistance = if (hasMovedEnough) totalDistance else 0.0
-        // FIX: Distance is in meters, convert to km for proper pace calculation
-        // avgSpeed in km/h = (distance in km) / (time in hours)
+        // avgSpeed in km/h for pace calculation
         val displayDistanceKm = displayDistance / 1000.0
         val durationHours = duration / 3600000.0
-        val avgSpeed = if (duration > 0 && hasMovedEnough && durationHours > 0) (displayDistanceKm / durationHours).toFloat() else 0f
+        // During simulation, wall-clock time is compressed (~8 min for a 5km run), so distance/time
+        // gives unrealistically fast avg speed. Use the average of simulated speed readings instead.
+        val avgSpeed = if (isSimulating && speedReadingCount > 0) {
+            ((speedReadingSum / speedReadingCount) * 3.6).toFloat() // m/s → km/h
+        } else if (duration > 0 && hasMovedEnough && durationHours > 0) {
+            (displayDistanceKm / durationHours).toFloat()
+        } else 0f
         
         val phase = determinePhase(displayDistance / 1000.0, targetDistance)
         
@@ -1197,16 +1221,8 @@ class RunTrackingService : Service(), SensorEventListener {
         val now = System.currentTimeMillis()
         val CADENCE_COOLDOWN_MS = 120_000L // 2 minutes
 
-        // Determine if we should fire cadence coaching
-        val shouldFire = when {
-            // First time detecting non-optimal stride
-            !hasCadenceCoachingFired && stride.strideZone != "OPTIMAL" -> true
-            // Zone changed since last coaching
-            hasCadenceCoachingFired && stride.strideZone != lastStrideZone && stride.strideZone != "OPTIMAL" -> true
-            // Fatigue detected
-            stride.isFatigued && (now - lastCadenceCoachingTime) > CADENCE_COOLDOWN_MS -> true
-            else -> false
-        }
+        // Determine if we should fire cadence coaching - ONLY ONCE per run (first time non-optimal stride detected)
+        val shouldFire = !hasCadenceCoachingFired && stride.strideZone != "OPTIMAL"
 
         if (!shouldFire) return
         if ((now - lastCadenceCoachingTime) < CADENCE_COOLDOWN_MS) return

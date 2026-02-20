@@ -86,7 +86,7 @@ fun PreviousRunsScreen(
             
             Spacer(modifier = Modifier.width(Spacing.sm))
             
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "RUN HISTORY",
                     style = AppTextStyles.h1.copy(fontWeight = FontWeight.Bold),
@@ -96,6 +96,18 @@ fun PreviousRunsScreen(
                     text = "Review your performance insights",
                     style = AppTextStyles.body,
                     color = Colors.textSecondary
+                )
+            }
+            
+            // Refresh button
+            IconButton(
+                onClick = { viewModel.fetchRuns() },
+                enabled = !isLoading
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Refresh",
+                    tint = if (isLoading) Colors.textMuted else Colors.textPrimary
                 )
             }
         }
@@ -119,6 +131,47 @@ fun PreviousRunsScreen(
                     style = AppTextStyles.body,
                     color = Colors.error
                 )
+            }
+        } else if (runs.isEmpty() && error == null) {
+            // Empty state - no runs to show
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DirectionsRun,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = Colors.textMuted
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.md))
+                    Text(
+                        text = "No runs yet",
+                        style = AppTextStyles.h2,
+                        color = Colors.textSecondary
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                    Text(
+                        text = "Complete your first run to see it here!",
+                        style = AppTextStyles.body,
+                        color = Colors.textMuted,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.lg))
+                    TextButton(onClick = { viewModel.fetchRuns() }) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Refresh")
+                    }
+                }
             }
         } else {
             LazyColumn(

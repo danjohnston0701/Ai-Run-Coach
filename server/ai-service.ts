@@ -128,20 +128,18 @@ export async function generatePaceUpdate(params: {
   const progress = Math.round((distance / targetDistance) * 100);
   const timeMin = Math.floor(elapsedTime / 60);
   
-  // Build terrain context
+  // Build terrain context - use higher threshold (5%) to filter GPS noise on flat runs
+  // Only include terrain context when there's significant elevation change
   let terrainContext = '';
-  if (currentGrade !== undefined && Math.abs(currentGrade) > 2) {
+  if (currentGrade !== undefined && Math.abs(currentGrade) > 5) {
     if (currentGrade > 5) {
       terrainContext = `Currently climbing a steep ${currentGrade.toFixed(1)}% grade hill. `;
-    } else if (currentGrade > 2) {
-      terrainContext = `Currently on a gentle ${currentGrade.toFixed(1)}% uphill. `;
     } else if (currentGrade < -5) {
       terrainContext = `Currently descending a steep ${Math.abs(currentGrade).toFixed(1)}% grade. `;
-    } else if (currentGrade < -2) {
-      terrainContext = `Currently on a gentle ${Math.abs(currentGrade).toFixed(1)}% downhill. `;
     }
   }
-  if (totalElevationGain && totalElevationGain > 0) {
+  // Only mention elevation gain if it's significant (>20m) to filter GPS noise
+  if (totalElevationGain && totalElevationGain > 20) {
     terrainContext += `Total elevation climbed so far: ${Math.round(totalElevationGain)}m. `;
   }
   

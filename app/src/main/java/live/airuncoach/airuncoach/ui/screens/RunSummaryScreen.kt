@@ -389,14 +389,36 @@ private fun SummaryTabFlagship(
                 analysisState = analysisState,
                 comments = comments,
                 onCommentsChange = onCommentsChange,
-                onGenerateAi = onGenerateAi,
-                onDelete = onDelete
+                onGenerateAi = onGenerateAi
             )
         }
 
         item { ChartsSectionFlagship(run = run) }
 
         item { HeartRateZonesCardFlagship(heartRateData = run.heartRateData) }
+
+        // Delete run button at the bottom of the screen
+        item {
+            Spacer(modifier = Modifier.height(Spacing.md))
+            OutlinedButton(
+                onClick = onDelete,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = Colors.error
+                ),
+                border = ButtonDefaults.outlinedButtonBorder.copy(
+                    brush = SolidColor(Colors.error)
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Delete",
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Delete Run", fontWeight = FontWeight.Medium)
+            }
+        }
 
         // AI Coaching Log - only visible to admin users
         if (isAdmin && run.aiCoachingNotes.isNotEmpty()) {
@@ -716,8 +738,7 @@ private fun AiSectionFlagship(
     analysisState: AiAnalysisState,
     comments: String,
     onCommentsChange: (String) -> Unit,
-    onGenerateAi: () -> Unit,
-    onDelete: () -> Unit
+    onGenerateAi: () -> Unit
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
@@ -819,27 +840,6 @@ private fun AiSectionFlagship(
                     }
                 }
             }
-        }
-        
-        // Delete run button at bottom (outside of AI section)
-        Spacer(modifier = Modifier.height(Spacing.md))
-        OutlinedButton(
-            onClick = onDelete,
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.outlinedButtonColors(
-                contentColor = Colors.error
-            ),
-            border = ButtonDefaults.outlinedButtonBorder.copy(
-                brush = SolidColor(Colors.error)
-            )
-        ) {
-            Icon(
-                imageVector = Icons.Default.Delete,
-                contentDescription = "Delete",
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Delete Run", fontWeight = FontWeight.Medium)
         }
     }
 }
@@ -1938,6 +1938,8 @@ private fun DataTabFlagship(run: RunSession) {
         }
 
         item { Spacer(modifier = Modifier.height(Spacing.xl)) }
+
+        
     }
 }
 

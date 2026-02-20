@@ -3,16 +3,15 @@
  * 
  * Uses GraphHopper API + OSM segment popularity data to generate high-quality running routes
  * 
- * ROUTE QUALITY RULES (Feb 9, 2026):
+ * ROUTE QUALITY RULES (Feb 21, 2026):
  * ✅ Avoids highways, motorways, and major roads (using GraphHopper road_class data)
- * ✅ Validates distance within ±10% of target
+ * ✅ Validates distance within ±20% of target
  * ✅ Detects and rejects routes with 180° U-turns  
- * ✅ Prevents repeated segments (backtracking)
- * ✅ Enforces genuine circular routes (start = end)
+ * ✅ Prevents repeated segments (backtracking < 30%)
+ * ✅ Enforces genuine circular routes (loop quality > 70%)
  * ✅ Optimizes for trails, parks, paths, cycleways when preferTrails=true
  * ✅ Filters out routes with >30% highway usage (HIGH severity)
- * ✅ Filters out routes with >10% highway usage (MEDIUM severity)
- * ✅ Scores routes: Quality (50%) + Popularity (30%) + Terrain (20% if preferTrails)
+ * ✅ Scores routes: Quality (40%) + Popularity (25%) + Circuit (35%) + Terrain (20% if preferTrails)
  */
 
 import axios from "axios";
@@ -190,13 +189,13 @@ function validateRoute(
     return { isValid: false, issues: [], qualityScore: 0 };
   }
   
-  // Check distance tolerance (±10% of target)
+  // Check distance tolerance (±20% of target - more lenient for diverse route options)
   const distanceDiffPercent = Math.abs(actualDistanceMeters - targetDistanceMeters) / targetDistanceMeters;
-  if (distanceDiffPercent > 0.10) {
+  if (distanceDiffPercent > 0.20) {
     issues.push({
       type: 'DISTANCE_MISMATCH',
       location: coordinates[0],
-      severity: distanceDiffPercent > 0.20 ? 'HIGH' : 'MEDIUM',
+      severity: 'HIGH',
     });
     console.log(`⚠️ Distance mismatch: ${(distanceDiffPercent * 100).toFixed(1)}% off target (actual=${actualDistanceMeters}m, target=${targetDistanceMeters}m)`);
   }
@@ -300,6 +299,72 @@ function calculateDifficulty(distanceKm: number, elevationGainM: number): string
   }
 }
 
+// ==================== CIRCUIT QUALITY FUNCTIONS ====================
+
+/**
+ * Calculate loop quality - how well the route forms a closed loop
+ * Returns 0-1 where 1 is a perfect loop (end point = start point)
+ */
+function calculateLoopQuality(coordinates: Array<[number, number]>, startLat: number, startLng: number): number {
+  if (coordinates.length < 2) return 0;
+  
+  const startPoint = { lat: startLat, lng: startLng };
+  const endPoint = { lat: coordinates[coordinates.length - 1][1], lng: coordinates[coordinates.length - 1][0] };
+  
+  // Distance from end to start in km
+  const distanceKm = getDistanceKm(startPoint, endPoint);
+  
+  // If end is within 200m of start, that's a perfect loop (score = 1)
+  // If end is more than 1km away, score = 0
+  return Math.max(0, 1 - (distanceKm / 1.0));
+}
+
+/**
+ * Calculate backtrack ratio - how much the route backtracks on itself
+ * Returns 0-1 where 0 is no backtracking, 1 is maximum backtracking
+ */
+function calculateBacktrackRatio(coordinates: Array<[number, number]>): number {
+  if (coordinates.length < 10) return 0;
+  
+  const gridSize = 0.0003; // ~30m grid
+  const segments: string[] = [];
+  let totalSegments = 0;
+  let backtrackCount = 0;
+  
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const g1 = `${Math.round(coordinates[i][0] / gridSize)},${Math.round(coordinates[i][1] / gridSize)}`;
+    const g2 = `${Math.round(coordinates[i + 1][0] / gridSize)},${Math.round(coordinates[i + 1][1] / gridSize)}`;
+    
+    if (g1 !== g2) {
+      totalSegments++;
+      const segment = `${g1}-${g2}`;
+      const reverseSegment = `${g2}-${g1}`;
+      
+      // If we've seen this segment before in reverse direction, it's backtracking
+      if (segments.includes(reverseSegment)) {
+        backtrackCount++;
+      }
+      segments.push(segment);
+    }
+  }
+  
+  return totalSegments > 0 ? backtrackCount / totalSegments : 0;
+}
+
+/**
+ * Haversine distance between two points in km
+ */
+function getDistanceKm(p1: { lat: number; lng: number }, p2: { lat: number; lng: number }): number {
+  const R = 6371;
+  const dLat = (p2.lat - p1.lat) * Math.PI / 180;
+  const dLon = (p2.lng - p1.lng) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(p1.lat * Math.PI / 180) * Math.cos(p2.lat * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 // ==================== INTELLIGENT ROUTE GENERATION ====================
 
 /**
@@ -353,6 +418,22 @@ export async function generateIntelligentRoute(
       const path = ghResponse.paths[0];
       let coordinates = path.points.coordinates as Array<[number, number]>;
       
+      // Calculate circuit quality BEFORE enforcing circular (so we get real loop quality)
+      // This tells us if GraphHopper naturally created a good loop
+      const loopQuality = calculateLoopQuality(coordinates, latitude, longitude);
+      const backtrackRatio = calculateBacktrackRatio(coordinates);
+      console.log(`Seed ${seed}: Circuit - Loop=${loopQuality.toFixed(2)}, Backtrack=${backtrackRatio.toFixed(2)}`);
+
+      // Reject routes with poor circuit quality
+      if (loopQuality < 0.7) {
+        console.log(`Seed ${seed}: Rejected - poor loop quality (${loopQuality.toFixed(2)} < 0.7)`);
+        continue;
+      }
+      if (backtrackRatio > 0.3) {
+        console.log(`Seed ${seed}: Rejected - too much backtracking (${backtrackRatio.toFixed(2)} > 0.3)`);
+        continue;
+      }
+      
       // ENSURE CIRCULAR ROUTE: Force start and end to be the exact same point
       if (coordinates.length > 0) {
         const startPoint: [number, number] = [longitude, latitude];
@@ -365,7 +446,7 @@ export async function generateIntelligentRoute(
         
         console.log(`Seed ${seed}: Enforced circular route - start (${startPoint[0].toFixed(6)}, ${startPoint[1].toFixed(6)}) = end`);
       }
-      
+
       // Debug: Log what GraphHopper returned
       console.log(`Seed ${seed}: GraphHopper returned distance=${path.distance}m, ascend=${path.ascend}m, time=${path.time}ms, points=${coordinates.length}`);
       
@@ -394,12 +475,14 @@ export async function generateIntelligentRoute(
       // Check popularity score
       const popularityScore = await getRoutePopularityScore(coordinates);
       console.log(`Seed ${seed}: Popularity=${popularityScore.toFixed(2)}`);
-      
+
       candidates.push({
         route: path,
         validation,
         popularityScore,
         terrainScore: roadAnalysis.terrainScore,
+        loopQuality,
+        backtrackRatio,
       } as any);
       
     } catch (error) {
@@ -414,15 +497,17 @@ export async function generateIntelligentRoute(
   
   // Score candidates and pick the best
   const scored = candidates.map((c: any) => {
-    // Base scoring: quality (50%) + popularity (30%)
+    // Base scoring: quality (40%) + popularity (25%) + circuit quality (20%) + loop (15%)
     let totalScore = 
-      c.validation.qualityScore * 0.5 + // 50% weight on quality (no dead ends, highways, distance ok)
-      c.popularityScore * 0.3;          // 30% weight on popularity
+      c.validation.qualityScore * 0.4 + // 40% weight on quality (no dead ends, highways, distance ok)
+      c.popularityScore * 0.25 +        // 25% weight on popularity
+      c.loopQuality * 0.2 +             // 20% weight on circuit quality (proper loop)
+      (1 - c.backtrackRatio) * 0.15;   // 15% weight on low backtracking
     
     // If user prefers trails, add terrain score (20% weight)
-    if (preferTrails) {
-      totalScore += c.terrainScore * 0.2;
-      console.log(`Terrain bonus for seed: quality=${c.validation.qualityScore.toFixed(2)}, popularity=${c.popularityScore.toFixed(2)}, terrain=${c.terrainScore.toFixed(2)}`);
+    if (preferTrails && c.terrainScore) {
+      totalScore = totalScore * 0.8 + c.terrainScore * 0.2;
+      console.log(`Terrain bonus for seed: quality=${c.validation.qualityScore.toFixed(2)}, popularity=${c.popularityScore.toFixed(2)}, terrain=${c.terrainScore.toFixed(2)}, loop=${c.loopQuality.toFixed(2)}, backtrack=${c.backtrackRatio.toFixed(2)}`);
     } else {
       // Without trail preference, give remaining 20% to quality
       totalScore += c.validation.qualityScore * 0.2;
@@ -458,10 +543,12 @@ export async function generateIntelligentRoute(
       difficulty,
       popularityScore: candidate.popularityScore,
       qualityScore: candidate.validation.qualityScore,
+      loopQuality: candidate.loopQuality,
+      backtrackRatio: candidate.backtrackRatio,
       turnInstructions: route.instructions || [],
     };
-    
-    console.log(`  → Returning: distance=${generatedRoute.distance}m, elevation=${generatedRoute.elevationGain}m↗/${generatedRoute.elevationLoss}m↘, duration=${generatedRoute.duration}s`);
+
+    console.log(`  → Returning: distance=${generatedRoute.distance}m, elevation=${generatedRoute.elevationGain}m↗/${generatedRoute.elevationLoss}m↘, loop=${candidate.loopQuality.toFixed(2)}, backtrack=${candidate.backtrackRatio.toFixed(2)}`);
     
     return generatedRoute;
   });
