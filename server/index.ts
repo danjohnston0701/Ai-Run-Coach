@@ -302,6 +302,15 @@ function setupErrorHandler(app: express.Application) {
     const webDistPath = path.resolve(process.cwd(), "web", "dist");
     const expoDistPath = path.resolve(process.cwd(), "dist");
 
+    // Load landing page template as fallback
+    const landingTemplatePath = path.resolve(process.cwd(), "server", "templates", "landing-page.html");
+    let landingPageTemplate = "";
+    if (fs.existsSync(landingTemplatePath)) {
+      landingPageTemplate = fs.readFileSync(landingTemplatePath, "utf-8");
+      log("Production: Landing page template loaded");
+    }
+    const appName = getAppName();
+
     // Serve static assets
     app.use("/assets", express.static(path.resolve(process.cwd(), "assets")));
     app.use("/logos", express.static(path.resolve(process.cwd(), "attached_assets/generated_images")));
@@ -330,11 +339,15 @@ function setupErrorHandler(app: express.Application) {
     app.get("*", (req: Request, res: Response) => {
       if (req.path.startsWith("/api")) return;
 
-      // Browser requests: serve web app
+      // Browser requests: serve web app or landing page
       if (isBrowserRequest(req)) {
         const webIndexPath = path.resolve(webDistPath, "index.html");
         if (fs.existsSync(webIndexPath)) {
           return res.sendFile(webIndexPath);
+        }
+        // Fallback: serve landing page
+        if (landingPageTemplate) {
+          return serveLandingPage({ req, res, landingPageTemplate, appName });
         }
       }
 
@@ -344,7 +357,12 @@ function setupErrorHandler(app: express.Application) {
         return res.sendFile(expoIndexPath);
       }
 
-      res.status(404).send("Web app not built.");
+      // Final fallback: landing page for any request
+      if (landingPageTemplate) {
+        return serveLandingPage({ req, res, landingPageTemplate, appName });
+      }
+
+      res.status(404).send("AI Run Coach API is running. Download the app to get started.");
     });
   }
 

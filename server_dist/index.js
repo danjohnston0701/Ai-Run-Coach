@@ -1129,18 +1129,14 @@ async function generatePaceUpdate(params) {
   const progress = Math.round(distance / targetDistance * 100);
   const timeMin = Math.floor(elapsedTime / 60);
   let terrainContext = "";
-  if (currentGrade !== void 0 && Math.abs(currentGrade) > 2) {
+  if (currentGrade !== void 0 && Math.abs(currentGrade) > 5) {
     if (currentGrade > 5) {
       terrainContext = `Currently climbing a steep ${currentGrade.toFixed(1)}% grade hill. `;
-    } else if (currentGrade > 2) {
-      terrainContext = `Currently on a gentle ${currentGrade.toFixed(1)}% uphill. `;
     } else if (currentGrade < -5) {
       terrainContext = `Currently descending a steep ${Math.abs(currentGrade).toFixed(1)}% grade. `;
-    } else if (currentGrade < -2) {
-      terrainContext = `Currently on a gentle ${Math.abs(currentGrade).toFixed(1)}% downhill. `;
     }
   }
-  if (totalElevationGain && totalElevationGain > 0) {
+  if (totalElevationGain && totalElevationGain > 20) {
     terrainContext += `Total elevation climbed so far: ${Math.round(totalElevationGain)}m. `;
   }
   let paceTrend = "";
@@ -2219,7 +2215,7 @@ var route_generation_exports = {};
 __export(route_generation_exports, {
   assignDifficulty: () => assignDifficulty,
   calculateAngularSpread: () => calculateAngularSpread,
-  calculateBacktrackRatio: () => calculateBacktrackRatio,
+  calculateBacktrackRatio: () => calculateBacktrackRatio2,
   calculateCircuitScore: () => calculateCircuitScore,
   calculateRouteOverlap: () => calculateRouteOverlap,
   containsMajorRoads: () => containsMajorRoads,
@@ -2227,7 +2223,7 @@ __export(route_generation_exports, {
   decodePolyline: () => decodePolyline,
   generateRouteOptions: () => generateRouteOptions2,
   generateTemplateWaypoints: () => generateTemplateWaypoints,
-  getDistanceKm: () => getDistanceKm,
+  getDistanceKm: () => getDistanceKm2,
   getGeometricTemplates: () => getGeometricTemplates,
   getRouteFootprint: () => getRouteFootprint,
   isGenuineCircuit: () => isGenuineCircuit,
@@ -2240,7 +2236,7 @@ function toRadians(degrees) {
 function toDegrees(radians) {
   return radians * 180 / Math.PI;
 }
-function getDistanceKm(p1, p2) {
+function getDistanceKm2(p1, p2) {
   const R = 6371;
   const dLat = toRadians(p2.lat - p1.lat);
   const dLng = toRadians(p2.lng - p1.lng);
@@ -2282,14 +2278,14 @@ function getRouteFootprint(encodedPolyline) {
     minLng = Math.min(minLng, p.lng);
     maxLng = Math.max(maxLng, p.lng);
   }
-  return getDistanceKm({ lat: minLat, lng: minLng }, { lat: maxLat, lng: maxLng });
+  return getDistanceKm2({ lat: minLat, lng: minLng }, { lat: maxLat, lng: maxLng });
 }
-function calculateBacktrackRatio(encodedPolyline) {
+function calculateBacktrackRatio2(encodedPolyline) {
   const points = decodePolyline(encodedPolyline);
   if (points.length < 10) return 0;
   const distances = [0];
   for (let i = 1; i < points.length; i++) {
-    distances.push(distances[i - 1] + getDistanceKm(points[i - 1], points[i]));
+    distances.push(distances[i - 1] + getDistanceKm2(points[i - 1], points[i]));
   }
   const totalDistance = distances[distances.length - 1];
   const excludeDistance = 0.3;
@@ -2352,7 +2348,7 @@ function calculateAngularSpread(encodedPolyline, startLat, startLng) {
   return sectors.size * 30;
 }
 function isGenuineCircuit(encodedPolyline, startLat, startLng) {
-  const backtrackRatio = calculateBacktrackRatio(encodedPolyline);
+  const backtrackRatio = calculateBacktrackRatio2(encodedPolyline);
   const angularSpread = calculateAngularSpread(encodedPolyline, startLat, startLng);
   const valid = angularSpread >= 180 && backtrackRatio <= 0.35;
   return { valid, backtrackRatio, angularSpread };
@@ -2751,8 +2747,8 @@ async function generateAIRoutesWithGoogle(startLat, startLng, targetDistanceKm, 
         aiRoute.waypoints
       );
       if (googleRoute && googleRoute.success) {
-        const loopQuality = calculateLoopQuality({ lat: startLat, lng: startLng }, googleRoute.polyline);
-        const backtrackRatio = calculateBacktrackRatio2(googleRoute.polyline);
+        const loopQuality = calculateLoopQuality2({ lat: startLat, lng: startLng }, googleRoute.polyline);
+        const backtrackRatio = calculateBacktrackRatio3(googleRoute.polyline);
         const distanceError = Math.abs(googleRoute.distance - targetDistanceKm) / targetDistanceKm;
         if (distanceError < 0.4 && backtrackRatio < 0.5 && loopQuality > 0.5) {
           const elevation = await fetchElevation(googleRoute.polyline);
@@ -3035,7 +3031,7 @@ async function fetchElevation(encodedPolyline) {
       } else {
         totalLoss += Math.abs(elevDiff);
       }
-      const horizontalDistance = getDistanceKm2(samplePoints[i - 1], samplePoints[i]) * 1e3;
+      const horizontalDistance = getDistanceKm3(samplePoints[i - 1], samplePoints[i]) * 1e3;
       if (horizontalDistance > 5) {
         const gradientPercent = Math.abs(elevDiff / horizontalDistance) * 100;
         if (gradientPercent > maxGradientPercent) {
@@ -3055,14 +3051,14 @@ async function fetchElevation(encodedPolyline) {
     return { gain: 0, loss: 0, maxGradientPercent: 0, maxGradientDegrees: 0 };
   }
 }
-function calculateLoopQuality(start, polylineStr) {
+function calculateLoopQuality2(start, polylineStr) {
   const points = decodePolyline2(polylineStr);
   if (points.length < 2) return 0;
   const endPoint = points[points.length - 1];
-  const distanceKm = getDistanceKm2(start, endPoint);
+  const distanceKm = getDistanceKm3(start, endPoint);
   return Math.max(0, 1 - distanceKm / 0.5);
 }
-function calculateBacktrackRatio2(polylineStr) {
+function calculateBacktrackRatio3(polylineStr) {
   const points = decodePolyline2(polylineStr);
   if (points.length < 10) return 0;
   const gridSize = 3e-4;
@@ -3107,7 +3103,7 @@ function decodePolyline2(encoded) {
     return [];
   }
 }
-function getDistanceKm2(p1, p2) {
+function getDistanceKm3(p1, p2) {
   const R = 6371;
   const dLat = toRadians2(p2.lat - p1.lat);
   const dLng = toRadians2(p2.lng - p1.lng);
@@ -6394,11 +6390,11 @@ function validateRoute(coordinates, actualDistanceMeters, targetDistanceMeters, 
     return { isValid: false, issues: [], qualityScore: 0 };
   }
   const distanceDiffPercent = Math.abs(actualDistanceMeters - targetDistanceMeters) / targetDistanceMeters;
-  if (distanceDiffPercent > 0.1) {
+  if (distanceDiffPercent > 0.2) {
     issues.push({
       type: "DISTANCE_MISMATCH",
       location: coordinates[0],
-      severity: distanceDiffPercent > 0.2 ? "HIGH" : "MEDIUM"
+      severity: "HIGH"
     });
     console.log(`\u26A0\uFE0F Distance mismatch: ${(distanceDiffPercent * 100).toFixed(1)}% off target (actual=${actualDistanceMeters}m, target=${targetDistanceMeters}m)`);
   }
@@ -6473,6 +6469,42 @@ function calculateDifficulty(distanceKm, elevationGainM) {
     return "hard";
   }
 }
+function calculateLoopQuality(coordinates, startLat, startLng) {
+  if (coordinates.length < 2) return 0;
+  const startPoint = { lat: startLat, lng: startLng };
+  const endPoint = { lat: coordinates[coordinates.length - 1][1], lng: coordinates[coordinates.length - 1][0] };
+  const distanceKm = getDistanceKm(startPoint, endPoint);
+  return Math.max(0, 1 - distanceKm / 1);
+}
+function calculateBacktrackRatio(coordinates) {
+  if (coordinates.length < 10) return 0;
+  const gridSize = 3e-4;
+  const segments2 = [];
+  let totalSegments = 0;
+  let backtrackCount = 0;
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const g1 = `${Math.round(coordinates[i][0] / gridSize)},${Math.round(coordinates[i][1] / gridSize)}`;
+    const g2 = `${Math.round(coordinates[i + 1][0] / gridSize)},${Math.round(coordinates[i + 1][1] / gridSize)}`;
+    if (g1 !== g2) {
+      totalSegments++;
+      const segment = `${g1}-${g2}`;
+      const reverseSegment = `${g2}-${g1}`;
+      if (segments2.includes(reverseSegment)) {
+        backtrackCount++;
+      }
+      segments2.push(segment);
+    }
+  }
+  return totalSegments > 0 ? backtrackCount / totalSegments : 0;
+}
+function getDistanceKm(p1, p2) {
+  const R = 6371;
+  const dLat = (p2.lat - p1.lat) * Math.PI / 180;
+  const dLon = (p2.lng - p1.lng) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(p1.lat * Math.PI / 180) * Math.cos(p2.lat * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
 async function generateIntelligentRoute(request) {
   const { latitude, longitude, distanceKm, preferTrails = true } = request;
   const distanceMeters = distanceKm * 1e3;
@@ -6501,6 +6533,17 @@ async function generateIntelligentRoute(request) {
       }
       const path2 = ghResponse.paths[0];
       let coordinates = path2.points.coordinates;
+      const loopQuality = calculateLoopQuality(coordinates, latitude, longitude);
+      const backtrackRatio = calculateBacktrackRatio(coordinates);
+      console.log(`Seed ${seed}: Circuit - Loop=${loopQuality.toFixed(2)}, Backtrack=${backtrackRatio.toFixed(2)}`);
+      if (loopQuality < 0.7) {
+        console.log(`Seed ${seed}: Rejected - poor loop quality (${loopQuality.toFixed(2)} < 0.7)`);
+        continue;
+      }
+      if (backtrackRatio > 0.3) {
+        console.log(`Seed ${seed}: Rejected - too much backtracking (${backtrackRatio.toFixed(2)} > 0.3)`);
+        continue;
+      }
       if (coordinates.length > 0) {
         const startPoint = [longitude, latitude];
         coordinates[0] = startPoint;
@@ -6527,7 +6570,9 @@ async function generateIntelligentRoute(request) {
         route: path2,
         validation,
         popularityScore,
-        terrainScore: roadAnalysis.terrainScore
+        terrainScore: roadAnalysis.terrainScore,
+        loopQuality,
+        backtrackRatio
       });
     } catch (error) {
       console.error(`Seed ${seed} failed:`, error);
@@ -6537,11 +6582,13 @@ async function generateIntelligentRoute(request) {
     throw new Error("Could not generate a valid route. Try a different location or distance.");
   }
   const scored = candidates.map((c) => {
-    let totalScore = c.validation.qualityScore * 0.5 + // 50% weight on quality (no dead ends, highways, distance ok)
-    c.popularityScore * 0.3;
-    if (preferTrails) {
-      totalScore += c.terrainScore * 0.2;
-      console.log(`Terrain bonus for seed: quality=${c.validation.qualityScore.toFixed(2)}, popularity=${c.popularityScore.toFixed(2)}, terrain=${c.terrainScore.toFixed(2)}`);
+    let totalScore = c.validation.qualityScore * 0.4 + // 40% weight on quality (no dead ends, highways, distance ok)
+    c.popularityScore * 0.25 + // 25% weight on popularity
+    c.loopQuality * 0.2 + // 20% weight on circuit quality (proper loop)
+    (1 - c.backtrackRatio) * 0.15;
+    if (preferTrails && c.terrainScore) {
+      totalScore = totalScore * 0.8 + c.terrainScore * 0.2;
+      console.log(`Terrain bonus for seed: quality=${c.validation.qualityScore.toFixed(2)}, popularity=${c.popularityScore.toFixed(2)}, terrain=${c.terrainScore.toFixed(2)}, loop=${c.loopQuality.toFixed(2)}, backtrack=${c.backtrackRatio.toFixed(2)}`);
     } else {
       totalScore += c.validation.qualityScore * 0.2;
     }
@@ -6570,9 +6617,11 @@ async function generateIntelligentRoute(request) {
       difficulty,
       popularityScore: candidate.popularityScore,
       qualityScore: candidate.validation.qualityScore,
+      loopQuality: candidate.loopQuality,
+      backtrackRatio: candidate.backtrackRatio,
       turnInstructions: route.instructions || []
     };
-    console.log(`  \u2192 Returning: distance=${generatedRoute.distance}m, elevation=${generatedRoute.elevationGain}m\u2197/${generatedRoute.elevationLoss}m\u2198, duration=${generatedRoute.duration}s`);
+    console.log(`  \u2192 Returning: distance=${generatedRoute.distance}m, elevation=${generatedRoute.elevationGain}m\u2197/${generatedRoute.elevationLoss}m\u2198, loop=${candidate.loopQuality.toFixed(2)}, backtrack=${candidate.backtrackRatio.toFixed(2)}`);
     return generatedRoute;
   });
 }
@@ -11610,6 +11659,13 @@ function setupErrorHandler(app2) {
   } else {
     const webDistPath = path.resolve(process.cwd(), "web", "dist");
     const expoDistPath = path.resolve(process.cwd(), "dist");
+    const landingTemplatePath = path.resolve(process.cwd(), "server", "templates", "landing-page.html");
+    let landingPageTemplate = "";
+    if (fs.existsSync(landingTemplatePath)) {
+      landingPageTemplate = fs.readFileSync(landingTemplatePath, "utf-8");
+      log("Production: Landing page template loaded");
+    }
+    const appName = getAppName();
     app.use("/assets", express2.static(path.resolve(process.cwd(), "assets")));
     app.use("/logos", express2.static(path.resolve(process.cwd(), "attached_assets/generated_images")));
     app.use(express2.static(path.resolve(process.cwd(), "static-build")));
@@ -11633,12 +11689,18 @@ function setupErrorHandler(app2) {
         if (fs.existsSync(webIndexPath)) {
           return res.sendFile(webIndexPath);
         }
+        if (landingPageTemplate) {
+          return serveLandingPage({ req, res, landingPageTemplate, appName });
+        }
       }
       const expoIndexPath = path.resolve(expoDistPath, "index.html");
       if (fs.existsSync(expoIndexPath)) {
         return res.sendFile(expoIndexPath);
       }
-      res.status(404).send("Web app not built.");
+      if (landingPageTemplate) {
+        return serveLandingPage({ req, res, landingPageTemplate, appName });
+      }
+      res.status(404).send("AI Run Coach API is running. Download the app to get started.");
     });
   }
   setupErrorHandler(app);
