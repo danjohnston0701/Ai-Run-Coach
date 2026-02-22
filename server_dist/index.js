@@ -11594,7 +11594,7 @@ function configureExpoAndLanding(app2) {
   app2.use("/assets", express2.static(path.resolve(process.cwd(), "assets")));
   app2.use("/logos", express2.static(path.resolve(process.cwd(), "attached_assets/generated_images")));
   app2.use(express2.static(path.resolve(process.cwd(), "static-build")));
-  const webDistPath = path.resolve(process.cwd(), "web", "dist");
+  const webDistPath = path.resolve(process.cwd(), "dist", "public");
   if (fs.existsSync(webDistPath)) {
     app2.use(express2.static(webDistPath));
     log(`Web app: Serving from ${webDistPath}`);
@@ -11657,7 +11657,7 @@ function setupErrorHandler(app2) {
   if (process.env.NODE_ENV !== "production") {
     configureExpoAndLanding(app);
   } else {
-    const webDistPath = path.resolve(process.cwd(), "web", "dist");
+    const webDistPath = path.resolve(process.cwd(), "dist", "public");
     const expoDistPath = path.resolve(process.cwd(), "dist");
     const landingTemplatePath = path.resolve(process.cwd(), "server", "templates", "landing-page.html");
     let landingPageTemplate = "";
