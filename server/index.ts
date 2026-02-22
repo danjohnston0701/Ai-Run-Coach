@@ -212,7 +212,7 @@ function configureExpoAndLanding(app: express.Application) {
   app.use(express.static(path.resolve(process.cwd(), "static-build")));
 
   // Serve the web app (Vite build) for browser requests
-  const webDistPath = path.resolve(process.cwd(), "web", "dist");
+  const webDistPath = path.resolve(process.cwd(), "dist", "public");
   if (fs.existsSync(webDistPath)) {
     app.use(express.static(webDistPath));
     log(`Web app: Serving from ${webDistPath}`);
@@ -299,7 +299,7 @@ function setupErrorHandler(app: express.Application) {
     configureExpoAndLanding(app);
   } else {
     // Production: Serve the web app (Vite build) for browsers
-    const webDistPath = path.resolve(process.cwd(), "web", "dist");
+    const webDistPath = path.resolve(process.cwd(), "dist", "public");
     const expoDistPath = path.resolve(process.cwd(), "dist");
 
     // Load landing page template as fallback
