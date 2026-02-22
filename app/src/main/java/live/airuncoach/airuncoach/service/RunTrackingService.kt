@@ -487,7 +487,7 @@ class RunTrackingService : Service(), SensorEventListener {
             latitude = location.latitude,
             longitude = location.longitude,
             timestamp = location.time,
-            speed = location.speed.takeIf { location.hasSpeed() },
+            speed = location.speed.takeIf { it > 0 }, // Store speed if positive (works for both real GPS and simulation)
             altitude = location.altitude.takeIf { location.hasAltitude() },
             heartRate = null,
             bearing = location.bearing.takeIf { location.hasBearing() }
@@ -520,8 +520,15 @@ class RunTrackingService : Service(), SensorEventListener {
                 }
                 totalDistance += distanceIncrement
                 // Accumulate speed readings for speed-based avg pace (essential for simulation where wall-clock time is compressed)
-                if (location.hasSpeed() && location.speed > 0.5f) {
-                    speedReadingSum += location.speed
+                // Use speed from Location if available, otherwise try LocationPoint speed as fallback
+                val speedToRecord = if (location.hasSpeed() && location.speed > 0.5f) {
+                    location.speed
+                } else if (newPoint.speed != null && newPoint.speed!! > 0.5f) {
+                    newPoint.speed!!.toFloat()
+                } else null
+
+                if (speedToRecord != null) {
+                    speedReadingSum += speedToRecord
                     speedReadingCount++
                 }
                 if (newPoint.altitude != null && prevPoint.altitude != null) {

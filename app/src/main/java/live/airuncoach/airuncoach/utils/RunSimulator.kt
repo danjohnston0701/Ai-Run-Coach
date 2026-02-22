@@ -70,7 +70,7 @@ class RunSimulator(
             latitude = currentLat
             longitude = currentLng
             this.altitude = altitude
-            this.speed = speed
+            setSpeed(speed) // Use setSpeed() to ensure hasSpeed() returns true
             this.accuracy = 3.5f
             this.bearing = bearing.toFloat()
             time = System.currentTimeMillis()

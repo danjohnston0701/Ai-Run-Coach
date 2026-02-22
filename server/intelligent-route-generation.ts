@@ -3,15 +3,20 @@
  * 
  * Uses GraphHopper API + OSM segment popularity data to generate high-quality running routes
  * 
- * ROUTE QUALITY RULES (Feb 21, 2026):
+ * ROUTE QUALITY RULES (Feb 22, 2026):
  * ✅ Avoids highways, motorways, and major roads (using GraphHopper road_class data)
  * ✅ Validates distance within ±20% of target
- * ✅ Detects and rejects routes with 180° U-turns  
- * ✅ Prevents repeated segments (backtracking < 30%)
+ * ✅ Detects and rejects routes with 180° U-turns (point-level AND macro-level)
+ * ✅ Prevents repeated segments (backtracking < 25%)
+ * ✅ Detects parallel road out-and-back (proximity-based, not just exact segment match)
  * ✅ Enforces genuine circular routes (loop quality > 70%)
+ * ✅ Measures route shape compactness (rejects elongated lollipop/out-and-back shapes)
+ * ✅ Measures angular spread from start (routes should explore multiple directions)
  * ✅ Optimizes for trails, parks, paths, cycleways when preferTrails=true
  * ✅ Filters out routes with >30% highway usage (HIGH severity)
- * ✅ Scores routes: Quality (40%) + Popularity (25%) + Circuit (35%) + Terrain (20% if preferTrails)
+ * ✅ Generates 8 candidates with well-spaced seeds for maximum variety, returns top 3
+ * ✅ Ensures returned routes are diverse (not three nearly-identical routes)
+ * ✅ Scores: Quality (25%) + Shape (25%) + Backtrack (20%) + Popularity (15%) + Terrain (15%)
  */
 
 import axios from "axios";
@@ -200,18 +205,31 @@ function validateRoute(
     console.log(`⚠️ Distance mismatch: ${(distanceDiffPercent * 100).toFixed(1)}% off target (actual=${actualDistanceMeters}m, target=${targetDistanceMeters}m)`);
   }
   
-  // Check for U-turns (180° turns)
-  for (let i = 1; i < coordinates.length - 1; i++) {
+  // Check for MACRO U-turns (going out 200m+ and turning back in approximately same direction)
+  // Sample every ~100m worth of points to detect large-scale direction reversals
+  const sampleInterval = Math.max(1, Math.floor(coordinates.length / 50));
+  const sampledCoords: Array<[number, number]> = [];
+  for (let i = 0; i < coordinates.length; i += sampleInterval) {
+    sampledCoords.push(coordinates[i]);
+  }
+  // Always include last point
+  if (sampledCoords[sampledCoords.length - 1] !== coordinates[coordinates.length - 1]) {
+    sampledCoords.push(coordinates[coordinates.length - 1]);
+  }
+  
+  let macroUTurnCount = 0;
+  for (let i = 1; i < sampledCoords.length - 1; i++) {
     const angle = calculateAngle(
-      coordinates[i - 1],
-      coordinates[i],
-      coordinates[i + 1]
+      sampledCoords[i - 1],
+      sampledCoords[i],
+      sampledCoords[i + 1]
     );
     
-    if (angle > 160) {
+    if (angle > 150) {
+      macroUTurnCount++;
       issues.push({
         type: 'U_TURN',
-        location: coordinates[i],
+        location: sampledCoords[i],
         severity: 'HIGH',
       });
     }
@@ -299,7 +317,174 @@ function calculateDifficulty(distanceKm: number, elevationGainM: number): string
   }
 }
 
-// ==================== CIRCUIT QUALITY FUNCTIONS ====================
+// ==================== SHAPE & QUALITY ANALYSIS ====================
+
+/**
+ * Calculate route compactness - how "fat" the loop is vs elongated/lollipop
+ * 
+ * A perfect circle has the highest area-to-perimeter ratio.
+ * An out-and-back has ~zero area for its perimeter.
+ * 
+ * Returns 0-1 where 1 = perfect compact loop, 0 = straight out-and-back
+ */
+function calculateCompactness(coordinates: Array<[number, number]>, startLat: number, startLng: number): number {
+  if (coordinates.length < 10) return 0;
+  
+  // Calculate the approximate enclosed area using the Shoelace formula
+  // (works for non-self-intersecting polygons, and gives a good approximation for routes)
+  let area = 0;
+  const n = coordinates.length;
+  
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    // Convert to approximate meters from start for area calculation
+    const x1 = (coordinates[i][0] - coordinates[0][0]) * 111320 * Math.cos(startLat * Math.PI / 180);
+    const y1 = (coordinates[i][1] - coordinates[0][1]) * 110540;
+    const x2 = (coordinates[j][0] - coordinates[0][0]) * 111320 * Math.cos(startLat * Math.PI / 180);
+    const y2 = (coordinates[j][1] - coordinates[0][1]) * 110540;
+    
+    area += x1 * y2 - x2 * y1;
+  }
+  area = Math.abs(area) / 2;
+  
+  // Calculate total route length in meters (approximate)
+  let perimeter = 0;
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const dx = (coordinates[i + 1][0] - coordinates[i][0]) * 111320 * Math.cos(startLat * Math.PI / 180);
+    const dy = (coordinates[i + 1][1] - coordinates[i][1]) * 110540;
+    perimeter += Math.sqrt(dx * dx + dy * dy);
+  }
+  
+  if (perimeter === 0) return 0;
+  
+  // Isoperimetric ratio: 4π·A / P² = 1 for a perfect circle
+  const circleRatio = (4 * Math.PI * area) / (perimeter * perimeter);
+  
+  // Normalize: a good running loop typically has 0.05-0.15 ratio
+  // (not a perfect circle, but has real enclosed area)
+  // An out-and-back will be near 0
+  // Cap at 1.0
+  const compactness = Math.min(1, circleRatio / 0.10); // 0.10 ratio = score of 1.0
+  
+  return compactness;
+}
+
+/**
+ * Calculate angular spread - how many different directions the route explores from start
+ * 
+ * A good loop should visit bearings all around the compass (360°).
+ * A lollipop/out-and-back will only visit a narrow bearing range.
+ * 
+ * Returns 0-1 where 1 = full 360° coverage, 0 = all in one direction
+ */
+function calculateAngularSpread(coordinates: Array<[number, number]>, startLat: number, startLng: number): number {
+  if (coordinates.length < 10) return 0;
+  
+  const startPoint: [number, number] = [startLng, startLat]; // [lng, lat]
+  
+  // Sample points along the route (every ~5% of the route)
+  const sampleInterval = Math.max(1, Math.floor(coordinates.length / 20));
+  const bearings: number[] = [];
+  
+  for (let i = sampleInterval; i < coordinates.length - sampleInterval; i += sampleInterval) {
+    // Only consider points that are at least 100m from start (skip the start/end area)
+    const dx = (coordinates[i][0] - startPoint[0]) * 111320 * Math.cos(startLat * Math.PI / 180);
+    const dy = (coordinates[i][1] - startPoint[1]) * 110540;
+    const distFromStart = Math.sqrt(dx * dx + dy * dy);
+    
+    if (distFromStart > 100) {
+      const bearing = calculateBearing(startPoint, coordinates[i]);
+      bearings.push(bearing);
+    }
+  }
+  
+  if (bearings.length < 3) return 0;
+  
+  // Divide compass into 8 sectors (N, NE, E, SE, S, SW, W, NW) of 45° each
+  const sectors = new Set<number>();
+  for (const bearing of bearings) {
+    sectors.add(Math.floor(bearing / 45));
+  }
+  
+  // Score: 8/8 sectors = 1.0, 1/8 = 0.125
+  return sectors.size / 8;
+}
+
+/**
+ * Detect proximity-based backtracking (parallel road problem)
+ * 
+ * Instead of checking exact segment reuse, checks if later parts of the route
+ * come within a close distance of earlier parts (excluding the start/end area).
+ * This catches the "down one street, back on adjacent parallel street" pattern.
+ * 
+ * Returns 0-1 where 0 = no proximity issues, 1 = heavy overlap
+ */
+function calculateProximityOverlap(
+  coordinates: Array<[number, number]>,
+  startLat: number,
+  startLng: number
+): number {
+  if (coordinates.length < 20) return 0;
+  
+  const PROXIMITY_THRESHOLD_M = 60; // Points within 60m of each other (catches adjacent streets)
+  const START_END_EXCLUSION_M = 150; // Ignore overlap near start/end (expected to overlap)
+  
+  const cosLat = Math.cos(startLat * Math.PI / 180);
+  const startPoint: [number, number] = [startLng, startLat];
+  
+  // Sample the route at regular intervals (~every 30m worth of index)
+  const sampleInterval = Math.max(1, Math.floor(coordinates.length / 100));
+  const sampledCoords: Array<{ coord: [number, number]; routeProgress: number }> = [];
+  
+  for (let i = 0; i < coordinates.length; i += sampleInterval) {
+    const progress = i / coordinates.length; // 0-1 position along route
+    sampledCoords.push({ coord: coordinates[i], routeProgress: progress });
+  }
+  
+  let overlapCount = 0;
+  let totalChecks = 0;
+  
+  for (let i = 0; i < sampledCoords.length; i++) {
+    const pi = sampledCoords[i];
+    
+    // Skip points near start/end
+    const dxStart = (pi.coord[0] - startPoint[0]) * 111320 * cosLat;
+    const dyStart = (pi.coord[1] - startPoint[1]) * 110540;
+    const distFromStart = Math.sqrt(dxStart * dxStart + dyStart * dyStart);
+    if (distFromStart < START_END_EXCLUSION_M) continue;
+    
+    for (let j = i + 1; j < sampledCoords.length; j++) {
+      const pj = sampledCoords[j];
+      
+      // Only compare points that are far apart along the route (>30% of route apart)
+      // to detect going out and coming back, not just dense points in same area
+      const routeGap = Math.abs(pj.routeProgress - pi.routeProgress);
+      if (routeGap < 0.30) continue;
+      
+      // Skip points near start/end for the second point too
+      const dxStart2 = (pj.coord[0] - startPoint[0]) * 111320 * cosLat;
+      const dyStart2 = (pj.coord[1] - startPoint[1]) * 110540;
+      const distFromStart2 = Math.sqrt(dxStart2 * dxStart2 + dyStart2 * dyStart2);
+      if (distFromStart2 < START_END_EXCLUSION_M) continue;
+      
+      totalChecks++;
+      
+      // Calculate distance between these two points
+      const dx = (pj.coord[0] - pi.coord[0]) * 111320 * cosLat;
+      const dy = (pj.coord[1] - pi.coord[1]) * 110540;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      
+      if (dist < PROXIMITY_THRESHOLD_M) {
+        overlapCount++;
+      }
+    }
+  }
+  
+  if (totalChecks === 0) return 0;
+  
+  // Return ratio of overlapping point-pairs
+  return overlapCount / totalChecks;
+}
 
 /**
  * Calculate loop quality - how well the route forms a closed loop
@@ -327,7 +512,7 @@ function calculateBacktrackRatio(coordinates: Array<[number, number]>): number {
   if (coordinates.length < 10) return 0;
   
   const gridSize = 0.0003; // ~30m grid
-  const segments: string[] = [];
+  const segmentSet = new Set<string>();
   let totalSegments = 0;
   let backtrackCount = 0;
   
@@ -341,10 +526,10 @@ function calculateBacktrackRatio(coordinates: Array<[number, number]>): number {
       const reverseSegment = `${g2}-${g1}`;
       
       // If we've seen this segment before in reverse direction, it's backtracking
-      if (segments.includes(reverseSegment)) {
+      if (segmentSet.has(reverseSegment)) {
         backtrackCount++;
       }
-      segments.push(segment);
+      segmentSet.add(segment);
     }
   }
   
@@ -365,10 +550,56 @@ function getDistanceKm(p1: { lat: number; lng: number }, p2: { lat: number; lng:
   return R * c;
 }
 
+/**
+ * Calculate how different two routes are from each other
+ * Uses the mean bearing from start to sampled points to detect similar-direction routes
+ * Returns 0-1 where 0 = identical direction, 1 = completely different
+ */
+function calculateRouteDiversity(
+  coordsA: Array<[number, number]>,
+  coordsB: Array<[number, number]>,
+  startLat: number,
+  startLng: number
+): number {
+  const startPoint: [number, number] = [startLng, startLat];
+  
+  // Get the "dominant bearing" of each route (average bearing to the midpoint area)
+  function getDominantBearing(coords: Array<[number, number]>): number {
+    // Sample the middle 40% of the route (20%-60%) for direction
+    const startIdx = Math.floor(coords.length * 0.2);
+    const endIdx = Math.floor(coords.length * 0.6);
+    const sampleInterval = Math.max(1, Math.floor((endIdx - startIdx) / 10));
+    
+    let sinSum = 0;
+    let cosSum = 0;
+    let count = 0;
+    
+    for (let i = startIdx; i < endIdx; i += sampleInterval) {
+      const bearing = calculateBearing(startPoint, coords[i]);
+      sinSum += Math.sin(bearing * Math.PI / 180);
+      cosSum += Math.cos(bearing * Math.PI / 180);
+      count++;
+    }
+    
+    if (count === 0) return 0;
+    return (Math.atan2(sinSum / count, cosSum / count) * 180 / Math.PI + 360) % 360;
+  }
+  
+  const bearingA = getDominantBearing(coordsA);
+  const bearingB = getDominantBearing(coordsB);
+  
+  let diff = Math.abs(bearingA - bearingB);
+  if (diff > 180) diff = 360 - diff;
+  
+  // Normalize: 180° apart = 1.0 diversity, 0° apart = 0.0
+  return diff / 180;
+}
+
 // ==================== INTELLIGENT ROUTE GENERATION ====================
 
 /**
  * Generate multiple route candidates and return top 3
+ * Uses well-spaced seeds for maximum variety from GraphHopper
  */
 export async function generateIntelligentRoute(
   request: RouteRequest
@@ -387,20 +618,32 @@ export async function generateIntelligentRoute(
   
   console.log(`🗺️ Generating ${distanceKm}km (${distanceMeters}m) route at (${latitude}, ${longitude})`);
   
-  // Generate multiple candidates with different seeds
-  const maxAttempts = 3;
+  // Generate MORE candidates with WELL-SPACED seeds for maximum variety
+  // Sequential seeds (0,1,2) often produce very similar routes
+  // Spaced seeds force GraphHopper to explore different road networks
+  const maxAttempts = 8;
   const candidates: Array<{
     route: any;
     validation: ValidationResult;
     popularityScore: number;
+    terrainScore: number;
+    loopQuality: number;
+    backtrackRatio: number;
+    compactness: number;
+    angularSpread: number;
+    proximityOverlap: number;
+    coordinates: Array<[number, number]>;
   }> = [];
   
-  // Use random starting seed to ensure different routes each generation
-  const baseSeed = Math.floor(Math.random() * 100);
-  console.log(`🎲 Using random base seed: ${baseSeed}`);
+  // Use random starting seed with wide spacing to ensure diverse routes
+  const baseSeed = Math.floor(Math.random() * 1000);
+  // Well-spaced seed offsets (primes * 7 for good distribution)
+  const seedOffsets = [0, 13, 29, 47, 61, 83, 97, 113];
+  console.log(`🎲 Using random base seed: ${baseSeed} with ${maxAttempts} attempts`);
   
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const seed = baseSeed + attempt;
+  // Fire off all GraphHopper requests in parallel for speed
+  const routePromises = seedOffsets.slice(0, maxAttempts).map(async (offset) => {
+    const seed = baseSeed + offset;
     try {
       const ghResponse = await generateGraphHopperRoute(
         latitude,
@@ -409,85 +652,114 @@ export async function generateIntelligentRoute(
         profile,
         seed
       );
-      
-      if (!ghResponse.paths || ghResponse.paths.length === 0) {
-        console.log(`Seed ${seed}: No route found`);
-        continue;
-      }
-      
-      const path = ghResponse.paths[0];
-      let coordinates = path.points.coordinates as Array<[number, number]>;
-      
-      // Calculate circuit quality BEFORE enforcing circular (so we get real loop quality)
-      // This tells us if GraphHopper naturally created a good loop
-      const loopQuality = calculateLoopQuality(coordinates, latitude, longitude);
-      const backtrackRatio = calculateBacktrackRatio(coordinates);
-      console.log(`Seed ${seed}: Circuit - Loop=${loopQuality.toFixed(2)}, Backtrack=${backtrackRatio.toFixed(2)}`);
-
-      // Reject routes with poor circuit quality
-      if (loopQuality < 0.7) {
-        console.log(`Seed ${seed}: Rejected - poor loop quality (${loopQuality.toFixed(2)} < 0.7)`);
-        continue;
-      }
-      if (backtrackRatio > 0.3) {
-        console.log(`Seed ${seed}: Rejected - too much backtracking (${backtrackRatio.toFixed(2)} > 0.3)`);
-        continue;
-      }
-      
-      // ENSURE CIRCULAR ROUTE: Force start and end to be the exact same point
-      if (coordinates.length > 0) {
-        const startPoint: [number, number] = [longitude, latitude];
-        
-        // Replace first point with exact user location
-        coordinates[0] = startPoint;
-        
-        // Replace last point with exact user location to close the loop
-        coordinates[coordinates.length - 1] = startPoint;
-        
-        console.log(`Seed ${seed}: Enforced circular route - start (${startPoint[0].toFixed(6)}, ${startPoint[1].toFixed(6)}) = end`);
-      }
-
-      // Debug: Log what GraphHopper returned
-      console.log(`Seed ${seed}: GraphHopper returned distance=${path.distance}m, ascend=${path.ascend}m, time=${path.time}ms, points=${coordinates.length}`);
-      
-      // Extract road class details for validation
-      const roadClassDetails = path.details?.road_class || [];
-      
-      // Analyze terrain (for preferTrails filtering)
-      const roadAnalysis = analyzeRoadClasses(roadClassDetails);
-      console.log(`Seed ${seed}: Terrain - trails=${(roadAnalysis.trailPercentage * 100).toFixed(1)}%, paths=${(roadAnalysis.pathPercentage * 100).toFixed(1)}%, highways=${(roadAnalysis.highwayPercentage * 100).toFixed(1)}%, score=${roadAnalysis.terrainScore.toFixed(2)}`);
-      
-      // If user prefers trails but route has very few, penalize it
-      if (preferTrails && roadAnalysis.terrainScore < 0.3) {
-        console.log(`Seed ${seed}: Rejected - user prefers trails but route has low terrain score`);
-        continue;
-      }
-      
-      // Validate route quality (includes distance tolerance, U-turns, highways)
-      const validation = validateRoute(coordinates, path.distance, distanceMeters, roadClassDetails);
-      console.log(`Seed ${seed}: Valid=${validation.isValid}, Quality=${validation.qualityScore.toFixed(2)}, Issues=${validation.issues.length}`);
-      
-      if (!validation.isValid) {
-        console.log(`Seed ${seed}: Rejected - invalid route`);
-        continue;
-      }
-      
-      // Check popularity score
-      const popularityScore = await getRoutePopularityScore(coordinates);
-      console.log(`Seed ${seed}: Popularity=${popularityScore.toFixed(2)}`);
-
-      candidates.push({
-        route: path,
-        validation,
-        popularityScore,
-        terrainScore: roadAnalysis.terrainScore,
-        loopQuality,
-        backtrackRatio,
-      } as any);
-      
+      return { seed, ghResponse };
     } catch (error) {
       console.error(`Seed ${seed} failed:`, error);
+      return { seed, ghResponse: null };
     }
+  });
+  
+  const routeResults = await Promise.all(routePromises);
+  
+  // Process each result
+  for (const { seed, ghResponse } of routeResults) {
+    if (!ghResponse || !ghResponse.paths || ghResponse.paths.length === 0) {
+      console.log(`Seed ${seed}: No route found`);
+      continue;
+    }
+    
+    const path = ghResponse.paths[0];
+    let coordinates = path.points.coordinates as Array<[number, number]>;
+    
+    // Calculate circuit quality BEFORE enforcing circular (so we get real loop quality)
+    const loopQuality = calculateLoopQuality(coordinates, latitude, longitude);
+    const backtrackRatio = calculateBacktrackRatio(coordinates);
+    console.log(`Seed ${seed}: Circuit - Loop=${loopQuality.toFixed(2)}, Backtrack=${backtrackRatio.toFixed(2)}`);
+
+    // Reject routes with poor circuit quality
+    if (loopQuality < 0.7) {
+      console.log(`Seed ${seed}: Rejected - poor loop quality (${loopQuality.toFixed(2)} < 0.7)`);
+      continue;
+    }
+    if (backtrackRatio > 0.25) {
+      console.log(`Seed ${seed}: Rejected - too much backtracking (${backtrackRatio.toFixed(2)} > 0.25)`);
+      continue;
+    }
+    
+    // NEW: Calculate shape metrics
+    const compactness = calculateCompactness(coordinates, latitude, longitude);
+    const angularSpread = calculateAngularSpread(coordinates, latitude, longitude);
+    const proximityOverlap = calculateProximityOverlap(coordinates, latitude, longitude);
+    
+    console.log(`Seed ${seed}: Shape - Compactness=${compactness.toFixed(2)}, AngularSpread=${angularSpread.toFixed(2)}, ProximityOverlap=${proximityOverlap.toFixed(2)}`);
+    
+    // Reject routes with excessive proximity overlap (parallel road out-and-back)
+    if (proximityOverlap > 0.25) {
+      console.log(`Seed ${seed}: Rejected - too much proximity overlap (${proximityOverlap.toFixed(2)} > 0.25, parallel road pattern)`);
+      continue;
+    }
+    
+    // Reject very elongated routes (compactness near 0 = pure out-and-back)
+    if (compactness < 0.15) {
+      console.log(`Seed ${seed}: Rejected - too elongated (compactness=${compactness.toFixed(2)} < 0.15)`);
+      continue;
+    }
+    
+    // Reject routes that only explore one direction
+    if (angularSpread < 0.25) {
+      console.log(`Seed ${seed}: Rejected - poor angular spread (${angularSpread.toFixed(2)} < 0.25, lollipop shape)`);
+      continue;
+    }
+    
+    // ENSURE CIRCULAR ROUTE: Force start and end to be the exact same point
+    if (coordinates.length > 0) {
+      const startPoint: [number, number] = [longitude, latitude];
+      coordinates[0] = startPoint;
+      coordinates[coordinates.length - 1] = startPoint;
+      console.log(`Seed ${seed}: Enforced circular route`);
+    }
+
+    console.log(`Seed ${seed}: GraphHopper returned distance=${path.distance}m, ascend=${path.ascend}m, time=${path.time}ms, points=${coordinates.length}`);
+    
+    // Extract road class details for validation
+    const roadClassDetails = path.details?.road_class || [];
+    
+    // Analyze terrain (for preferTrails filtering)
+    const roadAnalysis = analyzeRoadClasses(roadClassDetails);
+    console.log(`Seed ${seed}: Terrain - trails=${(roadAnalysis.trailPercentage * 100).toFixed(1)}%, paths=${(roadAnalysis.pathPercentage * 100).toFixed(1)}%, highways=${(roadAnalysis.highwayPercentage * 100).toFixed(1)}%`);
+    
+    // If user prefers trails but route has very few, penalize it (but don't hard-reject in urban areas)
+    // Lowered threshold from 0.3 to 0.1 so urban areas aren't over-filtered
+    if (preferTrails && roadAnalysis.terrainScore < 0.1) {
+      console.log(`Seed ${seed}: Rejected - user prefers trails but route has very low terrain score (${roadAnalysis.terrainScore.toFixed(2)})`);
+      continue;
+    }
+    
+    // Validate route quality (includes distance tolerance, U-turns, highways)
+    const validation = validateRoute(coordinates, path.distance, distanceMeters, roadClassDetails);
+    console.log(`Seed ${seed}: Valid=${validation.isValid}, Quality=${validation.qualityScore.toFixed(2)}, Issues=${validation.issues.length}`);
+    
+    if (!validation.isValid) {
+      console.log(`Seed ${seed}: Rejected - invalid route`);
+      continue;
+    }
+    
+    // Check popularity score
+    const popularityScore = await getRoutePopularityScore(coordinates);
+    console.log(`Seed ${seed}: Popularity=${popularityScore.toFixed(2)}`);
+
+    candidates.push({
+      route: path,
+      validation,
+      popularityScore,
+      terrainScore: roadAnalysis.terrainScore,
+      loopQuality,
+      backtrackRatio,
+      compactness,
+      angularSpread,
+      proximityOverlap,
+      coordinates,
+    });
   }
   
   // No valid routes found
@@ -495,42 +767,93 @@ export async function generateIntelligentRoute(
     throw new Error("Could not generate a valid route. Try a different location or distance.");
   }
   
-  // Score candidates and pick the best
-  const scored = candidates.map((c: any) => {
-    // Base scoring: quality (40%) + popularity (25%) + circuit quality (20%) + loop (15%)
-    let totalScore = 
-      c.validation.qualityScore * 0.4 + // 40% weight on quality (no dead ends, highways, distance ok)
-      c.popularityScore * 0.25 +        // 25% weight on popularity
-      c.loopQuality * 0.2 +             // 20% weight on circuit quality (proper loop)
-      (1 - c.backtrackRatio) * 0.15;   // 15% weight on low backtracking
+  console.log(`📊 ${candidates.length} valid candidates from ${maxAttempts} attempts`);
+  
+  // Score candidates
+  const scored = candidates.map((c) => {
+    // Combined shape score: compactness (how fat the loop is) + angular spread (explores many directions)
+    // - proximity overlap penalty (adjacent road out-and-back)
+    const shapeScore = Math.max(0, 
+      c.compactness * 0.4 + 
+      c.angularSpread * 0.4 - 
+      c.proximityOverlap * 0.8 // Heavy penalty for parallel road patterns
+    );
     
-    // If user prefers trails, add terrain score (20% weight)
-    if (preferTrails && c.terrainScore) {
-      totalScore = totalScore * 0.8 + c.terrainScore * 0.2;
-      console.log(`Terrain bonus for seed: quality=${c.validation.qualityScore.toFixed(2)}, popularity=${c.popularityScore.toFixed(2)}, terrain=${c.terrainScore.toFixed(2)}, loop=${c.loopQuality.toFixed(2)}, backtrack=${c.backtrackRatio.toFixed(2)}`);
-    } else {
-      // Without trail preference, give remaining 20% to quality
-      totalScore += c.validation.qualityScore * 0.2;
+    // New scoring weights emphasizing route shape quality:
+    // Quality: 25% (no dead ends, highways, distance ok)
+    // Shape: 25% (compactness + angular spread - overlap penalty)
+    // Backtrack: 20% (low exact backtracking)
+    // Popularity: 15% (known good segments)
+    // Loop: 15% (proper closed loop)
+    let totalScore = 
+      c.validation.qualityScore * 0.25 +
+      shapeScore * 0.25 +
+      (1 - c.backtrackRatio) * 0.20 +
+      c.popularityScore * 0.15 +
+      c.loopQuality * 0.15;
+    
+    // If user prefers trails, add terrain bonus
+    if (preferTrails && c.terrainScore > 0) {
+      totalScore = totalScore * 0.85 + c.terrainScore * 0.15;
     }
     
-    return { ...c, totalScore };
+    console.log(`  Candidate: quality=${c.validation.qualityScore.toFixed(2)}, shape=${shapeScore.toFixed(2)} (compact=${c.compactness.toFixed(2)}, spread=${c.angularSpread.toFixed(2)}, overlap=${c.proximityOverlap.toFixed(2)}), backtrack=${c.backtrackRatio.toFixed(2)}, popularity=${c.popularityScore.toFixed(2)}, loop=${c.loopQuality.toFixed(2)} → TOTAL=${totalScore.toFixed(3)}`);
+    
+    return { ...c, totalScore, shapeScore };
   });
   
   scored.sort((a, b) => b.totalScore - a.totalScore);
   
-  console.log(`✅ Generated ${scored.length} routes, returning top ${Math.min(3, scored.length)}`);
+  // Select top 3 routes with DIVERSITY enforcement
+  // Don't return 3 routes that all go in the same direction
+  const selectedRoutes: typeof scored = [];
   
-  // Return top 3 routes (or fewer if less than 3 valid routes)
-  const topRoutes = scored.slice(0, 3);
+  for (const candidate of scored) {
+    if (selectedRoutes.length >= 3) break;
+    
+    // Check if this route is sufficiently different from already-selected routes
+    let isSufficientlyDiverse = true;
+    for (const selected of selectedRoutes) {
+      const diversity = calculateRouteDiversity(
+        candidate.coordinates,
+        selected.coordinates,
+        latitude,
+        longitude
+      );
+      
+      if (diversity < 0.15) {
+        // Routes are too similar in direction, skip this one
+        console.log(`  Skipping similar route (diversity=${diversity.toFixed(2)} with already-selected route)`);
+        isSufficientlyDiverse = false;
+        break;
+      }
+    }
+    
+    if (isSufficientlyDiverse) {
+      selectedRoutes.push(candidate);
+    }
+  }
   
-  return topRoutes.map((candidate: any, index: number) => {
+  // If diversity filtering was too strict, fill remaining slots with best available
+  if (selectedRoutes.length < 3) {
+    for (const candidate of scored) {
+      if (selectedRoutes.length >= 3) break;
+      if (!selectedRoutes.includes(candidate)) {
+        selectedRoutes.push(candidate);
+      }
+    }
+  }
+  
+  console.log(`✅ Generated ${scored.length} valid routes, returning ${selectedRoutes.length} diverse routes`);
+  
+  return selectedRoutes.map((candidate, index) => {
     const route = candidate.route;
     const difficulty = calculateDifficulty(
       route.distance / 1000,
       route.ascend || 0
     );
     
-    console.log(`  Route ${index + 1}: Distance=${route.distance}m (${(route.distance / 1000).toFixed(2)}km), Score=${candidate.totalScore.toFixed(2)}, Quality=${candidate.validation.qualityScore.toFixed(2)}, Popularity=${candidate.popularityScore.toFixed(2)}, Terrain=${candidate.terrainScore?.toFixed(2) || 'N/A'}`);
+    console.log(`  Route ${index + 1}: ${(route.distance / 1000).toFixed(2)}km, Score=${candidate.totalScore.toFixed(2)}, Shape=${candidate.shapeScore.toFixed(2)}, Compact=${candidate.compactness.toFixed(2)}, Spread=${candidate.angularSpread.toFixed(2)}`);
     
     const generatedRoute = {
       id: generateRouteId(),
@@ -548,7 +871,7 @@ export async function generateIntelligentRoute(
       turnInstructions: route.instructions || [],
     };
 
-    console.log(`  → Returning: distance=${generatedRoute.distance}m, elevation=${generatedRoute.elevationGain}m↗/${generatedRoute.elevationLoss}m↘, loop=${candidate.loopQuality.toFixed(2)}, backtrack=${candidate.backtrackRatio.toFixed(2)}`);
+    console.log(`  → distance=${generatedRoute.distance}m, elevation=${generatedRoute.elevationGain}m↗/${generatedRoute.elevationLoss}m↘, loop=${candidate.loopQuality.toFixed(2)}, backtrack=${candidate.backtrackRatio.toFixed(2)}`);
     
     return generatedRoute;
   });

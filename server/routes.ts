@@ -3727,10 +3727,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         weatherImpact,
       });
       
-      // Build natural speech text from AI response
+      // Build natural speech text from ALL AI response fields
       const speechParts: string[] = [];
       if (aiBriefing.briefing) speechParts.push(aiBriefing.briefing);
+      if (aiBriefing.readinessInsight) speechParts.push(aiBriefing.readinessInsight);
       if (aiBriefing.intensityAdvice) speechParts.push(aiBriefing.intensityAdvice);
+      if (aiBriefing.weatherAdvantage) speechParts.push(aiBriefing.weatherAdvantage);
       // Include warnings if any
       if (aiBriefing.warnings && aiBriefing.warnings.length > 0) {
         speechParts.push(aiBriefing.warnings.join('. '));
