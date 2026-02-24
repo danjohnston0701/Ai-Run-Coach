@@ -107,7 +107,9 @@ class RunSessionViewModel @Inject constructor(
             RunTrackingService.uploadComplete.collect { backendRunId ->
                 backendRunId?.let {
                     Log.d("RunSessionViewModel", "Upload complete with backend ID: $it")
-                    _runState.update { state -> state.copy(backendRunId = it, isStopping = false) }
+                    // Keep isStopping = true so the navigation guard knows this is from the CURRENT run
+                    // isStopping will be cleared after navigation happens
+                    _runState.update { state -> state.copy(backendRunId = it) }
                 }
             }
         }
