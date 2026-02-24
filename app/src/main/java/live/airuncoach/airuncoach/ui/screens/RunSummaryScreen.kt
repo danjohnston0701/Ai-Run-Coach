@@ -90,8 +90,10 @@ import live.airuncoach.airuncoach.viewmodel.RunSummaryViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -393,9 +395,27 @@ private fun SummaryTabFlagship(
             )
         }
 
+        // Pace Consistency & Split Analysis
+        item { PaceConsistencyCard(run = run) }
+
+        item { SplitAnalysisCard(run = run) }
+
+        // Km Splits Visual Bar Chart
+        item {
+            if (run.kmSplits.size >= 2) {
+                KmSplitsVisualChart(kmSplits = run.kmSplits)
+            }
+        }
+
+        // Effort Score / Training Load
+        item { EffortScoreCard(run = run) }
+
         item { ChartsSectionFlagship(run = run) }
 
-        item { HeartRateZonesCardFlagship(heartRateData = run.heartRateData) }
+        item { HeartRateZonesVisualCard(heartRateData = run.heartRateData) }
+
+        // Intensity Distribution Donut
+        item { IntensityDistributionCard(run = run) }
 
         // Delete run button at the bottom of the screen
         item {
@@ -1542,6 +1562,54 @@ private fun ChartsSectionFlagship(run: RunSession) {
                 }
             }
         }
+
+        // Heart Rate Chart
+        val hrSeries = remember(run.routePoints, run.heartRateData, mode) {
+            buildHeartRateSeries(run.routePoints, run.heartRateData, mode)
+        }
+
+        if (hrSeries.y.size >= 2) {
+            val avgHr = hrSeries.y.average().roundToInt()
+            val maxHr = hrSeries.y.maxOrNull()?.roundToInt() ?: 0
+            LineChartCardFlagship(
+                title = "Heart Rate",
+                subtitleLeft = "Avg: $avgHr bpm",
+                subtitleRight = "Max: $maxHr bpm",
+                accent = Colors.error
+            ) {
+                RunLineChartCanvas(
+                    series = hrSeries,
+                    lineColor = Colors.error,
+                    xTitle = if (mode == ChartMode.Time) "Time (min)" else "Distance (km)",
+                    yFormatter = { v -> "${v.roundToInt()}" },
+                    yUnitHint = "bpm"
+                )
+            }
+        }
+
+        // Cadence Chart
+        val cadenceSeries = remember(run.routePoints, mode) {
+            buildCadenceSeries(run.routePoints, mode)
+        }
+
+        if (cadenceSeries.y.size >= 2) {
+            val avgCad = cadenceSeries.y.average().roundToInt()
+            val maxCad = cadenceSeries.y.maxOrNull()?.roundToInt() ?: 0
+            LineChartCardFlagship(
+                title = "Cadence",
+                subtitleLeft = "Avg: $avgCad spm",
+                subtitleRight = "Max: $maxCad spm",
+                accent = Color(0xFF9C27B0)
+            ) {
+                RunLineChartCanvas(
+                    series = cadenceSeries,
+                    lineColor = Color(0xFF9C27B0),
+                    xTitle = if (mode == ChartMode.Time) "Time (min)" else "Distance (km)",
+                    yFormatter = { v -> "${v.roundToInt()}" },
+                    yUnitHint = "spm"
+                )
+            }
+        }
     }
 }
 
@@ -2013,6 +2081,87 @@ private fun haversineMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Doub
     return r * (2 * atan2(sqrt(a), sqrt(1 - a)))
 }
 
+/* -------------------- HR / CADENCE SERIES BUILDERS -------------------- */
+
+private fun buildHeartRateSeries(
+    routePoints: List<LocationPoint>,
+    heartRateData: List<Int>?,
+    mode: ChartMode
+): LabeledSeries {
+    // Try from routePoints first (they have embedded HR from Garmin watch)
+    val fromRoute = hrFromRoutePoints(routePoints, mode)
+    if (fromRoute.y.size >= 2) return fromRoute
+
+    // Fallback: use heartRateData array (index-based)
+    val hr = heartRateData?.filter { it > 0 } ?: return LabeledSeries(emptyList(), emptyList(), emptyList())
+    if (hr.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
+
+    val step = (hr.size / 200f).coerceAtLeast(1f).toInt()
+    val xOut = mutableListOf<Double>()
+    val yOut = mutableListOf<Double>()
+    val labels = mutableListOf<String>()
+
+    var i = 0
+    while (i < hr.size) {
+        xOut.add(xOut.size.toDouble())
+        yOut.add(hr[i].toDouble())
+        labels.add("${i + 1}")
+        i += step
+    }
+
+    return LabeledSeries(xOut, smoothY(yOut, 5), labels)
+}
+
+private fun hrFromRoutePoints(points: List<LocationPoint>, mode: ChartMode): LabeledSeries {
+    val valid = points.filter { it.heartRate != null && it.heartRate > 0 && it.latitude != 0.0 }
+    if (valid.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
+
+    val xOut = mutableListOf<Double>()
+    val yOut = mutableListOf<Double>()
+    val labels = mutableListOf<String>()
+    val startTs = valid.first().timestamp
+    var cumulativeMeters = 0.0
+    val step = (valid.size / 200f).coerceAtLeast(1f).toInt()
+
+    var i = 1
+    while (i < valid.size) {
+        val prev = valid[i - 1]
+        val curr = valid[i]
+        cumulativeMeters += haversineMeters(prev.latitude, prev.longitude, curr.latitude, curr.longitude)
+
+        val xLabel = if (mode == ChartMode.Time) {
+            String.format(java.util.Locale.US, "%.0f", (curr.timestamp - startTs) / 60000.0)
+        } else {
+            String.format(java.util.Locale.US, "%.1f", cumulativeMeters / 1000.0)
+        }
+
+        xOut.add(xOut.size.toDouble())
+        yOut.add(curr.heartRate!!.toDouble())
+        labels.add(xLabel)
+
+        i += step
+    }
+
+    return LabeledSeries(xOut, smoothY(yOut, 5), labels)
+}
+
+private fun buildCadenceSeries(points: List<LocationPoint>, mode: ChartMode): LabeledSeries {
+    // Cadence is not directly on LocationPoint — we'd need it from speed
+    // For now, return empty — cadence chart shows when we have time-series cadence data
+    // TODO: Add cadence field to LocationPoint or store cadence time-series
+    return LabeledSeries(emptyList(), emptyList(), emptyList())
+}
+
+private fun parsePaceToSeconds(pace: String): Int {
+    // Parse "M:SS" or "M:SS/km" to total seconds
+    val cleaned = pace.replace("/km", "").trim()
+    val parts = cleaned.split(":")
+    if (parts.size != 2) return 0
+    val min = parts[0].toIntOrNull() ?: return 0
+    val sec = parts[1].toIntOrNull() ?: return 0
+    return min * 60 + sec
+}
+
 /* --------------------------------- dp/sp helpers -------------------------------- */
 
 @Composable
@@ -2125,6 +2274,790 @@ private fun HeartRateZonesCardFlagship(heartRateData: List<Int>?) {
                     ) {
                         Text("$name • $label", style = AppTextStyles.body, color = Colors.textSecondary)
                         Text("${pct(range)}%", style = AppTextStyles.body, color = Colors.textSecondary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* ---------------------- PACE CONSISTENCY SCORE CARD ---------------------- */
+
+@Composable
+private fun PaceConsistencyCard(run: RunSession) {
+    if (run.kmSplits.size < 2) return
+
+    val (score, label, color, description) = remember(run.kmSplits) {
+        calculatePaceConsistency(run.kmSplits)
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.6f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        "Pace Consistency",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
+                        color = Colors.textPrimary
+                    )
+                    Text(
+                        "How evenly you paced your run",
+                        style = AppTextStyles.caption,
+                        color = Colors.textSecondary
+                    )
+                }
+                // Score badge
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .background(color.copy(alpha = 0.15f), CircleShape)
+                        .border(2.dp, color.copy(alpha = 0.5f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "$score",
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.ExtraBold),
+                        color = color
+                    )
+                }
+            }
+
+            // Rating pill
+            Box(
+                modifier = Modifier
+                    .background(color.copy(alpha = 0.12f), RoundedCornerShape(999.dp))
+                    .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                Text(label, style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = color)
+            }
+
+            Text(
+                description,
+                style = AppTextStyles.body,
+                color = Colors.textSecondary
+            )
+
+            // Pace range indicator
+            val paces = run.kmSplits.map { parsePaceToSeconds(it.pace) }.filter { it > 0 }
+            if (paces.size >= 2) {
+                val fastest = paces.min()
+                val slowest = paces.max()
+                val range = slowest - fastest
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("Fastest", style = AppTextStyles.caption, color = Colors.textMuted)
+                        Text(
+                            formatPaceSeconds(fastest.toLong()),
+                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                            color = Color(0xFF4CAF50)
+                        )
+                    }
+                    Column {
+                        Text("Slowest", style = AppTextStyles.caption, color = Colors.textMuted)
+                        Text(
+                            formatPaceSeconds(slowest.toLong()),
+                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.error
+                        )
+                    }
+                    Column {
+                        Text("Range", style = AppTextStyles.caption, color = Colors.textMuted)
+                        Text(
+                            "${range}s",
+                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.textPrimary
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class PaceConsistencyResult(
+    val score: Int,
+    val label: String,
+    val color: Color,
+    val description: String
+)
+
+private fun calculatePaceConsistency(splits: List<KmSplit>): PaceConsistencyResult {
+    val paces = splits.map { parsePaceToSeconds(it.pace).toDouble() }.filter { it > 0 }
+    if (paces.size < 2) return PaceConsistencyResult(0, "N/A", Color.Gray, "Not enough data")
+
+    val mean = paces.average()
+    val variance = paces.map { (it - mean).pow(2) }.average()
+    val stdDev = sqrt(variance)
+    val cv = (stdDev / mean) * 100.0 // coefficient of variation as percentage
+
+    // Score: 100 = perfect, 0 = all over the place
+    // CV < 2% = excellent (95-100), CV 2-5% = good (80-95), CV 5-10% = average (60-80), CV > 10% = poor
+    val score = (100 - cv * 5).coerceIn(0.0, 100.0).roundToInt()
+
+    return when {
+        score >= 90 -> PaceConsistencyResult(score, "Metronome", Color(0xFF4CAF50), "Exceptional pacing! You held a remarkably even effort throughout the run. Elite-level consistency.")
+        score >= 75 -> PaceConsistencyResult(score, "Well Paced", Color(0xFF8BC34A), "Strong pacing strategy. Your splits are tight with minimal variation — this shows discipline.")
+        score >= 60 -> PaceConsistencyResult(score, "Moderate", Color(0xFFFFC107), "Some variation between splits. Consider starting a touch slower to maintain even effort in the second half.")
+        score >= 40 -> PaceConsistencyResult(score, "Variable", Color(0xFFFF9800), "Noticeable pace changes between kilometers. This could indicate terrain, fatigue, or inconsistent effort.")
+        else -> PaceConsistencyResult(score, "Erratic", Colors.error, "Large pace swings detected. Focus on running by feel or use pace alerts to stay within your target zone.")
+    }
+}
+
+/* ----------------------- SPLIT ANALYSIS CARD ----------------------- */
+
+@Composable
+private fun SplitAnalysisCard(run: RunSession) {
+    if (run.kmSplits.size < 2) return
+
+    val (splitType, firstHalfAvg, secondHalfAvg, differencePercent) = remember(run.kmSplits) {
+        analyzeSplits(run.kmSplits)
+    }
+
+    val (color, icon, description) = when (splitType) {
+        "NEGATIVE" -> Triple(
+            Color(0xFF4CAF50),
+            "🚀",
+            "Negative split — you got faster as the run progressed! This is the gold standard for racing strategy."
+        )
+        "POSITIVE" -> Triple(
+            Color(0xFFFF9800),
+            "📉",
+            "Positive split — you slowed as the run progressed. Consider starting 5-10s/km slower to have more energy for the finish."
+        )
+        else -> Triple(
+            Colors.primary,
+            "⚖️",
+            "Even split — nearly identical first and second half. Excellent pacing discipline!"
+        )
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.4f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(icon, style = AppTextStyles.h3)
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(
+                        "$splitType Split",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
+                        color = Colors.textPrimary
+                    )
+                    Text(
+                        "${abs(differencePercent).roundToInt()}% difference",
+                        style = AppTextStyles.caption,
+                        color = color
+                    )
+                }
+            }
+
+            // Half comparison
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("1st Half", style = AppTextStyles.caption, color = Colors.textMuted)
+                    Text(
+                        formatPaceSeconds(firstHalfAvg.toLong()),
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                        color = if (splitType == "NEGATIVE") Colors.textSecondary else color
+                    )
+                    Text("/km avg", style = AppTextStyles.caption, color = Colors.textMuted)
+                }
+                // Arrow
+                Text(
+                    if (splitType == "NEGATIVE") "→ ⚡" else if (splitType == "POSITIVE") "→ 🐢" else "→ =",
+                    style = AppTextStyles.h4,
+                    modifier = Modifier.padding(top = 12.dp)
+                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("2nd Half", style = AppTextStyles.caption, color = Colors.textMuted)
+                    Text(
+                        formatPaceSeconds(secondHalfAvg.toLong()),
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                        color = if (splitType == "NEGATIVE") color else Colors.textSecondary
+                    )
+                    Text("/km avg", style = AppTextStyles.caption, color = Colors.textMuted)
+                }
+            }
+
+            Text(
+                description,
+                style = AppTextStyles.small,
+                color = Colors.textSecondary
+            )
+        }
+    }
+}
+
+private data class SplitAnalysis(
+    val type: String, // "NEGATIVE", "POSITIVE", "EVEN"
+    val firstHalfAvg: Double,
+    val secondHalfAvg: Double,
+    val differencePercent: Double
+)
+
+private fun analyzeSplits(splits: List<KmSplit>): SplitAnalysis {
+    val paces = splits.map { parsePaceToSeconds(it.pace).toDouble() }.filter { it > 0 }
+    if (paces.size < 2) return SplitAnalysis("EVEN", 0.0, 0.0, 0.0)
+
+    val mid = paces.size / 2
+    val firstHalf = paces.subList(0, mid).average()
+    val secondHalf = paces.subList(mid, paces.size).average()
+    val diff = ((secondHalf - firstHalf) / firstHalf) * 100
+
+    val type = when {
+        diff < -2.0 -> "NEGATIVE"
+        diff > 2.0 -> "POSITIVE"
+        else -> "EVEN"
+    }
+
+    return SplitAnalysis(type, firstHalf, secondHalf, diff)
+}
+
+/* ---------------------- KM SPLITS VISUAL BAR CHART ---------------------- */
+
+@Composable
+private fun KmSplitsVisualChart(kmSplits: List<KmSplit>) {
+    val paces = remember(kmSplits) {
+        kmSplits.map { parsePaceToSeconds(it.pace).toDouble() }.filter { it > 0 }
+    }
+    if (paces.size < 2) return
+
+    val fastestIdx = paces.indexOf(paces.min())
+    val slowestIdx = paces.indexOf(paces.max())
+    val minPace = paces.min()
+    val maxPace = paces.max()
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.6f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                "Km Split Breakdown",
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
+                color = Colors.textPrimary
+            )
+
+            // Bar chart
+            paces.forEachIndexed { idx, pace ->
+                val fraction = if (maxPace > minPace) {
+                    ((pace - minPace) / (maxPace - minPace)).toFloat()
+                } else 0.5f
+                // Invert: fastest = longest bar (lowest pace = best)
+                val barFraction = (1f - fraction).coerceIn(0.15f, 1f)
+
+                val barColor = when (idx) {
+                    fastestIdx -> Color(0xFF4CAF50)
+                    slowestIdx -> Colors.error
+                    else -> paceToColor(pace, minPace, maxPace)
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Km label
+                    Text(
+                        "Km ${idx + 1}",
+                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
+                        color = Colors.textMuted,
+                        modifier = Modifier.width(42.dp)
+                    )
+
+                    // Bar
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(20.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Colors.backgroundTertiary.copy(alpha = 0.3f))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(barFraction)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(barColor)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    // Pace label
+                    Text(
+                        kmSplits[idx].pace,
+                        style = AppTextStyles.caption.copy(
+                            fontWeight = if (idx == fastestIdx || idx == slowestIdx) FontWeight.ExtraBold else FontWeight.Medium
+                        ),
+                        color = when (idx) {
+                            fastestIdx -> Color(0xFF4CAF50)
+                            slowestIdx -> Colors.error
+                            else -> Colors.textPrimary
+                        },
+                        modifier = Modifier.width(48.dp),
+                        textAlign = TextAlign.End
+                    )
+                }
+            }
+
+            // Legend
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.size(8.dp).background(Color(0xFF4CAF50), CircleShape))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Fastest", style = AppTextStyles.caption, color = Colors.textMuted)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.size(8.dp).background(Colors.error, CircleShape))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Slowest", style = AppTextStyles.caption, color = Colors.textMuted)
+                }
+            }
+        }
+    }
+}
+
+/* ----------------------- EFFORT SCORE / TRAINING LOAD ---------------------- */
+
+@Composable
+private fun EffortScoreCard(run: RunSession) {
+    val (effortScore, label, color, breakdown) = remember(run) {
+        calculateEffortScore(run)
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.6f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        "Effort Score",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
+                        color = Colors.textPrimary
+                    )
+                    Text(
+                        "Training load estimate",
+                        style = AppTextStyles.caption,
+                        color = Colors.textSecondary
+                    )
+                }
+
+                // Circular gauge
+                Box(
+                    modifier = Modifier.size(72.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                        val strokeWidth = 8.dp.toPx()
+                        val radius = (size.minDimension - strokeWidth) / 2
+
+                        // Background arc
+                        drawArc(
+                            color = color.copy(alpha = 0.15f),
+                            startAngle = 135f,
+                            sweepAngle = 270f,
+                            useCenter = false,
+                            style = Stroke(width = strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+                            topLeft = Offset(strokeWidth / 2, strokeWidth / 2),
+                            size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2)
+                        )
+
+                        // Filled arc
+                        val sweep = (effortScore / 100f) * 270f
+                        drawArc(
+                            color = color,
+                            startAngle = 135f,
+                            sweepAngle = sweep,
+                            useCenter = false,
+                            style = Stroke(width = strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+                            topLeft = Offset(strokeWidth / 2, strokeWidth / 2),
+                            size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2)
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "$effortScore",
+                            style = AppTextStyles.h4.copy(fontWeight = FontWeight.ExtraBold),
+                            color = color
+                        )
+                        Text(
+                            "/100",
+                            style = AppTextStyles.caption.copy(fontSize = 9.sp),
+                            color = Colors.textMuted
+                        )
+                    }
+                }
+            }
+
+            // Label pill
+            Box(
+                modifier = Modifier
+                    .background(color.copy(alpha = 0.12f), RoundedCornerShape(999.dp))
+                    .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                Text(label, style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = color)
+            }
+
+            // Breakdown factors
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                breakdown.forEach { (factor, value) ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(factor, style = AppTextStyles.caption, color = Colors.textMuted)
+                        Text(value, style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold), color = Colors.textPrimary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class EffortResult(
+    val score: Int,
+    val label: String,
+    val color: Color,
+    val breakdown: List<Pair<String, String>>
+)
+
+private fun calculateEffortScore(run: RunSession): EffortResult {
+    // Multi-factor effort score:
+    // 1. Duration factor (longer = harder)
+    // 2. Pace factor (faster = harder)
+    // 3. Elevation factor (more gain = harder)
+    // 4. Heart rate factor (higher avg HR = harder)
+
+    val durationMin = run.duration / 60000.0
+    val distanceKm = run.distance / 1000.0
+    val factors = mutableListOf<Pair<String, String>>()
+
+    // Duration: 0-20 pts (30 min = 10, 60 min = 18, 90 min = 20)
+    val durationScore = (durationMin / 90.0 * 20.0).coerceIn(0.0, 20.0)
+    factors.add("Duration" to "${durationMin.roundToInt()} min")
+
+    // Distance: 0-20 pts
+    val distanceScore = (distanceKm / 20.0 * 20.0).coerceIn(0.0, 20.0)
+    factors.add("Distance" to String.format("%.1f km", distanceKm))
+
+    // Pace intensity: 0-25 pts (based on pace relative to typical recreational ranges)
+    val paceSecPerKm = if (distanceKm > 0 && durationMin > 0) {
+        (durationMin * 60.0) / distanceKm
+    } else 600.0
+    // 3:00/km = elite = 25 pts, 7:00/km = easy jog = 5 pts
+    val paceScore = ((420.0 - paceSecPerKm) / (420.0 - 180.0) * 25.0).coerceIn(0.0, 25.0)
+    val paceMin = (paceSecPerKm / 60).toInt()
+    val paceSec = (paceSecPerKm % 60).roundToInt()
+    factors.add("Pace Intensity" to "$paceMin:${paceSec.toString().padStart(2, '0')}/km")
+
+    // Elevation: 0-15 pts
+    val elevScore = (run.totalElevationGain / 500.0 * 15.0).coerceIn(0.0, 15.0)
+    if (run.totalElevationGain > 0) {
+        factors.add("Elevation Gain" to "${run.totalElevationGain.roundToInt()} m")
+    }
+
+    // Heart Rate: 0-20 pts (if available)
+    val hrScore = if (run.heartRate > 0) {
+        // Assume max HR ~190 for generalization
+        val hrPercent = (run.heartRate.toDouble() / 190.0) * 100.0
+        ((hrPercent - 50) / 50.0 * 20.0).coerceIn(0.0, 20.0)
+    } else {
+        10.0 // neutral if no HR data
+    }
+    if (run.heartRate > 0) {
+        factors.add("Avg Heart Rate" to "${run.heartRate} bpm")
+    }
+
+    val total = (durationScore + distanceScore + paceScore + elevScore + hrScore).roundToInt().coerceIn(0, 100)
+
+    val (label, color) = when {
+        total >= 80 -> "Maximum Effort" to Colors.error
+        total >= 60 -> "Hard" to Color(0xFFFF9800)
+        total >= 40 -> "Moderate" to Color(0xFFFFC107)
+        total >= 20 -> "Easy" to Color(0xFF8BC34A)
+        else -> "Recovery" to Color(0xFF4CAF50)
+    }
+
+    return EffortResult(total, label, color, factors)
+}
+
+/* --------------------- HEART RATE ZONES (VISUAL BARS) --------------------- */
+
+@Composable
+private fun HeartRateZonesVisualCard(heartRateData: List<Int>?) {
+    val hr = heartRateData?.filter { it > 0 }.orEmpty()
+    if (hr.isEmpty()) return
+
+    val maxObserved = hr.maxOrNull() ?: 0
+    val maxHr = maxObserved.coerceAtLeast(160)
+
+    data class ZoneInfo(
+        val name: String,
+        val label: String,
+        val color: Color,
+        val range: IntRange,
+        val percent: Int,
+        val timeSeconds: Long
+    )
+
+    val totalSamples = hr.size
+    val z2 = (0.60 * maxHr).toInt()
+    val z3 = (0.70 * maxHr).toInt()
+    val z4 = (0.80 * maxHr).toInt()
+    val z5 = (0.90 * maxHr).toInt()
+
+    // Estimate time per sample (roughly 1-2 sec per HR reading)
+    val estimatedSecPerSample = 2L
+
+    val zones = listOf(
+        Triple("Zone 5", "Maximum", Color(0xFFE53935)) to (z5..maxHr),
+        Triple("Zone 4", "Threshold", Color(0xFFFF9800)) to (z4 until z5),
+        Triple("Zone 3", "Aerobic", Color(0xFFFFC107)) to (z3 until z4),
+        Triple("Zone 2", "Easy", Color(0xFF4CAF50)) to (z2 until z3),
+        Triple("Zone 1", "Warm Up", Color(0xFF42A5F5)) to (0 until z2),
+    ).map { (info, range) ->
+        val count = hr.count { it in range }
+        val pct = ((count.toDouble() / totalSamples) * 100).roundToInt()
+        val timeSec = count * estimatedSecPerSample
+        ZoneInfo(info.first, info.second, info.third, range, pct, timeSec)
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.6f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                "Heart Rate Zones",
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
+                color = Colors.textPrimary
+            )
+
+            Text(
+                "Based on est. max HR: $maxHr bpm",
+                style = AppTextStyles.caption,
+                color = Colors.textMuted
+            )
+
+            zones.forEach { zone ->
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "${zone.name} • ${zone.label}",
+                            style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
+                            color = Colors.textPrimary
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                formatSecondsToHMS(zone.timeSeconds),
+                                style = AppTextStyles.caption,
+                                color = Colors.textSecondary
+                            )
+                            Text(
+                                "${zone.percent}%",
+                                style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                                color = zone.color
+                            )
+                        }
+                    }
+
+                    // Horizontal bar
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(10.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(Colors.backgroundTertiary.copy(alpha = 0.3f))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth((zone.percent / 100f).coerceIn(0f, 1f))
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(zone.color)
+                        )
+                    }
+
+                    Text(
+                        "${zone.range.first}-${zone.range.last} bpm",
+                        style = AppTextStyles.caption.copy(fontSize = 9.sp),
+                        color = Colors.textMuted
+                    )
+                }
+            }
+        }
+    }
+}
+
+/* ------------------- INTENSITY DISTRIBUTION DONUT ------------------- */
+
+@Composable
+private fun IntensityDistributionCard(run: RunSession) {
+    val hr = run.heartRateData?.filter { it > 0 }.orEmpty()
+    if (hr.size < 10) return
+
+    val maxHr = (hr.maxOrNull() ?: 160).coerceAtLeast(160)
+
+    data class IntensityZone(val name: String, val color: Color, val percent: Float)
+
+    val zones = remember(hr, maxHr) {
+        val easy = hr.count { it < (0.70 * maxHr) }
+        val moderate = hr.count { it in (0.70 * maxHr).toInt() until (0.80 * maxHr).toInt() }
+        val hard = hr.count { it in (0.80 * maxHr).toInt() until (0.90 * maxHr).toInt() }
+        val maximal = hr.count { it >= (0.90 * maxHr) }
+        val total = hr.size.toFloat()
+
+        listOf(
+            IntensityZone("Easy", Color(0xFF4CAF50), easy / total),
+            IntensityZone("Moderate", Color(0xFFFFC107), moderate / total),
+            IntensityZone("Hard", Color(0xFFFF9800), hard / total),
+            IntensityZone("Maximal", Color(0xFFE53935), maximal / total)
+        )
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.6f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                "Intensity Distribution",
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
+                color = Colors.textPrimary
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Donut chart
+                Box(
+                    modifier = Modifier.size(120.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                        val strokeWidth = 20.dp.toPx()
+                        val radius = (size.minDimension - strokeWidth) / 2
+                        val arcSize = androidx.compose.ui.geometry.Size(radius * 2, radius * 2)
+                        val topLeft = Offset(strokeWidth / 2, strokeWidth / 2)
+
+                        var startAngle = -90f
+                        zones.forEach { zone ->
+                            val sweep = zone.percent * 360f
+                            if (sweep > 0.5f) {
+                                drawArc(
+                                    color = zone.color,
+                                    startAngle = startAngle,
+                                    sweepAngle = sweep,
+                                    useCenter = false,
+                                    style = Stroke(width = strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Butt),
+                                    topLeft = topLeft,
+                                    size = arcSize
+                                )
+                            }
+                            startAngle += sweep
+                        }
+                    }
+                    // Center text
+                    val dominantZone = zones.maxByOrNull { it.percent }
+                    if (dominantZone != null) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                "${(dominantZone.percent * 100).roundToInt()}%",
+                                style = AppTextStyles.h4.copy(fontWeight = FontWeight.ExtraBold),
+                                color = dominantZone.color
+                            )
+                            Text(
+                                dominantZone.name,
+                                style = AppTextStyles.caption.copy(fontSize = 10.sp),
+                                color = Colors.textMuted
+                            )
+                        }
+                    }
+                }
+
+                // Legend
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    zones.forEach { zone ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .background(zone.color, CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                zone.name,
+                                style = AppTextStyles.caption,
+                                color = Colors.textSecondary,
+                                modifier = Modifier.width(60.dp)
+                            )
+                            Text(
+                                "${(zone.percent * 100).roundToInt()}%",
+                                style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                                color = Colors.textPrimary
+                            )
+                        }
                     }
                 }
             }
