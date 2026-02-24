@@ -555,8 +555,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     val prevSmoothed = smoothedAltitude
                     smoothedAltitude = recentAltitudes.average()
                     
-                    // Use smoothed altitude difference for elevation coaching
-                    if (prevSmoothed != null && recentAltitudes.size >= ALTITUDE_SMOOTHING_WINDOW) {
+                    // Use smoothed altitude difference for elevation coaching (only when running a route)
+                    if (hasRoute && prevSmoothed != null && recentAltitudes.size >= ALTITUDE_SMOOTHING_WINDOW) {
                         val smoothedElevChange = smoothedAltitude!! - prevSmoothed
                         val smoothedGradePercent = (smoothedElevChange / distanceIncrement) * 100
                         updateElevationCoaching(distanceIncrement, smoothedGradePercent, smoothedElevChange)

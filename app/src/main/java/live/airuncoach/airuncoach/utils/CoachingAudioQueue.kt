@@ -131,8 +131,7 @@ object CoachingAudioQueue {
         } else if (!next.fallbackText.isNullOrEmpty()) {
             val tts = ttsHelper
             if (tts != null) {
-                tts.speak(next.fallbackText)
-                // TTS will callback via UtteranceProgressListener which triggers onDone
+                tts.speak(next.fallbackText, onComplete = onDone)
             } else {
                 Log.e(TAG, "TextToSpeechHelper not initialized")
                 onDone()

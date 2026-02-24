@@ -628,9 +628,9 @@ export async function getElevationCoaching(params: {
   const distanceKm = params.distance?.toFixed(2) || '?';
   const segmentM = params.segmentDistanceMeters ? Math.round(params.segmentDistanceMeters) : null;
 
-  // Don't give terrain coaching for no-route runs
+  // Don't give terrain coaching for no-route runs — return empty so no TTS is triggered
   if (params.hasRoute === false) {
-    return "Keep your effort steady and focus on your breathing!";
+    return "";
   }
 
   const eventDescription = eventType === 'hill_top' ? 'just crested a hill'
