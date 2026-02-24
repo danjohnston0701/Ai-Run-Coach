@@ -316,6 +316,7 @@ export async function generatePhaseCoaching(params: {
 
   // Build target pace comparison if available
   let paceComparisonInfo = '';
+  let paceVerdict = '';
   if (targetPace && currentPace) {
     paceComparisonInfo = `- Target pace: ${targetPace}/km (current: ${currentPace}/km)`;
     // Add explicit pace gap guidance for the AI
@@ -326,19 +327,37 @@ export async function generatePhaseCoaching(params: {
       const currentSec = currentParts[0] * 60 + currentParts[1];
       const diffSec = currentSec - targetSec;
       if (diffSec > 30) {
-        paceComparisonInfo += ` ⚠️ Runner is ${Math.abs(diffSec)} seconds/km SLOWER than target - needs to pick up pace!`;
+        paceVerdict = `BEHIND TARGET: Runner is ${Math.abs(diffSec)} seconds/km SLOWER than target pace. They need to pick it up!`;
       } else if (diffSec > 10) {
-        paceComparisonInfo += ` Runner is slightly behind target pace.`;
+        paceVerdict = `SLIGHTLY BEHIND: Runner is ${Math.abs(diffSec)}s/km behind target. Gentle nudge to pick up pace.`;
       } else if (diffSec < -10) {
-        paceComparisonInfo += ` Runner is ahead of target pace - may want to ease off slightly to sustain.`;
+        paceVerdict = `AHEAD OF TARGET: Runner is ${Math.abs(diffSec)}s/km faster than target. They could ease off to sustain.`;
+      } else {
+        paceVerdict = `ON TARGET: Runner is within ${Math.abs(diffSec)}s/km of target pace. Great pacing!`;
       }
+      paceComparisonInfo += `\n  → ${paceVerdict}`;
     }
   }
 
-  // Build target time info if available
+  // Build target time info and projected finish if available
   let targetTimeInfo = '';
   if (targetTime && targetTime > 0) {
     targetTimeInfo = `- Target time: ${formatDurationForTTS(targetTime)}`;
+    // Calculate projected finish time based on current pace
+    if (distance > 0 && targetDistance && elapsedTime > 0) {
+      const projectedTotalSec = (elapsedTime / distance) * targetDistance;
+      const projectedMin = Math.floor(projectedTotalSec / 60);
+      const projectedSec = Math.round(projectedTotalSec % 60);
+      const targetTotalMin = Math.floor(targetTime / 60);
+      const diff = projectedMin - targetTotalMin;
+      if (diff > 0) {
+        targetTimeInfo += `\n- ⚠️ Projected finish: ~${projectedMin} min ${projectedSec}s (${diff} min OVER target)`;
+      } else if (diff < 0) {
+        targetTimeInfo += `\n- Projected finish: ~${projectedMin} min ${projectedSec}s (${Math.abs(diff)} min UNDER target)`;
+      } else {
+        targetTimeInfo += `\n- Projected finish: ~${projectedMin} min ${projectedSec}s (ON TARGET)`;
+      }
+    }
   }
 
   // Build the no-terrain rule when there's no route
@@ -384,7 +403,7 @@ ${terrainInfo}
 ${noTerrainRule}
 ${triggerInstruction} Be ${coachTone} and encouraging.
 
-CRITICAL: You MUST weave in at least 2 specific data points from the Runner Status above (e.g. their actual pace like "${currentPace || '6:15'}/km", distance "${distance.toFixed(1)}km", time "${timeMin} minutes", cadence, heart rate). Runners want to hear their real numbers — do NOT give vague encouragement without citing their actual stats.${targetPace ? ' You MUST comment on how their current pace compares to their target and whether they need to speed up, slow down, or maintain.' : ''}${cadence && cadence > 0 ? ' Include a brief note on their cadence.' : ''}${hasRoute === true ? ' Consider their current terrain if on a hill.' : ''}`;
+CRITICAL: You MUST weave in at least 2 specific data points from the Runner Status above (e.g. their actual pace like "${currentPace || '6:15'}/km", distance "${distance.toFixed(1)}km", time "${timeMin} minutes", cadence, heart rate). Runners want to hear their real numbers — do NOT give vague encouragement without citing their actual stats.${targetPace ? ` You MUST tell the runner whether they are on track for their target pace of ${targetPace}/km. ${paceVerdict} — communicate this clearly.` : ''}${targetTime && targetTime > 0 ? ` You MUST mention whether they are on track for their target time of ${formatDurationForTTS(targetTime)}.` : ''}${cadence && cadence > 0 ? ' Include a brief note on their cadence.' : ''}${hasRoute === true ? ' Consider their current terrain if on a hill.' : ''}`;
 
     systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful — always cite the runner's actual numbers (pace, distance, time etc). ${toneDirective(coachTone)}`;
   }

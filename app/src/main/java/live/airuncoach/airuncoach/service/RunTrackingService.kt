@@ -265,7 +265,7 @@ class RunTrackingService : Service(), SensorEventListener {
             return
         }
 
-        Log.d("RunTrackingService", "Starting tracking...")
+        Log.d("RunTrackingService", "Starting tracking... targetDistance=$targetDistance, targetTime=$targetTime, hasRoute=$hasRoute")
         
         // CRITICAL: Call startForeground IMMEDIATELY to avoid ANR
         try {
@@ -394,7 +394,10 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun getCurrentStrideAnalysis(): StrideSnapshot? {
         if (currentCadence <= 0) return null
 
-        val currentSpeed = if (routePoints.size >= 2) {
+        // Prefer GPS-reported speed (more accurate, uses doppler shift) over distance/time calculation
+        val currentSpeed = if (routePoints.isNotEmpty() && routePoints.last().speed != null && routePoints.last().speed!! > 0.5f) {
+            routePoints.last().speed!!.toDouble()
+        } else if (routePoints.size >= 2) {
             val last = routePoints.last()
             val prev = routePoints[routePoints.size - 2]
             val timeDelta = (last.timestamp - prev.timestamp) / 1000.0
@@ -1031,7 +1034,7 @@ class RunTrackingService : Service(), SensorEventListener {
         if (last500mMilestone == 0 && current500m >= 1 && (now - lastCoachingTime) > COACHING_COOLDOWN_MS) {
             last500mMilestone = 1
             lastCoachingTime = now
-            Log.d("RunTrackingService", "Reached 500m - triggering initial coaching")
+            Log.d("RunTrackingService", "Reached 500m - triggering initial coaching (targetTime=$targetTime, targetDistance=$targetDistance)")
             serviceScope.launch {
                 try {
                     // Calculate target pace from target time and distance if available
