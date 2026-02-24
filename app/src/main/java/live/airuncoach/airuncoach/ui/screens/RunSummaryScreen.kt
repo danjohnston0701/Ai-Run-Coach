@@ -76,8 +76,11 @@ import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.KmSplit
 import live.airuncoach.airuncoach.domain.model.LocationPoint
 import live.airuncoach.airuncoach.domain.model.RunSession
+import live.airuncoach.airuncoach.domain.model.DismissReason
 import live.airuncoach.airuncoach.domain.model.StrugglePoint
 import live.airuncoach.airuncoach.domain.model.WeatherData
+import live.airuncoach.airuncoach.domain.model.getDisplayText
+import live.airuncoach.airuncoach.domain.model.AiCoachingNote
 import live.airuncoach.airuncoach.network.model.BasicRunInsights
 import live.airuncoach.airuncoach.network.model.ComprehensiveRunAnalysis
 import live.airuncoach.airuncoach.network.model.GarminInsights
@@ -191,7 +194,10 @@ fun RunSummaryScreenFlagship(
                                     onSuccess = { onNavigateBack() },
                                     onError = { error -> Log.e("RunSummaryScreen", "Delete error: $error") }
                                 )
-                            }
+                            },
+                            onStruggleComment = viewModel::updateStrugglePointComment,
+                            onStruggleDismiss = viewModel::dismissStrugglePoint,
+                            onStruggleRestore = viewModel::restoreStrugglePoint
                         )
 
                         1 -> DataTabFlagship(runSession!!)
@@ -324,6 +330,9 @@ private fun SummaryTabFlagship(
     onShareCard: () -> Unit,
     onDelete: () -> Unit,
     isAdmin: Boolean = false,
+    onStruggleComment: (String, String) -> Unit = { _, _ -> },
+    onStruggleDismiss: (String, DismissReason) -> Unit = { _, _ -> },
+    onStruggleRestore: (String) -> Unit = {},
 ) {
     LazyColumn(
         modifier = Modifier
@@ -344,7 +353,11 @@ private fun SummaryTabFlagship(
 
         item {
             if (run.routePoints.isNotEmpty()) {
-                RouteMapCardFlagship(points = run.routePoints)
+                RouteMapCardFlagship(
+                    points = run.routePoints,
+                    strugglePoints = strugglePoints.filter { it.isRelevant },
+                    coachingNotes = run.aiCoachingNotes
+                )
             }
         }
 
@@ -360,21 +373,15 @@ private fun SummaryTabFlagship(
             }
         }
 
-        // Struggle Point Analysis
+        // Struggle Point Analysis — Full interactive component
         if (strugglePoints.isNotEmpty()) {
             item {
-                Text(
-                    text = "Struggle Points",
-                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                    color = Colors.textPrimary
+                StrugglePointAnalysisSection(
+                    strugglePoints = strugglePoints,
+                    onComment = onStruggleComment,
+                    onDismiss = onStruggleDismiss,
+                    onRestore = onStruggleRestore
                 )
-                Spacer(modifier = Modifier.height(Spacing.sm))
-                strugglePoints.forEachIndexed { index, point ->
-                    StrugglePointRow(point = point, index = index + 1)
-                    if (index < strugglePoints.size - 1) {
-                        Spacer(modifier = Modifier.height(Spacing.sm))
-                    }
-                }
             }
         }
 
@@ -416,6 +423,38 @@ private fun SummaryTabFlagship(
 
         // Intensity Distribution Donut
         item { IntensityDistributionCard(run = run) }
+
+        // ===== UNIQUE DIFFERENTIATING FEATURES =====
+
+        // AI Coaching Replay Timeline
+        item {
+            if (run.aiCoachingNotes.isNotEmpty()) {
+                CoachingReplayTimeline(
+                    coachingNotes = run.aiCoachingNotes,
+                    routePoints = run.routePoints,
+                    totalDuration = run.duration
+                )
+            }
+        }
+
+        // Pace Decay / Fatigue Curve
+        item { FatigueCurveCard(run = run) }
+
+        // Aerobic Decoupling
+        item { AerobicDecouplingCard(run = run) }
+
+        // Running Economy (Pace vs HR)
+        item { RunningEconomyCard(run = run) }
+
+        // Race Time Predictor
+        item { RaceTimePredictorCard(run = run) }
+
+        // Weather Performance Index
+        item {
+            if (run.weatherAtStart != null) {
+                WeatherPerformanceCard(weather = run.weatherAtStart!!)
+            }
+        }
 
         // Delete run button at the bottom of the screen
         item {
@@ -1320,7 +1359,11 @@ private fun buildPaceSegments(
 }
 
 @Composable
-private fun RouteMapCardFlagship(points: List<LocationPoint>) {
+private fun RouteMapCardFlagship(
+    points: List<LocationPoint>,
+    strugglePoints: List<StrugglePoint> = emptyList(),
+    coachingNotes: List<AiCoachingNote> = emptyList()
+) {
     val valid = remember(points) {
         points.filter { p ->
             p.latitude in -90.0..90.0 &&
@@ -1414,6 +1457,22 @@ private fun RouteMapCardFlagship(points: List<LocationPoint>) {
                     title = "Finish",
                     icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
                 )
+
+                // Struggle point markers
+                strugglePoints.forEach { sp ->
+                    sp.location?.let { loc ->
+                        if (loc.latitude != 0.0 && loc.longitude != 0.0) {
+                            Marker(
+                                state = MarkerState(
+                                    position = LatLng(loc.latitude, loc.longitude)
+                                ),
+                                title = "Struggle (${String.format(Locale.US, "%.1f", sp.distanceMeters / 1000.0)} km)",
+                                snippet = "Pace drop: ${String.format(Locale.US, "%.0f", sp.paceDropPercent)}%",
+                                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE)
+                            )
+                        }
+                    }
+                }
             }
 
             // Pace legend overlay (bottom-left)
@@ -3065,6 +3124,676 @@ private fun IntensityDistributionCard(run: RunSession) {
     }
 }
 
+/* =================== AI COACHING REPLAY TIMELINE =================== */
+
+@Composable
+private fun CoachingReplayTimeline(
+    coachingNotes: List<AiCoachingNote>,
+    routePoints: List<LocationPoint>,
+    totalDuration: Long
+) {
+    if (coachingNotes.isEmpty()) return
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.primary.copy(alpha = 0.4f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("🤖", style = AppTextStyles.h3)
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(
+                        "AI Coaching Replay",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
+                        color = Colors.textPrimary
+                    )
+                    Text(
+                        "${coachingNotes.size} coaching moments during your run",
+                        style = AppTextStyles.caption,
+                        color = Colors.textSecondary
+                    )
+                }
+            }
+
+            // Timeline
+            coachingNotes.forEachIndexed { idx, note ->
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    // Timeline column
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.width(48.dp)
+                    ) {
+                        // Time badge
+                        Box(
+                            modifier = Modifier
+                                .background(Colors.primary.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 6.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                formatDuration(note.time),
+                                style = AppTextStyles.caption.copy(
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = Colors.primary
+                            )
+                        }
+                        // Vertical line (not on last item)
+                        if (idx < coachingNotes.size - 1) {
+                            Box(
+                                modifier = Modifier
+                                    .width(2.dp)
+                                    .height(20.dp)
+                                    .background(Colors.primary.copy(alpha = 0.2f))
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    // Coaching message
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = Colors.primary.copy(alpha = 0.06f)
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            note.message,
+                            style = AppTextStyles.small,
+                            color = Colors.textSecondary,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* =================== PACE DECAY / FATIGUE CURVE =================== */
+
+@Composable
+private fun FatigueCurveCard(run: RunSession) {
+    if (run.kmSplits.size < 3) return
+
+    val paces = run.kmSplits.map { parsePaceToSeconds(it.pace).toDouble() }.filter { it > 0 }
+    if (paces.size < 3) return
+
+    // Calculate fatigue rate: pace increase per km (seconds/km per km run)
+    val firstThirdAvg = paces.take((paces.size / 3).coerceAtLeast(1)).average()
+    val lastThirdAvg = paces.takeLast((paces.size / 3).coerceAtLeast(1)).average()
+    val totalFatiguePercent = ((lastThirdAvg - firstThirdAvg) / firstThirdAvg * 100)
+    val fatiguePerKm = (lastThirdAvg - firstThirdAvg) / (paces.size * 2.0 / 3.0)
+
+    val (rating, color) = when {
+        totalFatiguePercent <= 0 -> "Excellent (negative fatigue!)" to Color(0xFF4CAF50)
+        totalFatiguePercent <= 3 -> "Strong fatigue resistance" to Color(0xFF8BC34A)
+        totalFatiguePercent <= 6 -> "Normal fatigue" to Color(0xFFFFC107)
+        totalFatiguePercent <= 10 -> "Moderate fatigue" to Color(0xFFFF9800)
+        else -> "Significant fatigue" to Colors.error
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.6f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                "Fatigue Analysis",
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
+                color = Colors.textPrimary
+            )
+
+            // Visual: pace trend bars showing fatigue
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                val maxPace = paces.max()
+                val minPace = paces.min()
+                val range = (maxPace - minPace).coerceAtLeast(1.0)
+
+                paces.forEachIndexed { idx, pace ->
+                    val heightFraction = ((pace - minPace) / range * 0.7 + 0.3).toFloat()
+                    val barColor = paceToColor(pace, minPace, maxPace)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(heightFraction)
+                            .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                            .background(barColor)
+                    )
+                }
+            }
+
+            // Km labels
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Km 1", style = AppTextStyles.caption.copy(fontSize = 9.sp), color = Colors.textMuted)
+                Text("Km ${paces.size}", style = AppTextStyles.caption.copy(fontSize = 9.sp), color = Colors.textMuted)
+            }
+
+            HorizontalDivider(color = Colors.border.copy(alpha = 0.3f))
+
+            // Stats
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("First Third Avg", style = AppTextStyles.caption, color = Colors.textMuted)
+                    Text(
+                        formatPaceSeconds(firstThirdAvg.toLong()) + "/km",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                        color = Color(0xFF4CAF50)
+                    )
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Decay", style = AppTextStyles.caption, color = Colors.textMuted)
+                    Text(
+                        "${if (totalFatiguePercent >= 0) "+" else ""}${String.format(Locale.US, "%.1f", totalFatiguePercent)}%",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                        color = color
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("Last Third Avg", style = AppTextStyles.caption, color = Colors.textMuted)
+                    Text(
+                        formatPaceSeconds(lastThirdAvg.toLong()) + "/km",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                        color = if (totalFatiguePercent > 3) Colors.error else Colors.textPrimary
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .background(color.copy(alpha = 0.12f), RoundedCornerShape(999.dp))
+                    .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                Text(rating, style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = color)
+            }
+        }
+    }
+}
+
+/* =================== AEROBIC DECOUPLING =================== */
+
+@Composable
+private fun AerobicDecouplingCard(run: RunSession) {
+    val hr = run.heartRateData?.filter { it > 0 }.orEmpty()
+    if (hr.size < 10 || run.kmSplits.size < 2) return
+
+    val paces = run.kmSplits.map { parsePaceToSeconds(it.pace).toDouble() }.filter { it > 0 }
+    if (paces.size < 2) return
+
+    // Split HR and pace into halves
+    val hrMid = hr.size / 2
+    val paceMid = paces.size / 2
+
+    val firstHalfHr = hr.subList(0, hrMid).average()
+    val secondHalfHr = hr.subList(hrMid, hr.size).average()
+    val firstHalfPace = paces.subList(0, paceMid).average()
+    val secondHalfPace = paces.subList(paceMid, paces.size).average()
+
+    val hrDrift = ((secondHalfHr - firstHalfHr) / firstHalfHr) * 100
+    val paceDrift = ((secondHalfPace - firstHalfPace) / firstHalfPace) * 100
+    val decoupling = hrDrift + paceDrift // combined drift percentage
+
+    val (rating, color, advice) = when {
+        decoupling < 3.0 -> Triple(
+            "Excellent",
+            Color(0xFF4CAF50),
+            "Your aerobic system handled this effort efficiently. Strong fitness indicator."
+        )
+        decoupling < 5.0 -> Triple(
+            "Good",
+            Color(0xFF8BC34A),
+            "Minimal cardiac drift — your aerobic base is solid for this pace."
+        )
+        decoupling < 8.0 -> Triple(
+            "Moderate",
+            Color(0xFFFFC107),
+            "Some HR-pace decoupling detected. More aerobic base work (easy runs) would help."
+        )
+        else -> Triple(
+            "High",
+            Colors.error,
+            "Significant decoupling — either the effort was above threshold or aerobic fitness needs development."
+        )
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.6f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("🔬", style = AppTextStyles.h3)
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(
+                        "Aerobic Decoupling",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
+                        color = Colors.textPrimary
+                    )
+                    Text(
+                        "Heart rate vs pace drift analysis",
+                        style = AppTextStyles.caption,
+                        color = Colors.textSecondary
+                    )
+                }
+            }
+
+            // Decoupling percentage with gauge
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("HR Drift", style = AppTextStyles.caption, color = Colors.textMuted)
+                    Text(
+                        "${if (hrDrift >= 0) "+" else ""}${String.format(Locale.US, "%.1f", hrDrift)}%",
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                        color = if (hrDrift > 5) Colors.error else Colors.textPrimary
+                    )
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Pace Drift", style = AppTextStyles.caption, color = Colors.textMuted)
+                    Text(
+                        "${if (paceDrift >= 0) "+" else ""}${String.format(Locale.US, "%.1f", paceDrift)}%",
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                        color = if (paceDrift > 3) Color(0xFFFF9800) else Colors.textPrimary
+                    )
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Decoupling", style = AppTextStyles.caption, color = Colors.textMuted)
+                    Text(
+                        "${String.format(Locale.US, "%.1f", decoupling)}%",
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.ExtraBold),
+                        color = color
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .background(color.copy(alpha = 0.12f), RoundedCornerShape(999.dp))
+                    .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                Text(rating, style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = color)
+            }
+
+            Text(advice, style = AppTextStyles.small, color = Colors.textSecondary)
+        }
+    }
+}
+
+/* =================== RUNNING ECONOMY (PACE vs HR) =================== */
+
+@Composable
+private fun RunningEconomyCard(run: RunSession) {
+    if (run.heartRate <= 0 || run.distance < 500) return
+
+    val paceSecPerKm = if (run.distance > 0) {
+        (run.duration / 1000.0) / (run.distance / 1000.0)
+    } else return
+
+    // Running economy = pace per heartbeat (lower = more efficient)
+    // Speed per HR beat: (m/s) / bpm
+    val speedMs = run.distance / (run.duration / 1000.0)
+    val economyIndex = (speedMs / run.heartRate) * 1000 // meters per beat
+
+    val (rating, color) = when {
+        economyIndex > 7.0 -> "Elite Economy" to Color(0xFF4CAF50)
+        economyIndex > 5.5 -> "Good Economy" to Color(0xFF8BC34A)
+        economyIndex > 4.0 -> "Average Economy" to Color(0xFFFFC107)
+        else -> "Developing" to Color(0xFFFF9800)
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.6f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                "Running Economy",
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
+                color = Colors.textPrimary
+            )
+            Text(
+                "How efficiently you convert cardiac output to speed",
+                style = AppTextStyles.caption,
+                color = Colors.textSecondary
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        String.format(Locale.US, "%.1f", economyIndex),
+                        style = AppTextStyles.stat.copy(fontSize = 36.sp),
+                        color = color
+                    )
+                    Text("m per heartbeat", style = AppTextStyles.caption, color = Colors.textMuted)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        formatPaceSeconds(paceSecPerKm.toLong()) + "/km",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                    Text("at ${run.heartRate} bpm avg", style = AppTextStyles.caption, color = Colors.textMuted)
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .background(color.copy(alpha = 0.12f), RoundedCornerShape(999.dp))
+                    .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                Text(rating, style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = color)
+            }
+
+            Text(
+                "Track this metric over time — improving economy means you're getting faster at the same heart rate, or maintaining pace with less cardiac effort.",
+                style = AppTextStyles.small,
+                color = Colors.textSecondary
+            )
+        }
+    }
+}
+
+/* =================== RACE TIME PREDICTOR =================== */
+
+@Composable
+private fun RaceTimePredictorCard(run: RunSession) {
+    if (run.distance < 1000 || run.duration < 60000) return
+
+    val distanceKm = run.distance / 1000.0
+    val durationMin = run.duration / 60000.0
+
+    // Riegel formula: T2 = T1 * (D2/D1)^1.06
+    data class RacePrediction(
+        val name: String,
+        val distanceKm: Double,
+        val predictedMinutes: Double
+    )
+
+    val predictions = remember(distanceKm, durationMin) {
+        listOf(
+            RacePrediction("5K", 5.0, durationMin * (5.0 / distanceKm).pow(1.06)),
+            RacePrediction("10K", 10.0, durationMin * (10.0 / distanceKm).pow(1.06)),
+            RacePrediction("Half Marathon", 21.0975, durationMin * (21.0975 / distanceKm).pow(1.06)),
+            RacePrediction("Marathon", 42.195, durationMin * (42.195 / distanceKm).pow(1.06))
+        ).filter { it.distanceKm > distanceKm * 0.8 } // Only show predictions for distances at/above current
+    }
+
+    if (predictions.isEmpty()) return
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.primary.copy(alpha = 0.3f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("🏆", style = AppTextStyles.h3)
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(
+                        "Race Time Predictor",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
+                        color = Colors.textPrimary
+                    )
+                    Text(
+                        "Based on today's ${String.format(Locale.US, "%.1f", distanceKm)}km effort (Riegel formula)",
+                        style = AppTextStyles.caption,
+                        color = Colors.textSecondary
+                    )
+                }
+            }
+
+            predictions.forEach { pred ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        pred.name,
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                        color = Colors.textPrimary,
+                        modifier = Modifier.width(110.dp)
+                    )
+
+                    // Predicted time
+                    val totalSec = (pred.predictedMinutes * 60).toLong()
+                    val hours = totalSec / 3600
+                    val mins = (totalSec % 3600) / 60
+                    val secs = totalSec % 60
+                    val timeStr = if (hours > 0) {
+                        String.format(Locale.US, "%d:%02d:%02d", hours, mins, secs)
+                    } else {
+                        String.format(Locale.US, "%d:%02d", mins, secs)
+                    }
+
+                    Text(
+                        timeStr,
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.ExtraBold),
+                        color = Colors.primary
+                    )
+
+                    // Predicted pace
+                    val paceSecPerKm = (pred.predictedMinutes * 60 / pred.distanceKm)
+                    Text(
+                        formatPaceSeconds(paceSecPerKm.toLong()) + "/km",
+                        style = AppTextStyles.caption,
+                        color = Colors.textMuted
+                    )
+                }
+
+                if (pred != predictions.last()) {
+                    HorizontalDivider(color = Colors.border.copy(alpha = 0.2f))
+                }
+            }
+
+            Text(
+                "Predictions assume similar race conditions and a taper. Actual race performance depends on training, nutrition, and pacing strategy.",
+                style = AppTextStyles.caption.copy(fontSize = 10.sp),
+                color = Colors.textMuted
+            )
+        }
+    }
+}
+
+/* =================== WEATHER PERFORMANCE INDEX =================== */
+
+@Composable
+private fun WeatherPerformanceCard(weather: WeatherData) {
+    // Calculate weather impact score
+    data class WeatherFactor(val name: String, val impact: String, val penalty: Double, val color: Color)
+
+    val factors = remember(weather) {
+        buildList {
+            // Temperature impact
+            val temp = weather.temperature
+            val tempPenalty = when {
+                temp < 5 -> abs(temp - 12) * 0.3  // Cold penalty
+                temp in 5.0..15.0 -> 0.0           // Optimal
+                temp in 15.0..20.0 -> (temp - 15) * 0.5
+                temp in 20.0..25.0 -> (temp - 15) * 0.8
+                temp in 25.0..30.0 -> (temp - 15) * 1.2
+                else -> (temp - 15) * 1.5          // Hot
+            }
+            val tempLabel = when {
+                temp < 5 -> "Cold"
+                temp in 5.0..15.0 -> "Optimal"
+                temp in 15.0..25.0 -> "Warm"
+                else -> "Hot"
+            }
+            val tempColor = when {
+                temp < 5 -> Color(0xFF42A5F5)
+                temp in 5.0..15.0 -> Color(0xFF4CAF50)
+                temp in 15.0..25.0 -> Color(0xFFFFC107)
+                else -> Colors.error
+            }
+            add(WeatherFactor("Temperature", "${temp.toInt()}°C ($tempLabel)", tempPenalty, tempColor))
+
+            // Humidity impact
+            val humidity = weather.humidity
+            val humidityPenalty = when {
+                humidity < 40 -> 0.0
+                humidity in 40.0..60.0 -> (humidity - 40) * 0.1
+                humidity in 60.0..80.0 -> (humidity - 40) * 0.2
+                else -> (humidity - 40) * 0.3
+            }
+            val humColor = if (humidity > 70) Color(0xFFFF9800) else Color(0xFF4CAF50)
+            add(WeatherFactor("Humidity", "${humidity.toInt()}%", humidityPenalty, humColor))
+
+            // Wind impact
+            val wind = weather.windSpeed
+            val windPenalty = when {
+                wind < 10 -> 0.0
+                wind in 10.0..20.0 -> (wind - 10) * 0.3
+                else -> (wind - 10) * 0.5
+            }
+            val windColor = if (wind > 20) Colors.error else if (wind > 10) Color(0xFFFFC107) else Color(0xFF4CAF50)
+            add(WeatherFactor("Wind", "${wind.toInt()} km/h", windPenalty, windColor))
+        }
+    }
+
+    val totalPenalty = factors.sumOf { it.penalty }
+    val performancePercent = (100 - totalPenalty).coerceIn(70.0, 100.0)
+    val overallColor = when {
+        performancePercent >= 95 -> Color(0xFF4CAF50)
+        performancePercent >= 85 -> Color(0xFF8BC34A)
+        performancePercent >= 75 -> Color(0xFFFFC107)
+        else -> Color(0xFFFF9800)
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.6f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        "Weather Performance",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
+                        color = Colors.textPrimary
+                    )
+                    Text(
+                        "How conditions affected your run",
+                        style = AppTextStyles.caption,
+                        color = Colors.textSecondary
+                    )
+                }
+                // Performance percentage
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .background(overallColor.copy(alpha = 0.15f), CircleShape)
+                        .border(2.dp, overallColor.copy(alpha = 0.5f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "${performancePercent.roundToInt()}%",
+                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.ExtraBold),
+                        color = overallColor
+                    )
+                }
+            }
+
+            factors.forEach { factor ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(factor.name, style = AppTextStyles.caption, color = Colors.textMuted, modifier = Modifier.width(90.dp))
+                    Text(
+                        factor.impact,
+                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
+                        color = factor.color
+                    )
+                    if (factor.penalty > 0.5) {
+                        Text(
+                            "-${String.format(Locale.US, "%.0f", factor.penalty)}%",
+                            style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.error
+                        )
+                    } else {
+                        Text(
+                            "Optimal",
+                            style = AppTextStyles.caption,
+                            color = Color(0xFF4CAF50)
+                        )
+                    }
+                }
+            }
+
+            val desc = weather.condition ?: weather.description
+            if (desc.isNotBlank()) {
+                Text(
+                    "Conditions: $desc",
+                    style = AppTextStyles.small,
+                    color = Colors.textMuted
+                )
+            }
+        }
+    }
+}
+
 /* -------------------------------- TAB: DATA -------------------------------- */
 
 @Composable
@@ -3702,46 +4431,398 @@ private fun buildPaceSeriesVico2(
     return LabeledSeries(x, y, labels)
 }
 
-/* ============================ STRUGGLE POINT ROW ============================ */
+/* ==================== STRUGGLE POINT ANALYSIS SECTION ==================== */
 
 @Composable
-private fun StrugglePointRow(point: StrugglePoint, index: Int) {
+private fun StrugglePointAnalysisSection(
+    strugglePoints: List<StrugglePoint>,
+    onComment: (String, String) -> Unit,
+    onDismiss: (String, DismissReason) -> Unit,
+    onRestore: (String) -> Unit
+) {
+    val relevant = strugglePoints.filter { it.isRelevant }
+    val dismissed = strugglePoints.filter { !it.isRelevant }
+    var showDismissed by remember { mutableStateOf(false) }
+
     Card(
-        modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
-        shape = RoundedCornerShape(12.dp)
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.warning.copy(alpha = 0.4f))
     ) {
-        Column(modifier = Modifier.padding(Spacing.md)) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Struggle #$index",
-                    style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
-                    color = Colors.warning
-                )
-                Text(
-                    text = String.format(Locale.US, "%.1f km", point.distanceMeters / 1000.0),
-                    style = AppTextStyles.caption,
-                    color = Colors.textMuted
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("⚠️", style = AppTextStyles.h3)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            "Struggle Point Analysis",
+                            style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
+                            color = Colors.textPrimary
+                        )
+                        Text(
+                            "${relevant.size} detected • ${dismissed.size} dismissed",
+                            style = AppTextStyles.caption,
+                            color = Colors.textMuted
+                        )
+                    }
+                }
+                // Summary badge
+                Box(
+                    modifier = Modifier
+                        .background(Colors.warning.copy(alpha = 0.15f), RoundedCornerShape(999.dp))
+                        .border(1.dp, Colors.warning.copy(alpha = 0.3f), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        "${strugglePoints.size} total",
+                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.warning
+                    )
+                }
             }
-            Spacer(modifier = Modifier.height(4.dp))
+
             Text(
-                text = "Pace dropped ${String.format(Locale.US, "%.0f%%", point.paceDropPercent)} " +
-                       "(${point.paceAtStruggle} vs ${point.baselinePace})",
-                style = AppTextStyles.caption,
+                "Moments where your pace dropped significantly. Add context to help your AI coach understand why.",
+                style = AppTextStyles.small,
                 color = Colors.textSecondary
             )
-            if (point.heartRate != null && point.heartRate > 0) {
-                Text(
-                    text = "Heart rate: ${point.heartRate} bpm",
-                    style = AppTextStyles.caption,
-                    color = Colors.textMuted
+
+            // Relevant struggle points
+            relevant.forEachIndexed { index, point ->
+                StrugglePointCard(
+                    point = point,
+                    index = index + 1,
+                    onComment = onComment,
+                    onDismiss = onDismiss
                 )
             }
+
+            // Dismissed struggle points (collapsible)
+            if (dismissed.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { showDismissed = !showDismissed }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Dismissed (${dismissed.size})",
+                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
+                        color = Colors.textMuted,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        imageVector = if (showDismissed) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        tint = Colors.textMuted,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                AnimatedVisibility(visible = showDismissed, enter = fadeIn(), exit = fadeOut()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        dismissed.forEach { point ->
+                            DismissedStrugglePointRow(
+                                point = point,
+                                onRestore = onRestore
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StrugglePointCard(
+    point: StrugglePoint,
+    index: Int,
+    onComment: (String, String) -> Unit,
+    onDismiss: (String, DismissReason) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var commentDraft by remember(point.userComment) { mutableStateOf(point.userComment ?: "") }
+    var showDismissOptions by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundTertiary.copy(alpha = 0.3f)),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, Colors.warning.copy(alpha = 0.25f))
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            // Main row — always visible
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Index circle
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .background(Colors.warning.copy(alpha = 0.2f), CircleShape)
+                        .border(1.dp, Colors.warning.copy(alpha = 0.4f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "$index",
+                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.ExtraBold),
+                        color = Colors.warning
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            String.format(Locale.US, "%.2f km", point.distanceMeters / 1000.0),
+                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.textPrimary
+                        )
+                        // Pace drop badge
+                        Box(
+                            modifier = Modifier
+                                .background(Colors.error.copy(alpha = 0.15f), RoundedCornerShape(999.dp))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                "↓ ${String.format(Locale.US, "%.0f", point.paceDropPercent)}%",
+                                style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                                color = Colors.error
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    // Pace comparison
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            "${point.paceAtStruggle}/km",
+                            style = AppTextStyles.caption,
+                            color = Colors.error
+                        )
+                        Text("vs", style = AppTextStyles.caption, color = Colors.textMuted)
+                        Text(
+                            "${point.baselinePace}/km baseline",
+                            style = AppTextStyles.caption,
+                            color = Color(0xFF4CAF50)
+                        )
+                    }
+
+                    // Additional context
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (point.heartRate != null && point.heartRate > 0) {
+                            Text(
+                                "❤️ ${point.heartRate} bpm",
+                                style = AppTextStyles.caption,
+                                color = Colors.textMuted
+                            )
+                        }
+                        if (point.currentGrade != null && abs(point.currentGrade) > 1.0) {
+                            Text(
+                                "⛰️ ${String.format(Locale.US, "%.1f", point.currentGrade)}% grade",
+                                style = AppTextStyles.caption,
+                                color = Colors.textMuted
+                            )
+                        }
+                    }
+
+                    // Show saved comment if present
+                    if (!point.userComment.isNullOrBlank() && !expanded) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "💬 ${point.userComment}",
+                            style = AppTextStyles.caption,
+                            color = Colors.primary
+                        )
+                    }
+                }
+
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = "Expand",
+                    tint = Colors.textMuted,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // Expanded section: comment input + dismiss options
+            AnimatedVisibility(visible = expanded, enter = fadeIn(), exit = fadeOut()) {
+                Column(
+                    modifier = Modifier.padding(top = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Comment input
+                    OutlinedTextField(
+                        value = commentDraft,
+                        onValueChange = { commentDraft = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 56.dp),
+                        placeholder = {
+                            Text(
+                                "Why did you slow down here? (e.g. traffic light, stitch, hill...)",
+                                color = Colors.textMuted,
+                                style = AppTextStyles.caption
+                            )
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Colors.textPrimary,
+                            unfocusedTextColor = Colors.textPrimary,
+                            focusedBorderColor = Colors.primary.copy(alpha = 0.6f),
+                            unfocusedBorderColor = Colors.border,
+                            cursorColor = Colors.primary,
+                            focusedContainerColor = Colors.backgroundSecondary,
+                            unfocusedContainerColor = Colors.backgroundSecondary,
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        textStyle = AppTextStyles.caption
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Save comment button
+                        Button(
+                            onClick = {
+                                onComment(point.id, commentDraft)
+                                expanded = false
+                            },
+                            enabled = commentDraft.isNotBlank(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Colors.primary,
+                                disabledContainerColor = Colors.primary.copy(alpha = 0.3f)
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(vertical = 8.dp)
+                        ) {
+                            Text(
+                                "Save Comment",
+                                style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                                color = Colors.backgroundRoot
+                            )
+                        }
+
+                        // Dismiss button
+                        OutlinedButton(
+                            onClick = { showDismissOptions = !showDismissOptions },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(vertical = 8.dp),
+                            border = ButtonDefaults.outlinedButtonBorder.copy(
+                                brush = SolidColor(Colors.textMuted.copy(alpha = 0.5f))
+                            )
+                        ) {
+                            Text(
+                                "Mark Irrelevant",
+                                style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
+                                color = Colors.textSecondary
+                            )
+                        }
+                    }
+
+                    // Dismiss reason chips
+                    AnimatedVisibility(visible = showDismissOptions) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                "Why was this not a real struggle?",
+                                style = AppTextStyles.caption,
+                                color = Colors.textMuted
+                            )
+                            // Chip flow
+                            val reasons = DismissReason.entries
+                            val rows = reasons.chunked(3)
+                            rows.forEach { rowReasons ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    rowReasons.forEach { reason ->
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(999.dp))
+                                                .background(Colors.backgroundSecondary)
+                                                .border(
+                                                    1.dp,
+                                                    Colors.textMuted.copy(alpha = 0.3f),
+                                                    RoundedCornerShape(999.dp)
+                                                )
+                                                .clickable { onDismiss(point.id, reason) }
+                                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                        ) {
+                                            Text(
+                                                reason.getDisplayText(),
+                                                style = AppTextStyles.caption,
+                                                color = Colors.textSecondary
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DismissedStrugglePointRow(
+    point: StrugglePoint,
+    onRestore: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(Colors.backgroundTertiary.copy(alpha = 0.15f))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                String.format(Locale.US, "%.2f km — ${point.paceAtStruggle}/km", point.distanceMeters / 1000.0),
+                style = AppTextStyles.caption,
+                color = Colors.textMuted
+            )
+            point.dismissReason?.let {
+                Text(
+                    "Reason: ${it.getDisplayText()}",
+                    style = AppTextStyles.caption.copy(fontSize = 10.sp),
+                    color = Colors.textMuted.copy(alpha = 0.7f)
+                )
+            }
+        }
+        TextButton(
+            onClick = { onRestore(point.id) },
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+        ) {
+            Text(
+                "Restore",
+                style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
+                color = Colors.primary
+            )
         }
     }
 }
