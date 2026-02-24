@@ -109,7 +109,12 @@ class RunTrackingService : Service(), SensorEventListener {
     private var lastHillTopAckTime: Long = 0
     private var slopeDirection: Int = 0 // 1 = uphill, -1 = downhill, 0 = flat/unknown
     private var slopeDistanceMeters: Double = 0.0
+    private var slopeElevationGain: Double = 0.0 // Total metres gained in current uphill segment
+    private var slopeElevationLoss: Double = 0.0 // Total metres lost in current downhill segment
     private var downhillFinishTriggered: Boolean = false
+    // Altitude smoothing - rolling window to filter GPS noise
+    private val recentAltitudes = ArrayList<Double>() // Rolling window of recent altitudes
+    private var smoothedAltitude: Double? = null // Smoothed altitude from rolling average
 
     // Heart rate coaching
     private var hrSum: Long = 0
@@ -149,13 +154,18 @@ class RunTrackingService : Service(), SensorEventListener {
         private const val HILL_TOP_COOLDOWN_MS = 180_000 // 3 minutes
         private const val HR_COOLDOWN_MS = 180_000 // 3 minutes
 
-        private const val UPHILL_GRADE_THRESHOLD = 3.0
-        private const val STEEP_UPHILL_GRADE_THRESHOLD = 6.0
-        private const val DOWNHILL_GRADE_THRESHOLD = -3.0
-        private const val HILL_TOP_MIN_DISTANCE_M = 200.0
-        private const val UPHILL_MIN_DISTANCE_M = 150.0
-        private const val DOWNHILL_MIN_DISTANCE_M = 200.0
-        private const val DOWNHILL_FINISH_DISTANCE_KM = 1.0
+        private const val UPHILL_GRADE_THRESHOLD = 3.0      // Min grade to count as "uphill" for slope tracking
+        private const val STEEP_UPHILL_GRADE_THRESHOLD = 5.0 // Smoothed grade needed to trigger uphill coaching
+        private const val DOWNHILL_GRADE_THRESHOLD = -3.0    // Min grade to count as "downhill" for slope tracking
+        private const val STEEP_DOWNHILL_GRADE_THRESHOLD = -5.0 // Smoothed grade needed to trigger downhill coaching
+        private const val HILL_TOP_MIN_DISTANCE_M = 200.0    // Min uphill distance before hill-top ack fires
+        private const val UPHILL_MIN_DISTANCE_M = 200.0      // Min sustained uphill distance to trigger coaching
+        private const val DOWNHILL_MIN_DISTANCE_M = 250.0    // Min sustained downhill distance to trigger coaching
+        private const val DOWNHILL_FINISH_DISTANCE_KM = 1.0  // Within this distance of finish for downhill_finish
+        private const val MIN_ELEVATION_GAIN_M = 15.0        // Min metres climbed in segment to trigger uphill coaching
+        private const val MIN_ELEVATION_LOSS_M = 15.0        // Min metres descended in segment to trigger downhill coaching
+        private const val HILL_TOP_MIN_GAIN_M = 12.0         // Min metres gained before hill-top ack
+        private const val ALTITUDE_SMOOTHING_WINDOW = 5      // Number of altitude readings to average for smoothing
         
         const val ACTION_START_TRACKING = "ACTION_START_TRACKING"
         const val ACTION_STOP_TRACKING = "ACTION_STOP_TRACKING"
@@ -305,7 +315,11 @@ class RunTrackingService : Service(), SensorEventListener {
         lastHillTopAckTime = 0
         slopeDirection = 0
         slopeDistanceMeters = 0.0
+        slopeElevationGain = 0.0
+        slopeElevationLoss = 0.0
         downhillFinishTriggered = false
+        recentAltitudes.clear()
+        smoothedAltitude = null
         hrSum = 0
         hrCount = 0
         maxHr = 0
@@ -534,8 +548,19 @@ class RunTrackingService : Service(), SensorEventListener {
                 if (newPoint.altitude != null && prevPoint.altitude != null) {
                     val elevChange = newPoint.altitude - prevPoint.altitude
                     if (elevChange > 0) totalElevationGain += elevChange else totalElevationLoss += abs(elevChange)
-                    val gradePercent = (elevChange / distanceIncrement) * 100
-                    updateElevationCoaching(distanceIncrement, gradePercent)
+                    
+                    // Smooth altitude for elevation coaching (reduces GPS noise)
+                    recentAltitudes.add(newPoint.altitude)
+                    if (recentAltitudes.size > ALTITUDE_SMOOTHING_WINDOW) recentAltitudes.removeAt(0)
+                    val prevSmoothed = smoothedAltitude
+                    smoothedAltitude = recentAltitudes.average()
+                    
+                    // Use smoothed altitude difference for elevation coaching
+                    if (prevSmoothed != null && recentAltitudes.size >= ALTITUDE_SMOOTHING_WINDOW) {
+                        val smoothedElevChange = smoothedAltitude!! - prevSmoothed
+                        val smoothedGradePercent = (smoothedElevChange / distanceIncrement) * 100
+                        updateElevationCoaching(distanceIncrement, smoothedGradePercent, smoothedElevChange)
+                    }
                 }
                 routePoints.add(newPoint)
                 if (location.speed > maxSpeed) maxSpeed = location.speed
@@ -1311,7 +1336,7 @@ class RunTrackingService : Service(), SensorEventListener {
         }
     }
 
-    private fun updateElevationCoaching(distanceIncrement: Double, gradePercent: Double) {
+    private fun updateElevationCoaching(distanceIncrement: Double, gradePercent: Double, elevationChange: Double) {
         val now = System.currentTimeMillis()
         val direction = when {
             gradePercent >= UPHILL_GRADE_THRESHOLD -> 1
@@ -1321,31 +1346,46 @@ class RunTrackingService : Service(), SensorEventListener {
 
         if (direction == slopeDirection) {
             slopeDistanceMeters += distanceIncrement
+            // Track actual elevation gained/lost in this slope segment
+            if (elevationChange > 0) slopeElevationGain += elevationChange
+            if (elevationChange < 0) slopeElevationLoss += abs(elevationChange)
         } else {
             // Hill-top acknowledgement when leaving a sustained uphill
+            // Only fires if the runner actually climbed a meaningful amount
             if (slopeDirection == 1 &&
                 slopeDistanceMeters >= HILL_TOP_MIN_DISTANCE_M &&
+                slopeElevationGain >= HILL_TOP_MIN_GAIN_M &&
                 now - lastHillTopAckTime > HILL_TOP_COOLDOWN_MS
             ) {
+                Log.d("ElevationCoaching", "Hill top: climbed ${slopeElevationGain.toInt()}m over ${slopeDistanceMeters.toInt()}m")
                 triggerElevationCoaching("hill_top", gradePercent, slopeDistanceMeters)
                 lastHillTopAckTime = now
             }
+            // Reset slope tracking for new direction
             slopeDirection = direction
             slopeDistanceMeters = distanceIncrement
+            slopeElevationGain = if (elevationChange > 0) elevationChange else 0.0
+            slopeElevationLoss = if (elevationChange < 0) abs(elevationChange) else 0.0
         }
 
-        val hasElevationContext = hasRoute || abs(gradePercent) >= UPHILL_GRADE_THRESHOLD
-        if (!hasElevationContext) return
+        // Cooldown check
         if (now - lastElevationCoachingTime < ELEVATION_COOLDOWN_MS) return
 
+        // UPHILL coaching: sustained steep climb with meaningful elevation gain
         if (direction == 1 &&
             gradePercent >= STEEP_UPHILL_GRADE_THRESHOLD &&
-            slopeDistanceMeters >= UPHILL_MIN_DISTANCE_M
+            slopeDistanceMeters >= UPHILL_MIN_DISTANCE_M &&
+            slopeElevationGain >= MIN_ELEVATION_GAIN_M
         ) {
+            Log.d("ElevationCoaching", "Uphill trigger: ${gradePercent.toInt()}% grade, ${slopeElevationGain.toInt()}m gained over ${slopeDistanceMeters.toInt()}m")
             lastElevationCoachingTime = now
             triggerElevationCoaching("uphill", gradePercent, slopeDistanceMeters)
-        } else if (direction == -1 &&
-            slopeDistanceMeters >= DOWNHILL_MIN_DISTANCE_M
+        }
+        // DOWNHILL coaching: sustained steep descent with meaningful elevation loss
+        else if (direction == -1 &&
+            gradePercent <= STEEP_DOWNHILL_GRADE_THRESHOLD &&
+            slopeDistanceMeters >= DOWNHILL_MIN_DISTANCE_M &&
+            slopeElevationLoss >= MIN_ELEVATION_LOSS_M
         ) {
             val remainingDistanceKm = targetDistance?.let { it - (totalDistance / 1000.0) }
             if (!downhillFinishTriggered &&
@@ -1355,9 +1395,11 @@ class RunTrackingService : Service(), SensorEventListener {
             ) {
                 downhillFinishTriggered = true
                 lastElevationCoachingTime = now
+                Log.d("ElevationCoaching", "Downhill finish trigger: ${slopeElevationLoss.toInt()}m lost, ${remainingDistanceKm}km to go")
                 triggerElevationCoaching("downhill_finish", gradePercent, slopeDistanceMeters)
                 return
             }
+            Log.d("ElevationCoaching", "Downhill trigger: ${gradePercent.toInt()}% grade, ${slopeElevationLoss.toInt()}m lost over ${slopeDistanceMeters.toInt()}m")
             lastElevationCoachingTime = now
             triggerElevationCoaching("downhill", gradePercent, slopeDistanceMeters)
         }
