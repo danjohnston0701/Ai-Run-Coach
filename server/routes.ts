@@ -3846,15 +3846,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const message = await aiService.generatePaceUpdate(req.body);
       
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
-      const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
-      const audioBuffer = await aiService.generateTTS(message, voice);
-      const base64Audio = audioBuffer.toString('base64');
+      let base64Audio: string | null = null;
+      try {
+        const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
+        const audioBuffer = await aiService.generateTTS(message, voice);
+        base64Audio = audioBuffer.toString('base64');
+      } catch (ttsError) {
+        console.warn("Pace update TTS failed, returning text only:", ttsError);
+      }
       
       res.json({ 
         message,
         nextPace: req.body.currentPace, // Fallback
         audio: base64Audio,
-        format: 'mp3'
+        format: base64Audio ? 'mp3' : null
       });
     } catch (error: any) {
       console.error("Pace update coaching error:", error);
@@ -3879,14 +3884,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const message = await aiService.generateStruggleCoaching(req.body);
       
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
-      const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
-      const audioBuffer = await aiService.generateTTS(message, voice);
-      const base64Audio = audioBuffer.toString('base64');
+      let base64Audio: string | null = null;
+      try {
+        const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
+        const audioBuffer = await aiService.generateTTS(message, voice);
+        base64Audio = audioBuffer.toString('base64');
+      } catch (ttsError) {
+        console.warn("Struggle coaching TTS failed, returning text only:", ttsError);
+      }
       
       res.json({ 
         message,
         audio: base64Audio,
-        format: 'mp3'
+        format: base64Audio ? 'mp3' : null
       });
     } catch (error: any) {
       console.error("Struggle coaching error:", error);
@@ -3967,15 +3977,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const message = await aiService.generatePhaseCoaching(req.body);
       
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
-      const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
-      const audioBuffer = await aiService.generateTTS(message, voice);
-      const base64Audio = audioBuffer.toString('base64');
+      let base64Audio: string | null = null;
+      try {
+        const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
+        const audioBuffer = await aiService.generateTTS(message, voice);
+        base64Audio = audioBuffer.toString('base64');
+      } catch (ttsError) {
+        console.warn("Phase coaching TTS failed, returning text only:", ttsError);
+      }
       
       res.json({ 
         message,
         nextPhase: null,
         audio: base64Audio,
-        format: 'mp3'
+        format: base64Audio ? 'mp3' : null
       });
     } catch (error: any) {
       console.error("Phase coaching error:", error);
@@ -4029,16 +4044,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const response = await aiService.getWellnessAwareCoachingResponse(message, context);
       
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
-      const coachGender = user?.coachGender || 'female';
-      const coachAccent = user?.coachAccent || 'british';
-      const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
-      const audioBuffer = await aiService.generateTTS(response, voice);
-      const base64Audio = audioBuffer.toString('base64');
+      let base64Audio: string | null = null;
+      try {
+        const coachGender = user?.coachGender || 'female';
+        const coachAccent = user?.coachAccent || 'british';
+        const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
+        const audioBuffer = await aiService.generateTTS(response, voice);
+        base64Audio = audioBuffer.toString('base64');
+      } catch (ttsError) {
+        console.warn("Talk to coach TTS failed, returning text only:", ttsError);
+      }
       
       res.json({ 
         message: response,
         audio: base64Audio,
-        format: 'mp3'
+        format: base64Audio ? 'mp3' : null
       });
     } catch (error: any) {
       console.error("Talk to coach error:", error);
@@ -4095,16 +4115,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
-      const coachGender = user?.coachGender || 'female';
-      const coachAccent = user?.coachAccent || 'british';
-      const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
-      const audioBuffer = await aiService.generateTTS(response, voice);
-      const base64Audio = audioBuffer.toString('base64');
+      let base64Audio: string | null = null;
+      try {
+        const coachGender = user?.coachGender || 'female';
+        const coachAccent = user?.coachAccent || 'british';
+        const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
+        const audioBuffer = await aiService.generateTTS(response, voice);
+        base64Audio = audioBuffer.toString('base64');
+      } catch (ttsError) {
+        console.warn("HR coaching TTS failed, returning text only:", ttsError);
+      }
       
       res.json({ 
         message: response,
         audio: base64Audio,
-        format: 'mp3'
+        format: base64Audio ? 'mp3' : null
       });
     } catch (error: any) {
       console.error("HR coaching error:", error);

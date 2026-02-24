@@ -275,10 +275,18 @@ export async function generatePhaseCoaching(params: {
   const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
   
   const phaseDescriptions: Record<string, string> = {
+    // App sends these enum names from CoachingPhase.kt
+    EARLY: 'The runner is in the early phase, warming up and finding their rhythm.',
+    MID: `The runner is in the middle of their run (${progress}% complete) — they should be settling into a steady pace. Do NOT tell them to "finish strong" or "push to the end" — they have a long way to go.`,
+    LATE: `The runner is in the late phase (${progress}% complete), likely getting tired. Encourage them to maintain effort.`,
+    FINAL: `The runner is in the final push (${progress}% complete), approaching the finish. NOW is the time for "finish strong" and "dig deep" encouragement.`,
+    GENERIC: `The runner is ${progress}% through their run. Give phase-appropriate coaching based on their progress percentage.`,
+    STEADY: `The runner is running at a steady pace (${progress}% complete).`,
+    // Legacy keys (in case old server code calls with these)
     warmUp: 'The runner is in the warm-up phase, getting into their rhythm.',
-    midRun: 'The runner is in the middle of their run, working hard.',
-    lateRun: 'The runner is in the late phase, possibly getting tired.',
-    finalPush: 'The runner is approaching the finish, time for final encouragement.',
+    midRun: `The runner is in the middle of their run (${progress}% complete). Do NOT say "finish strong" — they have a lot left.`,
+    lateRun: `The runner is in the late phase (${progress}% complete), possibly getting tired.`,
+    finalPush: `The runner is approaching the finish (${progress}% complete), time for final encouragement.`,
   };
   
   // ONLY include terrain info when the runner has a planned route
