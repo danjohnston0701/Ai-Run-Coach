@@ -262,8 +262,11 @@ export async function generatePhaseCoaching(params: {
   coachTone: string;
   activityType?: string;
   hasRoute?: boolean;
+  targetPace?: string;
+  targetTime?: number;
+  triggerType?: string;
 }): Promise<string> {
-  const { phase, distance, targetDistance, elapsedTime, currentPace, currentGrade, totalElevationGain, heartRate, cadence, coachName, coachTone, activityType, hasRoute } = params;
+  const { phase, distance, targetDistance, elapsedTime, currentPace, currentGrade, totalElevationGain, heartRate, cadence, coachName, coachTone, activityType, hasRoute, targetPace, targetTime, triggerType } = params;
   
   const timeMin = Math.floor(elapsedTime / 60);
   const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
@@ -290,14 +293,41 @@ export async function generatePhaseCoaching(params: {
   let hrInfo = '';
   if (heartRate && heartRate > 0) {
     const hrZone = getHeartRateZone(heartRate);
-    hrInfo = `Heart rate: ${heartRate} bpm (${hrZone} zone). `;
+    hrInfo = `- Heart rate: ${heartRate} bpm (${hrZone} zone)`;
   }
 
   // Build cadence info if available
   let cadenceInfo = '';
   if (cadence && cadence > 0) {
     const cadenceAssessment = cadence >= 170 ? 'excellent' : cadence >= 160 ? 'good' : cadence >= 150 ? 'moderate' : 'needs work';
-    cadenceInfo = `Cadence: ${cadence} spm (${cadenceAssessment}). `;
+    cadenceInfo = `- Cadence: ${cadence} spm (${cadenceAssessment})`;
+  }
+
+  // Build target pace comparison if available
+  let paceComparisonInfo = '';
+  if (targetPace && currentPace) {
+    paceComparisonInfo = `- Target pace: ${targetPace}/km (current: ${currentPace}/km)`;
+    // Add explicit pace gap guidance for the AI
+    const targetParts = targetPace.split(':').map(Number);
+    const currentParts = currentPace.split(':').map(Number);
+    if (targetParts.length === 2 && currentParts.length === 2) {
+      const targetSec = targetParts[0] * 60 + targetParts[1];
+      const currentSec = currentParts[0] * 60 + currentParts[1];
+      const diffSec = currentSec - targetSec;
+      if (diffSec > 30) {
+        paceComparisonInfo += ` ⚠️ Runner is ${Math.abs(diffSec)} seconds/km SLOWER than target - needs to pick up pace!`;
+      } else if (diffSec > 10) {
+        paceComparisonInfo += ` Runner is slightly behind target pace.`;
+      } else if (diffSec < -10) {
+        paceComparisonInfo += ` Runner is ahead of target pace - may want to ease off slightly to sustain.`;
+      }
+    }
+  }
+
+  // Build target time info if available
+  let targetTimeInfo = '';
+  if (targetTime && targetTime > 0) {
+    targetTimeInfo = `- Target time: ${formatDurationForTTS(targetTime)}`;
   }
 
   // Build the no-terrain rule when there's no route
@@ -311,11 +341,13 @@ Runner Status:
 - Distance covered: ${distance.toFixed(2)}km${targetDistance ? ` (${progress}% of ${targetDistance}km)` : ''}
 - Time elapsed: ${timeMin} minutes
 ${currentPace ? `- Current pace: ${currentPace}/km` : ''}
+${paceComparisonInfo}
+${targetTimeInfo}
 ${hrInfo}
 ${cadenceInfo}
 ${terrainInfo}
 ${noTerrainRule}
-Give a brief (1-2 sentences) phase-appropriate coaching message. Be ${coachTone} and encouraging.${hasRoute === true ? ' Consider their current terrain if on a hill.' : ''}`;
+Give a brief (2-3 sentences) phase-appropriate coaching message. Be ${coachTone} and encouraging.${targetPace ? ' You MUST comment on how their current pace compares to their target and whether they need to speed up, slow down, or maintain.' : ''}${cadence && cadence > 0 ? ' Include a brief note on their cadence.' : ''}${hasRoute === true ? ' Consider their current terrain if on a hill.' : ''}`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -532,18 +564,52 @@ Provide response as JSON with: tips (array of 3-4 coaching tips), warnings (arra
   }
 }
 
-export async function getElevationCoaching(elevationData: { change: string; grade: number; upcoming?: string }): Promise<string> {
-  const prompt = `As a running coach, give a brief (1-2 sentences) tip for this terrain:
-- Current: ${elevationData.change} (${Math.abs(elevationData.grade)}% grade)
-- Upcoming: ${elevationData.upcoming || 'similar terrain'}`;
+export async function getElevationCoaching(params: {
+  eventType: string;
+  distance: number;
+  elapsedTime: number;
+  currentGrade: number;
+  segmentDistanceMeters?: number;
+  totalElevationGain?: number;
+  totalElevationLoss?: number;
+  hasRoute?: boolean;
+  coachName?: string;
+  coachTone?: string;
+  activityType?: string;
+  // Legacy format support
+  change?: string;
+  grade?: number;
+  upcoming?: string;
+}): Promise<string> {
+  const coachName = params.coachName || 'Coach';
+  const coachTone = params.coachTone || 'energetic';
+  const grade = params.currentGrade ?? params.grade ?? 0;
+  const eventType = params.eventType || params.change || 'uphill';
+  const distanceKm = params.distance?.toFixed(2) || '?';
+  const segmentM = params.segmentDistanceMeters ? Math.round(params.segmentDistanceMeters) : null;
+
+  // Don't give terrain coaching for no-route runs
+  if (params.hasRoute === false) {
+    return "Keep your effort steady and focus on your breathing!";
+  }
+
+  const eventDescription = eventType === 'hill_top' ? 'just crested a hill'
+    : eventType === 'uphill' ? `climbing (${Math.abs(grade).toFixed(1)}% grade)`
+    : eventType === 'downhill_finish' ? 'on a downhill towards the finish'
+    : eventType === 'downhill' ? `descending (${Math.abs(grade).toFixed(1)}% grade)`
+    : `on ${eventType} terrain`;
+
+  const prompt = `You are ${coachName}, a ${coachTone} running coach. The runner is at ${distanceKm}km and is ${eventDescription}.${segmentM ? ` This segment is ${segmentM}m long.` : ''}
+
+Give a brief (1-2 sentences) terrain-specific coaching tip. Be encouraging and actionable.`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: "You are an encouraging running coach. Keep responses brief and actionable." },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep responses brief and actionable. ${toneDirective(coachTone)}` },
       { role: "user", content: prompt }
     ],
-    max_tokens: 60,
+    max_tokens: 80,
     temperature: 0.8,
   });
 

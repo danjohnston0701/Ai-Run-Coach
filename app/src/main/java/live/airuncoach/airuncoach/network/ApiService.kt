@@ -73,7 +73,7 @@ interface ApiService {
     @POST("/api/coaching/hr-coaching")
     suspend fun getHeartRateCoaching(@Body request: HeartRateCoachingRequest): HeartRateCoachingResponse
 
-    @POST("/api/ai/elevation-coaching")
+    @POST("/api/coaching/elevation-coaching")
     suspend fun getElevationCoaching(@Body request: ElevationCoachingRequest): ElevationCoachingResponse
 
     @POST("/api/coaching/pre-run-briefing-audio")

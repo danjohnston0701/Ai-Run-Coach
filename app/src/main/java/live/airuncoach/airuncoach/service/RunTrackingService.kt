@@ -1009,6 +1009,15 @@ class RunTrackingService : Service(), SensorEventListener {
             Log.d("RunTrackingService", "Reached 500m - triggering initial coaching")
             serviceScope.launch {
                 try {
+                    // Calculate target pace from target time and distance if available
+                    val targetPaceStr = if (targetTime != null && targetDistance != null && targetDistance!! > 0) {
+                        val totalSeconds = targetTime!! / 1000
+                        val paceSecondsPerKm = totalSeconds / targetDistance!!
+                        val paceMin = (paceSecondsPerKm / 60).toInt()
+                        val paceSec = (paceSecondsPerKm % 60).toInt()
+                        "$paceMin:${paceSec.toString().padStart(2, '0')}"
+                    } else null
+
                     val update = PhaseCoachingUpdate(
                         phase = _currentRunSession.value?.phase?.name ?: "STEADY",
                         distance = totalDistance / 1000.0,
@@ -1024,7 +1033,10 @@ class RunTrackingService : Service(), SensorEventListener {
                         coachGender = currentUser?.coachGender,
                         coachAccent = currentUser?.coachAccent,
                         activityType = "run",
-                        hasRoute = hasRoute
+                        hasRoute = hasRoute,
+                        targetTime = targetTime?.let { (it / 1000).toInt() },
+                        targetPace = targetPaceStr,
+                        triggerType = "500m_checkin"
                     )
                     val response = apiService.getPhaseCoaching(update)
                     coachingHistory.add(AiCoachingNote(
@@ -1055,6 +1067,15 @@ class RunTrackingService : Service(), SensorEventListener {
             Log.d("RunTrackingService", "Phase changed to $newPhase at ${totalDistance/1000.0}km - triggering coaching")
             serviceScope.launch {
                 try {
+                    // Calculate target pace from target time and distance if available
+                    val phaseTargetPaceStr = if (targetTime != null && targetDistance != null && targetDistance!! > 0) {
+                        val totalSeconds = targetTime!! / 1000
+                        val paceSecondsPerKm = totalSeconds / targetDistance!!
+                        val paceMin = (paceSecondsPerKm / 60).toInt()
+                        val paceSec = (paceSecondsPerKm % 60).toInt()
+                        "$paceMin:${paceSec.toString().padStart(2, '0')}"
+                    } else null
+
                     val update = PhaseCoachingUpdate(
                         phase = newPhase.name,
                         distance = totalDistance / 1000.0,
@@ -1070,7 +1091,10 @@ class RunTrackingService : Service(), SensorEventListener {
                         coachGender = currentUser?.coachGender,
                         coachAccent = currentUser?.coachAccent,
                         activityType = "run",
-                        hasRoute = hasRoute
+                        hasRoute = hasRoute,
+                        targetTime = targetTime?.let { (it / 1000).toInt() },
+                        targetPace = phaseTargetPaceStr,
+                        triggerType = "phase_change"
                     )
                     val response = apiService.getPhaseCoaching(update)
                     coachingHistory.add(AiCoachingNote(
