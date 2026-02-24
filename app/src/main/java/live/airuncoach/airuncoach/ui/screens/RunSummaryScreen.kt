@@ -1891,57 +1891,276 @@ private fun DataTabFlagship(run: RunSession) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = Spacing.lg),
+            .padding(horizontal = Spacing.md),
         contentPadding = PaddingValues(vertical = Spacing.lg),
-        verticalArrangement = Arrangement.spacedBy(Spacing.lg)
+        verticalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
+        // ==================== PACE SECTION ====================
         item {
-            DataGroupCardFlagship(
-                title = "Heart Rate",
-                rows = buildList {
-                    if (run.heartRate > 0) add("Avg Heart Rate" to "${run.heartRate} bpm")
+            DataSectionCard(
+                title = "Pace",
+                icon = "⏱️",
+                metrics = buildList {
+                    run.averagePace?.let { add("Avg Pace" to "$it/km") }
+                    run.averagePace?.let { add("Avg Moving Pace" to "$it/km") } // Using avg as proxy for now
+                    run.currentPace?.let { add("Current Pace" to "$it/km") }
+                    add("Best Km Pace" to (run.kmSplits.minByOrNull { it.pace }?.pace?.replace("/km", "") ?: "--:--") + "/km")
                 }
             )
         }
 
+        // ==================== SPEED SECTION ====================
         item {
-            DataGroupCardFlagship(
+            val avgSpeedKmh = run.averageSpeed * 3.6f
+            val maxSpeedKmh = run.maxSpeed * 3.6f
+            DataSectionCard(
+                title = "Speed",
+                icon = "⚡",
+                metrics = buildList {
+                    if (run.averageSpeed > 0) add("Avg Speed" to String.format("%.1f km/h", avgSpeedKmh))
+                    if (run.avgSpeed != null && run.avgSpeed > 0) add("Avg Moving Speed" to String.format("%.1f km/h", run.avgSpeed * 3.6))
+                    if (run.maxSpeed > 0) add("Max Speed" to String.format("%.1f km/h", maxSpeedKmh))
+                }
+            )
+        }
+
+        // ==================== TIME SECTION ====================
+        item {
+            DataSectionCard(
+                title = "Time",
+                icon = "🕐",
+                metrics = buildList {
+                    add("Total Time" to run.getFormattedDuration())
+                    run.movingTime?.let { add("Moving Time" to formatSecondsToHMS(it)) }
+                    run.elapsedTime?.let { add("Elapsed Time" to formatMillisToHMS(it)) }
+                }
+            )
+        }
+
+        // ==================== RUNNING DYNAMICS SECTION ====================
+        item {
+            DataSectionCard(
                 title = "Running Dynamics",
-                rows = buildList {
-                    if (run.cadence > 0) add("Avg Run Cadence" to "${run.cadence} spm")
+                icon = "👟",
+                metrics = buildList {
+                    if (run.cadence > 0) add("Avg Cadence" to "${run.cadence} spm")
+                    run.maxCadence?.let { add("Max Cadence" to "$it spm") }
+                    run.avgStrideLength?.let { add("Avg Stride Length" to String.format("%.0f cm", it * 100)) }
                 }
             )
         }
 
+        // ==================== HEART RATE SECTION ====================
         item {
-            DataGroupCardFlagship(
+            DataSectionCard(
+                title = "Heart Rate",
+                icon = "❤️",
+                metrics = buildList {
+                    if (run.heartRate > 0) add("Avg Heart Rate" to "${run.heartRate} bpm")
+                    run.minHeartRate?.let { add("Min Heart Rate" to "$it bpm") }
+                }
+            )
+        }
+
+        // ==================== ELEVATION SECTION ====================
+        item {
+            DataSectionCard(
                 title = "Elevation",
-                rows = buildList {
+                icon = "⛰️",
+                metrics = buildList {
                     if (run.totalElevationGain > 0) add("Total Ascent" to "${run.totalElevationGain.roundToInt()} m")
+                    if (run.totalElevationLoss > 0) add("Total Descent" to "${run.totalElevationLoss.roundToInt()} m")
+                    run.minElevation?.let { add("Min Elevation" to "${it.toInt()} m") }
+                    run.maxElevation?.let { add("Max Elevation" to "${it.toInt()} m") }
+                    run.steepestIncline?.let { add("Steepest Incline" to "${it.toInt()}%") }
+                    run.steepestDecline?.let { add("Steepest Decline" to "${-it.toInt()}%") }
                 }
             )
         }
 
+        // ==================== DISTANCE SECTION ====================
         item {
-            DataGroupCardFlagship(
-                title = "Nutrition & Hydration",
-                rows = buildList {
-                    if (run.calories > 0) add("Total Calories" to "${run.calories} kcal")
+            DataSectionCard(
+                title = "Distance",
+                icon = "📏",
+                metrics = buildList {
+                    add("Total Distance" to String.format("%.2f km", run.distance / 1000))
                 }
             )
         }
 
+        // ==================== CALORIES SECTION ====================
+        item {
+            DataSectionCard(
+                title = "Calories",
+                icon = "🔥",
+                metrics = buildList {
+                    if (run.calories > 0) add("Total Calories" to "${run.calories} kcal")
+                    run.activeCalories?.let { add("Active Calories" to "$it kcal") }
+                    run.restingCalories?.let { add("Resting Calories" to "$it kcal") }
+                    run.estSweatLoss?.let { add("Est. Sweat Loss" to String.format("%.1f L", it)) }
+                }
+            )
+        }
+
+        // ==================== WEATHER SECTION ====================
         item {
             if (run.weatherAtStart != null) {
                 WeatherCardFlagship(run.weatherAtStart!!)
             }
         }
 
-        item { Spacer(modifier = Modifier.height(Spacing.xl)) }
+        // ==================== TARGET SECTION ====================
+        item {
+            if (run.targetDistance != null || run.targetTime != null) {
+                DataSectionCard(
+                    title = "Goals",
+                    icon = "🎯",
+                    metrics = buildList {
+                        run.targetDistance?.let { add("Target Distance" to String.format("%.2f km", it)) }
+                        run.targetTime?.let { add("Target Time" to formatMillisToHMS(it)) }
+                        run.wasTargetAchieved?.let { 
+                            add("Target Achieved" to if (it) "✅ Yes" else "❌ No") 
+                        }
+                    }
+                )
+            }
+        }
 
-        
+        // ==================== KM SPLITS SECTION ====================
+        item {
+            if (run.kmSplits.isNotEmpty()) {
+                KmSplitsCard(run.kmSplits)
+            }
+        }
+
+        item { Spacer(modifier = Modifier.height(Spacing.xl)) }
     }
 }
+
+@Composable
+private fun DataSectionCard(
+    title: String,
+    icon: String,
+    metrics: List<Pair<String, String>>
+) {
+    if (metrics.isEmpty()) return
+    
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.5f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            // Header
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 12.dp)
+            ) {
+                Text(icon, style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    title, 
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), 
+                    color = Colors.textPrimary
+                )
+            }
+            
+            // Metrics grid - 2 columns
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                metrics.chunked(2).forEach { rowMetrics ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        rowMetrics.forEach { (label, value) ->
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    label, 
+                                    style = AppTextStyles.caption, 
+                                    color = Colors.textMuted
+                                )
+                                Text(
+                                    value, 
+                                    style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold), 
+                                    color = Colors.textPrimary
+                                )
+                            }
+                        }
+                        // Fill empty space if odd number of items
+                        if (rowMetrics.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KmSplitsCard(kmSplits: List<KmSplit>) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.5f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 12.dp)
+            ) {
+                Text("📊", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "Km Splits", 
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), 
+                    color = Colors.textPrimary
+                )
+            }
+            
+            // Header row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Km", style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = Colors.textMuted, modifier = Modifier.weight(1f))
+                Text("Time", style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = Colors.textMuted, modifier = Modifier.weight(1f))
+                Text("Pace", style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = Colors.textMuted, modifier = Modifier.weight(1f))
+            }
+            
+            HorizontalDivider(color = Colors.border.copy(alpha = 0.3f), modifier = Modifier.padding(vertical = 8.dp))
+            
+            kmSplits.take(10).forEach { split ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("${split.km}", style = AppTextStyles.body, color = Colors.textSecondary, modifier = Modifier.weight(1f))
+                    Text(formatSecondsToHMS(split.time), style = AppTextStyles.body, color = Colors.textSecondary, modifier = Modifier.weight(1f))
+                    Text("${split.pace}/km", style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold), color = Colors.primary, modifier = Modifier.weight(1f))
+                }
+            }
+            
+            if (kmSplits.size > 10) {
+                Text("+ ${kmSplits.size - 10} more km splits", style = AppTextStyles.caption, color = Colors.textMuted, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+    }
+}
+
+private fun formatSecondsToHMS(seconds: Long): String {
+    val h = seconds / 3600
+    val m = (seconds % 3600) / 60
+    val s = seconds % 60
+    return if (h > 0) String.format("%d:%02d:%02d", h, m, s) else String.format("%d:%02d", m, s)
+}
+
+private fun formatMillisToHMS(millis: Long): String = formatSecondsToHMS(millis / 1000)
 
 @Composable
 private fun DataGroupCardFlagship(

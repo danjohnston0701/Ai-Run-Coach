@@ -65,7 +65,22 @@ data class RunSession(
     // Run goals for target tracking (optional)
     val targetDistance: Double? = null, // kilometers
     val targetTime: Long? = null, // milliseconds
-    val wasTargetAchieved: Boolean? = null
+    val wasTargetAchieved: Boolean? = null,
+
+    // Extended metrics (from server)
+    val avgSpeed: Float? = null, // m/s - override for avg moving speed
+    val movingTime: Long? = null, // seconds
+    val elapsedTime: Long? = null, // seconds (includes pauses)
+    val maxCadence: Int? = null, // spm
+    val avgStrideLength: Float? = null, // meters
+    val minElevation: Double? = null, // meters
+    val maxElevation: Double? = null, // meters
+    val steepestIncline: Float? = null, // percent
+    val steepestDecline: Float? = null, // percent
+    val activeCalories: Int? = null, // kcal
+    val restingCalories: Int? = null, // kcal
+    val estSweatLoss: Float? = null, // liters
+    val minHeartRate: Int? = null // bpm
 ) {
     fun getDistanceInKm(): Double = distance / 1000.0
     

@@ -159,6 +159,21 @@ export const runs = pgTable("runs", {
   // Garmin upload tracking (two-way sync)
   uploadedToGarmin: boolean("uploaded_to_garmin").default(false), // TRUE if uploaded to Garmin Connect
   garminActivityId: varchar("garmin_activity_id"), // Garmin activity ID if uploaded
+
+  // Extended metrics for detailed run data
+  maxSpeed: real("max_speed"), // m/s
+  avgSpeed: real("avg_speed"), // m/s
+  movingTime: integer("moving_time"), // seconds
+  elapsedTime: integer("elapsed_time"), // seconds  
+  maxCadence: integer("max_cadence"), // spm
+  avgStrideLength: real("avg_stride_length"), // meters
+  minElevation: real("min_elevation"), // meters
+  maxElevation: real("max_elevation"), // meters
+  steepestIncline: real("steepest_incline"), // percent
+  steepestDecline: real("steepest_decline"), // percent
+  activeCalories: integer("active_calories"), // kcal
+  restingCalories: integer("resting_calories"), // kcal
+  estSweatLoss: real("est_sweat_loss"), // liters
 });
 
 // Goals table
