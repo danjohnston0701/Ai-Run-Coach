@@ -77,6 +77,7 @@ class AudioPlayerHelper(private val context: Context) {
                         prepare()
                         
                         setOnCompletionListener {
+                            mediaPlayer = null  // Null out BEFORE release so stop() sees null and returns early
                             release()
                             tempFile.delete()
                             onComplete?.invoke()
@@ -84,6 +85,7 @@ class AudioPlayerHelper(private val context: Context) {
                         
                         setOnErrorListener { _, what, extra ->
                             Log.e("AudioPlayerHelper", "MediaPlayer error: what=$what, extra=$extra")
+                            mediaPlayer = null
                             release()
                             tempFile.delete()
                             onComplete?.invoke()
