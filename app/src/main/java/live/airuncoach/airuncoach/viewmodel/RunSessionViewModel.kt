@@ -165,6 +165,10 @@ class RunSessionViewModel @Inject constructor(
             return
         }
         
+        // Clear previous run state to prevent stale data from previous run showing
+        // This ensures we don't navigate to the previous run's summary when starting a new run
+        _runState.update { it.copy(backendRunId = null, isStopping = false) }
+        
         isPrepareRunInProgress = true
         viewModelScope.launch {
             // Skip AI coaching if disabled

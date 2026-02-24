@@ -137,9 +137,16 @@ fun RunSessionScreen(
         false // wire later
     }
 
-    LaunchedEffect(runState.backendRunId) {
+    // Only navigate to run summary if the run was actually running/paused (not stale data from previous run)
+    LaunchedEffect(runState.backendRunId, runState.isRunning, runState.isPaused) {
+        // Only navigate if we have a backend ID AND the run was active (not stale from previous session)
         runState.backendRunId?.let { backendId ->
-            onEndRun(backendId)
+            if (runState.isRunning || runState.isPaused) {
+                onEndRun(backendId)
+            } else {
+                // Stale value from previous run - clear it to prevent incorrect navigation
+                Log.d("RunSessionScreen", "Ignoring stale backendRunId from previous run: $backendId")
+            }
         }
     }
 
