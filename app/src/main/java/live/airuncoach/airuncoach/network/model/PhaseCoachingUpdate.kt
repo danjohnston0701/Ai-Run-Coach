@@ -28,5 +28,6 @@ data class PhaseCoachingUpdate(
     @SerializedName("optimalStrideMin") val optimalStrideMin: Double? = null,
     @SerializedName("optimalStrideMax") val optimalStrideMax: Double? = null,
     @SerializedName("terrainContext") val terrainContext: String? = null,
-    @SerializedName("isFatigued") val isFatigued: Boolean? = null
+    @SerializedName("isFatigued") val isFatigued: Boolean? = null,
+    @SerializedName("hasRoute") val hasRoute: Boolean = false
 )

@@ -1,5 +1,7 @@
 // Run View - Main activity view during run
 
+using Toybox.Attention;
+using Toybox.Math;
 using Toybox.WatchUi as Ui;
 using Toybox.Graphics as Gfx;
 using Toybox.Position as Pos;
@@ -22,16 +24,38 @@ class RunView extends Ui.View {
     private var _timer = null;
     private var _dataStreamer = null;
     private var _session = null;
+
+        // ---------------------------
+        // UI Animation / Display State
+        // ---------------------------
+        private var _elapsedMs = 0;
+        private var _tickMs = 250;                 // UI refresh interval
+        private var _streamAccumMs = 0;            // stream every 1000ms
+
+        private var _dispPace = 0.0;               // smoothed pace (sec/km)
+        private var _dispDistance = 0.0;           // smoothed distance (m)
+        private var _dispHeartRate = 0;            // smoothed HR
+        private var _dispCadence = 0;              // smoothed cadence
+
+        private var _ringPhase = 0.0;              // breathing animation phase
+        private var _ringPulseBoost = 0.0;         // brief pulse when coaching arrives
+
+        private var _lastCoachingText = "";
+        private var _coachingActive = false;
     
     function initialize() {
         View.initialize();
-        
-        // Initialize data streamer
+
         _dataStreamer = new DataStreamer();
-        
-        // Start timer for updates
+
+        // Initialize smoothed values
+        _dispPace = _pace;
+        _dispDistance = _distance;
+        _dispHeartRate = _heartRate;
+        _dispCadence = _cadence;
+
         _timer = new Timer.Timer();
-        _timer.start(method(:onTimer), 1000, true);  // Update every second
+        _timer.start(method(:onTimer), _tickMs, true); // 250ms refresh for smooth UI
     }
 
     function onLayout(dc) {
@@ -76,91 +100,168 @@ class RunView extends Ui.View {
     }
 
     function onUpdate(dc) {
+
         dc.setColor(Gfx.COLOR_BLACK, Gfx.COLOR_BLACK);
         dc.clear();
-        
-        var width = dc.getWidth();
+
+        var width  = dc.getWidth();
         var height = dc.getHeight();
-        var yOffset = height / 6;
-        
-        // Draw heart rate (large, top center)
-        dc.setColor(getHeartRateZoneColor(_heartRateZone), Gfx.COLOR_TRANSPARENT);
-        dc.drawText(
-            width / 2,
-            yOffset,
-            Gfx.FONT_NUMBER_HOT,
-            _heartRate.format("%d"),
-            Gfx.TEXT_JUSTIFY_CENTER
-        );
-        dc.drawText(
-            width / 2,
-            yOffset + 50,
-            Gfx.FONT_TINY,
-            "BPM (Z" + _heartRateZone + ")",
-            Gfx.TEXT_JUSTIFY_CENTER
-        );
-        
-        // Draw distance and pace (side by side)
-        yOffset += 90;
+        var centerX = width / 2;
+        var centerY = height / 2;
+
+        // ---------------------------
+        // Intelligent layout (small screens)
+        // ---------------------------
+        var isSmall = (height <= 240 || width <= 240);
+
+        // vertical anchors (tuned for round/small screens)
+        var paceY     = isSmall ? (height * 0.42) : (height * 0.40);
+        var unitY     = paceY + (isSmall ? 28 : 34);
+
+        var secondaryY = isSmall ? (height * 0.70) : (height * 0.72);
+        var tertiaryY  = isSmall ? (height * 0.82) : (height * 0.84);
+
+        var coachingY  = isSmall ? (height * 0.58) : (height * 0.60);
+
+        // ---------------------------
+        // Breathing ring effect
+        // ---------------------------
+        // sin wave 0..1
+        var s = (Math.sin(_ringPhase) + 1.0) * 0.5;
+
+        // radius breath + coaching pulse
+        var baseRadius = (width / 2) - (isSmall ? 6 : 4);
+        var breathe = s * (isSmall ? 3 : 4));
+        var pulse = _ringPulseBoost * (isSmall ? 4 : 6);
+
+        var ringRadius = baseRadius - 2 + breathe + pulse;
+
+        // subtle ring base
+        dc.setColor(0x003A4F, Gfx.COLOR_TRANSPARENT);
+        dc.drawCircle(centerX, centerY, baseRadius);
+
+        // accent ring during coaching / pulse
+        if (_coachingActive || _ringPulseBoost > 0.0) {
+            dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
+            dc.drawCircle(centerX, centerY, ringRadius);
+        }
+
+        // ---------------------------
+        // Primary Metric — PACE
+        // Adaptive font scaling: choose largest font that fits
+        // ---------------------------
+        var paceText = formatPace(_dispPace);
+
+        var paceFonts = isSmall
+            ? [Gfx.FONT_LARGE, Gfx.FONT_MEDIUM]
+            : [Gfx.FONT_LARGE, Gfx.FONT_MEDIUM];
+
+        var paceFont = pickLargestFontThatFits(dc, paceText, paceFonts, width - 24);
+
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(
-            width / 4,
-            yOffset,
-            Gfx.FONT_MEDIUM,
-            formatDistance(_distance),
-            Gfx.TEXT_JUSTIFY_CENTER
-        );
-        dc.drawText(
-            width * 3 / 4,
-            yOffset,
-            Gfx.FONT_MEDIUM,
-            formatPace(_pace),
-            Gfx.TEXT_JUSTIFY_CENTER
-        );
-        
-        // Draw time and cadence
-        yOffset += 35;
+        dc.drawText(centerX, paceY, paceFont, paceText, Gfx.TEXT_JUSTIFY_CENTER);
+
         dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(
-            width / 4,
-            yOffset,
-            Gfx.FONT_TINY,
-            formatTime(_elapsedTime),
-            Gfx.TEXT_JUSTIFY_CENTER
-        );
-        dc.drawText(
-            width * 3 / 4,
-            yOffset,
-            Gfx.FONT_TINY,
-            _cadence + " SPM",
-            Gfx.TEXT_JUSTIFY_CENTER
-        );
-        
-        // Draw coaching text (bottom, wrapped)
-        if (_coachingText.length() > 0) {
-            yOffset += 50;
-            dc.setColor(Gfx.COLOR_YELLOW, Gfx.COLOR_TRANSPARENT);
-            drawWrappedText(dc, _coachingText, width / 2, yOffset, Gfx.FONT_TINY, width - 20);
+        dc.drawText(centerX, unitY, Gfx.FONT_TINY, "min/km", Gfx.TEXT_JUSTIFY_CENTER);
+
+        // ---------------------------
+        // Dynamic HR Zone bar (premium)
+        // ---------------------------
+        drawHrZoneBar(dc, centerX, isSmall ? (height * 0.16) : (height * 0.18), width, _heartRateZone);
+
+        // ---------------------------
+        // Secondary Row — Distance & Time
+        // ---------------------------
+        var distText = formatDistance(_dispDistance);
+        var timeText = formatTime(_elapsedTime);
+
+        var secondaryFont = isSmall ? Gfx.FONT_TINY : Gfx.FONT_SMALL;
+
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(width * 0.25), secondaryY, secondaryFont, distText, Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(width * 0.75), secondaryY, secondaryFont, timeText, Gfx.TEXT_JUSTIFY_CENTER);
+
+        // ---------------------------
+        // Auto-hide tertiary row during coaching
+        // ---------------------------
+        if (!_coachingActive) {
+
+            // HR + cadence row
+            var hrColor = getHeartRateZoneColor(_heartRateZone);
+            dc.setColor(hrColor, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(width * 0.25, tertiaryY, Gfx.FONT_TINY, _dispHeartRate.format("%d") + " bpm", Gfx.TEXT_JUSTIFY_CENTER);
+
+            dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(width * 0.75, tertiaryY, Gfx.FONT_TINY, _dispCadence + " spm", Gfx.TEXT_JUSTIFY_CENTER);
+        }
+
+        // ---------------------------
+        // Coaching text block (if active)
+        // ---------------------------
+        if (_coachingActive) {
+            dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
+            drawWrappedText(dc, _coachingText, centerX, coachingY, (isSmall ? Gfx.FONT_TINY : Gfx.FONT_SMALL), width - 36);
         }
     }
     
     // Timer callback - update elapsed time
     function onTimer() as Void {
-        _elapsedTime += 1;
-        
-        // Stream data to backend every second
-        if (_dataStreamer != null) {
-            _dataStreamer.sendData({
-                "heartRate" => _heartRate,
-                "heartRateZone" => _heartRateZone,
-                "distance" => _distance,
-                "pace" => _pace,
-                "cadence" => _cadence,
-                "altitude" => _altitude,
-                "elapsedTime" => _elapsedTime
-            });
+
+        _elapsedMs += _tickMs;
+        _elapsedTime = _elapsedMs / 1000;
+
+        // ---------------------------
+        // Smooth number transitions
+        // ---------------------------
+        // Easing factor: smaller = smoother, larger = snappier
+        var ease = 0.18;
+
+        // Pace smoothing: ignore nonsense pace spikes
+        if (_pace > 0 && _pace < 1200) {
+            _dispPace = _dispPace + ((_pace - _dispPace) * ease);
+        } else {
+            // if pace invalid, softly drift to 0
+            _dispPace = _dispPace + ((0.0 - _dispPace) * 0.10);
         }
-        
+
+        _dispDistance = _dispDistance + ((_distance - _dispDistance) * ease);
+
+        _dispHeartRate = (_dispHeartRate + ((_heartRate - _dispHeartRate) * 0.25)).toNumber();
+        _dispCadence = (_dispCadence + ((_cadence - _dispCadence) * 0.25)).toNumber();
+
+        // ---------------------------
+        // Breathing ring animation
+        // ---------------------------
+        _ringPhase += 0.18; // speed of breathing
+        if (_ringPhase > 6.283) { _ringPhase -= 6.283; }
+
+        // decay pulse boost
+        _ringPulseBoost *= 0.85;
+        if (_ringPulseBoost < 0.01) _ringPulseBoost = 0.0;
+
+        // coaching state
+        _coachingActive = (_coachingText != null && _coachingText.length() > 0);
+
+        // ---------------------------
+        // Stream to backend (every 1000ms)
+        // ---------------------------
+        _streamAccumMs += _tickMs;
+        if (_streamAccumMs >= 1000) {
+            _streamAccumMs = 0;
+
+            if (_dataStreamer != null) {
+                _dataStreamer.sendData({
+                    "heartRate" => _heartRate,
+                    "heartRateZone" => _heartRateZone,
+                    "distance" => _distance,
+                    "pace" => _pace,
+                    "cadence" => _cadence,
+                    "altitude" => _altitude,
+                    "elapsedTime" => _elapsedTime
+                });
+            }
+        }
+
         Ui.requestUpdate();
     }
     
@@ -202,12 +303,19 @@ class RunView extends Ui.View {
     
     // Set coaching text from backend
     function setCoachingText(text) {
+
         _coachingText = text;
         Ui.requestUpdate();
-        
-        // Vibrate to alert user
-        if (Attention has :vibrate) {
-            Attention.vibrate([new Attention.VibeProfile(50, 200)]);
+
+        // Pulse ring when coaching changes
+        if (text != null && text.length() > 0 && !text.equals(_lastCoachingText)) {
+            _ringPulseBoost = 1.0;
+            _lastCoachingText = text;
+
+            // Vibrate alert (safe call)
+            if (Toybox.Attention has :vibrate) {
+                Toybox.Attention.vibrate([ new Toybox.Attention.VibeProfile(60, 120) ]);
+            }
         }
     }
     
@@ -218,11 +326,15 @@ class RunView extends Ui.View {
     }
     
     private function formatPace(secondsPerKm) {
+
         if (secondsPerKm <= 0 || secondsPerKm > 1200) {
             return "--:--";
         }
-        var minutes = secondsPerKm / 60;
-        var seconds = secondsPerKm % 60;
+
+        var total = secondsPerKm.toNumber();
+        var minutes = (total / 60).toNumber();
+        var seconds = (total % 60).toNumber();
+
         return minutes.format("%d") + ":" + seconds.format("%02d");
     }
     
@@ -290,6 +402,60 @@ class RunView extends Ui.View {
         
         if (line.length() > 0) {
             dc.drawText(x, y, font, line, Gfx.TEXT_JUSTIFY_CENTER);
+        }
+    }
+
+    private function pickLargestFontThatFits(dc, text, fonts, maxWidth) {
+
+        for (var i = 0; i < fonts.size(); i++) {
+            var f = fonts[i];
+            var w = dc.getTextWidthInPixels(text, f);
+            if (w <= maxWidth) {
+                return f; // first one that fits (largest first)
+            }
+        }
+
+        // fallback: smallest
+        return fonts[fonts.size() - 1];
+    }
+
+    private function drawHrZoneBar(dc, cx, y, width, zone) {
+
+        var barW = (width * 0.62).toNumber();
+        var barH = 6;
+        var x0 = (cx - (barW / 2)).toNumber();
+
+        // segment colors (premium but subtle)
+        var z1 = Gfx.COLOR_BLUE;
+        var z2 = Gfx.COLOR_GREEN;
+        var z3 = Gfx.COLOR_YELLOW;
+        var z4 = Gfx.COLOR_ORANGE;
+        var z5 = Gfx.COLOR_RED;
+
+        var cols = [z1, z2, z3, z4, z5];
+
+        // background track
+        dc.setColor(0x1A1A1A, Gfx.COLOR_TRANSPARENT);
+        dc.fillRectangle(x0, y, barW, barH);
+
+        var segW = (barW / 5).toNumber();
+
+        for (var i = 0; i < 5; i++) {
+            var segX = (x0 + (segW * i)).toNumber();
+
+            // subtle unselected
+            if ((i + 1) != zone) {
+                dc.setColor(0x2A2A2A, Gfx.COLOR_TRANSPARENT);
+                dc.fillRectangle(segX, y, segW - 1, barH);
+            } else {
+                // selected zone bright
+                dc.setColor(cols[i], Gfx.COLOR_TRANSPARENT);
+                dc.fillRectangle(segX, y, segW - 1, barH);
+
+                // tiny “glow” line above active zone
+                dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
+                dc.fillRectangle(segX, y - 2, segW - 1, 1);
+            }
         }
     }
     

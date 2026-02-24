@@ -297,6 +297,8 @@ fun WelcomeSection(userName: String?, profilePicUrl: String?, aiCoachName: Strin
             )
         }
         // User Avatar - Profile Image or Default Icon (Clickable)
+        // TODO: Re-enable profile pic once design is finalized
+        /*
         Box(
             modifier = Modifier
                 .size(70.dp)
@@ -329,6 +331,7 @@ fun WelcomeSection(userName: String?, profilePicUrl: String?, aiCoachName: Strin
                 )
             }
         }
+        */
     }
 }
 

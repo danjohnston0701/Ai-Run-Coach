@@ -13,5 +13,6 @@ data class StruggleUpdate(
     @SerializedName("coachName") val coachName: String?,
     @SerializedName("coachTone") val coachTone: String?,
     @SerializedName("coachGender") val coachGender: String?,
-    @SerializedName("coachAccent") val coachAccent: String?
+    @SerializedName("coachAccent") val coachAccent: String?,
+    @SerializedName("hasRoute") val hasRoute: Boolean = false
 )

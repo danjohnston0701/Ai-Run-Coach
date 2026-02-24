@@ -35,6 +35,22 @@ const toneDirective = (tone?: string): string => {
   }
 };
 
+// Helper to format distance for TTS - no decimals when whole number
+const formatDistanceForTTS = (km: number | undefined): string => {
+  if (km === undefined) return '?';
+  return km === Math.floor(km) ? `${Math.floor(km)}km` : `${km.toFixed(1)}km`;
+};
+
+// Helper to format duration in minutes for TTS - not as clock time
+const formatDurationForTTS = (seconds: number): string => {
+  const totalMinutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (remainingSeconds === 0) {
+    return `${totalMinutes} minutes`;
+  }
+  return `${totalMinutes} minutes and ${remainingSeconds} seconds`;
+};
+
 export interface CoachingContext {
   distance?: number;
   duration?: number;
@@ -88,7 +104,7 @@ export async function generatePreRunCoaching(params: {
   const prompt = `You are ${coachName}, an AI running coach. Your coaching style is ${coachTone}.
 
 Generate a brief pre-run briefing (2-3 sentences max) for this upcoming ${activityType}:
-- Distance: ${distance?.toFixed(1) || '?'}km
+- Distance: ${formatDistanceForTTS(distance)}
 - Difficulty: ${difficulty}
 - Elevation gain: ${Math.round(elevationGain || 0)}m, loss: ${Math.round(elevationLoss || 0)}m
 - ${weatherInfo}
@@ -122,25 +138,26 @@ export async function generatePaceUpdate(params: {
   totalElevationGain?: number;
   isOnHill?: boolean;
   kmSplits?: Array<{ km: number; time: number; pace: string }>;
+  hasRoute?: boolean;
 }): Promise<string> {
-  const { distance, targetDistance, currentPace, elapsedTime, coachName, coachTone, isSplit, splitKm, splitPace, currentGrade, totalElevationGain, isOnHill, kmSplits } = params;
+  const { distance, targetDistance, currentPace, elapsedTime, coachName, coachTone, isSplit, splitKm, splitPace, currentGrade, totalElevationGain, isOnHill, kmSplits, hasRoute } = params;
   
   const progress = Math.round((distance / targetDistance) * 100);
   const timeMin = Math.floor(elapsedTime / 60);
   
-  // Build terrain context - use higher threshold (5%) to filter GPS noise on flat runs
-  // Only include terrain context when there's significant elevation change
+  // ONLY include terrain context when the runner has a planned route
   let terrainContext = '';
-  if (currentGrade !== undefined && Math.abs(currentGrade) > 5) {
-    if (currentGrade > 5) {
-      terrainContext = `Currently climbing a steep ${currentGrade.toFixed(1)}% grade hill. `;
-    } else if (currentGrade < -5) {
-      terrainContext = `Currently descending a steep ${Math.abs(currentGrade).toFixed(1)}% grade. `;
+  if (hasRoute === true) {
+    if (currentGrade !== undefined && Math.abs(currentGrade) > 5) {
+      if (currentGrade > 5) {
+        terrainContext = `Currently climbing a steep ${currentGrade.toFixed(1)}% grade hill. `;
+      } else if (currentGrade < -5) {
+        terrainContext = `Currently descending a steep ${Math.abs(currentGrade).toFixed(1)}% grade. `;
+      }
     }
-  }
-  // Only mention elevation gain if it's significant (>20m) to filter GPS noise
-  if (totalElevationGain && totalElevationGain > 20) {
-    terrainContext += `Total elevation climbed so far: ${Math.round(totalElevationGain)}m. `;
+    if (totalElevationGain && totalElevationGain > 20) {
+      terrainContext += `Total elevation climbed so far: ${Math.round(totalElevationGain)}m. `;
+    }
   }
   
   // Build pace trend context for splits
@@ -160,6 +177,10 @@ export async function generatePaceUpdate(params: {
       }
     }
   }
+
+  // Build the no-terrain rule when there's no route
+  const noTerrainRule = hasRoute === true ? '' : `
+CRITICAL: This runner has NO planned route. Do NOT mention hills, terrain, elevation, climbing, descending, flat, undulating, conquering hills, or any route/terrain characteristics. You have NO idea what terrain they are running on. Focus only on pace, effort, form, and motivation.`;
   
   let prompt: string;
   if (isSplit && splitKm && splitPace) {
@@ -167,21 +188,21 @@ export async function generatePaceUpdate(params: {
     
 The runner just completed kilometer ${splitKm} with a split pace of ${splitPace}/km. They're at ${progress}% of their ${targetDistance}km run.
 ${terrainContext}${paceTrend}
-
-Give a brief (1-2 sentences) split update. ${isOnHill ? 'Acknowledge the hill effort. ' : ''}Mention their pace and give quick encouragement or pacing advice. ${paceTrend ? 'Comment on their pace trend if relevant.' : ''}`;
+${noTerrainRule}
+Give a brief (1-2 sentences) split update. ${hasRoute === true && isOnHill ? 'Acknowledge the hill effort. ' : ''}Mention their pace and give quick encouragement or pacing advice. ${paceTrend ? 'Comment on their pace trend if relevant.' : ''}`;
   } else {
     prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
     
 500m pace check: Runner is at ${distance.toFixed(2)}km, pace ${currentPace}/km, ${timeMin} minutes in.
 ${terrainContext}
-
-Give a very brief (1 sentence) pace update with encouragement.${isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
+${noTerrainRule}
+Give a very brief (1 sentence) pace update with encouragement.${hasRoute === true && isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
   }
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief (1-2 sentences max). Be elevation-aware when hills are mentioned. ${toneDirective(coachTone)}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief (1-2 sentences max). ${hasRoute === true ? 'Be elevation-aware when hills are mentioned. ' : 'Do NOT mention hills, terrain, or elevation. '}${toneDirective(coachTone)}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 80,
@@ -240,8 +261,9 @@ export async function generatePhaseCoaching(params: {
   coachName: string;
   coachTone: string;
   activityType?: string;
+  hasRoute?: boolean;
 }): Promise<string> {
-  const { phase, distance, targetDistance, elapsedTime, currentPace, currentGrade, totalElevationGain, heartRate, cadence, coachName, coachTone, activityType } = params;
+  const { phase, distance, targetDistance, elapsedTime, currentPace, currentGrade, totalElevationGain, heartRate, cadence, coachName, coachTone, activityType, hasRoute } = params;
   
   const timeMin = Math.floor(elapsedTime / 60);
   const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
@@ -253,12 +275,15 @@ export async function generatePhaseCoaching(params: {
     finalPush: 'The runner is approaching the finish, time for final encouragement.',
   };
   
+  // ONLY include terrain info when the runner has a planned route
   let terrainInfo = '';
-  if (currentGrade && Math.abs(currentGrade) > 2) {
-    terrainInfo = currentGrade > 0 ? `Currently climbing (${currentGrade.toFixed(1)}% grade). ` : `Currently descending (${Math.abs(currentGrade).toFixed(1)}% grade). `;
-  }
-  if (totalElevationGain && totalElevationGain > 0) {
-    terrainInfo += `Total climb so far: ${Math.round(totalElevationGain)}m. `;
+  if (hasRoute === true) {
+    if (currentGrade && Math.abs(currentGrade) > 2) {
+      terrainInfo = currentGrade > 0 ? `Currently climbing (${currentGrade.toFixed(1)}% grade). ` : `Currently descending (${Math.abs(currentGrade).toFixed(1)}% grade). `;
+    }
+    if (totalElevationGain && totalElevationGain > 0) {
+      terrainInfo += `Total climb so far: ${Math.round(totalElevationGain)}m. `;
+    }
   }
 
   // Build heart rate info if available
@@ -275,6 +300,10 @@ export async function generatePhaseCoaching(params: {
     cadenceInfo = `Cadence: ${cadence} spm (${cadenceAssessment}). `;
   }
 
+  // Build the no-terrain rule when there's no route
+  const noTerrainRule = hasRoute === true ? '' : `
+CRITICAL: This runner has NO planned route. Do NOT mention hills, terrain, elevation, climbing, descending, flat, undulating, or any route/terrain characteristics. You have NO idea what terrain they are running on. Focus only on pace, effort, form, and motivation.`;
+
   const prompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.
 
 Phase: ${phaseDescriptions[phase]}
@@ -285,8 +314,8 @@ ${currentPace ? `- Current pace: ${currentPace}/km` : ''}
 ${hrInfo}
 ${cadenceInfo}
 ${terrainInfo}
-
-Give a brief (1-2 sentences) phase-appropriate coaching message. Be ${coachTone} and encouraging. Consider their current terrain if on a hill.`;
+${noTerrainRule}
+Give a brief (1-2 sentences) phase-appropriate coaching message. Be ${coachTone} and encouraging.${hasRoute === true ? ' Consider their current terrain if on a hill.' : ''}`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -324,17 +353,25 @@ export async function generateStruggleCoaching(params: {
   totalElevationGain?: number;
   coachName: string;
   coachTone: string;
+  hasRoute?: boolean;
 }): Promise<string> {
-  const { distance, elapsedTime, currentPace, baselinePace, paceDropPercent, currentGrade, totalElevationGain, coachName, coachTone } = params;
+  const { distance, elapsedTime, currentPace, baselinePace, paceDropPercent, currentGrade, totalElevationGain, coachName, coachTone, hasRoute } = params;
   
   const timeMin = Math.floor(elapsedTime / 60);
   
+  // ONLY include terrain context when the runner has a planned route
   let terrainContext = '';
-  if (currentGrade && currentGrade > 3) {
-    terrainContext = `They're currently on a ${currentGrade.toFixed(1)}% uphill which may explain the slowdown. `;
-  } else if (totalElevationGain && totalElevationGain > 50) {
-    terrainContext = `They've climbed ${Math.round(totalElevationGain)}m so far, which is contributing to fatigue. `;
+  if (hasRoute === true) {
+    if (currentGrade && currentGrade > 3) {
+      terrainContext = `They're currently on a ${currentGrade.toFixed(1)}% uphill which may explain the slowdown. `;
+    } else if (totalElevationGain && totalElevationGain > 50) {
+      terrainContext = `They've climbed ${Math.round(totalElevationGain)}m so far, which is contributing to fatigue. `;
+    }
   }
+
+  // Build the no-terrain rule when there's no route
+  const noTerrainRule = hasRoute === true ? '' : `
+CRITICAL: This runner has NO planned route. Do NOT mention hills, terrain, elevation, climbing, descending, flat, undulating, or any route/terrain characteristics. You have NO idea what terrain they are running on. Focus only on pace, effort, form, and motivation.`;
   
   const prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
 
@@ -343,7 +380,7 @@ The runner is struggling. Their pace has dropped ${Math.round(paceDropPercent)}%
 - Distance: ${distance.toFixed(2)}km
 - Time: ${timeMin} minutes
 ${terrainContext}
-
+${noTerrainRule}
 Give a brief (1-2 sentences) supportive message to help them through this tough moment. Acknowledge their struggle, but encourage them to push through or adjust their strategy.`;
 
   const completion = await openai.chat.completions.create({
@@ -924,7 +961,7 @@ export async function generateWellnessAwarePreRunBriefing(params: {
     // Route-based run - include terrain/elevation info ONLY when hasRoute is explicitly true
     routeInfo = `
 ROUTE:
-- Distance: ${distance?.toFixed(1) || '?'}km
+- Distance: ${formatDistanceForTTS(distance)}
 - Difficulty: ${difficulty}
 - Elevation gain: ${Math.round(elevationGain || 0)}m
 - Terrain: ${elevationGain > 100 ? 'hilly' : elevationGain > 50 ? 'rolling' : 'generally flat'}`;
@@ -932,16 +969,14 @@ ROUTE:
     // Free run (no route) - NO terrain mention at all
     routeInfo = `
 RUN (No planned route):
-- Distance: ${distance?.toFixed(1) || '?'}km
+- Distance: ${formatDistanceForTTS(distance)}
 - Type: Free run / Training run`;
   }
 
   // Add target pace info if user has a target time/pace
   if (targetTime && targetPace) {
-    const targetMinutes = Math.floor(targetTime / 60);
-    const targetSeconds = targetTime % 60;
     routeInfo += `
-- Target: Complete ${distance?.toFixed(1) || '?'}km in ${targetMinutes}:${targetSeconds.toString().padStart(2, '0')} (target pace: ${targetPace}/km)`;
+- Target: Complete ${formatDistanceForTTS(distance)} in ${formatDurationForTTS(targetTime)} (target pace: ${targetPace}/km)`;
   }
 
   // Build wellness context string
@@ -1006,10 +1041,10 @@ ${readinessGuidance}
 
 Based on this data, provide:
 1. "briefing": A personalized pre-run briefing (4-5 sentences). You MUST include these specific details:
-   - The planned distance: "${distance?.toFixed(1) || '5.0'}km"
+   - The planned distance: "${formatDistanceForTTS(distance)}"
    ${weather && weather.temp !== undefined ? `- The weather: "${weather.temp || weather.temperature}°C and ${weather.condition || 'clear'}"` : '- Weather data is not available, do not mention weather'}
    ${targetPace ? `- Their target pace: "${targetPace}/km"` : '- No target pace set, suggest they run at a comfortable effort'}
-   ${targetTime ? `- Their target time: "${Math.floor((targetTime || 0) / 60)}:${((targetTime || 0) % 60).toString().padStart(2, '0')}"` : ''}
+   ${targetTime ? `- Their target time: "${formatDurationForTTS(targetTime || 0)}"` : ''}
    - Their wellness/recovery state if Garmin data is available above
    ${weatherAdvantage ? '- The weather advantage noted above' : ''}
    Include the actual numbers - do NOT give a vague or generic briefing.

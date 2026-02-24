@@ -1023,7 +1023,8 @@ class RunTrackingService : Service(), SensorEventListener {
                         coachTone = currentUser?.coachTone,
                         coachGender = currentUser?.coachGender,
                         coachAccent = currentUser?.coachAccent,
-                        activityType = "run"
+                        activityType = "run",
+                        hasRoute = hasRoute
                     )
                     val response = apiService.getPhaseCoaching(update)
                     coachingHistory.add(AiCoachingNote(
@@ -1068,7 +1069,8 @@ class RunTrackingService : Service(), SensorEventListener {
                         coachTone = currentUser?.coachTone,
                         coachGender = currentUser?.coachGender,
                         coachAccent = currentUser?.coachAccent,
-                        activityType = "run"
+                        activityType = "run",
+                        hasRoute = hasRoute
                     )
                     val response = apiService.getPhaseCoaching(update)
                     coachingHistory.add(AiCoachingNote(
@@ -1123,7 +1125,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     coachName = currentUser?.coachName,
                     coachTone = currentUser?.coachTone,
                     coachGender = currentUser?.coachGender,
-                    coachAccent = currentUser?.coachAccent
+                    coachAccent = currentUser?.coachAccent,
+                    hasRoute = hasRoute
                 )
                 val response = apiService.getStruggleCoaching(update)
                 // Note: Struggle point already added above before launching coroutine
@@ -1160,7 +1163,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     currentGrade = calculateAverageGradient().toDouble(),
                     totalElevationGain = totalElevationGain,
                     isOnHill = abs(calculateAverageGradient()) > 3f,
-                    kmSplits = kmSplits.toList()
+                    kmSplits = kmSplits.toList(),
+                    hasRoute = hasRoute
                 )
                 val response = apiService.getPaceUpdate(update)
                 coachingHistory.add(AiCoachingNote(

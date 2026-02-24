@@ -204,17 +204,19 @@ fun RouteCard(
         RouteDifficulty.HARD -> Color(0xFFEF5350)
     }
     
-    // Calculate average gradient angle in degrees (CORRECT formula using atan)
-    val maxClimb = if (route.distance > 0 && route.elevationGain > 0) {
-        val angle = (atan(route.elevationGain / route.distance) * (180.0 / Math.PI)).format(1)
-        Log.d("RouteCard", "Climb angle: ${route.elevationGain}m / ${route.distance}m = $angle°")
+    // Calculate average gradient angle in degrees
+    // route.distance is in KM, route.elevationGain/Loss is in meters — convert distance to meters first
+    val distanceMeters = route.distance * 1000.0
+    val maxClimb = if (distanceMeters > 0 && route.elevationGain > 0) {
+        val angle = (atan(route.elevationGain / distanceMeters) * (180.0 / Math.PI)).format(1)
+        Log.d("RouteCard", "Climb angle: ${route.elevationGain}m / ${distanceMeters}m = $angle°")
         angle
     } else {
         "0.0"
     }
-    val maxDescent = if (route.distance > 0 && route.elevationLoss > 0) {
-        val angle = (atan(route.elevationLoss / route.distance) * (180.0 / Math.PI)).format(1)
-        Log.d("RouteCard", "Descent angle: ${route.elevationLoss}m / ${route.distance}m = $angle°")
+    val maxDescent = if (distanceMeters > 0 && route.elevationLoss > 0) {
+        val angle = (atan(route.elevationLoss / distanceMeters) * (180.0 / Math.PI)).format(1)
+        Log.d("RouteCard", "Descent angle: ${route.elevationLoss}m / ${distanceMeters}m = $angle°")
         angle
     } else {
         "0.0"
