@@ -345,13 +345,31 @@ export async function generatePhaseCoaching(params: {
   const noTerrainRule = hasRoute === true ? '' : `
 CRITICAL: This runner has NO planned route. Do NOT mention hills, terrain, elevation, climbing, descending, flat, undulating, or any route/terrain characteristics. You have NO idea what terrain they are running on. Focus only on pace, effort, form, and motivation.`;
 
+  // Detect "run start" scenario: phase is EARLY/warmUp and distance is near zero
+  const isRunStart = (phase === 'EARLY' || phase === 'warmUp') && distance < 0.05;
+  
   // Build trigger-specific instruction
   const is500mCheckin = triggerType === '500m_checkin';
-  const triggerInstruction = is500mCheckin
-    ? `This is the runner's FIRST check-in at 500m. Give a brief (2-3 sentences) initial assessment of how their run is going so far.`
-    : `Give a brief (2-3 sentences) phase-appropriate coaching message.`;
 
-  const prompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.
+  let prompt: string;
+  let systemMsg: string;
+
+  if (isRunStart) {
+    // RUN START: Pure motivational message — no metrics (they haven't run yet!)
+    prompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.
+
+The runner has just started their ${activityType || 'run'}${targetDistance ? ` — their target is ${formatDistanceForTTS(targetDistance)}` : ''}${targetTime && targetTime > 0 ? ` in ${formatDurationForTTS(targetTime)}` : ''}.
+${noTerrainRule}
+Give a short, energetic motivational message (2-3 sentences) to kick off their run. Focus on getting them pumped up and ready to go. Do NOT mention distance covered, pace, cadence, or any metrics — the run has literally just begun. Just motivate them!`;
+
+    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Give a brief, energetic send-off to start the run. No stats or metrics — just motivation. ${toneDirective(coachTone)}`;
+  } else {
+    // DURING RUN: Include metrics
+    const triggerInstruction = is500mCheckin
+      ? `This is the runner's FIRST check-in at 500m. Give a brief (2-3 sentences) initial assessment of how their run is going so far.`
+      : `Give a brief (2-3 sentences) phase-appropriate coaching message.`;
+
+    prompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.
 
 ${is500mCheckin ? 'TRIGGER: First 500m check-in' : `Phase: ${phaseDescriptions[phase]}`}
 Runner Status:
@@ -368,10 +386,13 @@ ${triggerInstruction} Be ${coachTone} and encouraging.
 
 CRITICAL: You MUST weave in at least 2 specific data points from the Runner Status above (e.g. their actual pace like "${currentPace || '6:15'}/km", distance "${distance.toFixed(1)}km", time "${timeMin} minutes", cadence, heart rate). Runners want to hear their real numbers — do NOT give vague encouragement without citing their actual stats.${targetPace ? ' You MUST comment on how their current pace compares to their target and whether they need to speed up, slow down, or maintain.' : ''}${cadence && cadence > 0 ? ' Include a brief note on their cadence.' : ''}${hasRoute === true ? ' Consider their current terrain if on a hill.' : ''}`;
 
+    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful — always cite the runner's actual numbers (pace, distance, time etc). ${toneDirective(coachTone)}`;
+  }
+
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful — always cite the runner's actual numbers (pace, distance, time etc). ${toneDirective(coachTone)}` },
+      { role: "system", content: systemMsg },
       { role: "user", content: prompt }
     ],
     max_tokens: 120,
