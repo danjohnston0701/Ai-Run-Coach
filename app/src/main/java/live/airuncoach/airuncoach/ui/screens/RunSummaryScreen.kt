@@ -1161,6 +1161,144 @@ private fun LabeledAnalysisCardFlagship(label: String, body: String, labelColor:
 
 /* -------------------------------- MAP + ROUTE ------------------------------ */
 
+/**
+ * A colored polyline segment: two consecutive points with an assigned pace color.
+ */
+private data class PaceSegment(
+    val start: LatLng,
+    val end: LatLng,
+    val color: Color,
+    val paceSecPerKm: Double
+)
+
+/**
+ * Maps a pace (sec/km) to a color on a green→yellow→orange→red gradient.
+ * [fastPace] = fastest pace (green), [slowPace] = slowest pace (red).
+ * Clamps values outside this range to the endpoints.
+ */
+private fun paceToColor(paceSecPerKm: Double, fastPace: Double, slowPace: Double): Color {
+    if (fastPace >= slowPace) return Color(0xFF4CAF50) // all same pace → green
+    val ratio = ((paceSecPerKm - fastPace) / (slowPace - fastPace)).coerceIn(0.0, 1.0)
+    // Green → Yellow → Orange → Red
+    return when {
+        ratio < 0.33 -> {
+            val t = (ratio / 0.33).toFloat()
+            Color(
+                red = lerp(0.30f, 1.0f, t),
+                green = lerp(0.69f, 0.84f, t),
+                blue = lerp(0.31f, 0.0f, t),
+                alpha = 1f
+            )
+        }
+        ratio < 0.66 -> {
+            val t = ((ratio - 0.33) / 0.33).toFloat()
+            Color(
+                red = 1.0f,
+                green = lerp(0.84f, 0.55f, t),
+                blue = 0.0f,
+                alpha = 1f
+            )
+        }
+        else -> {
+            val t = ((ratio - 0.66) / 0.34).toFloat()
+            Color(
+                red = lerp(1.0f, 0.90f, t),
+                green = lerp(0.55f, 0.22f, t),
+                blue = lerp(0.0f, 0.15f, t),
+                alpha = 1f
+            )
+        }
+    }
+}
+
+private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
+
+/**
+ * Builds pace-colored segments from route points.
+ * Groups GPS points into ~50m micro-segments and computes pace for each.
+ * Returns the segments + the min/max pace for the legend.
+ */
+private fun buildPaceSegments(
+    points: List<LocationPoint>
+): Triple<List<PaceSegment>, Double, Double> {
+    if (points.size < 2) return Triple(emptyList(), 0.0, 0.0)
+
+    // First pass: compute raw pace for each consecutive pair, accumulate into ~50m buckets
+    data class Bucket(
+        val startIdx: Int,
+        val endIdx: Int,
+        val distanceM: Double,
+        val durationSec: Double
+    )
+
+    val buckets = mutableListOf<Bucket>()
+    var bucketStartIdx = 0
+    var bucketDist = 0.0
+    var bucketTime = 0.0
+    val BUCKET_SIZE_M = 50.0
+
+    for (i in 1 until points.size) {
+        val prev = points[i - 1]
+        val curr = points[i]
+        val dtSec = (curr.timestamp - prev.timestamp) / 1000.0
+        if (dtSec <= 0) continue
+
+        val d = haversineMeters(prev.latitude, prev.longitude, curr.latitude, curr.longitude)
+        if (d < 0.5) continue
+
+        bucketDist += d
+        bucketTime += dtSec
+
+        if (bucketDist >= BUCKET_SIZE_M) {
+            buckets.add(Bucket(bucketStartIdx, i, bucketDist, bucketTime))
+            bucketStartIdx = i
+            bucketDist = 0.0
+            bucketTime = 0.0
+        }
+    }
+    // Add final partial bucket
+    if (bucketDist > 5.0 && bucketTime > 0) {
+        buckets.add(Bucket(bucketStartIdx, points.lastIndex, bucketDist, bucketTime))
+    }
+
+    if (buckets.isEmpty()) return Triple(emptyList(), 0.0, 0.0)
+
+    // Calculate pace (sec/km) for each bucket
+    val bucketPaces = buckets.map { b ->
+        val speed = b.distanceM / b.durationSec // m/s
+        if (speed > 0.3) 1000.0 / speed else 1200.0 // cap at 20:00/km for stopped periods
+    }
+
+    // Use percentiles to define the color range (ignore extreme outliers)
+    val sortedPaces = bucketPaces.sorted()
+    val p5 = sortedPaces[(sortedPaces.size * 0.05).toInt().coerceIn(0, sortedPaces.lastIndex)]
+    val p95 = sortedPaces[(sortedPaces.size * 0.95).toInt().coerceIn(0, sortedPaces.lastIndex)]
+    val fastPace = p5.coerceAtLeast(120.0)  // minimum 2:00/km to avoid noise
+    val slowPace = p95.coerceAtMost(1200.0) // maximum 20:00/km
+
+    // Build colored segments
+    val segments = mutableListOf<PaceSegment>()
+    buckets.forEachIndexed { idx, bucket ->
+        val pace = bucketPaces[idx]
+        val color = paceToColor(pace, fastPace, slowPace)
+        // Draw a polyline from bucket start to bucket end through all intermediate points
+        for (j in bucket.startIdx until bucket.endIdx) {
+            val p1 = points[j]
+            val p2 = points[j + 1]
+            segments.add(
+                PaceSegment(
+                    start = LatLng(p1.latitude, p1.longitude),
+                    end = LatLng(p2.latitude, p2.longitude),
+                    color = color,
+                    paceSecPerKm = pace
+                )
+            )
+        }
+    }
+
+    return Triple(segments, fastPace, slowPace)
+}
+
 @Composable
 private fun RouteMapCardFlagship(points: List<LocationPoint>) {
     val valid = remember(points) {
@@ -1172,56 +1310,166 @@ private fun RouteMapCardFlagship(points: List<LocationPoint>) {
     }
     if (valid.size < 2) return
 
+    val (paceSegments, fastPace, slowPace) = remember(valid) { buildPaceSegments(valid) }
+
     Card(
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
         shape = RoundedCornerShape(24.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .height(210.dp),
+            .height(260.dp),
         border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.6f))
     ) {
-        val latLng = remember(valid) { valid.map { LatLng(it.latitude, it.longitude) } }
-        val cameraState = rememberCameraPositionState {
-            position = CameraPosition.fromLatLngZoom(latLng.first(), 14f)
-        }
+        Box(modifier = Modifier.fillMaxSize()) {
+            val latLng = remember(valid) { valid.map { LatLng(it.latitude, it.longitude) } }
+            val cameraState = rememberCameraPositionState {
+                position = CameraPosition.fromLatLngZoom(latLng.first(), 14f)
+            }
 
-        LaunchedEffect(latLng) {
-            val builder = LatLngBounds.builder()
-            latLng.forEach { builder.include(it) }
-            val bounds = builder.build()
-            cameraState.move(CameraUpdateFactory.newLatLngBounds(bounds, 80))
-        }
+            LaunchedEffect(latLng) {
+                val builder = LatLngBounds.builder()
+                latLng.forEach { builder.include(it) }
+                val bounds = builder.build()
+                cameraState.move(CameraUpdateFactory.newLatLngBounds(bounds, 80))
+            }
 
-        GoogleMap(
-            modifier = Modifier.fillMaxSize(),
-            cameraPositionState = cameraState,
-            properties = MapProperties(isMyLocationEnabled = false),
-            uiSettings = MapUiSettings(
-                zoomControlsEnabled = false,
-                myLocationButtonEnabled = false,
-                compassEnabled = false,
-                mapToolbarEnabled = false,
-                scrollGesturesEnabled = false,
-                zoomGesturesEnabled = false,
-                tiltGesturesEnabled = false,
-                rotationGesturesEnabled = false, // ✅ correct property name
-            )
-        ) {
-            Polyline(points = latLng, color = Colors.primary, width = 6f)
+            GoogleMap(
+                modifier = Modifier.fillMaxSize(),
+                cameraPositionState = cameraState,
+                properties = MapProperties(isMyLocationEnabled = false),
+                uiSettings = MapUiSettings(
+                    zoomControlsEnabled = false,
+                    myLocationButtonEnabled = false,
+                    compassEnabled = false,
+                    mapToolbarEnabled = false,
+                    scrollGesturesEnabled = false,
+                    zoomGesturesEnabled = false,
+                    tiltGesturesEnabled = false,
+                    rotationGesturesEnabled = false,
+                )
+            ) {
+                // Draw pace-colored polyline segments
+                if (paceSegments.isNotEmpty()) {
+                    // Group consecutive segments with the same color to reduce draw calls
+                    var currentColor = paceSegments.first().color
+                    var currentPoints = mutableListOf(paceSegments.first().start)
 
-            Marker(
-                state = MarkerState(position = latLng.first()),
-                title = "Start",
-                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)
-            )
+                    for (seg in paceSegments) {
+                        if (seg.color == currentColor) {
+                            currentPoints.add(seg.end)
+                        } else {
+                            // Flush the current batch
+                            if (currentPoints.size >= 2) {
+                                Polyline(
+                                    points = currentPoints.toList(),
+                                    color = currentColor,
+                                    width = 8f
+                                )
+                            }
+                            currentColor = seg.color
+                            currentPoints = mutableListOf(seg.start, seg.end)
+                        }
+                    }
+                    // Flush last batch
+                    if (currentPoints.size >= 2) {
+                        Polyline(
+                            points = currentPoints.toList(),
+                            color = currentColor,
+                            width = 8f
+                        )
+                    }
+                } else {
+                    // Fallback: single-color polyline if pace segments couldn't be built
+                    Polyline(points = latLng, color = Colors.primary, width = 6f)
+                }
 
-            Marker(
-                state = MarkerState(position = latLng.last()),
-                title = "Finish",
-                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
-            )
+                Marker(
+                    state = MarkerState(position = latLng.first()),
+                    title = "Start",
+                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)
+                )
+
+                Marker(
+                    state = MarkerState(position = latLng.last()),
+                    title = "Finish",
+                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
+                )
+            }
+
+            // Pace legend overlay (bottom-left)
+            if (paceSegments.isNotEmpty() && fastPace < slowPace) {
+                PaceLegend(
+                    fastPace = fastPace,
+                    slowPace = slowPace,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(8.dp)
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun PaceLegend(fastPace: Double, slowPace: Double, modifier: Modifier = Modifier) {
+    val legendColors = remember(fastPace, slowPace) {
+        // Build 5 color stops across the range
+        (0..4).map { i ->
+            val ratio = i / 4.0
+            val pace = fastPace + ratio * (slowPace - fastPace)
+            paceToColor(pace, fastPace, slowPace)
+        }
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.7f)),
+        shape = RoundedCornerShape(8.dp),
+        modifier = modifier
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+            Text(
+                "Pace",
+                style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
+                color = Color.White
+            )
+            Spacer(Modifier.height(3.dp))
+            // Gradient bar
+            Box(
+                modifier = Modifier
+                    .width(80.dp)
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(
+                        Brush.horizontalGradient(legendColors)
+                    )
+            )
+            Spacer(Modifier.height(2.dp))
+            // Labels
+            Row(
+                modifier = Modifier.width(80.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    formatPaceMinSec(fastPace),
+                    style = AppTextStyles.caption.copy(fontSize = 9.sp),
+                    color = Color.White.copy(alpha = 0.9f)
+                )
+                Text(
+                    formatPaceMinSec(slowPace),
+                    style = AppTextStyles.caption.copy(fontSize = 9.sp),
+                    color = Color.White.copy(alpha = 0.9f)
+                )
+            }
+        }
+    }
+}
+
+/** Formats pace in sec/km to "M:SS" */
+private fun formatPaceMinSec(paceSecPerKm: Double): String {
+    val totalSec = paceSecPerKm.roundToInt().coerceIn(0, 5999)
+    val min = totalSec / 60
+    val sec = totalSec % 60
+    return "$min:${sec.toString().padStart(2, '0')}"
 }
 /* --------------------------------- CHARTS (Pure Compose Canvas) -------------------------------- */
 
