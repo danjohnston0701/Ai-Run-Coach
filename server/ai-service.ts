@@ -186,26 +186,29 @@ CRITICAL: This runner has NO planned route. Do NOT mention hills, terrain, eleva
   if (isSplit && splitKm && splitPace) {
     prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
     
-The runner just completed kilometer ${splitKm} with a split pace of ${splitPace}/km. They're at ${progress}% of their ${targetDistance}km run.
+The runner just completed kilometer ${splitKm} with a split pace of ${splitPace}/km.
+- Overall progress: ${distance.toFixed(1)}km of ${targetDistance}km (${progress}%)
+- Time elapsed: ${timeMin} minutes
+- Average pace: ${currentPace}/km
 ${terrainContext}${paceTrend}
 ${noTerrainRule}
-Give a brief (1-2 sentences) split update. ${hasRoute === true && isOnHill ? 'Acknowledge the hill effort. ' : ''}Mention their pace and give quick encouragement or pacing advice. ${paceTrend ? 'Comment on their pace trend if relevant.' : ''}`;
+Give a brief (1-2 sentences) split update. You MUST mention their split pace (${splitPace}/km) and at least one other data point (progress, time, or pace trend). ${hasRoute === true && isOnHill ? 'Acknowledge the hill effort. ' : ''}${paceTrend ? 'Comment on their pace trend if relevant.' : ''}`;
   } else {
     prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
     
 500m pace check: Runner is at ${distance.toFixed(2)}km, pace ${currentPace}/km, ${timeMin} minutes in.
 ${terrainContext}
 ${noTerrainRule}
-Give a very brief (1 sentence) pace update with encouragement.${hasRoute === true && isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
+Give a very brief (1-2 sentences) pace update. You MUST cite their pace (${currentPace}/km) and distance (${distance.toFixed(1)}km). ${hasRoute === true && isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
   }
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief (1-2 sentences max). ${hasRoute === true ? 'Be elevation-aware when hills are mentioned. ' : 'Do NOT mention hills, terrain, or elevation. '}${toneDirective(coachTone)}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). ${hasRoute === true ? 'Be elevation-aware when hills are mentioned. ' : 'Do NOT mention hills, terrain, or elevation. '}${toneDirective(coachTone)}` },
       { role: "user", content: prompt }
     ],
-    max_tokens: 80,
+    max_tokens: 100,
     temperature: 0.7,
   });
 
@@ -334,11 +337,17 @@ export async function generatePhaseCoaching(params: {
   const noTerrainRule = hasRoute === true ? '' : `
 CRITICAL: This runner has NO planned route. Do NOT mention hills, terrain, elevation, climbing, descending, flat, undulating, or any route/terrain characteristics. You have NO idea what terrain they are running on. Focus only on pace, effort, form, and motivation.`;
 
+  // Build trigger-specific instruction
+  const is500mCheckin = triggerType === '500m_checkin';
+  const triggerInstruction = is500mCheckin
+    ? `This is the runner's FIRST check-in at 500m. Give a brief (2-3 sentences) initial assessment of how their run is going so far.`
+    : `Give a brief (2-3 sentences) phase-appropriate coaching message.`;
+
   const prompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.
 
-Phase: ${phaseDescriptions[phase]}
+${is500mCheckin ? 'TRIGGER: First 500m check-in' : `Phase: ${phaseDescriptions[phase]}`}
 Runner Status:
-- Distance covered: ${distance.toFixed(2)}km${targetDistance ? ` (${progress}% of ${targetDistance}km)` : ''}
+- Distance covered: ${distance.toFixed(2)}km${targetDistance ? ` of ${formatDistanceForTTS(targetDistance)} target (${progress}%)` : ''}
 - Time elapsed: ${timeMin} minutes
 ${currentPace ? `- Current pace: ${currentPace}/km` : ''}
 ${paceComparisonInfo}
@@ -347,16 +356,18 @@ ${hrInfo}
 ${cadenceInfo}
 ${terrainInfo}
 ${noTerrainRule}
-Give a brief (2-3 sentences) phase-appropriate coaching message. Be ${coachTone} and encouraging.${targetPace ? ' You MUST comment on how their current pace compares to their target and whether they need to speed up, slow down, or maintain.' : ''}${cadence && cadence > 0 ? ' Include a brief note on their cadence.' : ''}${hasRoute === true ? ' Consider their current terrain if on a hill.' : ''}`;
+${triggerInstruction} Be ${coachTone} and encouraging.
+
+CRITICAL: You MUST weave in at least 2 specific data points from the Runner Status above (e.g. their actual pace like "${currentPace || '6:15'}/km", distance "${distance.toFixed(1)}km", time "${timeMin} minutes", cadence, heart rate). Runners want to hear their real numbers — do NOT give vague encouragement without citing their actual stats.${targetPace ? ' You MUST comment on how their current pace compares to their target and whether they need to speed up, slow down, or maintain.' : ''}${cadence && cadence > 0 ? ' Include a brief note on their cadence.' : ''}${hasRoute === true ? ' Consider their current terrain if on a hill.' : ''}`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful. ${toneDirective(coachTone)}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful — always cite the runner's actual numbers (pace, distance, time etc). ${toneDirective(coachTone)}` },
       { role: "user", content: prompt }
     ],
-    max_tokens: 80,
-    temperature: 0.8,
+    max_tokens: 120,
+    temperature: 0.7,
   });
 
   return completion.choices[0].message.content || "You're doing great, keep it up!";
@@ -413,15 +424,15 @@ The runner is struggling. Their pace has dropped ${Math.round(paceDropPercent)}%
 - Time: ${timeMin} minutes
 ${terrainContext}
 ${noTerrainRule}
-Give a brief (1-2 sentences) supportive message to help them through this tough moment. Acknowledge their struggle, but encourage them to push through or adjust their strategy.`;
+Give a brief (1-2 sentences) supportive message to help them through this tough moment. You MUST cite at least one specific number (e.g. their pace or distance). Acknowledge their struggle, but encourage them to push through or adjust their strategy.`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Be supportive during tough moments. Keep it brief. ${toneDirective(coachTone)}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Be supportive during tough moments — always reference actual data. Keep it brief. ${toneDirective(coachTone)}` },
       { role: "user", content: prompt }
     ],
-    max_tokens: 80,
+    max_tokens: 100,
     temperature: 0.7,
   });
 
@@ -1287,7 +1298,7 @@ Current stats (${elapsedMinutes} minutes into run):
 ${targetZone ? `- Target Zone: Zone ${targetZone} (${zoneNames[targetZone]})` : ''}
 ${wellnessContext ? `\nWellness context: ${wellnessContext}` : ''}
 
-Give a brief (1-2 sentences) heart rate coaching tip. ${
+Give a brief (1-2 sentences) heart rate coaching tip. You MUST mention their actual heart rate (${currentHR} bpm) and zone (Zone ${currentZone}). ${
   targetZone && currentZone !== targetZone 
     ? currentZone > targetZone 
       ? 'They need to slow down to hit their target zone.' 
@@ -1299,10 +1310,10 @@ Give a brief (1-2 sentences) heart rate coaching tip. ${
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: `You are ${coachName}, giving brief real-time HR coaching. Keep it to 1-2 short sentences. ${toneDirective(coachTone)}` },
+        { role: "system", content: `You are ${coachName}, giving brief real-time HR coaching. Always cite the runner's actual heart rate and zone. Keep it to 1-2 short sentences. ${toneDirective(coachTone)}` },
         { role: "user", content: prompt }
       ],
-      max_tokens: 60,
+      max_tokens: 80,
       temperature: 0.7,
     });
 
