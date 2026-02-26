@@ -1,0 +1,132 @@
+2026-02-26 13:29:49.13
+756b6be5
+User
+Weather impact analysis failed
+2026-02-26 13:30:00.60
+756b6be5
+User
+POST /api/coaching/pre-run-briefing-audio 200 in 11876ms :: {"briefing":"Hey th…
+2026-02-26 13:30:13.47
+756b6be5
+User
+GET /api/users/8d898742-dd4e-4b3b-b612-6f34e11778a8 200 in 341ms :: {"id":"8d89…
+2026-02-26 13:30:17.10
+756b6be5
+User
+POST /api/coaching/phase-coaching 200 in 3936ms :: {"message":"Let’s go, supers…
+2026-02-26 13:31:58.04
+756b6be5
+User
+[POST /api/runs] Creating run for user: 8d898742-dd4e-4b3b-b612-6f34e11778a8
+2026-02-26 13:31:58.27
+756b6be5
+User
+where: undefined,
+2026-02-26 13:31:58.27
+756b6be5
+User
+length: 127,
+2026-02-26 13:31:58.27
+756b6be5
+User
+position: '672',
+2026-02-26 13:31:58.27
+756b6be5
+User
+at async file:///home/runner/workspace/server_dist/index.js:7377:19 {
+2026-02-26 13:31:58.27
+756b6be5
+User
+internalQuery: undefined,
+2026-02-26 13:31:58.27
+756b6be5
+User
+Create run error: error: column "max_speed" of relation "runs" does not exist
+2026-02-26 13:31:58.27
+756b6be5
+User
+at async file:///home/runner/workspace/node_modules/drizzle-orm/node-postgres/session.js:83:22
+2026-02-26 13:31:58.27
+756b6be5
+User
+table: undefined,
+2026-02-26 13:31:58.27
+756b6be5
+User
+at /home/runner/workspace/node_modules/pg-pool/index.js:45:11
+2026-02-26 13:31:58.27
+756b6be5
+User
+column: undefined,
+2026-02-26 13:31:58.27
+756b6be5
+User
+severity: 'ERROR',
+2026-02-26 13:31:58.27
+756b6be5
+User
+detail: undefined,
+2026-02-26 13:31:58.27
+756b6be5
+User
+schema: undefined,
+2026-02-26 13:31:58.27
+756b6be5
+User
+internalPosition: undefined,
+2026-02-26 13:31:58.27
+756b6be5
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2026-02-26 13:31:58.27
+756b6be5
+User
+at async DatabaseStorage.createRun (file:///home/runner/workspace/server_dist/index.js:4845:22)
+2026-02-26 13:31:58.27
+756b6be5
+User
+hint: undefined,
+2026-02-26 13:31:58.27
+756b6be5
+User
+code: '42703',
+2026-02-26 13:31:58.27
+756b6be5
+User
+dataType: undefined,
+2026-02-26 13:32:00.63
+756b6be5
+User
+[createRun] Input fields: aiCoachingNotes, avgPace, cadence, calories, completedAt, difficulty, distance, duration, elevation, elevationGain, elevationLoss, gpsTrack, isPublic, kmSplits, startLat, startLng, strugglePoints, terrainType, tss, startTime, endTime, userId
+2026-02-26 13:32:00.84
+756b6be5
+User
+length: 127,
+2026-02-26 13:32:00.84
+756b6be5
+User
+table: undefined,
+2026-02-26 13:32:00.84
+756b6be5
+User
+file: 'parse_target.c',
+2026-02-26 13:32:00.84
+756b6be5
+User
+Create run error: error: column "max_speed" of relation "runs" does not exist
+2026-02-26 13:32:00.84
+756b6be5
+User
+where: undefined,
+2026-02-26 13:32:00.84
+756b6be5
+User
+at async file:///home/runner/workspace/server_dist/index.js:7377:19 {
+2026-02-26 13:32:00.84
+756b6be5
+User
+constraint: undefined,
+2026-02-26 13:32:00.84
+756b6be5
+User
+code: '42703',
