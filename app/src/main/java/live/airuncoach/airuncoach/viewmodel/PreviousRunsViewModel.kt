@@ -173,7 +173,25 @@ class PreviousRunsViewModel @Inject constructor(
             "Last 3 Months" -> now - (90 * 24 * 60 * 60 * 1000L)
             else -> 0L // All Time
         }
-        return runs.filter { it.startTime >= cutoff }.sortedByDescending { it.startTime }
+        
+        // Debug: log each run's startTime to find parsing issues
+        runs.forEach { run ->
+            val startDate = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(run.startTime))
+            val effectiveTime = if (run.startTime > 0) run.startTime else run.endTime ?: 0L
+            val included = effectiveTime >= cutoff || effectiveTime == 0L
+            android.util.Log.d("PreviousRunsViewModel", "Run '${run.name ?: run.id}': startTime=${run.startTime} ($startDate), effectiveTime=$effectiveTime, cutoff=$cutoff, included=$included, filter=${_selectedFilter.value}")
+        }
+        
+        // Use startTime for filtering, but if startTime is 0/missing (bad parse or missing field), 
+        // fall back to endTime. If both are 0, include the run anyway (don't silently hide it).
+        val filtered = runs.filter { run ->
+            val effectiveTime = if (run.startTime > 0) run.startTime else run.endTime ?: 0L
+            effectiveTime >= cutoff || effectiveTime == 0L
+        }.sortedByDescending { run ->
+            if (run.startTime > 0) run.startTime else run.endTime ?: 0L
+        }
+        android.util.Log.d("PreviousRunsViewModel", "Filter result: ${runs.size} total -> ${filtered.size} after '${_selectedFilter.value}' filter (cutoff=$cutoff, now=$now)")
+        return filtered
     }
     
     fun calculateWeatherImpact() {

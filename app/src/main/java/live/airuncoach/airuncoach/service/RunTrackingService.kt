@@ -279,6 +279,7 @@ class RunTrackingService : Service(), SensorEventListener {
         
         // Now safely initialize everything else
         isTracking = true
+        _currentRunSession.value = null  // Clear stale data from previous run
         _uploadComplete.value = null
         _isServiceRunning.value = true
         startTime = System.currentTimeMillis()
@@ -833,6 +834,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private suspend fun uploadRunToBackend(runSession: RunSession) {
         val uploadRequest = UploadRunRequest(
             routeId = null, // TODO: Add if user selected a saved route
+            startTime = runSession.startTime,
             distance = runSession.distance,
             duration = runSession.duration,
             avgPace = runSession.averagePace ?: "0:00",

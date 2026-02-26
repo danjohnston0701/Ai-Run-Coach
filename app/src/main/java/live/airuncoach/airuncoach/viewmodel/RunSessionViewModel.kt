@@ -167,9 +167,12 @@ class RunSessionViewModel @Inject constructor(
             return
         }
         
-        // Clear previous run state to prevent stale data from previous run showing
-        // This ensures we don't navigate to the previous run's summary when starting a new run
-        _runState.update { it.copy(backendRunId = null, isStopping = false) }
+        // Fully reset run state to prevent stale data from previous run showing
+        // This resets all metrics to zeros and clears navigation/stopping flags
+        _runState.value = RunState(
+            isCoachEnabled = _runState.value.isCoachEnabled,
+            isMuted = _runState.value.isMuted
+        )
         
         isPrepareRunInProgress = true
         viewModelScope.launch {

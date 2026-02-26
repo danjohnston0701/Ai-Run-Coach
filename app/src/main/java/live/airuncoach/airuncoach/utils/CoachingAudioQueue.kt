@@ -32,6 +32,7 @@ object CoachingAudioQueue {
     // Shared AudioPlayerHelper instance for all playback
     private var audioPlayer: AudioPlayerHelper? = null
     private var ttsHelper: TextToSpeechHelper? = null
+    private var audioFocusManager: AudioFocusManager? = null
 
     /**
      * Initialize with a Context. Safe to call multiple times.
@@ -42,6 +43,9 @@ object CoachingAudioQueue {
         }
         if (ttsHelper == null) {
             ttsHelper = TextToSpeechHelper(context.applicationContext)
+        }
+        if (audioFocusManager == null) {
+            audioFocusManager = AudioFocusManager(context.applicationContext)
         }
     }
 
@@ -97,6 +101,7 @@ object CoachingAudioQueue {
         clearQueue()
         audioPlayer?.stop()
         isPlaying.set(false)
+        audioFocusManager?.abandonFocus()
         Log.d(TAG, "Stopped all audio and cleared queue")
     }
 
@@ -109,6 +114,20 @@ object CoachingAudioQueue {
         val next = queue.poll()
         if (next == null) {
             isPlaying.set(false)
+            // No more audio to play — release audio focus so background music resumes
+            audioFocusManager?.abandonFocus()
+            return
+        }
+
+        // Request audio focus to pause background music (e.g. Spotify).
+        // If focus is denied (e.g. active phone call), skip this audio rather
+        // than talking over the call.
+        val focusGranted = audioFocusManager?.requestFocus() ?: false
+        if (!focusGranted) {
+            Log.w(TAG, "Audio focus denied (phone call active?), skipping coaching audio")
+            next.onComplete?.invoke()
+            isPlaying.set(false)
+            playNext()
             return
         }
 
@@ -151,5 +170,7 @@ object CoachingAudioQueue {
         audioPlayer = null
         ttsHelper?.destroy()
         ttsHelper = null
+        audioFocusManager?.destroy()
+        audioFocusManager = null
     }
 }

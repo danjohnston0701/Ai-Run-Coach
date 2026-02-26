@@ -197,7 +197,9 @@ fun RunSummaryScreenFlagship(
                             },
                             onStruggleComment = viewModel::updateStrugglePointComment,
                             onStruggleDismiss = viewModel::dismissStrugglePoint,
-                            onStruggleRestore = viewModel::restoreStrugglePoint
+                            onStruggleRestore = viewModel::restoreStrugglePoint,
+                            difficultyLabel = runSession?.let { (it.difficulty ?: it.getDifficultyLevel()).uppercase(Locale.getDefault()) },
+                            onRename = { showRenameDialog = true }
                         )
 
                         1 -> DataTabFlagship(runSession!!)
@@ -253,17 +255,8 @@ private fun RunSummaryTopBarFlagship(
             IconButton(onClick = onRename) {
                 Icon(Icons.Default.Edit, contentDescription = "Rename", tint = Colors.textPrimary)
             }
-            IconButton(onClick = onShare) {
-                Icon(
-                    painter = painterResource(R.drawable.icon_share_vector),
-                    contentDescription = "Share",
-                    tint = Colors.textPrimary
-                )
-            }
-            if (!difficultyLabel.isNullOrBlank()) {
-                DifficultyPillFlagship(label = difficultyLabel)
-                Spacer(modifier = Modifier.width(Spacing.sm))
-            }
+            // Removed share icon - share is handled in Summary tab
+            // Difficulty moved to Summary tab alongside Run Completed banner
         },
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = Colors.backgroundRoot,
@@ -333,6 +326,8 @@ private fun SummaryTabFlagship(
     onStruggleComment: (String, String) -> Unit = { _, _ -> },
     onStruggleDismiss: (String, DismissReason) -> Unit = { _, _ -> },
     onStruggleRestore: (String) -> Unit = {},
+    difficultyLabel: String? = null,
+    onRename: () -> Unit = {},
 ) {
     LazyColumn(
         modifier = Modifier
@@ -341,13 +336,67 @@ private fun SummaryTabFlagship(
         contentPadding = PaddingValues(vertical = Spacing.lg),
         verticalArrangement = Arrangement.spacedBy(Spacing.lg)
     ) {
-        item { SuccessBannerFlagship() }
+        // Run name row - full width with edit button
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = run.name ?: "Run Summary",
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.ExtraBold),
+                    color = Colors.textPrimary,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = onRename) {
+                    Text("Edit", color = Colors.primary, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // Run Completed banner with optional difficulty pill
+        item {
+            RunCompletedBannerWithDifficulty(difficultyLabel = difficultyLabel)
+        }
 
         item {
             ShareableSummaryCard(
                 run = run,
                 lastRunForDelta = lastRunForDelta,
                 onShare = onShareCard
+            )
+        }
+
+        // Struggle Point Analysis — moved above map for visibility
+        if (strugglePoints.isNotEmpty()) {
+            item {
+                StrugglePointAnalysisSection(
+                    strugglePoints = strugglePoints,
+                    onComment = onStruggleComment,
+                    onDismiss = onStruggleDismiss,
+                    onRestore = onStruggleRestore
+                )
+            }
+        } else {
+            item { NoStrugglePointsBanner() }
+        }
+
+        // AI Analysis — moved above map for visibility
+        item {
+            Text(
+                text = "AI Analysis",
+                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                color = Colors.textPrimary
+            )
+        }
+
+        item {
+            AiSectionFlagship(
+                analysisState = analysisState,
+                comments = comments,
+                onCommentsChange = onCommentsChange,
+                onGenerateAi = onGenerateAi
             )
         }
 
@@ -371,35 +420,6 @@ private fun SummaryTabFlagship(
             if (run.kmSplits.isNotEmpty()) {
                 KmSplitsCardFlagship(run.kmSplits)
             }
-        }
-
-        // Struggle Point Analysis — Full interactive component
-        if (strugglePoints.isNotEmpty()) {
-            item {
-                StrugglePointAnalysisSection(
-                    strugglePoints = strugglePoints,
-                    onComment = onStruggleComment,
-                    onDismiss = onStruggleDismiss,
-                    onRestore = onStruggleRestore
-                )
-            }
-        }
-
-        item {
-            Text(
-                text = "AI Analysis",
-                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                color = Colors.textPrimary
-            )
-        }
-
-        item {
-            AiSectionFlagship(
-                analysisState = analysisState,
-                comments = comments,
-                onCommentsChange = onCommentsChange,
-                onGenerateAi = onGenerateAi
-            )
         }
 
         // Pace Consistency & Split Analysis
@@ -558,7 +578,79 @@ private fun SuccessBannerFlagship() {
     }
 }
 
+@Composable
+private fun RunCompletedBannerWithDifficulty(difficultyLabel: String?) {
+    val isUnknown = difficultyLabel.isNullOrBlank() || difficultyLabel.equals("UNKNOWN", ignoreCase = true)
+    
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.success.copy(alpha = 0.12f)),
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = if (isUnknown) Arrangement.Center else Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier.then(if (isUnknown) Modifier.fillMaxWidth() else Modifier)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = Colors.success,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "Run Complete!",
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                    color = Colors.success
+                )
+            }
+            
+            // Show difficulty pill only if not unknown
+            if (!isUnknown) {
+                DifficultyPillFlagship(label = difficultyLabel!!)
+            }
+        }
+    }
+}
+
 /* -------------------------- SHAREABLE SUMMARY CARD ------------------------- */
+
+@Composable
+private fun NoStrugglePointsBanner() {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.success.copy(alpha = 0.10f)),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.CheckCircle,
+                contentDescription = null,
+                tint = Colors.success,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = "Great run! No struggle points identified.",
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                color = Colors.success
+            )
+        }
+    }
+}
 
 @Composable
 private fun ShareableSummaryCard(

@@ -50,6 +50,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
@@ -196,6 +197,15 @@ fun RunSessionScreen(
         }
 
     ) { padding ->
+        
+        // Run Saving overlay - shows while run data is being processed
+        AnimatedVisibility(
+            visible = runState.isStopping,
+            enter = fadeIn(animationSpec = tween(300)),
+            exit = fadeOut(animationSpec = tween(300))
+        ) {
+            RunSavingOverlay()
+        }
 
         LazyColumn(
             modifier = Modifier
@@ -2528,4 +2538,75 @@ private fun computeStabilityProxy(cadence: Int?, paceSec: Int?): Int {
     val cadScore = ((cad - 140) / 50f).coerceIn(0f, 1f)
     val paceScore = paceSec?.let { paceIntensity(it) } ?: 0.55f
     return ((0.55f * cadScore + 0.45f * paceScore) * 100f).toInt()
+}
+
+@Composable
+private fun RunSavingOverlay() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Colors.backgroundRoot),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(Spacing.xl)
+        ) {
+            // Animated loading indicator with pulsing ring effect
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.size(120.dp)
+            ) {
+                // Outer pulsing ring
+                val infiniteTransition = rememberInfiniteTransition(label = "runSaving")
+                val scale by infiniteTransition.animateFloat(
+                    initialValue = 0.8f,
+                    targetValue = 1.2f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(1000, easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "scale"
+                )
+                val alpha by infiniteTransition.animateFloat(
+                    initialValue = 0.3f,
+                    targetValue = 0.8f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(1000, easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "alpha"
+                )
+                
+                Canvas(modifier = Modifier.size(100.dp)) {
+                    drawCircle(
+                        color = Colors.primary.copy(alpha = alpha),
+                        radius = size.minDimension / 2 * scale,
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 4.dp.toPx())
+                    )
+                }
+                
+                // Inner progress indicator
+                CircularProgressIndicator(
+                    modifier = Modifier.size(60.dp),
+                    color = Colors.primary,
+                    strokeWidth = 4.dp
+                )
+            }
+            
+            // Run Saving text
+            Text(
+                text = "Run Saving",
+                style = MaterialTheme.typography.headlineMedium,
+                color = Colors.textPrimary
+            )
+            
+            // Processing your run data text
+            Text(
+                text = "We are processing your run data",
+                style = MaterialTheme.typography.bodyLarge,
+                color = Colors.textSecondary
+            )
+        }
+    }
 }

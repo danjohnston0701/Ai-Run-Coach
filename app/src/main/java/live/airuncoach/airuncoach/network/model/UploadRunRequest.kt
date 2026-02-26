@@ -7,6 +7,7 @@ import live.airuncoach.airuncoach.domain.model.StrugglePoint
 
 data class UploadRunRequest(
     val routeId: String?,
+    val startTime: Long,
     val distance: Double,
     val duration: Long,
     val avgPace: String,
