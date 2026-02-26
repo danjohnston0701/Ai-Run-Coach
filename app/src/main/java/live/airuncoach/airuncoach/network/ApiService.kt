@@ -307,6 +307,16 @@ interface ApiService {
     
     @POST("/api/garmin/upload-run")
     suspend fun uploadRunToGarmin(@Body request: GarminUploadRequest): GarminUploadResponse
+
+    // ========== SHARE IMAGE CREATOR ==========
+    @GET("/api/share/templates")
+    suspend fun getShareTemplates(): ShareTemplatesResponse
+
+    @POST("/api/share/preview")
+    suspend fun getSharePreview(@Body request: ShareImageRequest): SharePreviewResponse
+
+    @POST("/api/share/generate")
+    suspend fun generateShareImage(@Body request: ShareImageRequest): okhttp3.ResponseBody
 }
 
 /**

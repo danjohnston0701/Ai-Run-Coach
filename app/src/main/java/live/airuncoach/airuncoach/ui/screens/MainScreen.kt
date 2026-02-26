@@ -412,7 +412,17 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         navController.navigate("login") {
                             popUpTo("login") { inclusive = true }
                         }
+                    },
+                    onNavigateToShareImage = { id ->
+                        navController.navigate("share_image/$id")
                     }
+                )
+            }
+            composable("share_image/{runId}") { backStackEntry ->
+                val runId = backStackEntry.arguments?.getString("runId") ?: ""
+                ShareImageEditorScreen(
+                    runId = runId,
+                    onNavigateBack = { navController.popBackStack() }
                 )
             }
             composable("previous_runs") {

@@ -35,6 +35,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
@@ -115,6 +116,7 @@ fun RunSummaryScreenFlagship(
     runId: String,
     onNavigateBack: () -> Unit = {},
     onNavigateToLogin: () -> Unit = {},
+    onNavigateToShareImage: (String) -> Unit = {},
     viewModel: RunSummaryViewModel = hiltViewModel(),
     lastRunForDelta: RunSession? = null, // optional: wire later from your VM/store
 ) {
@@ -199,7 +201,8 @@ fun RunSummaryScreenFlagship(
                             onStruggleDismiss = viewModel::dismissStrugglePoint,
                             onStruggleRestore = viewModel::restoreStrugglePoint,
                             difficultyLabel = runSession?.let { (it.difficulty ?: it.getDifficultyLevel()).uppercase(Locale.getDefault()) },
-                            onRename = { showRenameDialog = true }
+                            onRename = { showRenameDialog = true },
+                            onCreateShareImage = { onNavigateToShareImage(runId) }
                         )
 
                         1 -> DataTabFlagship(runSession!!)
@@ -328,6 +331,7 @@ private fun SummaryTabFlagship(
     onStruggleRestore: (String) -> Unit = {},
     difficultyLabel: String? = null,
     onRename: () -> Unit = {},
+    onCreateShareImage: () -> Unit = {},
 ) {
     LazyColumn(
         modifier = Modifier
@@ -366,6 +370,11 @@ private fun SummaryTabFlagship(
                 lastRunForDelta = lastRunForDelta,
                 onShare = onShareCard
             )
+        }
+
+        // Create Share Image button
+        item {
+            CreateShareImageButton(onClick = onCreateShareImage)
         }
 
         // Struggle Point Analysis — moved above map for visibility
@@ -622,6 +631,32 @@ private fun RunCompletedBannerWithDifficulty(difficultyLabel: String?) {
 }
 
 /* -------------------------- SHAREABLE SUMMARY CARD ------------------------- */
+
+@Composable
+private fun CreateShareImageButton(onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp),
+        shape = RoundedCornerShape(14.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Colors.primary,
+            contentColor = Colors.buttonText
+        )
+    ) {
+        Icon(
+            imageVector = Icons.Default.AutoAwesome,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(Spacing.sm))
+        Text(
+            text = "Create Share Image",
+            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+        )
+    }
+}
 
 @Composable
 private fun NoStrugglePointsBanner() {
