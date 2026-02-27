@@ -348,13 +348,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     // Convert completedAt timestamp to milliseconds
     const completedAtMs = run.completedAt ? new Date(run.completedAt).getTime() : Date.now();
-    
-    // Convert duration from SECONDS to MILLISECONDS (database stores seconds, Android expects milliseconds)
-    const durationMs = (run.duration || 0) * 1000;
+
+    // Duration handling: the database may contain values in either seconds OR milliseconds
+    // depending on the source (Garmin imports use seconds, Android app historically sent milliseconds).
+    // Heuristic: if duration > 86400 (more than 1 day in seconds = impossible single run), it's likely milliseconds.
+    const rawDuration = run.duration || 0;
+    const durationMs = rawDuration > 86400 ? rawDuration : rawDuration * 1000;
+
+    // Also use the startTime field from the DB if available (more accurate than computing from completedAt)
+    const dbStartTime = run.startTime ? new Date(run.startTime).getTime() : 0;
     
     // Calculate startTime and endTime
     const endTime = completedAtMs;
-    const startTime = completedAtMs - durationMs;
+    const startTime = dbStartTime > 0 ? dbStartTime : (completedAtMs - durationMs);
 
     // Transform weather data to match Android format (if exists)
     let weatherData = null;
@@ -434,7 +440,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Alias for Android app compatibility
   app.get("/api/users/:userId/runs", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const runs = await storage.getUserRuns(req.params.userId);
+      const requestedUserId = req.params.userId;
+      const tokenUserId = req.user?.userId;
+      console.log(`[GET /api/users/${requestedUserId}/runs] Requested by token userId: ${tokenUserId}`);
+      
+      if (requestedUserId !== tokenUserId) {
+        console.warn(`⚠️ userId MISMATCH: URL param="${requestedUserId}" vs token="${tokenUserId}"`);
+      }
+      
+      const runs = await storage.getUserRuns(requestedUserId);
+      console.log(`[GET /api/users/${requestedUserId}/runs] Found ${runs.length} runs in DB`);
+      
+      // Log each run's key fields for debugging
+      runs.forEach((run, i) => {
+        console.log(`  Run ${i + 1}: id=${run.id}, userId=${run.userId}, completedAt=${run.completedAt}, distance=${run.distance}`);
+      });
+      
       const transformedRuns = runs.map(transformRunForAndroid);
       res.json(transformedRuns);
     } catch (error: any) {
@@ -465,11 +486,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user!.userId;
       const runData = req.body;
       
-      // Calculate TSS if not provided
+      // Normalize duration to seconds for database storage
+      // Android app sends duration in milliseconds; if > 86400 it's definitely ms
+      const rawDuration = runData.duration || 0;
+      const durationInSeconds = rawDuration > 86400 ? Math.round(rawDuration / 1000) : rawDuration;
+      console.log(`[POST /api/runs] Duration normalization: raw=${rawDuration} → ${durationInSeconds}s (was ${rawDuration > 86400 ? 'ms' : 'seconds'})`);
+      
+      // Calculate TSS if not provided (needs duration in seconds)
       let tss = runData.tss || 0;
-      if (tss === 0 && runData.duration) {
+      if (tss === 0 && durationInSeconds) {
         tss = calculateTSS(
-          runData.duration,
+          durationInSeconds,
           runData.avgHeartRate,
           runData.maxHeartRate,
           60, // Default resting HR (could get from user profile)
@@ -480,6 +507,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Convert timestamp fields from numbers to Date objects for database compatibility
       const processedRunData = {
         ...runData,
+        duration: durationInSeconds,
         completedAt: runData.completedAt ? new Date(runData.completedAt) : undefined,
         startTime: runData.startTime ? new Date(runData.startTime) : undefined,
         endTime: runData.endTime ? new Date(runData.endTime) : undefined,

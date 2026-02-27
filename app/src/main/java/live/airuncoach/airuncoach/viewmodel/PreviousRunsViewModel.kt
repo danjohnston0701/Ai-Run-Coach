@@ -182,13 +182,14 @@ class PreviousRunsViewModel @Inject constructor(
             android.util.Log.d("PreviousRunsViewModel", "Run '${run.name ?: run.id}': startTime=${run.startTime} ($startDate), effectiveTime=$effectiveTime, cutoff=$cutoff, included=$included, filter=${_selectedFilter.value}")
         }
         
-        // Use startTime for filtering, but if startTime is 0/missing (bad parse or missing field), 
-        // fall back to endTime. If both are 0, include the run anyway (don't silently hide it).
+        // Use endTime (completedAt) as the primary filter/sort key — it's the most reliable timestamp.
+        // startTime may be miscalculated due to duration unit mismatches (ms vs seconds).
+        // If endTime is missing, fall back to startTime. If both are 0, include the run anyway.
         val filtered = runs.filter { run ->
-            val effectiveTime = if (run.startTime > 0) run.startTime else run.endTime ?: 0L
+            val effectiveTime = run.endTime?.takeIf { it > 0 } ?: run.startTime.takeIf { it > 0 } ?: 0L
             effectiveTime >= cutoff || effectiveTime == 0L
         }.sortedByDescending { run ->
-            if (run.startTime > 0) run.startTime else run.endTime ?: 0L
+            run.endTime?.takeIf { it > 0 } ?: run.startTime.takeIf { it > 0 } ?: 0L
         }
         android.util.Log.d("PreviousRunsViewModel", "Filter result: ${runs.size} total -> ${filtered.size} after '${_selectedFilter.value}' filter (cutoff=$cutoff, now=$now)")
         return filtered
