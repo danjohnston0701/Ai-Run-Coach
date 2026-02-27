@@ -102,9 +102,23 @@ class RouteGenerationViewModel @Inject constructor(
                 _error.value = errorMsg
                 Log.e("RouteGeneration", "🔌 CONNECTION ERROR", e)
             } catch (e: HttpException) {
-                // Handle HTTP errors with better messages
+                // Try to extract the server error message for user-friendly errors
+                var serverMessage: String? = null
+                try {
+                    val errorBody = e.response()?.errorBody()?.string()
+                    if (errorBody != null) {
+                        Log.e("RouteGeneration", "Error response: $errorBody")
+                        // Parse JSON error body to get the message
+                        val jsonObj = org.json.JSONObject(errorBody)
+                        serverMessage = jsonObj.optString("error", "").ifEmpty { null }
+                    }
+                } catch (ex: Exception) {
+                    Log.e("RouteGeneration", "Could not read error body", ex)
+                }
+
                 val errorMsg = when (e.code()) {
-                    400 -> "Unable to generate routes in this area. The location may not have enough suitable paths or roads for a ${distanceKm}km route."
+                    400 -> serverMessage ?: "Unable to generate routes in this area. The location may not have enough suitable paths or roads for a ${distanceKm}km route."
+                    422 -> serverMessage ?: "No suitable running routes found in this area. Try a different distance or location with more connected paths and trails."
                     404 -> "Route generation service not found. Please try again later."
                     500 -> "Server error while generating routes. Please try again."
                     503 -> "Route generation service is temporarily unavailable. Please try again later."
@@ -112,16 +126,6 @@ class RouteGenerationViewModel @Inject constructor(
                 }
                 _error.value = errorMsg
                 Log.e("RouteGeneration", "❌ HTTP ERROR ${e.code()}: ${e.message()}", e)
-                
-                // Try to get error body for more details
-                try {
-                    val errorBody = e.response()?.errorBody()?.string()
-                    if (errorBody != null) {
-                        Log.e("RouteGeneration", "Error response: $errorBody")
-                    }
-                } catch (ex: Exception) {
-                    Log.e("RouteGeneration", "Could not read error body", ex)
-                }
             } catch (e: Exception) {
                 _error.value = "An unexpected error occurred while generating routes. Please try again."
                 Log.e("RouteGeneration", "❌ UNEXPECTED ERROR: ${e.message}", e)

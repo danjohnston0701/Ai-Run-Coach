@@ -51,7 +51,8 @@ import {
   analyzeRouteCharacteristics
 } from "./osm-segment-intelligence";
 import {
-  generateIntelligentRoute
+  generateIntelligentRoute,
+  NoRoutesError
 } from "./intelligent-route-generation";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -880,9 +881,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       console.error("Intelligent route generation error:", error);
-      res.status(500).json({ 
-        error: error.message || "Failed to generate intelligent route" 
-      });
+      
+      if (error instanceof NoRoutesError) {
+        // No valid routes found — not a server error, just no suitable routes in this area
+        res.status(422).json({ 
+          error: error.message,
+          code: 'NO_ROUTES_FOUND'
+        });
+      } else {
+        res.status(500).json({ 
+          error: error.message || "Failed to generate intelligent route" 
+        });
+      }
     }
   });
 

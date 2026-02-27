@@ -568,6 +568,183 @@ function calculateRouteDiversity(a: Array<[number, number]>, b: Array<[number, n
   return d / 180;
 }
 
+// ==================== CANDIDATE TYPE ====================
+
+type RouteCandidate = {
+  route: any; validation: ValidationResult; popularityScore: number; terrainScore: number;
+  loopQuality: number; backtrackRatio: number; compactness: number; angularSpread: number;
+  proximityOverlap: number; coordinates: Array<[number, number]>; isScenic: boolean;
+};
+
+// ==================== QUALITY THRESHOLDS ====================
+
+interface QualityThresholds {
+  loopQuality: number;        // min loop quality for round-trip candidates
+  loopQualityScenic: number;  // min loop quality for scenic candidates
+  backtrackRatio: number;     // max backtrack ratio
+  proximityOverlap: number;   // max proximity overlap
+  compactness: number;        // min compactness (round-trip only)
+  angularSpread: number;      // min angular spread (round-trip only)
+}
+
+const STRICT_THRESHOLDS: QualityThresholds = {
+  loopQuality: 0.7,
+  loopQualityScenic: 0.5,
+  backtrackRatio: 0.25,
+  proximityOverlap: 0.25,
+  compactness: 0.15,
+  angularSpread: 0.25,
+};
+
+const LOOSE_THRESHOLDS: QualityThresholds = {
+  loopQuality: 0.4,
+  loopQualityScenic: 0.3,
+  backtrackRatio: 0.40,
+  proximityOverlap: 0.40,
+  compactness: 0.08,
+  angularSpread: 0.15,
+};
+
+// ==================== CUSTOM ERROR FOR NO ROUTES ====================
+
+export class NoRoutesError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NoRoutesError';
+  }
+}
+
+// ==================== CANDIDATE EVALUATION ====================
+
+/**
+ * Evaluate raw GraphHopper results against quality thresholds.
+ * Returns accepted candidates and raw metric data for rejected ones (so they can be re-evaluated with looser thresholds).
+ */
+async function evaluateCandidates(
+  allResults: Array<{ seed: number; ghResponse: any; isScenic: boolean }>,
+  latitude: number,
+  longitude: number,
+  distanceMeters: number,
+  thresholds: QualityThresholds,
+  tierLabel: string,
+): Promise<{ accepted: RouteCandidate[]; rejected: Array<{ raw: { seed: number; ghResponse: any; isScenic: boolean }; metrics: any }> }> {
+  const accepted: RouteCandidate[] = [];
+  const rejected: Array<{ raw: { seed: number; ghResponse: any; isScenic: boolean }; metrics: any }> = [];
+
+  for (const result of allResults) {
+    const { seed, ghResponse, isScenic } = result;
+    if (!ghResponse?.paths?.length) continue;
+    
+    const path = ghResponse.paths[0];
+    let coordinates = path.points.coordinates as Array<[number, number]>;
+    const label = `[${tierLabel}] ${isScenic ? `Scenic(${seed})` : `Seed ${seed}`}`;
+    
+    const loopQuality = calculateLoopQuality(coordinates, latitude, longitude);
+    const backtrackRatio = calculateBacktrackRatio(coordinates);
+    console.log(`${label}: Loop=${loopQuality.toFixed(2)}, Backtrack=${backtrackRatio.toFixed(2)}, Dist=${path.distance}m`);
+
+    const minLoop = isScenic ? thresholds.loopQualityScenic : thresholds.loopQuality;
+    
+    const compactness = calculateCompactness(coordinates, latitude, longitude);
+    const angularSpread = calculateAngularSpread(coordinates, latitude, longitude);
+    const proximityOverlap = calculateProximityOverlap(coordinates, latitude, longitude);
+
+    const metrics = { loopQuality, backtrackRatio, compactness, angularSpread, proximityOverlap };
+
+    // Apply threshold checks
+    if (loopQuality < minLoop) { console.log(`${label}: Rejected - poor loop (${loopQuality.toFixed(2)} < ${minLoop})`); rejected.push({ raw: result, metrics }); continue; }
+    if (backtrackRatio > thresholds.backtrackRatio) { console.log(`${label}: Rejected - backtracking (${backtrackRatio.toFixed(2)} > ${thresholds.backtrackRatio})`); rejected.push({ raw: result, metrics }); continue; }
+    if (proximityOverlap > thresholds.proximityOverlap) { console.log(`${label}: Rejected - overlap (${proximityOverlap.toFixed(2)} > ${thresholds.proximityOverlap})`); rejected.push({ raw: result, metrics }); continue; }
+    if (!isScenic && compactness < thresholds.compactness) { console.log(`${label}: Rejected - elongated (${compactness.toFixed(2)} < ${thresholds.compactness})`); rejected.push({ raw: result, metrics }); continue; }
+    if (!isScenic && angularSpread < thresholds.angularSpread) { console.log(`${label}: Rejected - poor spread (${angularSpread.toFixed(2)} < ${thresholds.angularSpread})`); rejected.push({ raw: result, metrics }); continue; }
+    
+    // Force circular
+    if (coordinates.length > 0) {
+      coordinates[0] = [longitude, latitude];
+      coordinates[coordinates.length - 1] = [longitude, latitude];
+    }
+
+    const roadClassDetails = path.details?.road_class || [];
+    const roadAnalysis = analyzeRoadClasses(roadClassDetails);
+    console.log(`${label}: trails=${(roadAnalysis.trailPercentage * 100).toFixed(1)}%, paths=${(roadAnalysis.pathPercentage * 100).toFixed(1)}%, residential=${(roadAnalysis.residentialPercentage * 100).toFixed(1)}%`);
+    
+    const validation = validateRoute(coordinates, path.distance, distanceMeters, roadClassDetails);
+    if (!validation.isValid) { console.log(`${label}: Rejected - invalid`); rejected.push({ raw: result, metrics }); continue; }
+    
+    const popularityScore = await getRoutePopularityScore(coordinates);
+    accepted.push({ route: path, validation, popularityScore, terrainScore: roadAnalysis.terrainScore, loopQuality, backtrackRatio, compactness, angularSpread, proximityOverlap, coordinates, isScenic });
+    console.log(`${label}: ✅ Accepted`);
+  }
+
+  return { accepted, rejected };
+}
+
+// ==================== FETCH GRAPHHOPPER CANDIDATES ====================
+
+/**
+ * Fetch round-trip + scenic candidates from GraphHopper using a specific profile strategy.
+ */
+async function fetchCandidates(
+  latitude: number,
+  longitude: number,
+  distanceMeters: number,
+  preferTrails: boolean,
+  scenicWaypoints: Array<{ lat: number; lng: number; name: string; type: string }>,
+  profileLabel: string,
+  useHikeProfile: boolean,
+): Promise<Array<{ seed: number; ghResponse: any; isScenic: boolean }>> {
+  const baseSeed = Math.floor(Math.random() * 1000);
+  const seedOffsets = [0, 17, 37, 53, 71, 89];
+  
+  const profile = useHikeProfile ? 'hike' : 'foot';
+  console.log(`🔄 Generating ${seedOffsets.length} round-trip candidates (${profileLabel}, ${profile} profile)...`);
+
+  const rtPromises = seedOffsets.map(async (offset) => {
+    const seed = baseSeed + offset;
+    try {
+      let ghResponse;
+      if (useHikeProfile) {
+        ghResponse = await generateGraphHopperRoute(latitude, longitude, distanceMeters, seed, preferTrails);
+      } else {
+        // foot profile — always use GET (no custom_model needed)
+        ghResponse = await generateGraphHopperRouteGet(latitude, longitude, distanceMeters, 'foot', seed);
+      }
+      return { seed, ghResponse, isScenic: false };
+    } catch (error: any) {
+      console.error(`[${profileLabel}] Seed ${seed} failed: ${error.message}`);
+      return { seed, ghResponse: null, isScenic: false };
+    }
+  });
+
+  const scenicPromises: Promise<{ seed: number; ghResponse: any; isScenic: boolean }>[] = [];
+  
+  if (useHikeProfile && scenicWaypoints.length >= 2) {
+    console.log(`🌿 Generating scenic waypoint candidates (${profileLabel})...`);
+    
+    scenicPromises.push((async () => {
+      try { return { seed: -1, ghResponse: await generateScenicWaypointRoute(latitude, longitude, scenicWaypoints), isScenic: true }; }
+      catch (e: any) { console.error(`[${profileLabel}] Scenic (all) failed: ${e.message}`); return { seed: -1, ghResponse: null, isScenic: true }; }
+    })());
+    
+    scenicPromises.push((async () => {
+      try { return { seed: -2, ghResponse: await generateScenicWaypointRoute(latitude, longitude, [...scenicWaypoints].reverse()), isScenic: true }; }
+      catch (e: any) { return { seed: -2, ghResponse: null, isScenic: true }; }
+    })());
+
+    if (scenicWaypoints.length >= 3) {
+      scenicPromises.push((async () => {
+        try {
+          const subset = scenicWaypoints.filter((_, i) => i % 2 === 0);
+          if (subset.length >= 2) return { seed: -3, ghResponse: await generateScenicWaypointRoute(latitude, longitude, subset), isScenic: true };
+          return { seed: -3, ghResponse: null, isScenic: true };
+        } catch (e: any) { return { seed: -3, ghResponse: null, isScenic: true }; }
+      })());
+    }
+  }
+
+  return Promise.all([...rtPromises, ...scenicPromises]);
+}
+
 // ==================== MAIN ROUTE GENERATION ====================
 
 export async function generateIntelligentRoute(request: RouteRequest): Promise<GeneratedRoute[]> {
@@ -590,104 +767,54 @@ export async function generateIntelligentRoute(request: RouteRequest): Promise<G
     console.log(`⚠️ No scenic features found nearby, using round-trip only`);
   }
 
-  // STEP 2: Generate candidates in parallel
-  const candidates: Array<{
-    route: any; validation: ValidationResult; popularityScore: number; terrainScore: number;
-    loopQuality: number; backtrackRatio: number; compactness: number; angularSpread: number;
-    proximityOverlap: number; coordinates: Array<[number, number]>; isScenic: boolean;
-  }> = [];
+  let allCandidates: RouteCandidate[] = [];
 
-  const baseSeed = Math.floor(Math.random() * 1000);
-  const seedOffsets = [0, 17, 37, 53, 71, 89];
-  
-  // A) Round-trip candidates (6 with hike profile)
-  console.log(`🔄 Generating ${seedOffsets.length} round-trip candidates (hike profile)...`);
-  const rtPromises = seedOffsets.map(async (offset) => {
-    const seed = baseSeed + offset;
-    try {
-      const ghResponse = await generateGraphHopperRoute(latitude, longitude, distanceMeters, seed, preferTrails);
-      return { seed, ghResponse, isScenic: false };
-    } catch (error: any) {
-      console.error(`Seed ${seed} failed: ${error.message}`);
-      return { seed, ghResponse: null, isScenic: false };
-    }
-  });
+  // ── TIER 1: Hike profile + strict thresholds ──
+  console.log(`\n━━━ TIER 1: Hike profile + strict thresholds ━━━`);
+  const hikeResults = await fetchCandidates(latitude, longitude, distanceMeters, preferTrails, scenicWaypoints, 'Tier1-Hike', true);
+  const tier1 = await evaluateCandidates(hikeResults, latitude, longitude, distanceMeters, STRICT_THRESHOLDS, 'Tier1-Strict');
+  allCandidates.push(...tier1.accepted);
+  console.log(`📊 Tier 1: ${tier1.accepted.length} accepted, ${tier1.rejected.length} rejected`);
 
-  // B) Scenic waypoint candidates
-  const scenicPromises: Promise<{ seed: number; ghResponse: any; isScenic: boolean }>[] = [];
-  
-  if (scenicWaypoints.length >= 2) {
-    console.log(`🌿 Generating scenic waypoint candidates...`);
-    
-    scenicPromises.push((async () => {
-      try { return { seed: -1, ghResponse: await generateScenicWaypointRoute(latitude, longitude, scenicWaypoints), isScenic: true }; }
-      catch (e: any) { console.error(`Scenic (all) failed: ${e.message}`); return { seed: -1, ghResponse: null, isScenic: true }; }
-    })());
-    
-    scenicPromises.push((async () => {
-      try { return { seed: -2, ghResponse: await generateScenicWaypointRoute(latitude, longitude, [...scenicWaypoints].reverse()), isScenic: true }; }
-      catch (e: any) { return { seed: -2, ghResponse: null, isScenic: true }; }
-    })());
+  // ── TIER 2: Re-evaluate rejected hike candidates with loose thresholds ──
+  if (allCandidates.length < 3 && tier1.rejected.length > 0) {
+    console.log(`\n━━━ TIER 2: Re-evaluating ${tier1.rejected.length} rejected hike candidates with loose thresholds ━━━`);
+    const rejectedRaws = tier1.rejected.map(r => r.raw);
+    const tier2 = await evaluateCandidates(rejectedRaws, latitude, longitude, distanceMeters, LOOSE_THRESHOLDS, 'Tier2-Loose');
+    allCandidates.push(...tier2.accepted);
+    console.log(`📊 Tier 2: ${tier2.accepted.length} more accepted (total: ${allCandidates.length})`);
+  }
 
-    if (scenicWaypoints.length >= 3) {
-      scenicPromises.push((async () => {
-        try {
-          const subset = scenicWaypoints.filter((_, i) => i % 2 === 0);
-          if (subset.length >= 2) return { seed: -3, ghResponse: await generateScenicWaypointRoute(latitude, longitude, subset), isScenic: true };
-          return { seed: -3, ghResponse: null, isScenic: true };
-        } catch (e: any) { return { seed: -3, ghResponse: null, isScenic: true }; }
-      })());
+  // ── TIER 3: Foot profile + strict thresholds (fallback when hike profile fails) ──
+  if (allCandidates.length < 3) {
+    console.log(`\n━━━ TIER 3: Foot profile fallback + strict thresholds ━━━`);
+    const footResults = await fetchCandidates(latitude, longitude, distanceMeters, false, scenicWaypoints, 'Tier3-Foot', false);
+    const tier3 = await evaluateCandidates(footResults, latitude, longitude, distanceMeters, STRICT_THRESHOLDS, 'Tier3-Strict');
+    allCandidates.push(...tier3.accepted);
+    console.log(`📊 Tier 3: ${tier3.accepted.length} more accepted (total: ${allCandidates.length})`);
+
+    // If still not enough, try foot candidates with loose thresholds too
+    if (allCandidates.length < 1 && tier3.rejected.length > 0) {
+      console.log(`\n━━━ TIER 3b: Re-evaluating foot candidates with loose thresholds ━━━`);
+      const tier3b = await evaluateCandidates(tier3.rejected.map(r => r.raw), latitude, longitude, distanceMeters, LOOSE_THRESHOLDS, 'Tier3b-Loose');
+      allCandidates.push(...tier3b.accepted);
+      console.log(`📊 Tier 3b: ${tier3b.accepted.length} more accepted (total: ${allCandidates.length})`);
     }
   }
 
-  const allResults = await Promise.all([...rtPromises, ...scenicPromises]);
-
-  // STEP 3: Process and validate
-  for (const { seed, ghResponse, isScenic } of allResults) {
-    if (!ghResponse?.paths?.length) continue;
-    
-    const path = ghResponse.paths[0];
-    let coordinates = path.points.coordinates as Array<[number, number]>;
-    const label = isScenic ? `Scenic(${seed})` : `Seed ${seed}`;
-    
-    const loopQuality = calculateLoopQuality(coordinates, latitude, longitude);
-    const backtrackRatio = calculateBacktrackRatio(coordinates);
-    console.log(`${label}: Loop=${loopQuality.toFixed(2)}, Backtrack=${backtrackRatio.toFixed(2)}, Dist=${path.distance}m`);
-
-    if (loopQuality < (isScenic ? 0.5 : 0.7)) { console.log(`${label}: Rejected - poor loop`); continue; }
-    if (backtrackRatio > 0.25) { console.log(`${label}: Rejected - backtracking`); continue; }
-    
-    const compactness = calculateCompactness(coordinates, latitude, longitude);
-    const angularSpread = calculateAngularSpread(coordinates, latitude, longitude);
-    const proximityOverlap = calculateProximityOverlap(coordinates, latitude, longitude);
-    
-    if (proximityOverlap > 0.25) { console.log(`${label}: Rejected - overlap`); continue; }
-    if (!isScenic && compactness < 0.15) { console.log(`${label}: Rejected - elongated`); continue; }
-    if (!isScenic && angularSpread < 0.25) { console.log(`${label}: Rejected - poor spread`); continue; }
-    
-    // Force circular
-    if (coordinates.length > 0) {
-      coordinates[0] = [longitude, latitude];
-      coordinates[coordinates.length - 1] = [longitude, latitude];
-    }
-
-    const roadClassDetails = path.details?.road_class || [];
-    const roadAnalysis = analyzeRoadClasses(roadClassDetails);
-    console.log(`${label}: trails=${(roadAnalysis.trailPercentage * 100).toFixed(1)}%, paths=${(roadAnalysis.pathPercentage * 100).toFixed(1)}%, residential=${(roadAnalysis.residentialPercentage * 100).toFixed(1)}%`);
-    
-    const validation = validateRoute(coordinates, path.distance, distanceMeters, roadClassDetails);
-    if (!validation.isValid) { console.log(`${label}: Rejected - invalid`); continue; }
-    
-    const popularityScore = await getRoutePopularityScore(coordinates);
-    candidates.push({ route: path, validation, popularityScore, terrainScore: roadAnalysis.terrainScore, loopQuality, backtrackRatio, compactness, angularSpread, proximityOverlap, coordinates, isScenic });
+  // ── NO ROUTES AT ALL ──
+  if (allCandidates.length === 0) {
+    throw new NoRoutesError(
+      `We couldn't find any suitable running routes for a ${distanceKm}km run at this location. ` +
+      `This area may not have enough paths, trails, or roads for a circular route. ` +
+      `Try adjusting the distance or moving to a location with more connected paths.`
+    );
   }
   
-  if (candidates.length === 0) throw new Error("Could not generate a valid route. Try a different location or distance.");
-  
-  console.log(`📊 ${candidates.length} valid candidates (${candidates.filter(c => c.isScenic).length} scenic, ${candidates.filter(c => !c.isScenic).length} round-trip)`);
+  console.log(`\n📊 Total: ${allCandidates.length} valid candidates (${allCandidates.filter(c => c.isScenic).length} scenic, ${allCandidates.filter(c => !c.isScenic).length} round-trip)`);
 
-  // STEP 4: Score and select top 3 diverse routes
-  const scored = candidates.map((c) => {
+  // STEP 4: Score and select up to 3 diverse routes (return whatever we have, even if < 3)
+  const scored = allCandidates.map((c) => {
     const shapeScore = Math.max(0, c.compactness * 0.4 + c.angularSpread * 0.4 - c.proximityOverlap * 0.8);
     const scenicScore = c.terrainScore + (c.isScenic ? 0.3 : 0);
     
@@ -705,14 +832,22 @@ export async function generateIntelligentRoute(request: RouteRequest): Promise<G
   
   scored.sort((a, b) => b.totalScore - a.totalScore);
   
+  // Select up to 3 diverse routes — but return whatever we have (1, 2, or 3)
+  const maxRoutes = Math.min(3, scored.length);
   const selected: typeof scored = [];
   for (const c of scored) {
-    if (selected.length >= 3) break;
+    if (selected.length >= maxRoutes) break;
     let diverse = true;
     for (const s of selected) { if (calculateRouteDiversity(c.coordinates, s.coordinates, latitude, longitude) < 0.15) { diverse = false; break; } }
     if (diverse) selected.push(c);
   }
-  if (selected.length < 3) for (const c of scored) { if (selected.length >= 3) break; if (!selected.includes(c)) selected.push(c); }
+  // Fill remaining slots if we couldn't find diverse ones
+  if (selected.length < maxRoutes) {
+    for (const c of scored) {
+      if (selected.length >= maxRoutes) break;
+      if (!selected.includes(c)) selected.push(c);
+    }
+  }
   
   console.log(`✅ Returning ${selected.length} routes (${selected.filter(s => s.isScenic).length} scenic)`);
   
