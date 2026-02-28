@@ -615,6 +615,9 @@ class RunTrackingService : Service(), SensorEventListener {
             lastKmSplit = currentKm
             lastSplitTime = now
             Log.d("RunTrackingService", "Reached ${currentKm}km - triggering split coaching")
+            // Mark coaching as fired so updateRunSession() won't trigger a duplicate
+            // (e.g. phase change or 500m check-in at the same distance)
+            hasCoachingFiredThisTick = true
             triggerKmSplitCoaching(split) // Trigger AI coaching for km split
         }
     }

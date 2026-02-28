@@ -39,6 +39,18 @@ fun GoalsScreen(
     var goalToDelete by remember { mutableStateOf<Goal?>(null) }
     var showGoalDetails by remember { mutableStateOf<Goal?>(null) }
 
+    // Refresh goals every time this screen becomes visible (e.g. after creating/deleting a goal)
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                viewModel.loadGoals()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(

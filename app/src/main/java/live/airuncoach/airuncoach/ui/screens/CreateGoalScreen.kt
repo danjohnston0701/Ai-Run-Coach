@@ -41,6 +41,8 @@ fun CreateGoalScreen(
     var selectedType by remember { mutableStateOf<GoalType?>(null) }
     var goalTitle by remember { mutableStateOf("") }
     var targetDate by remember { mutableStateOf("") }
+    var showDatePicker by remember { mutableStateOf(false) }
+    val datePickerState = rememberDatePickerState()
     var description by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
     
@@ -236,16 +238,27 @@ fun CreateGoalScreen(
                             .height(50.dp)
                             .clip(RoundedCornerShape(BorderRadius.sm))
                             .background(Colors.backgroundSecondary)
-                            .clickable { /* Open date picker */ }
+                            .clickable { showDatePicker = true }
                             .padding(horizontal = Spacing.md),
-                        contentAlignment = Alignment.CenterEnd
+                        contentAlignment = Alignment.CenterStart
                     ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.icon_play_vector),
-                            contentDescription = "Select date",
-                            tint = Colors.textMuted,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = targetDate.ifBlank { "Select a date" },
+                                style = AppTextStyles.body,
+                                color = if (targetDate.isBlank()) Colors.textMuted else Colors.textPrimary
+                            )
+                            Icon(
+                                painter = painterResource(id = R.drawable.icon_calendar_vector),
+                                contentDescription = "Select date",
+                                tint = Colors.textMuted,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.height(Spacing.md))
                 }
@@ -417,6 +430,55 @@ fun CreateGoalScreen(
                     Spacer(modifier = Modifier.height(Spacing.xl))
                 }
             }
+        }
+    }
+    
+    // Date Picker Dialog
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { millis ->
+                            val sdf = java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault())
+                            sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                            targetDate = sdf.format(java.util.Date(millis))
+                        }
+                        showDatePicker = false
+                    }
+                ) {
+                    Text("Confirm", color = Colors.primary)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel", color = Colors.textMuted)
+                }
+            },
+            colors = DatePickerDefaults.colors(
+                containerColor = Colors.backgroundSecondary,
+            )
+        ) {
+            DatePicker(
+                state = datePickerState,
+                colors = DatePickerDefaults.colors(
+                    containerColor = Colors.backgroundSecondary,
+                    titleContentColor = Colors.textPrimary,
+                    headlineContentColor = Colors.textPrimary,
+                    weekdayContentColor = Colors.textMuted,
+                    dayContentColor = Colors.textPrimary,
+                    selectedDayContainerColor = Colors.primary,
+                    selectedDayContentColor = Colors.backgroundRoot,
+                    todayContentColor = Colors.primary,
+                    todayDateBorderColor = Colors.primary,
+                    yearContentColor = Colors.textPrimary,
+                    selectedYearContainerColor = Colors.primary,
+                    selectedYearContentColor = Colors.backgroundRoot,
+                    navigationContentColor = Colors.textPrimary,
+                    subheadContentColor = Colors.textPrimary,
+                )
+            )
         }
     }
 }

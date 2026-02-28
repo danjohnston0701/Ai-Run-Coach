@@ -41,6 +41,25 @@ const formatDistanceForTTS = (km: number | undefined): string => {
   return km === Math.floor(km) ? `${Math.floor(km)}km` : `${km.toFixed(1)}km`;
 };
 
+// Helper to format pace for TTS - converts "4:32" to "4 minutes and 32 seconds per kilometer"
+// This prevents the AI from saying "four thirty-two" which is hard to understand while running
+const formatPaceForTTS = (pace: string | undefined): string => {
+  if (!pace) return 'unknown pace';
+  const parts = pace.replace('/km', '').trim().split(':');
+  if (parts.length === 2) {
+    const min = parseInt(parts[0], 10);
+    const sec = parseInt(parts[1], 10);
+    if (!isNaN(min) && !isNaN(sec)) {
+      if (sec === 0) return `${min} minutes per kilometer`;
+      return `${min} minutes and ${sec} seconds per kilometer`;
+    }
+  }
+  return `${pace} per kilometer`;
+};
+
+// Pace format instruction for AI system messages
+const PACE_FORMAT_RULE = `PACE FORMAT: When speaking about pace, ALWAYS say it as "X minutes and Y seconds per kilometer" (e.g. "4 minutes and 32 seconds per kilometer"), NEVER as shorthand like "four thirty-two" or "4:32". This is critical because the runner is listening via audio while running and needs to clearly understand pace values.`;
+
 // Helper to format duration in minutes for TTS - not as clock time
 const formatDurationForTTS = (seconds: number): string => {
   const totalMinutes = Math.floor(seconds / 60);
@@ -182,37 +201,42 @@ export async function generatePaceUpdate(params: {
   const noTerrainRule = hasRoute === true ? '' : `
 CRITICAL: This runner has NO planned route. Do NOT mention hills, terrain, elevation, climbing, descending, flat, undulating, conquering hills, or any route/terrain characteristics. You have NO idea what terrain they are running on. Focus only on pace, effort, form, and motivation.`;
   
+  const spokenCurrentPace = formatPaceForTTS(currentPace);
+  const spokenSplitPace = formatPaceForTTS(splitPace);
+  
   let prompt: string;
   if (isSplit && splitKm && splitPace) {
     prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
     
-The runner just completed kilometer ${splitKm} with a split pace of ${splitPace}/km.
+The runner just completed kilometer ${splitKm} with a split pace of ${spokenSplitPace}.
 - Overall progress: ${distance.toFixed(1)}km of ${targetDistance}km (${progress}%)
 - Time elapsed: ${timeMin} minutes
-- Average pace: ${currentPace}/km
+- Average pace: ${spokenCurrentPace}
 ${terrainContext}${paceTrend}
 ${noTerrainRule}
-Give a brief (1-2 sentences) split update. You MUST mention their split pace (${splitPace}/km) and at least one other data point (progress, time, or pace trend). ${hasRoute === true && isOnHill ? 'Acknowledge the hill effort. ' : ''}${paceTrend ? 'Comment on their pace trend if relevant.' : ''}`;
+${PACE_FORMAT_RULE}
+Give a brief (1-2 sentences) split update. You MUST mention their split pace (${spokenSplitPace}) and at least one other data point (progress, time, or pace trend). ${hasRoute === true && isOnHill ? 'Acknowledge the hill effort. ' : ''}${paceTrend ? 'Comment on their pace trend if relevant.' : ''}`;
   } else {
     prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
     
-500m pace check: Runner is at ${distance.toFixed(2)}km, pace ${currentPace}/km, ${timeMin} minutes in.
+500m pace check: Runner is at ${distance.toFixed(2)}km, pace ${spokenCurrentPace}, ${timeMin} minutes in.
 ${terrainContext}
 ${noTerrainRule}
-Give a very brief (1-2 sentences) pace update. You MUST cite their pace (${currentPace}/km) and distance (${distance.toFixed(1)}km). ${hasRoute === true && isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
+${PACE_FORMAT_RULE}
+Give a very brief (1-2 sentences) pace update. You MUST cite their pace (${spokenCurrentPace}) and distance (${distance.toFixed(1)}km). ${hasRoute === true && isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
   }
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). ${hasRoute === true ? 'Be elevation-aware when hills are mentioned. ' : 'Do NOT mention hills, terrain, or elevation. '}${toneDirective(coachTone)}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). ${PACE_FORMAT_RULE} ${hasRoute === true ? 'Be elevation-aware when hills are mentioned. ' : 'Do NOT mention hills, terrain, or elevation. '}${toneDirective(coachTone)}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 100,
     temperature: 0.7,
   });
 
-  return completion.choices[0].message.content || (isSplit ? `Kilometer ${splitKm} done at ${splitPace}. Keep it up!` : "Looking good, keep this pace!");
+  return completion.choices[0].message.content || (isSplit ? `Kilometer ${splitKm} done at ${spokenSplitPace}. Keep it up!` : "Looking good, keep this pace!");
 }
 
 export async function generateRunSummary(runData: any): Promise<any> {
@@ -314,11 +338,14 @@ export async function generatePhaseCoaching(params: {
     cadenceInfo = `- Cadence: ${cadence} spm (${cadenceAssessment})`;
   }
 
-  // Build target pace comparison if available
+  // Build target pace comparison if available (use spoken format for TTS)
+  const spokenPhasePace = formatPaceForTTS(currentPace);
+  const spokenTargetPace = formatPaceForTTS(targetPace);
+  
   let paceComparisonInfo = '';
   let paceVerdict = '';
   if (targetPace && currentPace) {
-    paceComparisonInfo = `- Target pace: ${targetPace}/km (current: ${currentPace}/km)`;
+    paceComparisonInfo = `- Target pace: ${spokenTargetPace} (current: ${spokenPhasePace})`;
     // Add explicit pace gap guidance for the AI
     const targetParts = targetPace.split(':').map(Number);
     const currentParts = currentPace.split(':').map(Number);
@@ -394,18 +421,19 @@ ${is500mCheckin ? 'TRIGGER: First 500m check-in' : `Phase: ${phaseDescriptions[p
 Runner Status:
 - Distance covered: ${distance.toFixed(2)}km${targetDistance ? ` of ${formatDistanceForTTS(targetDistance)} target (${progress}%)` : ''}
 - Time elapsed: ${timeMin} minutes
-${currentPace ? `- Current pace: ${currentPace}/km` : ''}
+${currentPace ? `- Current pace: ${spokenPhasePace}` : ''}
 ${paceComparisonInfo}
 ${targetTimeInfo}
 ${hrInfo}
 ${cadenceInfo}
 ${terrainInfo}
 ${noTerrainRule}
+${PACE_FORMAT_RULE}
 ${triggerInstruction} Be ${coachTone} and encouraging.
 
-CRITICAL: You MUST weave in at least 2 specific data points from the Runner Status above (e.g. their actual pace like "${currentPace || '6:15'}/km", distance "${distance.toFixed(1)}km", time "${timeMin} minutes", cadence, heart rate). Runners want to hear their real numbers — do NOT give vague encouragement without citing their actual stats.${targetPace ? ` You MUST tell the runner whether they are on track for their target pace of ${targetPace}/km. ${paceVerdict} — communicate this clearly.` : ''}${targetTime && targetTime > 0 ? ` You MUST mention whether they are on track for their target time of ${formatDurationForTTS(targetTime)}.` : ''}${cadence && cadence > 0 ? ' Include a brief note on their cadence.' : ''}${hasRoute === true ? ' Consider their current terrain if on a hill.' : ''}`;
+CRITICAL: You MUST weave in at least 2 specific data points from the Runner Status above (e.g. their actual pace like "${spokenPhasePace}", distance "${distance.toFixed(1)}km", time "${timeMin} minutes", cadence, heart rate). Runners want to hear their real numbers — do NOT give vague encouragement without citing their actual stats.${targetPace ? ` You MUST tell the runner whether they are on track for their target pace of ${spokenTargetPace}. ${paceVerdict} — communicate this clearly.` : ''}${targetTime && targetTime > 0 ? ` You MUST mention whether they are on track for their target time of ${formatDurationForTTS(targetTime)}.` : ''}${cadence && cadence > 0 ? ' Include a brief note on their cadence.' : ''}${hasRoute === true ? ' Consider their current terrain if on a hill.' : ''}`;
 
-    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful — always cite the runner's actual numbers (pace, distance, time etc). ${toneDirective(coachTone)}`;
+    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful — always cite the runner's actual numbers (pace, distance, time etc). ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}`;
   }
 
   const completion = await openai.chat.completions.create({
@@ -464,20 +492,24 @@ export async function generateStruggleCoaching(params: {
   const noTerrainRule = hasRoute === true ? '' : `
 CRITICAL: This runner has NO planned route. Do NOT mention hills, terrain, elevation, climbing, descending, flat, undulating, or any route/terrain characteristics. You have NO idea what terrain they are running on. Focus only on pace, effort, form, and motivation.`;
   
+  const spokenCurrentPaceStruggle = formatPaceForTTS(currentPace);
+  const spokenBaselinePace = formatPaceForTTS(baselinePace);
+  
   const prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
 
 The runner is struggling. Their pace has dropped ${Math.round(paceDropPercent)}% from their baseline.
-- Current pace: ${currentPace}/km (baseline was ${baselinePace}/km)
+- Current pace: ${spokenCurrentPaceStruggle} (baseline was ${spokenBaselinePace})
 - Distance: ${distance.toFixed(2)}km
 - Time: ${timeMin} minutes
 ${terrainContext}
 ${noTerrainRule}
+${PACE_FORMAT_RULE}
 Give a brief (1-2 sentences) supportive message to help them through this tough moment. You MUST cite at least one specific number (e.g. their pace or distance). Acknowledge their struggle, but encourage them to push through or adjust their strategy.`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Be supportive during tough moments — always reference actual data. Keep it brief. ${toneDirective(coachTone)}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Be supportive during tough moments — always reference actual data. Keep it brief. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 100,
@@ -540,7 +572,7 @@ The runner needs to SHORTEN their stride and INCREASE their cadence. Provide eli
 4. Imagine running on hot coals — minimize ground contact time
 5. Arms drive the cadence — quicker arms = quicker feet`;
   } else if (strideZone === 'UNDERSTRIDING') {
-    zoneAnalysis = `UNDERSTRIDING DETECTED: Cadence ${cadence} spm with stride length ${strideCm}cm — their cadence is too low for their pace of ${currentPace}/km.
+    zoneAnalysis = `UNDERSTRIDING DETECTED: Cadence ${cadence} spm with stride length ${strideCm}cm — their cadence is too low for their pace of ${formatPaceForTTS(currentPace)}.
 
 Understriding means they're shuffling with too-short steps at a low turnover rate. This:
 - Wastes energy on vertical oscillation (bouncing up and down)
@@ -564,17 +596,18 @@ ${zoneAnalysis}
 Runner Data:
 - Current cadence: ${cadence} spm
 - Stride length: ${strideCm}cm (optimal range: ${optMinCm}-${optMaxCm}cm)
-- Current pace: ${currentPace}/km
+- Current pace: ${formatPaceForTTS(currentPace)}
 - Distance: ${distance.toFixed(1)}km, time: ${timeMin} minutes
 ${heartRate ? `- Heart rate: ${heartRate} bpm` : ''}
 ${physicalContext}
 
+${PACE_FORMAT_RULE}
 Give a coaching message (3-4 sentences). First, tell them their cadence and stride length. Then explain what ${strideZone === 'OPTIMAL' ? 'this means (good form!)' : `${strideZone.toLowerCase()} means and why it matters`}. Finally, give ${strideZone === 'OPTIMAL' ? 'brief encouragement to maintain it' : '2-3 specific, actionable technique tips they can apply RIGHT NOW during this run'}. Be specific with numbers. No emojis.`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, an elite ${coachTone} running biomechanics coach. You specialize in cadence optimization and stride analysis. Give specific, actionable technique coaching — tell the runner exactly what to change and how. Reference actual numbers. No emojis. Keep it to 3-4 sentences that can be spoken in under 20 seconds.` },
+      { role: "system", content: `You are ${coachName}, an elite ${coachTone} running biomechanics coach. You specialize in cadence optimization and stride analysis. Give specific, actionable technique coaching — tell the runner exactly what to change and how. Reference actual numbers. No emojis. ${PACE_FORMAT_RULE} Keep it to 3-4 sentences that can be spoken in under 20 seconds.` },
       { role: "user", content: prompt }
     ],
     max_tokens: 200,
@@ -1101,7 +1134,7 @@ RUN (No planned route):
   // Add target pace info if user has a target time/pace
   if (targetTime && targetPace) {
     routeInfo += `
-- Target: Complete ${formatDistanceForTTS(distance)} in ${formatDurationForTTS(targetTime)} (target pace: ${targetPace}/km)`;
+- Target: Complete ${formatDistanceForTTS(distance)} in ${formatDurationForTTS(targetTime)} (target pace: ${formatPaceForTTS(targetPace)})`;
   }
 
   // Build wellness context string
@@ -1168,12 +1201,12 @@ Based on this data, provide:
 1. "briefing": A personalized pre-run briefing (4-5 sentences). You MUST include these specific details:
    - The planned distance: "${formatDistanceForTTS(distance)}"
    ${weather && weather.temp !== undefined ? `- The weather: "${weather.temp || weather.temperature}°C and ${weather.condition || 'clear'}"` : '- Weather data is not available, do not mention weather'}
-   ${targetPace ? `- Their target pace: "${targetPace}/km"` : '- No target pace set, suggest they run at a comfortable effort'}
+   ${targetPace ? `- Their target pace: "${formatPaceForTTS(targetPace)}"` : '- No target pace set, suggest they run at a comfortable effort'}
    ${targetTime ? `- Their target time: "${formatDurationForTTS(targetTime || 0)}"` : ''}
    - Their wellness/recovery state if Garmin data is available above
    ${weatherAdvantage ? '- The weather advantage noted above' : ''}
-   Include the actual numbers - do NOT give a vague or generic briefing.
-2. "intensityAdvice": Specific intensity advice. ${targetPace ? `They are targeting ${targetPace}/km - say whether to stick to it, go easier, or push harder based on their wellness.` : 'Suggest an appropriate effort level based on their wellness.'}
+   Include the actual numbers - do NOT give a vague or generic briefing. ${PACE_FORMAT_RULE}
+2. "intensityAdvice": Specific intensity advice. ${targetPace ? `They are targeting ${formatPaceForTTS(targetPace)} - say whether to stick to it, go easier, or push harder based on their wellness.` : 'Suggest an appropriate effort level based on their wellness.'}
 3. "warnings": Array of any warnings if their wellness indicators suggest caution. Empty array if none.
 4. "readinessInsight": How their body data affects today's run.
 

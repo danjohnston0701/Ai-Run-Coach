@@ -38,7 +38,7 @@ interface ApiService {
     suspend fun createGoal(@Body request: CreateGoalRequest): Goal
 
     @DELETE("/api/goals/{id}")
-    suspend fun deleteGoal(@Path("id") goalId: String)
+    suspend fun deleteGoal(@Path("id") goalId: String): retrofit2.Response<Unit>
 
     @GET("/api/users/{userId}/friends")
     suspend fun getFriends(@Path("userId") userId: String): List<Friend>
