@@ -193,7 +193,8 @@ fun RunSessionScreen(
                 onStop = { showStopConfirm = true },
                 onCancel = onCancel,
                 onSimulate = { viewModel.startSimulatedRun() },
-                onSimulateNav = { viewModel.startNavigationSimulatedRun() }
+                onSimulateNav = { viewModel.startNavigationSimulatedRun() },
+                hasRouteLoaded = routePolyline != null
             )
         }
 
@@ -1885,7 +1886,8 @@ fun ControlButtons(
     onStop: () -> Unit,
     onCancel: () -> Unit = {},
     onSimulate: (() -> Unit)? = null,
-    onSimulateNav: (() -> Unit)? = null
+    onSimulateNav: (() -> Unit)? = null,
+    hasRouteLoaded: Boolean = false
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -2021,7 +2023,7 @@ fun ControlButtons(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Simulate Nav Run (3km)",
+                        text = if (hasRouteLoaded) "Simulate Route Run" else "Simulate Nav Run (Belfast)",
                         style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
                         color = Color.White
                     )
@@ -2067,7 +2069,35 @@ fun EliteRouteMap(
             NavState()
     }
 
-    // 🔁 Auto-follow + ⅓ bottom framing
+    // 📍 Initialize camera on planned route when map first loads (before run starts)
+    // This prevents the map from defaulting to (0,0) Africa
+    var hasInitializedCamera by remember { mutableStateOf(false) }
+    LaunchedEffect(plannedRoute) {
+        if (!hasInitializedCamera && plannedRoute.isNotEmpty()) {
+            hasInitializedCamera = true
+            // Zoom to fit the entire planned route
+            val boundsBuilder = com.google.android.gms.maps.model.LatLngBounds.Builder()
+            plannedRoute.forEach { boundsBuilder.include(it) }
+            try {
+                val bounds = boundsBuilder.build()
+                cameraPositionState.animate(
+                    update = CameraUpdateFactory.newLatLngBounds(bounds, 80),
+                    durationMs = 500
+                )
+            } catch (e: Exception) {
+                // Fallback: center on first point
+                val first = plannedRoute.first()
+                cameraPositionState.animate(
+                    update = CameraUpdateFactory.newCameraPosition(
+                        CameraPosition.Builder().target(first).zoom(15f).build()
+                    ),
+                    durationMs = 500
+                )
+            }
+        }
+    }
+
+    // 🔁 Auto-follow runner position during run
     LaunchedEffect(latestPoint, compassLocked) {
         latestPoint?.let { point ->
             if (!isUserInteracting) {

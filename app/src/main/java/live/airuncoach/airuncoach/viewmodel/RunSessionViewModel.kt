@@ -375,21 +375,39 @@ class RunSessionViewModel @Inject constructor(
     }
 
     /**
-     * Start a simulated navigation run that follows a Belfast test route.
-     * Tests the full navigation pipeline: turn warnings, reached waypoints,
-     * missed waypoint auto-skip, and TTS announcements.
+     * Start a simulated navigation run using the ACTUAL generated route.
+     * If a route is loaded (from Map My Run), uses its polyline and turn instructions.
+     * Falls back to a Belfast test route if no route is configured.
      *
-     * Uses a ~3km Belfast loop with 10 turn instructions.
-     * Deliberately misses one waypoint to verify the skip logic.
+     * The simulation:
+     * - Follows the route polyline points sequentially
+     * - Triggers all navigation TTS (upcoming turns, reached waypoints, missed waypoint skip)
+     * - Shows the runner moving on the map in real time
      */
     fun startNavigationSimulatedRun() {
         _runState.update { it.copy(isRunning = true) }
 
         try {
+            val route = runConfig?.route
+            val distance = route?.distance ?: 3.0
+            
+            // Pass route data to the service via NavigationRouteHolder
+            if (route != null && route.polyline.isNotEmpty()) {
+                NavigationRouteHolder.set(route.polyline, route.turnInstructions)
+                Log.d("RunSessionViewModel", "Nav simulation using ACTUAL route: ${route.name}, " +
+                        "${route.turnInstructions.size} instructions, ${distance}km")
+            } else {
+                Log.d("RunSessionViewModel", "Nav simulation: no route configured, using Belfast test route")
+            }
+            
             val intent = Intent(context, RunTrackingService::class.java).apply {
                 action = RunTrackingService.ACTION_START_NAV_SIMULATION
-                putExtra(RunTrackingService.EXTRA_TARGET_DISTANCE, 3.0) // 3 km
+                putExtra(RunTrackingService.EXTRA_TARGET_DISTANCE, distance)
                 putExtra(RunTrackingService.EXTRA_HAS_ROUTE, true)
+                // Pass polyline so the service can build the simulator from it
+                if (route != null && route.polyline.isNotEmpty()) {
+                    putExtra("EXTRA_ROUTE_POLYLINE", route.polyline)
+                }
             }
             context.startForegroundService(intent)
             Log.d("RunSessionViewModel", "Started navigation simulation")

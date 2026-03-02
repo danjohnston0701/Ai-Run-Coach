@@ -275,10 +275,14 @@ class RunTrackingService : Service(), SensorEventListener {
         setupLocationCallback()
     }
 
+    // Polyline passed via intent for nav simulation
+    private var navSimulationPolyline: String? = null
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         targetDistance = intent?.getDoubleExtra(EXTRA_TARGET_DISTANCE, 0.0)?.takeIf { it > 0 }
         targetTime = intent?.getLongExtra(EXTRA_TARGET_TIME, 0)?.takeIf { it > 0 }
         hasRoute = intent?.getBooleanExtra(EXTRA_HAS_ROUTE, false) == true
+        navSimulationPolyline = intent?.getStringExtra("EXTRA_ROUTE_POLYLINE")
 
         when (intent?.action) {
             ACTION_START_TRACKING -> startTracking()
@@ -440,39 +444,51 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     /**
-     * Start a simulated run that follows a predefined route with turn instructions.
-     * Tests the full navigation pipeline: upcoming turn warnings, reached waypoints,
-     * missed waypoint detection + auto-skip, and TTS announcements.
+     * Start a simulated run that follows a route with turn instructions.
      *
-     * Uses a ~3km Belfast City Centre loop with 10 turn instructions.
-     * Deliberately misses waypoint #3 ("Turn right onto May Street") to test skip logic.
+     * If the ViewModel passed an actual route polyline (from Map My Run), uses that.
+     * Otherwise falls back to the hardcoded Belfast test route.
+     *
+     * The simulator walks along the decoded polyline points, producing realistic
+     * location updates that drive the map, navigation engine, and coaching triggers.
      */
     private fun startNavigationSimulation() {
         if (isTracking || isSimulating) return
         isSimulating = true
         hasRoute = true
 
-        // Create test route simulator with Belfast route and missed waypoint
-        val routeSimulator = RouteFollowingSimulator.createBelfastTestRoute()
-
-        // Load the turn instructions into the navigation engine via the static holder
-        val testInstructions = listOf(
-            TurnInstruction("Head east on Chichester Street", 54.5964, -5.9280, 0.15),
-            TurnInstruction("Turn right onto Victoria Street", 54.5955, -5.9238, 0.35),
-            TurnInstruction("Continue straight onto East Bridge Street", 54.5940, -5.9234, 0.55),
-            TurnInstruction("Turn right onto May Street", 54.5938, -5.9220, 0.70),
-            TurnInstruction("Turn left onto Dublin Road", 54.5934, -5.9185, 0.90),
-            TurnInstruction("Turn right onto University Road", 54.5895, -5.9175, 1.35),
-            TurnInstruction("Turn right onto Bradbury Place", 54.5889, -5.9235, 1.75),
-            TurnInstruction("Continue north towards Shaftesbury Square", 54.5915, -5.9268, 2.10),
-            TurnInstruction("Continue straight back to City Hall", 54.5945, -5.9288, 2.55),
-            TurnInstruction("Arrive at finish near Belfast City Hall", 54.5964, -5.9301, 2.95)
-        )
-        NavigationRouteHolder.set(null, testInstructions)
-        targetDistance = 3.0 // 3km route
-
-        Log.d("RunTrackingService", "Starting NAVIGATION simulation with ${testInstructions.size} turn instructions")
-        Log.d("RunTrackingService", "Waypoint #3 ('Turn right onto May Street') will be deliberately MISSED")
+        // Decode the actual route polyline if provided by the ViewModel
+        val polyline = navSimulationPolyline
+        val routeSimulator: RouteFollowingSimulator
+        
+        if (polyline != null && polyline.isNotEmpty()) {
+            // Use the ACTUAL generated route
+            val decodedPoints = try {
+                PolyUtil.decode(polyline)
+            } catch (e: Exception) {
+                Log.e("RunTrackingService", "Failed to decode route polyline for simulation", e)
+                emptyList()
+            }
+            
+            if (decodedPoints.size >= 2) {
+                // NavigationRouteHolder was already set by the ViewModel with turn instructions
+                routeSimulator = RouteFollowingSimulator(
+                    polylinePoints = decodedPoints,
+                    turnInstructions = emptyList(), // Not needed by simulator, only by nav engine
+                    tickIntervalMs = 2000L,
+                    missWaypointIndex = -1  // Don't deliberately miss any on real routes
+                )
+                Log.d("RunTrackingService", "Nav simulation using ACTUAL route: ${decodedPoints.size} polyline points, ${targetDistance ?: "?"}km")
+            } else {
+                // Fallback to Belfast test route
+                Log.w("RunTrackingService", "Route polyline too short (${decodedPoints.size} points), falling back to Belfast test")
+                routeSimulator = createBelfastFallbackSimulator()
+            }
+        } else {
+            // No route provided — use Belfast test route with hardcoded instructions
+            Log.d("RunTrackingService", "No route polyline, using Belfast test route")
+            routeSimulator = createBelfastFallbackSimulator()
+        }
 
         // Start tracking (this will consume the NavigationRouteHolder data)
         startTracking()
@@ -492,6 +508,25 @@ class RunTrackingService : Service(), SensorEventListener {
                 delay(routeSimulator.tickIntervalMs)
             }
         }
+    }
+    
+    /** Create the Belfast test route simulator as fallback */
+    private fun createBelfastFallbackSimulator(): RouteFollowingSimulator {
+        val testInstructions = listOf(
+            TurnInstruction("Head east on Chichester Street", 54.5964, -5.9280, 0.15),
+            TurnInstruction("Turn right onto Victoria Street", 54.5955, -5.9238, 0.35),
+            TurnInstruction("Continue straight onto East Bridge Street", 54.5940, -5.9234, 0.55),
+            TurnInstruction("Turn right onto May Street", 54.5938, -5.9220, 0.70),
+            TurnInstruction("Turn left onto Dublin Road", 54.5934, -5.9185, 0.90),
+            TurnInstruction("Turn right onto University Road", 54.5895, -5.9175, 1.35),
+            TurnInstruction("Turn right onto Bradbury Place", 54.5889, -5.9235, 1.75),
+            TurnInstruction("Continue north towards Shaftesbury Square", 54.5915, -5.9268, 2.10),
+            TurnInstruction("Continue straight back to City Hall", 54.5945, -5.9288, 2.55),
+            TurnInstruction("Arrive at finish near Belfast City Hall", 54.5964, -5.9301, 2.95)
+        )
+        NavigationRouteHolder.set(null, testInstructions)
+        targetDistance = 3.0
+        return RouteFollowingSimulator.createBelfastTestRoute()
     }
 
     // ==================== NAVIGATION ENGINE ====================
