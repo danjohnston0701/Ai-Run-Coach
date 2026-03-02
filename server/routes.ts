@@ -1832,39 +1832,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!deviceId || deviceId.trim() === "") {
         return res.status(400).json({ error: "Invalid device ID" });
       }
-      
-      // Verify device belongs to user before deleting
-      const devices = await storage.getConnectedDevices(req.user!.userId);
-      const device = devices.find(d => d.id === deviceId);
-      
-      if (!device) {
-        return res.status(404).json({ error: "Device not found" });
-      }
-      
-      // Delete (deactivate) the device
-      await storage.deleteConnectedDevice(deviceId);
-      
-      console.log(`✅ Device ${deviceId} (${device.deviceType}) disconnected for user ${req.user!.userId}`);
-      res.status(204).send(); // No content - successful deletion
-    } catch (error: any) {
-      console.error("Disconnect device error:", error);
-      res.status(500).json({ error: "Failed to disconnect device" });
-    }
-  });
 
-  app.delete("/api/connected-devices/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const device = await storage.getConnectedDevice(req.params.id);
+      console.log(`🔌 Disconnect request for device: ${deviceId}, user: ${req.user!.userId}`);
+      
+      // First try direct DB lookup by ID
+      let device = await storage.getConnectedDevice(deviceId);
+      
+      // If not found, try finding by matching user's devices (handles type mismatches)
+      if (!device) {
+        const devices = await storage.getConnectedDevices(req.user!.userId);
+        // Use loose equality (==) to handle numeric ID "5" vs 5 type mismatches
+        device = devices.find(d => String(d.id) === String(deviceId)) || undefined;
+        console.log(`🔍 Fallback search found: ${device ? device.id : 'nothing'}, checked ${devices.length} devices: [${devices.map(d => `${d.id}(${typeof d.id})`).join(', ')}]`);
+      }
       
       if (!device) {
         return res.status(404).json({ error: "Device not found" });
       }
       
+      // Verify device belongs to user
       if (device.userId !== req.user!.userId) {
         return res.status(403).json({ error: "Not authorized" });
       }
       
-      await storage.deleteConnectedDevice(req.params.id);
+      // Delete (deactivate) the device
+      await storage.deleteConnectedDevice(String(device.id));
+      
+      console.log(`✅ Device ${device.id} (${device.deviceType}) disconnected for user ${req.user!.userId}`);
       res.json({ success: true });
     } catch (error: any) {
       console.error("Disconnect device error:", error);
