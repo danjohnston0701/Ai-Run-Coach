@@ -2815,7 +2815,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // GARMIN PUSH WEBHOOK ENDPOINTS
   // These endpoints receive real-time data from Garmin's servers
   // No auth required - Garmin validates with their own mechanism
+  //
+  // IMPORTANT: Routes are mounted at BOTH /api/garmin/webhook/* (singular)
+  // AND /api/garmin/webhooks/* (plural) because the Garmin developer portal
+  // was configured with "webhooks" (plural) for some endpoints.
   // ==========================================
+
+  // Helper to register a handler on both singular and plural webhook paths
+  const garminWebhook = (path: string, handler: (req: Request, res: Response) => Promise<any>) => {
+    app.post(`/api/garmin/webhook/${path}`, handler);
+    app.post(`/api/garmin/webhooks/${path}`, handler);
+  };
 
   // Helper to find user by Garmin user access token
   // The userAccessToken in Garmin webhooks is the same as the OAuth access token we store
@@ -2830,7 +2840,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
 
   // ACTIVITY - Activities (when user completes a run/walk)
-  app.post("/api/garmin/webhook/activities", async (req: Request, res: Response) => {
+  garminWebhook("activities", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received activities push:', JSON.stringify(req.body).slice(0, 1000));
       
@@ -2935,7 +2945,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ACTIVITY - Activity Details (detailed activity metrics)
-  app.post("/api/garmin/webhook/activity-details", async (req: Request, res: Response) => {
+  garminWebhook("activity-details", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received activity details push');
       res.status(200).json({ success: true });
@@ -2946,7 +2956,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // HEALTH - Sleeps (sleep data push)
-  app.post("/api/garmin/webhook/sleeps", async (req: Request, res: Response) => {
+  garminWebhook("sleeps", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received sleeps push:', JSON.stringify(req.body).slice(0, 1000));
       
@@ -3008,7 +3018,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // HEALTH - Stress (stress data push)
-  app.post("/api/garmin/webhook/stress", async (req: Request, res: Response) => {
+  garminWebhook("stress", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received stress push:', JSON.stringify(req.body).slice(0, 1000));
       
@@ -3066,7 +3076,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // HEALTH - HRV Summary (heart rate variability)
-  app.post("/api/garmin/webhook/hrv", async (req: Request, res: Response) => {
+  garminWebhook("hrv", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received HRV push:', JSON.stringify(req.body).slice(0, 1000));
       
@@ -3122,7 +3132,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // HEALTH - Dailies (daily activity summary with Body Battery, steps, etc.)
-  app.post("/api/garmin/webhook/dailies", async (req: Request, res: Response) => {
+  garminWebhook("dailies", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received dailies push:', JSON.stringify(req.body).slice(0, 1000));
       
@@ -3199,7 +3209,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // HEALTH - Body Compositions
-  app.post("/api/garmin/webhook/body-compositions", async (req: Request, res: Response) => {
+  garminWebhook("body-compositions", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received body compositions push:', JSON.stringify(req.body).slice(0, 1000));
       
@@ -3239,7 +3249,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // HEALTH - Pulse Ox
-  app.post("/api/garmin/webhook/pulse-ox", async (req: Request, res: Response) => {
+  garminWebhook("pulse-ox", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received pulse ox push:', JSON.stringify(req.body).slice(0, 1000));
       
@@ -3289,7 +3299,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // HEALTH - Respiration
-  app.post("/api/garmin/webhook/respiration", async (req: Request, res: Response) => {
+  garminWebhook("respiration", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received respiration push:', JSON.stringify(req.body).slice(0, 1000));
       
@@ -3338,7 +3348,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // COMMON - Deregistrations (user disconnects Garmin)
-  app.post("/api/garmin/webhook/deregistrations", async (req: Request, res: Response) => {
+  garminWebhook("deregistrations", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received deregistration:', JSON.stringify(req.body).slice(0, 500));
       
@@ -3364,7 +3374,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // COMMON - User Permissions Change
-  app.post("/api/garmin/webhook/permissions", async (req: Request, res: Response) => {
+  garminWebhook("permissions", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received permissions change:', JSON.stringify(req.body).slice(0, 500));
       res.status(200).json({ success: true });
@@ -3374,42 +3384,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Other health endpoints (log only for now)
-  app.post("/api/garmin/webhook/epochs", async (_req: Request, res: Response) => {
+  // Other health endpoints (accept and log only for now)
+  const garminAckHandler = async (_req: Request, res: Response) => {
     res.status(200).json({ success: true });
-  });
-  
-  app.post("/api/garmin/webhook/health-snapshot", async (_req: Request, res: Response) => {
-    res.status(200).json({ success: true });
-  });
-  
-  app.post("/api/garmin/webhook/user-metrics", async (_req: Request, res: Response) => {
-    res.status(200).json({ success: true });
-  });
-  
-  app.post("/api/garmin/webhook/blood-pressure", async (_req: Request, res: Response) => {
-    res.status(200).json({ success: true });
-  });
-  
-  app.post("/api/garmin/webhook/skin-temperature", async (_req: Request, res: Response) => {
-    res.status(200).json({ success: true });
-  });
-  
-  app.post("/api/garmin/webhook/moveiq", async (_req: Request, res: Response) => {
-    res.status(200).json({ success: true });
-  });
-  
-  app.post("/api/garmin/webhook/manually-updated-activities", async (_req: Request, res: Response) => {
-    res.status(200).json({ success: true });
-  });
-  
-  app.post("/api/garmin/webhook/activity-files", async (_req: Request, res: Response) => {
-    res.status(200).json({ success: true });
-  });
-  
-  app.post("/api/garmin/webhook/menstrual-cycle", async (_req: Request, res: Response) => {
-    res.status(200).json({ success: true });
-  });
+  };
+
+  garminWebhook("epochs", garminAckHandler);
+  garminWebhook("health-snapshot", garminAckHandler);
+  garminWebhook("user-metrics", garminAckHandler);
+  garminWebhook("blood-pressure", garminAckHandler);
+  garminWebhook("skin-temperature", garminAckHandler);
+  garminWebhook("moveiq", garminAckHandler);
+  garminWebhook("manually-updated-activities", garminAckHandler);
+  garminWebhook("activity-files", garminAckHandler);
+  garminWebhook("menstrual-cycle", garminAckHandler);
 
   // ==========================================
   // END GARMIN WEBHOOK ENDPOINTS

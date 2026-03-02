@@ -54,10 +54,28 @@ class RunSummaryViewModel @Inject constructor(
     
     private val _loadError = MutableStateFlow<String?>(null)
     val loadError: StateFlow<String?> = _loadError.asStateFlow()
+
+    private val _isGarminConnected = MutableStateFlow(false)
+    val isGarminConnected: StateFlow<Boolean> = _isGarminConnected.asStateFlow()
     
     // Target info from run setup
     private var targetDistance: Double? = null
     private var targetTime: Long? = null
+
+    init {
+        checkGarminConnection()
+    }
+
+    private fun checkGarminConnection() {
+        viewModelScope.launch {
+            try {
+                val devices = apiService.getConnectedDevices()
+                _isGarminConnected.value = devices.any { it.deviceType == "garmin" && it.isActive == true }
+            } catch (_: Exception) {
+                _isGarminConnected.value = false
+            }
+        }
+    }
 
     /**
      * Load run by ID from backend API.

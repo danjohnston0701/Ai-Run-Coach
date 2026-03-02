@@ -55,6 +55,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -129,6 +131,7 @@ fun RunSummaryScreenFlagship(
     val userPostRunComments by viewModel.userPostRunComments.collectAsState()
     val strugglePoints by viewModel.strugglePoints.collectAsState()
     val isAdmin = viewModel.isAdminUser()
+    val isGarminConnected by viewModel.isGarminConnected.collectAsState()
 
     val context = LocalContext.current
 
@@ -188,6 +191,7 @@ fun RunSummaryScreenFlagship(
                             comments = userPostRunComments,
                             onCommentsChange = viewModel::updatePostRunComments,
                             onGenerateAi = { viewModel.generateAIAnalysis() },
+                            isGarminConnected = isGarminConnected,
                             onShareCard = {
                                 // share a “summary card” (text now; optional bitmap helper included below)
                                 viewModel.shareRunWithLink(context)
@@ -325,6 +329,7 @@ private fun SummaryTabFlagship(
     comments: String,
     onCommentsChange: (String) -> Unit,
     onGenerateAi: () -> Unit,
+    isGarminConnected: Boolean = false,
     onShareCard: () -> Unit,
     onDelete: () -> Unit,
     isAdmin: Boolean = false,
@@ -409,6 +414,13 @@ private fun SummaryTabFlagship(
                 onCommentsChange = onCommentsChange,
                 onGenerateAi = onGenerateAi
             )
+        }
+
+        // Garmin recognition badge — shown when user has an active Garmin device
+        if (isGarminConnected || run.externalSource == "garmin") {
+            item {
+                GarminPoweredByBadge(text = "Run Insights Powered by Garmin")
+            }
         }
 
         item {
@@ -4488,6 +4500,35 @@ private fun ErrorViewFlagship(
                 )
             }
         }
+    }
+}
+
+/* -------------------------------- GARMIN RECOGNITION --------------------------------- */
+
+@Composable
+private fun GarminPoweredByBadge(text: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.md, vertical = Spacing.xs),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.ic_garmin_connect_logo),
+            contentDescription = "Garmin Connect",
+            modifier = Modifier.size(20.dp),
+            contentScale = ContentScale.Fit
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = text,
+            style = AppTextStyles.caption.copy(
+                fontSize = 11.sp,
+                color = Color(0xFF8E9BAE),
+                letterSpacing = 0.3.sp
+            )
+        )
     }
 }
 

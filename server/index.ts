@@ -56,15 +56,21 @@ function setupCors(app: express.Application) {
 }
 
 function setupBodyParsing(app: express.Application) {
+  // Garmin webhook payloads can be up to 100MB (activity details with GPS tracks)
+  // Apply a larger limit specifically for Garmin webhook routes
+  app.use('/api/garmin/webhook', express.json({ limit: '100mb' }));
+  app.use('/api/garmin/webhooks', express.json({ limit: '100mb' }));
+
   app.use(
     express.json({
+      limit: '10mb',
       verify: (req, _res, buf) => {
         req.rawBody = buf;
       },
     }),
   );
 
-  app.use(express.urlencoded({ extended: false }));
+  app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 }
 
 function setupRequestLogging(app: express.Application) {

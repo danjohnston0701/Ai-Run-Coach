@@ -39,9 +39,24 @@ class ProfileViewModel @Inject constructor(
     private val _friendCount = MutableStateFlow(0)
     val friendCount: StateFlow<Int> = _friendCount.asStateFlow()
 
+    private val _isGarminConnected = MutableStateFlow(false)
+    val isGarminConnected: StateFlow<Boolean> = _isGarminConnected.asStateFlow()
+
     init {
         loadUser()
         loadFriendCount()
+        checkGarminConnection()
+    }
+
+    private fun checkGarminConnection() {
+        viewModelScope.launch {
+            try {
+                val devices = apiService.getConnectedDevices()
+                _isGarminConnected.value = devices.any { it.deviceType == "garmin" && it.isActive == true }
+            } catch (_: Exception) {
+                _isGarminConnected.value = false
+            }
+        }
     }
 
     private fun loadUser() {

@@ -71,6 +71,8 @@ fun ProfileScreen(
     val user by viewModel.user.collectAsState()
     val friendCount by viewModel.friendCount.collectAsState()
     
+    val isGarminConnected by viewModel.isGarminConnected.collectAsState()
+
     // User preferences for Garmin auto-sync
     val userPreferences = remember { UserPreferences(context) }
     val autoSyncToGarmin by userPreferences.autoSyncToGarmin.collectAsState(initial = true)
@@ -242,6 +244,35 @@ fun ProfileScreen(
                 SettingsItem(icon = R.drawable.icon_play_vector, text = "Subscription", value = user?.subscriptionTier ?: "Free", onClick = onNavigateToSubscription)
             }
         }
+
+        if (isGarminConnected) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg, vertical = Spacing.xs),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_garmin_connect_logo),
+                        contentDescription = "Garmin Connect",
+                        modifier = Modifier.size(18.dp),
+                        contentScale = ContentScale.Fit
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Health Data powered by Garmin",
+                        style = AppTextStyles.caption.copy(
+                            fontSize = 11.sp,
+                            color = Color(0xFF8E9BAE),
+                            letterSpacing = 0.3.sp
+                        )
+                    )
+                }
+            }
+        }
+
         item { Spacer(modifier = Modifier.height(Spacing.xl)) }
 
         item {
