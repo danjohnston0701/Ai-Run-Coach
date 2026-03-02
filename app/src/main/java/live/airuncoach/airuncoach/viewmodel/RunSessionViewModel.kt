@@ -32,6 +32,7 @@ import live.airuncoach.airuncoach.utils.CoachingAudioQueue
 import live.airuncoach.airuncoach.utils.SpeechRecognizerHelper
 import live.airuncoach.airuncoach.utils.SpeechState
 import live.airuncoach.airuncoach.utils.SpeechStatus
+import live.airuncoach.airuncoach.util.NavigationRouteHolder
 import live.airuncoach.airuncoach.utils.TextToSpeechHelper
 import java.util.Locale
 import javax.inject.Inject
@@ -373,6 +374,30 @@ class RunSessionViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Start a simulated navigation run that follows a Belfast test route.
+     * Tests the full navigation pipeline: turn warnings, reached waypoints,
+     * missed waypoint auto-skip, and TTS announcements.
+     *
+     * Uses a ~3km Belfast loop with 10 turn instructions.
+     * Deliberately misses one waypoint to verify the skip logic.
+     */
+    fun startNavigationSimulatedRun() {
+        _runState.update { it.copy(isRunning = true) }
+
+        try {
+            val intent = Intent(context, RunTrackingService::class.java).apply {
+                action = RunTrackingService.ACTION_START_NAV_SIMULATION
+                putExtra(RunTrackingService.EXTRA_TARGET_DISTANCE, 3.0) // 3 km
+                putExtra(RunTrackingService.EXTRA_HAS_ROUTE, true)
+            }
+            context.startForegroundService(intent)
+            Log.d("RunSessionViewModel", "Started navigation simulation")
+        } catch (e: Exception) {
+            Log.e("RunSessionViewModel", "Failed to start navigation simulation", e)
+        }
+    }
+
     fun startRun() {
         // Only clear coach state if no briefing audio is currently playing
         // This allows the pre-run briefing to finish naturally if still playing
@@ -386,6 +411,13 @@ class RunSessionViewModel @Inject constructor(
         }
         
         try {
+            // Pass route navigation data to the service via static holder
+            // (Intent extras can't reliably carry large lists)
+            runConfig?.route?.let { route ->
+                NavigationRouteHolder.set(route.polyline, route.turnInstructions)
+                Log.d("RunSessionViewModel", "Set navigation data: ${route.turnInstructions.size} turn instructions")
+            }
+            
             val intent = Intent(context, RunTrackingService::class.java).apply {
                 action = RunTrackingService.ACTION_START_TRACKING
                 // Pass target distance and time to service if configured

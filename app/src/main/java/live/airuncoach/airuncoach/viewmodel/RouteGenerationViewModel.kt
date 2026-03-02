@@ -17,6 +17,7 @@ import live.airuncoach.airuncoach.network.model.RouteGenerationRequest
 import live.airuncoach.airuncoach.network.model.RouteOption
 import live.airuncoach.airuncoach.network.model.IntelligentRouteRequest
 import live.airuncoach.airuncoach.network.model.IntelligentRoute
+import com.google.maps.android.PolyUtil
 import retrofit2.HttpException
 import java.net.ConnectException
 import java.net.SocketTimeoutException
@@ -159,7 +160,7 @@ class RouteGenerationViewModel @Inject constructor(
             elevationLoss = this.elevation?.loss ?: 0.0,
             maxGradientPercent = 0.0,
             maxGradientDegrees = 0.0,
-            instructions = emptyList(),
+            instructions = this.turnInstructions?.map { it.instruction } ?: emptyList(),
             turnInstructions = this.turnInstructions?.map { 
                 TurnInstruction(
                     instruction = it.instruction,
@@ -183,6 +184,42 @@ class RouteGenerationViewModel @Inject constructor(
         val durationMinutes = (estimatedTime ?: 30.0) / 60
         val difficultyStr = difficulty ?: "moderate"
         
+        // Decode polyline to extract lat/lng for turn instructions that use interval indices
+        val polylinePoints = if (!this.polyline.isNullOrEmpty()) {
+            try { PolyUtil.decode(this.polyline) } catch (e: Exception) {
+                Log.e("RouteGeneration", "Failed to decode polyline for turn instructions", e)
+                emptyList()
+            }
+        } else emptyList()
+        
+        // Map GraphHopper turn instructions to our TurnInstruction model.
+        // GraphHopper provides interval[startIndex, endIndex] into the polyline points,
+        // which we use to get the exact lat/lng for each instruction.
+        val mappedTurnInstructions = this.turnInstructions?.mapNotNull { ghInst ->
+            val text = ghInst.text ?: return@mapNotNull null
+            // Skip "Arrive at destination" / "Finish" type instructions with no real turn
+            if (text.isBlank()) return@mapNotNull null
+            
+            // Get lat/lng from polyline interval
+            val startIdx = ghInst.interval?.firstOrNull() ?: 0
+            val point = polylinePoints.getOrNull(startIdx)
+            
+            if (point != null) {
+                TurnInstruction(
+                    instruction = text,
+                    latitude = point.latitude,
+                    longitude = point.longitude,
+                    distance = (ghInst.distance ?: 0.0) / 1000.0 // Convert meters to km
+                )
+            } else {
+                // Fallback: use distance-based position (less accurate)
+                Log.w("RouteGeneration", "No polyline point for turn instruction '$text' at index $startIdx")
+                null
+            }
+        } ?: emptyList()
+        
+        Log.d("RouteGeneration", "Mapped ${mappedTurnInstructions.size} turn instructions from GraphHopper (${this.turnInstructions?.size ?: 0} raw)")
+        
         return GeneratedRoute(
             id = this.id ?: "unknown",
             name = "Route ${(distanceKm).toInt()}km - ${difficultyStr.replaceFirstChar { it.uppercase() }}",
@@ -200,8 +237,8 @@ class RouteGenerationViewModel @Inject constructor(
             elevationLoss = this.elevationLoss ?: 0.0, // Already in meters
             maxGradientPercent = 0.0, // Could be calculated from elevation data
             maxGradientDegrees = 0.0,
-            instructions = listOf("Circuit route - %.1f km, ~$durationMinutes minutes".format(distanceKm)),
-            turnInstructions = emptyList(), // Turn-by-turn available from backend if needed
+            instructions = mappedTurnInstructions.map { it.instruction },
+            turnInstructions = mappedTurnInstructions,
             backtrackRatio = 1.0 - (qualityScore ?: 0.5), // Quality score inverted
             angularSpread = (popularityScore ?: 0.5) * 360.0, // Use popularity as spread indicator
             templateName = "Intelligent Route",

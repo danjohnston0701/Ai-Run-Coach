@@ -37,11 +37,16 @@ import live.airuncoach.airuncoach.network.model.*
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.data.UserPreferences
 import live.airuncoach.airuncoach.utils.CoachingAudioQueue
+import live.airuncoach.airuncoach.utils.RouteFollowingSimulator
 import live.airuncoach.airuncoach.utils.RunSimulator
 import live.airuncoach.airuncoach.utils.TextToSpeechHelper
 import live.airuncoach.airuncoach.utils.AudioPlayerHelper
+import live.airuncoach.airuncoach.domain.model.TurnInstruction
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.domain.model.StrugglePoint
+import live.airuncoach.airuncoach.util.NavigationRouteHolder
+import com.google.maps.android.PolyUtil
+import com.google.maps.android.SphericalUtil
 import retrofit2.HttpException
 import java.security.MessageDigest
 import java.util.*
@@ -157,6 +162,22 @@ class RunTrackingService : Service(), SensorEventListener {
     // Speed-based average (for simulation where wall-clock time is compressed)
     private var speedReadingSum: Double = 0.0
     private var speedReadingCount: Int = 0
+
+    // ==================== NAVIGATION ENGINE ====================
+    // Turn-by-turn navigation state for route-guided runs
+    private var navTurnInstructions: List<TurnInstruction> = emptyList()
+    private var navPolylinePoints: List<com.google.android.gms.maps.model.LatLng> = emptyList()
+    private var navCurrentInstructionIndex: Int = 0  // Index of the NEXT instruction to deliver
+    private var navLastAnnouncedIndex: Int = -1      // Prevents double-announcing same instruction
+    private var navLastWarningIndex: Int = -1         // Prevents double-warning same instruction
+    private var navMissedWaypointCount: Int = 0
+    private var navLastCheckTime: Long = 0
+    private val NAV_CHECK_INTERVAL_MS = 3_000L       // Check navigation every 3 seconds
+    private val NAV_WAYPOINT_REACHED_RADIUS_M = 35.0  // Within 35m = reached waypoint
+    private val NAV_WARNING_RADIUS_M = 80.0            // Within 80m = announce upcoming turn
+    private val NAV_MISSED_WAYPOINT_RADIUS_M = 120.0   // Beyond 120m past waypoint = missed it
+    @Suppress("unused")
+    private val NAV_SKIP_DISTANCE_BEHIND_M = 60.0      // If user is 60m+ past the waypoint along the route, skip it
     
     // Weather and terrain
     private var weatherAtStart: WeatherData? = null
@@ -192,6 +213,7 @@ class RunTrackingService : Service(), SensorEventListener {
         const val ACTION_PAUSE_TRACKING = "ACTION_PAUSE_TRACKING"
         const val ACTION_RESUME_TRACKING = "ACTION_RESUME_TRACKING"
         const val ACTION_START_SIMULATION = "ACTION_START_SIMULATION"
+        const val ACTION_START_NAV_SIMULATION = "ACTION_START_NAV_SIMULATION"
         const val EXTRA_TARGET_DISTANCE = "EXTRA_TARGET_DISTANCE"
         const val EXTRA_TARGET_TIME = "EXTRA_TARGET_TIME"
         const val EXTRA_HAS_ROUTE = "EXTRA_HAS_ROUTE"
@@ -264,6 +286,7 @@ class RunTrackingService : Service(), SensorEventListener {
             ACTION_PAUSE_TRACKING -> pauseTracking()
             ACTION_RESUME_TRACKING -> resumeTracking()
             ACTION_START_SIMULATION -> startSimulation()
+            ACTION_START_NAV_SIMULATION -> startNavigationSimulation()
         }
         return START_STICKY
     }
@@ -361,6 +384,9 @@ class RunTrackingService : Service(), SensorEventListener {
         lastHrCoachingMinute = -1
         speedReadingSum = 0.0
         speedReadingCount = 0
+        
+        // Load navigation route data (turn instructions + polyline) from static holder
+        loadNavigationData()
 
         // Start location and sensors (skip real GPS/sensors during simulation — simulator feeds locations directly)
         try {
@@ -411,6 +437,253 @@ class RunTrackingService : Service(), SensorEventListener {
                 delay(simulator.tickIntervalMs)
             }
         }
+    }
+
+    /**
+     * Start a simulated run that follows a predefined route with turn instructions.
+     * Tests the full navigation pipeline: upcoming turn warnings, reached waypoints,
+     * missed waypoint detection + auto-skip, and TTS announcements.
+     *
+     * Uses a ~3km Belfast City Centre loop with 10 turn instructions.
+     * Deliberately misses waypoint #3 ("Turn right onto May Street") to test skip logic.
+     */
+    private fun startNavigationSimulation() {
+        if (isTracking || isSimulating) return
+        isSimulating = true
+        hasRoute = true
+
+        // Create test route simulator with Belfast route and missed waypoint
+        val routeSimulator = RouteFollowingSimulator.createBelfastTestRoute()
+
+        // Load the turn instructions into the navigation engine via the static holder
+        val testInstructions = listOf(
+            TurnInstruction("Head east on Chichester Street", 54.5964, -5.9280, 0.15),
+            TurnInstruction("Turn right onto Victoria Street", 54.5955, -5.9238, 0.35),
+            TurnInstruction("Continue straight onto East Bridge Street", 54.5940, -5.9234, 0.55),
+            TurnInstruction("Turn right onto May Street", 54.5938, -5.9220, 0.70),
+            TurnInstruction("Turn left onto Dublin Road", 54.5934, -5.9185, 0.90),
+            TurnInstruction("Turn right onto University Road", 54.5895, -5.9175, 1.35),
+            TurnInstruction("Turn right onto Bradbury Place", 54.5889, -5.9235, 1.75),
+            TurnInstruction("Continue north towards Shaftesbury Square", 54.5915, -5.9268, 2.10),
+            TurnInstruction("Continue straight back to City Hall", 54.5945, -5.9288, 2.55),
+            TurnInstruction("Arrive at finish near Belfast City Hall", 54.5964, -5.9301, 2.95)
+        )
+        NavigationRouteHolder.set(null, testInstructions)
+        targetDistance = 3.0 // 3km route
+
+        Log.d("RunTrackingService", "Starting NAVIGATION simulation with ${testInstructions.size} turn instructions")
+        Log.d("RunTrackingService", "Waypoint #3 ('Turn right onto May Street') will be deliberately MISSED")
+
+        // Start tracking (this will consume the NavigationRouteHolder data)
+        startTracking()
+
+        // Feed simulated route-following locations
+        serviceScope.launch {
+            while (isSimulating && isTracking) {
+                val point = routeSimulator.nextPoint()
+                if (point == null) {
+                    Log.d("RunTrackingService", "Navigation simulation complete, stopping")
+                    withContext(Dispatchers.Main) { stopTracking() }
+                    break
+                }
+                currentHeartRate = point.heartRate
+                currentCadence = point.cadence
+                withContext(Dispatchers.Main) { onNewLocation(point.location) }
+                delay(routeSimulator.tickIntervalMs)
+            }
+        }
+    }
+
+    // ==================== NAVIGATION ENGINE ====================
+
+    /**
+     * Load route navigation data from the static holder.
+     * Called once when tracking starts. If a route is available, sets up the
+     * turn instruction list and decodes the polyline for proximity calculations.
+     */
+    private fun loadNavigationData() {
+        val navData = NavigationRouteHolder.consume()
+        if (navData != null) {
+            val (polyline, instructions) = navData
+            navTurnInstructions = instructions
+            navPolylinePoints = if (polyline != null) {
+                try { PolyUtil.decode(polyline) } catch (e: Exception) {
+                    Log.e("Navigation", "Failed to decode polyline", e)
+                    emptyList()
+                }
+            } else emptyList()
+            navCurrentInstructionIndex = 0
+            navLastAnnouncedIndex = -1
+            navLastWarningIndex = -1
+            navMissedWaypointCount = 0
+            Log.d("Navigation", "Loaded ${navTurnInstructions.size} turn instructions, ${navPolylinePoints.size} polyline points")
+            navTurnInstructions.forEachIndexed { i, inst ->
+                Log.d("Navigation", "  [$i] ${inst.instruction} @ (${inst.latitude}, ${inst.longitude}) dist=${inst.distance}km")
+            }
+        } else {
+            Log.d("Navigation", "No navigation data available")
+        }
+    }
+
+    /**
+     * Core navigation check — called on every location update.
+     * Handles:
+     *  1. Upcoming turn warnings (80m ahead)
+     *  2. Waypoint reached confirmation (35m)
+     *  3. Missed waypoint detection & auto-skip
+     */
+    private fun checkNavigationProgress(currentLat: Double, currentLng: Double) {
+        if (navTurnInstructions.isEmpty()) return
+        if (navCurrentInstructionIndex >= navTurnInstructions.size) return
+
+        val now = System.currentTimeMillis()
+        if (now - navLastCheckTime < NAV_CHECK_INTERVAL_MS) return
+        navLastCheckTime = now
+
+        val currentPos = com.google.android.gms.maps.model.LatLng(currentLat, currentLng)
+        val nextInstruction = navTurnInstructions[navCurrentInstructionIndex]
+        val waypointPos = com.google.android.gms.maps.model.LatLng(nextInstruction.latitude, nextInstruction.longitude)
+        val distanceToWaypoint = SphericalUtil.computeDistanceBetween(currentPos, waypointPos)
+
+        Log.d("Navigation", "Check: idx=$navCurrentInstructionIndex, dist=${distanceToWaypoint.toInt()}m to '${nextInstruction.instruction}'")
+
+        when {
+            // CASE 1: Reached the waypoint
+            distanceToWaypoint <= NAV_WAYPOINT_REACHED_RADIUS_M -> {
+                if (navLastAnnouncedIndex != navCurrentInstructionIndex) {
+                    announceNavigation(nextInstruction, isReached = true)
+                    navLastAnnouncedIndex = navCurrentInstructionIndex
+                }
+                advanceToNextInstruction("reached")
+            }
+
+            // CASE 2: Approaching the waypoint — give advance warning
+            distanceToWaypoint <= NAV_WARNING_RADIUS_M -> {
+                if (navLastWarningIndex != navCurrentInstructionIndex) {
+                    navLastWarningIndex = navCurrentInstructionIndex
+                    val distInt = distanceToWaypoint.toInt()
+                    val warningText = "In ${distInt} metres, ${nextInstruction.instruction}"
+                    Log.d("Navigation", "WARNING: $warningText")
+                    announceNavigationText(warningText)
+                }
+            }
+
+            // CASE 3: Missed the waypoint — user has gone past it
+            else -> {
+                checkForMissedWaypoint(currentPos, waypointPos, distanceToWaypoint)
+            }
+        }
+    }
+
+    /**
+     * Detect if the runner has passed a waypoint without reaching it.
+     * Uses two heuristics:
+     *  A) Runner is past the waypoint along the polyline direction
+     *  B) Runner is getting farther from the waypoint after having been closer
+     */
+    private var navPreviousDistanceToWaypoint: Double = Double.MAX_VALUE
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun checkForMissedWaypoint(
+        currentPos: com.google.android.gms.maps.model.LatLng,
+        waypointPos: com.google.android.gms.maps.model.LatLng,
+        distanceToWaypoint: Double
+    ) {
+        // Heuristic: if we had a closer reading previously and now we're moving away AND beyond skip distance
+        val wasCloser = navPreviousDistanceToWaypoint < distanceToWaypoint
+        val isMovingAway = wasCloser && (distanceToWaypoint - navPreviousDistanceToWaypoint) > 5.0 // 5m hysteresis
+        val isBeyondSkipDistance = distanceToWaypoint > NAV_MISSED_WAYPOINT_RADIUS_M
+
+        // Also check: if there's a NEXT instruction, are we closer to that one?
+        val closerToNextInstruction = if (navCurrentInstructionIndex + 1 < navTurnInstructions.size) {
+            val nextNext = navTurnInstructions[navCurrentInstructionIndex + 1]
+            val nextNextPos = com.google.android.gms.maps.model.LatLng(nextNext.latitude, nextNext.longitude)
+            val distToNext = SphericalUtil.computeDistanceBetween(currentPos, nextNextPos)
+            distToNext < distanceToWaypoint
+        } else false
+
+        navPreviousDistanceToWaypoint = distanceToWaypoint
+
+        if ((isMovingAway && isBeyondSkipDistance) || closerToNextInstruction) {
+            Log.d("Navigation", "MISSED waypoint $navCurrentInstructionIndex (dist=${distanceToWaypoint.toInt()}m, " +
+                    "movingAway=$isMovingAway, closerToNext=$closerToNextInstruction)")
+            navMissedWaypointCount++
+            
+            // Skip to next instruction
+            advanceToNextInstruction("missed")
+            
+            // Tell the runner about the next instruction instead
+            if (navCurrentInstructionIndex < navTurnInstructions.size) {
+                val nextInst = navTurnInstructions[navCurrentInstructionIndex]
+                val skipText = "Recalculating. Next: ${nextInst.instruction}"
+                Log.d("Navigation", "SKIP ANNOUNCE: $skipText")
+                announceNavigationText(skipText)
+            } else {
+                announceNavigationText("Route complete. Keep going to the finish!")
+            }
+        }
+    }
+
+    /**
+     * Advance to the next turn instruction.
+     */
+    private fun advanceToNextInstruction(reason: String) {
+        val prev = navCurrentInstructionIndex
+        navCurrentInstructionIndex++
+        navPreviousDistanceToWaypoint = Double.MAX_VALUE // Reset for new waypoint
+        
+        if (navCurrentInstructionIndex < navTurnInstructions.size) {
+            Log.d("Navigation", "Advanced: $prev -> $navCurrentInstructionIndex ($reason). " +
+                    "Next: '${navTurnInstructions[navCurrentInstructionIndex].instruction}'")
+        } else {
+            Log.d("Navigation", "All ${navTurnInstructions.size} instructions completed ($reason)")
+            announceNavigationText("You've completed all the turns. Head to the finish!")
+        }
+    }
+
+    /**
+     * Announce a navigation instruction via TTS.
+     * Uses the shared coaching audio queue to prevent overlap with coaching audio.
+     */
+    @Suppress("SameParameterValue")
+    private fun announceNavigation(instruction: TurnInstruction, isReached: Boolean) {
+        val text = if (isReached) {
+            instruction.instruction
+        } else {
+            "Upcoming: ${instruction.instruction}"
+        }
+        Log.d("Navigation", "ANNOUNCE: $text")
+        announceNavigationText(text)
+    }
+
+    /**
+     * Play navigation text via TTS (bypasses AI coaching cooldowns).
+     * Navigation has priority — it's time-critical.
+     */
+    private fun announceNavigationText(text: String) {
+        if (isMuted) {
+            Log.d("Navigation", "Muted — skipping TTS: $text")
+            return
+        }
+        
+        // Broadcast to UI
+        _latestCoachingText.value = text
+        
+        coachingHistory.add(AiCoachingNote(
+            time = System.currentTimeMillis() - startTime,
+            message = "Nav: $text"
+        ))
+        
+        // Use TTS directly for navigation (no need for AI audio generation — needs to be instant)
+        CoachingAudioQueue.enqueue(
+            context = this,
+            base64Audio = null,
+            format = null,
+            fallbackText = text,
+            onComplete = {
+                _latestCoachingText.value = null
+            }
+        )
     }
 
     // ==================== STRIDE ANALYSIS (shared by all coaching triggers) ====================
@@ -605,6 +878,10 @@ class RunTrackingService : Service(), SensorEventListener {
                 
                 updatePaceAndStruggle(currentPaceSeconds)
                 checkForKmSplit()
+                // Check navigation progress (turn instructions, missed waypoints)
+                if (hasRoute) {
+                    checkNavigationProgress(location.latitude, location.longitude)
+                }
                 updateRunSession()
                 updateNotification()
             }

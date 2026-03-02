@@ -192,7 +192,8 @@ fun RunSessionScreen(
                 onResume = { viewModel.resumeRun() },
                 onStop = { showStopConfirm = true },
                 onCancel = onCancel,
-                onSimulate = { viewModel.startSimulatedRun() }
+                onSimulate = { viewModel.startSimulatedRun() },
+                onSimulateNav = { viewModel.startNavigationSimulatedRun() }
             )
         }
 
@@ -1883,7 +1884,8 @@ fun ControlButtons(
     onResume: () -> Unit,
     onStop: () -> Unit,
     onCancel: () -> Unit = {},
-    onSimulate: (() -> Unit)? = null
+    onSimulate: (() -> Unit)? = null,
+    onSimulateNav: (() -> Unit)? = null
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1994,6 +1996,34 @@ fun ControlButtons(
                         text = "Simulate 5km Run",
                         style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
                         color = Colors.backgroundRoot
+                    )
+                }
+            }
+
+            // Simulate Navigation Run button (debug builds only)
+            if (onSimulateNav != null && live.airuncoach.airuncoach.BuildConfig.DEBUG) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = onSimulateNav,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF3B82F6) // Blue
+                    ),
+                    shape = RoundedCornerShape(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Explore,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Simulate Nav Run (3km)",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White
                     )
                 }
             }
