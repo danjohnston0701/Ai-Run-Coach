@@ -97,9 +97,14 @@ class RunTrackingService : Service(), SensorEventListener {
     private var initialStepCount: Int = -1
     private var lastStepTimestamp: Long = 0
     
-    // Struggle detection
+    // Cadence tracking for average/max (mirrors HR tracking)
+    private var cadenceSum: Long = 0
+    private var cadenceCount: Int = 0
+    private var maxCadenceValue: Int = 0
+    
+    // Struggle detection - baseline is session average pace, updated every 500m
     private var baselinePace: Float = 0f
-    private val paceHistory = ArrayList<Float>()
+    private var lastBaselineUpdateDistance: Double = 0.0
     private var lastStruggleTriggerTime: Long = 0
     private var isStruggling = false
     private val strugglePointsList = mutableListOf<StrugglePoint>()
@@ -130,6 +135,20 @@ class RunTrackingService : Service(), SensorEventListener {
     private var baselineCadence: Int = 0
     private var cadenceSamplesForBaseline: Int = 0
     private val recentStrideLengths = mutableListOf<Double>()
+
+    // Elite coaching triggers — technique, milestones, reinforcement, ETA, trends, elevation
+    private var lastEliteCoachingTime: Long = 0
+    private val ELITE_COACHING_COOLDOWN_MS = 45_000L // 45 second gap between elite coaching
+    private var lastTechniqueCoachingTime: Long = 0
+    private val TECHNIQUE_INTERVAL_MS = 180_000L // Technique coaching every ~3 minutes
+    private var lastMilestonePercent: Int = 0 // Track which milestones have been triggered (25, 50, 75)
+    private var lastTargetEtaKm: Int = 0 // Track last km an ETA was given
+    private var lastPaceTrendCheckKm: Int = 0 // Track last km a pace trend was analysed
+    private var lastPositiveReinforcementKm: Int = 0 // Track last km positive reinforcement was given
+    private var lastElevationInsightTime: Long = 0
+    private val ELEVATION_INSIGHT_COOLDOWN_MS = 120_000L // 2 min between elevation insights
+    private var hasFinal500mFired = false
+    private var hasFinal100mFired = false
 
     // Simulation mode
     private var isSimulating = false
@@ -297,17 +316,29 @@ class RunTrackingService : Service(), SensorEventListener {
         weatherAtStart = null
         weatherAtEnd = null
         currentCadence = 0
+        cadenceSum = 0
+        cadenceCount = 0
+        maxCadenceValue = 0
         currentHeartRate = 0
         initialStepCount = -1
         lastStepTimestamp = 0
         baselinePace = 0f
-        paceHistory.clear()
+        lastBaselineUpdateDistance = 0.0
         hasCadenceCoachingFired = false
         lastCadenceCoachingTime = 0
         lastStrideZone = "OPTIMAL"
         baselineCadence = 0
         cadenceSamplesForBaseline = 0
         recentStrideLengths.clear()
+        lastEliteCoachingTime = 0
+        lastTechniqueCoachingTime = 0
+        lastMilestonePercent = 0
+        lastTargetEtaKm = 0
+        lastPaceTrendCheckKm = 0
+        lastPositiveReinforcementKm = 0
+        lastElevationInsightTime = 0
+        hasFinal500mFired = false
+        hasFinal100mFired = false
         hasCoachingFiredThisTick = false
         lastStruggleTriggerTime = 0
         isStruggling = false
@@ -508,7 +539,8 @@ class RunTrackingService : Service(), SensorEventListener {
             speed = location.speed.takeIf { it > 0 }, // Store speed if positive (works for both real GPS and simulation)
             altitude = location.altitude.takeIf { location.hasAltitude() },
             heartRate = null,
-            bearing = location.bearing.takeIf { location.hasBearing() }
+            bearing = location.bearing.takeIf { location.hasBearing() },
+            cadence = currentCadence.takeIf { it > 0 }
         )
 
         if (routePoints.isNotEmpty()) {
@@ -580,24 +612,22 @@ class RunTrackingService : Service(), SensorEventListener {
     }
     
     private fun updatePaceAndStruggle(currentPaceSeconds: Float) {
-        val currentGrade = routePoints.takeLast(2).let { if (it.size < 2 || it[0].altitude == null || it[1].altitude == null) 0.0 else (it[1].altitude!! - it[0].altitude!!) / calculateDistance(it[0], it[1]) * 100 }
-
-        if (abs(currentGrade) < 2.0) { 
-            paceHistory.add(currentPaceSeconds)
-            if (paceHistory.size > 30) paceHistory.removeAt(0)
-        }
-        
-        if (baselinePace == 0f && totalDistance > 1000 && totalDistance < 2000 && paceHistory.isNotEmpty()) {
-            baselinePace = paceHistory.sorted()[paceHistory.size / 2]
+        // Update baseline (session average pace) every 500m after the first 1km
+        if (totalDistance >= 1000 && (totalDistance - lastBaselineUpdateDistance) >= 500) {
+            val elapsedSeconds = (System.currentTimeMillis() - startTime) / 1000.0
+            if (elapsedSeconds > 0 && totalDistance > 0) {
+                baselinePace = (elapsedSeconds / (totalDistance / 1000.0)).toFloat() // seconds per km
+                lastBaselineUpdateDistance = totalDistance
+            }
         }
         
         if (baselinePace > 0f) {
             val paceDropPercent = (currentPaceSeconds - baselinePace) / baselinePace * 100
             val now = System.currentTimeMillis()
-            if (paceDropPercent > 15 && (now - lastStruggleTriggerTime) > STRUGGLE_COOLDOWN_MS) {
+            if (paceDropPercent > 20 && (now - lastStruggleTriggerTime) > STRUGGLE_COOLDOWN_MS) {
                 isStruggling = true
                 lastStruggleTriggerTime = now
-                triggerStruggleCoaching() // Trigger AI coaching for struggle
+                triggerStruggleCoaching(currentPaceSeconds, paceDropPercent) // Trigger AI coaching for struggle
             } else {
                 isStruggling = false
             }
@@ -672,6 +702,11 @@ class RunTrackingService : Service(), SensorEventListener {
         if (!hasCoachingFiredThisTick) {
             maybeTriggerCadenceCoaching()
         }
+
+        // Elite coaching triggers — technique, milestones, reinforcement, ETA, trends, elevation
+        if (!hasCoachingFiredThisTick) {
+            maybeFireEliteCoaching(displayDistance, duration, avgSpeed, phase)
+        }
         
         _currentRunSession.value = RunSession(
             id = UUID.randomUUID().toString(),
@@ -684,7 +719,7 @@ class RunTrackingService : Service(), SensorEventListener {
             averagePace = calculatePace(avgSpeed),
             currentPace = currentPace,
             calories = calculateCalories(displayDistance, duration),
-            cadence = currentCadence,
+            cadence = if (cadenceCount > 0) (cadenceSum / cadenceCount).toInt() else currentCadence,
             heartRate = currentHeartRate,
             routePoints = routePoints.toList(),
             kmSplits = kmSplits.toList(),
@@ -706,7 +741,8 @@ class RunTrackingService : Service(), SensorEventListener {
             strugglePoints = strugglePointsList.toList(),
             targetDistance = targetDistance,
             targetTime = targetTime,
-            wasTargetAchieved = calculateWasTargetAchieved()
+            wasTargetAchieved = calculateWasTargetAchieved(),
+            maxCadence = maxCadenceValue.takeIf { it > 0 }
         )
     }
     
@@ -846,6 +882,7 @@ class RunTrackingService : Service(), SensorEventListener {
             minHeartRate = null, // TODO: Track min HR
             calories = runSession.calories,
             cadence = if (runSession.cadence > 0) runSession.cadence else null,
+            maxCadence = runSession.maxCadence,
             elevation = runSession.totalElevationGain,
             difficulty = when {
                 runSession.totalElevationGain > 200 -> "hard"
@@ -1148,19 +1185,24 @@ class RunTrackingService : Service(), SensorEventListener {
         lastPhase = newPhase
     }
     
-    private fun triggerStruggleCoaching() {
-        val paceDropPercent = if (baselinePace > 0f) {
-            ((_currentRunSession.value?.averageSpeed ?: 0f) - baselinePace) / baselinePace * 100.0
-        } else 0.0
+    private fun triggerStruggleCoaching(currentPaceSeconds: Float, paceDropPercent: Float) {
+        // Format baseline pace: baselinePace is in seconds/km, convert to km/h for calculatePace
+        val baselinePaceFormatted = if (baselinePace > 0f) calculatePace(3600f / baselinePace) else "0:00"
+        // Format current instantaneous pace from seconds/km
+        val currentPaceFormatted = if (currentPaceSeconds > 0f && currentPaceSeconds < 3600f) {
+            val minutes = (currentPaceSeconds / 60).toInt()
+            val seconds = (currentPaceSeconds % 60).toInt()
+            String.format("%d:%02d", minutes, seconds)
+        } else "0:00"
         
         // Add struggle point to the list for post-run summary
         val strugglePoint = StrugglePoint(
             id = UUID.randomUUID().toString(),
             timestamp = System.currentTimeMillis() - startTime,
             distanceMeters = totalDistance,
-            paceAtStruggle = _currentRunSession.value?.averagePace ?: "0:00",
-            baselinePace = calculatePace(baselinePace),
-            paceDropPercent = paceDropPercent,
+            paceAtStruggle = currentPaceFormatted,
+            baselinePace = baselinePaceFormatted,
+            paceDropPercent = paceDropPercent.toDouble(),
             currentGrade = calculateAverageGradient().toDouble(),
             heartRate = if (currentHeartRate > 0) currentHeartRate else null,
             location = routePoints.lastOrNull()
@@ -1172,11 +1214,9 @@ class RunTrackingService : Service(), SensorEventListener {
                 val update = StruggleUpdate(
                     distance = totalDistance / 1000.0,
                     elapsedTime = System.currentTimeMillis() - startTime,
-                    currentPace = _currentRunSession.value?.averagePace ?: "0:00",
-                    baselinePace = calculatePace(baselinePace),
-                    paceDropPercent = if (baselinePace > 0f) {
-                        ((_currentRunSession.value?.averageSpeed ?: 0f) - baselinePace) / baselinePace * 100.0
-                    } else 0.0,
+                    currentPace = currentPaceFormatted,
+                    baselinePace = baselinePaceFormatted,
+                    paceDropPercent = paceDropPercent.toDouble(),
                     currentGrade = calculateAverageGradient().toDouble(),
                     totalElevationGain = totalElevationGain,
                     coachName = currentUser?.coachName,
@@ -1344,6 +1384,312 @@ class RunTrackingService : Service(), SensorEventListener {
         }
     }
 
+    // ================================================================
+    // ELITE COACHING — additional real-time coaching triggers
+    // ================================================================
+
+    private fun maybeFireEliteCoaching(displayDistance: Double, duration: Long, avgSpeed: Float, phase: CoachingPhase) {
+        if (totalDistance < 1000) return // Need at least 1km of data
+        val now = System.currentTimeMillis()
+
+        val distKm = displayDistance / 1000.0
+        val currentKm = distKm.toInt()
+        val td = targetDistance
+        val remainingMeters = if (td != null && td > 0) (td * 1000 - displayDistance) else null
+
+        // FINAL 100m — highest priority, bypasses cooldowns (fires once)
+        if (!hasFinal100mFired && remainingMeters != null && remainingMeters in 0.0..120.0) {
+            hasFinal100mFired = true
+            fireFinalCoaching("final_100m", distKm, duration, avgSpeed, remainingMeters)
+            return
+        }
+
+        // FINAL 500m — very high priority, bypasses elite cooldown (fires once)
+        if (!hasFinal500mFired && remainingMeters != null && remainingMeters in 0.0..550.0) {
+            if ((now - lastCoachingTime) < 10_000L) return // minimal 10s gap only
+            hasFinal500mFired = true
+            fireFinalCoaching("final_500m", distKm, duration, avgSpeed, remainingMeters)
+            return
+        }
+
+        // Standard elite coaching — respect cooldowns
+        if ((now - lastEliteCoachingTime) < ELITE_COACHING_COOLDOWN_MS) return
+        if ((now - lastCoachingTime) < COACHING_COOLDOWN_MS) return
+
+        // Priority order: milestone > target ETA > pace trend > positive reinforcement > technique > elevation
+        when {
+            shouldTriggerMilestone(distKm) -> fireMilestoneCoaching(distKm, duration, avgSpeed)
+            shouldTriggerTargetEta(currentKm, distKm, duration) -> fireTargetEtaCoaching(distKm, duration, avgSpeed)
+            shouldTriggerPaceTrend(currentKm) -> firePaceTrendCoaching(distKm, duration, avgSpeed)
+            shouldTriggerPositiveReinforcement(currentKm) -> firePositiveReinforcementCoaching(distKm, duration, avgSpeed)
+            shouldTriggerTechnique(now) -> fireTechniqueCoaching(distKm, duration, avgSpeed, phase)
+            shouldTriggerElevationInsight(now) -> fireElevationInsightCoaching(distKm, duration, avgSpeed)
+        }
+    }
+
+    // --- Condition checks ---
+
+    private fun shouldTriggerMilestone(distKm: Double): Boolean {
+        val td = targetDistance ?: return false
+        if (td <= 0) return false
+        val pct = (distKm / td * 100).toInt()
+        // Check if any milestone threshold has been crossed
+        val hasMilestone = when {
+            lastMilestonePercent < 25 && pct >= 25 -> true
+            lastMilestonePercent < 50 && pct >= 50 -> true
+            lastMilestonePercent < 75 && pct >= 75 -> true
+            else -> false
+        }
+        if (!hasMilestone) return false
+        // Don't fire within 200m of a km split to avoid overlap
+        val distFromKm = (distKm * 1000) % 1000
+        return distFromKm > 200 && distFromKm < 800
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun shouldTriggerTargetEta(currentKm: Int, distKm: Double, duration: Long): Boolean {
+        if (targetTime == null || targetTime!! <= 0) return false
+        if (currentKm <= lastTargetEtaKm) return false
+        if (currentKm < 2) return false // Need at least 2km for meaningful projection
+        // Fire every 2km
+        return currentKm % 2 == 0
+    }
+
+    private fun shouldTriggerPaceTrend(currentKm: Int): Boolean {
+        if (kmSplits.size < 3) return false
+        if (currentKm <= lastPaceTrendCheckKm) return false
+        // Check every 2km after 3km
+        return currentKm >= 3 && currentKm % 2 == 1
+    }
+
+    private fun shouldTriggerPositiveReinforcement(currentKm: Int): Boolean {
+        if (kmSplits.size < 3) return false
+        if (currentKm <= lastPositiveReinforcementKm) return false
+        // Check if runner deserves reinforcement
+        return detectPositiveRunning()
+    }
+
+    private fun shouldTriggerTechnique(now: Long): Boolean {
+        if (totalDistance < 1500) return false // Wait at least 1.5km
+        return (now - lastTechniqueCoachingTime) > TECHNIQUE_INTERVAL_MS
+    }
+
+    private fun shouldTriggerElevationInsight(now: Long): Boolean {
+        if (!hasRoute) return false
+        if ((now - lastElevationInsightTime) < ELEVATION_INSIGHT_COOLDOWN_MS) return false
+        val grade = calculateAverageGradient()
+        return abs(grade) > 3f // Only when on a meaningful incline/decline
+    }
+
+    // --- Detection helpers ---
+
+    private fun detectPositiveRunning(): Boolean {
+        if (kmSplits.size < 3) return false
+        val recentSplits = kmSplits.takeLast(3)
+        val paceSecs = recentSplits.map { split ->
+            val parts = split.pace.split(":")
+            if (parts.size == 2) parts[0].toIntOrNull()?.times(60)?.plus(parts[1].toIntOrNull() ?: 0) ?: 0 else 0
+        }
+        if (paceSecs.any { it == 0 }) return false
+
+        // Check for consistency (all within 10s of each other)
+        val spread = paceSecs.max() - paceSecs.min()
+        if (spread <= 10) return true
+
+        // Check for negative splitting (each split faster)
+        if (paceSecs.zipWithNext().all { (a, b) -> b <= a }) return true
+
+        return false
+    }
+
+    private fun detectPaceTrend(): Triple<String, Int, Boolean> {
+        // Returns (direction, avgDeltaPerKm, isNegativeSplitting)
+        if (kmSplits.size < 3) return Triple("consistent", 0, false)
+        val recentSplits = kmSplits.takeLast(4).takeIf { it.size >= 3 } ?: kmSplits.takeLast(3)
+        val paceSecs = recentSplits.map { split ->
+            val parts = split.pace.split(":")
+            if (parts.size == 2) parts[0].toIntOrNull()?.times(60)?.plus(parts[1].toIntOrNull() ?: 0) ?: 0 else 0
+        }
+        if (paceSecs.any { it == 0 }) return Triple("consistent", 0, false)
+
+        val deltas = paceSecs.zipWithNext().map { (a, b) -> b - a }
+        val avgDelta = deltas.sum() / deltas.size
+        val isNegSplit = deltas.all { it <= 0 }
+
+        return when {
+            avgDelta > 5 -> Triple("slowing", avgDelta, false)
+            avgDelta < -5 -> Triple("speeding_up", abs(avgDelta), isNegSplit)
+            else -> Triple("consistent", abs(avgDelta), isNegSplit)
+        }
+    }
+
+    // --- Fire functions ---
+
+    private fun buildBaseEliteRequest(type: String, distKm: Double, duration: Long, avgSpeed: Float): EliteCoachingRequest {
+        val elapsedSec = duration / 1000
+        return EliteCoachingRequest(
+            coachingType = type,
+            distance = distKm,
+            targetDistance = targetDistance,
+            currentPace = currentPace,
+            averagePace = calculatePace(avgSpeed),
+            elapsedTime = elapsedSec,
+            coachName = currentUser?.coachName,
+            coachTone = currentUser?.coachTone,
+            coachGender = currentUser?.coachGender,
+            coachAccent = currentUser?.coachAccent,
+            hasRoute = hasRoute,
+            heartRate = if (currentHeartRate > 0) currentHeartRate else null,
+            cadence = if (currentCadence > 0) currentCadence else null,
+            currentGrade = calculateAverageGradient().toDouble(),
+            totalElevationGain = totalElevationGain,
+            totalElevationLoss = totalElevationLoss,
+            targetTime = targetTime?.let { it / 1000 },
+            targetPace = null, // TODO: pass if user has set one
+            kmSplits = kmSplits.map { KmSplitBrief(it.km, it.pace) }
+        )
+    }
+
+    private fun fireEliteCoaching(request: EliteCoachingRequest, label: String) {
+        val now = System.currentTimeMillis()
+        lastEliteCoachingTime = now
+        lastCoachingTime = now
+        hasCoachingFiredThisTick = true
+
+        serviceScope.launch {
+            try {
+                val response = apiService.getEliteCoaching(request)
+                if (response.message.isNotBlank()) {
+                    coachingHistory.add(AiCoachingNote(
+                        time = System.currentTimeMillis() - startTime,
+                        message = "$label: ${response.message}"
+                    ))
+                    Log.d("RunTrackingService", "Elite coaching ($label): ${response.message}")
+                    if (!isMuted) {
+                        playCoachingAudio(response.audio, response.format, response.message)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("RunTrackingService", "Failed to get elite coaching ($label)", e)
+            }
+        }
+    }
+
+    private fun fireFinalCoaching(type: String, distKm: Double, duration: Long, avgSpeed: Float, remainingMeters: Double) {
+        val td = targetDistance ?: 0.0
+        val elapsedSec = duration / 1000.0
+        val projectedFinishSec = if (distKm > 0) (elapsedSec / distKm * td).toLong() else null
+        val targetTimeSec = targetTime?.let { it / 1000 }
+
+        // Determine target time category using percentage-based thresholds:
+        // <=2% over (or under) → on_track (reference target enthusiastically)
+        // 2-5% over → strong_effort (positive framing, don't dwell)
+        // >5% over → no_mention (pure motivation, skip target)
+        var category = "no_mention"
+        var overPercent: Double? = null
+        if (targetTimeSec != null && targetTimeSec > 0 && projectedFinishSec != null) {
+            overPercent = ((projectedFinishSec - targetTimeSec).toDouble() / targetTimeSec) * 100.0
+            category = when {
+                overPercent <= 2.0 -> "on_track"    // under target or within 2%
+                overPercent <= 5.0 -> "strong_effort" // 2-5% over
+                else -> "no_mention"                  // >5% over
+            }
+        }
+
+        val request = buildBaseEliteRequest(type, distKm, duration, avgSpeed).copy(
+            projectedFinishTime = projectedFinishSec,
+            targetTimeCategory = category,
+            etaOverTargetPercent = overPercent,
+            remainingMeters = remainingMeters.toInt()
+        )
+        fireEliteCoaching(request, if (type == "final_100m") "Final 100m" else "Final 500m")
+    }
+
+    private fun fireMilestoneCoaching(distKm: Double, duration: Long, avgSpeed: Float) {
+        val td = targetDistance ?: return
+        val pct = (distKm / td * 100).toInt()
+        val milestone = when {
+            pct >= 75 && lastMilestonePercent < 75 -> 75
+            pct >= 50 && lastMilestonePercent < 50 -> 50
+            pct >= 25 && lastMilestonePercent < 25 -> 25
+            else -> return
+        }
+        lastMilestonePercent = milestone
+
+        val request = buildBaseEliteRequest("milestone", distKm, duration, avgSpeed).copy(
+            milestonePercent = milestone,
+            projectedFinishTime = if (distKm > 0) ((duration / 1000.0) / distKm * td).toLong() else null
+        )
+        fireEliteCoaching(request, "${milestone}% Milestone")
+    }
+
+    private fun fireTargetEtaCoaching(distKm: Double, duration: Long, avgSpeed: Float) {
+        lastTargetEtaKm = distKm.toInt()
+        val td = targetDistance ?: return
+        val projectedSec = if (distKm > 0) ((duration / 1000.0) / distKm * td).toLong() else null
+
+        val request = buildBaseEliteRequest("target_eta", distKm, duration, avgSpeed).copy(
+            projectedFinishTime = projectedSec
+        )
+        fireEliteCoaching(request, "Target ETA")
+    }
+
+    private fun firePaceTrendCoaching(distKm: Double, duration: Long, avgSpeed: Float) {
+        lastPaceTrendCheckKm = distKm.toInt()
+        val (direction, delta, isNegSplit) = detectPaceTrend()
+
+        val request = buildBaseEliteRequest("pace_trend", distKm, duration, avgSpeed).copy(
+            paceTrendDirection = direction,
+            paceTrendDeltaPerKm = delta,
+            isNegativeSplitting = isNegSplit
+        )
+        fireEliteCoaching(request, "Pace Trend")
+    }
+
+    private fun firePositiveReinforcementCoaching(distKm: Double, duration: Long, avgSpeed: Float) {
+        lastPositiveReinforcementKm = distKm.toInt()
+        val (_, _, isNegSplit) = detectPaceTrend()
+
+        // Count consecutive consistent splits
+        var consistentCount = 0
+        if (kmSplits.size >= 2) {
+            val paceSecs = kmSplits.map { split ->
+                val parts = split.pace.split(":")
+                if (parts.size == 2) parts[0].toIntOrNull()?.times(60)?.plus(parts[1].toIntOrNull() ?: 0) ?: 0 else 0
+            }
+            for (i in paceSecs.size - 1 downTo 1) {
+                if (abs(paceSecs[i] - paceSecs[i - 1]) <= 10) consistentCount++ else break
+            }
+        }
+
+        // Find fastest split
+        val fastestSplit = kmSplits.minByOrNull { split ->
+            val parts = split.pace.split(":")
+            if (parts.size == 2) parts[0].toIntOrNull()?.times(60)?.plus(parts[1].toIntOrNull() ?: 0) ?: 9999 else 9999
+        }
+
+        val request = buildBaseEliteRequest("positive_reinforcement", distKm, duration, avgSpeed).copy(
+            consecutiveConsistentSplits = if (consistentCount >= 2) consistentCount + 1 else null,
+            isNegativeSplitting = isNegSplit,
+            fastestSplitKm = fastestSplit?.km,
+            fastestSplitPace = fastestSplit?.pace
+        )
+        fireEliteCoaching(request, "Positive Reinforcement")
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun fireTechniqueCoaching(distKm: Double, duration: Long, avgSpeed: Float, phase: CoachingPhase) {
+        lastTechniqueCoachingTime = System.currentTimeMillis()
+        val request = buildBaseEliteRequest("technique_form", distKm, duration, avgSpeed)
+        fireEliteCoaching(request, "Technique")
+    }
+
+    private fun fireElevationInsightCoaching(distKm: Double, duration: Long, avgSpeed: Float) {
+        lastElevationInsightTime = System.currentTimeMillis()
+        val request = buildBaseEliteRequest("elevation_insight", distKm, duration, avgSpeed)
+        fireEliteCoaching(request, "Elevation")
+    }
+
     private fun updateElevationCoaching(distanceIncrement: Double, gradePercent: Double, elevationChange: Double) {
         val now = System.currentTimeMillis()
         val direction = when {
@@ -1452,7 +1798,17 @@ class RunTrackingService : Service(), SensorEventListener {
                 val steps = event.values[0].toInt()
                 if (initialStepCount == -1) initialStepCount = steps
                 val sD = steps-initialStepCount; val tD = System.currentTimeMillis()-lastStepTimestamp
-                if (tD > 2000) { currentCadence=(sD*60000/tD).toInt(); initialStepCount=steps; lastStepTimestamp=System.currentTimeMillis() }
+                if (tD > 2000) {
+                    currentCadence = (sD*60000/tD).toInt()
+                    initialStepCount = steps
+                    lastStepTimestamp = System.currentTimeMillis()
+                    // Accumulate for average/max (only valid readings)
+                    if (currentCadence > 0) {
+                        cadenceSum += currentCadence
+                        cadenceCount += 1
+                        if (currentCadence > maxCadenceValue) maxCadenceValue = currentCadence
+                    }
+                }
             }
             Sensor.TYPE_HEART_RATE -> {
                 val hr = event.values[0].toInt()

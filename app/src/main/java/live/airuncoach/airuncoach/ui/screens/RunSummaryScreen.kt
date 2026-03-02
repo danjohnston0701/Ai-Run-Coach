@@ -858,7 +858,8 @@ private fun MainStatsGridFlagship(run: RunSession, lastRunForDelta: RunSession?)
             if (run.heartRate > 0) add(StatTile("Avg HR", "${run.heartRate} bpm", R.drawable.icon_heart_vector, Colors.error))
             if (run.calories > 0) add(StatTile("Calories", "${run.calories} kcal", R.drawable.icon_target_vector, Colors.warning))
             if (run.totalElevationGain > 0) add(StatTile("Elev Gain", "${run.totalElevationGain.roundToInt()} m", R.drawable.icon_trending_vector, Colors.success))
-            if (run.cadence > 0) add(StatTile("Cadence", "${run.cadence} spm", R.drawable.icon_repeat_vector, Colors.primary))
+            if (run.cadence > 0) add(StatTile("Avg Cadence", "${run.cadence} spm", R.drawable.icon_repeat_vector, Colors.primary))
+            if (run.maxCadence != null && run.maxCadence > 0) add(StatTile("Max Cadence", "${run.maxCadence} spm", R.drawable.icon_repeat_vector, Colors.accent))
         }
     }
 
@@ -2332,10 +2333,36 @@ private fun hrFromRoutePoints(points: List<LocationPoint>, mode: ChartMode): Lab
 }
 
 private fun buildCadenceSeries(points: List<LocationPoint>, mode: ChartMode): LabeledSeries {
-    // Cadence is not directly on LocationPoint — we'd need it from speed
-    // For now, return empty — cadence chart shows when we have time-series cadence data
-    // TODO: Add cadence field to LocationPoint or store cadence time-series
-    return LabeledSeries(emptyList(), emptyList(), emptyList())
+    val valid = points.filter { it.cadence != null && it.cadence > 0 && it.latitude != 0.0 }
+    if (valid.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
+
+    val xOut = mutableListOf<Double>()
+    val yOut = mutableListOf<Double>()
+    val labels = mutableListOf<String>()
+    val startTs = valid.first().timestamp
+    var cumulativeMeters = 0.0
+    val step = (valid.size / 200f).coerceAtLeast(1f).toInt()
+
+    var i = 1
+    while (i < valid.size) {
+        val prev = valid[i - 1]
+        val curr = valid[i]
+        cumulativeMeters += haversineMeters(prev.latitude, prev.longitude, curr.latitude, curr.longitude)
+
+        val xLabel = if (mode == ChartMode.Time) {
+            String.format(java.util.Locale.US, "%.0f", (curr.timestamp - startTs) / 60000.0)
+        } else {
+            String.format(java.util.Locale.US, "%.1f", cumulativeMeters / 1000.0)
+        }
+
+        xOut.add(xOut.size.toDouble())
+        yOut.add(curr.cadence!!.toDouble())
+        labels.add(xLabel)
+
+        i += step
+    }
+
+    return LabeledSeries(xOut, smoothY(yOut, 5), labels)
 }
 
 private fun parsePaceToSeconds(pace: String): Int {

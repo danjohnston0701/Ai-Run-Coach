@@ -394,6 +394,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       averagePace: run.avgPace || "0'00\"/km",
       calories: run.calories || 0,
       cadence: run.cadence || 0,
+      maxCadence: run.maxCadence || null,
       heartRate: run.avgHeartRate || 0,
       routePoints: Array.isArray(run.gpsTrack) ? run.gpsTrack : [],
       kmSplits: Array.isArray(run.kmSplits) ? run.kmSplits : [],
@@ -635,6 +636,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const runId = req.params.id;
       const userId = req.user!.userId;
       
+      // Check for existing analysis first — return cached if available
+      const existingAnalysis = await storage.getRunAnalysis(runId);
+      if (existingAnalysis?.analysis) {
+        // Unwrap the analysis — handle both direct and nested formats
+        let cachedAnalysis = existingAnalysis.analysis as any;
+        if (cachedAnalysis.analysis && typeof cachedAnalysis.analysis === 'object' && cachedAnalysis.analysis.performanceScore !== undefined) {
+          cachedAnalysis = cachedAnalysis.analysis; // Unwrap legacy double-nested format
+        }
+        if (cachedAnalysis.performanceScore !== undefined) {
+          console.log(`[comprehensive-analysis] Returning cached analysis for run ${runId}`);
+          return res.json({
+            success: true,
+            analysis: cachedAnalysis,
+            hasGarminData: false,
+            hasWellnessData: false,
+            cached: true,
+          });
+        }
+      }
+      
       // Get the run data
       const run = await storage.getRun(runId);
       if (!run) {
@@ -725,8 +746,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         coachTone,
       });
       
-      // Store the analysis
-      await storage.createRunAnalysis(runId, { analysis });
+      // Store the analysis (save the analysis object directly, not wrapped)
+      await storage.upsertRunAnalysis(runId, analysis);
       
       // Update run with ai insights summary
       await storage.updateRun(runId, { 
@@ -3998,6 +4019,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Elite Coaching with TTS — technique, milestones, positive reinforcement, target ETA, pace trends, elevation insights
+  app.post("/api/coaching/elite-coaching", async (req: Request, res: Response) => {
+    try {
+      const aiService = await import("./ai-service");
+      const message = await aiService.generateEliteCoaching(req.body);
+
+      // Skip TTS if AI returned empty (e.g. no terrain coaching for route-less runs)
+      if (!message) {
+        return res.json({ message: "", audio: null, format: "mp3" });
+      }
+
+      // Generate TTS audio with user's voice settings
+      let base64Audio: string | null = null;
+      try {
+        const { coachGender, coachAccent, coachTone } = req.body;
+        const voice = mapCoachVoice(coachGender, coachAccent, coachTone);
+        const audioBuffer = await aiService.generateTTS(message, voice);
+        base64Audio = audioBuffer.toString('base64');
+      } catch (ttsError) {
+        console.warn("Elite coaching TTS failed, returning text only:", ttsError);
+      }
+
+      res.json({
+        message,
+        audio: base64Audio,
+        format: 'mp3'
+      });
+    } catch (error: any) {
+      console.error("Elite coaching error:", error);
+      res.status(500).json({ error: "Failed to get elite coaching" });
+    }
+  });
+
   // Phase Coaching with TTS
   app.post("/api/coaching/phase-coaching", async (req: Request, res: Response) => {
     try {
@@ -5206,12 +5260,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? ai.improvementTips
         : (Array.isArray(ai.struggles) ? ai.struggles : []);
 
-      const trainingRecommendations = (Array.isArray(ai.improvementTips) ? ai.improvementTips : []).slice(0, 6).map((t: string) => ({
-        category: "technique",
-        recommendation: t,
-        priority: "medium",
-        specificWorkout: null,
-      }));
+      // Categorize training recommendations from the AI's improvement tips
+      const trainingRecommendations = (Array.isArray(ai.improvementTips) ? ai.improvementTips : []).slice(0, 6).map((t: string) => {
+        // Auto-categorize based on content
+        const lower = t.toLowerCase();
+        const category = lower.includes('cadence') || lower.includes('stride') || lower.includes('form') || lower.includes('lean') || lower.includes('foot') || lower.includes('arm')
+          ? 'technique'
+          : lower.includes('interval') || lower.includes('tempo') || lower.includes('speed') || lower.includes('threshold')
+          ? 'speed'
+          : lower.includes('strength') || lower.includes('hill') || lower.includes('core') || lower.includes('drill')
+          ? 'strength'
+          : 'endurance';
+        const priority = lower.includes('critical') || lower.includes('important') || lower.includes('must') ? 'high' : 'medium';
+        // Extract workout suggestion if present
+        const workoutMatch = t.match(/try[:\s]+([^.]+)/i) || t.match(/drill[:\s]+([^.]+)/i) || t.match(/workout[:\s]+([^.]+)/i);
+        return {
+          category,
+          recommendation: t,
+          priority,
+          specificWorkout: workoutMatch ? workoutMatch[1].trim() : null,
+        };
+      });
 
       const response = {
         executiveSummary: String(ai.summary || ""),
@@ -5231,9 +5300,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         targetAchievementAnalysis: null,
         weatherImpactAnalysis: null,
         terrainAnalysis: String(ai.technicalAnalysis?.elevationPerformance || ai.technicalAnalysis?.paceAnalysis || ""),
-        strugglePointsInsight: Array.isArray(body.relevantStrugglePoints) && body.relevantStrugglePoints.length
-          ? `We detected ${body.relevantStrugglePoints.length} struggle point(s). Your notes help us interpret them accurately.`
-          : null,
+        strugglePointsInsight: String(ai.strugglePointsInsight || (
+          Array.isArray(body.relevantStrugglePoints) && body.relevantStrugglePoints.length
+            ? `We detected ${body.relevantStrugglePoints.length} struggle point(s). Your notes help us interpret them accurately.`
+            : ""
+        )) || null,
         coachMotivationalMessage: String(ai.coachMotivationalMessage || ai.summary || "Great work — keep building!"),
       };
 

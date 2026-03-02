@@ -174,9 +174,6 @@ class RunSummaryViewModel @Inject constructor(
                 point
             }
         }
-        
-        // Regenerate analysis after dismissing a point
-        generateAIAnalysis()
     }
 
     /**
@@ -193,16 +190,25 @@ class RunSummaryViewModel @Inject constructor(
                 point
             }
         }
-        
-        // Regenerate analysis after restoring a point
-        generateAIAnalysis()
     }
 
     /**
-     * Generate comprehensive AI analysis with all context
+     * Whether an AI analysis has already been generated for this run.
+     * Used by UI to hide the generate button once analysis exists.
+     */
+    fun hasAnalysis(): Boolean {
+        return _analysisState.value is AiAnalysisState.Comprehensive || _analysisState.value is AiAnalysisState.Basic
+    }
+
+    /**
+     * Generate comprehensive AI analysis with all context.
+     * If analysis already exists (cached on backend), it will be returned without re-generating.
      */
     fun generateAIAnalysis() {
         val session = _runSession.value ?: return
+        
+        // Don't re-generate if we already have a loaded analysis
+        if (hasAnalysis()) return
         
         viewModelScope.launch {
             _analysisState.value = AiAnalysisState.Loading
@@ -239,16 +245,23 @@ class RunSummaryViewModel @Inject constructor(
             try {
                 val record = apiService.getRunAnalysisRecord(runId) ?: return@launch
                 val analysisJson = record.analysis ?: return@launch
-                val obj = analysisJson.asJsonObject
+                var obj = analysisJson.asJsonObject
+
+                // Handle legacy double-nested format: { analysis: { performanceScore: ... } }
+                if (!obj.has("performanceScore") && !obj.has("overallScore") && obj.has("analysis")) {
+                    val inner = obj.getAsJsonObject("analysis")
+                    if (inner != null) obj = inner
+                }
 
                 if (obj.has("performanceScore")) {
-                    val comprehensive = gson.fromJson(analysisJson, ComprehensiveRunAnalysis::class.java)
+                    val comprehensive = gson.fromJson(obj, ComprehensiveRunAnalysis::class.java)
                     _analysisState.value = AiAnalysisState.Comprehensive(comprehensive)
                 } else if (obj.has("overallScore")) {
-                    val basic = gson.fromJson(analysisJson, BasicRunInsights::class.java)
+                    val basic = gson.fromJson(obj, BasicRunInsights::class.java)
                     _analysisState.value = AiAnalysisState.Basic(basic)
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.w("RunSummaryViewModel", "Failed to load saved analysis for run $runId", e)
                 // Ignore parse errors; keep Idle
             }
         }

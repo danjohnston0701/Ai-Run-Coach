@@ -1,0 +1,55 @@
+package live.airuncoach.airuncoach.network.model
+
+import com.google.gson.annotations.SerializedName
+
+/**
+ * Request for the elite coaching endpoint — handles technique, milestones,
+ * positive reinforcement, target ETA, pace trends, and elevation insights.
+ */
+data class EliteCoachingRequest(
+    @SerializedName("coachingType") val coachingType: String,
+    @SerializedName("distance") val distance: Double,
+    @SerializedName("targetDistance") val targetDistance: Double?,
+    @SerializedName("currentPace") val currentPace: String,
+    @SerializedName("averagePace") val averagePace: String,
+    @SerializedName("elapsedTime") val elapsedTime: Long, // seconds
+    @SerializedName("coachName") val coachName: String?,
+    @SerializedName("coachTone") val coachTone: String?,
+    @SerializedName("coachGender") val coachGender: String?,
+    @SerializedName("coachAccent") val coachAccent: String?,
+    @SerializedName("hasRoute") val hasRoute: Boolean,
+
+    // Optional context
+    @SerializedName("heartRate") val heartRate: Int? = null,
+    @SerializedName("cadence") val cadence: Int? = null,
+    @SerializedName("currentGrade") val currentGrade: Double? = null,
+    @SerializedName("totalElevationGain") val totalElevationGain: Double? = null,
+    @SerializedName("totalElevationLoss") val totalElevationLoss: Double? = null,
+    @SerializedName("targetTime") val targetTime: Long? = null, // seconds
+    @SerializedName("targetPace") val targetPace: String? = null,
+
+    // Type-specific context
+    @SerializedName("milestonePercent") val milestonePercent: Int? = null,
+    @SerializedName("kmSplits") val kmSplits: List<KmSplitBrief>? = null,
+    @SerializedName("paceTrendDirection") val paceTrendDirection: String? = null,
+    @SerializedName("paceTrendDeltaPerKm") val paceTrendDeltaPerKm: Int? = null,
+    @SerializedName("projectedFinishTime") val projectedFinishTime: Long? = null, // seconds
+    @SerializedName("consecutiveConsistentSplits") val consecutiveConsistentSplits: Int? = null,
+    @SerializedName("isNegativeSplitting") val isNegativeSplitting: Boolean? = null,
+    @SerializedName("fastestSplitKm") val fastestSplitKm: Int? = null,
+    @SerializedName("fastestSplitPace") val fastestSplitPace: String? = null,
+    @SerializedName("targetTimeCategory") val targetTimeCategory: String? = null,
+    @SerializedName("etaOverTargetPercent") val etaOverTargetPercent: Double? = null,
+    @SerializedName("remainingMeters") val remainingMeters: Int? = null
+)
+
+data class KmSplitBrief(
+    @SerializedName("km") val km: Int,
+    @SerializedName("pace") val pace: String
+)
+
+data class EliteCoachingResponse(
+    @SerializedName("message") val message: String,
+    @SerializedName("audio") val audio: String? = null,
+    @SerializedName("format") val format: String? = "mp3"
+)

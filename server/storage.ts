@@ -86,6 +86,7 @@ export interface IStorage {
   // Run Analysis
   getRunAnalysis(runId: string): Promise<RunAnalysis | undefined>;
   createRunAnalysis(runId: string, analysis: any): Promise<RunAnalysis>;
+  upsertRunAnalysis(runId: string, analysis: any): Promise<RunAnalysis>;
   
   // Connected Devices
   getConnectedDevices(userId: string): Promise<ConnectedDevice[]>;
@@ -451,6 +452,39 @@ export class DatabaseStorage implements IStorage {
 
   async createRunAnalysis(runId: string, analysis: any): Promise<RunAnalysis> {
     try {
+      const [newAnalysis] = await db.insert(runAnalyses).values({ runId, analysis }).returning();
+      return newAnalysis;
+    } catch (error: any) {
+      // Fallback: persist analysis JSON into runs.aiInsights for legacy DBs
+      const msg = String(error?.message || "");
+      if (error?.code === "42703" || msg.includes("run_analyses") || msg.includes("analysis")) {
+        await db.update(runs)
+          .set({ aiInsights: JSON.stringify(analysis) })
+          .where(eq(runs.id, runId));
+        return {
+          id: "legacy",
+          runId,
+          analysis,
+          createdAt: new Date()
+        } as RunAnalysis;
+      }
+      throw error;
+    }
+  }
+
+  async upsertRunAnalysis(runId: string, analysis: any): Promise<RunAnalysis> {
+    try {
+      // Check if analysis already exists for this run
+      const existing = await this.getRunAnalysis(runId);
+      if (existing && existing.id !== "legacy") {
+        // Update existing record
+        const [updated] = await db.update(runAnalyses)
+          .set({ analysis })
+          .where(eq(runAnalyses.runId, runId))
+          .returning();
+        return updated;
+      }
+      // Create new record
       const [newAnalysis] = await db.insert(runAnalyses).values({ runId, analysis }).returning();
       return newAnalysis;
     } catch (error: any) {

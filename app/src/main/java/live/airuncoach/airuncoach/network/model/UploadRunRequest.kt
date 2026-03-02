@@ -16,6 +16,7 @@ data class UploadRunRequest(
     val minHeartRate: Int?,
     val calories: Int,
     val cadence: Int?,
+    val maxCadence: Int?,
     val elevation: Double,
     val difficulty: String,
     val startLat: Double,

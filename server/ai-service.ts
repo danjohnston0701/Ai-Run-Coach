@@ -1462,6 +1462,8 @@ export interface GarminWellnessData {
 export interface ComprehensiveRunAnalysis {
   summary: string;
   performanceScore: number; // 1-100
+  paceConsistencyScore?: number; // 1-100
+  effortScore?: number; // 1-100
   highlights: string[];
   struggles: string[];
   personalBests: string[];
@@ -1470,6 +1472,8 @@ export interface ComprehensiveRunAnalysis {
   recoveryAdvice: string;
   nextRunSuggestion: string;
   wellnessImpact: string;
+  coachMotivationalMessage?: string;
+  strugglePointsInsight?: string | null;
   technicalAnalysis: {
     paceAnalysis: string;
     heartRateAnalysis: string;
@@ -1722,5 +1726,321 @@ Be specific, use the actual numbers from the data, and provide actionable insigh
         recoveryTime: "Data unavailable.",
       },
     };
+  }
+}
+
+// ============================================================
+// REAL-TIME ELITE COACHING — additional coaching triggers
+// beyond the existing pace/split/struggle/phase/cadence system
+// ============================================================
+
+export type EliteCoachingType =
+  | 'technique_form'        // Periodic running form & technique coaching
+  | 'milestone'             // Progress milestone celebrations (25%, 50%, 75%)
+  | 'positive_reinforcement'// Reinforce consistent pacing, negative splits, strong effort
+  | 'target_eta'            // Projected finish time vs target
+  | 'pace_trend'            // Gradual pace drift detection (not sudden drop like struggle)
+  | 'elevation_insight'     // How elevation is affecting their pace right now
+  | 'final_500m'            // Last 500m motivational push
+  | 'final_100m';           // Last 100m — maximum intensity finish line push
+
+export interface EliteCoachingParams {
+  coachingType: EliteCoachingType;
+  distance: number;
+  targetDistance?: number;
+  currentPace: string;
+  averagePace: string;
+  elapsedTime: number; // seconds
+  coachName: string;
+  coachTone: string;
+  hasRoute: boolean;
+
+  // Optional context — sent when available
+  heartRate?: number;
+  cadence?: number;
+  currentGrade?: number;
+  totalElevationGain?: number;
+  totalElevationLoss?: number;
+  targetTime?: number; // seconds
+  targetPace?: string;
+
+  // Type-specific context
+  milestonePercent?: number;              // for 'milestone'
+  kmSplits?: Array<{ km: number; pace: string }>;  // for pace_trend, positive_reinforcement
+  paceTrendDirection?: 'slowing' | 'speeding_up' | 'consistent'; // for pace_trend
+  paceTrendDeltaPerKm?: number;           // seconds drift per km
+  projectedFinishTime?: number;           // seconds, for target_eta
+  consecutiveConsistentSplits?: number;   // for positive_reinforcement
+  isNegativeSplitting?: boolean;          // for positive_reinforcement
+  fastestSplitKm?: number;               // for positive_reinforcement
+  fastestSplitPace?: string;             // for positive_reinforcement
+  targetTimeCategory?: 'on_track' | 'strong_effort' | 'no_mention'; // for final_500m, final_100m
+  etaOverTargetPercent?: number;         // how far over target as % (negative = under)
+  remainingMeters?: number;              // meters remaining for final triggers
+}
+
+export async function generateEliteCoaching(params: EliteCoachingParams): Promise<string> {
+  const {
+    coachingType, distance, targetDistance, currentPace, averagePace, elapsedTime,
+    coachName, coachTone, hasRoute,
+    heartRate, cadence, currentGrade, totalElevationGain, totalElevationLoss,
+    targetTime, targetPace, milestonePercent, kmSplits,
+    paceTrendDirection, paceTrendDeltaPerKm,
+    projectedFinishTime, consecutiveConsistentSplits, isNegativeSplitting,
+    fastestSplitKm, fastestSplitPace,
+    targetTimeCategory, etaOverTargetPercent, remainingMeters
+  } = params;
+
+  const timeMin = Math.floor(elapsedTime / 60);
+  const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
+  const remaining = targetDistance ? (targetDistance - distance).toFixed(1) : '?';
+  const spokenPace = formatPaceForTTS(currentPace);
+  const spokenAvgPace = formatPaceForTTS(averagePace);
+  const spokenTargetPace = formatPaceForTTS(targetPace);
+
+  const noTerrainRule = hasRoute ? '' : `\nCRITICAL: No planned route. Do NOT mention hills, terrain, elevation, climbing, descending, or any terrain characteristics.`;
+
+  // Build runner status block (shared across all types)
+  let status = `Runner Status:
+- Distance: ${distance.toFixed(2)}km${targetDistance ? ` of ${targetDistance}km (${progress}%)` : ''} — ${remaining}km remaining
+- Time: ${timeMin} minutes
+- Current pace: ${spokenPace}
+- Average pace: ${spokenAvgPace}`;
+  if (heartRate && heartRate > 0) status += `\n- Heart rate: ${heartRate} bpm`;
+  if (cadence && cadence > 0) status += `\n- Cadence: ${cadence} spm`;
+  if (hasRoute && totalElevationGain && totalElevationGain > 0) status += `\n- Elevation climbed: ${Math.round(totalElevationGain)}m`;
+  if (hasRoute && currentGrade && Math.abs(currentGrade) > 2) status += `\n- Current gradient: ${currentGrade.toFixed(1)}%`;
+  if (kmSplits && kmSplits.length > 0) status += `\n- Splits: ${kmSplits.map(s => `km${s.km}=${s.pace}`).join(', ')}`;
+
+  let typePrompt = '';
+  let systemExtra = '';
+
+  switch (coachingType) {
+
+    case 'technique_form':
+      typePrompt = `COACHING TYPE: Running technique & form check.
+
+${status}
+${noTerrainRule}
+
+Give a focused technique coaching cue (2-3 sentences). Pick ONE technique area and coach it with specific, actionable cues the runner can apply RIGHT NOW:
+
+Choose the most relevant for this moment in the run:
+${progress < 30 ? `- EARLY RUN: Focus on establishing good form — relaxed shoulders, arms at 90 degrees, slight forward lean from ankles, landing under hips.` :
+  progress < 70 ? `- MID RUN: Focus on efficiency — are they bouncing too much? Arms crossing midline? Tension creeping into shoulders or jaw? Quick feet.` :
+  `- LATE RUN: Focus on fatigue management — when tired, form breaks down. Cue them to check posture (tall spine), relax hands (no clenching), drive arms forward.`}
+${cadence && cadence < 165 ? `- Their cadence is ${cadence} spm — below optimal. Cue quicker steps: "Think quick, light feet. Your arms set the rhythm — pump them faster and your legs will follow."` : ''}
+${heartRate && heartRate > 170 ? `- HR is high (${heartRate}bpm) — cue breathing technique: "Breathe from your belly. Try a 2-in, 2-out pattern matched to your footstrike."` : ''}
+${hasRoute && currentGrade && currentGrade > 3 ? `- On uphill: "Shorten your stride, lean into the hill from your ankles, pump your arms, and maintain effort — not pace."` : ''}
+${hasRoute && currentGrade && currentGrade < -3 ? `- On downhill: "Lean slightly forward, increase turnover, stay light on your feet. Don't brake with your heels."` : ''}
+
+Reference at least one data point. Keep it conversational — this is spoken aloud while running.`;
+      systemExtra = 'You specialize in running biomechanics and form coaching. Give one specific, actionable technique cue — not a generic reminder.';
+      break;
+
+    case 'milestone':
+      typePrompt = `COACHING TYPE: Milestone celebration — runner just hit ${milestonePercent}% of their target distance!
+
+${status}
+${noTerrainRule}
+
+Give a celebratory, motivating message (2-3 sentences):
+1. Acknowledge the milestone (${milestonePercent}% done, ${distance.toFixed(1)}km covered)
+2. Reinforce what they've done well so far (reference their actual pace, consistency, or effort)
+3. Set the tone for the next phase:
+${milestonePercent && milestonePercent <= 25 ? '   - Quarter way: "Great start, settle into your rhythm, lots of running ahead"' :
+  milestonePercent && milestonePercent <= 50 ? '   - Halfway: "You\'re at the turnaround point — everything from here is the home stretch"' :
+  '   - Three quarters: "The hard work is almost done — time to dig in and finish strong"'}
+${targetTime ? `\nProjected finish: ${projectedFinishTime ? Math.floor(projectedFinishTime / 60) + ' minutes' : 'unknown'} (target: ${Math.floor(targetTime / 60)} minutes)${projectedFinishTime && projectedFinishTime < targetTime ? ' — AHEAD OF TARGET, let them know!' : projectedFinishTime && projectedFinishTime > targetTime ? ' — behind target, encourage them to push' : ''}` : ''}
+
+Make them feel like they've accomplished something. Reference their actual numbers.`;
+      systemExtra = 'Celebrate the milestone with genuine enthusiasm while weaving in their real data. Make them feel proud of what they\'ve achieved so far.';
+      break;
+
+    case 'positive_reinforcement':
+      typePrompt = `COACHING TYPE: Positive reinforcement — the runner is executing well!
+
+${status}
+${noTerrainRule}
+
+The runner deserves recognition for strong execution:
+${consecutiveConsistentSplits && consecutiveConsistentSplits >= 3 ? `- They've run ${consecutiveConsistentSplits} consecutive consistent splits — excellent pacing discipline!` : ''}
+${isNegativeSplitting ? '- They are NEGATIVE SPLITTING (getting faster as the run progresses) — this is elite-level pacing!' : ''}
+${fastestSplitKm && fastestSplitPace ? `- Their fastest split was km ${fastestSplitKm} at ${formatPaceForTTS(fastestSplitPace)} — call this out!` : ''}
+
+Give a reinforcing message (2-3 sentences):
+1. Call out SPECIFICALLY what they're doing well (consistent pacing, negative splitting, etc.)
+2. Explain briefly WHY this is good running (e.g., "consistent pacing means you're running efficiently and saving energy for when it counts")
+3. Encourage them to maintain it
+
+This is about reinforcing excellence with substance — not empty praise.`;
+      systemExtra = 'Reinforce strong running with specific praise. Explain why what they\'re doing is good technique/strategy.';
+      break;
+
+    case 'target_eta': {
+      const projMin = projectedFinishTime ? Math.floor(projectedFinishTime / 60) : 0;
+      const projSec = projectedFinishTime ? Math.round(projectedFinishTime % 60) : 0;
+      const targetMin = targetTime ? Math.floor(targetTime / 60) : 0;
+      const diff = projectedFinishTime && targetTime ? Math.round((projectedFinishTime - targetTime) / 60) : 0;
+
+      typePrompt = `COACHING TYPE: Target time ETA update.
+
+${status}
+${noTerrainRule}
+
+Target: ${targetTime ? `${targetMin} minutes` : 'no target set'}
+Projected finish: ${projectedFinishTime ? `${projMin} minutes ${projSec} seconds` : 'insufficient data'}
+${diff > 1 ? `STATUS: ${Math.abs(diff)} minute(s) BEHIND target. They need to pick up the pace gradually — not panic.` :
+  diff < -1 ? `STATUS: ${Math.abs(diff)} minute(s) AHEAD of target. They have a cushion — smart pacing.` :
+  `STATUS: ON TARGET. They're executing their race plan perfectly.`}
+${targetPace ? `Target pace: ${spokenTargetPace} (current: ${spokenPace})` : ''}
+
+Give a brief ETA coaching message (2 sentences):
+1. State their projected finish time clearly vs their target
+2. Coach on pacing strategy — should they maintain, push slightly, or ease off?
+${PACE_FORMAT_RULE}`;
+      systemExtra = 'Give clear projected finish time updates with actionable pacing advice.';
+      break;
+    }
+
+    case 'pace_trend':
+      typePrompt = `COACHING TYPE: Pace trend insight.
+
+${status}
+${noTerrainRule}
+
+TREND DETECTED: ${
+  paceTrendDirection === 'slowing' ? `Pace is GRADUALLY DRIFTING SLOWER — approximately ${paceTrendDeltaPerKm ? Math.round(paceTrendDeltaPerKm) + 's/km' : 'noticeably'} per kilometer. This is different from a sudden struggle — it's a gradual fade.` :
+  paceTrendDirection === 'speeding_up' ? `Pace is GRADUALLY GETTING FASTER — approximately ${paceTrendDeltaPerKm ? Math.round(paceTrendDeltaPerKm) + 's/km' : 'noticeably'} per kilometer. They're building momentum.` :
+  'Pace has been remarkably CONSISTENT across splits.'
+}
+
+Give a trend-aware coaching message (2-3 sentences):
+${paceTrendDirection === 'slowing' ? `- Acknowledge the gradual slowdown without alarming them
+- Give a specific technique cue to arrest the fade (e.g., "reset your form — drop your shoulders, pump your arms, quicken your feet")
+- Remind them of their target or what good pacing looks like` :
+  paceTrendDirection === 'speeding_up' ? `- Reinforce the positive trend — they're running smart
+- Caution against going too fast too early if they're under 60% done
+- If they're past 60%, encourage the push` :
+  `- Praise the consistency — this is disciplined running
+- Give a quick form or mental cue to maintain`}
+
+Reference their actual split data.`;
+      systemExtra = 'Analyze pace trends and give targeted coaching. For slowing: technique reset cues. For speeding: smart encouragement.';
+      break;
+
+    case 'elevation_insight':
+      typePrompt = `COACHING TYPE: Elevation & pace analysis.
+
+${status}
+${noTerrainRule}
+
+ELEVATION CONTEXT:
+- Current gradient: ${currentGrade ? currentGrade.toFixed(1) + '%' : 'flat'}
+- Total climb: ${totalElevationGain ? Math.round(totalElevationGain) + 'm' : '0m'}
+- Total descent: ${totalElevationLoss ? Math.round(totalElevationLoss) + 'm' : '0m'}
+${kmSplits && kmSplits.length > 0 ? `- Recent splits: ${kmSplits.slice(-3).map(s => `km${s.km}=${s.pace}`).join(', ')}` : ''}
+
+Give elevation-specific coaching (2-3 sentences):
+${currentGrade && currentGrade > 3 ? `UPHILL COACHING: They're on a ${currentGrade.toFixed(1)}% climb.
+- Coach hill running technique: shorten stride by 10-15%, lean from ankles into hill, maintain arm drive, focus on effort not pace
+- It's OK for pace to slow on hills — reassure them that effort matters more than pace on climbs
+- If their pace dropped, tell them that's normal and smart running` :
+  currentGrade && currentGrade < -3 ? `DOWNHILL COACHING: They're on a ${Math.abs(currentGrade).toFixed(1)}% descent.
+- Coach downhill technique: lean slightly forward (not back), increase cadence, stay light on feet
+- Don't brake with heels — let gravity work for you
+- Great opportunity to recover pace lost on climbs` :
+  `FLAT/ROLLING TERRAIN: Coach on maintaining rhythm and form on undulating terrain.
+- Transitions between ups and downs are where efficiency matters
+- Coach smooth gear changes between inclines and flats`}
+
+This is spoken while running — keep it actionable and specific to the terrain they're on RIGHT NOW.`;
+      systemExtra = 'You are an expert in hill running technique and elevation-based pacing. Give terrain-specific coaching.';
+      break;
+
+    case 'final_500m': {
+      const etaProjMin = projectedFinishTime ? Math.floor(projectedFinishTime / 60) : 0;
+      const etaProjSec = projectedFinishTime ? Math.round(projectedFinishTime % 60) : 0;
+      const tgtMin = targetTime ? Math.floor(targetTime / 60) : 0;
+      const tgtSec = targetTime ? Math.round(targetTime % 60) : 0;
+
+      let targetContext = '';
+      if (targetTime && targetTimeCategory === 'on_track') {
+        targetContext = `\nTARGET TIME CONTEXT — MENTION THIS:
+The runner's target time is ${tgtMin} minutes ${tgtSec > 0 ? tgtSec + ' seconds' : ''}. Their projected finish is ${etaProjMin} minutes ${etaProjSec > 0 ? etaProjSec + ' seconds' : ''}.
+${etaOverTargetPercent !== undefined && etaOverTargetPercent <= 0
+  ? `They are ON TRACK or UNDER their target — tell them! "You're going to beat your target!" or "Your ${tgtMin}-minute goal is RIGHT THERE!"`
+  : `They are within ${etaOverTargetPercent?.toFixed(1)}% of their target — they can still make it with a push! Tell them exactly what they're chasing.`}`;
+      } else if (targetTime && targetTimeCategory === 'strong_effort') {
+        targetContext = `\nTARGET TIME CONTEXT — POSITIVE FRAMING:
+Their target was ${tgtMin} minutes but projected finish is ${etaProjMin} minutes ${etaProjSec > 0 ? etaProjSec + ' seconds' : ''} (${etaOverTargetPercent?.toFixed(1)}% over).
+Frame this positively — "strong effort today" or "you've pushed hard" — do NOT dwell on missing the target. Focus the energy on finishing strong.`;
+      }
+      // targetTimeCategory === 'no_mention' → no target context at all
+
+      typePrompt = `COACHING TYPE: FINAL 500 METERS — the finish line is close!
+
+${status}
+${noTerrainRule}
+${targetContext}
+
+The runner has ${remainingMeters || 500} meters left. This is the FINAL PUSH.
+
+Give a HIGH-ENERGY motivational coaching message (2-3 sentences):
+1. Tell them they have 500 meters to go — make them feel the finish line
+2. ${targetContext ? 'Reference their target time if context above says to' : 'Pure motivation — dig deep, strong finish, leave nothing out there'}
+3. Give ONE final technique cue: "Pump your arms! Lift your knees! Drive to the finish!"
+
+This must sound like a coach screaming at the finish line — maximum energy, maximum belief. Make them SPRINT.`;
+      systemExtra = 'Maximum motivational energy. This is the final 500m — coach like you\'re at the finish line cheering them in. Brief, powerful, electric.';
+      break;
+    }
+
+    case 'final_100m': {
+      let targetContext100 = '';
+      if (targetTime && targetTimeCategory === 'on_track') {
+        const tgt100Min = Math.floor(targetTime / 60);
+        targetContext100 = `They are about to SMASH their ${tgt100Min}-minute target! Tell them!`;
+      }
+
+      typePrompt = `COACHING TYPE: FINAL 100 METERS — FINISH LINE!
+
+The runner has approximately 100 meters to the finish. THIS IS IT.
+${targetContext100}
+
+Give the most intense, powerful 1-2 sentence motivational burst possible:
+- "100 meters! EVERYTHING YOU'VE GOT! FINISH STRONG!"
+- This is pure adrenaline. No data, no technique. Just raw, passionate coaching.
+- Make them feel like a champion crossing the finish line.
+- Keep it SHORT — they're sprinting.`;
+      systemExtra = 'This is the final 100m. Maximum intensity. 1-2 sentences of pure fire. Sound like a coach screaming at the finish line.';
+      break;
+    }
+  }
+
+  const prompt = `You are ${coachName}, an ELITE running coach with a ${coachTone} style. You're coaching this runner IN REAL-TIME via audio.
+
+${typePrompt}
+${PACE_FORMAT_RULE}
+
+Keep it to 2-3 spoken sentences (under 20 seconds of audio). Every word must add value.`;
+
+  const systemMsg = `You are ${coachName}, an elite ${coachTone} running coach delivering real-time audio coaching during a run. You combine data-driven insight with elite technique coaching. Reference the runner's actual numbers. Never give empty motivation — every word is backed by data or technique knowledge. ${systemExtra} ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}`;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemMsg },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 160,
+      temperature: 0.75,
+    });
+
+    return completion.choices[0].message.content || "Keep pushing, you're running strong!";
+  } catch (error) {
+    console.error(`Elite coaching (${coachingType}) error:`, error);
+    return "";
   }
 }

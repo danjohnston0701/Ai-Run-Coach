@@ -7,6 +7,7 @@ data class LocationPoint(
     val speed: Float?,
     val altitude: Double?,
     val heartRate: Int? = null,
-    val bearing: Float? = null
+    val bearing: Float? = null,
+    val cadence: Int? = null
 )
 
