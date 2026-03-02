@@ -802,6 +802,27 @@ export const planAdaptations = pgTable("plan_adaptations", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// ==================== SHARED RUNS ====================
+
+// Shared run links — each share creates a unique token for deep linking
+export const sharedRuns = pgTable("shared_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  shareToken: varchar("share_token").notNull().unique(), // Short unique token for the URL
+  runId: varchar("run_id").notNull().references(() => runs.id),
+  sharerId: varchar("sharer_id").notNull().references(() => users.id), // Who shared it
+  sharerName: text("sharer_name"), // Cached for the landing page
+  // Cached run summary data for the public landing page (so we don't need auth)
+  distanceKm: real("distance_km"),
+  durationSeconds: integer("duration_seconds"),
+  avgPace: text("avg_pace"),
+  completedAt: timestamp("completed_at"),
+  // Referral tracking
+  viewCount: integer("view_count").default(0),
+  installCount: integer("install_count").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  expiresAt: timestamp("expires_at"), // Optional expiry
+});
+
 // ==================== SOCIAL FEED TABLES ====================
 
 // Feed Activities table (social feed posts)
@@ -979,3 +1000,4 @@ export type Challenge = typeof challenges.$inferSelect;
 export type ChallengeParticipant = typeof challengeParticipants.$inferSelect;
 export type Achievement = typeof achievements.$inferSelect;
 export type UserAchievement = typeof userAchievements.$inferSelect;
+export type SharedRun = typeof sharedRuns.$inferSelect;

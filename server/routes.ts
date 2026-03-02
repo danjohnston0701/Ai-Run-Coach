@@ -10,7 +10,8 @@ import {
   trainingPlans, weeklyPlans, plannedWorkouts, planAdaptations,
   feedActivities, reactions, activityComments, commentLikes,
   clubs, clubMemberships, challenges, challengeParticipants, groupRunParticipants,
-  achievements, userAchievements, goals, users
+  achievements, userAchievements, goals, users,
+  sharedRuns
 } from "@shared/schema";
 import { sql } from "drizzle-orm";
 import { 
@@ -311,12 +312,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ==================== RUNS ENDPOINTS ====================
   
-  // Helper function to transform database run to Android format
-  function transformRunForAndroid(run: any) {
+  // Normalize distance: DB may store meters or km depending on source
+  // Returns value in meters
   function normalizeDistanceMeters(run: any): number {
     let d = run.distance || 0;
     if (!d) return 0;
-    // If already meters (typical), leave as-is.
+    // If already meters (typical for native app uploads), leave as-is.
     if (d > 1000) return d;
 
     const hasSplits = Array.isArray(run.kmSplits) && run.kmSplits.length > 0;
@@ -325,6 +326,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (hasSplits || hasPace || hasTrack) return d * 1000;
     return d;
   }
+
+  // Normalize duration: DB should store seconds, but old runs may have ms
+  function normalizeDurationSeconds(run: any): number {
+    const rawDur = run.duration || 0;
+    return rawDur > 86400 ? Math.round(rawDur / 1000) : rawDur;
+  }
+
+  // Helper function to transform database run to Android format
+  function transformRunForAndroid(run: any) {
 
   function normalizeNumericSeries(series: any): number[] {
     if (!series) return [];
@@ -6080,7 +6090,157 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==================== SHARE RUN LINK ENDPOINTS ====================
+
+  // Generate a shareable link for a run
+  app.post("/api/runs/:id/share-link", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const runId = req.params.id;
+      const run = await storage.getRun(runId);
+      if (!run) return res.status(404).json({ error: "Run not found" });
+      if (run.userId !== req.user!.userId) return res.status(403).json({ error: "You can only share your own runs" });
+
+      const user = await storage.getUser(req.user!.userId);
+
+      // Check if a share link already exists for this run
+      const existing = await db.select().from(sharedRuns).where(eq(sharedRuns.runId, runId)).limit(1);
+      
+      if (existing.length > 0) {
+        const share = existing[0];
+        const shareUrl = `https://ai-run-coach.replit.app/share/${share.shareToken}`;
+        return res.json({
+          shareToken: share.shareToken,
+          shareUrl,
+          deepLink: `airuncoach://run/${runId}?ref=${share.shareToken}`,
+        });
+      }
+
+      // Generate a short unique token (8 chars, URL-safe)
+      const { randomBytes } = await import("node:crypto");
+      const shareToken = randomBytes(6).toString("base64url").slice(0, 8);
+
+      const distanceKm = normalizeDistanceMeters(run) / 1000;
+      const durationSec = normalizeDurationSeconds(run);
+
+      await db.insert(sharedRuns).values({
+        shareToken,
+        runId,
+        sharerId: req.user!.userId,
+        sharerName: user?.name || "A runner",
+        distanceKm,
+        durationSeconds: durationSec,
+        avgPace: run.avgPace || null,
+        completedAt: run.completedAt || new Date(),
+      });
+
+      const shareUrl = `https://ai-run-coach.replit.app/share/${shareToken}`;
+      res.json({
+        shareToken,
+        shareUrl,
+        deepLink: `airuncoach://run/${runId}?ref=${shareToken}`,
+      });
+    } catch (error: any) {
+      console.error("Create share link error:", error);
+      res.status(500).json({ error: "Failed to create share link" });
+    }
+  });
+
+  // Public landing page for shared run links (no auth required)
+  app.get("/share/:token", async (req: Request, res: Response) => {
+    try {
+      const results = await db.select().from(sharedRuns).where(eq(sharedRuns.shareToken, req.params.token)).limit(1);
+      
+      if (results.length === 0) {
+        return res.status(404).send(buildShareNotFoundPage());
+      }
+
+      const share = results[0];
+
+      // Increment view count
+      await db.update(sharedRuns)
+        .set({ viewCount: (share.viewCount || 0) + 1 })
+        .where(eq(sharedRuns.id, share.id));
+
+      // Build a beautiful HTML landing page
+      const html = buildShareLandingPage(share);
+      res.setHeader("Content-Type", "text/html");
+      res.send(html);
+    } catch (error: any) {
+      console.error("Share landing page error:", error);
+      res.status(500).send("Something went wrong");
+    }
+  });
+
+  // API endpoint for the app to fetch shared run data (after deep link opens)
+  app.get("/api/shared-run/:token", async (req: Request, res: Response) => {
+    try {
+      const results = await db.select().from(sharedRuns).where(eq(sharedRuns.shareToken, req.params.token)).limit(1);
+      
+      if (results.length === 0) {
+        return res.status(404).json({ error: "Shared run not found" });
+      }
+
+      const share = results[0];
+      res.json({
+        runId: share.runId,
+        sharerId: share.sharerId,
+        sharerName: share.sharerName,
+        distanceKm: share.distanceKm,
+        durationSeconds: share.durationSeconds,
+        avgPace: share.avgPace,
+        completedAt: share.completedAt,
+      });
+    } catch (error: any) {
+      console.error("Get shared run error:", error);
+      res.status(500).json({ error: "Failed to get shared run" });
+    }
+  });
+
   // ==================== SHARE IMAGE CMS ENDPOINTS ====================
+
+  // Build normalized run data for share image generation
+  function buildShareRunData(run: any) {
+    const distanceKm = normalizeDistanceMeters(run) / 1000;
+    const durationSec = normalizeDurationSeconds(run);
+    
+    // Normalize GPS track: DB may store {latitude, longitude} or {lat, lng}
+    const rawGps = Array.isArray(run.gpsTrack) ? run.gpsTrack as any[] : [];
+    const gpsTrack = rawGps.length > 1 ? rawGps.map((p: any) => ({
+      lat: p.lat ?? p.latitude ?? 0,
+      lng: p.lng ?? p.longitude ?? 0,
+    })).filter((p: any) => p.lat !== 0 && p.lng !== 0) : undefined;
+    
+    // Build paceData from kmSplits if paceData not available
+    const rawKmSplits = Array.isArray(run.kmSplits) ? run.kmSplits as any[] : [];
+    let paceData = run.paceData as any;
+    if ((!paceData || !Array.isArray(paceData) || paceData.length === 0) && rawKmSplits.length > 0) {
+      paceData = rawKmSplits.map((s: any) => {
+        const parts = (s.pace || '0:00').split(':');
+        const paceSec = parts.length === 2 ? (parseInt(parts[0]) || 0) * 60 + (parseInt(parts[1]) || 0) : 0;
+        return { km: s.km, pace: s.pace, paceSeconds: paceSec };
+      });
+    }
+
+    return {
+      distance: distanceKm,
+      duration: durationSec,
+      avgPace: run.avgPace || undefined,
+      avgHeartRate: run.avgHeartRate || undefined,
+      maxHeartRate: run.maxHeartRate || undefined,
+      calories: run.calories || undefined,
+      cadence: run.cadence || undefined,
+      elevation: run.elevation || undefined,
+      elevationGain: run.elevationGain || undefined,
+      elevationLoss: run.elevationLoss || undefined,
+      difficulty: run.difficulty || undefined,
+      gpsTrack,
+      heartRateData: (run.heartRateData as any) || undefined,
+      paceData,
+      completedAt: run.completedAt?.toISOString() || undefined,
+      name: run.name || undefined,
+      weatherData: (run.weatherData as any) || undefined,
+    };
+  }
 
   app.get("/api/share/templates", async (req: Request, res: Response) => {
     try {
@@ -6111,29 +6271,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(req.user!.userId);
 
       const { generateShareImage } = await import("./share-image-service");
+      
       const imageBuffer = await generateShareImage({
         templateId,
         aspectRatio: aspectRatio || "1:1",
         stickers: stickers || [],
-        runData: {
-          distance: run.distance,
-          duration: run.duration,
-          avgPace: run.avgPace || undefined,
-          avgHeartRate: run.avgHeartRate || undefined,
-          maxHeartRate: run.maxHeartRate || undefined,
-          calories: run.calories || undefined,
-          cadence: run.cadence || undefined,
-          elevation: run.elevation || undefined,
-          elevationGain: run.elevationGain || undefined,
-          elevationLoss: run.elevationLoss || undefined,
-          difficulty: run.difficulty || undefined,
-          gpsTrack: (run.gpsTrack as any) || undefined,
-          heartRateData: (run.heartRateData as any) || undefined,
-          paceData: (run.paceData as any) || undefined,
-          completedAt: run.completedAt?.toISOString() || undefined,
-          name: run.name || undefined,
-          weatherData: (run.weatherData as any) || undefined,
-        },
+        runData: buildShareRunData(run),
         userName: user?.name || undefined,
       });
 
@@ -6169,29 +6312,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(req.user!.userId);
 
       const { generateShareImage } = await import("./share-image-service");
+
       const imageBuffer = await generateShareImage({
         templateId,
         aspectRatio: aspectRatio || "1:1",
         stickers: stickers || [],
-        runData: {
-          distance: run.distance,
-          duration: run.duration,
-          avgPace: run.avgPace || undefined,
-          avgHeartRate: run.avgHeartRate || undefined,
-          maxHeartRate: run.maxHeartRate || undefined,
-          calories: run.calories || undefined,
-          cadence: run.cadence || undefined,
-          elevation: run.elevation || undefined,
-          elevationGain: run.elevationGain || undefined,
-          elevationLoss: run.elevationLoss || undefined,
-          difficulty: run.difficulty || undefined,
-          gpsTrack: (run.gpsTrack as any) || undefined,
-          heartRateData: (run.heartRateData as any) || undefined,
-          paceData: (run.paceData as any) || undefined,
-          completedAt: run.completedAt?.toISOString() || undefined,
-          name: run.name || undefined,
-          weatherData: (run.weatherData as any) || undefined,
-        },
+        runData: buildShareRunData(run),
         userName: user?.name || undefined,
       });
 
@@ -6206,4 +6332,206 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
 
   return httpServer;
+}
+
+// ==================== SHARE LANDING PAGE HTML BUILDERS ====================
+
+function formatPaceLanding(pace: string | null): string {
+  if (!pace) return "--:--/km";
+  return pace.includes("/km") ? pace : `${pace}/km`;
+}
+
+function formatDurationLanding(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function buildShareLandingPage(share: any): string {
+  const distance = share.distanceKm?.toFixed(2) || "0";
+  const duration = formatDurationLanding(share.durationSeconds || 0);
+  const pace = formatPaceLanding(share.avgPace);
+  const sharerName = share.sharerName || "A runner";
+  const deepLink = `airuncoach://run/${share.runId}?ref=${share.shareToken}`;
+  const playStoreUrl = "https://play.google.com/store/apps/details?id=live.airuncoach.airuncoach";
+  const dateStr = share.completedAt ? new Date(share.completedAt).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "";
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${sharerName}'s Run — AI Run Coach</title>
+  <meta property="og:title" content="${sharerName} ran ${distance} km!" />
+  <meta property="og:description" content="${distance} km in ${duration} | Pace: ${pace} | Tracked with AI Run Coach" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://ai-run-coach.replit.app/share/${share.shareToken}" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #0A0F1A 0%, #111827 50%, #0D1117 100%);
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      background: rgba(31, 41, 55, 0.8);
+      border: 1px solid rgba(45, 55, 72, 0.6);
+      border-radius: 24px;
+      padding: 40px 32px;
+      max-width: 420px;
+      width: 100%;
+      text-align: center;
+      backdrop-filter: blur(10px);
+    }
+    .logo {
+      font-size: 28px;
+      font-weight: 800;
+      color: #00D4FF;
+      letter-spacing: 2px;
+      margin-bottom: 8px;
+    }
+    .logo-sub { font-size: 13px; color: #718096; margin-bottom: 32px; }
+    .sharer { font-size: 16px; color: #A0AEC0; margin-bottom: 4px; }
+    .date { font-size: 13px; color: #718096; margin-bottom: 24px; }
+    .distance {
+      font-size: 64px;
+      font-weight: 800;
+      background: linear-gradient(135deg, #00D4FF, #00E676);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      line-height: 1.1;
+    }
+    .distance-unit { font-size: 20px; color: #00D4FF; font-weight: 600; margin-bottom: 24px; }
+    .stats {
+      display: flex;
+      justify-content: center;
+      gap: 32px;
+      margin-bottom: 32px;
+    }
+    .stat-label { font-size: 11px; color: #718096; text-transform: uppercase; letter-spacing: 1px; }
+    .stat-value { font-size: 22px; font-weight: 700; color: #fff; margin-top: 4px; }
+    .stat-value.pace { color: #FF6B35; }
+    .divider {
+      width: 60%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #2D3748, transparent);
+      margin: 0 auto 24px;
+    }
+    .cta-primary {
+      display: inline-block;
+      background: linear-gradient(135deg, #00D4FF, #00B8E6);
+      color: #0A0F1A;
+      font-weight: 700;
+      font-size: 16px;
+      padding: 14px 32px;
+      border-radius: 14px;
+      text-decoration: none;
+      width: 100%;
+      margin-bottom: 12px;
+      transition: transform 0.2s;
+    }
+    .cta-primary:hover { transform: scale(1.02); }
+    .cta-secondary {
+      display: inline-block;
+      background: transparent;
+      color: #00D4FF;
+      font-weight: 600;
+      font-size: 14px;
+      padding: 12px 32px;
+      border-radius: 14px;
+      border: 1.5px solid #00D4FF;
+      text-decoration: none;
+      width: 100%;
+      transition: background 0.2s;
+    }
+    .cta-secondary:hover { background: rgba(0, 212, 255, 0.1); }
+    .footer { margin-top: 24px; font-size: 12px; color: #4A5568; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">AI RUN COACH</div>
+    <div class="logo-sub">Elite AI-Powered Running</div>
+
+    <div class="sharer">${sharerName}'s Run</div>
+    ${dateStr ? `<div class="date">${dateStr}</div>` : ""}
+
+    <div class="distance">${distance}</div>
+    <div class="distance-unit">KILOMETERS</div>
+
+    <div class="stats">
+      <div>
+        <div class="stat-label">Duration</div>
+        <div class="stat-value">${duration}</div>
+      </div>
+      <div>
+        <div class="stat-label">Pace</div>
+        <div class="stat-value pace">${pace}</div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <a href="${deepLink}" class="cta-primary" id="openApp">View in AI Run Coach</a>
+    <a href="${playStoreUrl}" class="cta-secondary">Get AI Run Coach</a>
+  </div>
+
+  <div class="footer">Shared via AI Run Coach</div>
+
+  <script>
+    // Try to open the app first, fall back to store after timeout
+    document.getElementById('openApp').addEventListener('click', function(e) {
+      e.preventDefault();
+      var deepLink = this.href;
+      var storeUrl = '${playStoreUrl}';
+      var start = Date.now();
+      
+      window.location = deepLink;
+      
+      setTimeout(function() {
+        if (Date.now() - start < 2000) {
+          window.location = storeUrl;
+        }
+      }, 1500);
+    });
+  </script>
+</body>
+</html>`;
+}
+
+function buildShareNotFoundPage(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Run Not Found — AI Run Coach</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0A0F1A; color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; text-align: center;
+    }
+    h1 { color: #00D4FF; margin-bottom: 16px; }
+    p { color: #A0AEC0; margin-bottom: 24px; }
+    a { color: #00D4FF; text-decoration: none; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div>
+    <h1>AI RUN COACH</h1>
+    <p>This shared run link has expired or doesn't exist.</p>
+    <a href="https://play.google.com/store/apps/details?id=live.airuncoach.airuncoach">Get AI Run Coach</a>
+  </div>
+</body>
+</html>`;
 }

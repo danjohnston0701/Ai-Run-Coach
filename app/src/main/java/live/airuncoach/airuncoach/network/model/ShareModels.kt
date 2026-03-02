@@ -38,3 +38,20 @@ data class PlacedSticker(
 data class SharePreviewResponse(
     val image: String // "data:image/png;base64,..."
 )
+
+// Share Link models
+data class ShareLinkResponse(
+    val shareToken: String,
+    val shareUrl: String,
+    val deepLink: String
+)
+
+data class SharedRunResponse(
+    val runId: String,
+    val sharerId: String,
+    val sharerName: String?,
+    val distanceKm: Double?,
+    val durationSeconds: Int?,
+    val avgPace: String?,
+    val completedAt: String?
+)

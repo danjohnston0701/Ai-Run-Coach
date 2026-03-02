@@ -90,6 +90,27 @@
                     android:host="connected-devices" />
             </intent-filter>
 
+            <!-- Deep link for shared run viewing (airuncoach://run/{runId}?ref={token}) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="airuncoach"
+                    android:host="run" />
+            </intent-filter>
+
+            <!-- HTTP deep link for shared runs (https://ai-run-coach.replit.app/share/{token}) -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="ai-run-coach.replit.app"
+                    android:pathPrefix="/share/" />
+            </intent-filter>
+
         </activity>
 
         <!-- Run Tracking Foreground Service -->

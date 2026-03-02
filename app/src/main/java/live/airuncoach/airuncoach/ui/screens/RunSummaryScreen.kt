@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -91,6 +92,7 @@ import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.AiAnalysisState
 import live.airuncoach.airuncoach.viewmodel.RunSummaryViewModel
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -157,7 +159,7 @@ fun RunSummaryScreenFlagship(
                 onBack = onNavigateBack,
                 onRename = { showRenameDialog = true },
                 onShare = {
-                    shareRunText(context, runSession)
+                    viewModel.shareRunWithLink(context)
                 },
                 difficultyLabel = runSession?.let { (it.difficulty ?: it.getDifficultyLevel()).uppercase(Locale.getDefault()) }
             )
@@ -188,7 +190,7 @@ fun RunSummaryScreenFlagship(
                             onGenerateAi = { viewModel.generateAIAnalysis() },
                             onShareCard = {
                                 // share a “summary card” (text now; optional bitmap helper included below)
-                                shareRunText(context, runSession)
+                                viewModel.shareRunWithLink(context)
                             },
                             isAdmin = isAdmin,
                             onDelete = {
@@ -1508,7 +1510,7 @@ private fun RouteMapCardFlagship(
         shape = RoundedCornerShape(24.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .height(260.dp),
+            .height(320.dp),
         border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.6f))
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
@@ -1529,12 +1531,12 @@ private fun RouteMapCardFlagship(
                 cameraPositionState = cameraState,
                 properties = MapProperties(isMyLocationEnabled = false),
                 uiSettings = MapUiSettings(
-                    zoomControlsEnabled = false,
+                    zoomControlsEnabled = true,
                     myLocationButtonEnabled = false,
-                    compassEnabled = false,
+                    compassEnabled = true,
                     mapToolbarEnabled = false,
-                    scrollGesturesEnabled = false,
-                    zoomGesturesEnabled = false,
+                    scrollGesturesEnabled = true,
+                    zoomGesturesEnabled = true,
                     tiltGesturesEnabled = false,
                     rotationGesturesEnabled = false,
                 )
@@ -1612,6 +1614,35 @@ private fun RouteMapCardFlagship(
                         .align(Alignment.BottomStart)
                         .padding(8.dp)
                 )
+            }
+
+            // Reset view button (top-right) — resets camera to show full route
+            val coroutineScope = rememberCoroutineScope()
+            val bounds = remember(latLng) {
+                LatLngBounds.builder().apply { latLng.forEach { include(it) } }.build()
+            }
+
+            Surface(
+                onClick = {
+                    coroutineScope.launch {
+                        cameraState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 80), 500)
+                    }
+                },
+                shape = RoundedCornerShape(8.dp),
+                color = Color.Black.copy(alpha = 0.65f),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .size(36.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Reset map view",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
     }

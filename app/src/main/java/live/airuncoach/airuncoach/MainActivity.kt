@@ -70,6 +70,10 @@ class MainActivity : ComponentActivity() {
             defaultHandler?.uncaughtException(thread, throwable)
         }
         
+        // Check if this is a shared run deep link
+        val sharedRunId = extractSharedRunId(intent)
+        Log.d("MainActivity", "Shared run deep link: $sharedRunId")
+
         // Check if this is launching from an active run notification
         val launchToActiveRun = intent?.getBooleanExtra(RunTrackingService.EXTRA_ACTIVE_RUN, false) == true
         Log.d("MainActivity", "Launch to active run: $launchToActiveRun")
@@ -90,14 +94,12 @@ class MainActivity : ComponentActivity() {
                         
                         // Navigate to active run if launched from notification
                         // Only navigate after navigation graph is set up (when graph is not empty)
-                        LaunchedEffect(navController, launchToActiveRun) {
+                        LaunchedEffect(navController, launchToActiveRun, sharedRunId) {
                             // Add delay to ensure navigation graph is ready
                             delay(100)
                             if (launchToActiveRun) {
                                 try {
-                                    // Check if destination exists before navigating
-                                    val currentBackStackEntry = navController.currentBackStackEntry
-                                    val currentRoute = currentBackStackEntry?.destination?.route
+                                    val currentRoute = navController.currentBackStackEntry?.destination?.route
                                     if (currentRoute != null && currentRoute != "run_session") {
                                         navController.navigate("run_session") {
                                             popUpTo(0) { inclusive = true }
@@ -105,6 +107,13 @@ class MainActivity : ComponentActivity() {
                                     }
                                 } catch (e: Exception) {
                                     Log.e("MainActivity", "Navigation failed", e)
+                                }
+                            } else if (sharedRunId != null) {
+                                try {
+                                    Log.d("MainActivity", "Navigating to shared run: $sharedRunId")
+                                    navController.navigate("run_summary/$sharedRunId")
+                                } catch (e: Exception) {
+                                    Log.e("MainActivity", "Shared run navigation failed", e)
                                 }
                             }
                         }
@@ -173,5 +182,55 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Extract a run ID from deep link intents:
+     * - airuncoach://run/{runId}?ref={token}
+     * - https://ai-run-coach.replit.app/share/{token} (resolved via API)
+     */
+    private fun extractSharedRunId(intent: Intent?): String? {
+        val uri = intent?.data ?: return null
+        Log.d("MainActivity", "Checking deep link URI: $uri")
+
+        // Custom scheme: airuncoach://run/{runId}
+        if (uri.scheme == "airuncoach" && uri.host == "run") {
+            val runId = uri.pathSegments?.firstOrNull()
+            if (!runId.isNullOrBlank()) {
+                Log.d("MainActivity", "Extracted runId from custom scheme: $runId")
+                return runId
+            }
+        }
+
+        // HTTPS link: https://ai-run-coach.replit.app/share/{token}
+        // For HTTPS links, the landing page JavaScript will redirect to airuncoach://run/{runId}
+        // so this case is a fallback — the primary path is the custom scheme above
+        if (uri.host == "ai-run-coach.replit.app" && uri.path?.startsWith("/share/") == true) {
+            val token = uri.pathSegments?.getOrNull(1)
+            if (!token.isNullOrBlank()) {
+                Log.d("MainActivity", "HTTPS share link detected, token: $token")
+                // The landing page JS will try the deep link first, so this path means
+                // the app was opened directly from the HTTPS link via app link verification.
+                // We'll resolve the token to a runId asynchronously.
+                lifecycleScope.launch {
+                    try {
+                        val response = live.airuncoach.airuncoach.network.RetrofitClient.apiService.getSharedRun(token)
+                        Log.d("MainActivity", "Resolved share token to runId: ${response.runId}")
+                        // Note: At this point the navController may need a reference
+                        // For now, store in a companion object for the LaunchedEffect to pick up
+                        pendingSharedRunId = response.runId
+                    } catch (e: Exception) {
+                        Log.e("MainActivity", "Failed to resolve share token", e)
+                    }
+                }
+            }
+        }
+
+        return null
+    }
+
+    companion object {
+        @Volatile
+        var pendingSharedRunId: String? = null
     }
 }

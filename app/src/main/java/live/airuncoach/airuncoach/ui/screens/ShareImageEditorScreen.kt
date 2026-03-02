@@ -3,11 +3,8 @@ package live.airuncoach.airuncoach.ui.screens
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.animation.*
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -22,9 +19,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -483,12 +477,9 @@ private fun PreviewArea(
                                 placed = placed,
                                 widget = widget,
                                 containerSize = containerSize,
-                                onDrag = { dx, dy ->
-                                    val newX = placed.x + dx / containerSize.width
-                                    val newY = placed.y + dy / containerSize.height
-                                    onStickerDrag(placed.widgetId, newX, newY)
-                                },
-                                onDragEnd = { onStickerDragEnd(placed.widgetId) },
+                                onDrag = { id, x, y -> onStickerDrag(id, x, y) },
+                                onDragEnd = { id -> onStickerDragEnd(id) },
+                                onScale = { id, scale -> onStickerScale(id, scale) },
                                 onRemove = { onStickerRemove(placed.widgetId) }
                             )
                         }
@@ -504,8 +495,9 @@ private fun StickerOverlayChip(
     placed: PlacedSticker,
     widget: StickerWidget,
     containerSize: IntSize,
-    onDrag: (Float, Float) -> Unit,
-    onDragEnd: () -> Unit,
+    onDrag: (String, Float, Float) -> Unit,
+    onDragEnd: (String) -> Unit,
+    onScale: (String, Float) -> Unit,
     onRemove: () -> Unit
 ) {
     val density = LocalDensity.current
@@ -514,59 +506,141 @@ private fun StickerOverlayChip(
     val xDp = with(density) { xPx.toDp() }
     val yDp = with(density) { yPx.toDp() }
 
-    // Offset to center the chip on the position
-    val chipSize = 48.dp
+    // Use rememberUpdatedState to avoid stale closure in gesture handlers
+    val currentPlaced by rememberUpdatedState(placed)
+    val currentOnDrag by rememberUpdatedState(onDrag)
+    val currentOnDragEnd by rememberUpdatedState(onDragEnd)
+    val currentOnScale by rememberUpdatedState(onScale)
+    val currentContainerSize by rememberUpdatedState(containerSize)
+
+    // Chip size scales with sticker scale
+    val baseChipW = 90.dp
+    val baseChipH = 36.dp
+    val chipW = baseChipW * placed.scale
+    val chipH = baseChipH * placed.scale
 
     Box(
         modifier = Modifier
             .offset(
-                x = xDp - chipSize / 2,
-                y = yDp - chipSize / 2
+                x = xDp - chipW / 2,
+                y = yDp - chipH / 2
             )
-            .size(chipSize * placed.scale)
-            .pointerInput(placed.widgetId) {
-                detectDragGestures(
-                    onDragEnd = { onDragEnd() }
-                ) { change, dragAmount ->
-                    change.consume()
-                    onDrag(dragAmount.x, dragAmount.y)
-                }
-            }
     ) {
-        // Sticker indicator
+        // Main draggable chip
         Surface(
-            shape = CircleShape,
-            color = Colors.primary.copy(alpha = 0.85f),
-            border = BorderStroke(1.5.dp, Colors.textPrimary.copy(alpha = 0.5f)),
-            modifier = Modifier.fillMaxSize()
+            shape = RoundedCornerShape(chipH / 2),
+            color = Colors.primary.copy(alpha = 0.75f),
+            border = BorderStroke(1.5.dp, Colors.textPrimary.copy(alpha = 0.4f)),
+            modifier = Modifier
+                .width(chipW)
+                .height(chipH)
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragEnd = {
+                            currentOnDragEnd(currentPlaced.widgetId)
+                        }
+                    ) { change, dragAmount ->
+                        change.consume()
+                        val newX =
+                            currentPlaced.x + dragAmount.x / currentContainerSize.width
+                        val newY =
+                            currentPlaced.y + dragAmount.y / currentContainerSize.height
+                        currentOnDrag(currentPlaced.widgetId, newX, newY)
+                    }
+                }
         ) {
-            Box(contentAlignment = Alignment.Center) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 8.dp * placed.scale),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
                 val icon = stickerIcon(widget.icon)
                 Icon(
                     imageVector = icon,
                     contentDescription = widget.label,
                     tint = Colors.buttonText,
-                    modifier = Modifier.size(18.dp * placed.scale)
+                    modifier = Modifier.size(14.dp * placed.scale)
+                )
+                Spacer(modifier = Modifier.width(4.dp * placed.scale))
+                Text(
+                    text = widget.label,
+                    color = Colors.buttonText,
+                    fontSize = (10 * placed.scale).sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
 
-        // Remove button
-        Surface(
-            onClick = onRemove,
-            shape = CircleShape,
-            color = Colors.error,
+        // Control buttons row — positioned above the chip
+        Row(
             modifier = Modifier
-                .size(18.dp)
-                .align(Alignment.TopEnd)
+                .align(Alignment.TopCenter)
+                .offset(y = (-20).dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Remove",
-                    tint = Colors.textPrimary,
-                    modifier = Modifier.size(12.dp)
-                )
+            // Scale down button
+            Surface(
+                onClick = {
+                    val newScale = (currentPlaced.scale - 0.2f).coerceIn(0.5f, 2.5f)
+                    currentOnScale(currentPlaced.widgetId, newScale)
+                    currentOnDragEnd(currentPlaced.widgetId) // trigger preview refresh
+                },
+                shape = CircleShape,
+                color = Colors.backgroundTertiary.copy(alpha = 0.9f),
+                border = BorderStroke(1.dp, Colors.border),
+                modifier = Modifier.size(20.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Remove,
+                        contentDescription = "Smaller",
+                        tint = Colors.textPrimary,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+            }
+
+            // Scale up button
+            Surface(
+                onClick = {
+                    val newScale = (currentPlaced.scale + 0.2f).coerceIn(0.5f, 2.5f)
+                    currentOnScale(currentPlaced.widgetId, newScale)
+                    currentOnDragEnd(currentPlaced.widgetId)
+                },
+                shape = CircleShape,
+                color = Colors.backgroundTertiary.copy(alpha = 0.9f),
+                border = BorderStroke(1.dp, Colors.border),
+                modifier = Modifier.size(20.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Larger",
+                        tint = Colors.textPrimary,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+            }
+
+            // Remove button
+            Surface(
+                onClick = onRemove,
+                shape = CircleShape,
+                color = Colors.error.copy(alpha = 0.9f),
+                modifier = Modifier.size(20.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Remove",
+                        tint = Colors.textPrimary,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
             }
         }
     }

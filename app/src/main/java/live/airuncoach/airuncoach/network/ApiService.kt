@@ -311,6 +311,13 @@ interface ApiService {
     @POST("/api/garmin/upload-run")
     suspend fun uploadRunToGarmin(@Body request: GarminUploadRequest): GarminUploadResponse
 
+    // ========== SHARE RUN LINKS ==========
+    @POST("/api/runs/{id}/share-link")
+    suspend fun createShareLink(@Path("id") runId: String): ShareLinkResponse
+
+    @GET("/api/shared-run/{token}")
+    suspend fun getSharedRun(@Path("token") token: String): SharedRunResponse
+
     // ========== SHARE IMAGE CREATOR ==========
     @GET("/api/share/templates")
     suspend fun getShareTemplates(): ShareTemplatesResponse

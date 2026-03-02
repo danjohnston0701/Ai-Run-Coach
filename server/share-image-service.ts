@@ -105,7 +105,7 @@ export const TEMPLATES: ShareTemplate[] = [
     description: "Km splits with pace visualization",
     category: "splits",
     preview: "splits",
-    aspectRatios: ["9:16", "4:5"],
+    aspectRatios: ["1:1", "9:16", "4:5"],
   },
   {
     id: "achievement",
@@ -469,13 +469,19 @@ function buildSplitSummarySvg(w: number, h: number, run: RunDataForImage, userNa
   const headerY = 80;
   const splitsStartY = headerY + 100;
   const rowH = 52;
-  const maxSplits = Math.min(run.paceData?.length || 0, Math.floor((h - splitsStartY - 120) / rowH));
+  const paceData = run.paceData || [];
+  const maxSplits = Math.min(paceData.length, Math.floor((h - splitsStartY - 120) / rowH));
 
   let splitRows = "";
-  const paceData = run.paceData || [];
+  
+  if (paceData.length === 0) {
+    // No split data available — show placeholder
+    splitRows = `<text x="${w / 2}" y="${splitsStartY + 60}" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="${COLORS.textMuted}" text-anchor="middle">No split data available</text>`;
+  }
+
   const paceValues = paceData.map((p) => p.paceSeconds);
-  const minPace = Math.min(...paceValues);
-  const maxPace = Math.max(...paceValues);
+  const minPace = paceValues.length > 0 ? Math.min(...paceValues) : 0;
+  const maxPace = paceValues.length > 0 ? Math.max(...paceValues) : 1;
   const paceRange = maxPace - minPace || 1;
 
   for (let i = 0; i < maxSplits; i++) {

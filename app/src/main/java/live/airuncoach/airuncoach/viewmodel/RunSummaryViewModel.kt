@@ -392,4 +392,79 @@ class RunSummaryViewModel @Inject constructor(
         val pace = session.averagePace?.replace("/km", "") ?: "--:--"
         return "I just completed a $distance km run in $duration! Average pace: $pace/km. Tracked with AI Run Coach!"
     }
+
+    // Share link state
+    private val _shareUrl = MutableStateFlow<String?>(null)
+    val shareUrl: StateFlow<String?> = _shareUrl.asStateFlow()
+    private val _isCreatingShareLink = MutableStateFlow(false)
+    val isCreatingShareLink: StateFlow<Boolean> = _isCreatingShareLink.asStateFlow()
+
+    /**
+     * Create a shareable link and fire a share intent with branded content
+     */
+    fun shareRunWithLink(context: android.content.Context) {
+        val session = _runSession.value ?: return
+
+        viewModelScope.launch {
+            _isCreatingShareLink.value = true
+            try {
+                val response = apiService.createShareLink(session.id)
+                _shareUrl.value = response.shareUrl
+
+                val distance = String.format(Locale.US, "%.2f", session.getDistanceInKm())
+                val duration = session.getFormattedDuration()
+                val pace = session.averagePace?.replace("/km", "") ?: "--:--"
+
+                val shareText = buildString {
+                    appendLine("\uD83C\uDFC3\u200D♂\uFE0F AI Run Coach")
+                    appendLine()
+                    appendLine("\uD83D\uDCCF $distance km  \u23F1\uFE0F $duration  \u26A1 $pace/km")
+                    appendLine()
+                    appendLine("View my run:")
+                    appendLine(response.shareUrl)
+                    appendLine()
+                    appendLine("Track your runs with elite AI coaching \uD83D\uDE80")
+                }
+
+                val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(android.content.Intent.EXTRA_SUBJECT, "Check out my run on AI Run Coach!")
+                    putExtra(android.content.Intent.EXTRA_TEXT, shareText)
+                }
+                context.startActivity(
+                    android.content.Intent.createChooser(shareIntent, "Share your run")
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (e: Exception) {
+                Log.e("RunSummaryVM", "Failed to create share link", e)
+                // Fall back to basic share without link
+                shareRunTextFallback(context, session)
+            } finally {
+                _isCreatingShareLink.value = false
+            }
+        }
+    }
+
+    private fun shareRunTextFallback(context: android.content.Context, session: RunSession) {
+        val distance = String.format(Locale.US, "%.2f", session.getDistanceInKm())
+        val duration = session.getFormattedDuration()
+        val pace = session.averagePace?.replace("/km", "") ?: "--:--"
+
+        val shareText = buildString {
+            appendLine("\uD83C\uDFC3\u200D♂\uFE0F AI Run Coach")
+            appendLine()
+            appendLine("\uD83D\uDCCF $distance km  \u23F1\uFE0F $duration  \u26A1 $pace/km")
+            appendLine()
+            appendLine("Track your runs with elite AI coaching \uD83D\uDE80")
+        }
+
+        val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(android.content.Intent.EXTRA_TEXT, shareText)
+        }
+        context.startActivity(
+            android.content.Intent.createChooser(shareIntent, "Share your run")
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }
 }
