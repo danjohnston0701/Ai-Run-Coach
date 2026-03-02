@@ -149,6 +149,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private val ELEVATION_INSIGHT_COOLDOWN_MS = 120_000L // 2 min between elevation insights
     private var hasFinal500mFired = false
     private var hasFinal100mFired = false
+    private var lastFlatTerrainCoachingKm: Int = 0 // tracks last km at which flat terrain coaching fired
 
     // Simulation mode
     private var isSimulating = false
@@ -339,6 +340,7 @@ class RunTrackingService : Service(), SensorEventListener {
         lastElevationInsightTime = 0
         hasFinal500mFired = false
         hasFinal100mFired = false
+        lastFlatTerrainCoachingKm = 0
         hasCoachingFiredThisTick = false
         lastStruggleTriggerTime = 0
         isStruggling = false
@@ -762,6 +764,54 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     private fun calculateCalories(distMeters: Double, durationMillis: Long): Int = (70 * (distMeters / 1000.0)).toInt()
+
+    /**
+     * Build per-km elevation summaries by scanning route points.
+     * For each km split, computes total gain, loss, and average gradient.
+     */
+    private fun buildKmSplitElevations(): List<KmSplitElevation> {
+        if (routePoints.size < 2 || kmSplits.isEmpty()) return emptyList()
+        val results = mutableListOf<KmSplitElevation>()
+        var cumulativeDistance = 0.0
+        var currentKm = 1
+        var kmGain = 0.0
+        var kmLoss = 0.0
+        var kmDistance = 0.0
+
+        for (i in 1 until routePoints.size) {
+            val prev = routePoints[i - 1]
+            val curr = routePoints[i]
+            val segDist = calculateDistance(prev, curr)
+            cumulativeDistance += segDist
+            kmDistance += segDist
+
+            if (prev.altitude != null && curr.altitude != null) {
+                val elevChange = curr.altitude - prev.altitude
+                if (elevChange > 0) kmGain += elevChange
+                else kmLoss += abs(elevChange)
+            }
+
+            // When we cross into the next km
+            if (cumulativeDistance >= currentKm * 1000.0) {
+                val split = kmSplits.getOrNull(currentKm - 1)
+                if (split != null) {
+                    val avgGrade = if (kmDistance > 0) ((kmGain - kmLoss) / kmDistance * 100) else 0.0
+                    results.add(KmSplitElevation(
+                        km = currentKm,
+                        pace = split.pace,
+                        elevGain = kmGain.toInt(),
+                        elevLoss = kmLoss.toInt(),
+                        avgGrade = avgGrade
+                    ))
+                }
+                currentKm++
+                kmGain = 0.0
+                kmLoss = 0.0
+                kmDistance = 0.0
+            }
+        }
+        return results
+    }
 
     private fun updateNotification() { val s = _currentRunSession.value; notificationManager.notify(NOTIFICATION_ID, createNotification("Run in progress", String.format("D: %.2f km | P: %s/km | T: %s", s?.getDistanceInKm()?:0.0, s?.averagePace?:"0:00", s?.getFormattedDuration()?:"00:00"))) }
 
@@ -1757,14 +1807,56 @@ class RunTrackingService : Service(), SensorEventListener {
             lastElevationCoachingTime = now
             triggerElevationCoaching("downhill", gradePercent, slopeDistanceMeters)
         }
+
+        // FLAT TERRAIN coaching: on flat/undulating routes, give terrain-aware insights
+        // every 2km after the first 2km (when there's enough data to analyze)
+        val currentKm = (totalDistance / 1000).toInt()
+        if (direction == 0 && currentKm >= 2 && currentKm - lastFlatTerrainCoachingKm >= 2
+            && now - lastElevationCoachingTime >= ELEVATION_COOLDOWN_MS
+        ) {
+            val distKm = totalDistance / 1000.0
+            val elevPerKm = if (distKm > 0.5) totalElevationGain / distKm else 0.0
+            // Only fire for genuinely flat/undulating routes (< 15m gain/km)
+            if (elevPerKm < 15) {
+                lastFlatTerrainCoachingKm = currentKm
+                lastElevationCoachingTime = now
+                Log.d("ElevationCoaching", "Flat terrain insight at ${currentKm}km: ${elevPerKm.toInt()}m/km elevation")
+                triggerElevationCoaching("flat_terrain", gradePercent, totalDistance)
+            }
+        }
     }
 
     private fun triggerElevationCoaching(eventType: String, gradePercent: Double, segmentDistanceMeters: Double) {
         serviceScope.launch {
             try {
+                // Build per-km split elevation summaries from route points
+                val splitElevations = buildKmSplitElevations()
+
+                // Calculate terrain profile
+                val distKm = totalDistance / 1000.0
+                val elevPerKm = if (distKm > 0.5) totalElevationGain / distKm else 0.0
+                val terrainProfile = when {
+                    elevPerKm < 5 -> "flat"
+                    elevPerKm < 15 -> "undulating"
+                    elevPerKm < 30 -> "hilly"
+                    else -> "mountainous"
+                }
+
+                // Pace consistency
+                val paceSecs = kmSplits.map { split ->
+                    val parts = split.pace.split(":")
+                    if (parts.size == 2) parts[0].toIntOrNull()?.times(60)?.plus(parts[1].toIntOrNull() ?: 0) ?: 0 else 0
+                }.filter { it > 0 }
+                val paceSpread = if (paceSecs.size >= 2) paceSecs.max() - paceSecs.min() else null
+                val isNegSplit = if (paceSecs.size >= 3) paceSecs.zipWithNext().all { (a, b) -> b <= a } else null
+
+                val avgSpeed = if (totalDistance > 0 && (System.currentTimeMillis() - startTime) > 0) {
+                    (totalDistance / ((System.currentTimeMillis() - startTime) / 1000.0)).toFloat()
+                } else 0f
+
                 val request = ElevationCoachingRequest(
                     eventType = eventType,
-                    distance = totalDistance / 1000.0,
+                    distance = distKm,
                     elapsedTime = System.currentTimeMillis() - startTime,
                     currentGrade = gradePercent,
                     segmentDistanceMeters = segmentDistanceMeters,
@@ -1775,7 +1867,20 @@ class RunTrackingService : Service(), SensorEventListener {
                     coachTone = currentUser?.coachTone,
                     coachGender = currentUser?.coachGender,
                     coachAccent = currentUser?.coachAccent,
-                    activityType = "run"
+                    activityType = "run",
+                    currentPace = currentPace,
+                    averagePace = calculatePace(avgSpeed * 3.6f),
+                    heartRate = currentHeartRate.takeIf { it > 0 },
+                    cadence = currentCadence.takeIf { it > 0 },
+                    avgCadence = if (cadenceCount > 0) (cadenceSum / cadenceCount).toInt() else null,
+                    kmSplitSummaries = splitElevations.takeIf { it.isNotEmpty() },
+                    terrainProfile = terrainProfile,
+                    elevationPerKm = elevPerKm,
+                    maxGradientSoFar = calculateMaxGradient().toDouble(),
+                    segmentElevationGain = slopeElevationGain.takeIf { it > 0 },
+                    segmentElevationLoss = slopeElevationLoss.takeIf { it > 0 },
+                    paceSpreadSeconds = paceSpread,
+                    isNegativeSplitting = isNegSplit
                 )
                 val response = apiService.getElevationCoaching(request)
                 coachingHistory.add(AiCoachingNote(

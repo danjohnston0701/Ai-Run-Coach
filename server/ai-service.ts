@@ -667,7 +667,23 @@ export async function getElevationCoaching(params: {
   hasRoute?: boolean;
   coachName?: string;
   coachTone?: string;
+  coachGender?: string;
+  coachAccent?: string;
   activityType?: string;
+  // Cross-metric context
+  currentPace?: string;
+  averagePace?: string;
+  heartRate?: number;
+  cadence?: number;
+  avgCadence?: number;
+  kmSplitSummaries?: Array<{ km: number; pace: string; elevGain: number; elevLoss: number; avgGrade: number }>;
+  terrainProfile?: string;
+  elevationPerKm?: number;
+  maxGradientSoFar?: number;
+  segmentElevationGain?: number;
+  segmentElevationLoss?: number;
+  paceSpreadSeconds?: number;
+  isNegativeSplitting?: boolean;
   // Legacy format support
   change?: string;
   grade?: number;
@@ -685,23 +701,108 @@ export async function getElevationCoaching(params: {
     return "";
   }
 
-  const eventDescription = eventType === 'hill_top' ? 'just crested a hill'
-    : eventType === 'uphill' ? `climbing (${Math.abs(grade).toFixed(1)}% grade)`
-    : eventType === 'downhill_finish' ? 'on a downhill towards the finish'
-    : eventType === 'downhill' ? `descending (${Math.abs(grade).toFixed(1)}% grade)`
-    : `on ${eventType} terrain`;
+  // Build the split-by-split elevation analysis table
+  let splitAnalysis = '';
+  if (params.kmSplitSummaries && params.kmSplitSummaries.length > 0) {
+    splitAnalysis = '\nKM SPLIT ELEVATION BREAKDOWN:\n' + params.kmSplitSummaries.map(s => {
+      const terrain = s.avgGrade > 2 ? '⬆ uphill' : s.avgGrade < -2 ? '⬇ downhill' : '➡ flat';
+      return `  km${s.km}: ${s.pace}/km | +${s.elevGain}m/-${s.elevLoss}m | ${s.avgGrade.toFixed(1)}% avg grade (${terrain})`;
+    }).join('\n');
+    splitAnalysis += '\n';
+  }
 
-  const prompt = `You are ${coachName}, a ${coachTone} running coach. The runner is at ${distanceKm}km and is ${eventDescription}.${segmentM ? ` This segment is ${segmentM}m long.` : ''}
+  // Build cross-metric status
+  let metricsStatus = '\nCURRENT METRICS:';
+  if (params.currentPace) metricsStatus += `\n- Current pace: ${params.currentPace}/km`;
+  if (params.averagePace) metricsStatus += `\n- Average pace: ${params.averagePace}/km`;
+  if (params.heartRate) metricsStatus += `\n- Heart rate: ${params.heartRate} bpm`;
+  if (params.cadence) metricsStatus += `\n- Cadence: ${params.cadence} spm`;
+  if (params.avgCadence) metricsStatus += ` (avg: ${params.avgCadence} spm)`;
+  if (params.paceSpreadSeconds != null) metricsStatus += `\n- Pace consistency: ${params.paceSpreadSeconds}s spread (fastest to slowest split)`;
+  if (params.isNegativeSplitting === true) metricsStatus += `\n- NEGATIVE SPLITTING — getting faster each km`;
+  metricsStatus += '\n';
 
-Give a brief (1-2 sentences) terrain-specific coaching tip. Be encouraging and actionable.`;
+  // Build terrain profile overview
+  let terrainOverview = '\nROUTE TERRAIN PROFILE:';
+  terrainOverview += `\n- Classification: ${params.terrainProfile || 'unknown'}`;
+  terrainOverview += `\n- Elevation gain per km: ${params.elevationPerKm ? params.elevationPerKm.toFixed(1) + 'm/km' : 'unknown'}`;
+  terrainOverview += `\n- Total climb: ${params.totalElevationGain ? Math.round(params.totalElevationGain) + 'm' : '0m'}`;
+  terrainOverview += `\n- Total descent: ${params.totalElevationLoss ? Math.round(params.totalElevationLoss) + 'm' : '0m'}`;
+  if (params.maxGradientSoFar) terrainOverview += `\n- Steepest gradient so far: ${params.maxGradientSoFar.toFixed(1)}%`;
+
+  // Build event-specific coaching instructions
+  let coachingInstructions: string;
+
+  if (eventType === 'flat_terrain') {
+    coachingInstructions = `FLAT TERRAIN INSIGHT — The runner is on a flat/undulating route.
+
+WHAT TO DO:
+- Acknowledge the terrain — tell them their route is flat/gently undulating (whichever fits the data)
+- CORRELATE their metrics with the terrain: flat routes are ideal for pace consistency, rhythm building, and target pace work
+- If their pace is consistent (spread < 15s): praise this specifically — "your splits are rock solid on this flat terrain, that's disciplined running"
+- If they're negative splitting on flat terrain: this is exceptional — call it out enthusiastically
+- If their pace is drifting (spread > 20s): on a flat route there's no terrain excuse — gently suggest a form reset or effort management
+- Give ONE specific technique cue for flat running: maintain cadence around 170-180, stay tall through hips, relax shoulders, swing arms forward not across
+- If they have energy to spare (HR under control, consistent pace): suggest conserving for a strong finish push
+- Reference their actual numbers — don't be generic`;
+  } else if (eventType === 'hill_top') {
+    coachingInstructions = `HILL TOP — The runner just crested a climb of ${params.segmentElevationGain ? Math.round(params.segmentElevationGain) + 'm' : 'significant elevation'} over ${segmentM ? segmentM + 'm' : 'a sustained distance'}.
+
+WHAT TO DO:
+- Celebrate the climb — they earned it. Be specific about what they just climbed
+- Transition coaching: as the terrain flattens/descends, coach them to gradually rebuild pace, lengthen stride back out, and let gravity help
+- If their HR is high: "catch your breath on this section, let your heart rate settle"
+- If their cadence dropped on the climb: "now you're over the top, pick your cadence back up"
+- Compare their uphill split pace to their flat split pace — acknowledge the slowdown as smart running, not weakness`;
+  } else if (eventType === 'uphill') {
+    coachingInstructions = `UPHILL — The runner is on a ${Math.abs(grade).toFixed(1)}% climb, ${segmentM ? segmentM + 'm into this hill' : 'sustained climb'}.${params.segmentElevationGain ? ` Climbed ${Math.round(params.segmentElevationGain)}m so far in this segment.` : ''}
+
+WHAT TO DO:
+- Coach hill-specific technique: shorten stride 10-15%, lean from ankles into the hill (not at the waist), pump arms more aggressively, focus on driving knees
+- Reassure that pace SHOULD slow on climbs — effort-based running, not pace-based. "Your pace slowing is exactly right on a hill like this"
+- If their HR is elevated: "heart rate is up because you're climbing — that's normal, focus on controlled effort"
+- If cadence dropped below 155: "try to keep your feet quick even on the climb — shorter faster steps are more efficient than long slow ones"
+- Look at the grade vs their pace drop: if pace dropped proportionally to grade, that's well-managed. If it dropped way more, they may be overstriding uphill`;
+  } else if (eventType === 'downhill' || eventType === 'downhill_finish') {
+    const isFinish = eventType === 'downhill_finish';
+    coachingInstructions = `${isFinish ? 'DOWNHILL FINISH — Descending towards the finish!' : `DOWNHILL — ${Math.abs(grade).toFixed(1)}% descent`}, ${segmentM ? segmentM + 'm into this downhill' : 'sustained descent'}.${params.segmentElevationLoss ? ` Descended ${Math.round(params.segmentElevationLoss)}m so far.` : ''}
+
+WHAT TO DO:
+- Coach downhill technique: lean SLIGHTLY forward from ankles (not backward!), increase cadence to 175+, stay light on feet, don't brake with heels
+- This is "free speed" — encourage them to let gravity work. "Let the hill do the work, just control the speed"
+${isFinish ? '- This is the final descent — maximum motivation. "The finish line is downhill from here, let it rip!"' : '- Advise using the downhill to recover from any previous climbs while banking faster split times'}
+- If their pace is much faster than average: great, but caution about quad fatigue from braking
+- If cadence is low on the descent: "pick up your turnover — short quick steps protect your knees on downhills"`;
+  } else {
+    coachingInstructions = `TERRAIN UPDATE — The runner is on ${eventType} terrain at ${distanceKm}km.
+Give terrain-specific coaching based on their current metrics and split data.`;
+  }
+
+  const prompt = `The runner is at ${distanceKm}km into their run.
+${terrainOverview}
+${metricsStatus}
+${splitAnalysis}
+${coachingInstructions}
+
+Give a coaching message (2-3 sentences). Sound like you KNOW this route inside and out — reference specific data points from their splits and metrics. This is spoken while running via TTS, so keep it conversational and actionable.`;
+
+  const systemPrompt = `You are ${coachName}, an elite running coach who specializes in terrain analysis and elevation-based pacing strategy. You've analyzed thousands of runs and can instantly correlate how terrain affects a runner's pace, heart rate, and cadence.
+
+CRITICAL RULES:
+- Reference SPECIFIC numbers from their data — never be generic
+- Sound like you can SEE the route and FEEL the terrain
+- Correlate metrics: "your pace dropped 15 seconds on that climb but your heart rate stayed controlled — that's textbook hill management"
+- Give ONE actionable technique cue specific to the current terrain
+- Keep it to 2-3 sentences maximum — this is spoken while they're running
+- ${toneDirective(coachTone)}`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep responses brief and actionable. ${toneDirective(coachTone)}` },
+      { role: "system", content: systemPrompt },
       { role: "user", content: prompt }
     ],
-    max_tokens: 80,
+    max_tokens: 150,
     temperature: 0.8,
   });
 
@@ -1929,34 +2030,76 @@ Reference their actual split data.`;
       systemExtra = 'Analyze pace trends and give targeted coaching. For slowing: technique reset cues. For speeding: smart encouragement.';
       break;
 
-    case 'elevation_insight':
-      typePrompt = `COACHING TYPE: Elevation & pace analysis.
+    case 'elevation_insight': {
+      // Build terrain correlation analysis from split data
+      let terrainAnalysis = '';
+      if (kmSplits && kmSplits.length >= 2) {
+        terrainAnalysis = '\nSPLIT-BY-SPLIT TERRAIN ANALYSIS:\n';
+        const splitPaces = kmSplits.map(s => {
+          const parts = s.pace.split(':');
+          return parts.length === 2 ? (parseInt(parts[0]) || 0) * 60 + (parseInt(parts[1]) || 0) : 0;
+        });
+        terrainAnalysis += kmSplits.map((s: any, i: number) => {
+          let delta = '';
+          if (i > 0 && splitPaces[i] > 0 && splitPaces[i-1] > 0) {
+            const diff = splitPaces[i] - splitPaces[i-1];
+            delta = diff > 0 ? ` [+${diff}s slower]` : diff < 0 ? ` [${diff}s faster]` : ' [steady]';
+          }
+          return `  km${s.km}: ${s.pace}/km${delta}`;
+        }).join('\n');
+        
+        const validPaces = splitPaces.filter(p => p > 0);
+        if (validPaces.length >= 2) {
+          const spread = Math.max(...validPaces) - Math.min(...validPaces);
+          terrainAnalysis += `\n  Pace spread: ${spread}s | Consistency: ${spread <= 10 ? 'EXCELLENT' : spread <= 20 ? 'GOOD' : spread <= 30 ? 'MODERATE' : 'VARIABLE'}`;
+        }
+      }
+
+      const isFlat = !currentGrade || (currentGrade > -3 && currentGrade < 3);
+      const isUphill = currentGrade && currentGrade >= 3;
+      const isDownhill = currentGrade && currentGrade <= -3;
+
+      typePrompt = `COACHING TYPE: Terrain-aware run analysis — sound like you know EVERYTHING about this route.
 
 ${status}
 ${noTerrainRule}
 
-ELEVATION CONTEXT:
-- Current gradient: ${currentGrade ? currentGrade.toFixed(1) + '%' : 'flat'}
-- Total climb: ${totalElevationGain ? Math.round(totalElevationGain) + 'm' : '0m'}
-- Total descent: ${totalElevationLoss ? Math.round(totalElevationLoss) + 'm' : '0m'}
-${kmSplits && kmSplits.length > 0 ? `- Recent splits: ${kmSplits.slice(-3).map(s => `km${s.km}=${s.pace}`).join(', ')}` : ''}
+TERRAIN PROFILE:
+- Route classification: ${totalElevationGain && distance > 0.5 ? (totalElevationGain / distance < 5 ? 'FLAT' : totalElevationGain / distance < 15 ? 'UNDULATING' : totalElevationGain / distance < 30 ? 'HILLY' : 'MOUNTAINOUS') : 'unknown'}
+- Current gradient: ${currentGrade ? currentGrade.toFixed(1) + '%' : '~0% (flat)'}
+- Total climb: ${totalElevationGain ? Math.round(totalElevationGain) + 'm' : '0m'} | Total descent: ${totalElevationLoss ? Math.round(totalElevationLoss) + 'm' : '0m'}
+- Elevation gain per km: ${totalElevationGain && distance > 0.5 ? (totalElevationGain / distance).toFixed(1) + 'm/km' : 'minimal'}
+${heartRate ? `- Heart rate: ${heartRate} bpm` : ''}
+${cadence ? `- Cadence: ${cadence} spm` : ''}
+${terrainAnalysis}
 
-Give elevation-specific coaching (2-3 sentences):
-${currentGrade && currentGrade > 3 ? `UPHILL COACHING: They're on a ${currentGrade.toFixed(1)}% climb.
-- Coach hill running technique: shorten stride by 10-15%, lean from ankles into hill, maintain arm drive, focus on effort not pace
-- It's OK for pace to slow on hills — reassure them that effort matters more than pace on climbs
-- If their pace dropped, tell them that's normal and smart running` :
-  currentGrade && currentGrade < -3 ? `DOWNHILL COACHING: They're on a ${Math.abs(currentGrade).toFixed(1)}% descent.
-- Coach downhill technique: lean slightly forward (not back), increase cadence, stay light on feet
-- Don't brake with heels — let gravity work for you
-- Great opportunity to recover pace lost on climbs` :
-  `FLAT/ROLLING TERRAIN: Coach on maintaining rhythm and form on undulating terrain.
-- Transitions between ups and downs are where efficiency matters
-- Coach smooth gear changes between inclines and flats`}
+${isUphill ? `UPHILL — They're on a ${currentGrade!.toFixed(1)}% climb right now.
+YOUR COACHING MUST:
+- Correlate their pace change with the gradient — "your pace dropped Xs on this climb, that's exactly proportional to the grade"
+- Coach uphill technique: shorter stride, ankle lean, arm drive, effort > pace
+- If HR is high + climbing: "heart rate is elevated because of the gradient — that's physics, not fitness. Stay controlled."
+- If cadence dropped: "shorten your stride and quicken your feet — shorter faster steps are more efficient uphill"` :
+  isDownhill ? `DOWNHILL — They're on a ${Math.abs(currentGrade!).toFixed(1)}% descent right now.
+YOUR COACHING MUST:
+- Coach them to use this descent strategically — "this is free speed, let gravity do the work"
+- Technique: lean forward from ankles, increase cadence to 175+, light feet, avoid heel braking
+- If their pace is much faster than average: praise it but caution on quad fatigue
+- If they're banking time: "great section to recover heart rate while keeping pace up"` :
+  `FLAT/UNDULATING TERRAIN — The route is ${totalElevationGain && distance > 0.5 && totalElevationGain / distance < 5 ? 'very flat with minimal undulation' : 'gently undulating'}.
+YOUR COACHING MUST:
+- Acknowledge the terrain: "You're on a beautifully flat stretch" or "this route has gentle undulation"
+- On flat terrain, pace consistency is everything — praise tight splits or address drift
+- If pace spread is < 15s: "Your splits are incredibly consistent on this flat terrain — that's disciplined, smart running"
+- If they're negative splitting on flat: "You're getting faster as the run goes on — textbook pacing on a flat route"
+- If pace is drifting on flat: "On flat ground, pace drift usually means form is breaking down — reset: drop shoulders, pump arms, quick feet"
+- Coach one flat-specific technique: cadence rhythm, hip extension, relaxed upper body, forward lean
+- If HR is stable: "Your heart rate is steady — you've found a sustainable effort level, that's great running"
+- Energy management: if they look comfortable and have distance remaining, suggest conserving for a strong finish push`}
 
-This is spoken while running — keep it actionable and specific to the terrain they're on RIGHT NOW.`;
-      systemExtra = 'You are an expert in hill running technique and elevation-based pacing. Give terrain-specific coaching.';
+Give 2-3 sentences that sound like you've analyzed every metre of this route. Reference SPECIFIC data points.`;
+      systemExtra = 'You are an elite running coach specializing in terrain analysis. You can see the full elevation profile, every split, and every metric. Sound like you KNOW this route. Correlate terrain with pace/HR/cadence changes. Be specific, not generic.';
       break;
+    }
 
     case 'final_500m': {
       const etaProjMin = projectedFinishTime ? Math.floor(projectedFinishTime / 60) : 0;
