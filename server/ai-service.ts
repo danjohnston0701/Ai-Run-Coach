@@ -1223,6 +1223,8 @@ function analyzePositiveWeatherConditions(
 export async function generateWellnessAwarePreRunBriefing(params: {
   distance: number;
   elevationGain: number;
+  elevationLoss?: number;
+  maxGradientDegrees?: number;
   difficulty: string;
   activityType: string;
   weather: any;
@@ -1238,9 +1240,10 @@ export async function generateWellnessAwarePreRunBriefing(params: {
   intensityAdvice: string;
   warnings: string[];
   readinessInsight: string;
+  routeInsight?: string;
   weatherAdvantage?: string;
 }> {
-  const { distance, elevationGain, difficulty, activityType, weather, coachName, coachTone, wellness, hasRoute = true, targetTime, targetPace, weatherImpact } = params;
+  const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, activityType, weather, coachName, coachTone, wellness, hasRoute = true, targetTime, targetPace, weatherImpact } = params;
 
   // Analyze positive weather conditions BEFORE building the prompt
   const weatherAdvantage = analyzePositiveWeatherConditions(weather, weatherImpact);
@@ -1251,14 +1254,47 @@ export async function generateWellnessAwarePreRunBriefing(params: {
 
   // Build route info based on whether there's a route
   let routeInfo = '';
+  let terrainDescription = '';
   if (hasRoute === true) {
-    // Route-based run - include terrain/elevation info ONLY when hasRoute is explicitly true
+    // Classify terrain type from elevation data
+    const gain = Math.round(elevationGain || 0);
+    const loss = Math.round(elevationLoss || 0);
+    const maxGrad = maxGradientDegrees || 0;
+    const distKm = distance || 1;
+    const gainPerKm = gain / distKm;
+    
+    // Terrain classification
+    if (gain < 20 && loss < 20) {
+      terrainDescription = 'Flat route — minimal elevation change, great for maintaining a steady pace';
+    } else if (gain < 50 && loss < 50) {
+      terrainDescription = 'Generally flat with gentle undulations';
+    } else if (gainPerKm > 30) {
+      terrainDescription = gain > 200 ? 'Mountainous/very hilly terrain — expect significant climbs and descents' :
+        'Hilly route with noticeable climbs';
+    } else if (gain > 50 || loss > 50) {
+      terrainDescription = 'Rolling terrain with mixed inclines and declines';
+    } else {
+      terrainDescription = 'Mixed terrain';
+    }
+
+    // Gradient description
+    let gradientNote = '';
+    if (maxGrad > 8) {
+      gradientNote = `Steepest section: ${maxGrad.toFixed(1)}° — a tough climb, consider walking if needed`;
+    } else if (maxGrad > 5) {
+      gradientNote = `Steepest section: ${maxGrad.toFixed(1)}° — noticeable hill, shorten your stride and maintain effort`;
+    } else if (maxGrad > 2) {
+      gradientNote = `Steepest section: ${maxGrad.toFixed(1)}° — gentle incline`;
+    }
+    
     routeInfo = `
 ROUTE:
 - Distance: ${formatDistanceForTTS(distance)}
 - Difficulty: ${difficulty}
-- Elevation gain: ${Math.round(elevationGain || 0)}m
-- Terrain: ${elevationGain > 100 ? 'hilly' : elevationGain > 50 ? 'rolling' : 'generally flat'}`;
+- Elevation gain: ${gain}m / Elevation loss: ${loss}m
+- Terrain: ${terrainDescription}
+${gradientNote ? `- Gradient: ${gradientNote}` : ''}
+- Route type: Road run on mapped route`;
   } else {
     // Free run (no route) - NO terrain mention at all
     routeInfo = `
@@ -1344,13 +1380,13 @@ Based on this data, provide:
    Include the actual numbers - do NOT give a vague or generic briefing. ${PACE_FORMAT_RULE}
 2. "intensityAdvice": Specific intensity advice. ${targetPace ? `They are targeting ${formatPaceForTTS(targetPace)} - say whether to stick to it, go easier, or push harder based on their wellness.` : 'Suggest an appropriate effort level based on their wellness.'}
 3. "warnings": Array of any warnings if their wellness indicators suggest caution. Empty array if none.
-4. "readinessInsight": How their body data affects today's run.
+${hasRoute === true ? `4. "routeInsight": A brief commentary (2-3 sentences) describing what to expect from the route terrain. Use the ROUTE data above — mention whether it's flat, rolling, hilly, has steep sections, etc. Give practical advice like "pace yourself on the climbs" or "use the downhills to recover" or "great flat route to maintain consistent splits". Be specific about the elevation numbers. Do NOT repeat the distance or weather — just focus on the terrain and what to expect from the route.` : `4. "readinessInsight": How their body data affects today's run.`}
 
 CRITICAL RULES:
 - For runs marked "RUN (No planned route)" - do NOT mention terrain, elevation, hills, flat, or any route characteristics.
 - Include the specific distance, pace, and time numbers in the briefing text. The runner wants to hear their actual plan confirmed.
 
-Respond as JSON with fields: briefing, intensityAdvice, warnings (array), readinessInsight`;
+Respond as JSON with fields: briefing, intensityAdvice, warnings (array), ${hasRoute === true ? 'routeInsight' : 'readinessInsight'}`;
 
   try {
     const completion = await openai.chat.completions.create({
@@ -1370,7 +1406,8 @@ Respond as JSON with fields: briefing, intensityAdvice, warnings (array), readin
       briefing: parsed.briefing || "Ready for your run! Let's get started.",
       intensityAdvice: parsed.intensityAdvice || "Listen to your body today.",
       warnings: parsed.warnings || [],
-      readinessInsight: parsed.readinessInsight || "Your body is ready for this run.",
+      readinessInsight: parsed.readinessInsight || (hasRoute ? undefined : "Your body is ready for this run."),
+      routeInsight: parsed.routeInsight || (hasRoute ? terrainDescription : undefined),
       weatherAdvantage: weatherAdvantage || undefined,
     };
   } catch (error) {
@@ -1379,7 +1416,8 @@ Respond as JSON with fields: briefing, intensityAdvice, warnings (array), readin
       briefing: "Ready for your run! Take it easy at the start and find your rhythm.",
       intensityAdvice: "Start conservatively and adjust based on how you feel.",
       warnings: [],
-      readinessInsight: "Listen to your body and adjust intensity as needed.",
+      readinessInsight: hasRoute ? undefined : "Listen to your body and adjust intensity as needed.",
+      routeInsight: hasRoute ? terrainDescription : undefined,
       weatherAdvantage: weatherAdvantage || undefined,
     };
   }

@@ -3621,6 +3621,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const briefing = await aiService.generateWellnessAwarePreRunBriefing({
         distance: distance || 5,
         elevationGain: elevationGain || 0,
+        elevationLoss: elevationLoss || 0,
+        maxGradientDegrees: maxGradientDegrees || 0,
         difficulty: difficulty || 'moderate',
         activityType: activityType || 'run',
         weather,
@@ -3766,6 +3768,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const aiBriefing = await aiService.generateWellnessAwarePreRunBriefing({
         distance: distance || 5,
         elevationGain: elevationGain || 0,
+        elevationLoss: elevationLoss || 0,
+        maxGradientDegrees: maxGradientDegrees || 0,
         difficulty: difficulty || 'unknown',
         activityType: activityType || 'run',
         weather,
@@ -3781,7 +3785,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Build natural speech text from ALL AI response fields
       const speechParts: string[] = [];
       if (aiBriefing.briefing) speechParts.push(aiBriefing.briefing);
-      if (aiBriefing.readinessInsight) speechParts.push(aiBriefing.readinessInsight);
+      // For route runs: include route terrain insight; for free runs: include readiness insight
+      if (aiBriefing.routeInsight) speechParts.push(aiBriefing.routeInsight);
+      else if (aiBriefing.readinessInsight) speechParts.push(aiBriefing.readinessInsight);
       if (aiBriefing.intensityAdvice) speechParts.push(aiBriefing.intensityAdvice);
       if (aiBriefing.weatherAdvantage) speechParts.push(aiBriefing.weatherAdvantage);
       // Include warnings if any
@@ -3805,7 +3811,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         briefing: aiBriefing.briefing,
         intensityAdvice: aiBriefing.intensityAdvice,
         warnings: aiBriefing.warnings,
-        readinessInsight: aiBriefing.readinessInsight,
+        readinessInsight: aiBriefing.routeInsight || aiBriefing.readinessInsight,
         weatherAdvantage: aiBriefing.weatherAdvantage,
         // OpenAI TTS audio
         audio: base64Audio,
