@@ -60,6 +60,15 @@ const formatPaceForTTS = (pace: string | undefined): string => {
 // Pace format instruction for AI system messages
 const PACE_FORMAT_RULE = `PACE FORMAT: When speaking about pace, ALWAYS say it as "X minutes and Y seconds per kilometer" (e.g. "4 minutes and 32 seconds per kilometer"), NEVER as shorthand like "four thirty-two" or "4:32". This is critical because the runner is listening via audio while running and needs to clearly understand pace values.`;
 
+// Helper to format seconds-per-km pace value to "X minutes and Y seconds" string
+const formatSecondsAsPace = (secondsPerKm: number): string => {
+  if (!secondsPerKm || secondsPerKm <= 0 || secondsPerKm > 3600) return 'unknown';
+  const min = Math.floor(secondsPerKm / 60);
+  const sec = Math.round(secondsPerKm % 60);
+  if (sec === 0) return `${min}:00`;
+  return `${min}:${sec.toString().padStart(2, '0')}`;
+};
+
 // Helper to format duration in minutes for TTS - not as clock time
 const formatDurationForTTS = (seconds: number): string => {
   const totalMinutes = Math.floor(seconds / 60);
@@ -424,6 +433,105 @@ Examples of good output: "Quick right turn onto May Street, looking good!", "Lef
     });
 
     return navCompletion.choices[0].message.content || navigationInstruction;
+  }
+
+  // PACE COACHING: Smart pace guidance based on deviation from target
+  if (triggerType === 'pace_coaching' || triggerType === 'pace_abandon') {
+    const paceDeviationPercent = (params as any).paceDeviationPercent ?? 0;
+    const rollingPaceDeviationPercent = (params as any).rollingPaceDeviationPercent ?? 0;
+    const projectedFinishSeconds = (params as any).projectedFinishSeconds ?? 0;
+    const currentAvgPaceSecondsPerKm = (params as any).currentAvgPaceSecondsPerKm ?? 0;
+    const rollingPaceSecondsPerKm = (params as any).rollingPaceSecondsPerKm ?? 0;
+    const progressPercent = (params as any).progressPercent ?? 0;
+    
+    const avgPaceFormatted = formatSecondsAsPace(currentAvgPaceSecondsPerKm);
+    const rollingPaceFormatted = formatSecondsAsPace(rollingPaceSecondsPerKm);
+    const targetPaceFormatted = targetPace || 'unknown';
+    const projectedFinishMin = Math.floor(projectedFinishSeconds / 60);
+    const projectedFinishSec = Math.round(projectedFinishSeconds % 60);
+    const targetTimeMin = targetTime ? Math.floor(targetTime / 60) : 0;
+    const targetTimeSec = targetTime ? Math.round(targetTime % 60) : 0;
+    
+    // Determine pace zone for the prompt
+    let paceZone = '';
+    let paceGuidance = '';
+    if (triggerType === 'pace_abandon') {
+      paceZone = 'TARGET ABANDONED';
+      paceGuidance = `The runner's target pace is now unreachable — they are consistently ${Math.abs(paceDeviationPercent).toFixed(0)}% slower than needed. 
+DO NOT nag about the missed target. Instead: acknowledge the effort, suggest they focus on maintaining their CURRENT effort level, and motivate them to finish strong. 
+This should feel supportive, not disappointing. "The target time isn't in the cards today, but you're still putting in great work" kind of energy.`;
+    } else if (paceDeviationPercent < -15) {
+      paceZone = 'WAY TOO FAST';
+      paceGuidance = `The runner is going ${Math.abs(paceDeviationPercent).toFixed(0)}% FASTER than their target pace. This is a common mistake — going out too fast leads to hitting the wall later.
+STRONGLY advise them to slow down NOW. Be direct but not alarming. Explain that banking time early almost always backfires. 
+Their current pace is ${avgPaceFormatted}/km but they need ${targetPaceFormatted}/km. Suggest they ease off and settle into rhythm.`;
+    } else if (paceDeviationPercent < -10) {
+      paceZone = 'TOO FAST';
+      paceGuidance = `The runner is ${Math.abs(paceDeviationPercent).toFixed(0)}% faster than target pace. They should ease off slightly to avoid burning out.
+Gently suggest pulling back a touch. Their body will thank them in the second half. Current: ${avgPaceFormatted}/km, target: ${targetPaceFormatted}/km.`;
+    } else if (paceDeviationPercent > 15) {
+      paceZone = 'WELL BEHIND TARGET';
+      paceGuidance = `The runner is ${paceDeviationPercent.toFixed(0)}% slower than target. Their projected finish is ${projectedFinishMin}:${projectedFinishSec.toString().padStart(2, '0')} vs target ${targetTimeMin}:${targetTimeSec.toString().padStart(2, '0')}.
+Encourage them to pick it up if they can, but be realistic. If there's a gradient/hill, acknowledge that hills slow pace naturally.`;
+    } else if (paceDeviationPercent > 10) {
+      paceZone = 'SLIGHTLY BEHIND';
+      paceGuidance = `The runner is ${paceDeviationPercent.toFixed(0)}% behind target pace. They need to pick it up a little. 
+Projected finish: ${projectedFinishMin}:${projectedFinishSec.toString().padStart(2, '0')} vs target ${targetTimeMin}:${targetTimeSec.toString().padStart(2, '0')}. Gentle nudge to increase effort.`;
+    } else {
+      paceZone = 'ON PACE';
+      paceGuidance = `The runner is RIGHT ON TARGET (within ${Math.abs(paceDeviationPercent).toFixed(0)}% of target pace). 
+Reinforce the good pacing with positive encouragement. Current: ${avgPaceFormatted}/km, target: ${targetPaceFormatted}/km. Tell them they're nailing it!`;
+    }
+    
+    // Gradient context
+    let gradientContext = '';
+    if (currentGrade && Math.abs(currentGrade) > 2) {
+      gradientContext = currentGrade > 0 
+        ? `Note: Runner is currently climbing (${currentGrade.toFixed(1)}% gradient) — slower pace is expected on hills.`
+        : `Note: Runner is currently descending (${Math.abs(currentGrade).toFixed(1)}% gradient) — pace naturally speeds up downhill.`;
+    }
+    
+    // Rolling vs average trend
+    let trendContext = '';
+    if (Math.abs(rollingPaceDeviationPercent - paceDeviationPercent) > 5) {
+      if (rollingPaceDeviationPercent < paceDeviationPercent) {
+        trendContext = `Good trend: Their recent pace (${rollingPaceFormatted}/km) is faster than their overall average — they're picking it up.`;
+      } else {
+        trendContext = `Concerning trend: Their recent pace (${rollingPaceFormatted}/km) is slowing compared to their overall average — they may be fading.`;
+      }
+    }
+
+    const pacePrompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.
+
+PACE COACHING — ${paceZone}
+The runner is ${progressPercent.toFixed(0)}% through their ${targetDistance ? formatDistanceForTTS(targetDistance) : 'run'}, having covered ${formatDistanceForTTS(distance)}.
+- Average pace: ${avgPaceFormatted}/km
+- Target pace: ${targetPaceFormatted}/km  
+- Recent pace (last 500m): ${rollingPaceFormatted}/km
+${gradientContext}
+${trendContext}
+${paceGuidance}
+
+${heartRate ? `Heart rate: ${heartRate} bpm.` : ''}
+${cadence ? `Cadence: ${cadence} spm.` : ''}
+
+Give 2-3 sentences of pace coaching. Be specific about the numbers — tell them their actual pace and what they need.
+${progressPercent > 80 ? "They're in the final stretch — be extra motivating!" : ""}
+Do NOT use markdown, emojis, or bullet points — this will be spoken aloud.`;
+
+    const paceSystemMsg = `You are ${coachName}, a ${coachTone} running coach giving pace guidance. Be specific with pace numbers (use "X minutes Y seconds per kilometre" format, not "X:YY"). Keep it concise (2-3 sentences). ${toneDirective(coachTone)}`;
+
+    const paceCompletion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: paceSystemMsg },
+        { role: "user", content: pacePrompt }
+      ],
+      max_tokens: 120,
+      temperature: 0.7,
+    });
+
+    return paceCompletion.choices[0].message.content || `You're running ${avgPaceFormatted} per kilometre, target is ${targetPaceFormatted}.`;
   }
 
   // Detect "run start" scenario: phase is EARLY/warmUp and distance is near zero

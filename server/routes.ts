@@ -4675,7 +4675,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/users/:id/coach-settings", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { id } = req.params;
-      const { coachName, coachGender, coachAccent, coachTone } = req.body;
+      const { 
+        coachName, coachGender, coachAccent, coachTone,
+        // In-Run AI Coaching feature preferences
+        coachPaceEnabled, coachNavigationEnabled, coachElevationEnabled,
+        coachHeartRateEnabled, coachCadenceStrideEnabled, coachKmSplitsEnabled,
+        coachStruggleEnabled, coachMotivationalEnabled, coachHalfKmCheckInEnabled,
+        coachKmSplitIntervalKm
+      } = req.body;
       
       // Verify user is updating their own settings
       if (req.user?.userId !== id) {
@@ -4699,13 +4706,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: `Invalid coach tone: ${coachTone}. Valid options: ${validTones.join(', ')}` });
       }
       
+      if (coachKmSplitIntervalKm !== undefined) {
+        const validIntervals = [1, 2, 3, 5, 10];
+        if (!validIntervals.includes(coachKmSplitIntervalKm)) {
+          return res.status(400).json({ error: `Invalid km split interval: ${coachKmSplitIntervalKm}. Valid options: ${validIntervals.join(', ')}` });
+        }
+      }
+      
+      // Build update object — only include fields that were actually sent
+      const updateData: any = {};
+      if (coachName !== undefined) updateData.coachName = coachName;
+      if (coachGender !== undefined) updateData.coachGender = coachGender;
+      if (coachAccent !== undefined) updateData.coachAccent = coachAccent;
+      if (coachTone !== undefined) updateData.coachTone = coachTone;
+      // Coaching feature toggles
+      if (coachPaceEnabled !== undefined) updateData.coachPaceEnabled = coachPaceEnabled;
+      if (coachNavigationEnabled !== undefined) updateData.coachNavigationEnabled = coachNavigationEnabled;
+      if (coachElevationEnabled !== undefined) updateData.coachElevationEnabled = coachElevationEnabled;
+      if (coachHeartRateEnabled !== undefined) updateData.coachHeartRateEnabled = coachHeartRateEnabled;
+      if (coachCadenceStrideEnabled !== undefined) updateData.coachCadenceStrideEnabled = coachCadenceStrideEnabled;
+      if (coachKmSplitsEnabled !== undefined) updateData.coachKmSplitsEnabled = coachKmSplitsEnabled;
+      if (coachStruggleEnabled !== undefined) updateData.coachStruggleEnabled = coachStruggleEnabled;
+      if (coachMotivationalEnabled !== undefined) updateData.coachMotivationalEnabled = coachMotivationalEnabled;
+      if (coachHalfKmCheckInEnabled !== undefined) updateData.coachHalfKmCheckInEnabled = coachHalfKmCheckInEnabled;
+      if (coachKmSplitIntervalKm !== undefined) updateData.coachKmSplitIntervalKm = coachKmSplitIntervalKm;
+      
       // Update user
-      const updatedUser = await storage.updateUser(id, {
-        coachName,
-        coachGender,
-        coachAccent,
-        coachTone
-      });
+      const updatedUser = await storage.updateUser(id, updateData);
       
       if (!updatedUser) {
         return res.status(404).json({ error: 'User not found' });

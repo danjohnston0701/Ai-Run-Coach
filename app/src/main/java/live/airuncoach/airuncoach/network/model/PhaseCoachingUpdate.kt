@@ -32,5 +32,12 @@ data class PhaseCoachingUpdate(
     @SerializedName("hasRoute") val hasRoute: Boolean = false,
     // Navigation coaching context
     @SerializedName("navigationInstruction") val navigationInstruction: String? = null,
-    @SerializedName("navigationDistance") val navigationDistance: Int? = null // meters to turn
+    @SerializedName("navigationDistance") val navigationDistance: Int? = null, // meters to turn
+    // Pace coaching context
+    @SerializedName("paceDeviationPercent") val paceDeviationPercent: Double? = null,          // +ve = slower than target, -ve = faster
+    @SerializedName("rollingPaceDeviationPercent") val rollingPaceDeviationPercent: Double? = null, // Recent ~500m pace vs target
+    @SerializedName("projectedFinishSeconds") val projectedFinishSeconds: Double? = null,       // ETA at current pace
+    @SerializedName("currentAvgPaceSecondsPerKm") val currentAvgPaceSecondsPerKm: Double? = null, // Overall avg pace
+    @SerializedName("rollingPaceSecondsPerKm") val rollingPaceSecondsPerKm: Double? = null,     // Recent rolling pace
+    @SerializedName("progressPercent") val progressPercent: Double? = null                       // 0-100 how far through the run
 )

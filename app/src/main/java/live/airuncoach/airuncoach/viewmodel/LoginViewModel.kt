@@ -11,7 +11,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import live.airuncoach.airuncoach.data.CoachingFeaturePreferences
 import live.airuncoach.airuncoach.data.SessionManager
+import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.model.LoginRequest
 import live.airuncoach.airuncoach.network.model.RegisterRequest
@@ -123,10 +125,12 @@ class LoginViewModel @Inject constructor(
                 if (savedUserJson != null) {
                     android.util.Log.d("LoginViewModel", "Saved user JSON: $savedUserJson")
                     
-                    // Triple-check we can deserialize it
+                    // Triple-check we can deserialize it and sync coaching prefs
                     try {
-                        val verifyUser = gson.fromJson(savedUserJson, live.airuncoach.airuncoach.domain.model.User::class.java)
+                        val verifyUser = gson.fromJson(savedUserJson, User::class.java)
                         android.util.Log.d("LoginViewModel", "✅ User data verified - ID: ${verifyUser.id}, Name: ${verifyUser.name}")
+                        // Sync coaching feature preferences from server to local storage
+                        CoachingFeaturePreferences(context).loadFromUser(verifyUser)
                     } catch (e: Exception) {
                         android.util.Log.e("LoginViewModel", "⚠️ User data deserialization FAILED: ${e.message}")
                         _loginState.update { it.copy(isLoading = false, error = "Failed to save user data correctly") }
@@ -268,10 +272,12 @@ class LoginViewModel @Inject constructor(
                 if (savedUserJson != null) {
                     android.util.Log.d("LoginViewModel", "Saved user JSON: $savedUserJson")
                     
-                    // Triple-check we can deserialize it
+                    // Triple-check we can deserialize it and sync coaching prefs
                     try {
-                        val verifyUser = gson.fromJson(savedUserJson, live.airuncoach.airuncoach.domain.model.User::class.java)
+                        val verifyUser = gson.fromJson(savedUserJson, User::class.java)
                         android.util.Log.d("LoginViewModel", "✅ User data verified - ID: ${verifyUser.id}, Name: ${verifyUser.name}")
+                        // Sync coaching feature preferences from server to local storage
+                        CoachingFeaturePreferences(context).loadFromUser(verifyUser)
                     } catch (e: Exception) {
                         android.util.Log.e("LoginViewModel", "⚠️ User data deserialization FAILED: ${e.message}")
                         _loginState.update { it.copy(isLoading = false, error = "Failed to save user data correctly") }

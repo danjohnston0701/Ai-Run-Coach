@@ -32,6 +32,17 @@ export const users = pgTable("users", {
   distanceMaxKm: real("distance_max_km").default(50),
   distanceDecimalsEnabled: boolean("distance_decimals_enabled").default(false),
   userCode: text("user_code").unique(),
+  // In-Run AI Coaching feature preferences (all default to enabled)
+  coachPaceEnabled: boolean("coach_pace_enabled").default(true),
+  coachNavigationEnabled: boolean("coach_navigation_enabled").default(true),
+  coachElevationEnabled: boolean("coach_elevation_enabled").default(true),
+  coachHeartRateEnabled: boolean("coach_heart_rate_enabled").default(true),
+  coachCadenceStrideEnabled: boolean("coach_cadence_stride_enabled").default(true),
+  coachKmSplitsEnabled: boolean("coach_km_splits_enabled").default(true),
+  coachStruggleEnabled: boolean("coach_struggle_enabled").default(true),
+  coachMotivationalEnabled: boolean("coach_motivational_enabled").default(true),
+  coachHalfKmCheckInEnabled: boolean("coach_half_km_check_in_enabled").default(true),
+  coachKmSplitIntervalKm: integer("coach_km_split_interval_km").default(1),
 });
 
 // Friends table

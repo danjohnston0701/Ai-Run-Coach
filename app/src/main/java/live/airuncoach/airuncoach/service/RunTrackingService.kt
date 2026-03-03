@@ -71,6 +71,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     
     // AI Coaching
+    private lateinit var coachingFeaturePrefs: live.airuncoach.airuncoach.data.CoachingFeaturePreferences
     private lateinit var apiService: ApiService
     private lateinit var sessionManager: SessionManager
     private lateinit var textToSpeechHelper: TextToSpeechHelper
@@ -155,6 +156,31 @@ class RunTrackingService : Service(), SensorEventListener {
     private var hasFinal500mFired = false
     private var hasFinal100mFired = false
     private var lastFlatTerrainCoachingKm: Int = 0 // tracks last km at which flat terrain coaching fired
+
+    // ==================== PACE COACHING ENGINE ====================
+    // Smart pace coaching when runner has a target time + distance.
+    // Helps runners maintain steady pace, avoid going out too fast, and
+    // gracefully abandons pace targets when they become unrealistic.
+    
+    private var paceCoachingEnabled = false       // Only active when target time + distance set
+    private var targetPaceSecondsPerKm: Double = 0.0  // Target avg pace in seconds/km
+    private var lastPaceCoachingDistance: Double = 0.0 // Distance at last pace coaching trigger
+    private var lastPaceCoachingTime: Long = 0         // Timestamp of last pace coaching trigger
+    private var paceTargetAbandoned = false             // True when target is unrealistic — stop nagging
+    private var paceTargetAbandonedNotified = false     // True after we've told the runner once
+    private var consecutiveOverPaceChecks = 0           // How many checks in a row they've been slow
+    private var lastPaceDeviationPercent: Double = 0.0  // Track trend
+    
+    // Pace coaching intervals (distance-based, varies by run phase)
+    private val PACE_FIRST_CHECK_M = 100.0            // First pace check at 100m
+    private val PACE_EARLY_INTERVAL_M = 300.0         // Every 300m for first km (catch fast starts)
+    private val PACE_MID_INTERVAL_M = 750.0           // Every 750m during middle of run
+    private val PACE_LATE_INTERVAL_M = 500.0          // Every 500m in final 20%
+    private val PACE_COOLDOWN_MS = 45_000L            // Minimum 45s between pace coaching
+    private val PACE_ABANDON_THRESHOLD = 0.25         // 25% slower than target → abandon
+    private val PACE_ABANDON_MIN_DISTANCE_M = 1500.0  // Don't abandon until at least 1.5km in
+    private val PACE_OVERFAST_THRESHOLD = 0.10         // 10% faster → warn to slow down
+    private val PACE_WAY_OVERFAST_THRESHOLD = 0.15     // 15% faster → strong slow down message
 
     // Simulation mode
     private var isSimulating = false
@@ -242,8 +268,9 @@ class RunTrackingService : Service(), SensorEventListener {
         stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
         heartRateSensor = sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE)
         
-        // Initialize session manager
+        // Initialize session manager and coaching feature preferences
         sessionManager = SessionManager(this)
+        coachingFeaturePrefs = live.airuncoach.airuncoach.data.CoachingFeaturePreferences(this)
         
         // Initialize API service
         apiService = RetrofitClient.apiService
@@ -391,6 +418,9 @@ class RunTrackingService : Service(), SensorEventListener {
         
         // Load navigation route data (turn instructions + polyline) from static holder
         loadNavigationData()
+        
+        // Initialize pace coaching (only active when target time + distance are set)
+        initPaceCoaching()
 
         // Start location and sensors (skip real GPS/sensors during simulation — simulator feeds locations directly)
         try {
@@ -568,6 +598,7 @@ class RunTrackingService : Service(), SensorEventListener {
      *  3. Missed waypoint detection & auto-skip
      */
     private fun checkNavigationProgress(currentLat: Double, currentLng: Double) {
+        if (!coachingFeaturePrefs.routeNavigationEnabled) return
         if (navTurnInstructions.isEmpty()) return
         if (navCurrentInstructionIndex >= navTurnInstructions.size) return
 
@@ -790,6 +821,273 @@ class RunTrackingService : Service(), SensorEventListener {
         }
     }
 
+    // ==================== PACE COACHING ENGINE ====================
+    
+    /**
+     * Initialize pace coaching if the run has both a target distance and target time.
+     * Called from startTracking().
+     */
+    private fun initPaceCoaching() {
+        val tDist = targetDistance
+        val tTime = targetTime
+        if (tDist != null && tDist > 0 && tTime != null && tTime > 0) {
+            val targetDistKm = tDist / 1000.0
+            val targetTimeSeconds = tTime / 1000.0
+            targetPaceSecondsPerKm = targetTimeSeconds / targetDistKm
+            paceCoachingEnabled = true
+            paceTargetAbandoned = false
+            paceTargetAbandonedNotified = false
+            consecutiveOverPaceChecks = 0
+            lastPaceCoachingDistance = 0.0
+            lastPaceCoachingTime = 0
+            lastPaceDeviationPercent = 0.0
+            
+            val paceMin = (targetPaceSecondsPerKm / 60).toInt()
+            val paceSec = (targetPaceSecondsPerKm % 60).toInt()
+            Log.d("PaceCoaching", "Initialized: target pace ${paceMin}:${String.format("%02d", paceSec)}/km, " +
+                    "target distance ${targetDistKm}km, target time ${targetTimeSeconds}s")
+        } else {
+            paceCoachingEnabled = false
+            Log.d("PaceCoaching", "Not enabled — no target time/distance (dist=$tDist, time=$tTime)")
+        }
+    }
+    
+    /**
+     * Check if pace coaching should fire based on current distance and time.
+     * Uses smart intervals: frequent early (catch fast starts), moderate mid-run, frequent late.
+     * Called from onNewLocation() after distance is updated.
+     */
+    private fun checkPaceCoaching() {
+        if (!paceCoachingEnabled) return
+        if (!coachingFeaturePrefs.paceCoachingEnabled) return
+        if (hasCoachingFiredThisTick) return
+        if (totalDistance < PACE_FIRST_CHECK_M) return // Don't start until 100m
+        
+        val now = System.currentTimeMillis()
+        val tDist = targetDistance ?: return
+        
+        // Cooldown check
+        if (now - lastPaceCoachingTime < PACE_COOLDOWN_MS && lastPaceCoachingTime > 0) return
+        
+        // Determine the interval based on run phase
+        val progressFraction = totalDistance / tDist // 0.0 to 1.0
+        val remainingDistance = tDist - totalDistance
+        val intervalForPhase = when {
+            totalDistance < 1000.0 -> PACE_EARLY_INTERVAL_M   // First km: every 300m
+            progressFraction > 0.80 -> PACE_LATE_INTERVAL_M   // Last 20%: every 500m
+            else -> PACE_MID_INTERVAL_M                        // Middle: every 750m
+        }
+        
+        // Check if we've covered enough distance since last coaching
+        val distanceSinceLastCoaching = totalDistance - lastPaceCoachingDistance
+        if (distanceSinceLastCoaching < intervalForPhase && lastPaceCoachingDistance > 0) return
+        
+        // Skip if we're in the last 100m (final sprint, no nagging)
+        if (remainingDistance < 100.0) return
+        
+        // Calculate current average pace for the whole run so far
+        val elapsedMs = now - startTime
+        val elapsedSeconds = elapsedMs / 1000.0
+        val distKm = totalDistance / 1000.0
+        if (distKm <= 0 || elapsedSeconds <= 0) return
+        
+        val currentAvgPaceSecondsPerKm = elapsedSeconds / distKm
+        val paceDeviation = (currentAvgPaceSecondsPerKm - targetPaceSecondsPerKm) / targetPaceSecondsPerKm
+        // Positive deviation = slower than target, Negative = faster than target
+        
+        // Project finish time based on current average pace
+        val totalDistKm = tDist / 1000.0
+        val projectedFinishSeconds = currentAvgPaceSecondsPerKm * totalDistKm
+        val targetTimeSeconds = (targetTime ?: return) / 1000.0
+        val projectedVsTarget = (projectedFinishSeconds - targetTimeSeconds) / targetTimeSeconds
+        
+        // Get current rolling pace (last ~500m if available, for trend detection)
+        val rollingPace = calculateRollingPace(500.0)
+        val rollingPaceDeviation = if (rollingPace > 0) {
+            (rollingPace - targetPaceSecondsPerKm) / targetPaceSecondsPerKm
+        } else paceDeviation
+        
+        // Get current gradient for context
+        val currentGradient = if (smoothedAltitude != null && recentAltitudes.size >= ALTITUDE_SMOOTHING_WINDOW) {
+            val lastTwo = recentAltitudes.takeLast(2)
+            if (lastTwo.size == 2) ((lastTwo[1] - lastTwo[0]) / 10.0 * 100).coerceIn(-15.0, 15.0) else 0.0
+        } else 0.0
+        
+        // SAFEGUARD: Check if target has become unrealistic
+        if (!paceTargetAbandoned && totalDistance >= PACE_ABANDON_MIN_DISTANCE_M) {
+            if (projectedVsTarget > PACE_ABANDON_THRESHOLD) {
+                consecutiveOverPaceChecks++
+                if (consecutiveOverPaceChecks >= 3) {
+                    // Target is truly unreachable — abandon pace coaching
+                    paceTargetAbandoned = true
+                    Log.d("PaceCoaching", "Target abandoned: projected ${projectedFinishSeconds}s vs target ${targetTimeSeconds}s " +
+                            "(${String.format("%.1f", projectedVsTarget * 100)}% over)")
+                    
+                    if (!paceTargetAbandonedNotified) {
+                        paceTargetAbandonedNotified = true
+                        triggerPaceCoaching(
+                            paceDeviation = paceDeviation,
+                            rollingPaceDeviation = rollingPaceDeviation,
+                            projectedFinishSeconds = projectedFinishSeconds,
+                            currentAvgPace = currentAvgPaceSecondsPerKm,
+                            rollingPace = rollingPace,
+                            currentGradient = currentGradient,
+                            progressFraction = progressFraction,
+                            isAbandoning = true
+                        )
+                        lastPaceCoachingDistance = totalDistance
+                        lastPaceCoachingTime = now
+                        hasCoachingFiredThisTick = true
+                    }
+                    return
+                }
+            } else {
+                consecutiveOverPaceChecks = 0 // Reset if they're back on track
+            }
+        }
+        
+        if (paceTargetAbandoned) return // Don't nag after abandoning
+        
+        // Determine pace zone
+        val paceZone = when {
+            paceDeviation < -PACE_WAY_OVERFAST_THRESHOLD -> "way_too_fast"    // >15% faster
+            paceDeviation < -PACE_OVERFAST_THRESHOLD -> "too_fast"            // 10-15% faster
+            paceDeviation < PACE_OVERFAST_THRESHOLD -> "on_pace"              // within 10%
+            paceDeviation < PACE_ABANDON_THRESHOLD -> "too_slow"              // 10-25% slower
+            else -> "way_too_slow"
+        }
+        
+        Log.d("PaceCoaching", "Check at ${String.format("%.0f", totalDistance)}m: zone=$paceZone, " +
+                "avgPace=${String.format("%.0f", currentAvgPaceSecondsPerKm)}s/km, " +
+                "rollingPace=${String.format("%.0f", rollingPace)}s/km, " +
+                "target=${String.format("%.0f", targetPaceSecondsPerKm)}s/km, " +
+                "deviation=${String.format("%.1f", paceDeviation * 100)}%, " +
+                "gradient=${String.format("%.1f", currentGradient)}%")
+        
+        // Don't trigger for "on_pace" every time — only every other check (avoid over-coaching)
+        if (paceZone == "on_pace" && totalDistance < tDist * 0.80) {
+            // On pace in mid-run: only trigger every 1.5km to be encouraging without nagging
+            if (distanceSinceLastCoaching < 1500.0 && lastPaceCoachingDistance > 0) return
+        }
+        
+        // Trigger the pace coaching API call
+        triggerPaceCoaching(
+            paceDeviation = paceDeviation,
+            rollingPaceDeviation = rollingPaceDeviation,
+            projectedFinishSeconds = projectedFinishSeconds,
+            currentAvgPace = currentAvgPaceSecondsPerKm,
+            rollingPace = rollingPace,
+            currentGradient = currentGradient,
+            progressFraction = progressFraction,
+            isAbandoning = false
+        )
+        lastPaceCoachingDistance = totalDistance
+        lastPaceCoachingTime = now
+        lastPaceDeviationPercent = paceDeviation * 100
+        hasCoachingFiredThisTick = true
+    }
+    
+    /**
+     * Calculate rolling average pace over the last N metres of the run.
+     * More responsive than overall average for detecting recent pace changes.
+     */
+    private fun calculateRollingPace(windowMeters: Double): Double {
+        if (routePoints.size < 3) return 0.0
+        
+        var distAccum = 0.0
+        var idx = routePoints.size - 1
+        
+        // Walk backwards through route points until we've accumulated the window distance
+        while (idx > 0 && distAccum < windowMeters) {
+            val p1 = routePoints[idx]
+            val p2 = routePoints[idx - 1]
+            distAccum += calculateDistance(p2, p1)
+            idx--
+        }
+        
+        if (distAccum < 50.0) return 0.0 // Need at least 50m of data
+        
+        val startPoint = routePoints[idx]
+        val endPoint = routePoints.last()
+        val timeSeconds = (endPoint.timestamp - startPoint.timestamp) / 1000.0
+        if (timeSeconds <= 0) return 0.0
+        
+        return (timeSeconds / (distAccum / 1000.0)) // seconds per km
+    }
+    
+    /**
+     * Trigger pace coaching via the AI backend.
+     * Sends pace context data so the LLM can generate smart, context-aware pace advice.
+     */
+    private fun triggerPaceCoaching(
+        paceDeviation: Double,
+        rollingPaceDeviation: Double,
+        projectedFinishSeconds: Double,
+        currentAvgPace: Double,
+        rollingPace: Double,
+        currentGradient: Double,
+        progressFraction: Double,
+        isAbandoning: Boolean
+    ) {
+        serviceScope.launch {
+            try {
+                val tDist = targetDistance ?: return@launch
+                val tTime = targetTime ?: return@launch
+                
+                // Build the coaching update with pace-specific data
+                val update = PhaseCoachingUpdate(
+                    phase = _currentRunSession.value?.phase?.name ?: "STEADY",
+                    distance = totalDistance / 1000.0, // km
+                    targetDistance = tDist,
+                    elapsedTime = System.currentTimeMillis() - startTime,
+                    currentPace = currentPace,
+                    currentGrade = currentGradient,
+                    totalElevationGain = totalElevationGain,
+                    heartRate = currentHeartRate.takeIf { it > 0 },
+                    cadence = currentCadence.takeIf { it > 0 },
+                    coachName = currentUser?.coachName,
+                    coachTone = currentUser?.coachTone,
+                    coachGender = currentUser?.coachGender,
+                    coachAccent = currentUser?.coachAccent,
+                    activityType = "run",
+                    hasRoute = hasRoute,
+                    targetTime = (tTime / 1000).toInt(),
+                    targetPace = formatPace(targetPaceSecondsPerKm),
+                    triggerType = if (isAbandoning) "pace_abandon" else "pace_coaching",
+                    // Pace-specific fields
+                    paceDeviationPercent = paceDeviation * 100,
+                    rollingPaceDeviationPercent = rollingPaceDeviation * 100,
+                    projectedFinishSeconds = projectedFinishSeconds,
+                    currentAvgPaceSecondsPerKm = currentAvgPace,
+                    rollingPaceSecondsPerKm = rollingPace,
+                    progressPercent = progressFraction * 100
+                )
+                
+                Log.d("PaceCoaching", "Requesting LLM pace coaching: triggerType=${update.triggerType}, " +
+                        "deviation=${String.format("%.1f", paceDeviation * 100)}%, " +
+                        "abandoning=$isAbandoning")
+                
+                val response = apiService.getPhaseCoaching(update)
+                Log.d("PaceCoaching", "LLM response: ${response.message.take(80)}...")
+                
+                // Play via the standard coaching audio pipeline
+                playCoachingAudio(response.audio, response.format, response.message)
+            } catch (e: Exception) {
+                Log.e("PaceCoaching", "Failed to get pace coaching from LLM", e)
+            }
+        }
+    }
+    
+    /**
+     * Format pace in seconds per km to a "M:SS" string.
+     */
+    private fun formatPace(secondsPerKm: Double): String {
+        if (secondsPerKm <= 0 || secondsPerKm > 3600) return "0:00"
+        val minutes = (secondsPerKm / 60).toInt()
+        val seconds = (secondsPerKm % 60).toInt()
+        return String.format("%d:%02d", minutes, seconds)
+    }
+    
     // ==================== STRIDE ANALYSIS (shared by all coaching triggers) ====================
 
     data class StrideSnapshot(
@@ -986,6 +1284,8 @@ class RunTrackingService : Service(), SensorEventListener {
                 if (hasRoute) {
                     checkNavigationProgress(location.latitude, location.longitude)
                 }
+                // Pace coaching — smart interval checks against target pace
+                checkPaceCoaching()
                 updateRunSession()
                 updateNotification()
             }
@@ -1027,11 +1327,15 @@ class RunTrackingService : Service(), SensorEventListener {
             kmSplits.add(split)
             lastKmSplit = currentKm
             lastSplitTime = now
-            Log.d("RunTrackingService", "Reached ${currentKm}km - triggering split coaching")
-            // Mark coaching as fired so updateRunSession() won't trigger a duplicate
-            // (e.g. phase change or 500m check-in at the same distance)
-            hasCoachingFiredThisTick = true
-            triggerKmSplitCoaching(split) // Trigger AI coaching for km split
+            Log.d("RunTrackingService", "Reached ${currentKm}km split")
+            
+            // Only trigger AI coaching at the user's chosen interval (1km, 2km, 3km, 5km, 10km)
+            val interval = coachingFeaturePrefs.kmSplitIntervalKm
+            if (currentKm % interval == 0) {
+                Log.d("RunTrackingService", "Triggering split coaching at ${currentKm}km (interval: every ${interval}km)")
+                hasCoachingFiredThisTick = true
+                triggerKmSplitCoaching(split)
+            }
         }
     }
 
@@ -1500,6 +1804,7 @@ class RunTrackingService : Service(), SensorEventListener {
     }
     
     private fun check500mMilestones() {
+        if (!coachingFeaturePrefs.halfKmCheckInEnabled) return
         val current500m = (totalDistance / 500).toInt()
         // Only trigger the 500m summary once, at the first 0.5km mark.
         // Also check cooldown to prevent duplicate coaching events
@@ -1558,6 +1863,7 @@ class RunTrackingService : Service(), SensorEventListener {
     }
     
     private fun checkPhaseChange(newPhase: CoachingPhase) {
+        if (!coachingFeaturePrefs.motivationalCoachingEnabled) return
         val now = System.currentTimeMillis()
         // Allow trigger when:
         // 1. Phase changed AND (first phase OR cooldown passed)
@@ -1617,6 +1923,7 @@ class RunTrackingService : Service(), SensorEventListener {
     }
     
     private fun triggerStruggleCoaching(currentPaceSeconds: Float, paceDropPercent: Float) {
+        if (!coachingFeaturePrefs.struggleDetectionEnabled) return
         // Format baseline pace: baselinePace is in seconds/km, convert to km/h for calculatePace
         val baselinePaceFormatted = if (baselinePace > 0f) calculatePace(3600f / baselinePace) else "0:00"
         // Format current instantaneous pace from seconds/km
@@ -1674,6 +1981,7 @@ class RunTrackingService : Service(), SensorEventListener {
     }
     
     private fun triggerKmSplitCoaching(split: KmSplit) {
+        if (!coachingFeaturePrefs.kmSplitsEnabled) return
         serviceScope.launch {
             try {
                 val update = PaceUpdate(
@@ -1712,6 +2020,7 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     private fun maybeTriggerHeartRateCoaching() {
+        if (!coachingFeaturePrefs.heartRateCoachingEnabled) return
         if (currentHeartRate <= 0) return
         val now = System.currentTimeMillis()
         val elapsedMinutes = ((now - startTime) / 60000).toInt()
@@ -1753,6 +2062,7 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     private fun maybeTriggerCadenceCoaching() {
+        if (!coachingFeaturePrefs.cadenceStrideEnabled) return
         if (currentCadence <= 0) return
         if (totalDistance < 1000) return // Need at least 1km of data
 
@@ -1820,6 +2130,7 @@ class RunTrackingService : Service(), SensorEventListener {
     // ================================================================
 
     private fun maybeFireEliteCoaching(displayDistance: Double, duration: Long, avgSpeed: Float, phase: CoachingPhase) {
+        if (!coachingFeaturePrefs.motivationalCoachingEnabled) return
         if (totalDistance < 1000) return // Need at least 1km of data
         val now = System.currentTimeMillis()
 
@@ -2122,6 +2433,7 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     private fun updateElevationCoaching(distanceIncrement: Double, gradePercent: Double, elevationChange: Double) {
+        if (!coachingFeaturePrefs.elevationCoachingEnabled) return
         val now = System.currentTimeMillis()
         val direction = when {
             gradePercent >= UPHILL_GRADE_THRESHOLD -> 1

@@ -22,5 +22,16 @@ data class User(
     val distanceDecimalsEnabled: Boolean = false,
     val subscriptionTier: String? = null,
     val subscriptionStatus: String? = null,
-    val distanceScale: String? = null
+    val distanceScale: String? = null,
+    // In-Run AI Coaching feature preferences (synced with server)
+    val coachPaceEnabled: Boolean = true,
+    val coachNavigationEnabled: Boolean = true,
+    val coachElevationEnabled: Boolean = true,
+    val coachHeartRateEnabled: Boolean = true,
+    val coachCadenceStrideEnabled: Boolean = true,
+    val coachKmSplitsEnabled: Boolean = true,
+    val coachStruggleEnabled: Boolean = true,
+    val coachMotivationalEnabled: Boolean = true,
+    val coachHalfKmCheckInEnabled: Boolean = true,
+    val coachKmSplitIntervalKm: Int = 1
 )
