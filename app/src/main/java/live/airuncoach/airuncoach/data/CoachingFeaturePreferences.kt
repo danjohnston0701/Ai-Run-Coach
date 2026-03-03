@@ -92,17 +92,18 @@ class CoachingFeaturePreferences(context: Context) {
      * This syncs server-stored preferences to local SharedPreferences.
      */
     fun loadFromUser(user: User) {
+        // null from server = feature not yet set = default to enabled (true)
         prefs.edit()
-            .putBoolean(KEY_PACE_COACHING, user.coachPaceEnabled)
-            .putBoolean(KEY_ROUTE_NAVIGATION, user.coachNavigationEnabled)
-            .putBoolean(KEY_ELEVATION_COACHING, user.coachElevationEnabled)
-            .putBoolean(KEY_HEART_RATE_COACHING, user.coachHeartRateEnabled)
-            .putBoolean(KEY_CADENCE_STRIDE, user.coachCadenceStrideEnabled)
-            .putBoolean(KEY_KM_SPLITS, user.coachKmSplitsEnabled)
-            .putBoolean(KEY_STRUGGLE_DETECTION, user.coachStruggleEnabled)
-            .putBoolean(KEY_MOTIVATIONAL_COACHING, user.coachMotivationalEnabled)
-            .putBoolean(KEY_HALF_KM_CHECK_IN, user.coachHalfKmCheckInEnabled)
-            .putInt(KEY_KM_SPLIT_INTERVAL, user.coachKmSplitIntervalKm)
+            .putBoolean(KEY_PACE_COACHING, user.coachPaceEnabled ?: true)
+            .putBoolean(KEY_ROUTE_NAVIGATION, user.coachNavigationEnabled ?: true)
+            .putBoolean(KEY_ELEVATION_COACHING, user.coachElevationEnabled ?: true)
+            .putBoolean(KEY_HEART_RATE_COACHING, user.coachHeartRateEnabled ?: true)
+            .putBoolean(KEY_CADENCE_STRIDE, user.coachCadenceStrideEnabled ?: true)
+            .putBoolean(KEY_KM_SPLITS, user.coachKmSplitsEnabled ?: true)
+            .putBoolean(KEY_STRUGGLE_DETECTION, user.coachStruggleEnabled ?: true)
+            .putBoolean(KEY_MOTIVATIONAL_COACHING, user.coachMotivationalEnabled ?: true)
+            .putBoolean(KEY_HALF_KM_CHECK_IN, user.coachHalfKmCheckInEnabled ?: true)
+            .putInt(KEY_KM_SPLIT_INTERVAL, user.coachKmSplitIntervalKm ?: DEFAULT_KM_SPLIT_INTERVAL)
             .apply()
     }
 }

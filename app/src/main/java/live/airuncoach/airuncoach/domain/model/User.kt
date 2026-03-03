@@ -24,14 +24,15 @@ data class User(
     val subscriptionStatus: String? = null,
     val distanceScale: String? = null,
     // In-Run AI Coaching feature preferences (synced with server)
-    val coachPaceEnabled: Boolean = true,
-    val coachNavigationEnabled: Boolean = true,
-    val coachElevationEnabled: Boolean = true,
-    val coachHeartRateEnabled: Boolean = true,
-    val coachCadenceStrideEnabled: Boolean = true,
-    val coachKmSplitsEnabled: Boolean = true,
-    val coachStruggleEnabled: Boolean = true,
-    val coachMotivationalEnabled: Boolean = true,
-    val coachHalfKmCheckInEnabled: Boolean = true,
-    val coachKmSplitIntervalKm: Int = 1
+    // Nullable so Gson null → we treat as "default enabled" in loadFromUser()
+    val coachPaceEnabled: Boolean? = null,
+    val coachNavigationEnabled: Boolean? = null,
+    val coachElevationEnabled: Boolean? = null,
+    val coachHeartRateEnabled: Boolean? = null,
+    val coachCadenceStrideEnabled: Boolean? = null,
+    val coachKmSplitsEnabled: Boolean? = null,
+    val coachStruggleEnabled: Boolean? = null,
+    val coachMotivationalEnabled: Boolean? = null,
+    val coachHalfKmCheckInEnabled: Boolean? = null,
+    val coachKmSplitIntervalKm: Int? = null
 )

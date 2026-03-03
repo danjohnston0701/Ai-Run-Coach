@@ -56,7 +56,7 @@ fun CoachSettingsScreen(onNavigateBack: () -> Unit) {
     Scaffold(
         topBar = {
              TopAppBar(
-                title = { Text("AI Coach Settings", style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary) },
+                title = { Text("Ai Coach Settings", style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(painterResource(id = R.drawable.icon_arrow_back_vector), contentDescription = "Back", tint = Colors.textPrimary)

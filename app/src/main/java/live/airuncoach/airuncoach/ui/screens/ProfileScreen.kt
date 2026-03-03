@@ -199,12 +199,10 @@ fun ProfileScreen(
         }
         item { Spacer(modifier = Modifier.height(Spacing.lg)) }
 
-        item { SectionTitle(title = "AI Coach") }
+        item { SectionTitle(title = "Ai Coach") }
         item {
             SettingsSection {
-                SettingsItem(icon = R.drawable.icon_mic_vector, text = "Coach Voice", value = "${user?.coachGender} - ${user?.coachAccent}", onClick = onNavigateToCoachSettings)
-                SettingsItem(icon = R.drawable.icon_trending_vector, text = "Coach Tone", value = user?.coachTone?.replaceFirstChar { it.uppercase() }, onClick = onNavigateToCoachSettings)
-                SettingsItem(icon = R.drawable.icon_mic_vector, text = "Coach Name", value = user?.coachName, onClick = onNavigateToCoachSettings)
+                SettingsItem(icon = R.drawable.icon_ai_vector, text = "Ai Coach Settings", onClick = onNavigateToCoachSettings)
             }
         }
         item { Spacer(modifier = Modifier.height(Spacing.lg)) }
