@@ -380,7 +380,7 @@ fun GarminConnectionCard(connection: GarminConnection) {
                     )
                     Spacer(modifier = Modifier.width(Spacing.xs))
                     Icon(
-                        painter = painterResource(id = R.drawable.icon_play_vector),
+                        painter = painterResource(id = R.drawable.icon_check_vector),
                         contentDescription = "Connected",
                         tint = Colors.success,
                         modifier = Modifier.size(18.dp)
@@ -394,7 +394,7 @@ fun GarminConnectionCard(connection: GarminConnection) {
             }
             
             Icon(
-                painter = painterResource(id = R.drawable.icon_play_vector),
+                painter = painterResource(id = R.drawable.icon_chevron_right_vector),
                 contentDescription = "Chevron",
                 tint = Colors.textMuted,
                 modifier = Modifier.size(20.dp)

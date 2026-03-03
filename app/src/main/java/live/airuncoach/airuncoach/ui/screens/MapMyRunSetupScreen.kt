@@ -861,7 +861,7 @@ private fun SocialRowToggle(
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                painter = painterResource(id = R.drawable.icon_profile_vector),
+                painter = painterResource(id = R.drawable.icon_people_vector),
                 contentDescription = null,
                 tint = Colors.primary,
                 modifier = Modifier.size(18.dp)

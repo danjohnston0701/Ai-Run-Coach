@@ -62,9 +62,9 @@ fun SubscriptionScreen(onNavigateBack: () -> Unit) {
 
             item { SectionTitle(title = "Unlock Premium Features") }
             item { Spacer(modifier = Modifier.height(Spacing.md)) }
-            item { PremiumFeature(icon = R.drawable.icon_profile_vector, title = "AI Coach", description = "Personalized real-time coaching") }
-            item { PremiumFeature(icon = R.drawable.icon_play_vector, title = "Unlimited Routes", description = "Generate unlimited AI routes") }
-            item { PremiumFeature(icon = R.drawable.icon_profile_vector, title = "Group Runs", description = "Create and join group runs") }
+            item { PremiumFeature(icon = R.drawable.icon_mic_vector, title = "AI Coach", description = "Personalized real-time coaching") }
+            item { PremiumFeature(icon = R.drawable.icon_navigation_vector, title = "Unlimited Routes", description = "Generate unlimited AI routes") }
+            item { PremiumFeature(icon = R.drawable.icon_people_vector, title = "Group Runs", description = "Create and join group runs") }
             item { PremiumFeature(icon = R.drawable.icon_chart_vector, title = "Advanced Analytics", description = "Detailed performance insights") }
 
             item { Spacer(modifier = Modifier.height(Spacing.lg)) }

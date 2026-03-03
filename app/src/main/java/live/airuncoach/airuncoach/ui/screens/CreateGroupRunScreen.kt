@@ -38,7 +38,7 @@ fun CreateGroupRunScreen(onNavigateBack: () -> Unit) {
                 title = { Text("Create Group Run", style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(painterResource(id = R.drawable.icon_play_vector), contentDescription = "Back", tint = Colors.textPrimary)
+                        Icon(painterResource(id = R.drawable.icon_arrow_back_vector), contentDescription = "Back", tint = Colors.textPrimary)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot)

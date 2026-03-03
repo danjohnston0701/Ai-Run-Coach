@@ -49,7 +49,7 @@ fun CoachSettingsScreen(onNavigateBack: () -> Unit) {
                 title = { Text("AI Coach Settings", style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(painterResource(id = R.drawable.icon_play_vector), contentDescription = "Back", tint = Colors.textPrimary)
+                        Icon(painterResource(id = R.drawable.icon_arrow_back_vector), contentDescription = "Back", tint = Colors.textPrimary)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot)
@@ -193,7 +193,7 @@ fun AccentSelector(accent: String, isSelected: Boolean, onClick: () -> Unit) {
             )
             if (isSelected) {
                 Icon(
-                    painter = painterResource(id = R.drawable.icon_play_vector),
+                    painter = painterResource(id = R.drawable.icon_check_vector),
                     contentDescription = "Selected",
                     tint = Colors.primary,
                     modifier = Modifier.size(20.dp)
@@ -240,7 +240,7 @@ fun ToneSelector(tone: CoachingTone, isSelected: Boolean, onClick: () -> Unit) {
             }
             if (isSelected) {
                 Icon(
-                    painter = painterResource(id = R.drawable.icon_play_vector),
+                    painter = painterResource(id = R.drawable.icon_check_vector),
                     contentDescription = "Selected",
                     tint = Colors.primary,
                     modifier = Modifier.size(20.dp)

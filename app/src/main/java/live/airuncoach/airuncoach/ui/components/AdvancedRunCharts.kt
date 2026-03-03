@@ -559,7 +559,7 @@ fun WeatherProgressionChart(
             ) {
                 WeatherSnapshot("Start", weatherAtStart)
                 Icon(
-                    painterResource(id = R.drawable.icon_play_vector),
+                    painterResource(id = R.drawable.icon_chevron_right_vector),
                     contentDescription = null,
                     tint = Colors.textMuted,
                     modifier = Modifier

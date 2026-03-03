@@ -2054,8 +2054,29 @@ fun EliteRouteMap(
         buildTurnCues(plannedRoute)
     }
 
-    val arrowMarkers = remember(plannedRoute) {
-        buildArrowMarkers(plannedRoute, spacingMeters = 70.0)
+    // Pre-compute gradient polyline segments (blue → green, same as route selection)
+    val gradientSegments = remember(plannedRoute) {
+        if (plannedRoute.size < 2) emptyList()
+        else {
+            val segmentCount = minOf(50, plannedRoute.size - 1)
+            val pointsPerSegment = (plannedRoute.size - 1) / segmentCount
+            (0 until segmentCount).mapNotNull { i ->
+                val startIndex = i * pointsPerSegment
+                val endIndex = if (i == segmentCount - 1) plannedRoute.size
+                    else minOf((i + 1) * pointsPerSegment + 1, plannedRoute.size)
+                if (startIndex < endIndex) {
+                    val progress = i.toFloat() / (segmentCount - 1).coerceAtLeast(1)
+                    val r = (37 + (16 - 37) * progress).toInt().coerceIn(0, 255)
+                    val g = (99 + (185 - 99) * progress).toInt().coerceIn(0, 255)
+                    val b = (235 + (129 - 235) * progress).toInt().coerceIn(0, 255)
+                    Triple(
+                        plannedRoute.subList(startIndex, endIndex),
+                        Color(r, g, b),
+                        i
+                    )
+                } else null
+            }
+        }
     }
 
     val runnerLatLng = latestPoint?.let {
@@ -2069,31 +2090,28 @@ fun EliteRouteMap(
             NavState()
     }
 
-    // 📍 Initialize camera on planned route when map first loads (before run starts)
+    // 📍 Initialize camera on start of route, zoomed in to show first 1-2 turns
     // This prevents the map from defaulting to (0,0) Africa
     var hasInitializedCamera by remember { mutableStateOf(false) }
     LaunchedEffect(plannedRoute) {
         if (!hasInitializedCamera && plannedRoute.isNotEmpty()) {
             hasInitializedCamera = true
-            // Zoom to fit the entire planned route
-            val boundsBuilder = com.google.android.gms.maps.model.LatLngBounds.Builder()
-            plannedRoute.forEach { boundsBuilder.include(it) }
-            try {
-                val bounds = boundsBuilder.build()
-                cameraPositionState.animate(
-                    update = CameraUpdateFactory.newLatLngBounds(bounds, 80),
-                    durationMs = 500
-                )
-            } catch (e: Exception) {
-                // Fallback: center on first point
-                val first = plannedRoute.first()
-                cameraPositionState.animate(
-                    update = CameraUpdateFactory.newCameraPosition(
-                        CameraPosition.Builder().target(first).zoom(15f).build()
-                    ),
-                    durationMs = 500
-                )
-            }
+            val startPoint = plannedRoute.first()
+            // Calculate bearing from first to second point for initial orientation
+            val initialBearing = if (plannedRoute.size >= 2) {
+                SphericalUtil.computeHeading(plannedRoute[0], plannedRoute[1]).toFloat()
+            } else 0f
+            cameraPositionState.animate(
+                update = CameraUpdateFactory.newCameraPosition(
+                    CameraPosition.Builder()
+                        .target(startPoint)
+                        .zoom(16.5f) // Close enough to see first corner or two
+                        .bearing(initialBearing)
+                        .tilt(30f)
+                        .build()
+                ),
+                durationMs = 600
+            )
         }
     }
 
@@ -2173,24 +2191,24 @@ fun EliteRouteMap(
             )
         ) {
 
-            // Planned route
-            if (plannedRoute.isNotEmpty()) {
+            // Planned route — blue (#2563EB) → green (#10B981) gradient
+            gradientSegments.forEach { (points, color, _) ->
                 Polyline(
-                    points = plannedRoute,
-                    color = Colors.primary,
-                    width = 10f
+                    points = points,
+                    color = color,
+                    width = 14f,
+                    startCap = com.google.android.gms.maps.model.RoundCap(),
+                    endCap = com.google.android.gms.maps.model.RoundCap(),
+                    jointType = com.google.android.gms.maps.model.JointType.ROUND
                 )
             }
 
-// 🔁 Direction arrows along route
-            arrowMarkers.forEach { (pos, heading) ->
+            // Start marker (blue dot)
+            if (plannedRoute.isNotEmpty()) {
                 Marker(
-                    state = MarkerState(position = pos),
-                    title = null,
-                    // Optional: use arrow icon if you have one
-                    // icon = BitmapDescriptorFactory.fromResource(R.drawable.map_arrow_small),
-                    flat = true,
-                    rotation = heading
+                    state = MarkerState(position = plannedRoute.first()),
+                    title = "Start",
+                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
                 )
             }
 
@@ -2421,40 +2439,6 @@ private fun computeNavState(
 
     val dist = SphericalUtil.computeDistanceBetween(current, next.position)
     return NavState(nextTurn = next, distanceToNextTurnM = dist)
-}
-
-/**
- * Arrow markers along route: place markers every N meters.
- */
-private fun buildArrowMarkers(
-    route: List<LatLng>,
-    spacingMeters: Double = 70.0
-): List<Pair<LatLng, Float>> {
-    if (route.size < 2) return emptyList()
-
-    val markers = mutableListOf<Pair<LatLng, Float>>()
-    var carry = 0.0
-
-    for (i in 0 until route.size - 1) {
-        val a = route[i]
-        val b = route[i + 1]
-        val segDist = SphericalUtil.computeDistanceBetween(a, b)
-        val heading = SphericalUtil.computeHeading(a, b).toFloat()
-
-        var t = (spacingMeters - carry) / segDist
-        while (t in 0.0..1.0) {
-            val pos = SphericalUtil.interpolate(a, b, t)
-            markers += pos to heading
-            t += spacingMeters / segDist
-        }
-
-        // update carry
-        val used = (segDist - ((1.0 - ((spacingMeters - carry) / segDist)).coerceIn(0.0, 1.0) * segDist)).coerceAtLeast(0.0)
-        val remainder = segDist % spacingMeters
-        carry = if (segDist + carry >= spacingMeters) remainder else carry + segDist
-    }
-
-    return markers
 }
 
 /* =====================================================================================

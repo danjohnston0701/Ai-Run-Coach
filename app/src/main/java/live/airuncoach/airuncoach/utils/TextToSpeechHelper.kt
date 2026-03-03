@@ -1,6 +1,8 @@
 package live.airuncoach.airuncoach.utils
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
@@ -12,7 +14,10 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
     private var isReady = false
     private var pendingText: String? = null
     private var pendingUtteranceId: String? = null
+    
+    @Volatile
     private var onCompleteCallback: (() -> Unit)? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
@@ -23,6 +28,29 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
             isReady = true
             Log.d("TTS", "TextToSpeech engine initialized successfully")
 
+            // Set up the listener once during init (not every speak call)
+            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(id: String?) {
+                    Log.d("TTS", "Started speaking: $id")
+                }
+
+                override fun onDone(id: String?) {
+                    Log.d("TTS", "Finished speaking: $id")
+                    invokeComplete()
+                }
+
+                @Deprecated("Deprecated in Java")
+                override fun onError(id: String?) {
+                    Log.e("TTS", "TTS error for: $id")
+                    invokeComplete()
+                }
+                
+                override fun onError(utteranceId: String?, errorCode: Int) {
+                    Log.e("TTS", "TTS error for: $utteranceId, code=$errorCode")
+                    invokeComplete()
+                }
+            })
+
             // If there was text queued before init, speak it now
             pendingText?.let { text ->
                 Log.d("TTS", "Speaking queued text after init: ${text.take(50)}...")
@@ -32,13 +60,23 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
             }
         } else {
             Log.e("TTS", "Initialization Failed!")
+            // TTS init failed — invoke any pending callback so the queue doesn't get stuck
+            invokeComplete()
+        }
+    }
+    
+    private fun invokeComplete() {
+        val callback = onCompleteCallback
+        onCompleteCallback = null
+        if (callback != null) {
+            mainHandler.post { callback.invoke() }
         }
     }
 
     /**
      * Speak text. If engine isn't ready yet, queues the text for when it initializes.
      */
-    fun speak(text: String, utteranceId: String = "tts_utterance", onComplete: (() -> Unit)? = null) {
+    fun speak(text: String, utteranceId: String = "tts_utterance_${System.currentTimeMillis()}", onComplete: (() -> Unit)? = null) {
         onCompleteCallback = onComplete
 
         if (isReady) {
@@ -51,27 +89,12 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
     }
 
     private fun speakInternal(text: String, utteranceId: String) {
-        // Set up completion listener
-        tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(id: String?) {
-                Log.d("TTS", "Started speaking: $id")
-            }
-
-            override fun onDone(id: String?) {
-                Log.d("TTS", "Finished speaking: $id")
-                onCompleteCallback?.invoke()
-                onCompleteCallback = null
-            }
-
-            @Deprecated("Deprecated in Java")
-            override fun onError(id: String?) {
-                Log.e("TTS", "TTS error for: $id")
-                onCompleteCallback?.invoke()
-                onCompleteCallback = null
-            }
-        })
-
-        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        val result = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        if (result != TextToSpeech.SUCCESS) {
+            Log.e("TTS", "TTS speak() returned error: $result")
+            // speak() failed — invoke callback so queue doesn't get stuck
+            invokeComplete()
+        }
     }
 
     fun stop() {
@@ -80,6 +103,8 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
         } catch (e: Exception) {
             Log.w("TTS", "Error stopping TTS", e)
         }
+        // Don't null out the callback — let the caller handle completion
+        // The queue's watchdog will clean up if needed
         onCompleteCallback = null
     }
 

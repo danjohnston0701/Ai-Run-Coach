@@ -35,7 +35,7 @@ fun GroupRunsScreen(onCreateGroupRun: () -> Unit, onNavigateBack: () -> Unit) {
                 title = { Text("Group Runs", style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(painterResource(id = R.drawable.icon_play_vector), contentDescription = "Back", tint = Colors.textPrimary)
+                        Icon(painterResource(id = R.drawable.icon_arrow_back_vector), contentDescription = "Back", tint = Colors.textPrimary)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot)
@@ -46,7 +46,7 @@ fun GroupRunsScreen(onCreateGroupRun: () -> Unit, onNavigateBack: () -> Unit) {
                 onClick = onCreateGroupRun,
                 containerColor = Colors.primary
             ) {
-                Icon(painterResource(id = R.drawable.icon_play_vector), contentDescription = "Create Group Run", tint = Colors.buttonText)
+                Icon(painterResource(id = R.drawable.icon_plus_vector), contentDescription = "Create Group Run", tint = Colors.buttonText)
             }
         },
         containerColor = Colors.backgroundRoot
@@ -138,7 +138,7 @@ fun EmptyGroupRunsState(onCreateGroupRun: () -> Unit) {
         verticalArrangement = Arrangement.Center
     ) {
         Icon(
-            painter = painterResource(id = R.drawable.icon_profile_vector),
+            painter = painterResource(id = R.drawable.icon_people_vector),
             contentDescription = "No Group Runs",
             tint = Colors.textMuted,
             modifier = Modifier.size(80.dp)

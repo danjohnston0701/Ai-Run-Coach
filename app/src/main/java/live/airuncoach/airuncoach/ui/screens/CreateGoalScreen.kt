@@ -148,7 +148,7 @@ fun CreateGoalScreen(
                         color = Colors.textPrimary
                     )
                     Icon(
-                        painter = painterResource(id = R.drawable.icon_play_vector),
+                        painter = painterResource(id = R.drawable.icon_close_vector),
                         contentDescription = "Close",
                         tint = Colors.textMuted,
                         modifier = Modifier
@@ -199,7 +199,7 @@ fun CreateGoalScreen(
                             modifier = Modifier.weight(1f),
                             title = "Health &\nWellbeing",
                             subtitle = "Fitness or weight\ngoals",
-                            icon = R.drawable.icon_profile_vector,
+                            icon = R.drawable.icon_heart_vector,
                             isSelected = selectedType == GoalType.HEALTH_WELLBEING,
                             onClick = { selectedType = GoalType.HEALTH_WELLBEING }
                         )

@@ -292,8 +292,10 @@ export async function generatePhaseCoaching(params: {
   targetPace?: string;
   targetTime?: number;
   triggerType?: string;
+  navigationInstruction?: string;
+  navigationDistance?: number;
 }): Promise<string> {
-  const { phase, distance, targetDistance, elapsedTime, currentPace, currentGrade, totalElevationGain, heartRate, cadence, coachName, coachTone, activityType, hasRoute, targetPace, targetTime, triggerType } = params;
+  const { phase, distance, targetDistance, elapsedTime, currentPace, currentGrade, totalElevationGain, heartRate, cadence, coachName, coachTone, activityType, hasRoute, targetPace, targetTime, triggerType, navigationInstruction, navigationDistance } = params;
   
   const timeMin = Math.floor(elapsedTime / 60);
   const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
@@ -390,6 +392,39 @@ export async function generatePhaseCoaching(params: {
   // Build the no-terrain rule when there's no route
   const noTerrainRule = hasRoute === true ? '' : `
 CRITICAL: This runner has NO planned route. Do NOT mention hills, terrain, elevation, climbing, descending, flat, undulating, or any route/terrain characteristics. You have NO idea what terrain they are running on. Focus only on pace, effort, form, and motivation.`;
+
+  // NAVIGATION TURN: Short, punchy direction delivered in coach's voice
+  if (triggerType === 'navigation_turn' && navigationInstruction) {
+    const distContext = navigationDistance && navigationDistance > 0
+      ? `The next turn is in approximately ${navigationDistance} metres. `
+      : '';
+    
+    const navPrompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.
+
+The runner is following a mapped route and needs a navigation direction:
+Navigation instruction: "${navigationInstruction}"
+${distContext}
+Runner context: ${distance.toFixed(1)}km into their run, pace ${currentPace || 'unknown'}.
+
+Deliver this navigation direction naturally in your coaching voice. Keep it to 1 SHORT sentence (max 15 words). 
+You MUST include the actual direction (left, right, straight, etc.) and street name if given. 
+Be concise — the runner needs to hear this quickly. Add a tiny bit of coach personality but prioritise clarity.
+Examples of good output: "Quick right turn onto May Street, looking good!", "Left here onto Dublin Road, keep that rhythm!"`;
+
+    const navSystemMsg = `You are ${coachName}, a ${coachTone} running coach delivering a navigation cue. Be extremely brief and clear — max 1 sentence, max 15 words. The direction must be unmistakable. ${toneDirective(coachTone)}`;
+
+    const navCompletion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: navSystemMsg },
+        { role: "user", content: navPrompt }
+      ],
+      max_tokens: 40,
+      temperature: 0.6,
+    });
+
+    return navCompletion.choices[0].message.content || navigationInstruction;
+  }
 
   // Detect "run start" scenario: phase is EARLY/warmUp and distance is near zero
   const isRunStart = (phase === 'EARLY' || phase === 'warmUp') && distance < 0.05;

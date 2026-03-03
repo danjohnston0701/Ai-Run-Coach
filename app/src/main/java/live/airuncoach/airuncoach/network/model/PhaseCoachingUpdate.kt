@@ -29,5 +29,8 @@ data class PhaseCoachingUpdate(
     @SerializedName("optimalStrideMax") val optimalStrideMax: Double? = null,
     @SerializedName("terrainContext") val terrainContext: String? = null,
     @SerializedName("isFatigued") val isFatigued: Boolean? = null,
-    @SerializedName("hasRoute") val hasRoute: Boolean = false
+    @SerializedName("hasRoute") val hasRoute: Boolean = false,
+    // Navigation coaching context
+    @SerializedName("navigationInstruction") val navigationInstruction: String? = null,
+    @SerializedName("navigationDistance") val navigationDistance: Int? = null // meters to turn
 )

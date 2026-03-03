@@ -138,7 +138,7 @@ fun PersonalDetailsScreen(onNavigateBack: () -> Unit) {
                         ),
                         trailingIcon = {
                             Icon(
-                                painter = painterResource(id = R.drawable.icon_play_vector),
+                                painter = painterResource(id = R.drawable.icon_chevron_down_vector),
                                 contentDescription = "Dropdown",
                                 tint = Colors.textMuted,
                                 modifier = Modifier.size(16.dp)

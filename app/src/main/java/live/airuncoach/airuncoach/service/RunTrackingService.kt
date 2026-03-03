@@ -677,8 +677,8 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     /**
-     * Announce a navigation instruction via TTS.
-     * Uses the shared coaching audio queue to prevent overlap with coaching audio.
+     * Announce a navigation instruction via the AI coach (LLM-generated voice).
+     * Falls back to device TTS if the LLM request fails or times out.
      */
     @Suppress("SameParameterValue")
     private fun announceNavigation(instruction: TurnInstruction, isReached: Boolean) {
@@ -687,38 +687,107 @@ class RunTrackingService : Service(), SensorEventListener {
         } else {
             "Upcoming: ${instruction.instruction}"
         }
-        Log.d("Navigation", "ANNOUNCE: $text")
-        announceNavigationText(text)
+        Log.d("Navigation", "ANNOUNCE via LLM: $text")
+        
+        // Calculate distance to turn for context
+        val distanceToTurn = if (!isReached) {
+            val currentPos = com.google.android.gms.maps.model.LatLng(
+                routePoints.lastOrNull()?.latitude ?: 0.0,
+                routePoints.lastOrNull()?.longitude ?: 0.0
+            )
+            val turnPos = com.google.android.gms.maps.model.LatLng(instruction.latitude, instruction.longitude)
+            SphericalUtil.computeDistanceBetween(currentPos, turnPos).toInt()
+        } else null
+        
+        requestNavigationCoachingFromLLM(text, distanceToTurn)
     }
 
     /**
-     * Play navigation text via TTS (bypasses AI coaching cooldowns).
-     * Navigation has priority — it's time-critical.
+     * Announce navigation text (for skips, recalculations, completions) via LLM coach voice.
      */
     private fun announceNavigationText(text: String) {
+        Log.d("Navigation", "ANNOUNCE text via LLM: $text")
+        requestNavigationCoachingFromLLM(text, null)
+    }
+
+    /**
+     * Request navigation coaching from the LLM backend.
+     * Sends the navigation instruction as context and gets back AI-generated audio
+     * in the user's chosen coach voice. Falls back to device TTS on failure.
+     */
+    private fun requestNavigationCoachingFromLLM(navigationText: String, distanceMeters: Int?) {
         if (isMuted) {
-            Log.d("Navigation", "Muted — skipping TTS: $text")
+            Log.d("Navigation", "Muted — skipping: $navigationText")
             return
         }
         
-        // Broadcast to UI
-        _latestCoachingText.value = text
+        // Show text in UI immediately while we wait for audio
+        _latestCoachingText.value = navigationText
         
         coachingHistory.add(AiCoachingNote(
             time = System.currentTimeMillis() - startTime,
-            message = "Nav: $text"
+            message = "Nav: $navigationText"
         ))
         
-        // Use TTS directly for navigation (no need for AI audio generation — needs to be instant)
-        CoachingAudioQueue.enqueue(
-            context = this,
-            base64Audio = null,
-            format = null,
-            fallbackText = text,
-            onComplete = {
-                _latestCoachingText.value = null
+        serviceScope.launch {
+            try {
+                val update = PhaseCoachingUpdate(
+                    phase = _currentRunSession.value?.phase?.name ?: "STEADY",
+                    distance = totalDistance / 1000.0,
+                    targetDistance = targetDistance,
+                    elapsedTime = System.currentTimeMillis() - startTime,
+                    currentPace = _currentRunSession.value?.averagePace ?: "0:00",
+                    currentGrade = calculateAverageGradient().toDouble(),
+                    totalElevationGain = totalElevationGain,
+                    heartRate = currentHeartRate.takeIf { it > 0 },
+                    cadence = currentCadence.takeIf { it > 0 },
+                    coachName = currentUser?.coachName,
+                    coachTone = currentUser?.coachTone,
+                    coachGender = currentUser?.coachGender,
+                    coachAccent = currentUser?.coachAccent,
+                    activityType = "run",
+                    hasRoute = true,
+                    triggerType = "navigation_turn",
+                    navigationInstruction = navigationText,
+                    navigationDistance = distanceMeters
+                )
+                
+                val response = apiService.getPhaseCoaching(update)
+                Log.d("Navigation", "LLM navigation response: ${response.message}")
+                
+                coachingHistory.add(AiCoachingNote(
+                    time = System.currentTimeMillis() - startTime,
+                    message = "Nav LLM: ${response.message}"
+                ))
+                
+                // Update UI with LLM's natural phrasing
+                _latestCoachingText.value = response.message
+                
+                // Play via PRIORITY queue — interrupts any coaching audio
+                CoachingAudioQueue.enqueueNavigation(
+                    context = this@RunTrackingService,
+                    base64Audio = response.audio,
+                    format = response.format,
+                    fallbackText = response.message,
+                    onComplete = {
+                        _latestCoachingText.value = null
+                    }
+                )
+                
+            } catch (e: Exception) {
+                Log.w("Navigation", "LLM navigation request failed, falling back to device TTS: ${e.message}")
+                // Fallback: use device TTS via PRIORITY queue
+                CoachingAudioQueue.enqueueNavigation(
+                    context = this@RunTrackingService,
+                    base64Audio = null,
+                    format = null,
+                    fallbackText = navigationText,
+                    onComplete = {
+                        _latestCoachingText.value = null
+                    }
+                )
             }
-        )
+        }
     }
 
     // ==================== STRIDE ANALYSIS (shared by all coaching triggers) ====================

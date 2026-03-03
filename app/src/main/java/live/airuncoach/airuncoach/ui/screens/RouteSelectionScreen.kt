@@ -233,12 +233,11 @@ fun RouteCard(
         shape = RoundedCornerShape(12.dp)
     ) {
         Column {
-            // Map View - Clickable to select route
+            // Map View with gradient polyline (blue start → green finish)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(200.dp)
-                    .clickable(onClick = onSelect) // Map click also selects route
             ) {
                 AndroidView(
                     factory = { context ->
@@ -252,14 +251,36 @@ fun RouteCard(
                                     val points = PolyUtil.decode(route.polyline)
                                     
                                     if (points.isNotEmpty()) {
-                                        // Add polyline to map
-                                        val polylineOptions = PolylineOptions()
-                                            .addAll(points)
-                                            .width(8f)
-                                            .color(android.graphics.Color.parseColor("#00E5FF"))
-                                            .geodesic(true)
+                                        // Draw gradient polyline: blue (#2563EB) → green (#10B981)
+                                        val segmentCount = minOf(40, points.size - 1)
+                                        val pointsPerSegment = (points.size - 1) / segmentCount
                                         
-                                        googleMap.addPolyline(polylineOptions)
+                                        for (i in 0 until segmentCount) {
+                                            val startIndex = i * pointsPerSegment
+                                            val endIndex = if (i == segmentCount - 1) points.size 
+                                                else minOf((i + 1) * pointsPerSegment + 1, points.size)
+                                            
+                                            if (startIndex < endIndex) {
+                                                val segmentPoints = points.subList(startIndex, endIndex)
+                                                
+                                                // Interpolate: blue (37,99,235) → green (16,185,129)
+                                                val progress = i.toFloat() / (segmentCount - 1).coerceAtLeast(1)
+                                                val r = (37 + (16 - 37) * progress).toInt().coerceIn(0, 255)
+                                                val g = (99 + (185 - 99) * progress).toInt().coerceIn(0, 255)
+                                                val b = (235 + (129 - 235) * progress).toInt().coerceIn(0, 255)
+                                                val segColor = android.graphics.Color.rgb(r, g, b)
+                                                
+                                                googleMap.addPolyline(
+                                                    PolylineOptions()
+                                                        .addAll(segmentPoints)
+                                                        .width(12f)
+                                                        .color(segColor)
+                                                        .startCap(RoundCap())
+                                                        .endCap(RoundCap())
+                                                        .jointType(JointType.ROUND)
+                                                )
+                                            }
+                                        }
                                         
                                         // Add start marker (blue)
                                         googleMap.addMarker(
@@ -277,20 +298,24 @@ fun RouteCard(
                                                 .title("Finish")
                                         )
                                         
-                                        // Calculate bounds and zoom
+                                        // Calculate bounds and zoom to fit route
                                         val boundsBuilder = LatLngBounds.Builder()
                                         points.forEach { boundsBuilder.include(it) }
                                         val bounds = boundsBuilder.build()
                                         
                                         googleMap.moveCamera(
-                                            CameraUpdateFactory.newLatLngBounds(bounds, 100)
+                                            CameraUpdateFactory.newLatLngBounds(bounds, 80)
                                         )
                                         
-                                        // Disable map interactions (zoom controls handle this)
-                                        googleMap.uiSettings.isScrollGesturesEnabled = false
-                                        googleMap.uiSettings.isZoomGesturesEnabled = false
+                                        // Enable all map gestures so user can pan, zoom, and explore
+                                        googleMap.uiSettings.isScrollGesturesEnabled = true
+                                        googleMap.uiSettings.isZoomGesturesEnabled = true
                                         googleMap.uiSettings.isTiltGesturesEnabled = false
-                                        googleMap.uiSettings.isRotateGesturesEnabled = false
+                                        googleMap.uiSettings.isRotateGesturesEnabled = true
+                                        googleMap.uiSettings.isZoomControlsEnabled = false // We have custom zoom buttons
+                                        
+                                        // Map click selects the route
+                                        googleMap.setOnMapClickListener { onSelect() }
                                     }
                                 } catch (e: Exception) {
                                     Log.e("RouteCard", "Error rendering map", e)

@@ -71,13 +71,6 @@ fun ProfileScreen(
     val user by viewModel.user.collectAsState()
     val friendCount by viewModel.friendCount.collectAsState()
     
-    val isGarminConnected by viewModel.isGarminConnected.collectAsState()
-
-    // User preferences for Garmin auto-sync
-    val userPreferences = remember { UserPreferences(context) }
-    val autoSyncToGarmin by userPreferences.autoSyncToGarmin.collectAsState(initial = true)
-    val coroutineScope = rememberCoroutineScope()
-    
     var showImagePickerDialog by remember { mutableStateOf(false) }
     
     val cameraUri = remember { mutableStateOf<Uri?>(null) }
@@ -200,8 +193,8 @@ fun ProfileScreen(
         item { SectionTitle(title = "Social") }
         item {
             SettingsSection {
-                SettingsItem(icon = R.drawable.icon_profile_vector, text = "Friends", value = "$friendCount ${if (friendCount == 1) "friend" else "friends"}", onClick = onNavigateToFriends)
-                SettingsItem(icon = R.drawable.icon_profile_vector, text = "Group Runs", onClick = onNavigateToGroupRuns)
+                SettingsItem(icon = R.drawable.icon_people_vector, text = "Friends", value = "$friendCount ${if (friendCount == 1) "friend" else "friends"}", onClick = onNavigateToFriends)
+                SettingsItem(icon = R.drawable.icon_people_vector, text = "Group Runs", onClick = onNavigateToGroupRuns)
             }
         }
         item { Spacer(modifier = Modifier.height(Spacing.lg)) }
@@ -209,9 +202,9 @@ fun ProfileScreen(
         item { SectionTitle(title = "AI Coach") }
         item {
             SettingsSection {
-                SettingsItem(icon = R.drawable.icon_timer_vector, text = "Coach Voice", value = "${user?.coachGender} - ${user?.coachAccent}", onClick = onNavigateToCoachSettings)
+                SettingsItem(icon = R.drawable.icon_mic_vector, text = "Coach Voice", value = "${user?.coachGender} - ${user?.coachAccent}", onClick = onNavigateToCoachSettings)
                 SettingsItem(icon = R.drawable.icon_trending_vector, text = "Coach Tone", value = user?.coachTone?.replaceFirstChar { it.uppercase() }, onClick = onNavigateToCoachSettings)
-                SettingsItem(icon = R.drawable.icon_profile_vector, text = "Coach Name", value = user?.coachName, onClick = onNavigateToCoachSettings)
+                SettingsItem(icon = R.drawable.icon_mic_vector, text = "Coach Name", value = user?.coachName, onClick = onNavigateToCoachSettings)
             }
         }
         item { Spacer(modifier = Modifier.height(Spacing.lg)) }
@@ -229,47 +222,8 @@ fun ProfileScreen(
         item { SectionTitle(title = "Settings") }
         item {
             SettingsSection {
-                SettingsItem(icon = R.drawable.icon_timer_vector, text = "Connected Devices", onClick = onNavigateToConnectedDevices)
-                SettingsToggleItem(
-                    icon = R.drawable.ic_garmin_logo,
-                    text = "Auto-sync to Garmin Connect",
-                    subtitle = "Automatically upload runs to your Garmin account",
-                    checked = autoSyncToGarmin,
-                    onCheckedChange = { enabled ->
-                        coroutineScope.launch {
-                            userPreferences.setAutoSyncToGarmin(enabled)
-                        }
-                    }
-                )
-                SettingsItem(icon = R.drawable.icon_play_vector, text = "Subscription", value = user?.subscriptionTier ?: "Free", onClick = onNavigateToSubscription)
-            }
-        }
-
-        if (isGarminConnected) {
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.lg, vertical = Spacing.xs),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.ic_garmin_connect_logo),
-                        contentDescription = "Garmin Connect",
-                        modifier = Modifier.size(18.dp),
-                        contentScale = ContentScale.Fit
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Health Data powered by Garmin",
-                        style = AppTextStyles.caption.copy(
-                            fontSize = 11.sp,
-                            color = Color(0xFF8E9BAE),
-                            letterSpacing = 0.3.sp
-                        )
-                    )
-                }
+                SettingsItem(icon = R.drawable.icon_watch_vector, text = "Connected Devices", onClick = onNavigateToConnectedDevices)
+                SettingsItem(icon = R.drawable.icon_crown_vector, text = "Subscription", value = user?.subscriptionTier ?: "Free", onClick = onNavigateToSubscription)
             }
         }
 
@@ -441,7 +395,7 @@ fun SettingsItem(icon: Int, text: String, value: String? = null, onClick: () -> 
                 Spacer(modifier = Modifier.width(Spacing.sm))
             }
             Icon(
-                painter = painterResource(id = R.drawable.icon_play_vector),
+                painter = painterResource(id = R.drawable.icon_chevron_right_vector),
                 contentDescription = "Navigate",
                 tint = Colors.textMuted,
                 modifier = Modifier.size(16.dp)
