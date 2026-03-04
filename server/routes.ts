@@ -6273,7 +6273,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/share/generate", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { templateId, aspectRatio, stickers, runId } = req.body;
+      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers } = req.body;
       if (!templateId || !runId) {
         return res.status(400).json({ error: "templateId and runId are required" });
       }
@@ -6297,6 +6297,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         stickers: stickers || [],
         runData: buildShareRunData(run),
         userName: user?.name || undefined,
+        customBackground: customBackground || undefined,
+        backgroundOpacity: backgroundOpacity ?? undefined,
+        backgroundBlur: backgroundBlur ?? undefined,
+        customStickers: customStickers || undefined,
       });
 
       res.set({
@@ -6314,7 +6318,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/share/preview", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { templateId, aspectRatio, stickers, runId } = req.body;
+      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers } = req.body;
       if (!templateId || !runId) {
         return res.status(400).json({ error: "templateId and runId are required" });
       }
@@ -6338,6 +6342,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         stickers: stickers || [],
         runData: buildShareRunData(run),
         userName: user?.name || undefined,
+        customBackground: customBackground || undefined,
+        backgroundOpacity: backgroundOpacity ?? undefined,
+        backgroundBlur: backgroundBlur ?? undefined,
+        customStickers: customStickers || undefined,
       });
 
       const base64 = imageBuffer.toString("base64");

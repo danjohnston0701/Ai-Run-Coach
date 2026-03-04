@@ -37,12 +37,25 @@ export interface PlacedSticker {
   scale: number;
 }
 
+export interface CustomStickerPlacement {
+  imageBase64: string;
+  x: number;
+  y: number;
+  scale: number;
+  rotation?: number;
+  opacity?: number;
+}
+
 export interface GenerateImageRequest {
   templateId: string;
   aspectRatio: AspectRatio;
   stickers: PlacedSticker[];
   runData: RunDataForImage;
   userName?: string;
+  customBackground?: string;
+  backgroundOpacity?: number;
+  backgroundBlur?: number;
+  customStickers?: CustomStickerPlacement[];
 }
 
 export interface RunDataForImage {
@@ -889,6 +902,72 @@ function buildMinimalSvg(w: number, h: number, run: RunDataForImage, userName?: 
   `;
 }
 
+function stripBase64Prefix(b64: string): { data: string; mime: string } {
+  const match = b64.match(/^data:(image\/\w+);base64,(.+)$/);
+  if (match) return { mime: match[1], data: match[2] };
+  return { mime: "image/png", data: b64 };
+}
+
+async function prepareBackground(base64: string, w: number, h: number, opacity: number, blur: number): Promise<Buffer> {
+  const { data } = stripBase64Prefix(base64);
+  const buf = Buffer.from(data, "base64");
+
+  let pipeline = sharp(buf).resize(w, h, { fit: "cover", position: "center" });
+
+  if (blur > 0) {
+    pipeline = pipeline.blur(Math.min(blur, 100));
+  }
+
+  if (opacity < 1) {
+    const alpha = Math.round(opacity * 255);
+    pipeline = pipeline.ensureAlpha().linear(1, 0).modulate({ brightness: 1 }).composite([{
+      input: Buffer.from([255, 255, 255, alpha]),
+      raw: { width: 1, height: 1, channels: 4 },
+      tile: true,
+      blend: "dest-in",
+    }]);
+  }
+
+  return pipeline.png().toBuffer();
+}
+
+async function prepareCustomSticker(cs: CustomStickerPlacement, canvasW: number, canvasH: number): Promise<{ buffer: Buffer; left: number; top: number }> {
+  const { data } = stripBase64Prefix(cs.imageBase64);
+  const buf = Buffer.from(data, "base64");
+
+  const meta = await sharp(buf).metadata();
+  const origW = meta.width || 200;
+  const origH = meta.height || 200;
+  const scale = cs.scale || 1;
+  const newW = Math.round(origW * scale);
+  const newH = Math.round(origH * scale);
+
+  let pipeline = sharp(buf).resize(newW, newH, { fit: "inside" });
+
+  const op = cs.opacity ?? 1;
+  if (op < 1) {
+    const alpha = Math.round(op * 255);
+    pipeline = pipeline.ensureAlpha().composite([{
+      input: Buffer.from([255, 255, 255, alpha]),
+      raw: { width: 1, height: 1, channels: 4 },
+      tile: true,
+      blend: "dest-in",
+    }]);
+  }
+
+  const rotation = cs.rotation || 0;
+  if (rotation !== 0) {
+    pipeline = pipeline.rotate(rotation, { background: { r: 0, g: 0, b: 0, alpha: 0 } });
+  }
+
+  const stickerBuf = await pipeline.png().toBuffer();
+
+  const left = Math.round(cs.x * canvasW - newW / 2);
+  const top = Math.round(cs.y * canvasH - newH / 2);
+
+  return { buffer: stickerBuf, left, top };
+}
+
 export async function generateShareImage(req: GenerateImageRequest): Promise<Buffer> {
   const template = TEMPLATES.find((t) => t.id === req.templateId);
   if (!template) throw new Error(`Template not found: ${req.templateId}`);
@@ -928,5 +1007,39 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
     ${stickersSvg}
   </svg>`;
 
-  return sharp(Buffer.from(fullSvg)).png({ quality: 95 }).toBuffer();
+  const templateLayer = await sharp(Buffer.from(fullSvg)).png().toBuffer();
+
+  const composites: sharp.OverlayOptions[] = [];
+
+  if (req.customBackground) {
+    const bgOpacity = req.backgroundOpacity ?? 0.4;
+    const bgBlur = req.backgroundBlur ?? 8;
+    const bgBuffer = await prepareBackground(req.customBackground, w, h, bgOpacity, bgBlur);
+    composites.push({ input: bgBuffer, left: 0, top: 0 });
+  }
+
+  composites.push({ input: templateLayer, left: 0, top: 0 });
+
+  if (req.customStickers && req.customStickers.length > 0) {
+    const maxStickers = Math.min(req.customStickers.length, 10);
+    for (let i = 0; i < maxStickers; i++) {
+      try {
+        const cs = req.customStickers[i];
+        const { buffer, left, top } = await prepareCustomSticker(cs, w, h);
+        composites.push({ input: buffer, left: Math.max(0, left), top: Math.max(0, top) });
+      } catch (e) {
+        console.error(`Custom sticker ${i} failed:`, e);
+      }
+    }
+  }
+
+  if (composites.length === 1 && !req.customBackground) {
+    return sharp(templateLayer).png({ quality: 95 }).toBuffer();
+  }
+
+  const base = sharp({
+    create: { width: w, height: h, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 255 } },
+  });
+
+  return base.composite(composites).png({ quality: 95 }).toBuffer();
 }
