@@ -1,14 +1,29 @@
 # AI Run Coach - Comprehensive iOS Build Brief
 
-> **For Xcode AI Agent:** This document contains everything needed to rebuild the Ai Run Coach app for iOS identically to the Android version.
+> **For Xcode AI Agent:** This document contains EVERYTHING needed to rebuild the Ai Run Coach app for iOS identically to the Android version. Read this first before making any decisions.
+
+---
+
+## Table of Contents
+1. [App Overview](#1-app-overview)
+2. [Navigation Hierarchy](#2-navigation-hierarchy)
+3. [All Screens Detail](#3-all-screens-detail)
+4. [UI/Brand Guidelines](#4-uibrand-guidelines)
+5. [Charts & Visualizations](#5-charts--visualizations)
+6. [Maps & Polylines](#6-maps--polylines)
+7. [Feature Deep Dive](#7-feature-deep-dive)
+8. [API Endpoints](#8-api-endpoints)
+9. [Data Models Reference](#9-data-models-reference)
+10. [Platform-Specific Notes](#10-platform-specific-notes)
+11. [Testing Checklist](#11-testing-checklist)
+12. [Assets Required](#12-assets-required)
 
 ---
 
 ## 1. App Overview
 
 ### What is AI Run Coach?
-
-**Ai Run Coach** is an intelligent running app that provides real-time audio coaching during runs. Users can generate AI-powered routes, track runs with GPS, receive personalized coaching feedback, analyze performance, and share achievements.
+An intelligent running app providing real-time audio coaching during runs. Users generate AI-powered routes, track runs with GPS, receive personalized coaching feedback, analyze performance, and share achievements.
 
 ### Target Audience
 - Recreational runners wanting coaching guidance
@@ -21,567 +36,1067 @@ Real-time AI audio coaching that adapts to your pace, heart rate, terrain, and r
 
 ---
 
-## 2. Navigation Structure
+## 2. Navigation Hierarchy
 
-### Bottom Navigation (5 tabs)
-1. **Home** (`/home`) - Dashboard with start run, recent activity, weather
-2. **History** (`/history`) - Past runs list with filters
-3. **Events** (`/events`) - Community events, parkruns
-4. **Goals** (`/goals`) - User goals (distance, pace, frequency)
-5. **Profile** (`/profile`) - User settings, coach settings, connected devices
-
-### Screen Flow
+### Complete Screen Tree (Parent-Child Relationships)
 
 ```
-App Launch
+App Root
+├── LoginScreen
+│   └── → SignUpScreen
+│   └── → LocationPermissionScreen (after login success)
+├── SignUpScreen
+│   └── → LocationPermissionScreen
+├── LocationPermissionScreen
+│   └── → MainScreen (tabs)
+│
+└── MainScreen (Bottom Navigation - 5 tabs)
     │
-    ▼
-LoginScreen / SignUpScreen
-    │
-    ▼
-MainScreen (Bottom Nav)
-    │
-    ├── HomeTab
+    ├── HomeStack (Home Tab)
     │   ├── DashboardScreen
-    │   │   ├── StartRunButton → RunSetupScreen / MapMyRunSetupScreen
-    │   │   ├── RouteGenerationScreen (generate new route)
-    │   │   ├── RouteSelectionScreen (choose existing route)
-    │   │   └── ConnectedDevicesScreen (Garmin, etc.)
+    │   │   ├── → RunSetupScreen (Start Run button)
+    │   │   ├── → RouteGenerationScreen (Generate Route)
+    │   │   ├── → RouteSelectionScreen (Select Route)
+    │   │   ├── → MapMyRunSetupScreen (Map My Run)
+    │   │   ├── → GroupRunsScreen (Group Run)
+    │   │   ├── → ConnectedDevicesScreen
+    │   │   └── → RunSessionScreen (Start Run →)
     │   │
-    │   └── RunSessionScreen (during active run)
-    │       ├── Pre-run briefing (if route selected)
-    │       ├── Active run UI (real-time metrics)
-    │       └── Post-run summary
+    │   ├── RunSetupScreen
+    │   │   └── → RunSessionScreen (Start →)
+    │   │
+    │   ├── RouteGenerationScreen
+    │   │   ├── RouteGeneratingLoadingScreen
+    │   │   └── → RunSessionScreen (Start →)
+    │   │
+    │   ├── RouteSelectionScreen
+    │   │   └── → RunSessionScreen (Start →)
+    │   │
+    │   ├── MapMyRunSetupScreen
+    │   │   └── → RunSessionScreen (Start →)
+    │   │
+    │   ├── GroupRunsScreen
+    │   │   └── → CreateGroupRunScreen
+    │   │
+    │   ├── ConnectedDevicesScreen
+    │   │   └── → GarminConnectScreen
+    │   │
+    │   ├── RunSessionScreen
+    │   │   ├── Pre-run: → RunSessionScreen (active)
+    │   │   ├── Active: → RunSessionScreen (paused)
+    │   │   ├── Paused: → RunSessionScreen (resume)
+    │   │   └── End: → RunSummaryScreen
+    │   │
+    │   └── RunSummaryScreen
     │
-    ├── HistoryTab
-    │   ├── PreviousRunsScreen (list)
-    │   └── RunSummaryScreen (detail for each run)
+    ├── HistoryStack (History Tab)
+    │   ├── PreviousRunsScreen
+    │   │   └── → RunSummaryScreen
+    │   ���── RunSummaryScreen
     │
-    ├── EventsTab
-    │   ├── EventsScreen (list)
+    ├── EventsStack (Events Tab)
+    │   ├── EventsScreen
+    │   │   └── → EventDetailScreen
     │   └── EventDetailScreen
     │
-    ├── GoalsTab
-    │   ├── GoalsScreen (list)
+    ├── GoalsStack (Goals Tab)
+    │   ├── GoalsScreen
+    │   │   └── → CreateGoalScreen
     │   └── CreateGoalScreen
     │
-    └── ProfileTab
-        ├── ProfileScreen (user info)
-        ├── CoachSettingsScreen (AI coach voice/behavior)
+    └── ProfileStack (Profile Tab)
+        ├── ProfileScreen
+        │   ├── → CoachSettingsScreen
+        │   ├── → FitnessLevelScreen
+        │   ├── → PersonalDetailsScreen
+        │   ├── → ConnectedDevicesScreen
+        │   ├── → SubscriptionScreen
+        │   ├── → NotificationsScreen
+        │   └── → FriendsScreen
+        ├── CoachSettingsScreen
         ├── FitnessLevelScreen
         ├── PersonalDetailsScreen
         ├── ConnectedDevicesScreen
+        │   └── → GarminConnectScreen
         ├── SubscriptionScreen
         ├── NotificationsScreen
-        └── FriendsScreen
+        ├── FriendsScreen
+        │   └── (Add Friend flow)
+        └── GarminConnectScreen
 
-Additional Flows:
-├── GroupRunsScreen → CreateGroupRunScreen
-├── LiveTrackingScreen (share live location)
-└── ShareImageEditorScreen (create run share image)
+Additional Standalone Screens:
+├── DistanceScaleScreen
+├── ShareImageEditorScreen
+└── LiveTrackingScreen
 ```
+
+### Navigation Implementation Notes
+- Bottom navigation hides during RunSessionScreen (full screen running)
+- Use SwiftUI NavigationStack/NavigationPath
+- Deep linking support for: `airuncoach://run/{runId}`, `airuncoach://route/{routeId}`
+- Modal sheets for: CreateGoalScreen, ShareImageEditorScreen
 
 ---
 
 ## 3. All Screens Detail
 
-### 3.1 Login & Onboarding
+### 3.1 Authentication Screens
 
 **LoginScreen**
-- Email/password fields
-- "Login" button (primary)
-- "Forgot Password?" link
-- "Sign Up" link
-- Background gradient
+- Logo/app name at top
+- Email TextField (validated, keyboard type: email)
+- Password TextField (obscured, toggle visibility icon)
+- "Login" PrimaryButton (cyan background, dark text)
+- "Forgot Password?" TextButton
+- "Don't have an account? Sign Up" link
+- Loading spinner during authentication
+- Error message display area
+- Background: gradient from backgroundRoot to backgroundDefault
 
 **SignUpScreen**
-- Name, email, password fields
-- Fitness level selector (beginner/intermediate/advanced)
-- Coach gender preference (male/female/neutral)
-- Sign up button
+- App logo
+- Name TextField
+- Email TextField
+- Password TextField (with strength indicator)
+- Fitness Level Picker: "Beginner" | "Intermediate" | "Advanced" | "Elite"
+- Coach Gender Selector: "Male" | "Female" | "Neutral" (default: Male)
+- "Sign Up" PrimaryButton
+- "Already have an account? Login" link
 
 **LocationPermissionScreen**
-- Location permission request
-- Explanation of why location needed
-- "Allow" / "Not Now" options
+- Icon: location pin
+- Title: "Location Access Required"
+- Description: "Ai Run Coach needs location access to track your runs and generate routes."
+- "Allow Location" PrimaryButton
+- "Not Now" SecondaryButton
+- Why needed: bullet points (track runs, show route on map, safety)
 
-### 3.2 Home Dashboard
+### 3.2 Dashboard (Home Tab)
 
 **DashboardScreen**
-- **Weather Widget**: Current temp, conditions, "Good for running" indicator
-- **Start Run Button**: Large CTA, opens run setup
-- **Quick Actions**:
-  - "Generate Route" - AI route generation
-  - "Select Route" - choose existing route
-  - "Group Run" - create/join group run
-- **Recent Activity**: Last 3 runs summary
-- **Connected Device Status**: Garmin/Apple Watch battery, sync status
-- **Weekly Stats**: Distance, time, runs count
+- **Weather Widget** (top card)
+  - Temperature (large)
+  - Weather icon (sun/cloud/rain)
+  - Condition text ("Partly Cloudy")
+  - "Good for running" / "Not ideal" badge
+  - Humidity, wind speed
+
+- **Start Run Section**
+  - Large circular "START RUN" button (pulsing animation)
+  - Tap → RunSetupScreen
+  - Long press → quick start free run
+
+- **Quick Actions Row** (horizontal scroll)
+  - "Generate Route" icon button
+  - "Select Route" icon button
+  - "Group Run" icon button
+  - "Connected Devices" icon button
+
+- **Recent Activity Section**
+  - "Recent Runs" header with "See All" → PreviousRunsScreen
+  - Up to 3 RunCard components:
+    - Date, distance, time, pace
+    - Mini route preview (small polyline)
+    - Tap → RunSummaryScreen
+
+- **Device Status Bar** (if devices connected)
+  - Device icon + name
+  - Battery percentage
+  - "Connected" / "Syncing" status
+
+- **Weekly Stats Card**
+  - Total distance (km)
+  - Total time
+  - Number of runs
+  - Streak indicator
 
 ### 3.3 Run Setup
 
-**RunSetupScreen / MapMyRunSetupScreen**
-- **Goal Type Selector**:
-  - Free Run (no target)
-  - Distance Target (5K, 10K, half marathon, custom)
-  - Time Target (30 min, 1 hour, custom)
-  - Pace Target (run at specific pace)
-- **Route Options**:
-  - Start from current location
-  - Select saved route
-  - Generate new route
-- **AI Coach Toggle**: Enable/disable audio coaching
-- **Auto-Pause Toggle**: Pause when stopped
-- **Start Button**: Begin run
+**RunSetupScreen**
+- **Goal Type Section**
+  - Segmented control: "Free Run" | "Distance" | "Time" | "Pace"
+  - When "Distance": slider (1-50km) or preset chips (5K, 10K, Half, Custom)
+  - When "Time": picker (15min to 4hr)
+  - When "Pace": "mm:ss" input
+
+- **Route Section**
+  - Toggle: "Use Route" / "Free Run"
+  - When "Use Route":
+    - "Generate New" button → RouteGenerationScreen
+    - "Select Existing" button → RouteSelectionScreen
+  - Map preview (if route selected)
+
+- **Settings Toggles**
+  - "AI Coach" (default: ON)
+  - "Auto-Pause" (default: ON)
+  - "Audio Briefing" (default: ON) - pre-run route preview
+
+- **Start Button** (bottom)
+  - "START RUN" - navigates to RunSessionScreen
 
 **RouteGenerationScreen**
-- **Distance Slider**: 1km to 50km
-- **Difficulty Selector**: Easy, Moderate, Hard, Extreme
-- **Terrain Type**: Flat, Hilly, Mixed, Mountainous
-- **Return to Start Toggle**: Loop route or out-and-back
-- **Generate Button**: Creates AI route
-- **Map Preview**: Shows generated route polyline
-- **Save/Start Route**: Options after generation
+- **Distance Slider**
+  - Range: 1km to 50km
+  - Labels at 5km intervals
 
-### 3.4 Run Session (Core Screen)
+- **Difficulty Selector**
+  - 4 buttons: Easy | Moderate | Hard | Extreme
+
+- **Terrain Type**
+  - 4 buttons: Flat | Hilly | Mixed | Mountainous
+
+- **Return to Start Toggle**
+  - Default: ON (loop route)
+
+- **Generate Button**
+  - Loading state → RouteGeneratingLoadingScreen
+
+- **Map Preview** (after generation)
+  - Full-width map
+  - Polyline route (gradient cyan→green)
+  - Elevation profile chart below
+  - Distance, elevation gain, estimated time
+  - "Start This Route" button
+  - "Save" button
+
+### 3.4 Run Session (CRITICAL SCREEN)
 
 **RunSessionScreen - Pre-Run (with route)**
-- Route map preview
-- Turn-by-turn preview (scrolling list)
-- Terrain summary (elevation profile)
-- Distance, estimated time
-- "Start Run" button
+- Full-screen map with route polyline
+- Route name at top
+- Distance, elevation, estimated time
+- Turn-by-turn instruction cards (scrollable)
+- "Start Run" large button
 - Audio briefing toggle
 
-**RunSessionScreen - Active Run (GPS tracking)**
+**RunSessionScreen - Active Run**
+*Layout: Full screen, high contrast for outdoor visibility*
 
-*Primary Display (large, readable):*
-- **Timer**: "00:00:00" format, very large
-- **Distance**: "0.00 km" format
-- **Current Pace**: "6:30 /km" (real-time)
-- **Average Pace**: "6:45 /km" (smaller)
+```
+┌─────────────────────────────────────────────┐
+│  [Map - half screen, current location]      │
+│  Route polyline, turn indicators            │
+├─────────────────────────────────────────────┤
+│  TIMER          DISTANCE        CURRENT     │
+│  00:32:15       5.23 km        6:30 /km    │
+│  (VERY LARGE)   (LARGE)         (MEDIUM)    │
+├─────────────────────────────────────────────┤
+│  HEART RATE    CADENCE    ELEVATION         │
+│  145 bpm       172 spm    +2.3%             │
+│  (SMALL)       (SMALL)    (SMALL)          │
+├─────────────────────────────────────────────┤
+│  AI Coach: "Great pace! Keep it up!"       │
+│  [🔊] [🔇] [Lock]                          │
+├─────────────────────────────────────────────┤
+│           [ ⏸️ PAUSE ]  [ ⏹️ STOP ]         │
+└─────────────────────────────────────────────┘
+```
 
-*Secondary Metrics (smaller):*
-- Heart Rate (if connected device)
-- Cadence (steps/min)
-- Elevation/Current gradient
+*Metrics Display:*
+- **Timer**: "00:00:00" format, 48sp, bold, white
+- **Distance**: "0.00" format, 36sp, white
+- **Unit label**: "km" small, secondary color
+- **Current Pace**: Real-time (30s rolling avg), "6:30 /km"
+- **Average Pace**: Total average, smaller
+- **Heart Rate**: From device, "145 bpm"
+- **Cadence**: From device, "172 spm"
+- **Elevation**: Current gradient "%" (color-coded)
+
+*Map:*
+- Current location (blue dot with accuracy circle)
+- Route polyline (cyan→green gradient)
+- Upcoming turns (markers with distance)
+- Distance to next turn indicator
 
 *AI Coach Panel:*
-- Current coaching message (scrolling text)
-- Coach avatar/icon
-- Mute button
-
-*Map Display:*
-- Current location marker
-- Route polyline (gradient: cyan → green)
-- Turn indicators
-- Distance to next turn
+- Current message text (scrolling if long)
+- Coach avatar (small icon)
+- Mute/unmute button
 
 *Controls:*
-- Pause/Resume button (large)
-- Stop button (end run)
-- Lock screen button (prevents accidental touches)
-- Audio feedback indicator
+- Pause (large, circular, 80dp)
+- Stop (smaller, requires long press or confirmation)
 
-**RunSessionScreen - Pause State**
-- "PAUSED" overlay
-- Time/distance still visible (dimmed)
-- "Resume" button
-- "End Run" button
+**RunSessionScreen - Paused**
+- Dimmed version of active UI
+- "PAUSED" banner overlay
+- "Resume" button (large)
+- "End Run" button (with confirmation dialog)
+- Timer shows total elapsed time (including pause)
 
-### 3.5 Run Summary
+**RunSessionScreen - Stopping**
+- Confirmation dialog: "End Run?"
+- Summary preview: "5.23 km in 32:15"
+- "End Run" / "Continue" buttons
+
+### 3.5 Run Summary (CRITICAL SCREEN)
 
 **RunSummaryScreen**
-- **Header**: Date, run name, duration
-- **Primary Stats Grid**:
-  - Distance, Time, Average Pace
-  - Calories, Elevation Gain
-- **Performance Chart**:
-  - Pace per km (bar chart)
-  - Heart rate zones (if available)
-- **AI Insights**:
-  - Performance summary
-  - Strengths
-  - Areas for improvement
-  - Personalized tips
-- **Splits Table**: Per-kilometer times
-- **Map**: GPS track visualization
-- **Struggle Points**: Detected pace drops (if any)
-- **Weather**: Conditions during run
-- **Save/Discard Options**
-- **Share Button**: Generate shareable image
+
+```
+┌─────────────────────────────────────────────┐
+│  "Morning Run"            March 4, 2026     │
+│  5.23 km • 32:15 • 6:10/km                  │
+├─────────────────────────────────────────────┤
+│  [Dual-Axis Chart]                           │
+│  Top: Pace per km (bar chart, color coded)  │
+│  Bottom: Elevation profile (line)           │
+│  X-axis: km markers                         │
+├─────────────────────────────────────────────┤
+│  ┌─────────┬─────────┬─────────┬─────────┐  │
+│  │ Dist    │ Time    │ Avg Pace│ Calories│  │
+│  │ 5.23km  │ 32:15   │ 6:10/km │ 412     │  │
+│  └─────────┴─────────┴─────────┴─────────┘  │
+│  ┌─────────┬─────────┬─────────┬─────────┐  │
+│  │ Elev    │ Avg HR  │ Max HR  │ TSS     │  │
+│  │ +45m    │ 145     │ 168     │ 48      │  │
+│  └─────────┴─────────┴─────────┴─────────┘  │
+├─────────────────────────────────────────────┤
+│  AI INSIGHTS (Personalized)                 │
+│  "Great first 3km! You faded in the final   │
+│   km - try starting slightly slower..."     │
+│                                             │
+│  ✓ Strong start                            │
+│  ⚠️ Final km fade                          │
+│  💡 Tip: Negative split training            │
+├─────────────────────────────────────────────┤
+│  SPLITS TABLE                               │
+│  Km 1: 6:02  ████████                       │
+│  Km 2: 6:05  ████████                       │
+│  Km 3: 6:08  ████████                       │
+│  Km 4: 6:15  ████████ (slowest)             │
+│  Km 5: 6:20  ████████ (struggle point)      │
+├─────────────────────────────────────────────┤
+│  [Route Map - GPS Track]                    │
+│  Polyline (cyan→green)                      │
+│  Start/End markers                          │
+├─────────────────────────────────────────────┤
+│  [Save] [Share Image] [Discard]             │
+└─────────────────────────────────────────────┘
+```
+
+*Charts:*
+1. **Pace Chart (Bars)**: Each km as a bar, color-coded by pace
+   - Green: faster than average
+   - Yellow: at average
+   - Red: slower than average
+2. **Elevation Profile (Line)**: Line chart showing elevation over distance
+3. **Heart Rate Zones (Pie/Doughnut)**: Time in each HR zone (if HR data)
+
+*AI Insights Section:*
+- Dynamic text generated based on run data
+- Performance verdict (positive/negative/even split)
+- Strengths (checkmarks)
+- Areas for improvement (warning icons)
+- Personalized tip
 
 ### 3.6 History
 
 **PreviousRunsScreen**
-- Filterable list (date range, distance, device)
-- Run cards showing: date, distance, time, pace
-- Tap to view RunSummaryScreen
+- Filter bar: "All" | "This Week" | "This Month" | "This Year"
+- Sort: "Newest First" | "Oldest First" | "Longest"
+- Run Cards (list):
+  - Date/time
+  - Route name (if applicable)
+  - Distance, time, pace
+  - Device icon (if connected)
+  - Chevron → RunSummaryScreen
 
 ### 3.7 Events
 
 **EventsScreen**
-- List of community events (parkruns, races)
-- Event cards: name, date, location, distance
-- Filter by: upcoming, past, nearby
+- Tab: "Upcoming" | "Past"
+- Event Cards:
+  - Event name (bold)
+  - Date/time
+  - Location (city)
+  - Distance
+  - "Register" / "Registered" button
 
 **EventDetailScreen**
-- Event name, description
-- Date/time
-- Location (map)
-- Route info
-- "Register" / "Join" button
+- Header image/map
+- Event name
+- Full description
+- Date, time, location
+- Route details
+- Register button
+- Participant count
 
 ### 3.8 Goals
 
 **GoalsScreen**
-- Active goals list
-- Progress bars
-- Goal types: distance milestones, pace targets, frequency
+- "Active Goals" section
+- "Completed Goals" section (collapsed by default)
+- Goal Cards:
+  - Goal title
+  - Progress bar (%)
+  - Target vs current
+  - Deadline
+  - Status badge
 
 **CreateGoalScreen**
-- Goal type selector
-- Target input (distance/time/pace)
-- Deadline picker
-- Priority selector
+- Goal Type: "Distance" | "Pace" | "Frequency" | "Race"
+- Target input (varies by type)
+- Deadline date picker
+- Priority: "Low" | "Medium" | "High"
+- Notes (optional)
 
-### 3.9 Profile
+### 3.9 Profile Tab
 
 **ProfileScreen**
-- User avatar, name, email
-- Quick stats (total distance, runs)
-- Settings sections (collapsible)
-- Logout button
+- User avatar (circle, 80dp)
+- Name, email
+- Stats row: "Total Distance" | "Total Runs" | "Avg Pace"
+- Settings groups (collapsible):
+  - "Account" → PersonalDetailsScreen
+  - "AI Coach" → CoachSettingsScreen
+  - "Fitness" → FitnessLevelScreen
+  - "Devices" → ConnectedDevicesScreen
+  - "Preferences" → NotificationsScreen
+  - "Friends" → FriendsScreen
+  - "Subscription" → SubscriptionScreen
+- "Logout" button (bottom)
 
-**CoachSettingsScreen** (Critical)
-- **Coach Name**: Customizable (default: "AI Coach")
-- **Coach Voice**:
-  - Gender (Male/Female/Neutral)
-  - Accent (British, American, Australian, Irish)
-  - Tone (Energetic, Calm, Humorous, Professional)
-- **Coaching Features Toggles**:
-  - Pace coaching
-  - Route navigation
-  - Elevation coaching
-  - Heart rate coaching
-  - Cadence/stride coaching
-  - Km split announcements
-  - Struggle detection
-  - Motivational coaching
-  - Half-km check-in
-- **Split Interval**: 1km, 2km, 3km, 5km, 10km
+**CoachSettingsScreen** (Critical - AI Coaching)
+```
+┌─────────────────────────────────────────────┐
+│  AI COACH SETTINGS                          │
+├─────────────────────────────────────────────┤
+│  Coach Name                                 │
+│  [TextField: "AI Coach"]                   │
+├─────────────────────────────────────────────┤
+│  Voice                                      │
+│  Gender: [Male ▼] [Female] [Neutral]       │
+│  Accent: [British ▼] [American] [Australian]│
+│  Tone: [Energetic ▼] [Calm] [Humorous]     │
+│  [Preview Voice] button                    │
+├─────────────────────────────────────────────┤
+│  Coaching Features (ALL DEFAULT ON)         │
+│  ┌─────────────────────────────────────────┐│
+│  │ ✓ Pace Coaching                          ││
+│  │ ✓ Route Navigation                       ││
+│  │ ✓ Elevation Coaching                     ││
+│  │ ✓ Heart Rate Coaching                    ││
+│  │ ✓ Cadence & Stride                       ││
+│  │ ✓ Km Split Announcements                 ││
+│  │ ✓ Struggle Detection                     ││
+│  │ ✓ Motivational Coaching                  ││
+│  │ ✓ Half-km Check-in                       ││
+│  └─────────────────────────────────────────┘│
+│                                             │
+│  Split Interval: [1km ▼] [2km] [3km] [5km] │
+├─────────────────────────────────────────────┤
+│  [Save Changes] button                      │
+└─────────────────────────────────────────────┘
+```
 
 **ConnectedDevicesScreen**
-- Paired devices list
-- Device cards: name, type, battery, status
+- "Connected Devices" section
+- Device Cards:
+  - Device icon (Garmin/Apple Watch/etc.)
+  - Device name
+  - Status: "Connected" / "Disconnected"
+  - Battery % (if available)
+  - Last synced time
 - "Connect New Device" button
-- Garmin connect flow
-- Apple Watch sync status
+- Device types supported:
+  - Garmin (→ GarminConnectScreen for OAuth)
+  - Apple Watch (HealthKit pairing)
+  - Samsung Watch
+  - Coros
+  - Fitbit
 
-**FitnessLevelScreen**
-- Assessment run or manual input
-- Calculates VO2 max estimate
-- Sets training zones
+**GarminConnectScreen**
+- "Connect to Garmin" header
+- Explanation of what data is shared
+- "Connect with Garmin" button
+- OAuth webview flow
+- Success/error handling
+
+**FriendsScreen**
+- "Friends" list
+- Friend Cards:
+  - Avatar
+  - Name
+  - Total runs / distance
+  - Last active
+- "Add Friend" button
+- "Friend Requests" section (pending)
+- Search by name/email/user code
 
 **PersonalDetailsScreen**
-- DOB, gender, height, weight
+- Name (editable)
+- Email (read-only)
+- Date of Birth
+- Gender
+- Height (cm/ft)
+- Weight (kg/lbs)
 - Emergency contact
 - Medical notes
 
+**FitnessLevelScreen**
+- "Calculate Your Level" section
+- Option 1: "Take Assessment Run" (5km timed)
+- Option 2: "Enter Known VO2 Max"
+- Result display:
+  - Fitness level: Beginner/Intermediate/Advanced/Elite
+  - Estimated VO2 Max
+  - Training zones
+
 **SubscriptionScreen**
-- Plan tiers display
-- Current subscription status
-- Upgrade/downgrade options
+- Current plan display
+- Plan comparison (Free / Pro / Elite)
+- Features list per tier
+- "Upgrade" / "Manage" buttons
 
----
+**NotificationsScreen**
+- Toggles:
+  - Run reminders
+  - Goal achievements
+  - Friend activity
+  - Race alerts
+  - Weekly summary
 
-## 4. UI/Brand Guidelines
+### 3.10 Additional Screens
 
-### Color Palette
+**GroupRunsScreen**
+- "My Group Runs" list
+- "Join Group Run" button
+- Group cards: name, date, participants, route
 
-```swift
-// Primary Brand
-primary = "#00D4FF"        // Bright cyan - main accent
-primaryDark = "#00B8E6"    // Pressed state
-accent = "#FF6B35"         // Orange - CTAs
-
-// Semantic
-success = "#00E676"        // Green - achievements
-warning = "#FFB300"        // Amber - caution
-error = "#FF5252"          // Red - errors
-
-// Background (dark theme)
-backgroundRoot = "#0A0F1A" // Main background
-backgroundDefault = "#111827"
-backgroundSecondary = "#1F2937"  // Cards
-backgroundTertiary = "#374151"   // Inputs
-
-// Text
-textPrimary = "#FFFFFF"
-textSecondary = "#A0AEC0"
-textMuted = "#718096"
-
-// Borders
-border = "#2D3748"
-borderLight = "#4A5568"
-
-// Route gradient
-routeGradientStart = "#00D4FF"  // Cyan
-routeGradientEnd = "#00E676"    // Green
-```
-
-### Typography
-
-- **Headings**: Bold, large (24-32sp)
-- **Body**: Regular (16sp)
-- **Captions**: Light (12-14sp)
-- **Numbers (run metrics)**: Monospace-style, very large for primary metrics
-
-### Layout Principles
-
-1. **Dark theme only** - All backgrounds dark blue-black
-2. **Card-based** - Content in rounded cards (#1F2937)
-3. **Bottom sheet modals** - For secondary actions
-4. **Full-screen maps** - For route display
-5. **Large touch targets** - For use while running
-6. **High contrast** - White text on dark backgrounds
-
-### Iconography
-- Outlined icons (not filled)
-- Consistent 24dp size for navigation
-- Custom icons for: run, heart, chart, calendar, target, profile
-
----
-
-## 5. Feature Deep Dive
-
-### 5.1 Route Generation
-
-**Algorithm**:
-1. User sets: distance (1-50km), difficulty, terrain
-2. System gets current location via GPS
-3. AI generates route using OpenStreetMap data
-4. Route includes: waypoints, elevation profile, turn instructions
-
-**Route Data Structure**:
-- Polyline (encoded coordinates)
-- Elevation gain/loss
-- Turn instructions (turn type, distance, street name)
-- Difficulty rating
-- Terrain classification
-
-**Route Display**:
-- Map with gradient polyline (cyan → green)
-- Elevation profile chart
-- Turn-by-turn list with distance to each turn
-
-### 5.2 Run Session Logic
-
-**GPS Tracking**:
-- Location updates every 1-3 seconds
-- Distance calculated from GPS points
-- Pace calculated from recent 30-second window (current) and total average
-
-**Real-Time Calculations**:
-- Current pace: rolling 30-second average
-- Average pace: total distance / total time
-- Cadence: from connected device or estimated
-- Heart rate: from device
-- Elevation: from GPS altitude
-- Gradient: calculated from elevation change over distance
-
-**Auto-Pause**:
-- Detects when runner stops (speed < 0.5 m/s)
-- Pauses timer automatically
-- Resumes when movement detected
-
-### 5.3 AI Coaching Triggers
-
-**All toggles are configurable in CoachSettingsScreen:**
-
-| Feature | Trigger | Audio Message Example |
-|---------|---------|----------------------|
-| **Pace Coaching** | Every 30 seconds | "Your pace is 6:30. Target is 6:00. Pick it up!" |
-| **Route Navigation** | 100m before turn | "In 100 metres, turn left onto Smith Street" |
-| **Elevation Coaching** | When gradient > 5% | "You're approaching a hill. Shorten your stride." |
-| **Heart Rate Coaching** | When HR enters new zone | "You're now in zone 4. Push through!" |
-| **Cadence/Stride** | Every 2 minutes | "Cadence is 170. Try to increase to 180." |
-| **Km Splits** | At each km marker | "First kilometre: 6 minutes 30 seconds." |
-| **Struggle Detection** | Pace drops > 20% | "You're struggling. Slow down and find your rhythm." |
-| **Motivational** | At 25%, 50%, 75% | "Quarter way there! You're doing great." |
-| **Half-km Check-in** | At 500m | "First 500m looks good. Heart rate is 145." |
-
-**Coaching Message Sources**:
-- Pre-written statements (tone-specific)
-- Dynamic messages based on real-time data
-- Backend AI generation (for complex insights)
-
-### 5.4 Group Runs
-
-**CreateGroupRunScreen**:
-- Group name
-- Date/time
+**CreateGroupRunScreen**
+- Group name input
+- Date/time picker
 - Meeting point (map picker)
 - Route selection
 - Max participants
 - Invite friends
 
-**GroupRunsScreen**:
-- List of active/upcoming group runs
-- Join/create buttons
-- Participant list
+**ShareImageEditorScreen**
+- Run summary image template
+- Customize: add text, filters, stickers
+- Save to photos / share to social
 
-**During Group Run**:
-- See other runners on map (if live tracking enabled)
-- Group leader can start/pause
-- Shared route
-
-### 5.5 Live Tracking
-
-**LiveTrackingScreen**:
+**LiveTrackingScreen**
+- "Share Live Location" button
 - Generate shareable link
-- View on web (non-app users)
-- Real-time position updates
-- Option to show pace/HR
+- Duration selector (1hr, 2hr, 4hr, 8hr, 24hr)
+- Web viewer URL to share
 
-**Sharing Options**:
-- Link generation (expires after 24h)
-- Web viewer (simple map + stats)
-
-### 5.6 Connected Devices
-
-**Supported Devices**:
-- Garmin (via Garmin Connect API)
-- Apple Watch (via HealthKit)
-- Samsung Watch
-- Coros
-- Fitbit
-
-**Pairing Flow**:
-1. User taps "Connect Device"
-2. Select device type
-3. OAuth/ Bluetooth pairing
-4. Sync confirmation
-
-**During Run**:
-- Auto-connect to paired device
-- Read: HR, cadence, stride length
-- Display in run session UI
-- Store in run data
+**DistanceScaleScreen**
+- Distance display calibration
+- Confirm GPS accuracy
 
 ---
 
-## 6. API Endpoints (Backend)
+## 4. UI/Brand Guidelines
 
-The iOS app communicates with the backend at `https://airuncoach.live` (production) or `http://10.0.2.2:3000` (development).
+### Color Palette (EXACT VALUES)
+
+```swift
+// Primary Brand
+primary = Color(hex: "#00D4FF")        // Bright cyan - main accent
+primaryDark = Color(hex: "#00B8E6")    // Pressed state
+accent = Color(hex: "#FF6B35")         // Orange - CTAs
+
+// Semantic
+success = Color(hex: "#00E676")        // Green - achievements
+warning = Color(hex: "#FFB300")        // Amber - caution
+error = Color(hex: "#FF5252")          // Red - errors
+
+// Background (Dark Theme - ONLY THEME)
+backgroundRoot = Color(hex: "#0A0F1A") // Main background (deep dark blue-black)
+backgroundDefault = Color(hex: "#111827")
+backgroundSecondary = Color(hex: "#1F2937")  // Cards
+backgroundTertiary = Color(hex: "#374151")   // Elevated elements, inputs
+
+// Text
+textPrimary = Color(hex: "#FFFFFF")    // White
+textSecondary = Color(hex: "#A0AEC0")  // Light gray
+textMuted = Color(hex: "#718096")      // Muted gray
+
+// Borders
+border = Color(hex: "#2D3748")
+borderLight = Color(hex: "#4A5568")
+
+// Route Gradient
+routeGradientStart = Color(hex: "#00D4FF")  // Cyan
+routeGradientEnd = Color(hex: "#00E676")    // Green
+
+// Difficulty Colors
+difficultyEasy = success
+difficultyModerate = warning
+difficultyHard = accent
+difficultyExtreme = error
+```
+
+### Typography
+
+- **Display (Timer)**: 48sp, Bold, Monospace-style
+- **H1 (Screen Titles)**: 24sp, Bold
+- **H2 (Section Headers)**: 20sp, SemiBold
+- **H3 (Card Titles)**: 18sp, Medium
+- **Body**: 16sp, Regular
+- **Caption**: 14sp, Regular
+- **Small**: 12sp, Light
+
+### Spacing System (4dp base)
+- xs: 4dp
+- sm: 8dp
+- md: 16dp
+- lg: 24dp
+- xl: 32dp
+- xxl: 48dp
+
+### Border Radius
+- Small (buttons, inputs): 8dp
+- Medium (cards): 12dp
+- Large (modals): 16dp
+- Circle (avatars): 50%
+
+### Component Styles
+
+**PrimaryButton**
+- Background: primary (#00D4FF)
+- Text: buttonText (#0A0F1A)
+- Padding: 16dp vertical, 24dp horizontal
+- Corner radius: 8dp
+- Full width in forms
+
+**SecondaryButton**
+- Background: transparent
+- Border: 1dp primary
+- Text: primary
+
+**Card**
+- Background: backgroundSecondary
+- Corner radius: 12dp
+- Padding: 16dp
+- Shadow: none (flat design)
+
+**TextField**
+- Background: backgroundTertiary
+- Border: 1dp border
+- Focus border: primary
+- Corner radius: 8dp
+- Padding: 12dp
+
+---
+
+## 5. Charts & Visualizations
+
+### Run Session Charts
+
+**Real-time Pace Chart** (during run)
+- Not displayed during active run (too distracting)
+- Only distance/time/pace numbers shown
+
+### Run Summary Charts
+
+**1. Dual-Axis Pace + Elevation Chart**
+- Chart type: Combined bar + line
+- X-axis: Distance (km markers)
+- Left Y-axis (bars): Pace (min/km)
+- Right Y-axis (line): Elevation (m)
+- Bar colors: pace vs average pace (green/yellow/red)
+- Tap bar: show detailed split info
+
+**2. Heart Rate vs Pace Correlation**
+- Scatter plot
+- X-axis: Pace (min/km)
+- Y-axis: Heart Rate (bpm)
+- Shows efficiency - flatter line = better efficiency
+
+**3. Split Pace Chart**
+- Chart type: Horizontal bar chart
+- Each km as a bar
+- Color coding:
+  - Green (#00E676): Faster than average
+  - Yellow (#FFB300): At average
+  - Red (#FF5252): Slower than average
+- Fastest/slowest splits annotated
+
+**4. Heart Rate Zones (Doughnut Chart)**
+- Segments: Zone 1-5
+- Colors: gray → green → yellow → orange → red
+- Labels: time in each zone
+
+**5. Elevation Profile**
+- Chart type: Area/Line chart
+- Fill: gradient from primary to transparent
+- X-axis: Distance
+- Y-axis: Elevation (m)
+
+### Dashboard Charts
+
+**Weekly Distance Bar Chart**
+- 7 bars (days of week)
+- Color: primary
+- Goal line overlay (if goal set)
+
+**Fitness Trend Chart** (in FitnessLevelScreen)
+- Line chart: CTL, ATL, TSB over time
+- X-axis: Date (30/60/90 days)
+- Three lines with different colors
+
+---
+
+## 6. Maps & Polylines
+
+### Map Implementation (iOS)
+
+- Use **MapKit** (Apple's native maps)
+- Map style: `.standard` with dark mode support
+- Fallback: Apple Maps (no Google Maps SDK needed)
+
+### Route Display
+
+**Route Generation Preview**
+- Polyline color: gradient from routeGradientStart (#00D4FF) to routeGradientEnd (#00E676)
+- Line width: 4pt
+- Start marker: green circle
+- End marker: red circle
+- Waypoints: small dots
+
+**Active Run Map**
+- Current location: blue pulsing dot
+- Accuracy circle: semi-transparent blue
+- Route polyline: gradient (as above)
+- Turn indicators: custom markers (arrow icons)
+- Distance to next turn: label on map
+- Off-route warning: red line to route
+
+**Run Summary Map**
+- Full GPS track polyline
+- Start marker with label
+- End marker with label
+- Zoom to fit entire route
+- Tap to expand full screen
+
+### Turn-by-Turn Navigation
+
+- Markers placed 100m, 50m, 20m before turn
+- Distance label on marker
+- Instruction text below map
+- Voice announcement at triggers
+
+---
+
+## 7. Feature Deep Dive
+
+### 7.1 Route Generation
+
+**Algorithm Flow:**
+1. User inputs: distance, difficulty, terrain, start location
+2. Backend generates route using OSM data
+3. Route includes:
+   - Encoded polyline (Google format)
+   - Turn-by-turn instructions
+   - Elevation profile
+   - Difficulty rating
+4. Frontend displays on map
+
+**Route Data Structure:**
+```swift
+struct GeneratedRoute {
+    id: String
+    name: String?
+    distance: Double // meters
+    difficulty: RouteDifficulty // easy/moderate/hard/extreme
+    startLat: Double
+    startLng: Double
+    waypoints: [RouteWaypoint]
+    polyline: String // encoded
+    elevationGain: Double
+    elevationLoss: Double
+    elevationProfile: [ElevationPoint]
+    turnInstructions: [TurnInstruction]
+    estimatedTime: Int // seconds
+}
+```
+
+### 7.2 Run Session Logic
+
+**GPS Tracking:**
+- Update frequency: every 1-3 seconds
+- Distance calculation: Haversine formula between points
+- Filter: ignore points with accuracy > 20m
+- Smoothing: moving average over 5 points
+
+**Real-Time Calculations:**
+```swift
+// Current pace (30-second rolling window)
+currentPace = 30s distance / 30s time
+
+// Average pace
+avgPace = totalDistance / totalTime
+
+// Gradient calculation
+gradient = (elevationChange / distanceChange) * 100
+```
+
+**Auto-Pause:**
+- Trigger: speed < 0.5 m/s for 5+ seconds
+- Resume trigger: speed > 1.0 m/s
+
+### 7.3 AI Coaching Triggers
+
+**All features configurable in CoachSettingsScreen (default: ON):**
+
+| Feature | Toggle Key | Trigger | Example Message |
+|---------|-----------|---------|-----------------|
+| Pace Coaching | `coachPaceEnabled` | Every 30s | "Your pace is 6:30. Target is 6:00. Pick it up!" |
+| Route Navigation | `coachNavigationEnabled` | 100m before turn | "In 100 metres, turn left onto Smith Street" |
+| Elevation Coaching | `coachElevationEnabled` | Gradient > 5% | "You're approaching a hill. Shorten your stride." |
+| Heart Rate Coaching | `coachHeartRateEnabled` | HR zone change | "You're now in zone 4. Push through!" |
+| Cadence/Stride | `coachCadenceStrideEnabled` | Every 2 min | "Cadence is 170. Try to increase to 180." |
+| Km Splits | `coachKmSplitsEnabled` | At km marker | "First kilometre: 6 minutes 30 seconds." |
+| Struggle Detection | `coachStruggleEnabled` | Pace drop > 20% | "You're struggling. Slow down and find your rhythm." |
+| Motivational | `coachMotivationalEnabled` | 25%, 50%, 75% | "Quarter way there! You're doing great." |
+| Half-km Check-in | `coachHalfKmCheckInEnabled` | At 500m | "First 500m looks good. Heart rate is 145." |
+
+**Coaching Message Priority:**
+1. Safety alerts (off-route, medical)
+2. Navigation (turn-by-turn)
+3. Scheduled (km splits, milestones)
+4. Adaptive (pace, HR, elevation)
+5. Motivational
+
+### 7.4 Group Runs
+
+**Creating:**
+- User creates group with name, date, location, route
+- System generates invite code
+- Share via link or user code
+
+**During Group Run:**
+- All participants see each other on map
+- Leader can start/pause/stop
+- Group pace shown (average of group)
+- Chat not included (focus on running)
+
+### 7.5 Live Tracking
+
+**Setup:**
+- User generates link in app
+- Link valid for selected duration (1-24 hours)
+- Non-app users can view on web
+
+**Viewer (web):**
+- Map with runner position (updates every 10s)
+- Current stats (distance, time, pace)
+- No HR/cadence (privacy)
+- "Runner is off the route" warning if applicable
+
+### 7.6 Connected Devices
+
+**Garmin Integration:**
+- OAuth 2.0 flow via Garmin Connect API
+- Permissions: activity, location, health
+- Sync: automatic after run completion
+- Data: HR, cadence, distance, pace, GPS track
+
+**Apple Watch:**
+- HealthKit integration
+- Workout session: "Outdoor Run"
+- Background delivery of heart rate
+- Watch shows: pace, distance, HR ( Complications)
+
+---
+
+## 8. API Endpoints
+
+### Base URLs
+- Production: `https://airuncoach.live`
+- Development: `http://10.0.2.2:3000` (Android emulator)
 
 ### Authentication
-- `POST /auth/login` - Login
-- `POST /auth/register` - Sign up
-- `POST /auth/refresh` - Refresh token
+```
+POST /auth/login
+Body: { "email": "...", "password": "..." }
+Response: { "token": "...", "user": {...} }
+
+POST /auth/register
+Body: { "email": "...", "password": "...", "name": "...", ... }
+Response: { "token": "...", "user": {...} }
+
+POST /auth/refresh
+Header: Authorization: Bearer {token}
+Response: { "token": "..." }
+```
 
 ### Routes
-- `GET /routes` - List user's routes
-- `POST /routes/generate` - AI generate route
-- `GET /routes/{id}` - Get route detail
+```
+GET /routes
+Query: ?page=1&limit=20
+Response: { "routes": [...], "total": 100 }
+
+POST /routes/generate
+Body: { "startLat": ..., "startLng": ..., "distanceKm": 5, "difficulty": "moderate" }
+Response: { "route": {...} }
+
+GET /routes/{id}
+Response: { "route": {...} }
+```
 
 ### Runs
-- `POST /runs` - Save run
-- `GET /runs` - List runs (paginated)
-- `GET /runs/{id}` - Get run detail
-- `GET /runs/{id}/ai-insights` - Get AI analysis
+```
+GET /runs
+Query: ?page=1&limit=20&from=2026-01-01&to=2026-03-04
+Response: { "runs": [...], "total": 50 }
+
+POST /runs
+Body: { "distance": 5230, "duration": 1935000, "avgPace": "6:10", ... }
+Response: { "run": {...}, "aiInsights": {...} }
+
+GET /runs/{id}
+Response: { "run": {...} }
+
+GET /runs/{id}/ai-insights
+Response: { "insights": "...", "coachingNotes": [...], "performance": {...} }
+```
 
 ### User
-- `GET /user` - Get profile
-- `PUT /user` - Update profile
-- `PUT /user/coach-settings` - Update coach preferences
+```
+GET /user
+Response: { "user": {...} }
+
+PUT /user
+Body: { "name": "...", "coachName": "...", ... }
+
+PUT /user/coach-settings
+Body: { "coachPaceEnabled": true, "coachNavigationEnabled": true, ... }
+```
 
 ### Social
-- `GET /events` - List events
-- `GET /goals` - List goals
-- `GET /friends` - List friends
+```
+GET /events
+GET /goals
+POST /goals
+GET /friends
+POST /friends
+POST /friends/request
+```
 
-### Device Integration
-- `GET /devices` - Get connected devices
-- `POST /devices/garmin/connect` - Garmin OAuth
+### Devices
+```
+GET /devices
+POST /devices/garmin/connect
+POST /devices/garmin/callback
+DELETE /devices/{id}
+```
 
 ---
 
-## 7. Data Models (Reference)
+## 9. Data Models Reference
 
-All data models are available in the shared KMP module at `/shared/src/commonMain/kotlin/live/airuncoach/airuncoach/shared/`
+All models are in KMP module: `/shared/src/commonMain/kotlin/live/airuncoach/airuncoach/shared/`
 
-Key models:
+Key models to use:
 - `RunSession` - Complete run data
-- `LocationPoint` - GPS coordinate
-- `KmSplit` - Per-km timing
-- `GeneratedRoute` - AI route
-- `User` - Profile data
+- `LocationPoint` - GPS coordinate with speed, altitude
+- `KmSplit` - Per-kilometer timing
+- `GeneratedRoute` - AI route with waypoints
+- `User` - Profile with all settings
 - `Goal` - User goals
 - `ConnectedDevice` - Paired devices
-- `CoachingFeaturePreferences` - AI settings
+- `CoachSettings` - AI coach preferences
+- `CoachingFeaturePreferences` - Feature toggles
+- `RunSetupConfig` - Run configuration
+- `WeatherData` - Weather at run time
 
 ---
 
-## 8. Key Differences: Android vs iOS
+## 10. Platform-Specific Notes
 
-### Platform-Specific Implementation Required
+### iOS-Specific Implementation
 
-| Feature | Android Implementation | iOS Implementation |
-|---------|----------------------|-------------------|
-| **GPS** | Google Play Services Location | CoreLocation |
-| **Health Data** | Health Connect | HealthKit |
-| **Audio TTS** | Android TTS | AVSpeechSynthesizer |
-| **Notifications** | Firebase Cloud Messaging | APNs |
-| **Background Run** | Foreground Service | Background Modes |
-| **Maps** | Google Maps SDK | MapKit |
-| **Bluetooth** | Android Bluetooth API | CoreBluetooth |
-| **Watch Connection** | Wear OS APIs | WatchConnectivity |
+| Feature | Implementation |
+|---------|---------------|
+| **Maps** | MapKit (MKMapView, MKPolyline) |
+| **GPS** | CoreLocation (CLLocationManager) |
+| **Audio TTS** | AVSpeechSynthesizer |
+| **Health Data** | HealthKit (HKHealthStore) |
+| **Background** | BackgroundTasks + BGTaskScheduler |
+| **Notifications** | UserNotifications (UNUserNotificationCenter) |
+| **Bluetooth** | CoreBluetooth (BLE) |
+| **Watch** | WatchConnectivity (WCSession) |
+| **Charts** | Swift Charts (iOS 16+) or Charts library |
+| **Persistence** | UserDefaults (prefs), SQLite (via SQLite.swift) |
 
-### Shared (in KMP Module)
+### What's NOT Shared (Platform-Specific)
 
-All business logic, calculations, and data models are shared:
-- GAP calculations
-- Run analytics
-- Fitness calculations (CTL/ATL/TSB)
-- All data models
-- API DTOs
-- Coaching logic
+Only put in iOS Swift code:
+- SwiftUI Views
+- MapKit implementation
+- HealthKit integration
+- WatchConnectivity
+- AVSpeechSynthesizer calls
+- UI state management (ViewModels)
+- Navigation setup
 
----
-
-## 9. Testing Checklist
-
-Before release, verify:
-
-- [ ] GPS tracking accuracy
-- [ ] Audio coaching triggers at correct times
-- [ ] Route generation produces valid routes
-- [ ] Connected device sync works
-- [ ] Run data saves to backend
-- [ ] AI insights generate correctly
-- [ ] UI matches Android screens exactly
-- [ ] Bottom navigation works correctly
-- [ ] Dark theme applied consistently
+Everything else (models, calculations, API DTOs) comes from shared KMP.
 
 ---
 
-## 10. Assets Required
+## 11. Testing Checklist
 
-### Images (to be ported from Android)
-- App icon (all sizes)
-- Onboarding illustrations
+Before release, verify EVERYTHING matches Android:
+
+- [ ] Login flow works (email/password, validation)
+- [ ] Sign up flow works
+- [ ] Location permission request
+- [ ] Dashboard loads with weather, recent runs
+- [ ] Route generation works (full flow)
+- [ ] Route selection works
+- [ ] Run setup (all goal types) works
+- [ ] GPS tracking accurate
+- [ ] Auto-pause works
+- [ ] Run session UI displays correctly (all metrics)
+- [ ] AI coaching triggers fire at correct times
+- [ ] Audio coaching plays (TTS)
+- [ ] Map displays during run
+- [ ] Route polyline displays correctly
+- [ ] Turn-by-turn navigation works
+- [ ] Pause/resume works
+- [ ] Stop and save run works
+- [ ] Run summary displays all charts
+- [ ] Dual-axis chart (pace + elevation)
+- [ ] Splits table
+- [ ] AI insights generate
+- [ ] GPS track polyline on map
+- [ ] Previous runs list loads
+- [ ] Events list loads
+- [ ] Goals list loads, create works
+- [ ] Profile settings save
+- [ ] Coach settings save (all 9 features)
+- [ ] Device pairing works
+- [ ] Bottom navigation works (all 5 tabs)
+- [ ] Dark theme applied throughout
+
+---
+
+## 12. Assets Required
+
+### App Icons
+- iOS app icon (all required sizes: 1024x1024 base)
+- Watch icon
+- Notification icon
+
+### Images (from Android)
+- Onboarding illustrations (3-5)
 - Empty state illustrations
 - Achievement badges
 - Coach avatar placeholders
 
-### Icons
-- All navigation icons (home, chart, calendar, target, profile)
-- Action icons (play, pause, stop, mute)
-- Device icons (garmin, apple watch)
-- Social icons
+### Icons (SF Symbols compatible)
+- Navigation: house, chart.bar, calendar, target, person
+- Actions: play.fill, pause.fill, stop.fill, speaker.wave.2, speaker.slash
+- Devices: applewatch, figure.run, antenna.radiowaves.left.and.right
+- Social: person.badge.plus, star, heart
 
 ---
 
+*Document Version: 2.0 - Complete*
 *Last Updated: March 2026*
-*For Xcode AI Agent use - Ai Run Coach iOS Build*
+*Use this file as the single source of truth for iOS build*
