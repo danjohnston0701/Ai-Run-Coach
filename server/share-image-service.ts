@@ -65,22 +65,41 @@ export interface RunDataForImage {
   weatherData?: { temperature?: number; conditions?: string };
 }
 
-const COLORS = {
-  primary: "#00D4FF",
-  primaryDark: "#00B8E6",
-  accent: "#FF6B35",
-  success: "#00E676",
-  warning: "#FFB300",
-  error: "#FF5252",
-  bgRoot: "#0A0F1A",
-  bgDefault: "#111827",
-  bgSecondary: "#1F2937",
-  bgTertiary: "#374151",
-  text: "#FFFFFF",
-  textSecondary: "#A0AEC0",
-  textMuted: "#718096",
-  border: "#2D3748",
+const C = {
+  cyan: "#00D4FF",
+  cyanDark: "#00A3CC",
+  cyanLight: "#33DFFF",
+  orange: "#FF6B35",
+  orangeLight: "#FF8F66",
+  green: "#00E676",
+  greenDark: "#00C853",
+  red: "#FF5252",
+  redLight: "#FF8A80",
+  gold: "#FFD700",
+  goldLight: "#FFE44D",
+  yellow: "#FFB300",
+  white: "#FFFFFF",
+  offWhite: "#F8F9FA",
+  bg: "#FFFFFF",
+  cardBg: "rgba(255,255,255,0.85)",
+  cardBorder: "rgba(0,0,0,0.06)",
+  textPrimary: "#1A1A2E",
+  textSecondary: "#4A5568",
+  textMuted: "#A0AEC0",
+  subtle: "#E2E8F0",
+  frost: "rgba(255,255,255,0.7)",
 };
+
+const QUOTES = [
+  "Every step is progress.",
+  "Run the mile you're in.",
+  "Strong legs, stronger mind.",
+  "The road doesn't judge.",
+  "One run closer to the goal.",
+  "Earned, not given.",
+  "Trust the process.",
+  "Your only limit is you.",
+];
 
 export const TEMPLATES: ShareTemplate[] = [
   {
@@ -143,6 +162,7 @@ export const STICKER_WIDGETS: StickerWidget[] = [
 ];
 
 function formatDuration(seconds: number): string {
+  if (seconds > 86400) seconds = Math.round(seconds / 1000);
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
@@ -155,54 +175,145 @@ function formatDate(dateStr?: string): string {
   return new Date(dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 }
 
-function escapeXml(str: string): string {
+function formatDateShort(dateStr?: string): string {
+  if (!dateStr) return new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function esc(str: string): string {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
+function distKm(d: number): string {
+  if (d > 100) return (d / 1000).toFixed(2);
+  return d.toFixed(2);
+}
+
+function pickQuote(): string {
+  return QUOTES[Math.floor(Math.random() * QUOTES.length)];
+}
+
+function commonDefs(w: number, h: number): string {
+  return `
+    <filter id="frost" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="18" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="1 0 0 0 0.04  0 1 0 0 0.04  0 0 1 0 0.04  0 0 0 0.75 0" result="tint"/>
+      <feComposite in="SourceGraphic" in2="tint" operator="over"/>
+    </filter>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="12" result="blur"/>
+      <feFlood flood-color="${C.cyan}" flood-opacity="0.35" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+      <feMerge><feMergeNode in="shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glowOrange" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="10" result="blur"/>
+      <feFlood flood-color="${C.orange}" flood-opacity="0.3" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+      <feMerge><feMergeNode in="shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="12" flood-color="rgba(0,0,0,0.08)"/>
+    </filter>
+    <filter id="bigGlow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="30" result="blur"/>
+      <feFlood flood-color="${C.cyan}" flood-opacity="0.2" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+      <feMerge><feMergeNode in="shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <linearGradient id="cyanGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="${C.cyan}"/>
+      <stop offset="100%" stop-color="#0088FF"/>
+    </linearGradient>
+    <linearGradient id="orangeGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="${C.orange}"/>
+      <stop offset="100%" stop-color="#FF4500"/>
+    </linearGradient>
+    <linearGradient id="routeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="${C.cyan}"/>
+      <stop offset="50%" stop-color="${C.cyanLight}"/>
+      <stop offset="100%" stop-color="${C.green}"/>
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${C.gold}"/>
+      <stop offset="100%" stop-color="#FFA000"/>
+    </linearGradient>
+    <linearGradient id="topAccent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="${C.cyan}"/>
+      <stop offset="100%" stop-color="${C.orange}"/>
+    </linearGradient>
+    <clipPath id="roundCard"><rect x="0" y="0" width="${w}" height="${h}" rx="0"/></clipPath>
+  `;
+}
+
 function buildWatermark(w: number, h: number): string {
-  const logoY = h - 50;
+  const y = h - 52;
   return `
-    <rect x="0" y="${logoY - 10}" width="${w}" height="60" fill="${COLORS.bgRoot}" opacity="0.7"/>
-    <text x="${w / 2}" y="${logoY + 22}" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700" fill="${COLORS.primary}" text-anchor="middle" letter-spacing="2">
-      AI RUN COACH
-    </text>
+    <rect x="0" y="${y}" width="${w}" height="52" fill="${C.bg}" opacity="0.95"/>
+    <line x1="${w * 0.2}" y1="${y}" x2="${w * 0.8}" y2="${y}" stroke="url(#topAccent)" stroke-width="1.5" opacity="0.4"/>
+    <text x="${w / 2}" y="${y + 32}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="700" fill="${C.textMuted}" text-anchor="middle" letter-spacing="4">AI RUN COACH</text>
   `;
 }
 
-function buildStatBox(x: number, y: number, w: number, h: number, label: string, value: string, unit: string, color: string): string {
+function buildTopBar(w: number): string {
+  return `<rect x="0" y="0" width="${w}" height="5" fill="url(#topAccent)"/>`;
+}
+
+function premiumStatCard(x: number, y: number, w: number, h: number, label: string, value: string, unit: string, color: string, iconSvg?: string): string {
+  const iconContent = iconSvg || "";
   return `
-    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="16" fill="${COLORS.bgSecondary}" opacity="0.9"/>
-    <text x="${x + w / 2}" y="${y + 28}" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="${COLORS.textMuted}" text-anchor="middle" letter-spacing="1">${escapeXml(label.toUpperCase())}</text>
-    <text x="${x + w / 2}" y="${y + h / 2 + 14}" font-family="Arial, Helvetica, sans-serif" font-size="36" font-weight="700" fill="${color}" text-anchor="middle">${escapeXml(value)}</text>
-    ${unit ? `<text x="${x + w / 2}" y="${y + h - 16}" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="${COLORS.textSecondary}" text-anchor="middle">${escapeXml(unit)}</text>` : ""}
+    <g filter="url(#softShadow)">
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="20" fill="${C.white}" stroke="${C.subtle}" stroke-width="1"/>
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="20" fill="${color}" opacity="0.04"/>
+      <rect x="${x + 16}" y="${y + h - 6}" width="${w - 32}" height="4" rx="2" fill="${color}" opacity="0.15"/>
+    </g>
+    ${iconContent}
+    <text x="${x + w / 2}" y="${y + 26}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="${C.textMuted}" text-anchor="middle" letter-spacing="2">${esc(label.toUpperCase())}</text>
+    <text x="${x + w / 2}" y="${y + h / 2 + 16}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="40" font-weight="800" fill="${C.textPrimary}" text-anchor="middle" filter="url(#glow)" style="paint-order: stroke">${esc(value)}</text>
+    ${unit ? `<text x="${x + w / 2}" y="${y + h - 18}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" fill="${color}" text-anchor="middle" letter-spacing="1">${esc(unit.toUpperCase())}</text>` : ""}
   `;
 }
 
-function buildMiniChart(x: number, y: number, w: number, h: number, data: number[], color: string, label: string): string {
+function buildSparkline(x: number, y: number, w: number, h: number, data: number[], color: string, gradId: string): string {
   if (!data || data.length < 2) return "";
   const min = Math.min(...data);
   const max = Math.max(...data);
   const range = max - min || 1;
-  const chartH = h - 40;
-  const chartY = y + 30;
   const stepX = w / (data.length - 1);
 
   const points = data.map((v, i) => {
     const px = x + i * stepX;
-    const py = chartY + chartH - ((v - min) / range) * chartH;
+    const py = y + h - ((v - min) / range) * h;
     return `${px},${py}`;
   }).join(" ");
 
-  const areaPoints = `${x},${chartY + chartH} ${points} ${x + w},${chartY + chartH}`;
+  const areaPoints = `${x},${y + h} ${points} ${x + w},${y + h}`;
 
   return `
-    <text x="${x}" y="${y + 16}" font-family="Arial, Helvetica, sans-serif" font-size="13" fill="${COLORS.textMuted}" letter-spacing="0.5">${escapeXml(label.toUpperCase())}</text>
-    <polygon points="${areaPoints}" fill="${color}" opacity="0.15"/>
+    <defs>
+      <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity="0.25"/>
+        <stop offset="100%" stop-color="${color}" stop-opacity="0.02"/>
+      </linearGradient>
+    </defs>
+    <polygon points="${areaPoints}" fill="url(#${gradId})"/>
     <polyline points="${points}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
   `;
 }
 
-function buildGpsRoute(x: number, y: number, w: number, h: number, track: Array<{ lat: number; lng: number }>): string {
+function buildPremiumChart(x: number, y: number, w: number, h: number, data: number[], color: string, label: string, gradId: string): string {
+  if (!data || data.length < 2) return "";
+  const chartH = h - 36;
+  const chartY = y + 28;
+  return `
+    <text x="${x}" y="${y + 14}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="${C.textMuted}" letter-spacing="1.5">${esc(label.toUpperCase())}</text>
+    <g opacity="0.9">
+      ${buildSparkline(x, chartY, w, chartH, data, color, gradId)}
+    </g>
+  `;
+}
+
+function buildGpsRoute(x: number, y: number, w: number, h: number, track: Array<{ lat: number; lng: number }>, thick?: boolean): string {
   if (!track || track.length < 2) return "";
 
   const lats = track.map((p) => p.lat);
@@ -214,7 +325,7 @@ function buildGpsRoute(x: number, y: number, w: number, h: number, track: Array<
   const latRange = maxLat - minLat || 0.001;
   const lngRange = maxLng - minLng || 0.001;
 
-  const padding = 30;
+  const padding = 50;
   const drawW = w - padding * 2;
   const drawH = h - padding * 2;
 
@@ -234,12 +345,107 @@ function buildGpsRoute(x: number, y: number, w: number, h: number, track: Array<
   const sy = offsetY + (maxLat - startPt.lat) * scale;
   const ex = offsetX + (endPt.lng - minLng) * scale;
   const ey = offsetY + (maxLat - endPt.lat) * scale;
+  const sw = thick ? 6 : 4;
 
   return `
-    <polyline points="${points}" fill="none" stroke="url(#routeGrad)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="${sx}" cy="${sy}" r="8" fill="${COLORS.success}" stroke="${COLORS.bgRoot}" stroke-width="3"/>
-    <circle cx="${ex}" cy="${ey}" r="8" fill="${COLORS.error}" stroke="${COLORS.bgRoot}" stroke-width="3"/>
+    <defs>
+      <filter id="routeGlow" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur"/>
+        <feFlood flood-color="${C.cyan}" flood-opacity="0.5" result="color"/>
+        <feComposite in="color" in2="blur" operator="in" result="glow"/>
+        <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+    <polyline points="${points}" fill="none" stroke="${C.cyan}" stroke-width="${sw + 8}" stroke-linecap="round" stroke-linejoin="round" opacity="0.12"/>
+    <polyline points="${points}" fill="none" stroke="url(#routeGrad)" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" filter="url(#routeGlow)"/>
+    <circle cx="${sx}" cy="${sy}" r="11" fill="${C.green}" stroke="${C.white}" stroke-width="3"/>
+    <circle cx="${ex}" cy="${ey}" r="10" fill="${C.red}" stroke="${C.white}" stroke-width="3"/>
   `;
+}
+
+function buildMapBackground(w: number, h: number, mapH: number): string {
+  let grid = "";
+  const gridColor = "rgba(0,40,80,0.06)";
+  const spacing = 60;
+  for (let gx = 0; gx <= w; gx += spacing) {
+    grid += `<line x1="${gx}" y1="0" x2="${gx}" y2="${mapH}" stroke="${gridColor}" stroke-width="0.5"/>`;
+  }
+  for (let gy = 0; gy <= mapH; gy += spacing) {
+    grid += `<line x1="0" y1="${gy}" x2="${w}" y2="${gy}" stroke="${gridColor}" stroke-width="0.5"/>`;
+  }
+
+  const cx1 = w * 0.3, cy1 = mapH * 0.4, cx2 = w * 0.7, cy2 = mapH * 0.6;
+  return `
+    <rect x="0" y="0" width="${w}" height="${mapH}" fill="#F0F4F8"/>
+    <defs>
+      <radialGradient id="mapGlow1" cx="${cx1 / w}" cy="${cy1 / mapH}" r="0.4">
+        <stop offset="0%" stop-color="${C.cyan}" stop-opacity="0.06"/>
+        <stop offset="100%" stop-color="${C.cyan}" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="mapGlow2" cx="${cx2 / w}" cy="${cy2 / mapH}" r="0.35">
+        <stop offset="0%" stop-color="${C.green}" stop-opacity="0.05"/>
+        <stop offset="100%" stop-color="${C.green}" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <rect x="0" y="0" width="${w}" height="${mapH}" fill="url(#mapGlow1)"/>
+    <rect x="0" y="0" width="${w}" height="${mapH}" fill="url(#mapGlow2)"/>
+    ${grid}
+    <rect x="${w * 0.12}" y="${mapH * 0.25}" width="${w * 0.18}" height="${mapH * 0.3}" rx="4" fill="rgba(0,60,120,0.03)" stroke="rgba(0,60,120,0.05)" stroke-width="0.5"/>
+    <rect x="${w * 0.55}" y="${mapH * 0.15}" width="${w * 0.25}" height="${mapH * 0.22}" rx="4" fill="rgba(0,60,120,0.03)" stroke="rgba(0,60,120,0.05)" stroke-width="0.5"/>
+    <rect x="${w * 0.4}" y="${mapH * 0.55}" width="${w * 0.15}" height="${mapH * 0.25}" rx="4" fill="rgba(0,60,120,0.03)" stroke="rgba(0,60,120,0.05)" stroke-width="0.5"/>
+    <line x1="${w * 0.08}" y1="${mapH * 0.2}" x2="${w * 0.92}" y2="${mapH * 0.2}" stroke="rgba(0,40,80,0.04)" stroke-width="2"/>
+    <line x1="${w * 0.1}" y1="${mapH * 0.5}" x2="${w * 0.9}" y2="${mapH * 0.5}" stroke="rgba(0,40,80,0.04)" stroke-width="2"/>
+    <line x1="${w * 0.35}" y1="${mapH * 0.05}" x2="${w * 0.35}" y2="${mapH * 0.95}" stroke="rgba(0,40,80,0.04)" stroke-width="2"/>
+    <line x1="${w * 0.65}" y1="${mapH * 0.1}" x2="${w * 0.65}" y2="${mapH * 0.9}" stroke="rgba(0,40,80,0.04)" stroke-width="2"/>
+  `;
+}
+
+function buildConfetti(w: number, h: number, count: number): string {
+  let svg = "";
+  const colors = [C.cyan, C.orange, C.gold, C.green, C.red, C.cyanLight, C.orangeLight];
+  for (let i = 0; i < count; i++) {
+    const cx = Math.random() * w;
+    const cy = Math.random() * h * 0.7 + h * 0.05;
+    const size = 4 + Math.random() * 8;
+    const color = colors[i % colors.length];
+    const opacity = 0.15 + Math.random() * 0.35;
+    const rot = Math.random() * 360;
+    const shape = i % 3;
+    if (shape === 0) {
+      svg += `<rect x="${cx}" y="${cy}" width="${size}" height="${size * 0.4}" rx="1" fill="${color}" opacity="${opacity}" transform="rotate(${rot} ${cx + size / 2} ${cy + size * 0.2})"/>`;
+    } else if (shape === 1) {
+      svg += `<circle cx="${cx}" cy="${cy}" r="${size * 0.35}" fill="${color}" opacity="${opacity}"/>`;
+    } else {
+      svg += `<polygon points="${cx},${cy - size * 0.4} ${cx + size * 0.35},${cy + size * 0.3} ${cx - size * 0.35},${cy + size * 0.3}" fill="${color}" opacity="${opacity}" transform="rotate(${rot} ${cx} ${cy})"/>`;
+    }
+  }
+  return svg;
+}
+
+function buildTrophy(cx: number, cy: number, size: number): string {
+  const s = size / 100;
+  return `
+    <g transform="translate(${cx - 50 * s}, ${cy - 60 * s}) scale(${s})">
+      <ellipse cx="50" cy="110" rx="30" ry="6" fill="${C.gold}" opacity="0.2"/>
+      <rect x="35" y="95" width="30" height="20" rx="3" fill="url(#goldGrad)"/>
+      <rect x="40" y="85" width="20" height="14" rx="2" fill="url(#goldGrad)"/>
+      <path d="M15,10 Q15,0 25,0 L75,0 Q85,0 85,10 L85,35 Q85,65 50,80 Q15,65 15,35 Z" fill="url(#goldGrad)" stroke="${C.goldLight}" stroke-width="2"/>
+      <path d="M25,10 L25,35 Q25,55 50,68 Q75,55 75,35 L75,10 Z" fill="${C.goldLight}" opacity="0.3"/>
+      <path d="M10,15 Q0,15 0,25 L0,35 Q0,50 15,45" fill="url(#goldGrad)" opacity="0.8"/>
+      <path d="M90,15 Q100,15 100,25 L100,35 Q100,50 85,45" fill="url(#goldGrad)" opacity="0.8"/>
+      <text x="50" y="52" font-family="'SF Pro Display', Arial, sans-serif" font-size="28" font-weight="800" fill="${C.white}" text-anchor="middle">&#9733;</text>
+    </g>
+  `;
+}
+
+function sampleData(data: number[], maxPoints: number): number[] {
+  if (data.length <= maxPoints) return data;
+  const step = data.length / maxPoints;
+  const result: number[] = [];
+  for (let i = 0; i < maxPoints; i++) {
+    result.push(data[Math.floor(i * step)]);
+  }
+  return result;
 }
 
 function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: number, canvasH: number): string {
@@ -254,232 +460,247 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
   let value = "";
   let unit = "";
   let label = "";
-  let color = COLORS.primary;
+  let color = C.cyan;
 
   switch (sticker.widgetId) {
     case "stat-distance":
-      value = run.distance?.toFixed(2) || "0";
-      unit = "km";
-      label = "DISTANCE";
-      color = COLORS.primary;
-      break;
+      value = distKm(run.distance || 0);
+      unit = "km"; label = "DISTANCE"; color = C.cyan; break;
     case "stat-duration":
       value = formatDuration(run.duration || 0);
-      unit = "";
-      label = "DURATION";
-      color = COLORS.primary;
-      break;
+      unit = ""; label = "DURATION"; color = C.cyan; break;
     case "stat-pace":
       value = run.avgPace || "--:--";
-      unit = "/km";
-      label = "AVG PACE";
-      color = COLORS.accent;
-      break;
+      unit = "/km"; label = "AVG PACE"; color = C.orange; break;
     case "stat-heartrate":
       value = run.avgHeartRate?.toString() || "--";
-      unit = "bpm";
-      label = "AVG HR";
-      color = COLORS.error;
-      break;
+      unit = "bpm"; label = "AVG HR"; color = C.red; break;
     case "stat-calories":
       value = run.calories?.toString() || "--";
-      unit = "kcal";
-      label = "CALORIES";
-      color = COLORS.warning;
-      break;
+      unit = "kcal"; label = "CALORIES"; color = C.yellow; break;
     case "stat-elevation":
       value = Math.round(run.elevationGain || run.elevation || 0).toString();
-      unit = "m";
-      label = "ELEVATION";
-      color = COLORS.success;
-      break;
+      unit = "m"; label = "ELEVATION"; color = C.green; break;
     case "stat-cadence":
       value = run.cadence?.toString() || "--";
-      unit = "spm";
-      label = "CADENCE";
-      color = COLORS.primary;
-      break;
+      unit = "spm"; label = "CADENCE"; color = C.cyan; break;
     case "stat-maxhr":
       value = run.maxHeartRate?.toString() || "--";
-      unit = "bpm";
-      label = "MAX HR";
-      color = COLORS.error;
-      break;
+      unit = "bpm"; label = "MAX HR"; color = C.red; break;
     case "chart-elevation": {
       if (!run.paceData || run.paceData.length < 2) return "";
-      const chartW = Math.round(280 * s);
-      const chartH = Math.round(140 * s);
+      const cw = Math.round(280 * s), ch = Math.round(140 * s);
+      const uid = `elev_${px}_${py}`;
       const elevData = run.paceData.map((_, i) => {
         const gps = run.gpsTrack;
         if (gps && gps.length > i) {
-          const point = gps[Math.floor((i / run.paceData!.length) * gps.length)] as any;
-          return point?.elevation || 0;
+          const pt = gps[Math.floor((i / run.paceData!.length) * gps.length)] as any;
+          return pt?.elevation || 0;
         }
         return 0;
       });
-      return `<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, elevData, COLORS.success, "Elevation")}</g>`;
+      return `<g transform="translate(${px},${py})">${buildPremiumChart(0, 0, cw, ch, elevData, C.green, "Elevation", uid)}</g>`;
     }
     case "chart-pace": {
       if (!run.paceData || run.paceData.length < 2) return "";
-      const chartW = Math.round(280 * s);
-      const chartH = Math.round(140 * s);
-      const paceValues = run.paceData.map((p) => p.paceSeconds);
-      return `<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, paceValues, COLORS.accent, "Pace /km")}</g>`;
+      const cw = Math.round(280 * s), ch = Math.round(140 * s);
+      const uid = `pace_${px}_${py}`;
+      return `<g transform="translate(${px},${py})">${buildPremiumChart(0, 0, cw, ch, run.paceData.map(p => p.paceSeconds), C.orange, "Pace /km", uid)}</g>`;
     }
     case "chart-heartrate": {
       if (!run.heartRateData || run.heartRateData.length < 2) return "";
-      const chartW = Math.round(280 * s);
-      const chartH = Math.round(140 * s);
-      const hrSampled = sampleData(run.heartRateData.map((h) => h.value), 30);
-      return `<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, hrSampled, COLORS.error, "Heart Rate")}</g>`;
+      const cw = Math.round(280 * s), ch = Math.round(140 * s);
+      const uid = `hr_${px}_${py}`;
+      const hrSampled = sampleData(run.heartRateData.map(h => h.value), 30);
+      return `<g transform="translate(${px},${py})">${buildPremiumChart(0, 0, cw, ch, hrSampled, C.red, "Heart Rate", uid)}</g>`;
     }
     case "badge-difficulty": {
       const diff = run.difficulty || "moderate";
-      const diffColors: Record<string, string> = {
-        easy: COLORS.success, moderate: COLORS.warning, challenging: COLORS.accent, hard: COLORS.accent, extreme: COLORS.error,
-      };
-      const dc = diffColors[diff] || COLORS.warning;
-      const bw = Math.round(160 * s);
-      const bh = Math.round(48 * s);
+      const dc: Record<string, string> = { easy: C.green, moderate: C.yellow, challenging: C.orange, hard: C.orange, extreme: C.red };
+      const col = dc[diff] || C.yellow;
+      const bw = Math.round(160 * s), bh = Math.round(44 * s);
       return `
-        <rect x="${px}" y="${py}" width="${bw}" height="${bh}" rx="${bh / 2}" fill="${dc}" opacity="0.2" stroke="${dc}" stroke-width="2"/>
-        <text x="${px + bw / 2}" y="${py + bh / 2 + 5}" font-family="Arial, Helvetica, sans-serif" font-size="${Math.round(16 * s)}" font-weight="600" fill="${dc}" text-anchor="middle">${escapeXml(diff.toUpperCase())}</text>
+        <g filter="url(#softShadow)">
+          <rect x="${px}" y="${py}" width="${bw}" height="${bh}" rx="${bh / 2}" fill="${C.white}" stroke="${col}" stroke-width="2"/>
+        </g>
+        <text x="${px + bw / 2}" y="${py + bh / 2 + 5}" font-family="'SF Pro Display', Arial, sans-serif" font-size="${Math.round(14 * s)}" font-weight="700" fill="${col}" text-anchor="middle" letter-spacing="1">${esc(diff.toUpperCase())}</text>
       `;
     }
     case "badge-weather": {
       if (!run.weatherData?.temperature) return "";
-      const bw = Math.round(180 * s);
-      const bh = Math.round(48 * s);
-      const weatherText = `${Math.round(run.weatherData.temperature)}°C ${run.weatherData.conditions || ""}`.trim();
+      const bw = Math.round(180 * s), bh = Math.round(44 * s);
+      const wt = `${Math.round(run.weatherData.temperature)}°C ${run.weatherData.conditions || ""}`.trim();
       return `
-        <rect x="${px}" y="${py}" width="${bw}" height="${bh}" rx="${bh / 2}" fill="${COLORS.bgSecondary}" opacity="0.9" stroke="${COLORS.border}" stroke-width="1"/>
-        <text x="${px + bw / 2}" y="${py + bh / 2 + 5}" font-family="Arial, Helvetica, sans-serif" font-size="${Math.round(14 * s)}" fill="${COLORS.textSecondary}" text-anchor="middle">${escapeXml(weatherText)}</text>
+        <g filter="url(#softShadow)">
+          <rect x="${px}" y="${py}" width="${bw}" height="${bh}" rx="${bh / 2}" fill="${C.white}" stroke="${C.subtle}" stroke-width="1"/>
+        </g>
+        <text x="${px + bw / 2}" y="${py + bh / 2 + 5}" font-family="'SF Pro Display', Arial, sans-serif" font-size="${Math.round(13 * s)}" font-weight="500" fill="${C.textSecondary}" text-anchor="middle">${esc(wt)}</text>
       `;
     }
     default:
       return "";
   }
 
-  return `
-    <rect x="${px}" y="${py}" width="${sw}" height="${sh}" rx="${Math.round(12 * s)}" fill="${COLORS.bgSecondary}" opacity="0.9"/>
-    <text x="${px + sw / 2}" y="${py + labelSize + 8}" font-family="Arial, Helvetica, sans-serif" font-size="${labelSize}" fill="${COLORS.textMuted}" text-anchor="middle" letter-spacing="0.5">${label}</text>
-    <text x="${px + sw / 2}" y="${py + sh / 2 + fontSize * 0.35}" font-family="Arial, Helvetica, sans-serif" font-size="${fontSize}" font-weight="700" fill="${color}" text-anchor="middle">${escapeXml(value)}</text>
-    ${unit ? `<text x="${px + sw / 2}" y="${py + sh - Math.round(8 * s)}" font-family="Arial, Helvetica, sans-serif" font-size="${labelSize}" fill="${COLORS.textSecondary}" text-anchor="middle">${escapeXml(unit)}</text>` : ""}
-  `;
-}
-
-function sampleData(data: number[], maxPoints: number): number[] {
-  if (data.length <= maxPoints) return data;
-  const step = data.length / maxPoints;
-  const result: number[] = [];
-  for (let i = 0; i < maxPoints; i++) {
-    result.push(data[Math.floor(i * step)]);
-  }
-  return result;
+  return premiumStatCard(px, py, sw, sh, label, value, unit, color);
 }
 
 function buildStatsGridSvg(w: number, h: number, run: RunDataForImage, userName?: string): string {
   const isVertical = h > w;
-  const headerY = isVertical ? 120 : 80;
-  const statsStartY = headerY + 120;
+  const pad = 40;
+  const headerY = isVertical ? 80 : 60;
   const gap = 16;
   const cols = 2;
-  const boxW = (w - gap * 3) / cols;
+  const boxW = (w - pad * 2 - gap) / cols;
   const boxH = isVertical ? 130 : 120;
+  const statsStartY = headerY + 140;
 
   const stats = [
-    { label: "Distance", value: run.distance?.toFixed(2) || "0", unit: "km", color: COLORS.primary },
-    { label: "Duration", value: formatDuration(run.duration || 0), unit: "", color: COLORS.primary },
-    { label: "Avg Pace", value: run.avgPace || "--:--", unit: "/km", color: COLORS.accent },
-    { label: "Heart Rate", value: run.avgHeartRate?.toString() || "--", unit: "bpm", color: COLORS.error },
-    { label: "Calories", value: run.calories?.toString() || "--", unit: "kcal", color: COLORS.warning },
-    { label: "Elevation", value: Math.round(run.elevationGain || run.elevation || 0).toString(), unit: "m", color: COLORS.success },
+    { label: "Distance", value: distKm(run.distance || 0), unit: "km", color: C.cyan },
+    { label: "Duration", value: formatDuration(run.duration || 0), unit: "", color: C.cyan },
+    { label: "Avg Pace", value: run.avgPace || "--:--", unit: "/km", color: C.orange },
+    { label: "Heart Rate", value: run.avgHeartRate?.toString() || "--", unit: "bpm", color: C.red },
+    { label: "Calories", value: run.calories?.toString() || "--", unit: "kcal", color: C.yellow },
+    { label: "Elevation", value: Math.round(run.elevationGain || run.elevation || 0).toString(), unit: "m", color: C.green },
   ];
+
+  if (run.cadence) {
+    stats.push({ label: "Cadence", value: run.cadence.toString(), unit: "spm", color: C.cyan });
+  }
+  if (run.maxHeartRate) {
+    stats.push({ label: "Max HR", value: run.maxHeartRate.toString(), unit: "bpm", color: C.red });
+  }
 
   let boxes = "";
   stats.forEach((s, i) => {
     const col = i % cols;
     const row = Math.floor(i / cols);
-    const bx = gap + col * (boxW + gap);
+    const bx = pad + col * (boxW + gap);
     const by = statsStartY + row * (boxH + gap);
-    if (by + boxH < h - 60) {
-      boxes += buildStatBox(bx, by, boxW, boxH, s.label, s.value, s.unit, s.color);
+    if (by + boxH < h - 120) {
+      boxes += premiumStatCard(bx, by, boxW, boxH, s.label, s.value, s.unit, s.color);
     }
   });
 
+  const gridBottom = statsStartY + Math.ceil(stats.length / cols) * (boxH + gap);
+  const remainingSpace = h - 52 - gridBottom;
+  let fillerContent = "";
+
+  if (remainingSpace > 140) {
+    const paceData = run.paceData;
+    const hrData = run.heartRateData;
+    if (paceData && paceData.length >= 2) {
+      const chartY = gridBottom + 10;
+      const chartH = Math.min(remainingSpace - 60, 120);
+      fillerContent = `
+        <text x="${pad}" y="${chartY + 12}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="${C.textMuted}" letter-spacing="1.5">PACE CHART</text>
+        ${buildSparkline(pad, chartY + 22, w - pad * 2, chartH - 30, paceData.map(p => p.paceSeconds), C.orange, "statsGridPaceGrad")}
+      `;
+    } else if (hrData && hrData.length >= 2) {
+      const chartY = gridBottom + 10;
+      const chartH = Math.min(remainingSpace - 60, 120);
+      const sampled = sampleData(hrData.map(h => h.value), 40);
+      fillerContent = `
+        <text x="${pad}" y="${chartY + 12}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="${C.textMuted}" letter-spacing="1.5">HEART RATE</text>
+        ${buildSparkline(pad, chartY + 22, w - pad * 2, chartH - 30, sampled, C.red, "statsGridHrGrad")}
+      `;
+    } else {
+      const qy = gridBottom + remainingSpace / 2;
+      const quote = pickQuote();
+      fillerContent = `
+        <line x1="${w * 0.25}" y1="${qy - 20}" x2="${w * 0.75}" y2="${qy - 20}" stroke="${C.subtle}" stroke-width="1"/>
+        <text x="${w / 2}" y="${qy + 8}" font-family="'Georgia', 'Times New Roman', serif" font-size="18" font-style="italic" fill="${C.textMuted}" text-anchor="middle">"${esc(quote)}"</text>
+        <line x1="${w * 0.25}" y1="${qy + 30}" x2="${w * 0.75}" y2="${qy + 30}" stroke="${C.subtle}" stroke-width="1"/>
+      `;
+    }
+  }
+
   return `
-    <defs>
-      <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#0D1117"/>
-        <stop offset="100%" stop-color="#0A0F1A"/>
-      </linearGradient>
-    </defs>
-    <rect width="${w}" height="${h}" fill="url(#bgGrad)"/>
-    <text x="${w / 2}" y="${headerY}" font-family="Arial, Helvetica, sans-serif" font-size="20" fill="${COLORS.textSecondary}" text-anchor="middle">${escapeXml(formatDate(run.completedAt))}</text>
-    <text x="${w / 2}" y="${headerY + 55}" font-family="Arial, Helvetica, sans-serif" font-size="56" font-weight="700" fill="${COLORS.text}" text-anchor="middle">${escapeXml(run.distance?.toFixed(2) || "0")} km</text>
-    ${userName ? `<text x="${w / 2}" y="${headerY + 85}" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="${COLORS.textMuted}" text-anchor="middle">${escapeXml(userName)}</text>` : ""}
+    <defs>${commonDefs(w, h)}</defs>
+    <rect width="${w}" height="${h}" fill="${C.bg}"/>
+    ${buildTopBar(w)}
+    <text x="${w / 2}" y="${headerY + 10}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="500" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1">${esc(formatDate(run.completedAt).toUpperCase())}</text>
+    <text x="${w / 2}" y="${headerY + 70}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="64" font-weight="800" fill="${C.textPrimary}" text-anchor="middle" filter="url(#bigGlow)">${esc(distKm(run.distance || 0))}</text>
+    <text x="${w / 2}" y="${headerY + 100}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="600" fill="${C.cyan}" text-anchor="middle" letter-spacing="4">KILOMETERS</text>
+    ${userName ? `<text x="${w / 2}" y="${headerY + 125}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="500" fill="${C.textMuted}" text-anchor="middle">${esc(userName)}</text>` : ""}
     ${boxes}
+    ${fillerContent}
     ${buildWatermark(w, h)}
   `;
 }
 
 function buildRouteMapSvg(w: number, h: number, run: RunDataForImage, userName?: string): string {
-  const mapH = h > w ? h * 0.55 : h * 0.6;
+  const mapH = h > w ? h * 0.58 : h * 0.55;
   const statsY = mapH + 20;
-  const gap = 12;
+  const gap = 14;
   const statW = (w - gap * 4) / 3;
-  const statH = 90;
+  const statH = 100;
+
+  const mapBg = buildMapBackground(w, h, mapH);
 
   const routeSvg = run.gpsTrack && run.gpsTrack.length > 1
-    ? buildGpsRoute(20, 20, w - 40, mapH - 40, run.gpsTrack)
-    : `<text x="${w / 2}" y="${mapH / 2}" font-family="Arial, Helvetica, sans-serif" font-size="20" fill="${COLORS.textMuted}" text-anchor="middle">No GPS data</text>`;
+    ? buildGpsRoute(20, 20, w - 40, mapH - 40, run.gpsTrack, true)
+    : `<text x="${w / 2}" y="${mapH / 2}" font-family="'SF Pro Display', Arial, sans-serif" font-size="18" fill="${C.textMuted}" text-anchor="middle">No GPS data</text>`;
 
   const stats = [
-    { label: "Distance", value: `${run.distance?.toFixed(2) || "0"}`, unit: "km", color: COLORS.primary },
-    { label: "Pace", value: run.avgPace || "--:--", unit: "/km", color: COLORS.accent },
-    { label: "Time", value: formatDuration(run.duration || 0), unit: "", color: COLORS.primary },
+    { label: "Distance", value: distKm(run.distance || 0), unit: "km", color: C.cyan },
+    { label: "Pace", value: run.avgPace || "--:--", unit: "/km", color: C.orange },
+    { label: "Time", value: formatDuration(run.duration || 0), unit: "", color: C.cyan },
   ];
 
   let statBoxes = "";
   stats.forEach((s, i) => {
     const sx = gap + i * (statW + gap);
-    statBoxes += buildStatBox(sx, statsY, statW, statH, s.label, s.value, s.unit, s.color);
+    statBoxes += premiumStatCard(sx, statsY, statW, statH, s.label, s.value, s.unit, s.color);
   });
 
+  const extraY = statsY + statH + 20;
+  let extraStats = "";
+  const extras = [];
+  if (run.elevationGain) extras.push({ l: "Elev Gain", v: `${Math.round(run.elevationGain)}m`, c: C.green });
+  if (run.calories) extras.push({ l: "Calories", v: `${run.calories}`, c: C.yellow });
+  if (run.avgHeartRate) extras.push({ l: "Avg HR", v: `${run.avgHeartRate} bpm`, c: C.red });
+
+  if (extras.length > 0 && extraY + 30 < h - 60) {
+    const spacing = w / (extras.length + 1);
+    extras.forEach((e, i) => {
+      const ex = spacing * (i + 1);
+      extraStats += `
+        <text x="${ex}" y="${extraY}" font-family="'SF Pro Display', Arial, sans-serif" font-size="10" font-weight="600" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1">${esc(e.l.toUpperCase())}</text>
+        <text x="${ex}" y="${extraY + 22}" font-family="'SF Pro Display', Arial, sans-serif" font-size="16" font-weight="700" fill="${e.c}" text-anchor="middle">${esc(e.v)}</text>
+      `;
+    });
+  }
+
   return `
-    <defs>
-      <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#0D1117"/>
-        <stop offset="100%" stop-color="#0A0F1A"/>
-      </linearGradient>
-      <linearGradient id="routeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-        <stop offset="0%" stop-color="${COLORS.primary}"/>
-        <stop offset="100%" stop-color="${COLORS.success}"/>
-      </linearGradient>
-    </defs>
-    <rect width="${w}" height="${h}" fill="url(#bgGrad)"/>
+    <defs>${commonDefs(w, h)}</defs>
+    <rect width="${w}" height="${h}" fill="${C.bg}"/>
+    ${buildTopBar(w)}
+    ${mapBg}
     ${routeSvg}
+    <rect x="0" y="${mapH - 40}" width="${w}" height="40" fill="url(#mapFade)"/>
+    <defs><linearGradient id="mapFade" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${C.bg}" stop-opacity="0"/><stop offset="100%" stop-color="${C.bg}"/></linearGradient></defs>
     ${statBoxes}
-    ${userName ? `<text x="${w / 2}" y="${statsY + statH + 40}" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="${COLORS.textMuted}" text-anchor="middle">${escapeXml(userName)} • ${escapeXml(formatDate(run.completedAt))}</text>` : ""}
+    ${extraStats}
+    ${userName ? `<text x="${w / 2}" y="${h - 65}" font-family="'SF Pro Display', Arial, sans-serif" font-size="13" font-weight="500" fill="${C.textMuted}" text-anchor="middle">${esc(userName)} · ${esc(formatDate(run.completedAt))}</text>` : `<text x="${w / 2}" y="${h - 65}" font-family="'SF Pro Display', Arial, sans-serif" font-size="13" font-weight="500" fill="${C.textMuted}" text-anchor="middle">${esc(formatDate(run.completedAt))}</text>`}
     ${buildWatermark(w, h)}
   `;
 }
 
 function buildSplitSummarySvg(w: number, h: number, run: RunDataForImage, userName?: string): string {
-  const headerY = 80;
-  const splitsStartY = headerY + 100;
-  const rowH = 52;
+  const pad = 40;
+  const headerY = 70;
+  const splitsStartY = headerY + 110;
+  const rowH = 56;
   const paceData = run.paceData || [];
-  const maxSplits = Math.min(paceData.length, Math.floor((h - splitsStartY - 120) / rowH));
+  const maxSplits = Math.min(paceData.length, Math.floor((h - splitsStartY - 140) / rowH));
 
   let splitRows = "";
-  
+
   if (paceData.length === 0) {
-    // No split data available — show placeholder
-    splitRows = `<text x="${w / 2}" y="${splitsStartY + 60}" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="${COLORS.textMuted}" text-anchor="middle">No split data available</text>`;
+    splitRows = `<text x="${w / 2}" y="${splitsStartY + 60}" font-family="'SF Pro Display', Arial, sans-serif" font-size="16" fill="${C.textMuted}" text-anchor="middle">No split data available</text>`;
   }
 
-  const paceValues = paceData.map((p) => p.paceSeconds);
+  const paceValues = paceData.map(p => p.paceSeconds);
   const minPace = paceValues.length > 0 ? Math.min(...paceValues) : 0;
   const maxPace = paceValues.length > 0 ? Math.max(...paceValues) : 1;
   const paceRange = maxPace - minPace || 1;
@@ -487,102 +708,183 @@ function buildSplitSummarySvg(w: number, h: number, run: RunDataForImage, userNa
   for (let i = 0; i < maxSplits; i++) {
     const split = paceData[i];
     const ry = splitsStartY + i * rowH;
-    const barMaxW = w * 0.4;
-    const barW = barMaxW * (1 - (split.paceSeconds - minPace) / paceRange * 0.6);
-    const paceColor = split.paceSeconds <= minPace + paceRange * 0.33
-      ? COLORS.success
-      : split.paceSeconds <= minPace + paceRange * 0.66
-        ? COLORS.warning
-        : COLORS.accent;
+    const barMaxW = w * 0.42;
+    const barFrac = 1 - (split.paceSeconds - minPace) / paceRange * 0.6;
+    const barW = barMaxW * barFrac;
+    const pct = (split.paceSeconds - minPace) / paceRange;
+    const gradId = `splitGrad${i}`;
+
+    let startColor = C.green;
+    let endColor = C.green;
+    if (pct <= 0.33) { startColor = C.green; endColor = C.greenDark; }
+    else if (pct <= 0.66) { startColor = C.yellow; endColor = C.orange; }
+    else { startColor = C.orange; endColor = C.red; }
 
     splitRows += `
-      <text x="40" y="${ry + 30}" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="${COLORS.textSecondary}">Km ${split.km}</text>
-      <rect x="${w * 0.3}" y="${ry + 10}" width="${barW}" height="28" rx="14" fill="${paceColor}" opacity="0.3"/>
-      <rect x="${w * 0.3}" y="${ry + 10}" width="${barW * 0.8}" height="28" rx="14" fill="${paceColor}" opacity="0.6"/>
-      <text x="${w - 40}" y="${ry + 30}" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="600" fill="${paceColor}" text-anchor="end">${escapeXml(split.pace)}</text>
+      <defs>
+        <linearGradient id="${gradId}" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="${startColor}"/>
+          <stop offset="100%" stop-color="${endColor}"/>
+        </linearGradient>
+      </defs>
+      <text x="${pad}" y="${ry + 32}" font-family="'SF Pro Display', Arial, sans-serif" font-size="15" font-weight="600" fill="${C.textSecondary}">KM ${split.km}</text>
+      <rect x="${w * 0.22}" y="${ry + 12}" width="${barW}" height="30" rx="15" fill="url(#${gradId})" opacity="0.2"/>
+      <rect x="${w * 0.22}" y="${ry + 14}" width="${barW * 0.85}" height="26" rx="13" fill="url(#${gradId})" opacity="0.5"/>
+      <rect x="${w * 0.22}" y="${ry + 16}" width="${barW * 0.65}" height="22" rx="11" fill="url(#${gradId})" opacity="0.8"/>
+      <text x="${w - pad}" y="${ry + 34}" font-family="'SF Pro Display', Arial, sans-serif" font-size="20" font-weight="700" fill="${startColor}" text-anchor="end">${esc(split.pace)}</text>
     `;
 
     if (i < maxSplits - 1) {
-      splitRows += `<line x1="40" y1="${ry + rowH}" x2="${w - 40}" y2="${ry + rowH}" stroke="${COLORS.border}" stroke-width="1"/>`;
+      splitRows += `<line x1="${pad}" y1="${ry + rowH}" x2="${w - pad}" y2="${ry + rowH}" stroke="${C.subtle}" stroke-width="0.5" opacity="0.6"/>`;
     }
   }
 
+  const sparkY = splitsStartY + maxSplits * rowH + 20;
+  let sparkline = "";
+  if (paceValues.length >= 3 && sparkY + 80 < h - 100) {
+    sparkline = `
+      <text x="${pad}" y="${sparkY + 12}" font-family="'SF Pro Display', Arial, sans-serif" font-size="10" font-weight="600" fill="${C.textMuted}" letter-spacing="1.5">PACE TREND</text>
+      ${buildSparkline(pad, sparkY + 20, w - pad * 2, 50, paceValues, C.orange, "splitSparkGrad")}
+    `;
+  }
+
   return `
-    <defs>
-      <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#0D1117"/>
-        <stop offset="100%" stop-color="#0A0F1A"/>
-      </linearGradient>
-    </defs>
-    <rect width="${w}" height="${h}" fill="url(#bgGrad)"/>
-    <text x="${w / 2}" y="${headerY}" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="${COLORS.textSecondary}" text-anchor="middle">${escapeXml(formatDate(run.completedAt))}</text>
-    <text x="${w / 2}" y="${headerY + 50}" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="700" fill="${COLORS.text}" text-anchor="middle">${escapeXml(run.distance?.toFixed(2) || "0")} km — ${escapeXml(formatDuration(run.duration || 0))}</text>
-    <text x="${w / 2}" y="${headerY + 80}" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="${COLORS.textMuted}" text-anchor="middle" letter-spacing="2">KM SPLITS</text>
+    <defs>${commonDefs(w, h)}</defs>
+    <rect width="${w}" height="${h}" fill="${C.bg}"/>
+    ${buildTopBar(w)}
+    <text x="${w / 2}" y="${headerY + 8}" font-family="'SF Pro Display', Arial, sans-serif" font-size="12" font-weight="500" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1">${esc(formatDate(run.completedAt).toUpperCase())}</text>
+    <text x="${w / 2}" y="${headerY + 55}" font-family="'SF Pro Display', Arial, sans-serif" font-size="44" font-weight="800" fill="${C.textPrimary}" text-anchor="middle">${esc(distKm(run.distance || 0))} km</text>
+    <text x="${w / 2}" y="${headerY + 82}" font-family="'SF Pro Display', Arial, sans-serif" font-size="18" font-weight="500" fill="${C.orange}" text-anchor="middle">${esc(formatDuration(run.duration || 0))} · ${esc(run.avgPace || "--:--")} /km</text>
+    <text x="${w / 2}" y="${headerY + 105}" font-family="'SF Pro Display', Arial, sans-serif" font-size="11" font-weight="600" fill="${C.textMuted}" text-anchor="middle" letter-spacing="3">KILOMETER SPLITS</text>
     ${splitRows}
-    ${userName ? `<text x="${w / 2}" y="${h - 70}" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="${COLORS.textMuted}" text-anchor="middle">${escapeXml(userName)}</text>` : ""}
+    ${sparkline}
+    ${userName ? `<text x="${w / 2}" y="${h - 65}" font-family="'SF Pro Display', Arial, sans-serif" font-size="13" font-weight="500" fill="${C.textMuted}" text-anchor="middle">${esc(userName)}</text>` : ""}
     ${buildWatermark(w, h)}
   `;
 }
 
 function buildAchievementSvg(w: number, h: number, run: RunDataForImage, userName?: string): string {
-  const centerY = h / 2;
-  const circleR = Math.min(w, h) * 0.22;
+  const centerY = h * 0.42;
+  const circleR = Math.min(w, h) * 0.2;
+
+  const confetti = buildConfetti(w, h, 50);
+  const trophy = buildTrophy(w / 2, centerY - circleR - 50, Math.min(w, h) * 0.35);
+
+  const ringSegments = 60;
+  let progressRing = "";
+  for (let i = 0; i < ringSegments; i++) {
+    const angle = (i / ringSegments) * 360 - 90;
+    const rad = (angle * Math.PI) / 180;
+    const x1 = w / 2 + Math.cos(rad) * circleR;
+    const y1 = centerY + Math.sin(rad) * circleR;
+    const x2 = w / 2 + Math.cos(rad) * (circleR + 6);
+    const y2 = centerY + Math.sin(rad) * (circleR + 6);
+    const opacity = 0.3 + (i / ringSegments) * 0.7;
+    progressRing += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${C.cyan}" stroke-width="3" stroke-linecap="round" opacity="${opacity}"/>`;
+  }
+
+  const statY = centerY + circleR + 60;
+  const statSpacing = w / 4;
 
   return `
     <defs>
-      <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="#0D1117"/>
-        <stop offset="50%" stop-color="#111827"/>
-        <stop offset="100%" stop-color="#0A0F1A"/>
-      </linearGradient>
-      <radialGradient id="glowGrad" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stop-color="${COLORS.primary}" stop-opacity="0.3"/>
-        <stop offset="100%" stop-color="${COLORS.primary}" stop-opacity="0"/>
+      ${commonDefs(w, h)}
+      <radialGradient id="achieveGlow" cx="50%" cy="40%" r="45%">
+        <stop offset="0%" stop-color="${C.cyan}" stop-opacity="0.08"/>
+        <stop offset="40%" stop-color="${C.gold}" stop-opacity="0.04"/>
+        <stop offset="100%" stop-color="${C.cyan}" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="innerGlow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="${C.gold}" stop-opacity="0.06"/>
+        <stop offset="100%" stop-color="${C.gold}" stop-opacity="0"/>
       </radialGradient>
     </defs>
-    <rect width="${w}" height="${h}" fill="url(#bgGrad)"/>
-    <circle cx="${w / 2}" cy="${centerY - 30}" r="${circleR + 40}" fill="url(#glowGrad)"/>
-    <circle cx="${w / 2}" cy="${centerY - 30}" r="${circleR}" fill="none" stroke="${COLORS.primary}" stroke-width="4" opacity="0.6"/>
-    <circle cx="${w / 2}" cy="${centerY - 30}" r="${circleR - 8}" fill="none" stroke="${COLORS.primary}" stroke-width="2" opacity="0.3"/>
-    <text x="${w / 2}" y="${centerY - 60}" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="${COLORS.textMuted}" text-anchor="middle" letter-spacing="3">RUN COMPLETE</text>
-    <text x="${w / 2}" y="${centerY}" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="700" fill="${COLORS.text}" text-anchor="middle">${escapeXml(run.distance?.toFixed(2) || "0")}</text>
-    <text x="${w / 2}" y="${centerY + 35}" font-family="Arial, Helvetica, sans-serif" font-size="24" fill="${COLORS.primary}" text-anchor="middle">KILOMETERS</text>
-    <text x="${w * 0.25}" y="${centerY + circleR + 60}" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="${COLORS.textMuted}" text-anchor="middle">PACE</text>
-    <text x="${w * 0.25}" y="${centerY + circleR + 90}" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" fill="${COLORS.accent}" text-anchor="middle">${escapeXml(run.avgPace || "--:--")}</text>
-    <text x="${w * 0.5}" y="${centerY + circleR + 60}" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="${COLORS.textMuted}" text-anchor="middle">TIME</text>
-    <text x="${w * 0.5}" y="${centerY + circleR + 90}" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" fill="${COLORS.primary}" text-anchor="middle">${escapeXml(formatDuration(run.duration || 0))}</text>
-    <text x="${w * 0.75}" y="${centerY + circleR + 60}" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="${COLORS.textMuted}" text-anchor="middle">AVG HR</text>
-    <text x="${w * 0.75}" y="${centerY + circleR + 90}" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" fill="${COLORS.error}" text-anchor="middle">${run.avgHeartRate || "--"}</text>
-    ${userName ? `<text x="${w / 2}" y="${centerY - circleR - 50}" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="600" fill="${COLORS.text}" text-anchor="middle">${escapeXml(userName)}</text>` : ""}
-    <text x="${w / 2}" y="${centerY - circleR - 25}" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="${COLORS.textSecondary}" text-anchor="middle">${escapeXml(formatDate(run.completedAt))}</text>
+    <rect width="${w}" height="${h}" fill="${C.bg}"/>
+    ${buildTopBar(w)}
+    <rect width="${w}" height="${h}" fill="url(#achieveGlow)"/>
+    ${confetti}
+
+    ${trophy}
+
+    ${userName ? `<text x="${w / 2}" y="${centerY - circleR - 30}" font-family="'SF Pro Display', Arial, sans-serif" font-size="18" font-weight="700" fill="${C.textPrimary}" text-anchor="middle">${esc(userName)}</text>` : ""}
+    <text x="${w / 2}" y="${centerY - circleR - 10}" font-family="'SF Pro Display', Arial, sans-serif" font-size="12" font-weight="500" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1">${esc(formatDate(run.completedAt).toUpperCase())}</text>
+
+    <circle cx="${w / 2}" cy="${centerY}" r="${circleR + 20}" fill="url(#innerGlow)"/>
+    ${progressRing}
+    <circle cx="${w / 2}" cy="${centerY}" r="${circleR}" fill="none" stroke="${C.subtle}" stroke-width="1.5"/>
+
+    <text x="${w / 2}" y="${centerY - 22}" font-family="'SF Pro Display', Arial, sans-serif" font-size="12" font-weight="600" fill="${C.gold}" text-anchor="middle" letter-spacing="3">RUN COMPLETE</text>
+    <text x="${w / 2}" y="${centerY + 25}" font-family="'SF Pro Display', Arial, sans-serif" font-size="72" font-weight="800" fill="${C.textPrimary}" text-anchor="middle" filter="url(#bigGlow)">${esc(distKm(run.distance || 0))}</text>
+    <text x="${w / 2}" y="${centerY + 55}" font-family="'SF Pro Display', Arial, sans-serif" font-size="18" font-weight="600" fill="${C.cyan}" text-anchor="middle" letter-spacing="5">KILOMETERS</text>
+
+    <line x1="${w * 0.15}" y1="${statY - 15}" x2="${w * 0.85}" y2="${statY - 15}" stroke="${C.subtle}" stroke-width="1"/>
+
+    <text x="${statSpacing}" y="${statY + 10}" font-family="'SF Pro Display', Arial, sans-serif" font-size="10" font-weight="600" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1">PACE</text>
+    <text x="${statSpacing}" y="${statY + 38}" font-family="'SF Pro Display', Arial, sans-serif" font-size="28" font-weight="800" fill="${C.orange}" text-anchor="middle">${esc(run.avgPace || "--:--")}</text>
+    <text x="${statSpacing}" y="${statY + 54}" font-family="'SF Pro Display', Arial, sans-serif" font-size="11" font-weight="500" fill="${C.textMuted}" text-anchor="middle">/km</text>
+
+    <text x="${statSpacing * 2}" y="${statY + 10}" font-family="'SF Pro Display', Arial, sans-serif" font-size="10" font-weight="600" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1">TIME</text>
+    <text x="${statSpacing * 2}" y="${statY + 38}" font-family="'SF Pro Display', Arial, sans-serif" font-size="28" font-weight="800" fill="${C.cyan}" text-anchor="middle">${esc(formatDuration(run.duration || 0))}</text>
+
+    <text x="${statSpacing * 3}" y="${statY + 10}" font-family="'SF Pro Display', Arial, sans-serif" font-size="10" font-weight="600" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1">AVG HR</text>
+    <text x="${statSpacing * 3}" y="${statY + 38}" font-family="'SF Pro Display', Arial, sans-serif" font-size="28" font-weight="800" fill="${C.red}" text-anchor="middle">${run.avgHeartRate || "--"}</text>
+    <text x="${statSpacing * 3}" y="${statY + 54}" font-family="'SF Pro Display', Arial, sans-serif" font-size="11" font-weight="500" fill="${C.textMuted}" text-anchor="middle">bpm</text>
+
+    ${run.calories ? `
+      <line x1="${w * 0.15}" y1="${statY + 75}" x2="${w * 0.85}" y2="${statY + 75}" stroke="${C.subtle}" stroke-width="0.5"/>
+      <text x="${w * 0.35}" y="${statY + 100}" font-family="'SF Pro Display', Arial, sans-serif" font-size="10" font-weight="600" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1">CALORIES</text>
+      <text x="${w * 0.35}" y="${statY + 124}" font-family="'SF Pro Display', Arial, sans-serif" font-size="22" font-weight="700" fill="${C.yellow}" text-anchor="middle">${run.calories}</text>
+      <text x="${w * 0.65}" y="${statY + 100}" font-family="'SF Pro Display', Arial, sans-serif" font-size="10" font-weight="600" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1">ELEVATION</text>
+      <text x="${w * 0.65}" y="${statY + 124}" font-family="'SF Pro Display', Arial, sans-serif" font-size="22" font-weight="700" fill="${C.green}" text-anchor="middle">${Math.round(run.elevationGain || run.elevation || 0)}m</text>
+    ` : ""}
+
     ${buildWatermark(w, h)}
   `;
 }
 
 function buildMinimalSvg(w: number, h: number, run: RunDataForImage, userName?: string): string {
-  const centerY = h / 2;
+  const centerY = h * 0.44;
 
   return `
     <defs>
-      <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="#0A0F1A"/>
-        <stop offset="40%" stop-color="#111827"/>
-        <stop offset="100%" stop-color="#0D1117"/>
-      </linearGradient>
-      <linearGradient id="accentLine" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0%" stop-color="${COLORS.primary}" stop-opacity="0"/>
-        <stop offset="50%" stop-color="${COLORS.primary}"/>
-        <stop offset="100%" stop-color="${COLORS.primary}" stop-opacity="0"/>
-      </linearGradient>
+      ${commonDefs(w, h)}
+      <radialGradient id="minimalGlow" cx="50%" cy="44%" r="35%">
+        <stop offset="0%" stop-color="${C.cyan}" stop-opacity="0.07"/>
+        <stop offset="100%" stop-color="${C.cyan}" stop-opacity="0"/>
+      </radialGradient>
+      <filter id="numberShadow" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur in="SourceAlpha" stdDeviation="6" result="blur"/>
+        <feFlood flood-color="${C.cyan}" flood-opacity="0.15" result="color"/>
+        <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+        <feMerge><feMergeNode in="shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
     </defs>
-    <rect width="${w}" height="${h}" fill="url(#bgGrad)"/>
-    <line x1="${w * 0.15}" y1="${centerY - 70}" x2="${w * 0.85}" y2="${centerY - 70}" stroke="url(#accentLine)" stroke-width="2"/>
-    <text x="${w / 2}" y="${centerY - 20}" font-family="Arial, Helvetica, sans-serif" font-size="96" font-weight="700" fill="${COLORS.text}" text-anchor="middle">${escapeXml(run.distance?.toFixed(2) || "0")}</text>
-    <text x="${w / 2}" y="${centerY + 30}" font-family="Arial, Helvetica, sans-serif" font-size="28" fill="${COLORS.primary}" text-anchor="middle" letter-spacing="6">KILOMETERS</text>
-    <line x1="${w * 0.15}" y1="${centerY + 60}" x2="${w * 0.85}" y2="${centerY + 60}" stroke="url(#accentLine)" stroke-width="2"/>
-    <text x="${w * 0.33}" y="${centerY + 110}" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="${COLORS.textMuted}" text-anchor="middle">${escapeXml(formatDuration(run.duration || 0))}</text>
-    <text x="${w * 0.66}" y="${centerY + 110}" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="${COLORS.textMuted}" text-anchor="middle">${escapeXml(run.avgPace || "--:--")} /km</text>
-    ${userName ? `<text x="${w / 2}" y="${centerY - 100}" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="${COLORS.textSecondary}" text-anchor="middle">${escapeXml(userName)} • ${escapeXml(formatDate(run.completedAt))}</text>` : `<text x="${w / 2}" y="${centerY - 100}" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="${COLORS.textSecondary}" text-anchor="middle">${escapeXml(formatDate(run.completedAt))}</text>`}
+    <rect width="${w}" height="${h}" fill="${C.bg}"/>
+    ${buildTopBar(w)}
+    <rect width="${w}" height="${h}" fill="url(#minimalGlow)"/>
+
+    ${userName ? `<text x="${w / 2}" y="${centerY - 120}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="600" fill="${C.textSecondary}" text-anchor="middle">${esc(userName)}</text>` : ""}
+    <text x="${w / 2}" y="${centerY - 90}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="500" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1">${esc(formatDate(run.completedAt).toUpperCase())}</text>
+
+    <line x1="${w * 0.2}" y1="${centerY - 70}" x2="${w * 0.8}" y2="${centerY - 70}" stroke="url(#topAccent)" stroke-width="1.5" opacity="0.3"/>
+
+    <text x="${w / 2}" y="${centerY + 10}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="120" font-weight="800" fill="${C.textPrimary}" text-anchor="middle" filter="url(#numberShadow)">${esc(distKm(run.distance || 0))}</text>
+    <text x="${w / 2}" y="${centerY + 55}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="22" font-weight="700" fill="${C.cyan}" text-anchor="middle" letter-spacing="8">KILOMETERS</text>
+
+    <line x1="${w * 0.2}" y1="${centerY + 80}" x2="${w * 0.8}" y2="${centerY + 80}" stroke="url(#topAccent)" stroke-width="1.5" opacity="0.3"/>
+
+    <text x="${w * 0.33}" y="${centerY + 130}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1">TIME</text>
+    <text x="${w * 0.33}" y="${centerY + 158}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="24" font-weight="700" fill="${C.textPrimary}" text-anchor="middle">${esc(formatDuration(run.duration || 0))}</text>
+
+    <text x="${w * 0.66}" y="${centerY + 130}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1">PACE</text>
+    <text x="${w * 0.66}" y="${centerY + 158}" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="24" font-weight="700" fill="${C.orange}" text-anchor="middle">${esc(run.avgPace || "--:--")} /km</text>
+
+    ${run.avgHeartRate ? `
+      <line x1="${w * 0.3}" y1="${centerY + 185}" x2="${w * 0.7}" y2="${centerY + 185}" stroke="${C.subtle}" stroke-width="0.5"/>
+      <text x="${w / 2}" y="${centerY + 210}" font-family="'SF Pro Display', Arial, sans-serif" font-size="11" font-weight="600" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1">HEART RATE</text>
+      <text x="${w / 2}" y="${centerY + 238}" font-family="'SF Pro Display', Arial, sans-serif" font-size="22" font-weight="700" fill="${C.red}" text-anchor="middle">${run.avgHeartRate} bpm</text>
+    ` : ""}
+
     ${buildWatermark(w, h)}
   `;
 }
@@ -626,6 +928,5 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
     ${stickersSvg}
   </svg>`;
 
-  const buffer = await sharp(Buffer.from(fullSvg)).png({ quality: 95 }).toBuffer();
-  return buffer;
+  return sharp(Buffer.from(fullSvg)).png({ quality: 95 }).toBuffer();
 }
