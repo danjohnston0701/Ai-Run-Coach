@@ -70,11 +70,19 @@ class CoachSettingsViewModel(private val context: Context) : ViewModel() {
 
     val availableKmSplitIntervals = listOf(1, 2, 3, 5, 10)
 
-    val availableAccents = listOf("British", "American", "Australian", "Irish", "Scottish", "New Zealand")
+    val availableAccents = listOf(
+        "British", "American", "Australian", "Irish", "Scottish", "New Zealand",
+        "South African", "Canadian", "Welsh", "Indian", "Caribbean", "Scandinavian"
+    )
     val availableTones = listOf(
         CoachingTone("Energetic", "High energy, upbeat encouragement"),
         CoachingTone("Motivational", "Inspiring and supportive coaching"),
+        CoachingTone("Friendly", "Like running with your best mate"),
         CoachingTone("Instructive", "Clear, detailed guidance and tips"),
+        CoachingTone("Tough Love", "Firm but caring — pushes you because they believe in you"),
+        CoachingTone("Analytical", "Deep stats nerd, data-driven insights"),
+        CoachingTone("Zen", "Calm, mindful, breathing-focused"),
+        CoachingTone("Playful", "Witty, light-hearted, uses humour"),
         CoachingTone("Factual", "Straightforward stats and information"),
         CoachingTone("Abrupt", "Short, direct commands")
     )

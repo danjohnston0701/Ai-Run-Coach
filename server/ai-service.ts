@@ -13,25 +13,75 @@ const toneDirective = (tone?: string): string => {
   const normalized = normalizeCoachTone(tone);
   switch (normalized) {
     case "energetic":
-      return "Sound lively and motivating. Use short, punchy sentences. Vary phrasing.";
+      return "Sound lively and motivating. Use short, punchy sentences. Vary phrasing. Exclamation marks sparingly but with impact.";
     case "motivational":
     case "inspirational":
-      return "Sound inspiring and uplifting. Emphasize belief, progress, and resilience.";
+      return "Sound inspiring and uplifting. Emphasize belief, progress, and resilience. Use powerful, affirming language.";
+    case "friendly":
+      return "Conversational and warm — like a mate running alongside them. Use casual, relatable language. Contractions are good. Keep it genuine, not performative.";
+    case "tough love":
+    case "toughlove":
+      return "Firm, direct, and no-nonsense — but clearly caring. Challenge them. Use phrases like 'I know you have more', 'don't let up', 'you're better than this pace'. Push hard because you believe in them. Never cruel, always constructive.";
+    case "analytical":
+      return "Data-driven and precise. Lead with numbers and metrics. Use phrases like 'your data shows', 'based on your splits', 'the numbers suggest'. Fascinated by performance data but still personable. Think sports scientist.";
+    case "zen":
+    case "mindful":
+      return "Calm, centred, and meditative. Use mindfulness language — 'breathe', 'be present', 'feel the rhythm', 'let go of tension'. Short, spacious sentences with natural pauses. Focus on the experience, not just the numbers. Grounding and peaceful.";
+    case "playful":
+    case "humorous":
+      return "Light-hearted and witty. Use gentle humour, playful metaphors, and fun observations. Make the runner smile. Slightly cheeky but always supportive. Avoid being corny — keep it clever and natural.";
     case "supportive":
     case "encouraging":
-      return "Warm, reassuring, and steady. Encourage without pressure.";
+      return "Warm, reassuring, and steady. Encourage without pressure. Validate their effort.";
     case "calm":
-      return "Calm, steady, and grounded. Use soothing language.";
+      return "Calm, steady, and grounded. Use soothing language. Measured and unhurried.";
     case "professional":
     case "factual":
+      return "Clear, concise, and practical. Focus on actionable guidance. Lead with facts, minimal flourish.";
     case "instructive":
-      return "Clear, concise, and practical. Focus on actionable guidance.";
+      return "Clear, detailed, and educational. Explain the 'why' behind advice. Use coaching terminology naturally. Like a knowledgeable coach sharing expertise.";
     case "abrupt":
-      return "Direct and concise. Keep it short and decisive.";
-    case "friendly":
-      return "Upbeat and personable. Use friendly, encouraging phrasing.";
+      return "Ultra-direct and concise. Maximum 2 sentences. No filler words. Commands, not suggestions. 'Pick it up.' 'Hold this pace.' 'Breathe.'";
     default:
       return "Encouraging and positive with varied phrasing.";
+  }
+};
+
+/**
+ * Returns an LLM prompt directive for accent-aware phrasing.
+ * Ensures the TEXT the LLM writes matches the accent the TTS will speak with.
+ */
+const accentDirective = (accent?: string): string => {
+  const normalized = (accent || '').trim().toLowerCase();
+  switch (normalized) {
+    case 'british':
+      return 'Write with British English phrasing — "brilliant", "well done", "cracking pace", "spot on". Use "kilometres" not "kilometers". Avoid Americanisms.';
+    case 'irish':
+      return 'Write with Irish English phrasing — "grand", "mighty", "fair play", "dead on". Warm and friendly. Use "kilometres".';
+    case 'scottish':
+      return 'Write with Scottish English phrasing — "brilliant", "cracking", "braw", "well done". Direct and warm. Use "kilometres".';
+    case 'australian':
+      return 'Write with Australian English phrasing — "legend", "ripper", "no worries", "you beauty". Relaxed and confident. Use "kilometres".';
+    case 'new zealand':
+    case 'newzealand':
+    case 'nz':
+      return 'Write with New Zealand English phrasing — "sweet as", "good on ya", "choice", "chur". Understated Kiwi warmth. Use "kilometres".';
+    case 'american':
+      return 'Write with American English phrasing — "awesome", "great job", "crushing it". High energy and direct.';
+    case 'south african':
+      return 'Write with South African English phrasing — "lekker", "shame" (sympathetic), "howzit". Resilient warmth. Use "kilometres".';
+    case 'canadian':
+      return 'Write with Canadian English phrasing — "eh", "for sure", "beauty". Friendly and humble. Use "kilometres".';
+    case 'welsh':
+      return 'Write with Welsh English phrasing — "lovely", "tidy", "fair play", "cracking on". Passionate warmth. Use "kilometres".';
+    case 'indian':
+      return 'Write with Indian English phrasing — "very good", "excellent", "superb". Articulate and warm. Use "kilometres".';
+    case 'caribbean':
+      return 'Write with Caribbean English phrasing — "wicked", "big up yourself", "nuff respect". Rhythmic and uplifting. Use "kilometres".';
+    case 'scandinavian':
+      return 'Write with Scandinavian-influenced English — "very nice", "exactly", "perfect". Clean and understated. Use "kilometres".';
+    default:
+      return '';
   }
 };
 
@@ -122,8 +172,9 @@ export async function generatePreRunCoaching(params: {
   weather: any;
   coachName: string;
   coachTone: string;
+  coachAccent?: string;
 }): Promise<string> {
-  const { distance, elevationGain, elevationLoss, difficulty, activityType, weather, coachName, coachTone } = params;
+  const { distance, elevationGain, elevationLoss, difficulty, activityType, weather, coachName, coachTone, coachAccent } = params;
   
   const weatherInfo = weather 
     ? `Weather: ${weather.temp || 'N/A'}°C, ${weather.condition || 'clear'}, wind ${weather.windSpeed || 0} km/h.`
@@ -142,7 +193,7 @@ Be encouraging, specific to the conditions, and give one actionable tip. Speak n
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep responses brief, encouraging, and actionable. ${toneDirective(coachTone)}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep responses brief, encouraging, and actionable. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 120,
@@ -159,6 +210,7 @@ export async function generatePaceUpdate(params: {
   elapsedTime: number;
   coachName: string;
   coachTone: string;
+  coachAccent?: string;
   isSplit: boolean;
   splitKm?: number;
   splitPace?: string;
@@ -169,6 +221,7 @@ export async function generatePaceUpdate(params: {
   hasRoute?: boolean;
 }): Promise<string> {
   const { distance, targetDistance, currentPace, elapsedTime, coachName, coachTone, isSplit, splitKm, splitPace, currentGrade, totalElevationGain, isOnHill, kmSplits, hasRoute } = params;
+  const accentRule = accentDirective((params as any).coachAccent);
   
   const progress = Math.round((distance / targetDistance) * 100);
   const timeMin = Math.floor(elapsedTime / 60);
@@ -238,7 +291,7 @@ Give a very brief (1-2 sentences) pace update. You MUST cite their pace (${spoke
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). ${PACE_FORMAT_RULE} ${hasRoute === true ? 'Be elevation-aware when hills are mentioned. ' : 'Do NOT mention hills, terrain, or elevation. '}${toneDirective(coachTone)}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). ${PACE_FORMAT_RULE} ${hasRoute === true ? 'Be elevation-aware when hills are mentioned. ' : 'Do NOT mention hills, terrain, or elevation. '}${toneDirective(coachTone)}${accentRule ? ' ' + accentRule : ''}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 100,
@@ -296,6 +349,8 @@ export async function generatePhaseCoaching(params: {
   cadence?: number;
   coachName: string;
   coachTone: string;
+  coachAccent?: string;
+  coachGender?: string;
   activityType?: string;
   hasRoute?: boolean;
   targetPace?: string;
@@ -309,7 +364,7 @@ export async function generatePhaseCoaching(params: {
   runnerWeight?: number;
   runnerHeight?: number;
 }): Promise<string> {
-  const { phase, distance, targetDistance, elapsedTime, currentPace, currentGrade, totalElevationGain, heartRate, cadence, coachName, coachTone, activityType, hasRoute, targetPace, targetTime, triggerType, navigationInstruction, navigationDistance, fitnessLevel, runnerName, runnerAge, runnerWeight, runnerHeight } = params;
+  const { phase, distance, targetDistance, elapsedTime, currentPace, currentGrade, totalElevationGain, heartRate, cadence, coachName, coachTone, coachAccent, coachGender, activityType, hasRoute, targetPace, targetTime, triggerType, navigationInstruction, navigationDistance, fitnessLevel, runnerName, runnerAge, runnerWeight, runnerHeight } = params;
   
   const timeMin = Math.floor(elapsedTime / 60);
   const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
@@ -425,7 +480,7 @@ You MUST include the actual direction (left, right, straight, etc.) and street n
 Be concise — the runner needs to hear this quickly. Add a tiny bit of coach personality but prioritise clarity.
 Examples of good output: "Quick right turn onto May Street, looking good!", "Left here onto Dublin Road, keep that rhythm!"`;
 
-    const navSystemMsg = `You are ${coachName}, a ${coachTone} running coach delivering a navigation cue. Be extremely brief and clear — max 1 sentence, max 15 words. The direction must be unmistakable. ${toneDirective(coachTone)}`;
+    const navSystemMsg = `You are ${coachName}, a ${coachTone} running coach delivering a navigation cue. Be extremely brief and clear — max 1 sentence, max 15 words. The direction must be unmistakable. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}`;
 
     const navCompletion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -525,7 +580,7 @@ ${progressPercent > 80 ? "They're in the final stretch — be extra motivating!"
 Do NOT use markdown, emojis, or bullet points — this will be spoken aloud.
 Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight into the pace coaching.${runnerFirstName ? ` The runner's name is ${runnerFirstName} — use it naturally but not as a greeting.` : ''}`;
 
-    const paceSystemMsg = `You are ${coachName}, a ${coachTone} running coach giving pace guidance. Be specific with pace numbers (use "X minutes Y seconds per kilometre" format, not "X:YY"). Keep it concise (2-3 sentences). NEVER start with greetings. ${toneDirective(coachTone)}`;
+    const paceSystemMsg = `You are ${coachName}, a ${coachTone} running coach giving pace guidance. Be specific with pace numbers (use "X minutes Y seconds per kilometre" format, not "X:YY"). Keep it concise (2-3 sentences). NEVER start with greetings. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}`;
 
     const paceCompletion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -558,6 +613,49 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
     runnerProfileContext += ` BMI: ${bmi.toFixed(1)}.`;
   }
 
+  // Accent-aware phrasing — makes the TEXT sound natural for the chosen accent
+  const normalizedAccent = (coachAccent || '').trim().toLowerCase();
+  switch (normalizedAccent) {
+    case 'british':
+      runnerProfileContext += '\nWrite with natural British English phrasing — use "brilliant", "well done", "cracking pace", "spot on", "kilometres". Avoid Americanisms.';
+      break;
+    case 'irish':
+      runnerProfileContext += '\nWrite with natural Irish English phrasing — use "grand", "mighty", "fair play", "dead on", "kilometres". Warm and friendly tone.';
+      break;
+    case 'scottish':
+      runnerProfileContext += '\nWrite with natural Scottish English phrasing — use "brilliant", "well done", "cracking", "braw", "kilometres". Direct and warm.';
+      break;
+    case 'australian':
+      runnerProfileContext += '\nWrite with natural Australian English phrasing — use "legend", "ripper", "no worries", "you beauty", "kays" or "kilometres". Relaxed and confident.';
+      break;
+    case 'new zealand':
+    case 'newzealand':
+    case 'nz':
+      runnerProfileContext += '\nWrite with natural New Zealand English phrasing — use "sweet as", "good on ya", "choice", "chur", "kilometres". Understated, genuine warmth — not over the top. Kiwi style.';
+      break;
+    case 'american':
+      runnerProfileContext += '\nWrite with natural American English phrasing — use "awesome", "great job", "crushing it", "miles" if user prefers or "kilometres". High energy and direct.';
+      break;
+    case 'south african':
+      runnerProfileContext += '\nWrite with natural South African English phrasing — use "lekker", "shame" (sympathetic), "howzit", "ja", "kilometres". Resilient, warm energy — like someone who runs ultra-marathons for fun.';
+      break;
+    case 'canadian':
+      runnerProfileContext += '\nWrite with natural Canadian English phrasing — use "eh", "for sure", "beauty", "no doubt", "kilometres". Friendly, humble, and genuinely encouraging. Never boastful.';
+      break;
+    case 'welsh':
+      runnerProfileContext += '\nWrite with natural Welsh English phrasing — use "lovely", "tidy", "fair play", "cracking on", "kilometres". Passionate and heartfelt with musical warmth.';
+      break;
+    case 'indian':
+      runnerProfileContext += '\nWrite with natural Indian English phrasing — use "very good", "excellent", "well done", "superb", "kilometres". Articulate, encouraging, and warm. Slightly formal but genuinely caring.';
+      break;
+    case 'caribbean':
+      runnerProfileContext += '\nWrite with natural Caribbean English phrasing — use "wicked", "big up yourself", "nuff respect", "easy now", "kilometres". Rhythmic, confident, uplifting energy. Island warmth.';
+      break;
+    case 'scandinavian':
+      runnerProfileContext += '\nWrite with natural Scandinavian-influenced English — use "very nice", "good job", "exactly", "perfect", "kilometres". Clean, precise, understated positivity. Hygge energy — calm confidence.';
+      break;
+  }
+
   // Detect "run start" scenario: phase is EARLY/warmUp and distance is near zero
   const isRunStart = (phase === 'EARLY' || phase === 'warmUp') && distance < 0.05;
   
@@ -576,7 +674,7 @@ ${noTerrainRule}${runnerProfileContext}
 Give a short, energetic motivational message (2-3 sentences) to kick off their run. Focus on getting them pumped up and ready to go. Do NOT mention distance covered, pace, cadence, or any metrics — the run has literally just begun. Just motivate them!
 CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", or "Hello". Jump straight into the coaching message.${runnerFirstName ? ` You may use "${runnerFirstName}" naturally but not as a greeting opener.` : ''}`;
 
-    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Give a brief, energetic send-off to start the run. No stats or metrics — just motivation. NEVER start with "Hey there", "Hey!", "Hi!" or any greeting — jump straight into the coaching. ${toneDirective(coachTone)}`;
+    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Give a brief, energetic send-off to start the run. No stats or metrics — just motivation. NEVER start with "Hey there", "Hey!", "Hi!" or any greeting — jump straight into the coaching. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}`;
   } else {
     // DURING RUN: Include metrics
     const triggerInstruction = is500mCheckin
@@ -602,7 +700,7 @@ CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", "Hello
 
 CRITICAL: You MUST weave in at least 2 specific data points from the Runner Status above (e.g. their actual pace like "${spokenPhasePace}", distance "${distance.toFixed(1)}km", time "${timeMin} minutes", cadence, heart rate). Runners want to hear their real numbers — do NOT give vague encouragement without citing their actual stats.${targetPace ? ` You MUST tell the runner whether they are on track for their target pace of ${spokenTargetPace}. ${paceVerdict} — communicate this clearly.` : ''}${targetTime && targetTime > 0 ? ` You MUST mention whether they are on track for their target time of ${formatDurationForTTS(targetTime)}.` : ''}${cadence && cadence > 0 ? ' Include a brief note on their cadence.' : ''}${hasRoute === true ? ' Consider their current terrain if on a hill.' : ''}`;
 
-    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful — always cite the runner's actual numbers (pace, distance, time etc). NEVER start with greetings like "Hey there", "Hey!", "Hi!" — jump straight into coaching. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}`;
+    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful — always cite the runner's actual numbers (pace, distance, time etc). NEVER start with greetings like "Hey there", "Hey!", "Hi!" — jump straight into coaching. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}`;
   }
 
   const completion = await openai.chat.completions.create({
@@ -641,9 +739,10 @@ export async function generateStruggleCoaching(params: {
   totalElevationGain?: number;
   coachName: string;
   coachTone: string;
+  coachAccent?: string;
   hasRoute?: boolean;
 }): Promise<string> {
-  const { distance, elapsedTime, currentPace, baselinePace, paceDropPercent, currentGrade, totalElevationGain, coachName, coachTone, hasRoute } = params;
+  const { distance, elapsedTime, currentPace, baselinePace, paceDropPercent, currentGrade, totalElevationGain, coachName, coachTone, coachAccent, hasRoute } = params;
   
   const timeMin = Math.floor(elapsedTime / 60);
   
@@ -678,7 +777,7 @@ Give a brief (1-2 sentences) supportive message to help them through this tough 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Be supportive during tough moments — always reference actual data. Keep it brief. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Be supportive during tough moments — always reference actual data. Keep it brief. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 100,
@@ -709,11 +808,13 @@ export async function generateCadenceCoaching(params: {
   optimalStrideLengthMax: number;
   coachName?: string;
   coachTone?: string;
+  coachAccent?: string;
 }): Promise<string> {
   const { cadence, strideLength, strideZone, currentPace, speed, distance, elapsedTime,
     heartRate, userHeight, userWeight, userAge,
     optimalCadenceMin, optimalCadenceMax, optimalStrideLengthMin, optimalStrideLengthMax,
     coachName = 'Coach', coachTone = 'energetic' } = params;
+  const cadenceAccentRule = accentDirective((params as any).coachAccent);
   
   const strideCm = Math.round(strideLength * 100);
   const optMinCm = Math.round(optimalStrideLengthMin * 100);
@@ -776,7 +877,7 @@ Give a coaching message (3-4 sentences). First, tell them their cadence and stri
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, an elite ${coachTone} running biomechanics coach. You specialize in cadence optimization and stride analysis. Give specific, actionable technique coaching — tell the runner exactly what to change and how. Reference actual numbers. No emojis. ${PACE_FORMAT_RULE} Keep it to 3-4 sentences that can be spoken in under 20 seconds.` },
+      { role: "system", content: `You are ${coachName}, an elite ${coachTone} running biomechanics coach. You specialize in cadence optimization and stride analysis. Give specific, actionable technique coaching — tell the runner exactly what to change and how. Reference actual numbers. No emojis. ${PACE_FORMAT_RULE} Keep it to 3-4 sentences that can be spoken in under 20 seconds. ${toneDirective(coachTone)}${cadenceAccentRule ? ' ' + cadenceAccentRule : ''}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 200,
@@ -963,7 +1064,7 @@ CRITICAL RULES:
 - Correlate metrics: "your pace dropped 15 seconds on that climb but your heart rate stayed controlled — that's textbook hill management"
 - Give ONE actionable technique cue specific to the current terrain
 - Keep it to 2-3 sentences maximum — this is spoken while they're running
-- ${toneDirective(coachTone)}`;
+- ${toneDirective(coachTone)}${params.coachAccent ? '\n- ' + accentDirective(params.coachAccent) : ''}`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -978,15 +1079,142 @@ CRITICAL RULES:
   return completion.choices[0].message.content || "Adjust your effort for the terrain!";
 }
 
-export async function generateTTS(text: string, voice: string = "alloy"): Promise<Buffer> {
+/**
+ * Generate TTS audio using OpenAI's gpt-4o-mini-tts model.
+ * The `instructions` parameter steers the voice's accent, tone, pacing, and style.
+ * This is far more expressive than the old tts-1 model.
+ */
+export async function generateTTS(
+  text: string, 
+  voice: string = "alloy",
+  instructions?: string
+): Promise<Buffer> {
   const response = await openai.audio.speech.create({
-    model: "tts-1",
+    model: "gpt-4o-mini-tts",
     voice: voice as any,
     input: text,
+    ...(instructions ? { instructions } : {}),
   });
 
   const buffer = Buffer.from(await response.arrayBuffer());
   return buffer;
+}
+
+/**
+ * Build TTS voice instructions based on coach accent, tone, and gender.
+ * These instructions steer gpt-4o-mini-tts to speak with the right accent,
+ * energy level, pacing, and personality.
+ */
+export function buildTTSInstructions(
+  coachAccent?: string, 
+  coachTone?: string, 
+  coachGender?: string,
+  coachName?: string
+): string {
+  const parts: string[] = [];
+  
+  // Core identity
+  const name = coachName || "the coach";
+  const gender = coachGender === 'male' ? 'male' : 'female';
+  parts.push(`You are ${name}, a ${gender} running coach.`);
+  
+  // Accent — the key differentiator
+  const accent = (coachAccent || '').trim().toLowerCase();
+  switch (accent) {
+    case 'british':
+      parts.push('Speak with a British English accent (RP or modern London). Use British pronunciation — "can\'t" rhymes with "ant", say "kilometre" not "kilometer". Natural and conversational, not posh.');
+      break;
+    case 'irish':
+      parts.push('Speak with a warm Irish accent. Slightly melodic intonation, natural Irish rhythm. Friendly and down-to-earth.');
+      break;
+    case 'scottish':
+      parts.push('Speak with a Scottish accent. Rolling Rs where natural, Scottish vowel sounds. Warm and direct.');
+      break;
+    case 'australian':
+      parts.push('Speak with an Australian accent. Relaxed vowels, rising intonation on statements. Laid-back but encouraging energy.');
+      break;
+    case 'new zealand':
+    case 'newzealand':
+    case 'nz':
+      parts.push('Speak with a New Zealand accent. Short "i" vowels (like "fush and chups"), flat vowels, slight Kiwi lilt. Genuine and understated warmth — not over the top.');
+      break;
+    case 'american':
+      parts.push('Speak with a General American accent. Clear, confident, energetic delivery.');
+      break;
+    case 'south african':
+      parts.push('Speak with a South African accent. Distinctive vowels, slightly clipped consonants. Warm, resilient energy — like someone who runs Comrades Marathon. Natural Afrikaans-influenced English rhythm.');
+      break;
+    case 'canadian':
+      parts.push('Speak with a Canadian English accent. Friendly, approachable, slightly softer than American. Natural "about" and "out" vowels. Warm and genuinely encouraging.');
+      break;
+    case 'welsh':
+      parts.push('Speak with a Welsh accent. Musical, lilting intonation with a warm sing-song quality. Rich vowels. Passionate and heartfelt delivery.');
+      break;
+    case 'indian':
+      parts.push('Speak with an Indian English accent. Clear, rhythmic cadence with distinctive intonation patterns. Articulate and precise. Warm and encouraging with natural Indian English flow.');
+      break;
+    case 'caribbean':
+      parts.push('Speak with a Caribbean English accent. Rhythmic, melodic delivery with warm island energy. Relaxed but powerful. Think Jamaican-influenced — confident and uplifting.');
+      break;
+    case 'scandinavian':
+      parts.push('Speak with a Scandinavian-accented English. Clean, precise pronunciation with slight Nordic melody. Calm, measured delivery — hygge energy. Understated confidence.');
+      break;
+    default:
+      parts.push('Speak clearly and naturally.');
+      break;
+  }
+  
+  // Tone — energy and personality
+  const tone = (coachTone || 'energetic').trim().toLowerCase();
+  switch (tone) {
+    case 'energetic':
+      parts.push('High energy and upbeat. Speak with enthusiasm and excitement — like you genuinely love coaching. Slightly faster pacing. Emphasize key words with vocal energy.');
+      break;
+    case 'motivational':
+    case 'inspirational':
+      parts.push('Inspiring and warm. Speak with conviction and belief in the runner. Moderate pace with well-placed pauses for emphasis. Build the runner up.');
+      break;
+    case 'instructive':
+      parts.push('Clear and precise. Speak like an experienced coach giving specific guidance. Measured pace, emphasis on key numbers and technique cues. Professional but friendly.');
+      break;
+    case 'factual':
+      parts.push('Straightforward and concise. Deliver information clearly without excessive emotion. Moderate pace, no-nonsense delivery. Think sports commentator giving stats.');
+      break;
+    case 'friendly':
+      parts.push('Warm and casual — like running with your best mate. Relaxed, conversational delivery. Use natural pauses and emphasis like you\'re chatting mid-run. Genuine and relatable, not performative.');
+      break;
+    case 'tough love':
+    case 'toughlove':
+      parts.push('Firm but caring. Speak like a coach who pushes hard because they believe in the runner. Direct, slightly intense delivery with conviction. Not mean — tough because you care. Think "I know you have more in you."');
+      break;
+    case 'analytical':
+      parts.push('Precise and data-focused. Speak like a sports scientist delivering insights. Clear emphasis on numbers and metrics. Measured pace, intellectual curiosity. Fascinated by the data but still personable.');
+      break;
+    case 'zen':
+    case 'mindful':
+      parts.push('Calm, centred, and meditative. Slow, deliberate pacing with mindful pauses. Soothing and grounding — like a yoga instructor who runs. Focus on breath, presence, and the journey. Gentle and peaceful.');
+      break;
+    case 'playful':
+    case 'humorous':
+      parts.push('Light-hearted, witty, and fun. Speak with a smile in your voice. Playful energy — like a coach who makes you laugh while pushing you. Slightly cheeky but always supportive. Keep it entertaining.');
+      break;
+    case 'abrupt':
+      parts.push('Short and direct. Punchy delivery with minimal words. Quick pace. Like a drill sergeant who cares — firm but not harsh.');
+      break;
+    case 'calm':
+    case 'supportive':
+    case 'encouraging':
+      parts.push('Calm and supportive. Gentle pacing, warm and reassuring. Speak like a trusted friend running alongside them. Steady and grounding.');
+      break;
+    default:
+      parts.push('Speak with encouraging, coaching energy.');
+      break;
+  }
+  
+  // Universal coaching delivery rules
+  parts.push('This is a running coaching message — the listener is actively running. Keep delivery natural, conversational, and easy to understand while moving. Do not sound robotic or overly formal.');
+  
+  return parts.join(' ');
 }
 
 function buildCoachingSystemPrompt(context: CoachingContext): string {
@@ -1059,6 +1287,14 @@ function buildCoachingSystemPrompt(context: CoachingContext): string {
   // Include user's fitness level for tailored coaching
   if (context.userFitnessLevel) {
     prompt += `\n\nRunner's fitness level: ${context.userFitnessLevel}. Tailor your advice complexity, pacing expectations, and encouragement style to this level.`;
+  }
+  
+  // Include accent-aware phrasing
+  if (context.coachAccent) {
+    const accentRule = accentDirective(context.coachAccent);
+    if (accentRule) {
+      prompt += `\n\n${accentRule}`;
+    }
   }
   
   return prompt;
@@ -1369,6 +1605,7 @@ export async function generateWellnessAwarePreRunBriefing(params: {
   weather: any;
   coachName: string;
   coachTone: string;
+  coachAccent?: string;
   wellness: WellnessContext;
   hasRoute?: boolean;
   targetTime?: number;
@@ -1384,7 +1621,7 @@ export async function generateWellnessAwarePreRunBriefing(params: {
   routeInsight?: string;
   weatherAdvantage?: string;
 }> {
-  const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, activityType, weather, coachName, coachTone, wellness, hasRoute = true, targetTime, targetPace, weatherImpact, runnerName, fitnessLevel } = params;
+  const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, activityType, weather, coachName, coachTone, coachAccent, wellness, hasRoute = true, targetTime, targetPace, weatherImpact, runnerName, fitnessLevel } = params;
 
   // Analyze positive weather conditions BEFORE building the prompt
   const weatherAdvantage = analyzePositiveWeatherConditions(weather, weatherImpact);
@@ -1529,6 +1766,8 @@ ${hasRoute === true ? `4. "routeInsight": A brief commentary (2-3 sentences) des
 CRITICAL RULES:
 - For runs marked "RUN (No planned route)" - do NOT mention terrain, elevation, hills, flat, or any route characteristics.
 - Include the specific distance, pace, and time numbers in the briefing text. The runner wants to hear their actual plan confirmed.
+- NEVER start with generic greetings like "Hey there!" — jump straight into the briefing content.
+${coachAccent ? `- Write using natural ${coachAccent} English phrasing and expressions. The text will be spoken aloud by a ${coachAccent} voice.` : ''}
 
 Respond as JSON with fields: briefing, intensityAdvice, warnings (array), ${hasRoute === true ? 'routeInsight' : 'readinessInsight'}`;
 
@@ -1536,7 +1775,7 @@ Respond as JSON with fields: briefing, intensityAdvice, warnings (array), ${hasR
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: `You are ${coachName}, a ${coachTone} running coach who uses biometric data for personalized coaching. Respond only with valid JSON. ${toneDirective(coachTone)}` },
+        { role: "system", content: `You are ${coachName}, a ${coachTone} running coach who uses biometric data for personalized coaching. Respond only with valid JSON. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}` },
         { role: "user", content: prompt }
       ],
       max_tokens: 600,
@@ -1666,9 +1905,10 @@ export async function generateHeartRateCoaching(params: {
   elapsedMinutes: number;
   coachName: string;
   coachTone: string;
+  coachAccent?: string;
   wellness?: WellnessContext;
 }): Promise<string> {
-  const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes, coachName, coachTone, wellness } = params;
+  const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes, coachName, coachTone, coachAccent, wellness } = params;
   
   const currentZone = getHeartRateZoneNumber(currentHR, maxHR);
   const percentMax = Math.round((currentHR / maxHR) * 100);
@@ -1709,7 +1949,7 @@ Give a brief (1-2 sentences) heart rate coaching tip. You MUST mention their act
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: `You are ${coachName}, giving brief real-time HR coaching. Always cite the runner's actual heart rate and zone. Keep it to 1-2 short sentences. ${toneDirective(coachTone)}` },
+        { role: "system", content: `You are ${coachName}, giving brief real-time HR coaching. Always cite the runner's actual heart rate and zone. Keep it to 1-2 short sentences. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}` },
         { role: "user", content: prompt }
       ],
       max_tokens: 80,
@@ -1814,8 +2054,9 @@ export async function generateComprehensiveRunAnalysis(params: {
   userProfile?: { fitnessLevel?: string; age?: number; weight?: number };
   coachName: string;
   coachTone: string;
+  coachAccent?: string;
 }): Promise<ComprehensiveRunAnalysis> {
-  const { runData, garminActivity, wellness, previousRuns, userProfile, coachName, coachTone } = params;
+  const { runData, garminActivity, wellness, previousRuns, userProfile, coachName, coachTone, coachAccent } = params;
   
   // Build comprehensive prompt with all available data
   let prompt = `You are ${coachName}, an expert AI running coach with a ${coachTone} style. 
@@ -1999,7 +2240,7 @@ Be specific, use the actual numbers from the data, and provide actionable insigh
       messages: [
         { 
           role: "system", 
-          content: `You are ${coachName}, an expert running coach with deep knowledge of exercise physiology and Garmin metrics. Provide detailed, personalized analysis using all available biometric data. Respond only with valid JSON. ${toneDirective(coachTone)}` 
+          content: `You are ${coachName}, an expert running coach with deep knowledge of exercise physiology and Garmin metrics. Provide detailed, personalized analysis using all available biometric data. Respond only with valid JSON. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}` 
         },
         { role: "user", content: prompt }
       ],

@@ -19,6 +19,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.R
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.ui.theme.*
@@ -178,7 +179,90 @@ fun ConnectedDevicesScreen(
                     isConnected = garminDevice.isConnected
                 )
             }
-            
+
+            // Garmin settings — shown when connected
+            if (garminDevice.isConnected) {
+                item {
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val userPreferences = remember { live.airuncoach.airuncoach.data.UserPreferences(context) }
+                    val autoSyncToGarmin by userPreferences.autoSyncToGarmin.collectAsState(initial = true)
+                    val coroutineScope = rememberCoroutineScope()
+
+                    Column {
+                        // Auto-sync toggle
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+                            shape = RoundedCornerShape(BorderRadius.lg)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_garmin_logo),
+                                    contentDescription = null,
+                                    tint = Color.Unspecified,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        "Auto-sync to Garmin Connect",
+                                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
+                                        color = Colors.textPrimary
+                                    )
+                                    Text(
+                                        "Automatically upload runs to your Garmin account",
+                                        style = AppTextStyles.caption,
+                                        color = Colors.textSecondary
+                                    )
+                                }
+                                Switch(
+                                    checked = autoSyncToGarmin,
+                                    onCheckedChange = { enabled ->
+                                        coroutineScope.launch {
+                                            userPreferences.setAutoSyncToGarmin(enabled)
+                                        }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Colors.textPrimary,
+                                        checkedTrackColor = Colors.accent,
+                                        uncheckedThumbColor = Colors.textMuted,
+                                        uncheckedTrackColor = Colors.backgroundSecondary
+                                    )
+                                )
+                            }
+                        }
+
+                        // "Health Data powered by Garmin" badge
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            androidx.compose.foundation.Image(
+                                painter = painterResource(id = R.drawable.ic_garmin_connect_logo),
+                                contentDescription = "Garmin Connect",
+                                modifier = Modifier.size(18.dp),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Health Data powered by Garmin",
+                                style = AppTextStyles.caption.copy(
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF8E9BAE),
+                                    letterSpacing = 0.3.sp
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
             // Coming Soon Section
             item {
                 Column {
@@ -305,7 +389,7 @@ fun DeviceCard(device: DeviceInfo, isConnected: Boolean, isComingSoon: Boolean =
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     InfoBadge(
-                        text = if (device.name == "Garmin") "Garmin Companion App recommended" else "Requires app install",
+                        text = if (device.name == "Garmin") "AI Run Coach watch app from Connect IQ Store recommended" else "Requires app install",
                         color = Color(0xFFFFA726)
                     )
                 }

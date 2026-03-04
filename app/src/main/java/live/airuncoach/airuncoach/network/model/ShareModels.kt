@@ -25,7 +25,11 @@ data class ShareImageRequest(
     val runId: String,
     val templateId: String,
     val aspectRatio: String = "1:1",
-    val stickers: List<PlacedSticker> = emptyList()
+    val stickers: List<PlacedSticker> = emptyList(),
+    val customBackground: String? = null,
+    val backgroundOpacity: Float? = null,
+    val backgroundBlur: Int? = null,
+    val customStickers: List<CustomSticker>? = null
 )
 
 data class PlacedSticker(
@@ -33,6 +37,15 @@ data class PlacedSticker(
     val x: Float,
     val y: Float,
     val scale: Float = 1.0f
+)
+
+data class CustomSticker(
+    val imageBase64: String,
+    val x: Float,
+    val y: Float,
+    val scale: Float = 1.0f,
+    val rotation: Float = 0f,
+    val opacity: Float = 1.0f
 )
 
 data class SharePreviewResponse(

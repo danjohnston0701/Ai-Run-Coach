@@ -3,7 +3,9 @@ package live.airuncoach.airuncoach.viewmodel
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -23,6 +25,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.model.*
+import java.io.ByteArrayOutputStream
 import java.io.File
 import javax.inject.Inject
 
@@ -39,7 +42,13 @@ data class ShareEditorState(
     val isSaving: Boolean = false,
     val error: String? = null,
     val successMessage: String? = null,
-    val runId: String = ""
+    val runId: String = "",
+    // Custom background
+    val customBackgroundBase64: String? = null,
+    val backgroundOpacity: Float = 0.4f,
+    val backgroundBlur: Int = 8,
+    // Custom stickers (user-uploaded images)
+    val customStickers: List<CustomSticker> = emptyList()
 )
 
 @HiltViewModel
@@ -158,6 +167,175 @@ class ShareImageViewModel @Inject constructor(
         requestPreviewDebounced()
     }
 
+    // ═══════════════════ Custom Background ═══════════════════
+
+    fun setCustomBackground(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri) ?: return@launch
+                val bitmap = BitmapFactory.decodeStream(inputStream)
+                inputStream.close()
+
+                if (bitmap == null) {
+                    _state.update { it.copy(error = "Failed to load image") }
+                    return@launch
+                }
+
+                // Resize to max 1080px on longest side to keep base64 reasonable
+                val maxDim = 1080
+                val scale = maxDim.toFloat() / maxOf(bitmap.width, bitmap.height)
+                val resized = if (scale < 1f) {
+                    Bitmap.createScaledBitmap(
+                        bitmap,
+                        (bitmap.width * scale).toInt(),
+                        (bitmap.height * scale).toInt(),
+                        true
+                    )
+                } else bitmap
+
+                val outputStream = ByteArrayOutputStream()
+                resized.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
+                val base64 = "data:image/jpeg;base64," + Base64.encodeToString(
+                    outputStream.toByteArray(), Base64.NO_WRAP
+                )
+
+                _state.update { it.copy(customBackgroundBase64 = base64) }
+                requestPreviewDebounced()
+            } catch (e: Exception) {
+                Log.e("ShareImageVM", "Failed to process background image", e)
+                _state.update { it.copy(error = "Failed to load background image") }
+            }
+        }
+    }
+
+    fun removeCustomBackground() {
+        _state.update { it.copy(customBackgroundBase64 = null) }
+        requestPreviewDebounced()
+    }
+
+    fun setBackgroundOpacity(opacity: Float) {
+        _state.update { it.copy(backgroundOpacity = opacity.coerceIn(0.1f, 1.0f)) }
+        requestPreviewDebounced()
+    }
+
+    fun setBackgroundBlur(blur: Int) {
+        _state.update { it.copy(backgroundBlur = blur.coerceIn(0, 100)) }
+        requestPreviewDebounced()
+    }
+
+    // ═══════════════════ Custom Stickers ═══════════════════
+
+    fun addCustomSticker(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                if (_state.value.customStickers.size >= 10) {
+                    _state.update { it.copy(error = "Maximum 10 custom stickers allowed") }
+                    return@launch
+                }
+
+                val inputStream = context.contentResolver.openInputStream(uri) ?: return@launch
+                val bitmap = BitmapFactory.decodeStream(inputStream)
+                inputStream.close()
+
+                if (bitmap == null) {
+                    _state.update { it.copy(error = "Failed to load sticker image") }
+                    return@launch
+                }
+
+                // Resize stickers to max 512px
+                val maxDim = 512
+                val scale = maxDim.toFloat() / maxOf(bitmap.width, bitmap.height)
+                val resized = if (scale < 1f) {
+                    Bitmap.createScaledBitmap(
+                        bitmap,
+                        (bitmap.width * scale).toInt(),
+                        (bitmap.height * scale).toInt(),
+                        true
+                    )
+                } else bitmap
+
+                val outputStream = ByteArrayOutputStream()
+                resized.compress(Bitmap.CompressFormat.PNG, 90, outputStream)
+                val base64 = "data:image/png;base64," + Base64.encodeToString(
+                    outputStream.toByteArray(), Base64.NO_WRAP
+                )
+
+                val newSticker = CustomSticker(
+                    imageBase64 = base64,
+                    x = 0.5f,
+                    y = 0.5f,
+                    scale = 0.5f,
+                    rotation = 0f,
+                    opacity = 1.0f
+                )
+                _state.update { it.copy(customStickers = it.customStickers + newSticker) }
+                requestPreviewDebounced()
+            } catch (e: Exception) {
+                Log.e("ShareImageVM", "Failed to process custom sticker", e)
+                _state.update { it.copy(error = "Failed to load sticker image") }
+            }
+        }
+    }
+
+    fun updateCustomStickerPosition(index: Int, x: Float, y: Float) {
+        _state.update { state ->
+            val updated = state.customStickers.toMutableList()
+            if (index in updated.indices) {
+                updated[index] = updated[index].copy(
+                    x = x.coerceIn(0f, 1f),
+                    y = y.coerceIn(0f, 1f)
+                )
+            }
+            state.copy(customStickers = updated)
+        }
+    }
+
+    fun finalizeCustomStickerPosition(index: Int) {
+        requestPreviewDebounced()
+    }
+
+    fun updateCustomStickerScale(index: Int, scale: Float) {
+        _state.update { state ->
+            val updated = state.customStickers.toMutableList()
+            if (index in updated.indices) {
+                updated[index] = updated[index].copy(scale = scale.coerceIn(0.1f, 3.0f))
+            }
+            state.copy(customStickers = updated)
+        }
+        requestPreviewDebounced()
+    }
+
+    fun updateCustomStickerRotation(index: Int, rotation: Float) {
+        _state.update { state ->
+            val updated = state.customStickers.toMutableList()
+            if (index in updated.indices) {
+                updated[index] = updated[index].copy(rotation = rotation % 360f)
+            }
+            state.copy(customStickers = updated)
+        }
+        requestPreviewDebounced()
+    }
+
+    fun updateCustomStickerOpacity(index: Int, opacity: Float) {
+        _state.update { state ->
+            val updated = state.customStickers.toMutableList()
+            if (index in updated.indices) {
+                updated[index] = updated[index].copy(opacity = opacity.coerceIn(0.1f, 1.0f))
+            }
+            state.copy(customStickers = updated)
+        }
+        requestPreviewDebounced()
+    }
+
+    fun removeCustomSticker(index: Int) {
+        _state.update { state ->
+            val updated = state.customStickers.toMutableList()
+            if (index in updated.indices) updated.removeAt(index)
+            state.copy(customStickers = updated)
+        }
+        requestPreviewDebounced()
+    }
+
     private fun requestPreviewDebounced() {
         previewJob?.cancel()
         previewJob = viewModelScope.launch {
@@ -166,18 +344,26 @@ class ShareImageViewModel @Inject constructor(
         }
     }
 
-    private suspend fun loadPreview() {
+    private fun buildRequest(): ShareImageRequest? {
         val s = _state.value
-        val template = s.selectedTemplate ?: return
+        val template = s.selectedTemplate ?: return null
+        return ShareImageRequest(
+            runId = s.runId,
+            templateId = template.id,
+            aspectRatio = s.selectedAspectRatio,
+            stickers = s.placedStickers,
+            customBackground = s.customBackgroundBase64,
+            backgroundOpacity = if (s.customBackgroundBase64 != null) s.backgroundOpacity else null,
+            backgroundBlur = if (s.customBackgroundBase64 != null) s.backgroundBlur else null,
+            customStickers = s.customStickers.ifEmpty { null }
+        )
+    }
+
+    private suspend fun loadPreview() {
+        val request = buildRequest() ?: return
 
         _state.update { it.copy(isLoadingPreview = true, error = null) }
         try {
-            val request = ShareImageRequest(
-                runId = s.runId,
-                templateId = template.id,
-                aspectRatio = s.selectedAspectRatio,
-                stickers = s.placedStickers
-            )
             val response = apiService.getSharePreview(request)
             _state.update {
                 it.copy(previewImageBase64 = response.image, isLoadingPreview = false)
@@ -232,15 +418,7 @@ class ShareImageViewModel @Inject constructor(
     }
 
     private suspend fun generateImage(): ByteArray? {
-        val s = _state.value
-        val template = s.selectedTemplate ?: return null
-
-        val request = ShareImageRequest(
-            runId = s.runId,
-            templateId = template.id,
-            aspectRatio = s.selectedAspectRatio,
-            stickers = s.placedStickers
-        )
+        val request = buildRequest() ?: return null
         val responseBody = apiService.generateShareImage(request)
         return responseBody.bytes()
     }

@@ -2,6 +2,8 @@ package live.airuncoach.airuncoach.ui.screens
 
 import android.graphics.BitmapFactory
 import android.util.Base64
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -14,11 +16,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -33,6 +38,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import live.airuncoach.airuncoach.network.model.CustomSticker
 import live.airuncoach.airuncoach.network.model.PlacedSticker
 import live.airuncoach.airuncoach.network.model.ShareTemplate
 import live.airuncoach.airuncoach.network.model.StickerWidget
@@ -55,26 +61,32 @@ fun ShareImageEditorScreen(
     }
 
     var isStickerPanelExpanded by remember { mutableStateOf(false) }
+    var isBackgroundPanelExpanded by remember { mutableStateOf(false) }
+    var isCustomStickerPanelExpanded by remember { mutableStateOf(false) }
 
-    Scaffold(
-        containerColor = Colors.backgroundRoot,
-        topBar = {
-            ShareEditorTopBar(onBack = onNavigateBack)
-        },
-        bottomBar = {
-            ShareEditorBottomBar(
-                isSaving = state.isSaving,
-                isGenerating = state.isGenerating,
-                onDownload = { viewModel.saveToGallery() },
-                onShare = { viewModel.shareImage() }
-            )
-        }
-    ) { padding ->
+    // Gallery picker for background image
+    val backgroundPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { viewModel.setCustomBackground(it) }
+    }
+
+    // Gallery picker for custom stickers
+    val stickerPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { viewModel.addCustomSticker(it) }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF050A12))
+            .statusBarsPadding()
+    ) {
         if (state.isLoadingTemplates) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
+                modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -84,30 +96,16 @@ fun ShareImageEditorScreen(
                 }
             }
         } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-            ) {
-                // Template selector
-                TemplateSelector(
-                    templates = state.templates,
-                    selectedTemplate = state.selectedTemplate,
-                    onSelect = { viewModel.selectTemplate(it) }
-                )
-
-                // Aspect ratio picker
-                state.selectedTemplate?.let { template ->
-                    AspectRatioPicker(
-                        availableRatios = template.aspectRatios,
-                        selectedRatio = state.selectedAspectRatio,
-                        onSelect = { viewModel.selectAspectRatio(it) }
-                    )
-                }
-
-                // Live preview area
-                Box(modifier = Modifier.weight(1f)) {
-                    PreviewArea(
+            // ─── Full-bleed preview fills the screen ───
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Preview area takes all remaining space
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    PreviewAreaFullBleed(
                         previewBase64 = state.previewImageBase64,
                         isLoading = state.isLoadingPreview,
                         placedStickers = state.placedStickers,
@@ -120,253 +118,107 @@ fun ShareImageEditorScreen(
                     )
                 }
 
-                // Sticker panel toggle
-                StickerPanelToggle(
-                    isExpanded = isStickerPanelExpanded,
-                    onToggle = { isStickerPanelExpanded = !isStickerPanelExpanded },
-                    placedCount = state.placedStickers.size
-                )
-
-                // Collapsible sticker panel
-                AnimatedVisibility(
-                    visible = isStickerPanelExpanded,
-                    enter = expandVertically() + fadeIn(),
-                    exit = shrinkVertically() + fadeOut()
-                ) {
-                    StickerPanel(
-                        stickers = state.stickers,
-                        placedStickerIds = state.placedStickers.map { it.widgetId }.toSet(),
-                        onAddSticker = { viewModel.addSticker(it) },
-                        onRemoveSticker = { viewModel.removeSticker(it) }
-                    )
-                }
-            }
-        }
-
-        // Error snackbar
-        state.error?.let { error ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.BottomCenter
-            ) {
-                Snackbar(
-                    modifier = Modifier.padding(Spacing.lg),
-                    containerColor = Colors.error.copy(alpha = 0.9f),
-                    contentColor = Colors.textPrimary,
-                    action = {
-                        TextButton(onClick = { viewModel.clearError() }) {
-                            Text("OK", color = Colors.textPrimary)
-                        }
-                    }
-                ) {
-                    Text(error)
-                }
-            }
-        }
-
-        // Success message
-        state.successMessage?.let { msg ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.BottomCenter
-            ) {
-                Snackbar(
-                    modifier = Modifier.padding(Spacing.lg),
-                    containerColor = Colors.success.copy(alpha = 0.9f),
-                    contentColor = Colors.textPrimary
-                ) {
-                    Text(msg)
-                }
-            }
-        }
-    }
-}
-
-/* ================================ TOP BAR ================================ */
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ShareEditorTopBar(onBack: () -> Unit) {
-    TopAppBar(
-        title = {
-            Column {
-                Text(
-                    "Create Share Image",
-                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.ExtraBold),
-                    color = Colors.textPrimary
-                )
-                Text(
-                    "Customize and share your run",
-                    style = AppTextStyles.small,
-                    color = Colors.textSecondary
+                // ─── Compact control strip ───
+                ControlStrip(
+                    templates = state.templates,
+                    selectedTemplate = state.selectedTemplate,
+                    selectedAspectRatio = state.selectedAspectRatio,
+                    onSelectTemplate = { viewModel.selectTemplate(it) },
+                    onSelectAspectRatio = { viewModel.selectAspectRatio(it) },
+                    isStickerPanelExpanded = isStickerPanelExpanded,
+                    onToggleStickers = { isStickerPanelExpanded = !isStickerPanelExpanded },
+                    placedStickerCount = state.placedStickers.size,
+                    stickers = state.stickers,
+                    placedStickerIds = state.placedStickers.map { it.widgetId }.toSet(),
+                    onAddSticker = { viewModel.addSticker(it) },
+                    onRemoveSticker = { viewModel.removeSticker(it) },
+                    // Background
+                    isBackgroundPanelExpanded = isBackgroundPanelExpanded,
+                    onToggleBackground = { isBackgroundPanelExpanded = !isBackgroundPanelExpanded },
+                    hasCustomBackground = state.customBackgroundBase64 != null,
+                    backgroundOpacity = state.backgroundOpacity,
+                    backgroundBlur = state.backgroundBlur,
+                    onPickBackground = { backgroundPickerLauncher.launch("image/*") },
+                    onRemoveBackground = { viewModel.removeCustomBackground() },
+                    onBackgroundOpacityChange = { viewModel.setBackgroundOpacity(it) },
+                    onBackgroundBlurChange = { viewModel.setBackgroundBlur(it) },
+                    // Custom stickers
+                    isCustomStickerPanelExpanded = isCustomStickerPanelExpanded,
+                    onToggleCustomStickers = { isCustomStickerPanelExpanded = !isCustomStickerPanelExpanded },
+                    customStickers = state.customStickers,
+                    onPickCustomSticker = { stickerPickerLauncher.launch("image/*") },
+                    onRemoveCustomSticker = { viewModel.removeCustomSticker(it) },
+                    onCustomStickerScaleChange = { idx, scale -> viewModel.updateCustomStickerScale(idx, scale) },
+                    onCustomStickerRotationChange = { idx, rotation -> viewModel.updateCustomStickerRotation(idx, rotation) },
+                    onCustomStickerOpacityChange = { idx, opacity -> viewModel.updateCustomStickerOpacity(idx, opacity) },
+                    // Actions
+                    isSaving = state.isSaving,
+                    isGenerating = state.isGenerating,
+                    onDownload = { viewModel.saveToGallery() },
+                    onShare = { viewModel.shareImage() }
                 )
             }
-        },
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Colors.textPrimary)
-            }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = Colors.backgroundRoot,
-            titleContentColor = Colors.textPrimary
-        )
-    )
-}
 
-/* ================================ TEMPLATE SELECTOR ================================ */
-
-@Composable
-private fun TemplateSelector(
-    templates: List<ShareTemplate>,
-    selectedTemplate: ShareTemplate?,
-    onSelect: (ShareTemplate) -> Unit
-) {
-    Column(modifier = Modifier.padding(vertical = Spacing.sm)) {
-        Text(
-            text = "TEMPLATE",
-            style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
-            color = Colors.textMuted,
-            modifier = Modifier.padding(start = Spacing.lg, end = Spacing.lg, bottom = Spacing.xs)
-        )
-
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = Spacing.lg),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-        ) {
-            items(templates) { template ->
-                TemplateCard(
-                    template = template,
-                    isSelected = template.id == selectedTemplate?.id,
-                    onClick = { onSelect(template) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun TemplateCard(
-    template: ShareTemplate,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    val borderColor = if (isSelected) Colors.primary else Colors.border
-    val bgColor = if (isSelected) Colors.primary.copy(alpha = 0.12f) else Colors.backgroundSecondary
-
-    val icon = when (template.category) {
-        "stats" -> Icons.Default.GridView
-        "map" -> Icons.Default.Map
-        "splits" -> Icons.Default.BarChart
-        "achievement" -> Icons.Default.EmojiEvents
-        "minimal" -> Icons.Default.Contrast
-        else -> Icons.Default.Image
-    }
-
-    Card(
-        onClick = onClick,
-        colors = CardDefaults.cardColors(containerColor = bgColor),
-        border = BorderStroke(if (isSelected) 2.dp else 1.dp, borderColor),
-        shape = RoundedCornerShape(14.dp),
-        modifier = Modifier.width(110.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(Spacing.md),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = if (isSelected) Colors.primary else Colors.textSecondary,
-                modifier = Modifier.size(28.dp)
-            )
-            Spacer(modifier = Modifier.height(Spacing.xs))
-            Text(
-                text = template.name,
-                style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold),
-                color = if (isSelected) Colors.primary else Colors.textPrimary,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = template.category.replaceFirstChar { it.uppercase() },
-                style = AppTextStyles.caption,
-                color = Colors.textMuted,
-                textAlign = TextAlign.Center
-            )
-        }
-    }
-}
-
-/* ================================ ASPECT RATIO PICKER ================================ */
-
-@Composable
-private fun AspectRatioPicker(
-    availableRatios: List<String>,
-    selectedRatio: String,
-    onSelect: (String) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.sm, Alignment.CenterHorizontally)
-    ) {
-        availableRatios.forEach { ratio ->
-            val label = when (ratio) {
-                "1:1" -> "Square"
-                "9:16" -> "Story"
-                "4:5" -> "Portrait"
-                else -> ratio
-            }
-            val isSelected = ratio == selectedRatio
-            val bgColor = if (isSelected) Colors.primary else Colors.backgroundTertiary
-            val textColor = if (isSelected) Colors.buttonText else Colors.textSecondary
-
+            // ─── Back button floating top-left ───
             Surface(
-                onClick = { onSelect(ratio) },
-                shape = RoundedCornerShape(10.dp),
-                color = bgColor,
-                modifier = Modifier.height(36.dp)
+                onClick = onNavigateBack,
+                shape = CircleShape,
+                color = Color.Black.copy(alpha = 0.6f),
+                border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.4f)),
+                modifier = Modifier
+                    .padding(start = 12.dp, top = 8.dp)
+                    .size(40.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    // Mini aspect ratio icon
-                    val (w, h) = when (ratio) {
-                        "1:1" -> 12.dp to 12.dp
-                        "9:16" -> 9.dp to 14.dp
-                        "4:5" -> 10.dp to 13.dp
-                        else -> 12.dp to 12.dp
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(w, h)
-                            .border(1.5.dp, textColor, RoundedCornerShape(2.dp))
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = label,
-                        style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold),
-                        color = textColor
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
+            }
+        }
+
+        // ─── Error snackbar ───
+        state.error?.let { error ->
+            Snackbar(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(Spacing.lg)
+                    .navigationBarsPadding(),
+                containerColor = Colors.error.copy(alpha = 0.95f),
+                contentColor = Colors.textPrimary,
+                action = {
+                    TextButton(onClick = { viewModel.clearError() }) {
+                        Text("OK", color = Colors.textPrimary)
+                    }
+                }
+            ) {
+                Text(error)
+            }
+        }
+
+        // ─── Success toast ───
+        state.successMessage?.let { msg ->
+            Snackbar(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(Spacing.lg)
+                    .navigationBarsPadding(),
+                containerColor = Colors.success.copy(alpha = 0.95f),
+                contentColor = Colors.textPrimary
+            ) {
+                Text(msg)
             }
         }
     }
 }
 
-/* ================================ PREVIEW AREA ================================ */
+/* ═══════════════════════ FULL-BLEED PREVIEW ═══════════════════════ */
 
 @Composable
-private fun PreviewArea(
+private fun PreviewAreaFullBleed(
     previewBase64: String?,
     isLoading: Boolean,
     placedStickers: List<PlacedSticker>,
@@ -386,14 +238,16 @@ private fun PreviewArea(
 
     Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+            .fillMaxSize()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
+        // The preview card fills as much space as possible while maintaining aspect ratio
         Card(
-            colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
-            shape = RoundedCornerShape(16.dp),
-            border = BorderStroke(1.dp, Colors.border)
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117)),
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.5f)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 12.dp)
         ) {
             Box(
                 modifier = Modifier
@@ -410,7 +264,7 @@ private fun PreviewArea(
                                 .removePrefix("data:image/jpeg;base64,")
                             val bytes = Base64.decode(raw, Base64.DEFAULT)
                             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
                             null
                         }
                     }
@@ -419,8 +273,10 @@ private fun PreviewArea(
                         Image(
                             bitmap = bitmap,
                             contentDescription = "Preview",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Fit
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(20.dp)),
+                            contentScale = ContentScale.Crop
                         )
                     }
                 }
@@ -430,14 +286,22 @@ private fun PreviewArea(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Colors.backgroundRoot.copy(alpha = 0.6f)),
+                            .background(Color(0xFF050A12).copy(alpha = 0.5f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        CircularProgressIndicator(
-                            color = Colors.primary,
-                            modifier = Modifier.size(32.dp),
-                            strokeWidth = 3.dp
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(
+                                color = Colors.primary,
+                                modifier = Modifier.size(36.dp),
+                                strokeWidth = 3.dp
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                "Rendering...",
+                                style = AppTextStyles.caption,
+                                color = Colors.textSecondary
+                            )
+                        }
                     }
                 }
 
@@ -450,8 +314,8 @@ private fun PreviewArea(
                         Icon(
                             imageVector = Icons.Default.Image,
                             contentDescription = null,
-                            tint = Colors.textMuted,
-                            modifier = Modifier.size(48.dp)
+                            tint = Colors.textMuted.copy(alpha = 0.5f),
+                            modifier = Modifier.size(56.dp)
                         )
                         Spacer(modifier = Modifier.height(Spacing.md))
                         Text(
@@ -463,7 +327,7 @@ private fun PreviewArea(
                     }
                 }
 
-                // Sticker overlay indicators (show where stickers are placed)
+                // Sticker overlay indicators
                 var containerSize by remember { mutableStateOf(IntSize.Zero) }
                 Box(
                     modifier = Modifier
@@ -490,6 +354,462 @@ private fun PreviewArea(
     }
 }
 
+/* ═══════════════════════ CONTROL STRIP ═══════════════════════ */
+
+@Composable
+private fun ControlStrip(
+    templates: List<ShareTemplate>,
+    selectedTemplate: ShareTemplate?,
+    selectedAspectRatio: String,
+    onSelectTemplate: (ShareTemplate) -> Unit,
+    onSelectAspectRatio: (String) -> Unit,
+    isStickerPanelExpanded: Boolean,
+    onToggleStickers: () -> Unit,
+    placedStickerCount: Int,
+    stickers: List<StickerWidget>,
+    placedStickerIds: Set<String>,
+    onAddSticker: (StickerWidget) -> Unit,
+    onRemoveSticker: (String) -> Unit,
+    // Background
+    isBackgroundPanelExpanded: Boolean,
+    onToggleBackground: () -> Unit,
+    hasCustomBackground: Boolean,
+    backgroundOpacity: Float,
+    backgroundBlur: Int,
+    onPickBackground: () -> Unit,
+    onRemoveBackground: () -> Unit,
+    onBackgroundOpacityChange: (Float) -> Unit,
+    onBackgroundBlurChange: (Int) -> Unit,
+    // Custom stickers
+    isCustomStickerPanelExpanded: Boolean,
+    onToggleCustomStickers: () -> Unit,
+    customStickers: List<CustomSticker>,
+    onPickCustomSticker: () -> Unit,
+    onRemoveCustomSticker: (Int) -> Unit,
+    onCustomStickerScaleChange: (Int, Float) -> Unit,
+    onCustomStickerRotationChange: (Int, Float) -> Unit,
+    onCustomStickerOpacityChange: (Int, Float) -> Unit,
+    // Actions
+    isSaving: Boolean,
+    isGenerating: Boolean,
+    onDownload: () -> Unit,
+    onShare: () -> Unit
+) {
+    Surface(
+        color = Color(0xFF0D1117),
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.4f)),
+        tonalElevation = 8.dp,
+        shadowElevation = 16.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+        ) {
+            // Drag handle
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(36.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Colors.border)
+                )
+            }
+
+            // Template chips row + aspect ratio pills (single combined row)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Templates
+                LazyRow(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(templates) { template ->
+                        TemplateChip(
+                            template = template,
+                            isSelected = template.id == selectedTemplate?.id,
+                            onClick = { onSelectTemplate(template) }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // Aspect ratio toggles
+                selectedTemplate?.let { tmpl ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        tmpl.aspectRatios.forEach { ratio ->
+                            AspectRatioChip(
+                                ratio = ratio,
+                                isSelected = ratio == selectedAspectRatio,
+                                onClick = { onSelectAspectRatio(ratio) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Sticker toggle row
+            Surface(
+                onClick = onToggleStickers,
+                color = Color.Transparent
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Widgets,
+                        contentDescription = null,
+                        tint = Colors.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Stickers",
+                        style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold),
+                        color = Colors.textPrimary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (placedStickerCount > 0) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Colors.primary,
+                            modifier = Modifier.size(20.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    "$placedStickerCount",
+                                    style = AppTextStyles.caption.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.sp
+                                    ),
+                                    color = Colors.buttonText
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+                    Icon(
+                        imageVector = if (isStickerPanelExpanded) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                        contentDescription = null,
+                        tint = Colors.textSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            // Expandable sticker panel
+            AnimatedVisibility(
+                visible = isStickerPanelExpanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                StickerPanelCompact(
+                    stickers = stickers,
+                    placedStickerIds = placedStickerIds,
+                    onAddSticker = onAddSticker,
+                    onRemoveSticker = onRemoveSticker
+                )
+            }
+
+            // ─── Background image toggle ───
+            Surface(
+                onClick = onToggleBackground,
+                color = Color.Transparent
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Image,
+                        contentDescription = null,
+                        tint = if (hasCustomBackground) Colors.success else Colors.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Background Photo",
+                        style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold),
+                        color = Colors.textPrimary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (hasCustomBackground) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Colors.success,
+                            modifier = Modifier.size(8.dp)
+                        ) {}
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+                    Icon(
+                        imageVector = if (isBackgroundPanelExpanded) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                        contentDescription = null,
+                        tint = Colors.textSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            // Expandable background panel
+            AnimatedVisibility(
+                visible = isBackgroundPanelExpanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                BackgroundControlPanel(
+                    hasCustomBackground = hasCustomBackground,
+                    backgroundOpacity = backgroundOpacity,
+                    backgroundBlur = backgroundBlur,
+                    onPickBackground = onPickBackground,
+                    onRemoveBackground = onRemoveBackground,
+                    onOpacityChange = onBackgroundOpacityChange,
+                    onBlurChange = onBackgroundBlurChange
+                )
+            }
+
+            // ─── Custom stickers toggle ───
+            Surface(
+                onClick = onToggleCustomStickers,
+                color = Color.Transparent
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AddPhotoAlternate,
+                        contentDescription = null,
+                        tint = Colors.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Custom Stickers",
+                        style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold),
+                        color = Colors.textPrimary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (customStickers.isNotEmpty()) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Colors.primary,
+                            modifier = Modifier.size(20.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    "${customStickers.size}",
+                                    style = AppTextStyles.caption.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.sp
+                                    ),
+                                    color = Colors.buttonText
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+                    Icon(
+                        imageVector = if (isCustomStickerPanelExpanded) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                        contentDescription = null,
+                        tint = Colors.textSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            // Expandable custom sticker panel
+            AnimatedVisibility(
+                visible = isCustomStickerPanelExpanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                CustomStickerPanel(
+                    customStickers = customStickers,
+                    onPickSticker = onPickCustomSticker,
+                    onRemove = onRemoveCustomSticker,
+                    onScaleChange = onCustomStickerScaleChange,
+                    onRotationChange = onCustomStickerRotationChange,
+                    onOpacityChange = onCustomStickerOpacityChange
+                )
+            }
+
+            // Action buttons
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Download button
+                OutlinedButton(
+                    onClick = onDownload,
+                    enabled = !isSaving && !isGenerating,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(
+                        1.5.dp,
+                        if (isSaving) Colors.textMuted else Colors.primary
+                    ),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Colors.primary,
+                        disabledContentColor = Colors.textMuted
+                    )
+                ) {
+                    if (isSaving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Colors.textMuted,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Saving...", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    } else {
+                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Download", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    }
+                }
+
+                // Share button
+                Button(
+                    onClick = onShare,
+                    enabled = !isSaving && !isGenerating,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Colors.primary,
+                        contentColor = Colors.buttonText,
+                        disabledContainerColor = Colors.backgroundTertiary,
+                        disabledContentColor = Colors.textMuted
+                    )
+                ) {
+                    if (isGenerating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Colors.buttonText,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Generating...", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    } else {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Share", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* ═══════════════════════ TEMPLATE CHIP ═══════════════════════ */
+
+@Composable
+private fun TemplateChip(
+    template: ShareTemplate,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    val icon = when (template.category) {
+        "stats" -> Icons.Default.GridView
+        "map" -> Icons.Default.Map
+        "splits" -> Icons.Default.BarChart
+        "achievement" -> Icons.Default.EmojiEvents
+        "minimal" -> Icons.Default.Contrast
+        else -> Icons.Default.Image
+    }
+
+    val bgColor = if (isSelected) Colors.primary.copy(alpha = 0.15f) else Color(0xFF1A2332)
+    val borderColor = if (isSelected) Colors.primary else Colors.border.copy(alpha = 0.5f)
+    val contentColor = if (isSelected) Colors.primary else Colors.textSecondary
+
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = bgColor,
+        border = BorderStroke(if (isSelected) 1.5.dp else 1.dp, borderColor)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = template.name,
+                style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold),
+                color = if (isSelected) Colors.primary else Colors.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+/* ═══════════════════════ ASPECT RATIO CHIP ═══════════════════════ */
+
+@Composable
+private fun AspectRatioChip(
+    ratio: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    val label = when (ratio) {
+        "1:1" -> "1:1"
+        "9:16" -> "9:16"
+        "4:5" -> "4:5"
+        else -> ratio
+    }
+
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
+        color = if (isSelected) Colors.primary else Color(0xFF1A2332),
+        modifier = Modifier.size(36.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = label,
+                fontSize = 9.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                color = if (isSelected) Colors.buttonText else Colors.textSecondary,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+/* ═══════════════════════ STICKER OVERLAY ═══════════════════════ */
+
 @Composable
 private fun StickerOverlayChip(
     placed: PlacedSticker,
@@ -506,14 +826,12 @@ private fun StickerOverlayChip(
     val xDp = with(density) { xPx.toDp() }
     val yDp = with(density) { yPx.toDp() }
 
-    // Use rememberUpdatedState to avoid stale closure in gesture handlers
     val currentPlaced by rememberUpdatedState(placed)
     val currentOnDrag by rememberUpdatedState(onDrag)
     val currentOnDragEnd by rememberUpdatedState(onDragEnd)
     val currentOnScale by rememberUpdatedState(onScale)
     val currentContainerSize by rememberUpdatedState(containerSize)
 
-    // Chip size scales with sticker scale
     val baseChipW = 90.dp
     val baseChipH = 36.dp
     val chipW = baseChipW * placed.scale
@@ -529,8 +847,9 @@ private fun StickerOverlayChip(
         // Main draggable chip
         Surface(
             shape = RoundedCornerShape(chipH / 2),
-            color = Colors.primary.copy(alpha = 0.75f),
-            border = BorderStroke(1.5.dp, Colors.textPrimary.copy(alpha = 0.4f)),
+            color = Colors.primary.copy(alpha = 0.85f),
+            border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.3f)),
+            shadowElevation = 6.dp,
             modifier = Modifier
                 .width(chipW)
                 .height(chipH)
@@ -541,10 +860,8 @@ private fun StickerOverlayChip(
                         }
                     ) { change, dragAmount ->
                         change.consume()
-                        val newX =
-                            currentPlaced.x + dragAmount.x / currentContainerSize.width
-                        val newY =
-                            currentPlaced.y + dragAmount.y / currentContainerSize.height
+                        val newX = currentPlaced.x + dragAmount.x / currentContainerSize.width
+                        val newY = currentPlaced.y + dragAmount.y / currentContainerSize.height
                         currentOnDrag(currentPlaced.widgetId, newX, newY)
                     }
                 }
@@ -575,36 +892,30 @@ private fun StickerOverlayChip(
             }
         }
 
-        // Control buttons row — positioned above the chip
+        // Control buttons — positioned above the chip
         Row(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .offset(y = (-20).dp),
+                .offset(y = (-22).dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            // Scale down button
+            // Scale down
             Surface(
                 onClick = {
                     val newScale = (currentPlaced.scale - 0.2f).coerceIn(0.5f, 2.5f)
                     currentOnScale(currentPlaced.widgetId, newScale)
-                    currentOnDragEnd(currentPlaced.widgetId) // trigger preview refresh
+                    currentOnDragEnd(currentPlaced.widgetId)
                 },
                 shape = CircleShape,
-                color = Colors.backgroundTertiary.copy(alpha = 0.9f),
+                color = Color(0xFF1A2332).copy(alpha = 0.95f),
                 border = BorderStroke(1.dp, Colors.border),
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(22.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.Remove,
-                        contentDescription = "Smaller",
-                        tint = Colors.textPrimary,
-                        modifier = Modifier.size(12.dp)
-                    )
+                    Icon(Icons.Default.Remove, contentDescription = "Smaller", tint = Color.White, modifier = Modifier.size(12.dp))
                 }
             }
-
-            // Scale up button
+            // Scale up
             Surface(
                 onClick = {
                     val newScale = (currentPlaced.scale + 0.2f).coerceIn(0.5f, 2.5f)
@@ -612,101 +923,33 @@ private fun StickerOverlayChip(
                     currentOnDragEnd(currentPlaced.widgetId)
                 },
                 shape = CircleShape,
-                color = Colors.backgroundTertiary.copy(alpha = 0.9f),
+                color = Color(0xFF1A2332).copy(alpha = 0.95f),
                 border = BorderStroke(1.dp, Colors.border),
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(22.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Larger",
-                        tint = Colors.textPrimary,
-                        modifier = Modifier.size(12.dp)
-                    )
+                    Icon(Icons.Default.Add, contentDescription = "Larger", tint = Color.White, modifier = Modifier.size(12.dp))
                 }
             }
-
-            // Remove button
+            // Remove
             Surface(
                 onClick = onRemove,
                 shape = CircleShape,
-                color = Colors.error.copy(alpha = 0.9f),
-                modifier = Modifier.size(20.dp)
+                color = Colors.error.copy(alpha = 0.95f),
+                modifier = Modifier.size(22.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Remove",
-                        tint = Colors.textPrimary,
-                        modifier = Modifier.size(12.dp)
-                    )
+                    Icon(Icons.Default.Close, contentDescription = "Remove", tint = Color.White, modifier = Modifier.size(12.dp))
                 }
             }
         }
     }
 }
 
-/* ================================ STICKER PANEL ================================ */
+/* ═══════════════════════ COMPACT STICKER PANEL ═══════════════════════ */
 
 @Composable
-private fun StickerPanelToggle(
-    isExpanded: Boolean,
-    onToggle: () -> Unit,
-    placedCount: Int
-) {
-    Surface(
-        onClick = onToggle,
-        color = Colors.backgroundSecondary,
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-        border = BorderStroke(1.dp, Colors.border),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Spacing.lg, vertical = Spacing.md),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.Widgets,
-                contentDescription = null,
-                tint = Colors.primary,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.width(Spacing.sm))
-            Text(
-                text = "Stickers",
-                style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
-                color = Colors.textPrimary,
-                modifier = Modifier.weight(1f)
-            )
-            if (placedCount > 0) {
-                Surface(
-                    shape = CircleShape,
-                    color = Colors.primary,
-                    modifier = Modifier.size(22.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            "$placedCount",
-                            style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
-                            color = Colors.buttonText
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.width(Spacing.sm))
-            }
-            Icon(
-                imageVector = if (isExpanded) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
-                contentDescription = if (isExpanded) "Collapse" else "Expand",
-                tint = Colors.textSecondary
-            )
-        }
-    }
-}
-
-@Composable
-private fun StickerPanel(
+private fun StickerPanelCompact(
     stickers: List<StickerWidget>,
     placedStickerIds: Set<String>,
     onAddSticker: (StickerWidget) -> Unit,
@@ -716,91 +959,90 @@ private fun StickerPanel(
     val categoryOrder = listOf("metrics", "charts", "badges", "text")
     var selectedCategory by remember { mutableStateOf("metrics") }
 
-    Surface(
-        color = Colors.backgroundSecondary,
-        border = BorderStroke(1.dp, Colors.border)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 180.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 220.dp)
+        // Category row — horizontal chips instead of tabs
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(bottom = 6.dp)
         ) {
-            // Category tabs
-            ScrollableTabRow(
-                selectedTabIndex = categoryOrder.indexOf(selectedCategory).coerceAtLeast(0),
-                containerColor = Colors.backgroundTertiary,
-                contentColor = Colors.textPrimary,
-                edgePadding = Spacing.sm,
-                divider = {}
-            ) {
-                categoryOrder.forEach { cat ->
-                    val label = when (cat) {
-                        "metrics" -> "Metrics"
-                        "charts" -> "Charts"
-                        "badges" -> "Badges"
-                        "text" -> "Text"
-                        else -> cat.replaceFirstChar { it.uppercase() }
-                    }
-                    Tab(
-                        selected = selectedCategory == cat,
-                        onClick = { selectedCategory = cat },
-                        text = {
-                            Text(
-                                label,
-                                fontWeight = if (selectedCategory == cat) FontWeight.Bold else FontWeight.Normal,
-                                color = if (selectedCategory == cat) Colors.primary else Colors.textSecondary,
-                                fontSize = 13.sp
-                            )
-                        }
+            items(categoryOrder) { cat ->
+                val label = when (cat) {
+                    "metrics" -> "Metrics"
+                    "charts" -> "Charts"
+                    "badges" -> "Badges"
+                    "text" -> "Text"
+                    else -> cat.replaceFirstChar { it.uppercase() }
+                }
+                val isSelected = selectedCategory == cat
+
+                Surface(
+                    onClick = { selectedCategory = cat },
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isSelected) Colors.primary.copy(alpha = 0.15f) else Color.Transparent,
+                    border = BorderStroke(
+                        1.dp,
+                        if (isSelected) Colors.primary else Colors.border.copy(alpha = 0.3f)
+                    )
+                ) {
+                    Text(
+                        text = label,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        fontSize = 12.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        color = if (isSelected) Colors.primary else Colors.textSecondary
                     )
                 }
             }
+        }
 
-            // Stickers grid for selected category
-            val categoryStickers = categories[selectedCategory] ?: emptyList()
-
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
-                contentPadding = PaddingValues(Spacing.sm),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                items(categoryStickers) { widget ->
-                    val isPlaced = widget.id in placedStickerIds
-                    StickerGridItem(
-                        widget = widget,
-                        isPlaced = isPlaced,
-                        onToggle = {
-                            if (isPlaced) onRemoveSticker(widget.id)
-                            else onAddSticker(widget)
-                        }
-                    )
-                }
+        // Sticker grid
+        val categoryStickers = categories[selectedCategory] ?: emptyList()
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(4),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(categoryStickers) { widget ->
+                val isPlaced = widget.id in placedStickerIds
+                StickerGridItemCompact(
+                    widget = widget,
+                    isPlaced = isPlaced,
+                    onToggle = {
+                        if (isPlaced) onRemoveSticker(widget.id)
+                        else onAddSticker(widget)
+                    }
+                )
             }
         }
     }
 }
 
 @Composable
-private fun StickerGridItem(
+private fun StickerGridItemCompact(
     widget: StickerWidget,
     isPlaced: Boolean,
     onToggle: () -> Unit
 ) {
-    val bgColor = if (isPlaced) Colors.primary.copy(alpha = 0.15f) else Colors.backgroundTertiary
-    val borderColor = if (isPlaced) Colors.primary else Colors.border
+    val bgColor = if (isPlaced) Colors.primary.copy(alpha = 0.15f) else Color(0xFF1A2332)
+    val borderColor = if (isPlaced) Colors.primary else Colors.border.copy(alpha = 0.3f)
 
     Card(
         onClick = onToggle,
         colors = CardDefaults.cardColors(containerColor = bgColor),
         border = BorderStroke(1.dp, borderColor),
-        shape = RoundedCornerShape(10.dp)
+        shape = RoundedCornerShape(8.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(Spacing.sm),
+                .padding(vertical = 6.dp, horizontal = 4.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box {
@@ -808,7 +1050,7 @@ private fun StickerGridItem(
                     imageVector = stickerIcon(widget.icon),
                     contentDescription = null,
                     tint = if (isPlaced) Colors.primary else Colors.textSecondary,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(18.dp)
                 )
                 if (isPlaced) {
                     Icon(
@@ -816,7 +1058,7 @@ private fun StickerGridItem(
                         contentDescription = null,
                         tint = Colors.primary,
                         modifier = Modifier
-                            .size(10.dp)
+                            .size(8.dp)
                             .align(Alignment.TopEnd)
                     )
                 }
@@ -824,100 +1066,240 @@ private fun StickerGridItem(
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = widget.label,
-                style = AppTextStyles.caption.copy(fontSize = 10.sp),
+                style = AppTextStyles.caption.copy(fontSize = 9.sp),
                 color = if (isPlaced) Colors.primary else Colors.textSecondary,
                 textAlign = TextAlign.Center,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
     }
 }
 
-/* ================================ BOTTOM BAR ================================ */
+/* ═══════════════════════ BACKGROUND CONTROL PANEL ═══════════════════════ */
 
 @Composable
-private fun ShareEditorBottomBar(
-    isSaving: Boolean,
-    isGenerating: Boolean,
-    onDownload: () -> Unit,
-    onShare: () -> Unit
+private fun BackgroundControlPanel(
+    hasCustomBackground: Boolean,
+    backgroundOpacity: Float,
+    backgroundBlur: Int,
+    onPickBackground: () -> Unit,
+    onRemoveBackground: () -> Unit,
+    onOpacityChange: (Float) -> Unit,
+    onBlurChange: (Int) -> Unit
 ) {
-    Surface(
-        color = Colors.backgroundSecondary,
-        tonalElevation = 8.dp,
-        border = BorderStroke(1.dp, Colors.border)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Spacing.lg, vertical = Spacing.md)
-                .navigationBarsPadding(),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.md)
-        ) {
-            // Download button
+        if (!hasCustomBackground) {
+            // Pick background button
             OutlinedButton(
-                onClick = onDownload,
-                enabled = !isSaving && !isGenerating,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp),
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.5.dp, if (isSaving) Colors.textMuted else Colors.primary),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = Colors.primary,
-                    disabledContentColor = Colors.textMuted
-                )
+                onClick = onPickBackground,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, Colors.primary.copy(alpha = 0.5f)),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
             ) {
-                if (isSaving) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        color = Colors.textMuted,
-                        strokeWidth = 2.dp
-                    )
-                    Spacer(modifier = Modifier.width(Spacing.sm))
-                    Text("Saving...", fontWeight = FontWeight.SemiBold)
-                } else {
-                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(Spacing.sm))
-                    Text("Download", fontWeight = FontWeight.SemiBold)
+                Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Choose from Gallery", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
+        } else {
+            // Controls for existing background
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.CheckCircle, null, tint = Colors.success, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Background set", style = AppTextStyles.small, color = Colors.textSecondary, modifier = Modifier.weight(1f))
+                TextButton(onClick = onPickBackground) {
+                    Text("Change", fontSize = 12.sp, color = Colors.primary)
+                }
+                TextButton(onClick = onRemoveBackground) {
+                    Text("Remove", fontSize = 12.sp, color = Colors.error)
                 }
             }
 
-            // Share button
-            Button(
-                onClick = onShare,
-                enabled = !isSaving && !isGenerating,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Colors.primary,
-                    contentColor = Colors.buttonText,
-                    disabledContainerColor = Colors.backgroundTertiary,
-                    disabledContentColor = Colors.textMuted
-                )
+            // Opacity slider
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (isGenerating) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        color = Colors.buttonText,
-                        strokeWidth = 2.dp
+                Text("Opacity", style = AppTextStyles.caption, color = Colors.textMuted, modifier = Modifier.width(60.dp))
+                Slider(
+                    value = backgroundOpacity,
+                    onValueChange = onOpacityChange,
+                    valueRange = 0.1f..1.0f,
+                    modifier = Modifier.weight(1f),
+                    colors = SliderDefaults.colors(
+                        thumbColor = Colors.primary,
+                        activeTrackColor = Colors.primary
                     )
-                    Spacer(modifier = Modifier.width(Spacing.sm))
-                    Text("Generating...", fontWeight = FontWeight.Bold)
-                } else {
-                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(Spacing.sm))
-                    Text("Share", fontWeight = FontWeight.Bold)
+                )
+                Text(
+                    "${(backgroundOpacity * 100).toInt()}%",
+                    style = AppTextStyles.caption,
+                    color = Colors.textSecondary,
+                    modifier = Modifier.width(36.dp),
+                    textAlign = TextAlign.End
+                )
+            }
+
+            // Blur slider
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Blur", style = AppTextStyles.caption, color = Colors.textMuted, modifier = Modifier.width(60.dp))
+                Slider(
+                    value = backgroundBlur.toFloat(),
+                    onValueChange = { onBlurChange(it.toInt()) },
+                    valueRange = 0f..50f,
+                    modifier = Modifier.weight(1f),
+                    colors = SliderDefaults.colors(
+                        thumbColor = Colors.primary,
+                        activeTrackColor = Colors.primary
+                    )
+                )
+                Text(
+                    "$backgroundBlur",
+                    style = AppTextStyles.caption,
+                    color = Colors.textSecondary,
+                    modifier = Modifier.width(36.dp),
+                    textAlign = TextAlign.End
+                )
+            }
+        }
+    }
+}
+
+/* ═══════════════════════ CUSTOM STICKER PANEL ═══════════════════════ */
+
+@Composable
+private fun CustomStickerPanel(
+    customStickers: List<CustomSticker>,
+    onPickSticker: () -> Unit,
+    onRemove: (Int) -> Unit,
+    onScaleChange: (Int, Float) -> Unit,
+    onRotationChange: (Int, Float) -> Unit,
+    onOpacityChange: (Int, Float) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+    ) {
+        // Add sticker button
+        OutlinedButton(
+            onClick = onPickSticker,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, Colors.primary.copy(alpha = 0.5f)),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary),
+            enabled = customStickers.size < 10
+        ) {
+            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                if (customStickers.size < 10) "Add Image Sticker" else "Max 10 stickers",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        if (customStickers.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        // List of placed custom stickers with controls
+        customStickers.forEachIndexed { index, sticker ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2332)),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.4f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 3.dp)
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    // Header row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Image,
+                            contentDescription = null,
+                            tint = Colors.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            "Sticker ${index + 1}",
+                            style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold),
+                            color = Colors.textPrimary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = { onRemove(index) },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Close, null, tint = Colors.error, modifier = Modifier.size(16.dp))
+                        }
+                    }
+
+                    // Scale slider
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Size", style = AppTextStyles.caption, color = Colors.textMuted, modifier = Modifier.width(48.dp))
+                        Slider(
+                            value = sticker.scale,
+                            onValueChange = { onScaleChange(index, it) },
+                            valueRange = 0.1f..3.0f,
+                            modifier = Modifier.weight(1f),
+                            colors = SliderDefaults.colors(thumbColor = Colors.primary, activeTrackColor = Colors.primary)
+                        )
+                    }
+
+                    // Rotation slider
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Rotate", style = AppTextStyles.caption, color = Colors.textMuted, modifier = Modifier.width(48.dp))
+                        Slider(
+                            value = sticker.rotation,
+                            onValueChange = { onRotationChange(index, it) },
+                            valueRange = -180f..180f,
+                            modifier = Modifier.weight(1f),
+                            colors = SliderDefaults.colors(thumbColor = Colors.accent, activeTrackColor = Colors.accent)
+                        )
+                        Text(
+                            "${sticker.rotation.toInt()}°",
+                            style = AppTextStyles.caption,
+                            color = Colors.textSecondary,
+                            modifier = Modifier.width(36.dp),
+                            textAlign = TextAlign.End
+                        )
+                    }
+
+                    // Opacity slider
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Fade", style = AppTextStyles.caption, color = Colors.textMuted, modifier = Modifier.width(48.dp))
+                        Slider(
+                            value = sticker.opacity,
+                            onValueChange = { onOpacityChange(index, it) },
+                            valueRange = 0.1f..1.0f,
+                            modifier = Modifier.weight(1f),
+                            colors = SliderDefaults.colors(thumbColor = Colors.primary, activeTrackColor = Colors.primary)
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-/* ================================ HELPERS ================================ */
+/* ═══════════════════════ HELPERS ═══════════════════════ */
 
 private fun stickerIcon(iconName: String): ImageVector {
     return when (iconName) {
@@ -926,7 +1308,7 @@ private fun stickerIcon(iconName: String): ImageVector {
         "zap" -> Icons.Default.FlashOn
         "heart" -> Icons.Default.Favorite
         "activity" -> Icons.Default.LocalFireDepartment
-        "trending-up" -> Icons.Default.TrendingUp
+        "trending-up" -> Icons.AutoMirrored.Filled.TrendingUp
         "repeat" -> Icons.Default.Repeat
         "bar-chart" -> Icons.Default.BarChart
         "shield" -> Icons.Default.Shield

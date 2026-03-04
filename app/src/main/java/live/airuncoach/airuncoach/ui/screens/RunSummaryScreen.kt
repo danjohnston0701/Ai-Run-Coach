@@ -106,6 +106,9 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
+/** When true, charts should fill all available space instead of using a fixed height */
+private val LocalFullscreenChart = compositionLocalOf { false }
+
 /**
  * FLAGSHIP Run Summary Screen
  * - 3 tabs (Summary/Data/Achievements)
@@ -172,16 +175,11 @@ fun RunSummaryScreenFlagship(
             isLoadingRun -> CenterLoading(padding)
             loadError != null -> ErrorViewFlagship(loadError!!, onNavigateBack, onNavigateToLogin)
             runSession != null -> {
-                Column(
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
                 ) {
-                    RunTabsFlagship(
-                        selected = selectedTab,
-                        onSelected = { selectedTab = it }
-                    )
-
                     when (selectedTab) {
                         0 -> SummaryTabFlagship(
                             run = runSession!!,
@@ -208,11 +206,22 @@ fun RunSummaryScreenFlagship(
                             onStruggleRestore = viewModel::restoreStrugglePoint,
                             difficultyLabel = runSession?.let { (it.difficulty ?: it.getDifficultyLevel()).uppercase(Locale.getDefault()) },
                             onRename = { showRenameDialog = true },
-                            onCreateShareImage = { onNavigateToShareImage(runId) }
+                            onCreateShareImage = { onNavigateToShareImage(runId) },
+                            selectedTab = selectedTab,
+                            onTabSelected = { selectedTab = it }
                         )
 
-                        1 -> DataTabFlagship(runSession!!)
-                        2 -> AchievementsTabFlagship(runSession!!, analysisState)
+                        1 -> DataTabFlagship(
+                            runSession!!,
+                            selectedTab = selectedTab,
+                            onTabSelected = { selectedTab = it }
+                        )
+                        2 -> AchievementsTabFlagship(
+                            runSession!!,
+                            analysisState,
+                            selectedTab = selectedTab,
+                            onTabSelected = { selectedTab = it }
+                        )
                     }
                 }
 
@@ -246,32 +255,28 @@ private fun RunSummaryTopBarFlagship(
     onShare: () -> Unit,
     difficultyLabel: String?
 ) {
-    TopAppBar(
-        title = {
-            Column {
-                Text(title, style = AppTextStyles.h4.copy(fontWeight = FontWeight.ExtraBold))
-                if (subtitle.isNotBlank()) {
-                    Text(subtitle, style = AppTextStyles.small, color = Colors.textSecondary)
-                }
+    // Compact header pinned to top — minimal vertical padding so no wasted space
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Colors.backgroundRoot)
+            .statusBarsPadding()
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Colors.textPrimary)
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = AppTextStyles.h4.copy(fontWeight = FontWeight.ExtraBold), color = Colors.textPrimary)
+            if (subtitle.isNotBlank()) {
+                Text(subtitle, style = AppTextStyles.small, color = Colors.textSecondary)
             }
-        },
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Colors.textPrimary)
-            }
-        },
-        actions = {
-            IconButton(onClick = onRename) {
-                Icon(Icons.Default.Edit, contentDescription = "Rename", tint = Colors.textPrimary)
-            }
-            // Removed share icon - share is handled in Summary tab
-            // Difficulty moved to Summary tab alongside Run Completed banner
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = Colors.backgroundRoot,
-            titleContentColor = Colors.textPrimary
-        )
-    )
+        }
+        IconButton(onClick = onRename) {
+            Icon(Icons.Default.Edit, contentDescription = "Rename", tint = Colors.textPrimary)
+        }
+    }
 }
 
 @Composable
@@ -339,31 +344,22 @@ private fun SummaryTabFlagship(
     difficultyLabel: String? = null,
     onRename: () -> Unit = {},
     onCreateShareImage: () -> Unit = {},
+    selectedTab: Int = 0,
+    onTabSelected: (Int) -> Unit = {},
 ) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = Spacing.lg),
-        contentPadding = PaddingValues(vertical = Spacing.lg),
+        contentPadding = PaddingValues(bottom = Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Spacing.lg)
     ) {
-        // Run name row - full width with edit button
+        // Tabs scroll with content — not pinned
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = run.name ?: "Run Summary",
-                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.ExtraBold),
-                    color = Colors.textPrimary,
-                    modifier = Modifier.weight(1f)
-                )
-                TextButton(onClick = onRename) {
-                    Text("Edit", color = Colors.primary, fontWeight = FontWeight.Bold)
-                }
-            }
+            RunTabsFlagship(
+                selected = selectedTab,
+                onSelected = onTabSelected
+            )
         }
 
         // Run Completed banner with optional difficulty pill
@@ -374,7 +370,7 @@ private fun SummaryTabFlagship(
         // Garmin recognition badge — shown just below the Run Completed banner
         if (isGarminConnected || run.externalSource == "garmin") {
             item {
-                GarminPoweredByBadge(text = "Run Insights Powered by Garmin")
+                GarminPoweredByBadge(text = "Run data Powered by Garmin")
             }
         }
 
@@ -569,7 +565,7 @@ private fun SummaryTabFlagship(
             }
         }
 
-        item { Spacer(modifier = Modifier.height(Spacing.xl)) }
+        item { Spacer(modifier = Modifier.height(Spacing.sm)) }
     }
 }
 
@@ -1901,12 +1897,13 @@ private fun ChartsSectionFlagship(run: RunSession) {
                     labels = paceElevData.labels,
                     primaryColor = Colors.primary,
                     secondaryColor = Colors.success,
-                    primaryLabel = "min/km",
-                    secondaryLabel = "m",
+                    primaryLabel = "Pace",
+                    secondaryLabel = "Elevation",
                     xTitle = "Distance (km)",
                     primaryFormatter = { v -> formatPaceSeconds(v.toLong()) },
                     secondaryFormatter = { v -> String.format(java.util.Locale.US, "%.0f", v) },
-                    fillSecondary = true
+                    fillSecondary = true,
+                    invertPrimary = true   // Faster pace (lower number) at top
                 )
             }
         }
@@ -1988,6 +1985,8 @@ private fun LineChartCardFlagship(
     accent: Color,
     content: @Composable () -> Unit
 ) {
+    var showFullscreen by remember { mutableStateOf(false) }
+
     Card(
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
         shape = RoundedCornerShape(18.dp),
@@ -2003,7 +2002,7 @@ private fun LineChartCardFlagship(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         title,
                         style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
@@ -2014,14 +2013,109 @@ private fun LineChartCardFlagship(
                         Text(subtitleRight, style = AppTextStyles.caption, color = Colors.textSecondary)
                     }
                 }
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .background(accent, CircleShape)
-                )
+                // Expand button
+                IconButton(
+                    onClick = { showFullscreen = true },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.icon_expand_vector),
+                        contentDescription = "Expand chart",
+                        tint = Colors.textMuted,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
 
             content()
+        }
+    }
+
+    // Fullscreen chart dialog
+    if (showFullscreen) {
+        FullscreenChartDialog(
+            title = title,
+            subtitleLeft = subtitleLeft,
+            subtitleRight = subtitleRight,
+            accent = accent,
+            onDismiss = { showFullscreen = false },
+            content = content
+        )
+    }
+}
+
+/**
+ * Fullscreen dialog that shows a chart at maximum size.
+ * Works in both portrait and landscape. The chart fills all available space.
+ */
+@Composable
+private fun FullscreenChartDialog(
+    title: String,
+    subtitleLeft: String,
+    subtitleRight: String,
+    accent: Color,
+    onDismiss: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Colors.backgroundRoot)
+                .systemBarsPadding()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+            ) {
+                // Header row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            title,
+                            style = AppTextStyles.h4.copy(fontWeight = FontWeight.ExtraBold),
+                            color = Colors.textPrimary
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.lg)) {
+                            Text(subtitleLeft, style = AppTextStyles.body, color = Colors.textSecondary)
+                            Text(subtitleRight, style = AppTextStyles.body, color = Colors.textSecondary)
+                        }
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.icon_x_vector),
+                            contentDescription = "Close",
+                            tint = Colors.textPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Chart fills remaining space — provide via LocalFullscreenChart
+                CompositionLocalProvider(LocalFullscreenChart provides true) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(12.dp))
+                    ) {
+                        content()
+                    }
+                }
+            }
         }
     }
 }
@@ -2038,6 +2132,7 @@ private fun RunLineChartCanvas(
     modifier: Modifier = Modifier,
     height: Dp = 220.dp
 ) {
+    val isFullscreen = LocalFullscreenChart.current
     if (series.y.size < 2) {
         Text("Not enough data to chart.", style = AppTextStyles.caption, color = Colors.textMuted)
         return
@@ -2062,7 +2157,7 @@ private fun RunLineChartCanvas(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(height)
+            .then(if (isFullscreen) Modifier.fillMaxHeight() else Modifier.height(height))
             .clip(RoundedCornerShape(16.dp))
             .background(bgBrush)
             .border(1.dp, Colors.border.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
@@ -2629,9 +2724,11 @@ private fun DualAxisChartCanvas(
     primaryFormatter: (Double) -> String,
     secondaryFormatter: (Double) -> String,
     fillSecondary: Boolean = true,
+    invertPrimary: Boolean = false,  // When true, lower Y values are at top (for pace: faster = top)
     modifier: Modifier = Modifier,
     height: Dp = 250.dp
 ) {
+    val isFullscreen = LocalFullscreenChart.current
     val n = primaryY.size.coerceAtMost(secondaryY.size)
     if (n < 2) {
         Text("Not enough data to chart.", style = AppTextStyles.caption, color = Colors.textMuted)
@@ -2655,7 +2752,7 @@ private fun DualAxisChartCanvas(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(height)
+            .then(if (isFullscreen) Modifier.fillMaxHeight() else Modifier.height(height))
             .clip(RoundedCornerShape(16.dp))
             .background(bgBrush)
             .border(1.dp, Colors.border.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
@@ -2686,7 +2783,9 @@ private fun DualAxisChartCanvas(
             fun xFor(i: Int): Float = leftPadPx + (i.toFloat() / (n - 1).toFloat()) * plotW
             fun priYFor(v: Double): Float {
                 val t = ((v - priMin) / priRange).toFloat()
-                return topPadPx + (1f - t) * plotH
+                // When inverted: lower values (faster pace) at top, higher values (slower) at bottom
+                return if (invertPrimary) topPadPx + t * plotH
+                else topPadPx + (1f - t) * plotH
             }
             fun secYFor(v: Double): Float {
                 val t = ((v - secMin) / secRange).toFloat()
@@ -2705,7 +2804,9 @@ private fun DualAxisChartCanvas(
                     strokeWidth = 1.dp.toPx(),
                     pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f)
                 )
-                val value = priMax - (t.toDouble() * priRange)
+                // When inverted: top = priMin (fast), bottom = priMax (slow)
+                val value = if (invertPrimary) priMin + (t.toDouble() * priRange)
+                            else priMax - (t.toDouble() * priRange)
                 drawContext.canvas.nativeCanvas.apply {
                     val p = android.graphics.Paint().apply {
                         isAntiAlias = true
@@ -4451,14 +4552,21 @@ private fun WeatherPerformanceCard(weather: WeatherData) {
 /* -------------------------------- TAB: DATA -------------------------------- */
 
 @Composable
-private fun DataTabFlagship(run: RunSession) {
+private fun DataTabFlagship(
+    run: RunSession,
+    selectedTab: Int = 1,
+    onTabSelected: (Int) -> Unit = {}
+) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = Spacing.md),
-        contentPadding = PaddingValues(vertical = Spacing.lg),
+        contentPadding = PaddingValues(bottom = Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
+        item {
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected)
+        }
         // ==================== PACE SECTION ====================
         item {
             DataSectionCard(
@@ -4598,7 +4706,7 @@ private fun DataTabFlagship(run: RunSession) {
             }
         }
 
-        item { Spacer(modifier = Modifier.height(Spacing.xl)) }
+        item { Spacer(modifier = Modifier.height(Spacing.sm)) }
     }
 }
 
@@ -4793,14 +4901,22 @@ private fun WeatherMetricFlagship(label: String, value: String) {
 /* ---------------------------- TAB: ACHIEVEMENTS ---------------------------- */
 
 @Composable
-private fun AchievementsTabFlagship(run: RunSession, analysisState: AiAnalysisState) {
+private fun AchievementsTabFlagship(
+    run: RunSession,
+    analysisState: AiAnalysisState,
+    selectedTab: Int = 2,
+    onTabSelected: (Int) -> Unit = {}
+) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = Spacing.lg),
-        contentPadding = PaddingValues(vertical = Spacing.lg),
+        contentPadding = PaddingValues(bottom = Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Spacing.lg)
     ) {
+        item {
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected)
+        }
         item {
             Text(
                 text = "Badges",
@@ -4838,7 +4954,7 @@ private fun AchievementsTabFlagship(run: RunSession, analysisState: AiAnalysisSt
             }
         }
 
-        item { Spacer(modifier = Modifier.height(Spacing.xl)) }
+        item { Spacer(modifier = Modifier.height(Spacing.sm)) }
     }
 }
 

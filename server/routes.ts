@@ -754,6 +754,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } : undefined,
         coachName,
         coachTone,
+        coachAccent: user?.coachAccent || undefined,
       });
       
       // Store the analysis (save the analysis object directly, not wrapped)
@@ -3628,6 +3629,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         weather,
         coachName,
         coachTone,
+        coachAccent,
         wellness,
         hasRoute: hasRoute === true, // Only true if explicitly true - all other values become false
         targetTime: targetTime,
@@ -3636,13 +3638,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         runnerName: req.body.runnerName || user?.name || undefined,
         fitnessLevel: user?.fitnessLevel || undefined,
       });
-      
+
       // Map the briefing text to 'text' field for client compatibility
       // Also generate TTS audio if we have text
       const briefingText = briefing.briefing;
       
       // Generate TTS audio for the briefing
-      const audioBuffer = briefingText ? await aiService.generateTTS(briefingText, mapCoachVoice(coachGender, coachAccent, coachTone)) : null;
+      const briefingVoice = mapCoachVoice(coachGender, coachAccent, coachTone);
+      const briefingTTSInstructions = getCoachTTSInstructions(coachAccent, coachTone, coachGender, coachName);
+      const audioBuffer = briefingText ? await aiService.generateTTS(briefingText, briefingVoice, briefingTTSInstructions) : null;
       
       res.json({
         audio: audioBuffer ? audioBuffer.toString('base64') : null,
@@ -3673,7 +3677,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userVoice = voice || mapCoachVoice(user?.coachGender, user?.coachAccent, coachTone);
       
       const aiService = await import("./ai-service");
-      const audioBuffer = await aiService.generateTTS(text, userVoice);
+      const talkTTSInstructions = getCoachTTSInstructions(user?.coachAccent, coachTone, user?.coachGender, user?.coachName);
+      const audioBuffer = await aiService.generateTTS(text, userVoice, talkTTSInstructions);
       
       // Return as base64 for mobile playback
       const base64Audio = audioBuffer.toString('base64');
@@ -3705,6 +3710,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const coachAccent = user?.coachAccent || 'british';
       const coachName = user?.coachName || 'Coach';
       const voice = mapCoachVoice(coachGender, coachAccent, coachTone);
+      const audioBriefingTTSInstructions = getCoachTTSInstructions(coachAccent, coachTone, coachGender, coachName);
       
       // Fetch weather if not provided
       let weather = clientWeather;
@@ -3777,6 +3783,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         weather,
         coachName,
         coachTone,
+        coachAccent,
         wellness: wellnessData,
         hasRoute: hasRoute || false,
         targetTime: targetTime || null,
@@ -3803,7 +3810,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Generate OpenAI TTS audio from AI-generated text
       let base64Audio: string | null = null;
       try {
-        const audioBuffer = await aiService.generateTTS(speechText, voice);
+        const audioBuffer = await aiService.generateTTS(speechText, voice, audioBriefingTTSInstructions);
         base64Audio = audioBuffer.toString('base64');
       } catch (ttsError) {
         console.warn("Pre-run briefing TTS failed, returning text only:", ttsError);
@@ -3858,36 +3865,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return "inspirational";
   };
 
-  // Helper function to map user coach settings to OpenAI voices
+  // Helper function to map user coach settings to OpenAI base voice
+  // With gpt-4o-mini-tts, the base voice is just the vocal character —
+  // accent and tone are controlled via the `instructions` parameter.
   const mapCoachVoice = (coachGender?: string, coachAccent?: string, coachTone?: string): string => {
     const tone = normalizeCoachTone(coachTone);
-    const accent = normalizeCoachAccent(coachAccent);
-    const isAmerican = accent === 'american';
-    const isBritish = accent === 'british';
-    const isIrish = accent === 'irish';
-    const isScottish = accent === 'scottish';
-    const isAustralian = accent === 'australian';
-    const isNewZealand = accent === 'new zealand' || accent === 'newzealand' || accent === 'nz';
-    const isCommonwealth = isBritish || isIrish || isScottish;
-    const isOceania = isAustralian || isNewZealand;
-
+    
     if (coachGender === 'male') {
-      if (tone === "energetic") return 'echo';
-      if (tone === "motivational" || tone === "inspirational") return 'alloy';
-      if (tone === "calm" || tone === "supportive" || tone === "encouraging") return 'onyx';
-      if (isAmerican) return 'echo';
-      if (isCommonwealth) return 'alloy';
-      if (isOceania) return 'onyx';
-      return 'onyx';
+      // Male voices: echo (energetic/punchy), alloy (warm/motivational), onyx (deep/calm)
+      if (tone === "energetic" || tone === "abrupt" || tone === "tough love" || tone === "toughlove") return 'echo';
+      if (tone === "motivational" || tone === "inspirational" || tone === "playful" || tone === "humorous") return 'alloy';
+      if (tone === "calm" || tone === "supportive" || tone === "encouraging" || tone === "zen" || tone === "mindful") return 'onyx';
+      if (tone === "instructive" || tone === "factual" || tone === "analytical") return 'alloy';
+      if (tone === "friendly") return 'alloy';
+      return 'alloy'; // good default male voice
     } else {
-      if (tone === "energetic") return 'shimmer';
-      if (tone === "motivational" || tone === "inspirational") return 'nova';
-      if (tone === "calm" || tone === "supportive" || tone === "encouraging") return 'fable';
-      if (isAmerican) return 'shimmer';
-      if (isCommonwealth) return 'nova';
-      if (isOceania) return 'fable';
-      return 'fable';
+      // Female voices: shimmer (bright/energetic), nova (warm/inspiring), fable (calm/storytelling)
+      if (tone === "energetic" || tone === "abrupt" || tone === "tough love" || tone === "toughlove") return 'shimmer';
+      if (tone === "motivational" || tone === "inspirational" || tone === "playful" || tone === "humorous") return 'nova';
+      if (tone === "calm" || tone === "supportive" || tone === "encouraging" || tone === "zen" || tone === "mindful") return 'fable';
+      if (tone === "instructive" || tone === "factual" || tone === "analytical") return 'nova';
+      if (tone === "friendly") return 'nova';
+      return 'nova'; // good default female voice
     }
+  };
+
+  // Build TTS instructions for gpt-4o-mini-tts (accent, tone, style)
+  const getCoachTTSInstructions = (coachAccent?: string, coachTone?: string, coachGender?: string, coachName?: string): string => {
+    return aiService.buildTTSInstructions(coachAccent, coachTone, coachGender, coachName);
   };
 
   // Pace Update Coaching with TTS
@@ -3910,7 +3915,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let base64Audio: string | null = null;
       try {
         const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
-        const audioBuffer = await aiService.generateTTS(message, voice);
+        const ttsInstructions = getCoachTTSInstructions(coachAccent, baseTone, coachGender, req.body.coachName);
+        const audioBuffer = await aiService.generateTTS(message, voice, ttsInstructions);
         base64Audio = audioBuffer.toString('base64');
       } catch (ttsError) {
         console.warn("Pace update TTS failed, returning text only:", ttsError);
@@ -3948,7 +3954,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let base64Audio: string | null = null;
       try {
         const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
-        const audioBuffer = await aiService.generateTTS(message, voice);
+        const ttsInstructions = getCoachTTSInstructions(coachAccent, baseTone, coachGender, req.body.coachName);
+        const audioBuffer = await aiService.generateTTS(message, voice, ttsInstructions);
         base64Audio = audioBuffer.toString('base64');
       } catch (ttsError) {
         console.warn("Struggle coaching TTS failed, returning text only:", ttsError);
@@ -3976,7 +3983,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const { coachGender, coachAccent, coachTone } = req.body;
         const voice = mapCoachVoice(coachGender, coachAccent, coachTone);
-        const audioBuffer = await aiService.generateTTS(message, voice);
+        const ttsInstructions = getCoachTTSInstructions(coachAccent, coachTone, coachGender, req.body.coachName);
+        const audioBuffer = await aiService.generateTTS(message, voice, ttsInstructions);
         base64Audio = audioBuffer.toString('base64');
       } catch (ttsError) {
         console.warn("Cadence coaching TTS failed, returning text only:", ttsError);
@@ -4004,7 +4012,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const { coachGender, coachAccent, coachTone } = req.body;
         const voice = mapCoachVoice(coachGender, coachAccent, coachTone);
-        const audioBuffer = await aiService.generateTTS(message, voice);
+        const ttsInstructions = getCoachTTSInstructions(coachAccent, coachTone, coachGender, req.body.coachName);
+        const audioBuffer = await aiService.generateTTS(message, voice, ttsInstructions);
         base64Audio = audioBuffer.toString('base64');
       } catch (ttsError) {
         console.warn("Elevation coaching TTS failed, returning text only:", ttsError);
@@ -4037,7 +4046,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const { coachGender, coachAccent, coachTone } = req.body;
         const voice = mapCoachVoice(coachGender, coachAccent, coachTone);
-        const audioBuffer = await aiService.generateTTS(message, voice);
+        const ttsInstructions = getCoachTTSInstructions(coachAccent, coachTone, coachGender, req.body.coachName);
+        const audioBuffer = await aiService.generateTTS(message, voice, ttsInstructions);
         base64Audio = audioBuffer.toString('base64');
       } catch (ttsError) {
         console.warn("Elite coaching TTS failed, returning text only:", ttsError);
@@ -4074,7 +4084,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let base64Audio: string | null = null;
       try {
         const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
-        const audioBuffer = await aiService.generateTTS(message, voice);
+        const phaseTTSInstructions = getCoachTTSInstructions(coachAccent, baseTone, coachGender, req.body.coachName);
+        const audioBuffer = await aiService.generateTTS(message, voice, phaseTTSInstructions);
         base64Audio = audioBuffer.toString('base64');
       } catch (ttsError) {
         console.warn("Phase coaching TTS failed, returning text only:", ttsError);
@@ -4133,6 +4144,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Add coach settings to context - effectiveTone drives AI personality
       context.coachTone = effectiveTone;
       context.coachName = coachName;
+      context.coachAccent = user?.coachAccent || req.body.coachAccent || undefined;
       
       const aiService = await import("./ai-service");
       const response = await aiService.getWellnessAwareCoachingResponse(message, context);
@@ -4143,7 +4155,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const coachGender = user?.coachGender || 'female';
         const coachAccent = user?.coachAccent || 'british';
         const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
-        const audioBuffer = await aiService.generateTTS(response, voice);
+        const eliteTTSInstructions = getCoachTTSInstructions(coachAccent, baseTone, coachGender, user?.coachName);
+        const audioBuffer = await aiService.generateTTS(response, voice, eliteTTSInstructions);
         base64Audio = audioBuffer.toString('base64');
       } catch (ttsError) {
         console.warn("Talk to coach TTS failed, returning text only:", ttsError);
@@ -4205,6 +4218,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         elapsedMinutes: elapsedMinutes || 0,
         coachName,
         coachTone: effectiveTone,
+        coachAccent: user?.coachAccent || 'british',
         wellness,
       });
       
@@ -4214,7 +4228,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const coachGender = user?.coachGender || 'female';
         const coachAccent = user?.coachAccent || 'british';
         const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
-        const audioBuffer = await aiService.generateTTS(response, voice);
+        const eliteTTSInstructions = getCoachTTSInstructions(coachAccent, baseTone, coachGender, user?.coachName);
+        const audioBuffer = await aiService.generateTTS(response, voice, eliteTTSInstructions);
         base64Audio = audioBuffer.toString('base64');
       } catch (ttsError) {
         console.warn("HR coaching TTS failed, returning text only:", ttsError);
@@ -5252,8 +5267,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } : undefined),
           coachName,
           coachTone,
+          coachAccent: user?.coachAccent || body.coachAccent || undefined,
         });
-      } catch (e: any) {
+} catch (e: any) {
         console.error("AI analysis generation failed, falling back to lightweight response:", e);
         ai = {
           summary: `Great run! You covered ${(((body.distance ?? run.distance) || 0) / 1000).toFixed(2)}km in ${Math.round((((body.duration ?? run.duration) || 0) / 1000) / 60)} minutes.`,

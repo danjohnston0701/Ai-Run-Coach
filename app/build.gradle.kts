@@ -4,7 +4,7 @@ plugins {
     id("com.google.devtools.ksp")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.dagger.hilt.android")
-    kotlin("plugin.serialization") version "2.1.0"
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 android {
