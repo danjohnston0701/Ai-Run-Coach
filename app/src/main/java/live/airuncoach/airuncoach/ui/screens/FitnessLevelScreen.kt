@@ -58,8 +58,10 @@ fun FitnessLevelScreen(onNavigateBack: () -> Unit) {
             }
             items(viewModel.fitnessLevels.size) { index ->
                 val level = viewModel.fitnessLevels[index]
+                val description = viewModel.fitnessLevelDescriptions[level] ?: ""
                 FitnessLevelSelector(
                     level = level,
+                    description = description,
                     isSelected = level == fitnessLevel,
                     onClick = { viewModel.onFitnessLevelChanged(level) }
                 )
@@ -86,7 +88,12 @@ fun FitnessLevelScreen(onNavigateBack: () -> Unit) {
 }
 
 @Composable
-fun FitnessLevelSelector(level: String, isSelected: Boolean, onClick: () -> Unit) {
+fun FitnessLevelSelector(
+    level: String,
+    description: String = "",
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -103,11 +110,21 @@ fun FitnessLevelSelector(level: String, isSelected: Boolean, onClick: () -> Unit
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(
-                text = level,
-                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                color = Colors.textPrimary
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = level,
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.textPrimary
+                )
+                if (description.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = description,
+                        style = AppTextStyles.caption,
+                        color = Colors.textSecondary
+                    )
+                }
+            }
             if (isSelected) {
                 RadioButton(
                     selected = true,

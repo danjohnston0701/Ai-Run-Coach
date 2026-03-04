@@ -27,9 +27,10 @@ class AudioPlayerHelper(private val context: Context) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val mainHandler = Handler(Looper.getMainLooper())
     
-    // Safety timeout: if audio doesn't complete within 15 seconds, force-complete
+    // Safety timeout: if audio doesn't complete within this time, force-complete.
+    // Pre-run briefings can be 30-45 seconds, so allow generous timeout.
     private var safetyTimeout: Runnable? = null
-    private val AUDIO_TIMEOUT_MS = 15_000L
+    private val AUDIO_TIMEOUT_MS = 60_000L
     
     // Track whether onComplete has been called to prevent double-invocation
     @Volatile

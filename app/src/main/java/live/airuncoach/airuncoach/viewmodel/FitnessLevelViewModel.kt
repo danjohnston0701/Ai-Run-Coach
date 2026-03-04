@@ -25,7 +25,29 @@ class FitnessLevelViewModel(private val context: Context) : ViewModel() {
     private val _fitnessLevel = MutableStateFlow("")
     val fitnessLevel: StateFlow<String> = _fitnessLevel.asStateFlow()
 
-    val fitnessLevels = listOf("Beginner", "Intermediate", "Advanced")
+    val fitnessLevels = listOf(
+        "Newcomer",
+        "Beginner",
+        "Casual",
+        "Regular",
+        "Committed",
+        "Competitive",
+        "Advanced",
+        "Elite",
+        "Professional"
+    )
+
+    val fitnessLevelDescriptions = mapOf(
+        "Newcomer" to "Just getting started with running — every step counts",
+        "Beginner" to "Building a running habit, can run 1–3 km comfortably",
+        "Casual" to "Running a few times a month for fun and fitness",
+        "Regular" to "Running 2–3 times a week, comfortable at 5–10 km",
+        "Committed" to "Consistent training schedule, running 10–20 km per week",
+        "Competitive" to "Racing regularly, training with structure and goals",
+        "Advanced" to "High-mileage runner, comfortable at half marathon+",
+        "Elite" to "Sub-elite performance, racing at a high level",
+        "Professional" to "Competing or coaching at a professional level"
+    )
 
     init {
         loadFitnessLevel()

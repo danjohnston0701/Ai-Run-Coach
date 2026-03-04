@@ -294,7 +294,7 @@ private fun DifficultyPillFlagship(label: String) {
 
 @Composable
 private fun RunTabsFlagship(selected: Int, onSelected: (Int) -> Unit) {
-    val labels = listOf("Summary", "Data", "Achievements")
+    val labels = listOf("Summary", "Data", "Badges")
     TabRow(
         selectedTabIndex = selected,
         containerColor = Colors.backgroundRoot,
@@ -371,6 +371,13 @@ private fun SummaryTabFlagship(
             RunCompletedBannerWithDifficulty(difficultyLabel = difficultyLabel)
         }
 
+        // Garmin recognition badge — shown just below the Run Completed banner
+        if (isGarminConnected || run.externalSource == "garmin") {
+            item {
+                GarminPoweredByBadge(text = "Run Insights Powered by Garmin")
+            }
+        }
+
         item {
             ShareableSummaryCard(
                 run = run,
@@ -414,13 +421,6 @@ private fun SummaryTabFlagship(
                 onCommentsChange = onCommentsChange,
                 onGenerateAi = onGenerateAi
             )
-        }
-
-        // Garmin recognition badge — shown when user has an active Garmin device
-        if (isGarminConnected || run.externalSource == "garmin") {
-            item {
-                GarminPoweredByBadge(text = "Run Insights Powered by Garmin")
-            }
         }
 
         item {
@@ -710,6 +710,7 @@ private fun ShareableSummaryCard(
     val distanceKm = run.distance / 1000.0
     val duration = formatDuration(run.duration)
     val avgPace = run.averagePace?.replace("/km", "") ?: "--:--"
+    val avgCadence = if (run.cadence > 0) "${run.cadence} spm" else "-- spm"
 
     val deltaPace = remember(run, lastRunForDelta) {
         lastRunForDelta?.averagePace?.let { last ->
@@ -759,13 +760,42 @@ private fun ShareableSummaryCard(
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                SummaryMiniStat("Distance", String.format(Locale.US, "%.2f km", distanceKm), Colors.primary)
-                SummaryMiniStat("Duration", duration, Colors.success)
-                SummaryMiniStat("Avg Pace", "$avgPace /km", Colors.accent)
+            // 2x2 Stats Grid
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SummaryStatTile(
+                        label = "Distance",
+                        value = String.format(Locale.US, "%.2f km", distanceKm),
+                        accent = Colors.primary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    SummaryStatTile(
+                        label = "Duration",
+                        value = duration,
+                        accent = Colors.success,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SummaryStatTile(
+                        label = "Avg Pace",
+                        value = "$avgPace /km",
+                        accent = Colors.accent,
+                        modifier = Modifier.weight(1f)
+                    )
+                    SummaryStatTile(
+                        label = "Avg Cadence",
+                        value = avgCadence,
+                        accent = Color(0xFF8B5CF6),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
 
             if (!deltaPace.isNullOrBlank()) {
@@ -780,16 +810,28 @@ private fun ShareableSummaryCard(
 }
 
 @Composable
-private fun SummaryMiniStat(label: String, value: String, accent: Color) {
+private fun SummaryStatTile(
+    label: String,
+    value: String,
+    accent: Color,
+    modifier: Modifier = Modifier
+) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(14.dp))
             .background(accent.copy(alpha = 0.10f))
             .border(1.dp, accent.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(label, style = AppTextStyles.caption, color = Colors.textMuted)
-        Text(value, style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            value,
+            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp),
+            color = Colors.textPrimary,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
@@ -1840,6 +1882,63 @@ private fun ChartsSectionFlagship(run: RunSession) {
                 )
             }
         }
+
+        // ===== PACE vs ELEVATION (dual-axis overlay) =====
+        val paceElevData = remember(run.routePoints, run.kmSplits) {
+            buildPaceElevationDualSeries(run.routePoints, run.kmSplits)
+        }
+
+        if (paceElevData.paceY.size >= 2 && paceElevData.elevY.size >= 2) {
+            LineChartCardFlagship(
+                title = "Pace vs Elevation",
+                subtitleLeft = "Pace: ${run.averagePace ?: "—"}",
+                subtitleRight = "Gain: ${run.totalElevationGain.roundToInt()} m",
+                accent = Colors.primary
+            ) {
+                DualAxisChartCanvas(
+                    primaryY = paceElevData.paceY,
+                    secondaryY = paceElevData.elevY,
+                    labels = paceElevData.labels,
+                    primaryColor = Colors.primary,
+                    secondaryColor = Colors.success,
+                    primaryLabel = "min/km",
+                    secondaryLabel = "m",
+                    xTitle = "Distance (km)",
+                    primaryFormatter = { v -> formatPaceSeconds(v.toLong()) },
+                    secondaryFormatter = { v -> String.format(java.util.Locale.US, "%.0f", v) },
+                    fillSecondary = true
+                )
+            }
+        }
+
+        // ===== CADENCE vs ELEVATION (dual-axis overlay) =====
+        val cadElevData = remember(run.routePoints) {
+            buildCadenceElevationDualSeries(run.routePoints)
+        }
+
+        if (cadElevData.paceY.size >= 2 && cadElevData.elevY.size >= 2) {
+            val avgCadElev = cadElevData.paceY.average().roundToInt()
+            LineChartCardFlagship(
+                title = "Cadence vs Elevation",
+                subtitleLeft = "Avg: $avgCadElev spm",
+                subtitleRight = "Gain: ${run.totalElevationGain.roundToInt()} m",
+                accent = Color(0xFF8B5CF6)
+            ) {
+                DualAxisChartCanvas(
+                    primaryY = cadElevData.paceY,
+                    secondaryY = cadElevData.elevY,
+                    labels = cadElevData.labels,
+                    primaryColor = Color(0xFF8B5CF6),
+                    secondaryColor = Colors.success,
+                    primaryLabel = "spm",
+                    secondaryLabel = "m",
+                    xTitle = "Distance (km)",
+                    primaryFormatter = { v -> "${v.roundToInt()}" },
+                    secondaryFormatter = { v -> String.format(java.util.Locale.US, "%.0f", v) },
+                    fillSecondary = true
+                )
+            }
+        }
     }
 }
 
@@ -2406,6 +2505,364 @@ private fun buildCadenceSeries(points: List<LocationPoint>, mode: ChartMode): La
     }
 
     return LabeledSeries(xOut, smoothY(yOut, 5), labels)
+}
+
+/* -------------------- DUAL-AXIS SERIES DATA -------------------- */
+
+private data class DualSeriesData(
+    val paceY: List<Double>,   // primary axis (pace or cadence)
+    val elevY: List<Double>,   // secondary axis (elevation)
+    val labels: List<String>   // x-axis labels (distance in km)
+)
+
+/**
+ * Build aligned pace + elevation series over distance.
+ * Both series share the same x-axis (distance in km) and same number of data points.
+ */
+private fun buildPaceElevationDualSeries(
+    points: List<LocationPoint>,
+    kmSplits: List<KmSplit>
+): DualSeriesData {
+    val valid = points.filter {
+        it.latitude != 0.0 && it.longitude != 0.0 && it.altitude != null && it.speed != null && it.speed > 0.2f
+    }
+    if (valid.size < 4) return DualSeriesData(emptyList(), emptyList(), emptyList())
+
+    val paceOut = mutableListOf<Double>()
+    val elevOut = mutableListOf<Double>()
+    val labels = mutableListOf<String>()
+
+    var cumulativeMeters = 0.0
+    val step = (valid.size / 200f).coerceAtLeast(1f).toInt()
+
+    var i = 1
+    while (i < valid.size) {
+        val prev = valid[i - 1]
+        val curr = valid[i]
+        cumulativeMeters += haversineMeters(prev.latitude, prev.longitude, curr.latitude, curr.longitude)
+
+        val alt = curr.altitude ?: run { i += step; continue }
+        val speed = curr.speed ?: run { i += step; continue }
+        if (speed < 0.2f) { i += step; continue }
+
+        // Pace in seconds per km
+        val paceSecPerKm = 1000.0 / speed.toDouble()
+
+        val km = cumulativeMeters / 1000.0
+        labels.add(String.format(java.util.Locale.US, "%.1f", km))
+        paceOut.add(paceSecPerKm)
+        elevOut.add(alt.toDouble())
+
+        i += step
+    }
+
+    if (paceOut.size < 2) return DualSeriesData(emptyList(), emptyList(), emptyList())
+
+    return DualSeriesData(
+        paceY = smoothY(paceOut, 7),
+        elevY = smoothY(elevOut, 5),
+        labels = labels
+    )
+}
+
+/**
+ * Build aligned cadence + elevation series over distance.
+ */
+private fun buildCadenceElevationDualSeries(
+    points: List<LocationPoint>
+): DualSeriesData {
+    val valid = points.filter {
+        it.latitude != 0.0 && it.longitude != 0.0 && it.altitude != null &&
+                it.cadence != null && it.cadence > 0
+    }
+    if (valid.size < 4) return DualSeriesData(emptyList(), emptyList(), emptyList())
+
+    val cadOut = mutableListOf<Double>()
+    val elevOut = mutableListOf<Double>()
+    val labels = mutableListOf<String>()
+
+    var cumulativeMeters = 0.0
+    val step = (valid.size / 200f).coerceAtLeast(1f).toInt()
+
+    var i = 1
+    while (i < valid.size) {
+        val prev = valid[i - 1]
+        val curr = valid[i]
+        cumulativeMeters += haversineMeters(prev.latitude, prev.longitude, curr.latitude, curr.longitude)
+
+        val alt = curr.altitude ?: run { i += step; continue }
+        val cad = curr.cadence ?: run { i += step; continue }
+
+        val km = cumulativeMeters / 1000.0
+        labels.add(String.format(java.util.Locale.US, "%.1f", km))
+        cadOut.add(cad.toDouble())
+        elevOut.add(alt.toDouble())
+
+        i += step
+    }
+
+    if (cadOut.size < 2) return DualSeriesData(emptyList(), emptyList(), emptyList())
+
+    return DualSeriesData(
+        paceY = smoothY(cadOut, 5),
+        elevY = smoothY(elevOut, 5),
+        labels = labels
+    )
+}
+
+/* -------------------- DUAL-AXIS CHART CANVAS -------------------- */
+
+/**
+ * Dual-axis line chart: primary line (left Y axis) + secondary filled area (right Y axis).
+ * Used for Pace vs Elevation and Cadence vs Elevation overlays.
+ */
+@Composable
+private fun DualAxisChartCanvas(
+    primaryY: List<Double>,
+    secondaryY: List<Double>,
+    labels: List<String>,
+    primaryColor: Color,
+    secondaryColor: Color,
+    primaryLabel: String,
+    secondaryLabel: String,
+    xTitle: String,
+    primaryFormatter: (Double) -> String,
+    secondaryFormatter: (Double) -> String,
+    fillSecondary: Boolean = true,
+    modifier: Modifier = Modifier,
+    height: Dp = 250.dp
+) {
+    val n = primaryY.size.coerceAtMost(secondaryY.size)
+    if (n < 2) {
+        Text("Not enough data to chart.", style = AppTextStyles.caption, color = Colors.textMuted)
+        return
+    }
+
+    val animProgress by animateFloatAsState(
+        targetValue = n.toFloat(),
+        animationSpec = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+        label = "dualChartProgress"
+    )
+    val reveal = (animProgress / n.toFloat()).coerceIn(0f, 1f)
+
+    val bgBrush = Brush.verticalGradient(
+        colors = listOf(
+            primaryColor.copy(alpha = 0.08f),
+            Colors.backgroundRoot.copy(alpha = 0.0f)
+        )
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(RoundedCornerShape(16.dp))
+            .background(bgBrush)
+            .border(1.dp, Colors.border.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+            .padding(12.dp)
+    ) {
+        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+            if (n < 2) return@Canvas
+
+            // Compute ranges
+            val priMin = primaryY.take(n).minOrNull() ?: 0.0
+            val priMax = primaryY.take(n).maxOrNull() ?: 0.0
+            val priRange = (priMax - priMin).takeIf { it > 1e-9 } ?: 1.0
+
+            val secMin = secondaryY.take(n).minOrNull() ?: 0.0
+            val secMax = secondaryY.take(n).maxOrNull() ?: 0.0
+            val secRange = (secMax - secMin).takeIf { it > 1e-9 } ?: 1.0
+
+            val leftPadPx = 50.dp.toPx()
+            val rightPadPx = 50.dp.toPx()
+            val bottomPadPx = 22.dp.toPx()
+            val topPadPx = 8.dp.toPx()
+
+            val w = size.width
+            val h = size.height
+            val plotW = (w - leftPadPx - rightPadPx).coerceAtLeast(1f)
+            val plotH = (h - topPadPx - bottomPadPx).coerceAtLeast(1f)
+
+            fun xFor(i: Int): Float = leftPadPx + (i.toFloat() / (n - 1).toFloat()) * plotW
+            fun priYFor(v: Double): Float {
+                val t = ((v - priMin) / priRange).toFloat()
+                return topPadPx + (1f - t) * plotH
+            }
+            fun secYFor(v: Double): Float {
+                val t = ((v - secMin) / secRange).toFloat()
+                return topPadPx + (1f - t) * plotH
+            }
+
+            // --- Left Y axis gridlines + labels (primary) ---
+            val ticks = 3
+            for (i in 0..ticks) {
+                val t = i / ticks.toFloat()
+                val y = topPadPx + t * plotH
+                drawLine(
+                    color = Colors.border.copy(alpha = 0.18f),
+                    start = Offset(leftPadPx, y),
+                    end = Offset(leftPadPx + plotW, y),
+                    strokeWidth = 1.dp.toPx(),
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f)
+                )
+                val value = priMax - (t.toDouble() * priRange)
+                drawContext.canvas.nativeCanvas.apply {
+                    val p = android.graphics.Paint().apply {
+                        isAntiAlias = true
+                        color = primaryColor.copy(alpha = 0.85f).toArgb()
+                        textSize = 10.sp.toPx()
+                        textAlign = android.graphics.Paint.Align.RIGHT
+                    }
+                    drawText(primaryFormatter(value), leftPadPx - 6.dp.toPx(), y + 4.dp.toPx(), p)
+                }
+            }
+
+            // --- Right Y axis labels (secondary) ---
+            for (i in 0..ticks) {
+                val t = i / ticks.toFloat()
+                val y = topPadPx + t * plotH
+                val value = secMax - (t.toDouble() * secRange)
+                drawContext.canvas.nativeCanvas.apply {
+                    val p = android.graphics.Paint().apply {
+                        isAntiAlias = true
+                        color = secondaryColor.copy(alpha = 0.85f).toArgb()
+                        textSize = 10.sp.toPx()
+                        textAlign = android.graphics.Paint.Align.LEFT
+                    }
+                    drawText(secondaryFormatter(value), leftPadPx + plotW + 6.dp.toPx(), y + 4.dp.toPx(), p)
+                }
+            }
+
+            val lastIdx = ((n - 1) * reveal).roundToInt().coerceIn(1, n - 1)
+
+            // --- Secondary (elevation): filled area ---
+            val secPoints = ArrayList<Offset>(lastIdx + 1)
+            for (i in 0..lastIdx) {
+                secPoints.add(Offset(xFor(i), secYFor(secondaryY[i])))
+            }
+
+            val secPath = buildSmoothPath(secPoints)
+
+            if (fillSecondary) {
+                val fillPath = Path().apply {
+                    addPath(secPath)
+                    lineTo(secPoints.last().x, topPadPx + plotH)
+                    lineTo(secPoints.first().x, topPadPx + plotH)
+                    close()
+                }
+                drawPath(
+                    path = fillPath,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            secondaryColor.copy(alpha = 0.22f),
+                            secondaryColor.copy(alpha = 0.04f),
+                            Color.Transparent
+                        ),
+                        startY = topPadPx,
+                        endY = topPadPx + plotH
+                    )
+                )
+            }
+
+            // Secondary line (thin, behind primary)
+            drawPath(
+                path = secPath,
+                color = secondaryColor.copy(alpha = 0.55f),
+                style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+
+            // --- Primary line (pace / cadence): bold line on top ---
+            val priPoints = ArrayList<Offset>(lastIdx + 1)
+            for (i in 0..lastIdx) {
+                priPoints.add(Offset(xFor(i), priYFor(primaryY[i])))
+            }
+
+            val priPath = buildSmoothPath(priPoints)
+            drawPath(
+                path = priPath,
+                color = primaryColor,
+                style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+
+            // End dots
+            val priEnd = priPoints.last()
+            drawCircle(color = primaryColor, radius = 4.dp.toPx(), center = priEnd)
+            drawCircle(color = Colors.backgroundRoot, radius = 2.dp.toPx(), center = priEnd)
+
+            // --- x labels ---
+            val xLabelIndices = listOf(0, (n - 1) / 2, n - 1).distinct()
+            xLabelIndices.forEach { idx ->
+                val label = labels.getOrNull(idx) ?: idx.toString()
+                val x = xFor(idx)
+                drawContext.canvas.nativeCanvas.apply {
+                    val p = android.graphics.Paint().apply {
+                        isAntiAlias = true
+                        color = Colors.textMuted.copy(alpha = 0.9f).toArgb()
+                        textSize = 10.sp.toPx()
+                        textAlign = android.graphics.Paint.Align.CENTER
+                    }
+                    drawText(label, x, topPadPx + plotH + 16.dp.toPx(), p)
+                }
+            }
+
+            // Axis unit labels
+            drawContext.canvas.nativeCanvas.apply {
+                // Left axis label
+                val pL = android.graphics.Paint().apply {
+                    isAntiAlias = true
+                    color = primaryColor.copy(alpha = 0.85f).toArgb()
+                    textSize = 10.sp.toPx()
+                    textAlign = android.graphics.Paint.Align.LEFT
+                }
+                drawText(primaryLabel, leftPadPx, 12.dp.toPx(), pL)
+
+                // Right axis label
+                val pR = android.graphics.Paint().apply {
+                    isAntiAlias = true
+                    color = secondaryColor.copy(alpha = 0.85f).toArgb()
+                    textSize = 10.sp.toPx()
+                    textAlign = android.graphics.Paint.Align.RIGHT
+                }
+                drawText(secondaryLabel, leftPadPx + plotW, 12.dp.toPx(), pR)
+
+                // x-axis title
+                val pX = android.graphics.Paint().apply {
+                    isAntiAlias = true
+                    color = Colors.textMuted.copy(alpha = 0.85f).toArgb()
+                    textSize = 10.sp.toPx()
+                    textAlign = android.graphics.Paint.Align.RIGHT
+                }
+                drawText(xTitle, leftPadPx + plotW, topPadPx + plotH + 16.dp.toPx(), pX)
+            }
+        }
+
+        // Legend row
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(primaryColor, CircleShape)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(primaryLabel, style = AppTextStyles.caption.copy(fontSize = 10.sp), color = primaryColor)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(secondaryColor, CircleShape)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(secondaryLabel, style = AppTextStyles.caption.copy(fontSize = 10.sp), color = secondaryColor)
+            }
+        }
+    }
 }
 
 private fun parsePaceToSeconds(pace: String): Int {
@@ -4346,7 +4803,7 @@ private fun AchievementsTabFlagship(run: RunSession, analysisState: AiAnalysisSt
     ) {
         item {
             Text(
-                text = "Achievements",
+                text = "Badges",
                 style = AppTextStyles.h3.copy(fontWeight = FontWeight.ExtraBold),
                 color = Colors.textPrimary
             )
@@ -4363,7 +4820,7 @@ private fun AchievementsTabFlagship(run: RunSession, analysisState: AiAnalysisSt
                 }
 
                 is AiAnalysisState.Basic -> EmptyStateCardFlagship("Generate comprehensive insights to detect personal bests.")
-                else -> EmptyStateCardFlagship("Generate AI insights to see achievements and personal bests.")
+                else -> EmptyStateCardFlagship("Generate AI insights to see badges and personal bests.")
             }
         }
 
@@ -4779,7 +5236,7 @@ private fun StrugglePointCard(
     onComment: (String, String) -> Unit,
     onDismiss: (String, DismissReason) -> Unit
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(true) }
     var commentDraft by remember(point.userComment) { mutableStateOf(point.userComment ?: "") }
     var showDismissOptions by remember { mutableStateOf(false) }
 

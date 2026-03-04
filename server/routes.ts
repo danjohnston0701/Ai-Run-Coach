@@ -3633,6 +3633,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         targetTime: targetTime,
         targetPace: targetPace,
         weatherImpact: weatherImpactData,
+        runnerName: req.body.runnerName || user?.name || undefined,
+        fitnessLevel: user?.fitnessLevel || undefined,
       });
       
       // Map the briefing text to 'text' field for client compatibility
@@ -3780,6 +3782,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         targetTime: targetTime || null,
         targetPace: targetPace || null,
         weatherImpact,
+        runnerName: req.body.runnerName || user?.name || undefined,
+        fitnessLevel: user?.fitnessLevel || undefined,
       });
       
       // Build natural speech text from ALL AI response fields

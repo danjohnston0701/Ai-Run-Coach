@@ -39,5 +39,11 @@ data class PhaseCoachingUpdate(
     @SerializedName("projectedFinishSeconds") val projectedFinishSeconds: Double? = null,       // ETA at current pace
     @SerializedName("currentAvgPaceSecondsPerKm") val currentAvgPaceSecondsPerKm: Double? = null, // Overall avg pace
     @SerializedName("rollingPaceSecondsPerKm") val rollingPaceSecondsPerKm: Double? = null,     // Recent rolling pace
-    @SerializedName("progressPercent") val progressPercent: Double? = null                       // 0-100 how far through the run
+    @SerializedName("progressPercent") val progressPercent: Double? = null,                      // 0-100 how far through the run
+    // Runner profile for personalised coaching
+    @SerializedName("fitnessLevel") val fitnessLevel: String? = null,
+    @SerializedName("runnerName") val runnerName: String? = null,
+    @SerializedName("runnerAge") val runnerAge: Int? = null,
+    @SerializedName("runnerWeight") val runnerWeight: Double? = null,
+    @SerializedName("runnerHeight") val runnerHeight: Double? = null  // cm
 )

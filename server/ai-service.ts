@@ -303,8 +303,13 @@ export async function generatePhaseCoaching(params: {
   triggerType?: string;
   navigationInstruction?: string;
   navigationDistance?: number;
+  fitnessLevel?: string;
+  runnerName?: string;
+  runnerAge?: number;
+  runnerWeight?: number;
+  runnerHeight?: number;
 }): Promise<string> {
-  const { phase, distance, targetDistance, elapsedTime, currentPace, currentGrade, totalElevationGain, heartRate, cadence, coachName, coachTone, activityType, hasRoute, targetPace, targetTime, triggerType, navigationInstruction, navigationDistance } = params;
+  const { phase, distance, targetDistance, elapsedTime, currentPace, currentGrade, totalElevationGain, heartRate, cadence, coachName, coachTone, activityType, hasRoute, targetPace, targetTime, triggerType, navigationInstruction, navigationDistance, fitnessLevel, runnerName, runnerAge, runnerWeight, runnerHeight } = params;
   
   const timeMin = Math.floor(elapsedTime / 60);
   const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
@@ -517,9 +522,10 @@ ${cadence ? `Cadence: ${cadence} spm.` : ''}
 
 Give 2-3 sentences of pace coaching. Be specific about the numbers — tell them their actual pace and what they need.
 ${progressPercent > 80 ? "They're in the final stretch — be extra motivating!" : ""}
-Do NOT use markdown, emojis, or bullet points — this will be spoken aloud.`;
+Do NOT use markdown, emojis, or bullet points — this will be spoken aloud.
+Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight into the pace coaching.${runnerFirstName ? ` The runner's name is ${runnerFirstName} — use it naturally but not as a greeting.` : ''}`;
 
-    const paceSystemMsg = `You are ${coachName}, a ${coachTone} running coach giving pace guidance. Be specific with pace numbers (use "X minutes Y seconds per kilometre" format, not "X:YY"). Keep it concise (2-3 sentences). ${toneDirective(coachTone)}`;
+    const paceSystemMsg = `You are ${coachName}, a ${coachTone} running coach giving pace guidance. Be specific with pace numbers (use "X minutes Y seconds per kilometre" format, not "X:YY"). Keep it concise (2-3 sentences). NEVER start with greetings. ${toneDirective(coachTone)}`;
 
     const paceCompletion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -532,6 +538,24 @@ Do NOT use markdown, emojis, or bullet points — this will be spoken aloud.`;
     });
 
     return paceCompletion.choices[0].message.content || `You're running ${avgPaceFormatted} per kilometre, target is ${targetPaceFormatted}.`;
+  }
+
+  // Runner profile context — name, fitness level, physical stats
+  const runnerFirstName = runnerName ? runnerName.split(' ')[0] : null;
+  let runnerProfileContext = '';
+  if (runnerFirstName) {
+    runnerProfileContext += `\nThe runner's name is ${runnerFirstName}. Use their name naturally (not every sentence, but occasionally to personalise).`;
+  }
+  if (fitnessLevel) {
+    runnerProfileContext += `\nRunner's fitness level: ${fitnessLevel}. Tailor your advice complexity and expectations to this level.`;
+  }
+  if (runnerAge) {
+    runnerProfileContext += ` Age: ${runnerAge}.`;
+  }
+  if (runnerWeight && runnerHeight) {
+    const heightM = runnerHeight / 100;
+    const bmi = runnerWeight / (heightM * heightM);
+    runnerProfileContext += ` BMI: ${bmi.toFixed(1)}.`;
   }
 
   // Detect "run start" scenario: phase is EARLY/warmUp and distance is near zero
@@ -548,10 +572,11 @@ Do NOT use markdown, emojis, or bullet points — this will be spoken aloud.`;
     prompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.
 
 The runner has just started their ${activityType || 'run'}${targetDistance ? ` — their target is ${formatDistanceForTTS(targetDistance)}` : ''}${targetTime && targetTime > 0 ? ` in ${formatDurationForTTS(targetTime)}` : ''}.
-${noTerrainRule}
-Give a short, energetic motivational message (2-3 sentences) to kick off their run. Focus on getting them pumped up and ready to go. Do NOT mention distance covered, pace, cadence, or any metrics — the run has literally just begun. Just motivate them!`;
+${noTerrainRule}${runnerProfileContext}
+Give a short, energetic motivational message (2-3 sentences) to kick off their run. Focus on getting them pumped up and ready to go. Do NOT mention distance covered, pace, cadence, or any metrics — the run has literally just begun. Just motivate them!
+CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", or "Hello". Jump straight into the coaching message.${runnerFirstName ? ` You may use "${runnerFirstName}" naturally but not as a greeting opener.` : ''}`;
 
-    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Give a brief, energetic send-off to start the run. No stats or metrics — just motivation. ${toneDirective(coachTone)}`;
+    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Give a brief, energetic send-off to start the run. No stats or metrics — just motivation. NEVER start with "Hey there", "Hey!", "Hi!" or any greeting — jump straight into the coaching. ${toneDirective(coachTone)}`;
   } else {
     // DURING RUN: Include metrics
     const triggerInstruction = is500mCheckin
@@ -570,13 +595,14 @@ ${targetTimeInfo}
 ${hrInfo}
 ${cadenceInfo}
 ${terrainInfo}
-${noTerrainRule}
+${noTerrainRule}${runnerProfileContext}
 ${PACE_FORMAT_RULE}
 ${triggerInstruction} Be ${coachTone} and encouraging.
+CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", "Hello", or "Hey superstar". Jump straight into the coaching content.${runnerFirstName ? ` You may address them as "${runnerFirstName}" naturally within the message but not as an opening greeting.` : ''}
 
 CRITICAL: You MUST weave in at least 2 specific data points from the Runner Status above (e.g. their actual pace like "${spokenPhasePace}", distance "${distance.toFixed(1)}km", time "${timeMin} minutes", cadence, heart rate). Runners want to hear their real numbers — do NOT give vague encouragement without citing their actual stats.${targetPace ? ` You MUST tell the runner whether they are on track for their target pace of ${spokenTargetPace}. ${paceVerdict} — communicate this clearly.` : ''}${targetTime && targetTime > 0 ? ` You MUST mention whether they are on track for their target time of ${formatDurationForTTS(targetTime)}.` : ''}${cadence && cadence > 0 ? ' Include a brief note on their cadence.' : ''}${hasRoute === true ? ' Consider their current terrain if on a hill.' : ''}`;
 
-    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful — always cite the runner's actual numbers (pace, distance, time etc). ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}`;
+    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful — always cite the runner's actual numbers (pace, distance, time etc). NEVER start with greetings like "Hey there", "Hey!", "Hi!" — jump straight into coaching. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}`;
   }
 
   const completion = await openai.chat.completions.create({
@@ -964,7 +990,7 @@ export async function generateTTS(text: string, voice: string = "alloy"): Promis
 }
 
 function buildCoachingSystemPrompt(context: CoachingContext): string {
-  let prompt = `You are an AI running coach. Be encouraging, brief (1-2 sentences max), and specific to the runner's current situation.`;
+  let prompt = `You are an AI running coach. Be encouraging, brief (1-2 sentences max), and specific to the runner's current situation. NEVER start with greetings like "Hey there", "Hey!", "Hi!" — jump straight into coaching.`;
   
   if (context.coachTone) {
     prompt += ` Your tone should be ${context.coachTone}.`;
@@ -1028,6 +1054,11 @@ function buildCoachingSystemPrompt(context: CoachingContext): string {
     } else if (hrPercent >= 85) {
       prompt += ' Heart rate is elevated - monitor effort level.';
     }
+  }
+
+  // Include user's fitness level for tailored coaching
+  if (context.userFitnessLevel) {
+    prompt += `\n\nRunner's fitness level: ${context.userFitnessLevel}. Tailor your advice complexity, pacing expectations, and encouragement style to this level.`;
   }
   
   return prompt;
@@ -1343,6 +1374,8 @@ export async function generateWellnessAwarePreRunBriefing(params: {
   targetTime?: number;
   targetPace?: string;
   weatherImpact?: WeatherImpactData;
+  runnerName?: string;
+  fitnessLevel?: string;
 }): Promise<{
   briefing: string;
   intensityAdvice: string;
@@ -1351,7 +1384,7 @@ export async function generateWellnessAwarePreRunBriefing(params: {
   routeInsight?: string;
   weatherAdvantage?: string;
 }> {
-  const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, activityType, weather, coachName, coachTone, wellness, hasRoute = true, targetTime, targetPace, weatherImpact } = params;
+  const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, activityType, weather, coachName, coachTone, wellness, hasRoute = true, targetTime, targetPace, weatherImpact, runnerName, fitnessLevel } = params;
 
   // Analyze positive weather conditions BEFORE building the prompt
   const weatherAdvantage = analyzePositiveWeatherConditions(weather, weatherImpact);
@@ -1467,7 +1500,10 @@ READINESS COACHING GUIDANCE (use this to personalize the readinessInsight):
     }
   }
   
+  const briefingRunnerName = runnerName ? runnerName.split(' ')[0] : null;
   const prompt = `You are ${coachName}, an AI running coach. Your coaching style is ${coachTone}.
+${briefingRunnerName ? `The runner's name is ${briefingRunnerName}. Use their name naturally in the briefing.` : ''}
+${fitnessLevel ? `Runner's fitness level: ${fitnessLevel}.` : ''}
 
 Generate a personalized pre-run briefing for an upcoming run.
 ${routeInfo}
@@ -1805,6 +1841,22 @@ Analyze this run comprehensively using all available data from the runner's Garm
     if (typeof runData.wasTargetAchieved === "boolean") {
       prompt += `- Target Achieved: ${runData.wasTargetAchieved ? "Yes" : "No"}\n`;
     }
+  }
+
+  // Add user profile for personalised analysis
+  if (userProfile) {
+    prompt += `\n## RUNNER PROFILE:\n`;
+    if (userProfile.fitnessLevel) {
+      prompt += `- Fitness Level: ${userProfile.fitnessLevel}\n`;
+    }
+    if (userProfile.age) {
+      prompt += `- Age: ${userProfile.age}\n`;
+    }
+    if (userProfile.weight) {
+      prompt += `- Weight: ${userProfile.weight}kg\n`;
+    }
+    prompt += `Tailor your analysis depth, pacing expectations, and recommendations to this runner's fitness level. `;
+    prompt += `For example, a "Newcomer" needs simple encouragement and basic form tips, while a "Competitive" or "Elite" runner expects detailed training load analysis and race-specific insights.\n`;
   }
 
   // Add Garmin activity metrics if available

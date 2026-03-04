@@ -24,7 +24,9 @@ object CoachingAudioQueue {
     private const val TAG = "CoachingAudioQueue"
     
     /** Max time any single audio item can hold the queue before being force-completed */
-    private const val STUCK_WATCHDOG_MS = 20_000L
+    /** Max time any single audio item can hold the queue before watchdog kicks in.
+     *  Pre-run briefings can be 30-45s, so allow generous timeout. */
+    private const val STUCK_WATCHDOG_MS = 75_000L
 
     data class AudioRequest(
         val base64Audio: String?,
