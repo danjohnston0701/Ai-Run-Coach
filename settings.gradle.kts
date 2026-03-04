@@ -21,4 +21,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "Ai Run Coach"
 include(":app")
+include(":shared")
  
