@@ -4,6 +4,9 @@ import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -60,18 +63,31 @@ fun ShareImageEditorScreen(
         viewModel.initialize(runId)
     }
 
+    val context = LocalContext.current
+
     var isStickerPanelExpanded by remember { mutableStateOf(false) }
     var isBackgroundPanelExpanded by remember { mutableStateOf(false) }
     var isCustomStickerPanelExpanded by remember { mutableStateOf(false) }
 
-    // Gallery picker for background image
+    val cameraPhotoUri = remember {
+        val photoFile = File(context.cacheDir, "share_bg_photo.jpg")
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", photoFile)
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success) {
+            viewModel.setCustomBackground(cameraPhotoUri)
+        }
+    }
+
     val backgroundPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let { viewModel.setCustomBackground(it) }
     }
 
-    // Gallery picker for custom stickers
     val stickerPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
@@ -139,6 +155,7 @@ fun ShareImageEditorScreen(
                     backgroundOpacity = state.backgroundOpacity,
                     backgroundBlur = state.backgroundBlur,
                     onPickBackground = { backgroundPickerLauncher.launch("image/*") },
+                    onTakePhoto = { cameraLauncher.launch(cameraPhotoUri) },
                     onRemoveBackground = { viewModel.removeCustomBackground() },
                     onBackgroundOpacityChange = { viewModel.setBackgroundOpacity(it) },
                     onBackgroundBlurChange = { viewModel.setBackgroundBlur(it) },
@@ -377,6 +394,7 @@ private fun ControlStrip(
     backgroundOpacity: Float,
     backgroundBlur: Int,
     onPickBackground: () -> Unit,
+    onTakePhoto: () -> Unit,
     onRemoveBackground: () -> Unit,
     onBackgroundOpacityChange: (Float) -> Unit,
     onBackgroundBlurChange: (Int) -> Unit,
@@ -578,6 +596,7 @@ private fun ControlStrip(
                     backgroundOpacity = backgroundOpacity,
                     backgroundBlur = backgroundBlur,
                     onPickBackground = onPickBackground,
+                    onTakePhoto = onTakePhoto,
                     onRemoveBackground = onRemoveBackground,
                     onOpacityChange = onBackgroundOpacityChange,
                     onBlurChange = onBackgroundBlurChange
@@ -1084,6 +1103,7 @@ private fun BackgroundControlPanel(
     backgroundOpacity: Float,
     backgroundBlur: Int,
     onPickBackground: () -> Unit,
+    onTakePhoto: () -> Unit,
     onRemoveBackground: () -> Unit,
     onOpacityChange: (Float) -> Unit,
     onBlurChange: (Int) -> Unit
@@ -1094,20 +1114,34 @@ private fun BackgroundControlPanel(
             .padding(horizontal = 16.dp, vertical = 4.dp)
     ) {
         if (!hasCustomBackground) {
-            // Pick background button
-            OutlinedButton(
-                onClick = onPickBackground,
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, Colors.primary.copy(alpha = 0.5f)),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Choose from Gallery", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                OutlinedButton(
+                    onClick = onPickBackground,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Colors.primary.copy(alpha = 0.5f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
+                ) {
+                    Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Gallery", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+                OutlinedButton(
+                    onClick = onTakePhoto,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Colors.primary.copy(alpha = 0.5f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
+                ) {
+                    Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Camera", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
             }
         } else {
-            // Controls for existing background
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -1117,6 +1151,9 @@ private fun BackgroundControlPanel(
                 Text("Background set", style = AppTextStyles.small, color = Colors.textSecondary, modifier = Modifier.weight(1f))
                 TextButton(onClick = onPickBackground) {
                     Text("Change", fontSize = 12.sp, color = Colors.primary)
+                }
+                TextButton(onClick = onTakePhoto) {
+                    Text("Camera", fontSize = 12.sp, color = Colors.primary)
                 }
                 TextButton(onClick = onRemoveBackground) {
                     Text("Remove", fontSize = 12.sp, color = Colors.error)

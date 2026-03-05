@@ -39,12 +39,25 @@ export interface PlacedSticker {
   scale: number;
 }
 
+export interface CustomStickerData {
+  imageBase64: string;
+  x: number;
+  y: number;
+  scale: number;
+  width: number;
+  height: number;
+}
+
 export interface GenerateImageRequest {
   templateId: string;
   aspectRatio: AspectRatio;
   stickers: PlacedSticker[];
   runData: RunDataForImage;
   userName?: string;
+  customBackground?: string;
+  backgroundOpacity?: number;
+  backgroundBlur?: number;
+  customStickers?: CustomStickerData[];
 }
 
 export interface RunDataForImage {
@@ -885,12 +898,57 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
     stickersSvg = req.stickers.map((s) => buildStickerSvg(s, req.runData, w, h)).join("\n");
   }
 
+  const hasCustomBg = !!req.customBackground;
+
+  if (hasCustomBg) {
+    svgContent = svgContent.replace(
+      `<rect width="${w}" height="${h}" fill="${C.bg}"/>`,
+      `<rect width="${w}" height="${h}" fill="${C.bg}" opacity="0"/>`
+    );
+  }
+
   const fullSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
     ${svgContent}
     ${stickersSvg}
   </svg>`;
 
-  let svgBuffer = await sharp(Buffer.from(fullSvg)).png({ quality: 95 }).toBuffer();
+  let svgBuffer = await sharp(Buffer.from(fullSvg))
+    .png({ quality: 95 })
+    .toBuffer();
+
+  if (hasCustomBg) {
+    try {
+      let bgBase64 = req.customBackground!;
+      if (bgBase64.startsWith("data:")) {
+        bgBase64 = bgBase64.split(",")[1] || bgBase64;
+      }
+      const bgRaw = Buffer.from(bgBase64, "base64");
+      let bgPipeline = sharp(bgRaw).resize(w, h, { fit: "cover", position: "center" });
+
+      const blurAmount = req.backgroundBlur || 0;
+      if (blurAmount > 0) {
+        const sigma = Math.max(0.3, blurAmount / 10);
+        bgPipeline = bgPipeline.blur(sigma);
+      }
+
+      const opacity = Math.min(Math.max(req.backgroundOpacity ?? 1, 0.1), 1);
+      let bgBuffer = await bgPipeline.ensureAlpha().png().toBuffer();
+
+      if (opacity < 1) {
+        const fadeOverlay = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="${C.bg}" opacity="${(1 - opacity).toFixed(2)}"/></svg>`;
+        const fadeBuffer = await sharp(Buffer.from(fadeOverlay)).png().toBuffer();
+        bgBuffer = await sharp(bgBuffer)
+          .composite([{ input: fadeBuffer, top: 0, left: 0 }])
+          .png().toBuffer();
+      }
+
+      svgBuffer = await sharp(bgBuffer)
+        .composite([{ input: svgBuffer, top: 0, left: 0 }])
+        .png({ quality: 95 }).toBuffer();
+    } catch (e: any) {
+      console.error("Custom background processing error:", e.message);
+    }
+  }
 
   if (template.id === "route-map" && req.runData.gpsTrack && req.runData.gpsTrack.length > 1) {
     const mapRegionH = getRouteMapHeight(w, h);
