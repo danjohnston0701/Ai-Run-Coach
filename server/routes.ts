@@ -3645,7 +3645,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Generate TTS audio for the briefing
       const briefingVoice = mapCoachVoice(coachGender, coachAccent, coachTone);
-      const briefingTTSInstructions = getCoachTTSInstructions(coachAccent, coachTone, coachGender, coachName);
+      const briefingTTSInstructions = await getCoachTTSInstructions(coachAccent, coachTone, coachGender, coachName);
       const audioBuffer = briefingText ? await aiService.generateTTS(briefingText, briefingVoice, briefingTTSInstructions) : null;
       
       res.json({
@@ -3677,7 +3677,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userVoice = voice || mapCoachVoice(user?.coachGender, user?.coachAccent, coachTone);
       
       const aiService = await import("./ai-service");
-      const talkTTSInstructions = getCoachTTSInstructions(user?.coachAccent, coachTone, user?.coachGender, user?.coachName);
+      const talkTTSInstructions = await getCoachTTSInstructions(user?.coachAccent, coachTone, user?.coachGender, user?.coachName);
       const audioBuffer = await aiService.generateTTS(text, userVoice, talkTTSInstructions);
       
       // Return as base64 for mobile playback
@@ -3710,7 +3710,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const coachAccent = user?.coachAccent || 'british';
       const coachName = user?.coachName || 'Coach';
       const voice = mapCoachVoice(coachGender, coachAccent, coachTone);
-      const audioBriefingTTSInstructions = getCoachTTSInstructions(coachAccent, coachTone, coachGender, coachName);
+      const audioBriefingTTSInstructions = await getCoachTTSInstructions(coachAccent, coachTone, coachGender, coachName);
       
       // Fetch weather if not provided
       let weather = clientWeather;
@@ -3916,7 +3916,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let base64Audio: string | null = null;
       try {
         const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
-        const ttsInstructions = getCoachTTSInstructions(coachAccent, baseTone, coachGender, req.body.coachName);
+        const ttsInstructions = await getCoachTTSInstructions(coachAccent, baseTone, coachGender, req.body.coachName);
         const audioBuffer = await aiService.generateTTS(message, voice, ttsInstructions);
         base64Audio = audioBuffer.toString('base64');
       } catch (ttsError) {
@@ -3955,7 +3955,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let base64Audio: string | null = null;
       try {
         const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
-        const ttsInstructions = getCoachTTSInstructions(coachAccent, baseTone, coachGender, req.body.coachName);
+        const ttsInstructions = await getCoachTTSInstructions(coachAccent, baseTone, coachGender, req.body.coachName);
         const audioBuffer = await aiService.generateTTS(message, voice, ttsInstructions);
         base64Audio = audioBuffer.toString('base64');
       } catch (ttsError) {
@@ -3984,7 +3984,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const { coachGender, coachAccent, coachTone } = req.body;
         const voice = mapCoachVoice(coachGender, coachAccent, coachTone);
-        const ttsInstructions = getCoachTTSInstructions(coachAccent, coachTone, coachGender, req.body.coachName);
+        const ttsInstructions = await getCoachTTSInstructions(coachAccent, coachTone, coachGender, req.body.coachName);
         const audioBuffer = await aiService.generateTTS(message, voice, ttsInstructions);
         base64Audio = audioBuffer.toString('base64');
       } catch (ttsError) {
@@ -4013,7 +4013,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const { coachGender, coachAccent, coachTone } = req.body;
         const voice = mapCoachVoice(coachGender, coachAccent, coachTone);
-        const ttsInstructions = getCoachTTSInstructions(coachAccent, coachTone, coachGender, req.body.coachName);
+        const ttsInstructions = await getCoachTTSInstructions(coachAccent, coachTone, coachGender, req.body.coachName);
         const audioBuffer = await aiService.generateTTS(message, voice, ttsInstructions);
         base64Audio = audioBuffer.toString('base64');
       } catch (ttsError) {
@@ -4047,7 +4047,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const { coachGender, coachAccent, coachTone } = req.body;
         const voice = mapCoachVoice(coachGender, coachAccent, coachTone);
-        const ttsInstructions = getCoachTTSInstructions(coachAccent, coachTone, coachGender, req.body.coachName);
+        const ttsInstructions = await getCoachTTSInstructions(coachAccent, coachTone, coachGender, req.body.coachName);
         const audioBuffer = await aiService.generateTTS(message, voice, ttsInstructions);
         base64Audio = audioBuffer.toString('base64');
       } catch (ttsError) {
@@ -4085,7 +4085,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let base64Audio: string | null = null;
       try {
         const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
-        const phaseTTSInstructions = getCoachTTSInstructions(coachAccent, baseTone, coachGender, req.body.coachName);
+        const phaseTTSInstructions = await getCoachTTSInstructions(coachAccent, baseTone, coachGender, req.body.coachName);
         const audioBuffer = await aiService.generateTTS(message, voice, phaseTTSInstructions);
         base64Audio = audioBuffer.toString('base64');
       } catch (ttsError) {
@@ -4156,7 +4156,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const coachGender = user?.coachGender || 'female';
         const coachAccent = user?.coachAccent || 'british';
         const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
-        const eliteTTSInstructions = getCoachTTSInstructions(coachAccent, baseTone, coachGender, user?.coachName);
+        const eliteTTSInstructions = await getCoachTTSInstructions(coachAccent, baseTone, coachGender, user?.coachName);
         const audioBuffer = await aiService.generateTTS(response, voice, eliteTTSInstructions);
         base64Audio = audioBuffer.toString('base64');
       } catch (ttsError) {
@@ -4229,7 +4229,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const coachGender = user?.coachGender || 'female';
         const coachAccent = user?.coachAccent || 'british';
         const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
-        const eliteTTSInstructions = getCoachTTSInstructions(coachAccent, baseTone, coachGender, user?.coachName);
+        const eliteTTSInstructions = await getCoachTTSInstructions(coachAccent, baseTone, coachGender, user?.coachName);
         const audioBuffer = await aiService.generateTTS(response, voice, eliteTTSInstructions);
         base64Audio = audioBuffer.toString('base64');
       } catch (ttsError) {
