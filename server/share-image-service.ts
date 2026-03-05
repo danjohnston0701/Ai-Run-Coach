@@ -931,11 +931,11 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
 async function getLogoBuffer(): Promise<Buffer | null> {
   try {
     const logoPath = path.resolve("server/assets/logo.png");
-    return await sharp(logoPath).resize(72, 72, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer();
+    return await sharp(logoPath).resize(86, 86, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer();
   } catch (e: any) {
     try {
       const altPath = path.resolve("attached_assets/logo_1772693744611.png");
-      return await sharp(altPath).resize(72, 72, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer();
+      return await sharp(altPath).resize(86, 86, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer();
     } catch {
       console.error("Logo not found:", e.message);
       return null;
@@ -1064,7 +1064,7 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
   if (logoBuffer) {
     const logoX = 40;
     const logoY = h - LOGO_ZONE_H + 24;
-    const textX = logoX + 84;
+    const textX = logoX + 100;
 
     const isDarkTemplate = template.id === "run-metrics" || template.id === "minimal-dark";
     const logoBg = isDarkTemplate ? "#0A0A1A" : C.bg;
@@ -1075,8 +1075,8 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
     const brandSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
       <rect x="0" y="${h - LOGO_ZONE_H}" width="${w}" height="${LOGO_ZONE_H}" fill="${logoBg}"/>
       <line x1="60" y1="${h - LOGO_ZONE_H}" x2="${w - 60}" y2="${h - LOGO_ZONE_H}" stroke="${logoLineColor}" stroke-width="1" opacity="0.4"/>
-      <text x="${textX}" y="${logoY + 28}" font-family="${FONT}" font-size="24" font-weight="800" fill="${logoTextColor}" letter-spacing="0.3">AI Run Coach</text>
-      <text x="${textX}" y="${logoY + 50}" font-family="${FONT}" font-size="14" font-weight="500" fill="${logoSubColor}" letter-spacing="0.5">Your AI-Powered Running Partner</text>
+      <text x="${textX}" y="${logoY + 32}" font-family="${FONT}" font-size="29" font-weight="800" fill="${logoTextColor}" letter-spacing="0.3">AI Run Coach</text>
+      <text x="${textX}" y="${logoY + 56}" font-family="${FONT}" font-size="17" font-weight="500" fill="${logoSubColor}" letter-spacing="0.5">Your AI-Powered Running Partner</text>
     </svg>`;
 
     const brandBuffer = await sharp(Buffer.from(brandSvg)).png().toBuffer();
