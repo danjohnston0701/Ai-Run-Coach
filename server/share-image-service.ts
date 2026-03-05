@@ -91,7 +91,7 @@ const C = {
   borderGlow: "#00D4FF",
 };
 
-const FONT = `"SF Pro Display", "Inter", "Helvetica Neue", Arial, sans-serif`;
+const FONT = `'SF Pro Display', 'Inter', 'Helvetica Neue', Arial, sans-serif`;
 
 export const TEMPLATES: ShareTemplate[] = [
   {
