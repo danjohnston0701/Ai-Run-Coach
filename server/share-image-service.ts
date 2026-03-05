@@ -117,6 +117,14 @@ export const TEMPLATES: ShareTemplate[] = [
     aspectRatios: ["1:1", "9:16", "4:5"],
   },
   {
+    id: "run-metrics",
+    name: "Run Metrics",
+    description: "Clean photo overlay with distance, time and pace",
+    category: "stats",
+    preview: "metrics",
+    aspectRatios: ["1:1", "9:16", "4:5"],
+  },
+  {
     id: "route-map",
     name: "Route Map",
     description: "Your GPS route on a real map with stats",
@@ -370,6 +378,77 @@ function buildStatsGridSvg(w: number, h: number, run: RunDataForImage, userName?
     <rect width="${w}" height="${h}" fill="${C.bg}"/>
     ${headerSvg}
     ${ringSvg}
+  `;
+}
+
+function buildRunMetricsSvg(w: number, h: number, run: RunDataForImage, userName?: string): string {
+  const isVertical = h > w;
+  const pad = 48;
+  const bottomY = h - LOGO_ZONE_H;
+
+  const statsBlockH = isVertical ? 320 : 280;
+  const statsTop = bottomY - statsBlockH;
+
+  const gradientOverlay = `
+    <defs>
+      <linearGradient id="photoFade" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#000000" stop-opacity="0"/>
+        <stop offset="40%" stop-color="#000000" stop-opacity="0"/>
+        <stop offset="70%" stop-color="#000000" stop-opacity="0.55"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="0.85"/>
+      </linearGradient>
+    </defs>
+    <rect width="${w}" height="${h}" fill="url(#photoFade)"/>
+  `;
+
+  let y = statsTop + 20;
+
+  let nameSvg = "";
+  if (userName) {
+    nameSvg += `<text x="${pad}" y="${y}" font-family="${FONT}" font-size="20" font-weight="600" fill="#FFFFFF" opacity="0.85">${esc(userName)}</text>`;
+    y += 28;
+  }
+  nameSvg += `<text x="${pad}" y="${y}" font-family="${FONT}" font-size="14" fill="#FFFFFF" opacity="0.55" letter-spacing="0.5">${esc(formatDate(run.completedAt))}</text>`;
+  y += 36;
+
+  const runName = run.name || "Run";
+  nameSvg += `<text x="${pad}" y="${y}" font-family="${FONT}" font-size="28" font-weight="800" fill="#FFFFFF">${esc(runName)}</text>`;
+  y += 46;
+
+  const col1X = pad;
+  const col2X = w * 0.5;
+
+  const labelStyle = `font-family="${FONT}" font-size="15" font-weight="500" fill="#FFFFFF" opacity="0.6"`;
+  const valueStyle = `font-family="${FONT}" font-size="38" font-weight="800" fill="#FFFFFF"`;
+  const unitStyle = `font-family="${FONT}" font-size="20" font-weight="500" fill="#FFFFFF" opacity="0.7"`;
+
+  const paceVal = run.avgPace || "--:--";
+  const timeVal = formatDuration(run.duration || 0);
+  const distVal = run.distance?.toFixed(2) || "0";
+
+  let statsSvg = "";
+
+  statsSvg += `<text x="${col1X}" y="${y}" ${labelStyle}>Pace</text>`;
+  statsSvg += `<text x="${col2X}" y="${y}" ${labelStyle}>Time</text>`;
+  y += 40;
+
+  statsSvg += `<text x="${col1X}" y="${y}" ${valueStyle}>${esc(paceVal)}</text>`;
+  statsSvg += `<text x="${col1X + paceVal.length * 22 + 6}" y="${y}" ${unitStyle}>/km</text>`;
+  statsSvg += `<text x="${col2X}" y="${y}" ${valueStyle}>${esc(timeVal)}</text>`;
+  y += 44;
+
+  statsSvg += `<text x="${col1X}" y="${y}" ${labelStyle}>Distance</text>`;
+  y += 40;
+
+  statsSvg += `<text x="${col1X}" y="${y}" ${valueStyle}>${esc(distVal)}</text>`;
+  statsSvg += `<text x="${col1X + distVal.length * 22 + 6}" y="${y}" ${unitStyle}>km</text>`;
+
+  return `
+    ${globalDefs(w, h)}
+    <rect width="${w}" height="${h}" fill="#1a1a2e"/>
+    ${gradientOverlay}
+    ${nameSvg}
+    ${statsSvg}
   `;
 }
 
@@ -877,6 +956,9 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
     case "stats-grid":
       svgContent = buildStatsGridSvg(w, h, req.runData, req.userName);
       break;
+    case "run-metrics":
+      svgContent = buildRunMetricsSvg(w, h, req.runData, req.userName);
+      break;
     case "route-map":
       svgContent = buildRouteMapSvg(w, h, req.runData, req.userName);
       break;
@@ -901,10 +983,16 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
   const hasCustomBg = !!req.customBackground;
 
   if (hasCustomBg) {
-    svgContent = svgContent.replace(
-      `<rect width="${w}" height="${h}" fill="${C.bg}"/>`,
-      `<rect width="${w}" height="${h}" fill="${C.bg}" opacity="0"/>`
-    );
+    const bgRectPattern = `<rect width="${w}" height="${h}" fill="`;
+    const bgRectIdx = svgContent.indexOf(bgRectPattern);
+    if (bgRectIdx >= 0) {
+      const afterFill = svgContent.indexOf('"/>', bgRectIdx + bgRectPattern.length);
+      if (afterFill >= 0) {
+        svgContent = svgContent.substring(0, bgRectIdx)
+          + `<rect width="${w}" height="${h}" fill="#000000" opacity="0"/>`
+          + svgContent.substring(afterFill + 3);
+      }
+    }
   }
 
   const fullSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
@@ -978,11 +1066,17 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
     const logoY = h - LOGO_ZONE_H + 24;
     const textX = logoX + 84;
 
+    const isDarkTemplate = template.id === "run-metrics" || template.id === "minimal-dark";
+    const logoBg = isDarkTemplate ? "#0A0A1A" : C.bg;
+    const logoTextColor = isDarkTemplate ? "#FFFFFF" : C.textDark;
+    const logoSubColor = isDarkTemplate ? "rgba(255,255,255,0.5)" : C.textMuted;
+    const logoLineColor = isDarkTemplate ? "rgba(255,255,255,0.15)" : C.border;
+
     const brandSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
-      <rect x="0" y="${h - LOGO_ZONE_H}" width="${w}" height="${LOGO_ZONE_H}" fill="${C.bg}"/>
-      <line x1="60" y1="${h - LOGO_ZONE_H}" x2="${w - 60}" y2="${h - LOGO_ZONE_H}" stroke="${C.border}" stroke-width="1" opacity="0.4"/>
-      <text x="${textX}" y="${logoY + 28}" font-family="${FONT}" font-size="24" font-weight="800" fill="${C.textDark}" letter-spacing="0.3">AI Run Coach</text>
-      <text x="${textX}" y="${logoY + 50}" font-family="${FONT}" font-size="14" font-weight="500" fill="${C.textMuted}" letter-spacing="0.5">Your AI-Powered Running Partner</text>
+      <rect x="0" y="${h - LOGO_ZONE_H}" width="${w}" height="${LOGO_ZONE_H}" fill="${logoBg}"/>
+      <line x1="60" y1="${h - LOGO_ZONE_H}" x2="${w - 60}" y2="${h - LOGO_ZONE_H}" stroke="${logoLineColor}" stroke-width="1" opacity="0.4"/>
+      <text x="${textX}" y="${logoY + 28}" font-family="${FONT}" font-size="24" font-weight="800" fill="${logoTextColor}" letter-spacing="0.3">AI Run Coach</text>
+      <text x="${textX}" y="${logoY + 50}" font-family="${FONT}" font-size="14" font-weight="500" fill="${logoSubColor}" letter-spacing="0.5">Your AI-Powered Running Partner</text>
     </svg>`;
 
     const brandBuffer = await sharp(Buffer.from(brandSvg)).png().toBuffer();
