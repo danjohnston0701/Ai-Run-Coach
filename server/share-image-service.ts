@@ -250,24 +250,27 @@ function globalDefs(w: number, h: number): string {
 function metricRing(
   cx: number, cy: number, r: number,
   label: string, value: string, unit: string,
-  gradId: string, progress: number
+  gradId: string, progress: number,
+  trackColorHex: string
 ): string {
   const circumference = 2 * Math.PI * r;
-  const strokeW = Math.max(r * 0.14, 10);
-  const dashLen = circumference * Math.min(Math.max(progress, 0.05), 1.0);
-  const gap = circumference - dashLen;
+  const strokeW = Math.round(r * 0.18);
+  const clampedProgress = Math.min(Math.max(progress, 0.08), 0.97);
+  const dashLen = circumference * clampedProgress;
+  const gapLen = circumference - dashLen;
 
-  const valueFontSize = Math.min(Math.round(r * 0.48), 56);
-  const labelFontSize = Math.min(Math.round(r * 0.2), 20);
-  const unitFontSize = Math.min(Math.round(r * 0.18), 18);
+  const labelFontSize = Math.min(Math.round(r * 0.2), 22);
+  const valueFontSize = Math.min(Math.round(r * 0.52), 60);
+  const unitFontSize = Math.min(Math.round(r * 0.17), 18);
 
-  const labelY = cy - r * 0.2;
-  const valueY = cy + r * 0.18;
-  const unitY = valueY + unitFontSize + 6;
+  const labelY = cy - r * 0.22;
+  const valueY = cy + r * 0.2;
+  const unitY = valueY + unitFontSize + 5;
 
   return `
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${C.border}" stroke-width="${strokeW}" opacity="0.08"/>
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="url(#${gradId})" stroke-width="${strokeW}" stroke-linecap="round" stroke-dasharray="${dashLen} ${gap}" transform="rotate(-90 ${cx} ${cy})" filter="url(#ringGlow)"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${trackColorHex}" stroke-width="${strokeW}" opacity="0.18"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="url(#${gradId})" stroke-width="${strokeW}" stroke-linecap="round" stroke-dasharray="${dashLen} ${gapLen}" transform="rotate(-90 ${cx} ${cy})" filter="url(#ringGlow)"/>
+    <circle cx="${cx}" cy="${cy}" r="${r - strokeW * 0.8}" fill="none" stroke="url(#${gradId})" stroke-width="1.5" opacity="0.06"/>
     <text x="${cx}" y="${labelY}" font-family="${FONT}" font-size="${labelFontSize}" font-weight="600" fill="${C.textLight}" text-anchor="middle" letter-spacing="0.5">${esc(label)}</text>
     <text x="${cx}" y="${valueY}" font-family="${FONT}" font-size="${valueFontSize}" font-weight="800" fill="${C.textDark}" text-anchor="middle">${esc(value)}</text>
     ${unit ? `<text x="${cx}" y="${unitY}" font-family="${FONT}" font-size="${unitFontSize}" font-weight="500" fill="${C.textMuted}" text-anchor="middle">${esc(unit)}</text>` : ""}
@@ -275,78 +278,78 @@ function metricRing(
 }
 
 function buildStatsGridSvg(w: number, h: number, run: RunDataForImage, userName?: string): string {
-  const isVertical = h > w;
   const cx = w / 2;
   const contentEndY = h - LOGO_ZONE_H;
+  const isVertical = h > w;
 
-  let headerY = isVertical ? 70 : 55;
+  let headerY = isVertical ? 60 : 50;
   let headerSvg = "";
 
   if (userName) {
-    headerSvg += `<text x="${cx}" y="${headerY}" font-family="${FONT}" font-size="20" font-weight="700" fill="${C.textDark}" text-anchor="middle">${esc(userName)}</text>`;
-    headerY += 26;
+    headerSvg += `<text x="${cx}" y="${headerY}" font-family="${FONT}" font-size="22" font-weight="700" fill="${C.textDark}" text-anchor="middle">${esc(userName)}</text>`;
+    headerY += 24;
   }
   headerSvg += `<text x="${cx}" y="${headerY}" font-family="${FONT}" font-size="14" fill="${C.textLight}" text-anchor="middle" letter-spacing="0.5">${esc(formatDate(run.completedAt))}</text>`;
-  headerY += 14;
+  headerY += 10;
 
-  const heroY = headerY + 50;
+  const heroY = headerY + 48;
   const dist = run.distance?.toFixed(2) || "0";
-  headerSvg += `<text x="${cx}" y="${heroY}" font-family="${FONT}" font-size="72" font-weight="900" fill="${C.textDark}" text-anchor="middle" letter-spacing="-2">${esc(dist)}</text>`;
-  headerSvg += `<text x="${cx}" y="${heroY + 32}" font-family="${FONT}" font-size="16" font-weight="700" fill="${C.cyan}" text-anchor="middle" letter-spacing="6">KILOMETERS</text>`;
-  headerSvg += `<line x1="${w * 0.2}" y1="${heroY + 48}" x2="${w * 0.8}" y2="${heroY + 48}" stroke="url(#fadeLine)" stroke-width="1.5"/>`;
+  headerSvg += `<text x="${cx}" y="${heroY}" font-family="${FONT}" font-size="68" font-weight="900" fill="${C.textDark}" text-anchor="middle" letter-spacing="-2">${esc(dist)}</text>`;
+  headerSvg += `<text x="${cx}" y="${heroY + 30}" font-family="${FONT}" font-size="15" font-weight="700" fill="${C.cyan}" text-anchor="middle" letter-spacing="5">KILOMETERS</text>`;
 
-  const ringAreaTop = heroY + 70;
-  const ringAreaBot = contentEndY - 10;
+  const ringAreaTop = heroY + 54;
+  const ringAreaBot = contentEndY - 6;
   const ringAreaH = ringAreaBot - ringAreaTop;
+  const ringAreaW = w;
 
-  const ringR = Math.min((w * 0.42) / 2, (ringAreaH * 0.46) / 2, 140);
+  const maxRingDiameter = Math.min(ringAreaW * 0.44, ringAreaH * 0.48);
+  const ringR = Math.min(maxRingDiameter / 2, 155);
 
-  const col1X = w * 0.27;
-  const col2X = w * 0.73;
-  const row1Y = ringAreaTop + ringAreaH * 0.28;
-  const row2Y = ringAreaTop + ringAreaH * 0.72;
+  const col1X = w * 0.28;
+  const col2X = w * 0.72;
+  const row1Y = ringAreaTop + ringAreaH * 0.27;
+  const row2Y = ringAreaTop + ringAreaH * 0.73;
 
   const durationSec = run.duration || 0;
   const distKm = run.distance || 0;
-  const distProgress = Math.min(distKm / 15, 1);
-  const durationProgress = Math.min(durationSec / 5400, 1);
 
-  let paceProgress = 0.5;
+  const distProgress = Math.min(0.3 + distKm / 10 * 0.6, 0.95);
+  const durationProgress = Math.min(0.3 + durationSec / 3600 * 0.6, 0.95);
+
+  let paceProgress = 0.65;
   if (run.avgPace) {
     const paceSec = paceToSeconds(run.avgPace);
-    if (paceSec > 0) paceProgress = Math.min(Math.max(1 - (paceSec - 180) / 420, 0.1), 1);
+    if (paceSec > 0) paceProgress = Math.min(Math.max(0.35, 1 - (paceSec - 180) / 480), 0.95);
   }
 
-  let hrProgress = 0.5;
+  let ring4Progress = 0.55;
+  let ring4Label = "Calories";
+  let ring4Value = run.calories?.toString() || "--";
+  let ring4Unit = "kcal";
+  let ring4Grad = "greenRingGrad";
+  let ring4Track = "#00E676";
+
   if (run.avgHeartRate) {
-    hrProgress = Math.min(run.avgHeartRate / 200, 1);
+    ring4Label = "Heart Rate";
+    ring4Value = run.avgHeartRate.toString();
+    ring4Unit = "bpm";
+    ring4Grad = "redRingGrad";
+    ring4Track = "#FF5252";
+    ring4Progress = Math.min(0.3 + run.avgHeartRate / 200 * 0.6, 0.95);
+  } else if (run.calories) {
+    ring4Progress = Math.min(0.3 + run.calories / 600 * 0.6, 0.95);
   }
 
-  let calProgress = 0.5;
-  if (run.calories) {
-    calProgress = Math.min(run.calories / 800, 1);
-  }
-
-  let elevProgress = 0.3;
-  const elev = run.elevationGain || run.elevation || 0;
-  if (elev > 0) {
-    elevProgress = Math.min(elev / 500, 1);
-  }
-
-  const rings4 = [
-    { cx: col1X, cy: row1Y, label: "Distance", value: dist, unit: "km", grad: "cyanRingGrad", prog: distProgress },
-    { cx: col2X, cy: row1Y, label: "Pace", value: run.avgPace || "--:--", unit: "/km", grad: "blueRingGrad", prog: paceProgress },
-    { cx: col1X, cy: row2Y, label: "Duration", value: formatDuration(durationSec), unit: "", grad: "yellowRingGrad", prog: durationProgress },
-    { cx: col2X, cy: row2Y, label: "Calories", value: run.calories?.toString() || "--", unit: "kcal", grad: "greenRingGrad", prog: calProgress },
+  const rings = [
+    { cx: col1X, cy: row1Y, label: "Distance (km)", value: dist, unit: "km", grad: "cyanRingGrad", prog: distProgress, track: "#00E5FF" },
+    { cx: col2X, cy: row1Y, label: "Pace (/km)", value: run.avgPace || "--:--", unit: "/km", grad: "blueRingGrad", prog: paceProgress, track: "#42A5F5" },
+    { cx: col1X, cy: row2Y, label: "Duration", value: formatDuration(durationSec), unit: "", grad: "yellowRingGrad", prog: durationProgress, track: "#FFD600" },
+    { cx: col2X, cy: row2Y, label: ring4Label, value: ring4Value, unit: ring4Unit, grad: ring4Grad, prog: ring4Progress, track: ring4Track },
   ];
 
-  if (run.avgHeartRate) {
-    rings4[3] = { cx: col2X, cy: row2Y, label: "Heart Rate", value: run.avgHeartRate.toString(), unit: "bpm", grad: "redRingGrad", prog: hrProgress };
-  }
-
   let ringSvg = "";
-  rings4.forEach(r => {
-    ringSvg += metricRing(r.cx, r.cy, ringR, r.label, r.value, r.unit, r.grad, r.prog);
+  rings.forEach(r => {
+    ringSvg += metricRing(r.cx, r.cy, ringR, r.label, r.value, r.unit, r.grad, r.prog, r.track);
   });
 
   return `
