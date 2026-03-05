@@ -442,16 +442,11 @@ function buildGpsRouteElite(
   `;
 }
 
-function buildRouteMapSvg(w: number, h: number, run: RunDataForImage, userName?: string): string {
+function buildRouteMapSvg(w: number, h: number, run: RunDataForImage, userName?: string, hasMapTile?: boolean): string {
   const isVertical = h > w;
-  const mapH = isVertical ? h * 0.6 : h * 0.58;
+  const mapH = Math.round(isVertical ? h * 0.6 : h * 0.58);
   const statsY = mapH + 16;
 
-  const routeSvg = run.gpsTrack && run.gpsTrack.length > 1
-    ? buildGpsRouteElite(0, 0, w, mapH, run.gpsTrack, run.paceData)
-    : `<text x="${w / 2}" y="${mapH / 2}" font-family="${FONT}" font-size="22" fill="${C.greyMuted}" text-anchor="middle">No GPS data available</text>`;
-
-  // Stats strip
   const gap = 12;
   const statW = (w - gap * 4) / 3;
   const statH = isVertical ? 100 : 90;
@@ -468,7 +463,6 @@ function buildRouteMapSvg(w: number, h: number, run: RunDataForImage, userName?:
     statCards += glassCard(sx, statsY, statW, statH, s.label, s.value, s.unit, s.color);
   });
 
-  // Pace legend (if pace data exists)
   let legend = "";
   if (run.paceData && run.paceData.length > 0) {
     const paceSeconds = run.paceData.map(p => p.paceSeconds);
@@ -486,11 +480,20 @@ function buildRouteMapSvg(w: number, h: number, run: RunDataForImage, userName?:
     `;
   }
 
-  // Footer
   const footerY = statsY + statH + 30;
   const nameDate = userName
     ? `${esc(userName)}  ·  ${esc(formatDate(run.completedAt))}`
     : esc(formatDate(run.completedAt));
+
+  const mapBg = hasMapTile
+    ? ""
+    : `<rect width="${w}" height="${mapH}" fill="url(#bgGrad)"/>${bgPattern(w, mapH)}`;
+
+  const routeSvg = hasMapTile
+    ? ""
+    : (run.gpsTrack && run.gpsTrack.length > 1
+      ? buildGpsRouteElite(0, 0, w, mapH, run.gpsTrack, run.paceData)
+      : `<text x="${w / 2}" y="${mapH / 2}" font-family="${FONT}" font-size="22" fill="${C.greyMuted}" text-anchor="middle">No GPS data available</text>`);
 
   return `
     ${globalDefs(w, h)}
@@ -501,14 +504,19 @@ function buildRouteMapSvg(w: number, h: number, run: RunDataForImage, userName?:
         <stop offset="100%" stop-color="${C.orange}"/>
       </linearGradient>
     </defs>
-    <rect width="${w}" height="${h}" fill="url(#bgGrad)"/>
-    ${bgPattern(w, h)}
+    ${mapBg}
+    <rect x="0" y="${mapH}" width="${w}" height="${h - mapH}" fill="url(#bgGrad)"/>
     ${routeSvg}
     ${legend}
     ${statCards}
     <text x="${w / 2}" y="${footerY}" font-family="${FONT}" font-size="14" fill="${C.greyMuted}" text-anchor="middle">${nameDate}</text>
     ${watermark(w, h)}
   `;
+}
+
+function getRouteMapHeight(w: number, h: number): number {
+  const isVertical = h > w;
+  return Math.round(isVertical ? h * 0.6 : h * 0.58);
 }
 
 /* ═══════════════════════ SPLIT SUMMARY ═══════════════════════ */
@@ -904,6 +912,96 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
     ${stickersSvg}
   </svg>`;
 
-  const buffer = await sharp(Buffer.from(fullSvg)).png({ quality: 95 }).toBuffer();
-  return buffer;
+  const svgBuffer = await sharp(Buffer.from(fullSvg)).png({ quality: 95 }).toBuffer();
+
+  if (template.id === "route-map" && req.runData.gpsTrack && req.runData.gpsTrack.length > 1) {
+    const mapRegionH = getRouteMapHeight(w, h);
+    const mapTileBuffer = await fetchMapTileWithRoute(req.runData.gpsTrack, w, mapRegionH, req.runData.paceData);
+    if (mapTileBuffer) {
+      const overlaySvg = buildRouteMapSvg(w, h, req.runData, req.userName, true);
+      let overlaySvgFull = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${overlaySvg}${stickersSvg}</svg>`;
+      const overlayBuffer = await sharp(Buffer.from(overlaySvgFull)).png().toBuffer();
+
+      const mapResized = await sharp(mapTileBuffer).resize(w, mapRegionH, { fit: "cover" }).toBuffer();
+
+      const base = await sharp({
+        create: { width: w, height: h, channels: 4, background: { r: 5, g: 10, b: 18, alpha: 255 } }
+      })
+        .composite([
+          { input: mapResized, top: 0, left: 0 },
+          { input: overlayBuffer, top: 0, left: 0 },
+        ])
+        .png({ quality: 95 })
+        .toBuffer();
+
+      return base;
+    }
+  }
+
+  return svgBuffer;
+}
+
+async function fetchMapTileWithRoute(
+  gpsTrack: Array<{ lat: number; lng: number }>,
+  tileW: number, tileH: number,
+  paceData?: Array<{ km: number; pace: string; paceSeconds: number }>
+): Promise<Buffer | null> {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_API_KEY;
+  if (!apiKey) return null;
+
+  const reqW = Math.min(Math.round(tileW / 2), 640);
+  const reqH = Math.min(Math.round(tileH / 2), 640);
+
+  const darkStyle = [
+    "style=element:geometry|color:0x0a1628",
+    "style=element:labels.text.fill|color:0x3a5580",
+    "style=element:labels.text.stroke|color:0x050a12",
+    "style=feature:road|element:geometry|color:0x1e3048",
+    "style=feature:road|element:geometry.stroke|color:0x162236",
+    "style=feature:road.highway|element:geometry|color:0x2a3f5f",
+    "style=feature:water|element:geometry|color:0x050a12",
+    "style=feature:landscape.natural|element:geometry|color:0x0f1d32",
+    "style=feature:poi|visibility:off",
+    "style=feature:transit|visibility:off",
+    "style=feature:administrative|element:geometry.stroke|color:0x1e3048|weight:0.5",
+    "style=feature:road|element:labels|visibility:simplified",
+  ].join("&");
+
+  const sampleCount = Math.min(gpsTrack.length, 80);
+  const step = gpsTrack.length / sampleCount;
+  const sampled = [];
+  for (let i = 0; i < sampleCount; i++) {
+    const pt = gpsTrack[Math.floor(i * step)];
+    sampled.push(`${pt.lat.toFixed(5)},${pt.lng.toFixed(5)}`);
+  }
+  const last = gpsTrack[gpsTrack.length - 1];
+  sampled.push(`${last.lat.toFixed(5)},${last.lng.toFixed(5)}`);
+
+  const pathParam = `path=color:0x00D4FFBB|weight:5|${sampled.join("|")}`;
+
+  const startPt = gpsTrack[0];
+  const endPt = gpsTrack[gpsTrack.length - 1];
+  const markers = [
+    `markers=color:0x00E676|size:small|label:S|${startPt.lat.toFixed(5)},${startPt.lng.toFixed(5)}`,
+    `markers=color:0xFF5252|size:small|label:F|${endPt.lat.toFixed(5)},${endPt.lng.toFixed(5)}`,
+  ].join("&");
+
+  const url = `https://maps.googleapis.com/maps/api/staticmap?size=${reqW}x${reqH}&scale=2&maptype=roadmap&${darkStyle}&${pathParam}&${markers}&key=${apiKey}`;
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const resp = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      console.error("Map tile fetch failed:", resp.status, resp.statusText, body.substring(0, 200));
+      return null;
+    }
+    const buf = Buffer.from(await resp.arrayBuffer());
+    return buf;
+  } catch (err: any) {
+    console.error("Map tile fetch error:", err.message);
+    return null;
+  }
 }
