@@ -84,6 +84,16 @@ class RunTrackingService : Service(), SensorEventListener {
     private var lastCoachingTime: Long = 0 // Cooldown between coaching events
     private val COACHING_COOLDOWN_MS = 30_000L // 30 second minimum gap between coaching
     private var hasCoachingFiredThisTick = false // Only one coaching trigger per location update
+
+    // ── Global coaching coordinator ──
+    // Prevents back-to-back audio from different coaching types (pace, splits, nav, HR, etc.)
+    // Each coaching type records when it fires; all types check the global timestamp before triggering.
+    private var lastGlobalCoachingTime: Long = 0          // Timestamp of last coaching audio from ANY source
+    private var lastGlobalCoachingDistance: Double = 0.0   // Distance at which last coaching fired
+    private val GLOBAL_COACHING_MIN_GAP_MS = 15_000L      // Minimum 15 seconds between ANY coaching audio
+    private val GLOBAL_COACHING_MIN_GAP_M = 150.0         // Minimum 150m between ANY coaching audio
+    private val NAV_COACHING_MIN_GAP_MS = 8_000L          // Navigation gets shorter gap (safety-critical) but still prevents overlap
+    private val KM_SPLIT_EXCLUSION_ZONE_M = 200.0         // Suppress pace coaching within 200m of a km boundary
     
     // Run data
     private var targetDistance: Double? = null // For mapped runs
@@ -198,10 +208,10 @@ class RunTrackingService : Service(), SensorEventListener {
     private var navLastWarningIndex: Int = -1         // Prevents double-warning same instruction
     private var navMissedWaypointCount: Int = 0
     private var navLastCheckTime: Long = 0
-    private val NAV_CHECK_INTERVAL_MS = 3_000L       // Check navigation every 3 seconds
-    private val NAV_WAYPOINT_REACHED_RADIUS_M = 35.0  // Within 35m = reached waypoint
-    private val NAV_WARNING_RADIUS_M = 80.0            // Within 80m = announce upcoming turn
-    private val NAV_MISSED_WAYPOINT_RADIUS_M = 120.0   // Beyond 120m past waypoint = missed it
+    private val NAV_CHECK_INTERVAL_MS = 2_000L       // Check navigation every 2 seconds (was 3s)
+    private val NAV_WAYPOINT_REACHED_RADIUS_M = 45.0  // Within 45m = reached waypoint (was 35m — phone GPS is less precise than Garmin)
+    private val NAV_WARNING_RADIUS_M = 100.0           // Within 100m = announce upcoming turn (was 80m — earlier warning gives runner more time)
+    private val NAV_MISSED_WAYPOINT_RADIUS_M = 150.0   // Beyond 150m past waypoint = missed it (was 120m — more forgiving)
     @Suppress("unused")
     private val NAV_SKIP_DISTANCE_BEHIND_M = 60.0      // If user is 60m+ past the waypoint along the route, skip it
     
@@ -214,8 +224,8 @@ class RunTrackingService : Service(), SensorEventListener {
     companion object {
         private const val CHANNEL_ID = "run_tracking_channel"
         private const val NOTIFICATION_ID = 1001
-        private const val LOCATION_UPDATE_INTERVAL = 2000L
-        private const val LOCATION_FASTEST_INTERVAL = 1000L
+        private const val LOCATION_UPDATE_INTERVAL = 1000L  // Request GPS every 1 second (matches Garmin frequency)
+        private const val LOCATION_FASTEST_INTERVAL = 500L   // Accept updates as fast as 500ms
         private const val STRUGGLE_COOLDOWN_MS = 120_000 // 2 minutes
         private const val ELEVATION_COOLDOWN_MS = 120_000 // 2 minutes
         private const val HILL_TOP_COOLDOWN_MS = 180_000 // 3 minutes
@@ -387,6 +397,8 @@ class RunTrackingService : Service(), SensorEventListener {
         recentStrideLengths.clear()
         lastEliteCoachingTime = 0
         lastTechniqueCoachingTime = 0
+        lastGlobalCoachingTime = 0
+        lastGlobalCoachingDistance = 0.0
         lastMilestonePercent = 0
         lastTargetEtaKm = 0
         lastPaceTrendCheckKm = 0
@@ -661,11 +673,14 @@ class RunTrackingService : Service(), SensorEventListener {
         val isBeyondSkipDistance = distanceToWaypoint > NAV_MISSED_WAYPOINT_RADIUS_M
 
         // Also check: if there's a NEXT instruction, are we closer to that one?
-        val closerToNextInstruction = if (navCurrentInstructionIndex + 1 < navTurnInstructions.size) {
+        // BUT only skip if we're already well past the current waypoint (beyond warning radius)
+        // to prevent cascade-skipping closely spaced waypoints
+        val closerToNextInstruction = if (navCurrentInstructionIndex + 1 < navTurnInstructions.size
+            && distanceToWaypoint > NAV_WARNING_RADIUS_M) { // Only consider skip if we're beyond the 80m warning zone
             val nextNext = navTurnInstructions[navCurrentInstructionIndex + 1]
             val nextNextPos = com.google.android.gms.maps.model.LatLng(nextNext.latitude, nextNext.longitude)
             val distToNext = SphericalUtil.computeDistanceBetween(currentPos, nextNextPos)
-            distToNext < distanceToWaypoint
+            distToNext < distanceToWaypoint * 0.5 // Must be significantly closer (50%), not just marginally
         } else false
 
         navPreviousDistanceToWaypoint = distanceToWaypoint
@@ -751,6 +766,11 @@ class RunTrackingService : Service(), SensorEventListener {
             Log.d("Navigation", "Muted — skipping: $navigationText")
             return
         }
+        if (!canFireCoaching(isNavigation = true)) {
+            Log.d("Navigation", "Suppressed (too soon after other coaching): $navigationText")
+            return
+        }
+        recordCoachingFired()
         
         // Show text in UI immediately while we wait for audio
         _latestCoachingText.value = navigationText
@@ -864,6 +884,8 @@ class RunTrackingService : Service(), SensorEventListener {
         if (!coachingFeaturePrefs.paceCoachingEnabled) return
         if (hasCoachingFiredThisTick) return
         if (totalDistance < PACE_FIRST_CHECK_M) return // Don't start until 100m
+        if (!canFireCoaching()) return // Global coaching gate — prevents back-to-back with splits/nav/HR
+        if (isNearKmBoundary()) return // Suppress within 200m of km marks — split coaching will fire there
         
         val now = System.currentTimeMillis()
         val tDist = targetDistance ?: return
@@ -940,6 +962,7 @@ class RunTrackingService : Service(), SensorEventListener {
                         lastPaceCoachingDistance = totalDistance
                         lastPaceCoachingTime = now
                         hasCoachingFiredThisTick = true
+                        recordCoachingFired()
                     }
                     return
                 }
@@ -987,6 +1010,7 @@ class RunTrackingService : Service(), SensorEventListener {
         lastPaceCoachingTime = now
         lastPaceDeviationPercent = paceDeviation * 100
         hasCoachingFiredThisTick = true
+        recordCoachingFired()
     }
     
     /**
@@ -1172,7 +1196,7 @@ class RunTrackingService : Service(), SensorEventListener {
             return
         }
         try {
-            val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, LOCATION_UPDATE_INTERVAL).apply { setMinUpdateIntervalMillis(LOCATION_FASTEST_INTERVAL); setWaitForAccurateLocation(true) }.build()
+            val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, LOCATION_UPDATE_INTERVAL).apply { setMinUpdateIntervalMillis(LOCATION_FASTEST_INTERVAL); setWaitForAccurateLocation(false) }.build()
             fusedLocationClient.requestLocationUpdates(req, locationCallback, Looper.getMainLooper())
             Log.d("RunTrackingService", "Location updates requested successfully")
         } catch (e: Exception) {
@@ -1232,14 +1256,26 @@ class RunTrackingService : Service(), SensorEventListener {
             val distanceIncrement = calculateDistance(prevPoint, newPoint)
 
             // Log location info for debugging
-            Log.d("RunTrackingService", "Location update - accuracy: ${location.accuracy}m, speed: ${location.speed}m/s, distance: ${distanceIncrement}m")
+            Log.d("RunTrackingService", "Location update - accuracy: ${location.accuracy}m, speed: ${location.speed}m/s, distance: ${distanceIncrement}m, points: ${routePoints.size}")
 
-            // Accept location if accuracy is reasonable OR if we're still in the first few locations (to get started)
-            // Only count distance increments >= 5m to filter GPS drift
+            // Tiered accuracy filter: accept more points to avoid "cutting corners" which under-counts distance
+            // Phone GPS typically: 3-10m (open sky), 10-25m (urban), 25-50m (dense urban/trees)
+            // Garmin watches: 2-5m consistently (dedicated multi-band GPS antenna)
             val isFirstLocations = routePoints.size < 5
-            if ((location.accuracy < 20f || isFirstLocations) && distanceIncrement >= 5.0) {
+            val timeSinceLastPoint = (newPoint.timestamp - prevPoint.timestamp) / 1000.0 // seconds
+            val maxAcceptableAccuracy = when {
+                isFirstLocations -> 50f                        // Be lenient at start to get initial fix
+                timeSinceLastPoint > 10 -> 40f                 // If it's been >10s, accept wider accuracy to avoid big gaps
+                else -> 30f                                    // Normal running: accept up to 30m accuracy
+            }
+            // Distance sanity: min 2m (GPS drift), max 100m between points (teleport/spike)
+            val isDistanceReasonable = distanceIncrement >= 2.0 && distanceIncrement <= 100.0
+            // Speed sanity: reject points implying >40 km/h (impossible running speed)
+            val impliedSpeedKmh = if (timeSinceLastPoint > 0) (distanceIncrement / timeSinceLastPoint) * 3.6 else 0.0
+            val isSpeedReasonable = impliedSpeedKmh < 40.0 || isFirstLocations
+
+            if (location.accuracy <= maxAcceptableAccuracy && isDistanceReasonable && isSpeedReasonable) {
                 // Calculate pace from our own distance/time (more reliable than GPS speed which can be noisy/wrong)
-                val timeSinceLastPoint = (newPoint.timestamp - prevPoint.timestamp) / 1000.0 // seconds
                 val currentPaceSeconds = if (timeSinceLastPoint > 0 && distanceIncrement > 0) {
                     (1000.0 * timeSinceLastPoint / distanceIncrement).toFloat() // seconds per km
                 } else 0f
@@ -1287,14 +1323,27 @@ class RunTrackingService : Service(), SensorEventListener {
                 
                 updatePaceAndStruggle(currentPaceSeconds)
                 checkForKmSplit()
-                // Check navigation progress (turn instructions, missed waypoints)
-                if (hasRoute) {
-                    checkNavigationProgress(location.latitude, location.longitude)
-                }
                 // Pace coaching — smart interval checks against target pace
                 checkPaceCoaching()
                 updateRunSession()
                 updateNotification()
+            } else {
+                // Log rejected point for debugging distance discrepancies
+                val reason = when {
+                    location.accuracy > maxAcceptableAccuracy -> "accuracy ${location.accuracy}m > ${maxAcceptableAccuracy}m"
+                    !isDistanceReasonable -> "distance ${distanceIncrement}m out of range [2-100m]"
+                    !isSpeedReasonable -> "implied speed ${impliedSpeedKmh.toInt()} km/h > 40 km/h"
+                    else -> "unknown"
+                }
+                Log.d("RunTrackingService", "GPS point REJECTED: $reason")
+            }
+
+            // ALWAYS check navigation on every GPS update, even if the point was rejected for distance tracking.
+            // Navigation only needs lat/lng to check proximity to waypoints — it doesn't depend on
+            // distance accuracy. Previously this was inside the acceptance block, so rejected points
+            // caused navigation to silently stop mid-run.
+            if (hasRoute) {
+                checkNavigationProgress(location.latitude, location.longitude)
             }
         } else {
             routePoints.add(newPoint)
@@ -1338,9 +1387,10 @@ class RunTrackingService : Service(), SensorEventListener {
             
             // Only trigger AI coaching at the user's chosen interval (1km, 2km, 3km, 5km, 10km)
             val interval = coachingFeaturePrefs.kmSplitIntervalKm
-            if (currentKm % interval == 0) {
+            if (currentKm % interval == 0 && canFireCoaching()) {
                 Log.d("RunTrackingService", "Triggering split coaching at ${currentKm}km (interval: every ${interval}km)")
                 hasCoachingFiredThisTick = true
+                recordCoachingFired()
                 triggerKmSplitCoaching(split)
             }
         }
@@ -1380,25 +1430,26 @@ class RunTrackingService : Service(), SensorEventListener {
         hasCoachingFiredThisTick = false
 
         // Check for phase changes and trigger coaching (includes 500m check-in)
+        // Phase changes use the global gate internally
         checkPhaseChange(phase)
 
-        // Check for 500m milestones (skipped if phase change just fired)
-        if (!hasCoachingFiredThisTick) {
+        // Check for 500m milestones (skipped if phase change just fired OR global cooldown active)
+        if (!hasCoachingFiredThisTick && canFireCoaching()) {
             check500mMilestones()
         }
 
-        // Check for heart rate coaching
-        if (!hasCoachingFiredThisTick) {
+        // Check for heart rate coaching (respects global cooldown)
+        if (!hasCoachingFiredThisTick && canFireCoaching()) {
             maybeTriggerHeartRateCoaching()
         }
 
-        // Check for cadence/stride coaching
-        if (!hasCoachingFiredThisTick) {
+        // Check for cadence/stride coaching (respects global cooldown)
+        if (!hasCoachingFiredThisTick && canFireCoaching()) {
             maybeTriggerCadenceCoaching()
         }
 
         // Elite coaching triggers — technique, milestones, reinforcement, ETA, trends, elevation
-        if (!hasCoachingFiredThisTick) {
+        if (!hasCoachingFiredThisTick && canFireCoaching()) {
             maybeFireEliteCoaching(displayDistance, duration, avgSpeed, phase)
         }
         
@@ -1809,6 +1860,47 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun determinePhase(distanceKm: Double, targetDistance: Double?): CoachingPhase {
         return live.airuncoach.airuncoach.domain.model.determinePhase(distanceKm, targetDistance)
     }
+
+    /**
+     * Global coaching gate — checks if enough time AND distance have passed since ANY coaching audio.
+     * All coaching triggers should call this before firing. Navigation uses a shorter gap.
+     * Returns true if coaching is allowed, false if it should be suppressed.
+     */
+    private fun canFireCoaching(isNavigation: Boolean = false): Boolean {
+        val now = System.currentTimeMillis()
+        val minGapMs = if (isNavigation) NAV_COACHING_MIN_GAP_MS else GLOBAL_COACHING_MIN_GAP_MS
+        val timeSinceLastCoaching = now - lastGlobalCoachingTime
+        val distSinceLastCoaching = totalDistance - lastGlobalCoachingDistance
+
+        // Navigation only checks time gap (turns are position-critical, not distance-dependent)
+        if (isNavigation) {
+            return timeSinceLastCoaching >= minGapMs
+        }
+
+        // Non-navigation coaching: both time AND distance must have passed
+        return timeSinceLastCoaching >= minGapMs && distSinceLastCoaching >= GLOBAL_COACHING_MIN_GAP_M
+    }
+
+    /**
+     * Record that coaching audio just fired. Call this from every coaching trigger
+     * immediately before launching the coaching coroutine / playing audio.
+     */
+    private fun recordCoachingFired() {
+        lastGlobalCoachingTime = System.currentTimeMillis()
+        lastGlobalCoachingDistance = totalDistance
+    }
+
+    /**
+     * Check if the runner is within the km-split exclusion zone.
+     * Pace coaching should be suppressed near km boundaries since a km split
+     * will fire there, and back-to-back audio is annoying.
+     */
+    private fun isNearKmBoundary(): Boolean {
+        val distIntoCurrentKm = totalDistance % 1000.0  // 0–999m
+        // Within 200m BEFORE a km mark (800–1000m) or 200m AFTER (0–200m, but only after first km)
+        return distIntoCurrentKm >= (1000.0 - KM_SPLIT_EXCLUSION_ZONE_M) ||
+                (totalDistance >= 1000.0 && distIntoCurrentKm <= KM_SPLIT_EXCLUSION_ZONE_M)
+    }
     
     private fun check500mMilestones() {
         if (!coachingFeaturePrefs.halfKmCheckInEnabled) return
@@ -1819,6 +1911,8 @@ class RunTrackingService : Service(), SensorEventListener {
         if (last500mMilestone == 0 && current500m >= 1 && (now - lastCoachingTime) > COACHING_COOLDOWN_MS) {
             last500mMilestone = 1
             lastCoachingTime = now
+            recordCoachingFired()
+            hasCoachingFiredThisTick = true
             Log.d("RunTrackingService", "Reached 500m - triggering initial coaching (targetTime=$targetTime, targetDistance=$targetDistance)")
             serviceScope.launch {
                 try {
@@ -1880,9 +1974,11 @@ class RunTrackingService : Service(), SensorEventListener {
         // Allow trigger when:
         // 1. Phase changed AND (first phase OR cooldown passed)
         // This ensures first phase change (null -> EARLY) triggers coaching
-        if (newPhase != lastPhase && (lastPhase == null || (now - lastCoachingTime) > COACHING_COOLDOWN_MS)) {
+        if (newPhase != lastPhase && (lastPhase == null || (now - lastCoachingTime) > COACHING_COOLDOWN_MS) && canFireCoaching()) {
             lastPhase = newPhase
             lastCoachingTime = now
+            hasCoachingFiredThisTick = true
+            recordCoachingFired()
             Log.d("RunTrackingService", "Phase changed to $newPhase at ${totalDistance/1000.0}km - triggering coaching")
             serviceScope.launch {
                 try {
@@ -1941,6 +2037,8 @@ class RunTrackingService : Service(), SensorEventListener {
     
     private fun triggerStruggleCoaching(currentPaceSeconds: Float, paceDropPercent: Float) {
         if (!coachingFeaturePrefs.struggleDetectionEnabled) return
+        if (!canFireCoaching()) return
+        recordCoachingFired()
         // Format baseline pace: baselinePace is in seconds/km, convert to km/h for calculatePace
         val baselinePaceFormatted = if (baselinePace > 0f) calculatePace(3600f / baselinePace) else "0:00"
         // Format current instantaneous pace from seconds/km
@@ -2051,6 +2149,8 @@ class RunTrackingService : Service(), SensorEventListener {
 
         lastHrCoachingTime = now
         lastHrCoachingMinute = elapsedMinutes
+        recordCoachingFired()
+        hasCoachingFiredThisTick = true
 
         serviceScope.launch {
             try {
@@ -2099,6 +2199,7 @@ class RunTrackingService : Service(), SensorEventListener {
         lastCoachingTime = now
         lastStrideZone = stride.strideZone
         hasCoachingFiredThisTick = true
+        recordCoachingFired()
 
         serviceScope.launch {
             try {
@@ -2314,6 +2415,7 @@ class RunTrackingService : Service(), SensorEventListener {
         lastEliteCoachingTime = now
         lastCoachingTime = now
         hasCoachingFiredThisTick = true
+        recordCoachingFired()
 
         serviceScope.launch {
             try {
@@ -2335,6 +2437,8 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     private fun fireFinalCoaching(type: String, distKm: Double, duration: Long, avgSpeed: Float, remainingMeters: Double) {
+        recordCoachingFired()
+        hasCoachingFiredThisTick = true
         val td = targetDistance ?: 0.0
         val elapsedSec = duration / 1000.0
         val projectedFinishSec = if (distKm > 0) (elapsedSec / distKm * td).toLong() else null

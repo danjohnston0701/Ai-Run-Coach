@@ -260,8 +260,8 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     initialSeconds = s,
                     onNavigateBack = { navController.popBackStack() },
                     onGenerateRoute = { distance, hasTime, hours, minutes, seconds, liveTracking, groupRun, latitude, longitude ->
-                        // Store target time so it persists through route generation → selection → run session
-                        viewModel.setTargetTime(hasTime, hours, minutes, seconds)
+                        // Store target time + distance so it persists through route generation → selection → run session
+                        viewModel.setTargetTime(hasTime, hours, minutes, seconds, distance.toDouble())
                         
                         // Generate routes with GPS location from setup screen
                         val targetTimeMinutes = if (hasTime) hours * 60 + minutes else null
@@ -350,6 +350,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 val targetHours by viewModel.targetHours.collectAsState()
                 val targetMinutes by viewModel.targetMinutes.collectAsState()
                 val targetSeconds by viewModel.targetSeconds.collectAsState()
+                val originalTargetDistanceKm by viewModel.originalTargetDistanceKm.collectAsState()
                 var selectedRouteId by remember { mutableStateOf<String?>(null) }
                 var aiCoachEnabled by remember { mutableStateOf(true) }
                 
@@ -363,13 +364,31 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         selectedRouteId?.let { routeId ->
                             val selectedRoute = routes.find { it.id == routeId }
                             selectedRoute?.let { route ->
-                                // Create RunSetupConfig with route + user's target time from setup screen
+                                // Pro-rata target time based on actual route distance vs original target distance
+                                // e.g. User set 22min for 5km, picks 4.7km route → adjusted time = 22 * (4.7/5.0) = 20:41
+                                val adjustedHours: Int
+                                val adjustedMinutes: Int
+                                val adjustedSeconds: Int
+                                if (hasTargetTime && originalTargetDistanceKm > 0) {
+                                    val originalTotalSeconds = targetHours * 3600 + targetMinutes * 60 + targetSeconds
+                                    val ratio = route.distance / originalTargetDistanceKm
+                                    val adjustedTotalSeconds = (originalTotalSeconds * ratio).toInt()
+                                    adjustedHours = adjustedTotalSeconds / 3600
+                                    adjustedMinutes = (adjustedTotalSeconds % 3600) / 60
+                                    adjustedSeconds = adjustedTotalSeconds % 60
+                                } else {
+                                    adjustedHours = targetHours
+                                    adjustedMinutes = targetMinutes
+                                    adjustedSeconds = targetSeconds
+                                }
+                                
+                                // Create RunSetupConfig with route + pro-rated target time
                                 val config = RunSetupConfig(
                                     targetDistance = route.distance.toFloat(),
                                     hasTargetTime = hasTargetTime,
-                                    targetHours = targetHours,
-                                    targetMinutes = targetMinutes,
-                                    targetSeconds = targetSeconds,
+                                    targetHours = adjustedHours,
+                                    targetMinutes = adjustedMinutes,
+                                    targetSeconds = adjustedSeconds,
                                     route = route
                                 )
                                 RunConfigHolder.setConfig(config)

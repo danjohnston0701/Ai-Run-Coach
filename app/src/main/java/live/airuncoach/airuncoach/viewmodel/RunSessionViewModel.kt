@@ -443,7 +443,7 @@ class RunSessionViewModel @Inject constructor(
                     putExtra(RunTrackingService.EXTRA_TARGET_DISTANCE, it.targetDistance.toDouble())
                     // Calculate target time in milliseconds if set
                     if (it.hasTargetTime) {
-                        val targetTimeMs = (it.targetHours * 3600000L) + (it.targetMinutes * 60000L)
+                        val targetTimeMs = (it.targetHours * 3600000L) + (it.targetMinutes * 60000L) + (it.targetSeconds * 1000L)
                         putExtra(RunTrackingService.EXTRA_TARGET_TIME, targetTimeMs)
                     }
                     putExtra(RunTrackingService.EXTRA_HAS_ROUTE, it.route != null)

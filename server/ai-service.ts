@@ -1747,8 +1747,8 @@ ${routeInfo}
 - ${weatherInfo}
 ${weatherAdvantage}
 
-CURRENT WELLNESS STATUS (from Garmin):${wellnessContext || '\n- No wellness data available'}
-${readinessGuidance}
+${wellnessContext ? `CURRENT WELLNESS STATUS (from Garmin):${wellnessContext}
+${readinessGuidance}` : `NO WELLNESS DATA AVAILABLE — The runner does not have a Garmin device connected or no wellness data has been synced today. Do NOT mention body readiness, recovery status, fatigue, body battery, sleep quality, HRV, stress levels, or any wellness/biometric data. Simply skip wellness entirely in your response.`}
 
 Based on this data, provide:
 1. "briefing": A personalized pre-run briefing (4-5 sentences). You MUST include these specific details:
@@ -1756,15 +1756,16 @@ Based on this data, provide:
    ${weather && weather.temp !== undefined ? `- The weather: "${weather.temp || weather.temperature}°C and ${weather.condition || 'clear'}"` : '- Weather data is not available, do not mention weather'}
    ${targetPace ? `- Their target pace: "${formatPaceForTTS(targetPace)}"` : '- No target pace set, suggest they run at a comfortable effort'}
    ${targetTime ? `- Their target time: "${formatDurationForTTS(targetTime || 0)}"` : ''}
-   - Their wellness/recovery state if Garmin data is available above
+   ${wellnessContext ? '- Their wellness/recovery state from the Garmin data above' : '- Do NOT mention wellness, readiness, recovery, fatigue, or body data — none is available'}
    ${weatherAdvantage ? '- The weather advantage noted above' : ''}
    Include the actual numbers - do NOT give a vague or generic briefing. ${PACE_FORMAT_RULE}
-2. "intensityAdvice": Specific intensity advice. ${targetPace ? `They are targeting ${formatPaceForTTS(targetPace)} - say whether to stick to it, go easier, or push harder based on their wellness.` : 'Suggest an appropriate effort level based on their wellness.'}
-3. "warnings": Array of any warnings if their wellness indicators suggest caution. Empty array if none.
-${hasRoute === true ? `4. "routeInsight": A brief commentary (2-3 sentences) describing what to expect from the route terrain. Use the ROUTE data above — mention whether it's flat, rolling, hilly, has steep sections, etc. Give practical advice like "pace yourself on the climbs" or "use the downhills to recover" or "great flat route to maintain consistent splits". Be specific about the elevation numbers. Do NOT repeat the distance or weather — just focus on the terrain and what to expect from the route.` : `4. "readinessInsight": How their body data affects today's run.`}
+2. "intensityAdvice": Specific intensity advice. ${targetPace ? `They are targeting ${formatPaceForTTS(targetPace)}${wellnessContext ? ' - say whether to stick to it, go easier, or push harder based on their wellness.' : ' - give pacing advice based on the distance and conditions, without referencing wellness data.'}` : `${wellnessContext ? 'Suggest an appropriate effort level based on their wellness.' : 'Suggest an appropriate effort level based on the distance, weather, and conditions.'}`}
+3. "warnings": Array of any warnings ${wellnessContext ? 'if their wellness indicators suggest caution' : 'based on weather or route conditions'}. Empty array if none.
+${hasRoute === true ? `4. "routeInsight": A brief commentary (2-3 sentences) describing what to expect from the route terrain. Use the ROUTE data above — mention whether it's flat, rolling, hilly, has steep sections, etc. Give practical advice like "pace yourself on the climbs" or "use the downhills to recover" or "great flat route to maintain consistent splits". Be specific about the elevation numbers. Do NOT repeat the distance or weather — just focus on the terrain and what to expect from the route.` : `4. "readinessInsight": ${wellnessContext ? 'How their body data affects today\'s run.' : 'A brief motivational note about the run ahead (do NOT mention wellness, readiness, fatigue, or body data since none is available).'}`}
 
 CRITICAL RULES:
 - For runs marked "RUN (No planned route)" - do NOT mention terrain, elevation, hills, flat, or any route characteristics.
+${!wellnessContext ? '- CRITICAL: No Garmin or wellness data is connected. Do NOT mention body readiness, recovery, fatigue, body battery, sleep, stress, HRV, or any biometric data. Do not assume or invent wellness status.' : ''}
 - Include the specific distance, pace, and time numbers in the briefing text. The runner wants to hear their actual plan confirmed.
 - NEVER start with generic greetings like "Hey there!" — jump straight into the briefing content.
 ${coachAccent ? `- Write using natural ${coachAccent} English phrasing and expressions. The text will be spoken aloud by a ${coachAccent} voice.` : ''}
