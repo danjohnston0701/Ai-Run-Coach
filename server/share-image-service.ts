@@ -92,7 +92,7 @@ const C = {
 
 const FONT = `'SF Pro Display', 'Inter', 'Helvetica Neue', Arial, sans-serif`;
 
-const LOGO_ZONE_H = 70;
+const LOGO_ZONE_H = 120;
 
 export const TEMPLATES: ShareTemplate[] = [
   {
@@ -253,21 +253,24 @@ function metricRing(
   gradId: string, progress: number
 ): string {
   const circumference = 2 * Math.PI * r;
-  const strokeW = Math.max(r * 0.16, 8);
+  const strokeW = Math.max(r * 0.14, 10);
   const dashLen = circumference * Math.min(Math.max(progress, 0.05), 1.0);
   const gap = circumference - dashLen;
-  const trackOpacity = 0.08;
 
-  const valueFontSize = Math.round(r * 0.6);
-  const labelFontSize = Math.round(r * 0.22);
-  const unitFontSize = Math.round(r * 0.2);
+  const valueFontSize = Math.min(Math.round(r * 0.48), 56);
+  const labelFontSize = Math.min(Math.round(r * 0.2), 20);
+  const unitFontSize = Math.min(Math.round(r * 0.18), 18);
+
+  const labelY = cy - r * 0.2;
+  const valueY = cy + r * 0.18;
+  const unitY = valueY + unitFontSize + 6;
 
   return `
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${C.border}" stroke-width="${strokeW}" opacity="${trackOpacity}"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${C.border}" stroke-width="${strokeW}" opacity="0.08"/>
     <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="url(#${gradId})" stroke-width="${strokeW}" stroke-linecap="round" stroke-dasharray="${dashLen} ${gap}" transform="rotate(-90 ${cx} ${cy})" filter="url(#ringGlow)"/>
-    <text x="${cx}" y="${cy - valueFontSize * 0.15}" font-family="${FONT}" font-size="${labelFontSize}" font-weight="600" fill="${C.textLight}" text-anchor="middle" letter-spacing="1">${esc(label)}</text>
-    <text x="${cx}" y="${cy + valueFontSize * 0.45}" font-family="${FONT}" font-size="${valueFontSize}" font-weight="800" fill="${C.textDark}" text-anchor="middle">${esc(value)}</text>
-    ${unit ? `<text x="${cx}" y="${cy + valueFontSize * 0.45 + unitFontSize + 4}" font-family="${FONT}" font-size="${unitFontSize}" font-weight="500" fill="${C.textMuted}" text-anchor="middle">${esc(unit)}</text>` : ""}
+    <text x="${cx}" y="${labelY}" font-family="${FONT}" font-size="${labelFontSize}" font-weight="600" fill="${C.textLight}" text-anchor="middle" letter-spacing="0.5">${esc(label)}</text>
+    <text x="${cx}" y="${valueY}" font-family="${FONT}" font-size="${valueFontSize}" font-weight="800" fill="${C.textDark}" text-anchor="middle">${esc(value)}</text>
+    ${unit ? `<text x="${cx}" y="${unitY}" font-family="${FONT}" font-size="${unitFontSize}" font-weight="500" fill="${C.textMuted}" text-anchor="middle">${esc(unit)}</text>` : ""}
   `;
 }
 
@@ -293,15 +296,14 @@ function buildStatsGridSvg(w: number, h: number, run: RunDataForImage, userName?
   headerSvg += `<line x1="${w * 0.2}" y1="${heroY + 48}" x2="${w * 0.8}" y2="${heroY + 48}" stroke="url(#fadeLine)" stroke-width="1.5"/>`;
 
   const ringAreaTop = heroY + 70;
-  const ringAreaBot = contentEndY - 20;
+  const ringAreaBot = contentEndY - 10;
   const ringAreaH = ringAreaBot - ringAreaTop;
 
-  const gap = isVertical ? 30 : 20;
-  const ringR = Math.min((w - gap * 3) / 4 * 0.45, (ringAreaH - gap) / 2 * 0.45, 120);
+  const ringR = Math.min((w * 0.42) / 2, (ringAreaH * 0.46) / 2, 140);
 
-  const col1X = w * 0.28;
-  const col2X = w * 0.72;
-  const row1Y = ringAreaTop + ringAreaH * 0.3;
+  const col1X = w * 0.27;
+  const col2X = w * 0.73;
+  const row1Y = ringAreaTop + ringAreaH * 0.28;
   const row2Y = ringAreaTop + ringAreaH * 0.72;
 
   const durationSec = run.duration || 0;
@@ -347,36 +349,11 @@ function buildStatsGridSvg(w: number, h: number, run: RunDataForImage, userName?
     ringSvg += metricRing(r.cx, r.cy, ringR, r.label, r.value, r.unit, r.grad, r.prog);
   });
 
-  const extraY = ringAreaBot - 6;
-  let extraStats = "";
-  const extras = [];
-  if (run.avgHeartRate && !rings4.find(r => r.label === "Heart Rate")) {
-    extras.push({ label: "AVG HR", value: `${run.avgHeartRate} bpm`, color: C.red });
-  }
-  if (run.calories && !rings4.find(r => r.label === "Calories" && r.value !== "--")) {
-  }
-  if (elev > 0) {
-    extras.push({ label: "ELEVATION", value: `${Math.round(elev)}m`, color: C.green });
-  }
-  if (run.cadence) {
-    extras.push({ label: "CADENCE", value: `${run.cadence} spm`, color: C.cyan });
-  }
-
-  if (extras.length > 0) {
-    const spacing = w / (extras.length + 1);
-    extras.forEach((e, i) => {
-      const ex = spacing * (i + 1);
-      extraStats += `<text x="${ex}" y="${extraY - 14}" font-family="${FONT}" font-size="10" font-weight="600" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1.5">${e.label}</text>`;
-      extraStats += `<text x="${ex}" y="${extraY + 6}" font-family="${FONT}" font-size="16" font-weight="700" fill="${e.color}" text-anchor="middle">${esc(e.value)}</text>`;
-    });
-  }
-
   return `
     ${globalDefs(w, h)}
     <rect width="${w}" height="${h}" fill="${C.bg}"/>
     ${headerSvg}
     ${ringSvg}
-    ${extraStats}
   `;
 }
 
@@ -859,11 +836,11 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
 async function getLogoBuffer(): Promise<Buffer | null> {
   try {
     const logoPath = path.resolve("server/assets/logo.png");
-    return await sharp(logoPath).resize(48, 48, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer();
+    return await sharp(logoPath).resize(72, 72, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer();
   } catch (e: any) {
     try {
       const altPath = path.resolve("attached_assets/logo_1772693744611.png");
-      return await sharp(altPath).resize(48, 48, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer();
+      return await sharp(altPath).resize(72, 72, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer();
     } catch {
       console.error("Logo not found:", e.message);
       return null;
@@ -936,14 +913,15 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
 
   const logoBuffer = await getLogoBuffer();
   if (logoBuffer) {
-    const logoY = h - LOGO_ZONE_H + 11;
-    const logoX = 24;
+    const logoX = 40;
+    const logoY = h - LOGO_ZONE_H + 24;
+    const textX = logoX + 84;
 
     const brandSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
       <rect x="0" y="${h - LOGO_ZONE_H}" width="${w}" height="${LOGO_ZONE_H}" fill="${C.bg}"/>
-      <line x1="40" y1="${h - LOGO_ZONE_H}" x2="${w - 40}" y2="${h - LOGO_ZONE_H}" stroke="${C.border}" stroke-width="1" opacity="0.5"/>
-      <text x="${logoX + 58}" y="${logoY + 20}" font-family="${FONT}" font-size="18" font-weight="800" fill="${C.textDark}" letter-spacing="0.5">AI Run Coach</text>
-      <text x="${logoX + 58}" y="${logoY + 36}" font-family="${FONT}" font-size="11" font-weight="500" fill="${C.textMuted}" letter-spacing="1">Your AI-Powered Running Partner</text>
+      <line x1="60" y1="${h - LOGO_ZONE_H}" x2="${w - 60}" y2="${h - LOGO_ZONE_H}" stroke="${C.border}" stroke-width="1" opacity="0.4"/>
+      <text x="${textX}" y="${logoY + 28}" font-family="${FONT}" font-size="24" font-weight="800" fill="${C.textDark}" letter-spacing="0.3">AI Run Coach</text>
+      <text x="${textX}" y="${logoY + 50}" font-family="${FONT}" font-size="14" font-weight="500" fill="${C.textMuted}" letter-spacing="0.5">Your AI-Powered Running Partner</text>
     </svg>`;
 
     const brandBuffer = await sharp(Buffer.from(brandSvg)).png().toBuffer();
