@@ -37,6 +37,23 @@ class RouteGenerationViewModel @Inject constructor(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
+    // Carry target time from setup screen through to route selection → run session
+    private val _hasTargetTime = MutableStateFlow(false)
+    val hasTargetTime: StateFlow<Boolean> = _hasTargetTime.asStateFlow()
+    private val _targetHours = MutableStateFlow(0)
+    val targetHours: StateFlow<Int> = _targetHours.asStateFlow()
+    private val _targetMinutes = MutableStateFlow(0)
+    val targetMinutes: StateFlow<Int> = _targetMinutes.asStateFlow()
+    private val _targetSeconds = MutableStateFlow(0)
+    val targetSeconds: StateFlow<Int> = _targetSeconds.asStateFlow()
+
+    fun setTargetTime(hasTime: Boolean, hours: Int, minutes: Int, seconds: Int) {
+        _hasTargetTime.value = hasTime
+        _targetHours.value = hours
+        _targetMinutes.value = minutes
+        _targetSeconds.value = seconds
+    }
+
     fun generateRoutes(request: RouteGenerationRequest) {
         viewModelScope.launch {
             _isLoading.value = true

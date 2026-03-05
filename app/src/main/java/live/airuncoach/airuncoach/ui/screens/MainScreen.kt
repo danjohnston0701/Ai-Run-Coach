@@ -167,10 +167,20 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 val refreshKey = backStackEntry.lifecycle.currentState.hashCode()
                 DashboardScreen(
                     onNavigateToRouteGeneration = {
-                        navController.navigate("map_my_run_setup/route")
+                        val dist = dashboardViewModel.targetDistance.value
+                        val timeOn = dashboardViewModel.isTargetTimeEnabled.value
+                        val h = dashboardViewModel.targetHours.value
+                        val m = dashboardViewModel.targetMinutes.value
+                        val s = dashboardViewModel.targetSeconds.value
+                        navController.navigate("map_my_run_setup/route/$dist/$timeOn/$h/$m/$s")
                     },
                     onNavigateToFreeRunSetup = {
-                        navController.navigate("map_my_run_setup/no_route")
+                        val dist = dashboardViewModel.targetDistance.value
+                        val timeOn = dashboardViewModel.isTargetTimeEnabled.value
+                        val h = dashboardViewModel.targetHours.value
+                        val m = dashboardViewModel.targetMinutes.value
+                        val s = dashboardViewModel.targetSeconds.value
+                        navController.navigate("map_my_run_setup/no_route/$dist/$timeOn/$h/$m/$s")
                     },
                     onNavigateToRunSession = {
                         navController.navigate("run_session") {
@@ -229,8 +239,13 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 )
             }
             // Map My Run Setup Screen (the beautiful redesigned one!)
-            composable("map_my_run_setup/{mode}") { backStackEntry ->
+            composable("map_my_run_setup/{mode}/{dist}/{timeOn}/{h}/{m}/{s}") { backStackEntry ->
                 val mode = backStackEntry.arguments?.getString("mode") ?: "route"
+                val dist = backStackEntry.arguments?.getString("dist")?.toFloatOrNull() ?: 5f
+                val timeOn = backStackEntry.arguments?.getString("timeOn")?.toBooleanStrictOrNull() ?: false
+                val h = backStackEntry.arguments?.getString("h")?.toIntOrNull() ?: 0
+                val m = backStackEntry.arguments?.getString("m")?.toIntOrNull() ?: 0
+                val s = backStackEntry.arguments?.getString("s")?.toIntOrNull() ?: 0
                 val parentEntry = remember(backStackEntry) {
                     navController.getBackStackEntry(navController.graph.id)
                 }
@@ -238,13 +253,16 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
 
                 MapMyRunSetupScreen(
                     mode = mode,
-                    initialDistance = 5f,
-                    initialTargetTimeEnabled = false,
-                    initialHours = 0,
-                    initialMinutes = 0,
-                    initialSeconds = 0,
+                    initialDistance = dist,
+                    initialTargetTimeEnabled = timeOn,
+                    initialHours = h,
+                    initialMinutes = m,
+                    initialSeconds = s,
                     onNavigateBack = { navController.popBackStack() },
                     onGenerateRoute = { distance, hasTime, hours, minutes, seconds, liveTracking, groupRun, latitude, longitude ->
+                        // Store target time so it persists through route generation → selection → run session
+                        viewModel.setTargetTime(hasTime, hours, minutes, seconds)
+                        
                         // Generate routes with GPS location from setup screen
                         val targetTimeMinutes = if (hasTime) hours * 60 + minutes else null
                         
@@ -328,6 +346,10 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 }
                 val viewModel: RouteGenerationViewModel = hiltViewModel(parentEntry)
                 val routes by viewModel.routes.collectAsState()
+                val hasTargetTime by viewModel.hasTargetTime.collectAsState()
+                val targetHours by viewModel.targetHours.collectAsState()
+                val targetMinutes by viewModel.targetMinutes.collectAsState()
+                val targetSeconds by viewModel.targetSeconds.collectAsState()
                 var selectedRouteId by remember { mutableStateOf<String?>(null) }
                 var aiCoachEnabled by remember { mutableStateOf(true) }
                 
@@ -341,10 +363,13 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         selectedRouteId?.let { routeId ->
                             val selectedRoute = routes.find { it.id == routeId }
                             selectedRoute?.let { route ->
-                                // Create RunSetupConfig with route
+                                // Create RunSetupConfig with route + user's target time from setup screen
                                 val config = RunSetupConfig(
                                     targetDistance = route.distance.toFloat(),
-                                    hasTargetTime = false,
+                                    hasTargetTime = hasTargetTime,
+                                    targetHours = targetHours,
+                                    targetMinutes = targetMinutes,
+                                    targetSeconds = targetSeconds,
                                     route = route
                                 )
                                 RunConfigHolder.setConfig(config)
@@ -358,7 +383,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onBack = { navController.popBackStack() },
                     onRegenerateRoutes = {
                         viewModel.clearRoutes()
-                        navController.navigate("map_my_run_setup/route") {
+                        navController.navigate("map_my_run_setup/route/${distanceKm}/${hasTargetTime}/${targetHours}/${targetMinutes}/${targetSeconds}") {
                             popUpTo("route_selection/${distanceKm.toInt()}") { inclusive = true }
                         }
                     },

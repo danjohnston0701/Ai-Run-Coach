@@ -4708,20 +4708,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: "Forbidden" });
       }
       
-      // Validate inputs
+      // Validate inputs — must match all options the Android/iOS apps offer
       const validGenders = ['male', 'female'];
-      const validAccents = ['British', 'American', 'Australian', 'Irish', 'Scottish', 'New Zealand'];
-      const validTones = ['Energetic', 'Motivational', 'Instructive', 'Factual', 'Abrupt'];
+      const validAccents = [
+        'British', 'American', 'Australian', 'Irish', 'Scottish', 'New Zealand',
+        'South African', 'Canadian', 'Welsh', 'Indian', 'Caribbean', 'Scandinavian'
+      ];
+      const validTones = [
+        'Energetic', 'Motivational', 'Friendly', 'Instructive', 'Tough Love',
+        'Analytical', 'Zen', 'Playful', 'Factual', 'Abrupt'
+      ];
       
-      if (coachGender && !validGenders.includes(coachGender)) {
+      if (coachGender && !validGenders.includes(coachGender.toLowerCase())) {
         return res.status(400).json({ error: 'Invalid coach gender' });
       }
       
-      if (coachAccent && !validAccents.includes(coachAccent)) {
+      const normalizedAccent = coachAccent?.toLowerCase();
+      if (coachAccent && !validAccents.some(a => a.toLowerCase() === normalizedAccent)) {
         return res.status(400).json({ error: `Invalid coach accent: ${coachAccent}. Valid options: ${validAccents.join(', ')}` });
       }
       
-      if (coachTone && !validTones.includes(coachTone)) {
+      const normalizedTone = coachTone?.toLowerCase();
+      if (coachTone && !validTones.some(t => t.toLowerCase() === normalizedTone)) {
         return res.status(400).json({ error: `Invalid coach tone: ${coachTone}. Valid options: ${validTones.join(', ')}` });
       }
       

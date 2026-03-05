@@ -9,7 +9,7 @@
  * ✅ Generates scenic waypoint-based loop routes THROUGH parks/rivers/trails
  * ✅ Uses POST API with custom_model to heavily penalise residential/tertiary streets
  * ✅ Avoids highways, motorways, and major roads
- * ✅ Validates distance within ±25% of target
+ * ✅ Validates distance within ±15% of target
  * ✅ Detects and rejects routes with 180° U-turns (macro-level)
  * ✅ Prevents repeated segments (backtracking < 25%)
  * ✅ Detects parallel road out-and-back (proximity-based)
@@ -421,9 +421,9 @@ function validateRoute(
   if (coordinates.length < 3) return { isValid: false, issues: [], qualityScore: 0 };
   
   const distanceDiffPercent = Math.abs(actualDistanceMeters - targetDistanceMeters) / targetDistanceMeters;
-  if (distanceDiffPercent > 0.25) {
+  if (distanceDiffPercent > 0.15) {
     issues.push({ type: 'DISTANCE_MISMATCH', location: coordinates[0], severity: 'HIGH' });
-    console.log(`⚠️ Distance mismatch: ${(distanceDiffPercent * 100).toFixed(1)}% off target`);
+    console.log(`⚠️ Distance mismatch: ${(distanceDiffPercent * 100).toFixed(1)}% off target (max 15%)`);
   }
   
   // Macro U-turn detection
@@ -639,9 +639,17 @@ async function evaluateCandidates(
     let coordinates = path.points.coordinates as Array<[number, number]>;
     const label = `[${tierLabel}] ${isScenic ? `Scenic(${seed})` : `Seed ${seed}`}`;
     
+    // Hard reject: distance must be within ±15% of target
+    const distanceDiffPercent = Math.abs(path.distance - distanceMeters) / distanceMeters;
+    if (distanceDiffPercent > 0.15) {
+      console.log(`${label}: Rejected - distance ${(path.distance / 1000).toFixed(2)}km is ${(distanceDiffPercent * 100).toFixed(1)}% off target ${(distanceMeters / 1000).toFixed(1)}km (max ±15%)`);
+      rejected.push({ raw: result, metrics: { loopQuality: 0, backtrackRatio: 0, compactness: 0, angularSpread: 0, proximityOverlap: 0 } });
+      continue;
+    }
+
     const loopQuality = calculateLoopQuality(coordinates, latitude, longitude);
     const backtrackRatio = calculateBacktrackRatio(coordinates);
-    console.log(`${label}: Loop=${loopQuality.toFixed(2)}, Backtrack=${backtrackRatio.toFixed(2)}, Dist=${path.distance}m`);
+    console.log(`${label}: Loop=${loopQuality.toFixed(2)}, Backtrack=${backtrackRatio.toFixed(2)}, Dist=${(path.distance / 1000).toFixed(2)}km (${(distanceDiffPercent * 100).toFixed(1)}% off)`);
 
     const minLoop = isScenic ? thresholds.loopQualityScenic : thresholds.loopQuality;
     
