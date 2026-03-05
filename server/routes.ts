@@ -3891,8 +3891,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
 
   // Build TTS instructions for gpt-4o-mini-tts (accent, tone, style)
-  const getCoachTTSInstructions = (coachAccent?: string, coachTone?: string, coachGender?: string, coachName?: string): string => {
-    return aiService.buildTTSInstructions(coachAccent, coachTone, coachGender, coachName);
+  const getCoachTTSInstructions = async (coachAccent?: string, coachTone?: string, coachGender?: string, coachName?: string): Promise<string> => {
+    const ai = await import("./ai-service");
+    return ai.buildTTSInstructions(coachAccent, coachTone, coachGender, coachName);
   };
 
   // Pace Update Coaching with TTS
