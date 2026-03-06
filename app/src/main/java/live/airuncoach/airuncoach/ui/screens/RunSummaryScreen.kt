@@ -1014,9 +1014,11 @@ private data class StatTile(
 
 @Composable
 private fun MainStatsGridFlagship(run: RunSession, lastRunForDelta: RunSession?) {
+    // Fixed 4-tile layout: Avg Pace, Avg Cadence, Elevation Gain, Max Incline
+    // Duration removed — already shown in header
     val stats = remember(run, lastRunForDelta) {
         buildList {
-            add(StatTile("Duration", formatDuration(run.duration), R.drawable.icon_clock_vector, Colors.primary))
+            // Top left: Avg Pace
             add(
                 StatTile(
                     "Avg Pace",
@@ -1026,11 +1028,24 @@ private fun MainStatsGridFlagship(run: RunSession, lastRunForDelta: RunSession?)
                     delta = lastRunForDelta?.averagePace?.let { paceDeltaString(it, run.averagePace) }
                 )
             )
-            if (run.heartRate > 0) add(StatTile("Avg HR", "${run.heartRate} bpm", R.drawable.icon_heart_vector, Colors.error))
-            if (run.calories > 0) add(StatTile("Calories", "${run.calories} kcal", R.drawable.icon_target_vector, Colors.warning))
-            if (run.totalElevationGain > 0) add(StatTile("Elev Gain", "${run.totalElevationGain.roundToInt()} m", R.drawable.icon_trending_vector, Colors.success))
-            if (run.cadence > 0) add(StatTile("Avg Cadence", "${run.cadence} spm", R.drawable.icon_repeat_vector, Colors.primary))
-            if (run.maxCadence != null && run.maxCadence > 0) add(StatTile("Max Cadence", "${run.maxCadence} spm", R.drawable.icon_repeat_vector, Colors.accent))
+            // Top right: Avg Cadence
+            if (run.cadence > 0) {
+                add(StatTile("Avg Cadence", "${run.cadence} spm", R.drawable.icon_repeat_vector, Colors.primary))
+            } else {
+                add(StatTile("Avg Cadence", "-- spm", R.drawable.icon_repeat_vector, Colors.textMuted))
+            }
+            // Bottom left: Elevation Gain
+            if (run.totalElevationGain > 0) {
+                add(StatTile("Elev Gain", "${run.totalElevationGain.roundToInt()} m", R.drawable.icon_trending_vector, Colors.success))
+            } else {
+                add(StatTile("Elev Gain", "0 m", R.drawable.icon_trending_vector, Colors.textMuted))
+            }
+            // Bottom right: Max Incline (steepest incline)
+            if (run.steepestIncline != null && run.steepestIncline > 0) {
+                add(StatTile("Max Incline", "${run.steepestIncline.roundToInt()}°", R.drawable.icon_trending_vector, Colors.warning))
+            } else {
+                add(StatTile("Max Incline", "0°", R.drawable.icon_trending_vector, Colors.textMuted))
+            }
         }
     }
 
