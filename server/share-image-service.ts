@@ -289,9 +289,9 @@ function metricRing(
   const unitY = valueY + unitFontSize + 5;
 
   return `
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${trackColorHex}" stroke-width="${strokeW}" opacity="0.55"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#E2E8F0" stroke-width="${strokeW}"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${trackColorHex}" stroke-width="${strokeW}" opacity="0.25"/>
     <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="url(#${gradId})" stroke-width="${strokeW}" stroke-linecap="round" stroke-dasharray="${dashLen} ${gapLen}" transform="rotate(-90 ${cx} ${cy})" filter="url(#ringGlow)"/>
-    <circle cx="${cx}" cy="${cy}" r="${r - strokeW * 0.8}" fill="none" stroke="url(#${gradId})" stroke-width="1.5" opacity="0.06"/>
     <text x="${cx}" y="${labelY}" font-family="${FONT}" font-size="${labelFontSize}" font-weight="600" fill="${C.textLight}" text-anchor="middle" letter-spacing="0.5">${esc(label)}</text>
     <text x="${cx}" y="${valueY}" font-family="${FONT}" font-size="${valueFontSize}" font-weight="800" fill="${C.textDark}" text-anchor="middle">${esc(value)}</text>
     ${unit ? `<text x="${cx}" y="${unitY}" font-family="${FONT}" font-size="${unitFontSize}" font-weight="500" fill="${C.textMuted}" text-anchor="middle">${esc(unit)}</text>` : ""}
@@ -946,6 +946,8 @@ async function getLogoBuffer(): Promise<Buffer | null> {
 export async function generateShareImage(req: GenerateImageRequest): Promise<Buffer> {
   const template = TEMPLATES.find((t) => t.id === req.templateId);
   if (!template) throw new Error(`Template not found: ${req.templateId}`);
+
+  console.log(`Share image: template=${req.templateId}, gpsTrack=${req.runData.gpsTrack?.length || 0} points, paceData=${req.runData.paceData?.length || 0} splits`);
 
   const dims = ASPECT_DIMENSIONS[req.aspectRatio] || ASPECT_DIMENSIONS["1:1"];
   const { width: w, height: h } = dims;
