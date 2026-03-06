@@ -2212,7 +2212,9 @@ class RunTrackingService : Service(), SensorEventListener {
                     targetZone = 0, // Unknown; backend should avoid assumptions
                     elapsedMinutes = elapsedMinutes,
                     coachName = currentUser?.coachName,
-                    coachTone = currentUser?.coachTone
+                    coachTone = currentUser?.coachTone,
+                    coachGender = currentUser?.coachGender,
+                    coachAccent = currentUser?.coachAccent
                 )
                 val response = apiService.getHeartRateCoaching(request)
                 coachingHistory.add(AiCoachingNote(

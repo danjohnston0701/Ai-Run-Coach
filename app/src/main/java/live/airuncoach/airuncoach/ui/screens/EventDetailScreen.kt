@@ -50,6 +50,13 @@ fun EventDetailScreen(
     val apiService = remember { RetrofitClient(context, sessionManager).instance }
     val scope = rememberCoroutineScope()
     
+    // Load user for coach settings
+    val user = remember {
+        val userJson = context.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
+            .getString("user", null)
+        userJson?.let { com.google.gson.Gson().fromJson(it, live.airuncoach.airuncoach.domain.model.User::class.java) }
+    }
+    
     var route by remember { mutableStateOf<Route?>(null) }
     var weatherData by remember { mutableStateOf<WeatherData?>(null) }
     var briefingText by remember { mutableStateOf<String?>(null) }
@@ -151,7 +158,11 @@ fun EventDetailScreen(
                         temp = weather.temperature.toInt(),
                         condition = weather.condition ?: weather.description,
                         windSpeed = weather.windSpeed.toInt()
-                    )
+                    ),
+                    coachName = user?.coachName,
+                    coachGender = user?.coachGender,
+                    coachAccent = user?.coachAccent,
+                    coachTone = user?.coachTone
                 )
                 
                 val response = apiService.getPreRunBriefing(request)

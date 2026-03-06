@@ -9,5 +9,7 @@ data class HeartRateCoachingRequest(
     @SerializedName("targetZone") val targetZone: Int,
     @SerializedName("elapsedMinutes") val elapsedMinutes: Int,
     @SerializedName("coachName") val coachName: String?,
-    @SerializedName("coachTone") val coachTone: String?
+    @SerializedName("coachTone") val coachTone: String?,
+    @SerializedName("coachGender") val coachGender: String? = null,
+    @SerializedName("coachAccent") val coachAccent: String? = null
 )

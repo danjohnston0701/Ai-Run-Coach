@@ -15,7 +15,12 @@ data class PreRunBriefingRequest(
     @SerializedName("targetPace") val targetPace: String?,
     @SerializedName("firstTurnInstruction") val firstTurnInstruction: String?,
     @SerializedName("weather") val weather: WeatherPayload?,
-    @SerializedName("wellness") val wellness: WellnessPayload? = null
+    @SerializedName("wellness") val wellness: WellnessPayload? = null,
+    // Coach personality settings
+    @SerializedName("coachName") val coachName: String? = null,
+    @SerializedName("coachGender") val coachGender: String? = null,
+    @SerializedName("coachAccent") val coachAccent: String? = null,
+    @SerializedName("coachTone") val coachTone: String? = null
 )
 
 data class StartLocation(

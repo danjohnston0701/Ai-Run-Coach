@@ -272,7 +272,11 @@ class RunSessionViewModel @Inject constructor(
                         targetPace = targetPace,
                         firstTurnInstruction = firstTurnInstruction,
                         weather = weatherPayload,
-                        wellness = wellnessPayload
+                        wellness = wellnessPayload,
+                        coachName = user?.coachName,
+                        coachGender = user?.coachGender,
+                        coachAccent = user?.coachAccent,
+                        coachTone = user?.coachTone
                     )
                     
                     val briefing = apiService.getPreRunBriefing(request)
@@ -541,8 +545,10 @@ class RunSessionViewModel @Inject constructor(
                         isStruggling = runSession.value?.isStruggling,
                         activityType = "run",
                         userFitnessLevel = null,
+                        coachName = user?.coachName,
                         coachTone = user?.coachTone,
-                        coachAccent = null,
+                        coachGender = user?.coachGender,
+                        coachAccent = user?.coachAccent,
                         wellness = _runState.value.wellnessContext
                     )
                 )

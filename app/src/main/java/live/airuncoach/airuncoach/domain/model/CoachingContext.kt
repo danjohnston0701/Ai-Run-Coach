@@ -27,7 +27,9 @@ data class CoachingContext(
     // Settings
     val activityType: String?,
     val userFitnessLevel: String?,
+    val coachName: String?,
     val coachTone: String?,
+    val coachGender: String?,
     val coachAccent: String?,
     
     // Wellness (from Garmin)
