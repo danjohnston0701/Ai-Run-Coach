@@ -5102,14 +5102,17 @@ private fun DataTabFlagship(
 
         // ==================== PACE SECTION ====================
         item {
+            val bestPace = run.kmSplits.minByOrNull { parsePaceToSeconds(it.pace) }
+            val worstPace = run.kmSplits.maxByOrNull { parsePaceToSeconds(it.pace) }
+            
             DataSectionCard(
                 title = "Pace",
                 icon = "⏱️",
                 metrics = buildList {
                     run.averagePace?.let { add("Avg Pace" to "$it/km") }
-                    run.averagePace?.let { add("Avg Moving Pace" to "$it/km") } // Using avg as proxy for now
                     run.currentPace?.let { add("Current Pace" to "$it/km") }
-                    add("Best Km Pace" to (run.kmSplits.minByOrNull { it.pace }?.pace?.replace("/km", "") ?: "--:--") + "/km")
+                    if (bestPace != null) add("Best Km Pace" to bestPace.pace.replace("/km", "") + "/km")
+                    if (worstPace != null) add("Slowest Km Pace" to worstPace.pace.replace("/km", "") + "/km")
                 }
             )
         }
@@ -5117,18 +5120,25 @@ private fun DataTabFlagship(
         // ==================== SPEED SECTION ====================
         item {
             // Use avgSpeed (moving speed) if available, otherwise fall back to averageSpeed
-            // Backend might send in km/h or m/s - detect based on magnitude (> 50 = likely km/h)
             val rawAvgSpeed = run.avgSpeed ?: run.averageSpeed
             val avgSpeedKmh = if (rawAvgSpeed > 50) rawAvgSpeed else rawAvgSpeed * 3.6f
             
             val rawMaxSpeed = run.maxSpeed
             val maxSpeedKmh = if (rawMaxSpeed > 50) rawMaxSpeed else rawMaxSpeed * 3.6f
             
+            // Calculate fastest and slowest speeds from km splits (pace is in min/km)
+            val fastestPaceSeconds = run.kmSplits.minOfOrNull { parsePaceToSeconds(it.pace) } ?: 0
+            val slowestPaceSeconds = run.kmSplits.maxOfOrNull { parsePaceToSeconds(it.pace) } ?: 0
+            val fastestSpeedKmh = if (fastestPaceSeconds > 0) 60.0 / (fastestPaceSeconds / 60.0) else 0.0
+            val slowestSpeedKmh = if (slowestPaceSeconds > 0) 60.0 / (slowestPaceSeconds / 60.0) else 0.0
+            
             DataSectionCard(
                 title = "Speed",
                 icon = "⚡",
                 metrics = buildList {
                     if (avgSpeedKmh > 0) add("Avg Speed" to String.format(Locale.US, "%.1f km/h", avgSpeedKmh))
+                    if (fastestSpeedKmh > 0) add("Fastest Speed" to String.format(Locale.US, "%.1f km/h", fastestSpeedKmh))
+                    if (slowestSpeedKmh > 0) add("Slowest Speed" to String.format(Locale.US, "%.1f km/h", slowestSpeedKmh))
                     if (maxSpeedKmh > 0) add("Max Speed" to String.format(Locale.US, "%.1f km/h", maxSpeedKmh))
                 }
             )
@@ -5182,8 +5192,15 @@ private fun DataTabFlagship(
                     if (run.totalElevationLoss > 0) add("Total Descent" to "${run.totalElevationLoss.roundToInt()} m")
                     run.minElevation?.let { add("Min Elevation" to "${it.toInt()} m") }
                     run.maxElevation?.let { add("Max Elevation" to "${it.toInt()} m") }
-                    run.steepestIncline?.let { add("Steepest Incline" to "${it.toInt()}%") }
-                    run.steepestDecline?.let { add("Steepest Decline" to "${-it.toInt()}%") }
+                    // Convert percentage to degrees: 0°=flat, 90°=vertical
+                    run.steepestIncline?.let { 
+                        val degrees = Math.toDegrees(Math.atan(it / 100.0))
+                        add("Steepest Incline" to "${degrees.roundToInt()}°") 
+                    }
+                    run.steepestDecline?.let { 
+                        val degrees = Math.toDegrees(Math.atan(it / 100.0))
+                        add("Steepest Decline" to "${degrees.roundToInt()}°") 
+                    }
                 }
             )
         }
@@ -5334,6 +5351,12 @@ private fun DataSectionCard(
 
 @Composable
 private fun KmSplitsCard(kmSplits: List<KmSplit>) {
+    // Calculate per-km times from cumulative times
+    val splitsWithPerKmTime = kmSplits.mapIndexed { index, split ->
+        val perKmTime = if (index == 0) split.time else split.time - kmSplits[index - 1].time
+        split to perKmTime
+    }
+    
     Card(
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
         shape = RoundedCornerShape(16.dp),
@@ -5359,28 +5382,25 @@ private fun KmSplitsCard(kmSplits: List<KmSplit>) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Km", style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = Colors.textMuted, modifier = Modifier.weight(1f))
+                Text("Km", style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = Colors.textMuted, modifier = Modifier.weight(0.8f))
                 Text("Time", style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = Colors.textMuted, modifier = Modifier.weight(1f))
                 Text("Pace", style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = Colors.textMuted, modifier = Modifier.weight(1f))
             }
             
             HorizontalDivider(color = Colors.border.copy(alpha = 0.3f), modifier = Modifier.padding(vertical = 8.dp))
             
-            kmSplits.take(10).forEach { split ->
+            // Show all splits (not just first 10)
+            splitsWithPerKmTime.forEach { (split, perKmTime) ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("${split.km}", style = AppTextStyles.body, color = Colors.textSecondary, modifier = Modifier.weight(1f))
-                    Text(formatSecondsToHMS(split.time), style = AppTextStyles.body, color = Colors.textSecondary, modifier = Modifier.weight(1f))
+                    Text("${split.km}", style = AppTextStyles.body, color = Colors.textSecondary, modifier = Modifier.weight(0.8f))
+                    Text(formatSecondsToHMS(perKmTime), style = AppTextStyles.body, color = Colors.textSecondary, modifier = Modifier.weight(1f))
                     Text("${split.pace}/km", style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold), color = Colors.primary, modifier = Modifier.weight(1f))
                 }
-            }
-            
-            if (kmSplits.size > 10) {
-                Text("+ ${kmSplits.size - 10} more km splits", style = AppTextStyles.caption, color = Colors.textMuted, modifier = Modifier.padding(top = 8.dp))
             }
         }
     }
