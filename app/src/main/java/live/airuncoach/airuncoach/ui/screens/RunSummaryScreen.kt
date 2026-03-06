@@ -194,6 +194,7 @@ fun RunSummaryScreenFlagship(
                             onCommentsChange = viewModel::updatePostRunComments,
                             onGenerateAi = { viewModel.generateAIAnalysis() },
                             isGarminConnected = isGarminConnected,
+                            coachingNotes = runSession!!.aiCoachingNotes,
                             onShareCard = {
                                 // share a “summary card” (text now; optional bitmap helper included below)
                                 viewModel.shareRunWithLink(context)
@@ -389,6 +390,7 @@ private fun AiInsightsTabContent(
     onCommentsChange: (String) -> Unit,
     onGenerateAi: () -> Unit,
     isGarminConnected: Boolean = false,
+    coachingNotes: List<AiCoachingNote> = emptyList(),
     onShareCard: () -> Unit,
     onDelete: () -> Unit,
     onStruggleComment: (String, String) -> Unit = { _, _ -> },
@@ -463,6 +465,7 @@ private fun AiInsightsTabContent(
             AiSectionFlagship(
                 analysisState = analysisState,
                 comments = comments,
+                coachingNotes = coachingNotes,
                 onCommentsChange = onCommentsChange,
                 onGenerateAi = onGenerateAi
             )
@@ -1111,6 +1114,7 @@ private fun StatCardFlagship(tile: StatTile, modifier: Modifier = Modifier) {
 private fun AiSectionFlagship(
     analysisState: AiAnalysisState,
     comments: String,
+    coachingNotes: List<AiCoachingNote> = emptyList(),
     onCommentsChange: (String) -> Unit,
     onGenerateAi: () -> Unit
 ) {
@@ -1219,6 +1223,68 @@ private fun AiSectionFlagship(
                             color = Colors.error
                         )
                     }
+                }
+            }
+        }
+
+        // AI Coaching Logs - shown after the AI summary (excluding navigation prompts)
+        if (coachingNotes.isNotEmpty()) {
+            val filteredNotes = coachingNotes.filter { note ->
+                // Exclude short navigation-like prompts (typically under 30 chars)
+                // Navigation prompts are things like "Turn left", "Hill ahead", "Speed up"
+                note.message.length >= 30 || 
+                !note.message.contains("turn", ignoreCase = true) &&
+                !note.message.contains("left", ignoreCase = true) &&
+                !note.message.contains("right", ignoreCase = true) &&
+                !note.message.contains("hill", ignoreCase = true) &&
+                !note.message.contains("ahead", ignoreCase = true) &&
+                !note.message.contains("speed", ignoreCase = true) &&
+                !note.message.contains("slow", ignoreCase = true) &&
+                !note.message.contains("meter", ignoreCase = true) &&
+                !note.message.contains("metre", ignoreCase = true)
+            }
+            
+            if (filteredNotes.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(Spacing.md))
+                HorizontalDivider(color = Colors.border.copy(alpha = 0.4f))
+                Spacer(modifier = Modifier.height(Spacing.md))
+                
+                Text(
+                    text = "AI Coaching During Run",
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.textPrimary
+                )
+                
+                Spacer(modifier = Modifier.height(Spacing.sm))
+                
+                filteredNotes.forEach { note ->
+                    val minutes = note.time / 60000
+                    val seconds = (note.time % 60000) / 1000
+                    val timeStr = String.format(Locale.US, "%d:%02d", minutes, seconds)
+                    
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Colors.backgroundTertiary.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Text(
+                                text = timeStr,
+                                style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                                color = Colors.primary
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = note.message,
+                                style = AppTextStyles.body,
+                                color = Colors.textPrimary
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(Spacing.sm))
                 }
             }
         }
