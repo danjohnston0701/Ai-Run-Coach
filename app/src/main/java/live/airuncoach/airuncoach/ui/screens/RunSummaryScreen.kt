@@ -1040,9 +1040,10 @@ private fun MainStatsGridFlagship(run: RunSession, lastRunForDelta: RunSession?)
             } else {
                 add(StatTile("Elev Gain", "0 m", R.drawable.icon_trending_vector, Colors.textMuted))
             }
-            // Bottom right: Max Incline (steepest incline)
+            // Bottom right: Max Incline (steepest incline, converted from % to degrees: 0°=flat, 90°=vertical)
             if (run.steepestIncline != null && run.steepestIncline > 0) {
-                add(StatTile("Max Incline", "${run.steepestIncline.roundToInt()}°", R.drawable.icon_trending_vector, Colors.warning))
+                val maxInclineDegrees = Math.toDegrees(Math.atan(run.steepestIncline / 100.0))
+                add(StatTile("Max Incline", "${maxInclineDegrees.roundToInt()}°", R.drawable.icon_trending_vector, Colors.warning))
             } else {
                 add(StatTile("Max Incline", "0°", R.drawable.icon_trending_vector, Colors.textMuted))
             }
