@@ -296,12 +296,12 @@ private fun RunSummaryTopBarFlagship(
     onShare: () -> Unit,
     difficultyLabel: String?
 ) {
-    // Compact header pinned to top — minimal vertical padding so no wasted space
+    // Compact header pinned to top — no statusBarsPadding here because the Scaffold
+    // already accounts for it via the `padding` values passed to the content lambda.
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(Colors.backgroundRoot)
-            .statusBarsPadding()
             .padding(horizontal = 4.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

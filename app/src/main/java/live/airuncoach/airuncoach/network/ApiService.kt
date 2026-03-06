@@ -10,6 +10,7 @@ import live.airuncoach.airuncoach.network.model.*
 import live.airuncoach.airuncoach.domain.model.ConnectedDevice
 import live.airuncoach.airuncoach.domain.model.WellnessSyncResponse
 import okhttp3.MultipartBody
+import retrofit2.Response
 import retrofit2.http.*
 
 interface ApiService {
