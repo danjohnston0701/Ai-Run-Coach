@@ -803,8 +803,8 @@ class RunTrackingService : Service(), SensorEventListener {
                 val update = PhaseCoachingUpdate(
                     phase = _currentRunSession.value?.phase?.name ?: "STEADY",
                     distance = totalDistance / 1000.0,
-                    targetDistance = targetDistance,
-                    elapsedTime = getActiveRunDuration(),
+                    targetDistance = targetDistance?.let { it / 1000.0 },  // Convert metres to km
+                    elapsedTime = getActiveRunDuration() / 1000,  // Convert ms to seconds
                     currentPace = _currentRunSession.value?.averagePace ?: "0:00",
                     currentGrade = calculateAverageGradient().toDouble(),
                     totalElevationGain = totalElevationGain,
@@ -1082,9 +1082,9 @@ class RunTrackingService : Service(), SensorEventListener {
                 val update = PhaseCoachingUpdate(
                     phase = _currentRunSession.value?.phase?.name ?: "STEADY",
                     distance = totalDistance / 1000.0, // km
-                    targetDistance = tDist,
-                    elapsedTime = getActiveRunDuration(),
-                    currentPace = currentPace,
+                    targetDistance = tDist / 1000.0,  // Convert metres to km
+                    elapsedTime = getActiveRunDuration() / 1000,  // Convert ms to seconds
+                    currentPace = formatPace(currentAvgPace),  // Use actual avg pace, not GPS instant pace
                     currentGrade = currentGradient,
                     totalElevationGain = totalElevationGain,
                     heartRate = currentHeartRate.takeIf { it > 0 },
@@ -1955,20 +1955,31 @@ class RunTrackingService : Service(), SensorEventListener {
             serviceScope.launch {
                 try {
                     // Calculate target pace from target time and distance if available
+                    // targetTime is in milliseconds, targetDistance is in metres
                     val targetPaceStr = if (targetTime != null && targetDistance != null && targetDistance!! > 0) {
-                        val totalSeconds = targetTime!! / 1000
-                        val paceSecondsPerKm = totalSeconds / targetDistance!!
+                        val totalSeconds = targetTime!! / 1000.0
+                        val targetDistKm = targetDistance!! / 1000.0
+                        val paceSecondsPerKm = totalSeconds / targetDistKm
                         val paceMin = (paceSecondsPerKm / 60).toInt()
                         val paceSec = (paceSecondsPerKm % 60).toInt()
                         "$paceMin:${paceSec.toString().padStart(2, '0')}"
                     } else null
 
+                    // Calculate current average pace from actual distance/time (not stale session)
+                    val elapsedMs = getActiveRunDuration()
+                    val elapsedSec = elapsedMs / 1000.0
+                    val distKm = totalDistance / 1000.0
+                    val currentAvgPaceStr = if (distKm > 0 && elapsedSec > 0) {
+                        val paceSecPerKm = elapsedSec / distKm
+                        formatPace(paceSecPerKm)
+                    } else "0:00"
+
                     val update = PhaseCoachingUpdate(
                         phase = _currentRunSession.value?.phase?.name ?: "STEADY",
                         distance = totalDistance / 1000.0,
-                        targetDistance = targetDistance,
-                        elapsedTime = getActiveRunDuration(),
-                        currentPace = _currentRunSession.value?.averagePace ?: "0:00",
+                        targetDistance = targetDistance?.let { it / 1000.0 },  // Convert metres to km
+                        elapsedTime = getActiveRunDuration() / 1000,  // Convert ms to seconds
+                        currentPace = currentAvgPaceStr,
                         currentGrade = calculateAverageGradient().toDouble(),
                         totalElevationGain = totalElevationGain,
                         heartRate = currentHeartRate.takeIf { it > 0 },
@@ -2021,20 +2032,31 @@ class RunTrackingService : Service(), SensorEventListener {
             serviceScope.launch {
                 try {
                     // Calculate target pace from target time and distance if available
+                    // targetTime is in milliseconds, targetDistance is in metres
                     val phaseTargetPaceStr = if (targetTime != null && targetDistance != null && targetDistance!! > 0) {
-                        val totalSeconds = targetTime!! / 1000
-                        val paceSecondsPerKm = totalSeconds / targetDistance!!
+                        val totalSeconds = targetTime!! / 1000.0
+                        val targetDistKm = targetDistance!! / 1000.0
+                        val paceSecondsPerKm = totalSeconds / targetDistKm
                         val paceMin = (paceSecondsPerKm / 60).toInt()
                         val paceSec = (paceSecondsPerKm % 60).toInt()
                         "$paceMin:${paceSec.toString().padStart(2, '0')}"
                     } else null
 
+                    // Calculate current average pace from actual distance/time
+                    val phaseElapsedMs = getActiveRunDuration()
+                    val phaseElapsedSec = phaseElapsedMs / 1000.0
+                    val phaseDistKm = totalDistance / 1000.0
+                    val phaseCurrentPaceStr = if (phaseDistKm > 0 && phaseElapsedSec > 0) {
+                        val paceSecPerKm = phaseElapsedSec / phaseDistKm
+                        formatPace(paceSecPerKm)
+                    } else "0:00"
+
                     val update = PhaseCoachingUpdate(
                         phase = newPhase.name,
                         distance = totalDistance / 1000.0,
-                        targetDistance = targetDistance,
-                        elapsedTime = getActiveRunDuration(),
-                        currentPace = _currentRunSession.value?.averagePace ?: "0:00",
+                        targetDistance = targetDistance?.let { it / 1000.0 },  // Convert metres to km
+                        elapsedTime = getActiveRunDuration() / 1000,  // Convert ms to seconds
+                        currentPace = phaseCurrentPaceStr,
                         currentGrade = calculateAverageGradient().toDouble(),
                         totalElevationGain = totalElevationGain,
                         heartRate = currentHeartRate.takeIf { it > 0 },
@@ -2104,7 +2126,7 @@ class RunTrackingService : Service(), SensorEventListener {
             try {
                 val update = StruggleUpdate(
                     distance = totalDistance / 1000.0,
-                    elapsedTime = getActiveRunDuration(),
+                    elapsedTime = getActiveRunDuration() / 1000,  // Convert ms to seconds
                     currentPace = currentPaceFormatted,
                     baselinePace = baselinePaceFormatted,
                     paceDropPercent = paceDropPercent.toDouble(),
@@ -2137,11 +2159,16 @@ class RunTrackingService : Service(), SensorEventListener {
         if (!coachingFeaturePrefs.kmSplitsEnabled) return
         serviceScope.launch {
             try {
+                // Convert KmSplit times from ms to seconds for the backend
+                val splitsForBackend = kmSplits.map { s ->
+                    KmSplit(km = s.km, time = s.time / 1000, pace = s.pace)
+                }
+                
                 val update = PaceUpdate(
                     distance = totalDistance / 1000.0,
-                    targetDistance = targetDistance,
+                    targetDistance = targetDistance?.let { it / 1000.0 },  // Convert metres to km
                     currentPace = split.pace,
-                    elapsedTime = getActiveRunDuration(),
+                    elapsedTime = getActiveRunDuration() / 1000,  // Convert ms to seconds
                     coachName = currentUser?.coachName,
                     coachTone = currentUser?.coachTone,
                     coachGender = currentUser?.coachGender,
@@ -2152,7 +2179,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     currentGrade = calculateAverageGradient().toDouble(),
                     totalElevationGain = totalElevationGain,
                     isOnHill = abs(calculateAverageGradient()) > 3f,
-                    kmSplits = kmSplits.toList(),
+                    kmSplits = splitsForBackend,  // Send with seconds, not milliseconds
                     hasRoute = hasRoute
                 )
                 val response = apiService.getPaceUpdate(update)
@@ -2253,7 +2280,7 @@ class RunTrackingService : Service(), SensorEventListener {
                         if (dt > 0) calculateDistance(prev, last) / dt else 0.0
                     } else 0.0,
                     distance = totalDistance / 1000.0,
-                    elapsedTime = getActiveRunDuration(),
+                    elapsedTime = getActiveRunDuration() / 1000,  // Convert ms to seconds
                     heartRate = if (currentHeartRate > 0) currentHeartRate else null,
                     userHeight = currentUser?.height?.let { it / 100.0 },
                     userWeight = currentUser?.weight?.toDouble(),
@@ -2428,7 +2455,7 @@ class RunTrackingService : Service(), SensorEventListener {
         return EliteCoachingRequest(
             coachingType = type,
             distance = distKm,
-            targetDistance = targetDistance,
+            targetDistance = targetDistance?.let { it / 1000.0 },  // Convert metres to km
             currentPace = currentPace,
             averagePace = calculatePace(avgSpeed),
             elapsedTime = elapsedSec,
@@ -2709,7 +2736,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 val request = ElevationCoachingRequest(
                     eventType = eventType,
                     distance = distKm,
-                    elapsedTime = getActiveRunDuration(),
+                    elapsedTime = getActiveRunDuration() / 1000,  // Convert ms to seconds
                     currentGrade = gradePercent,
                     segmentDistanceMeters = segmentDistanceMeters,
                     totalElevationGain = totalElevationGain,
