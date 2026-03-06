@@ -5116,15 +5116,20 @@ private fun DataTabFlagship(
 
         // ==================== SPEED SECTION ====================
         item {
-            val avgSpeedKmh = run.averageSpeed * 3.6f
-            val maxSpeedKmh = run.maxSpeed * 3.6f
+            // Use avgSpeed (moving speed) if available, otherwise fall back to averageSpeed
+            // Backend might send in km/h or m/s - detect based on magnitude (> 50 = likely km/h)
+            val rawAvgSpeed = run.avgSpeed ?: run.averageSpeed
+            val avgSpeedKmh = if (rawAvgSpeed > 50) rawAvgSpeed else rawAvgSpeed * 3.6f
+            
+            val rawMaxSpeed = run.maxSpeed
+            val maxSpeedKmh = if (rawMaxSpeed > 50) rawMaxSpeed else rawMaxSpeed * 3.6f
+            
             DataSectionCard(
                 title = "Speed",
                 icon = "⚡",
                 metrics = buildList {
-                    if (run.averageSpeed > 0) add("Avg Speed" to String.format("%.1f km/h", avgSpeedKmh))
-                    if (run.avgSpeed != null && run.avgSpeed > 0) add("Avg Moving Speed" to String.format("%.1f km/h", run.avgSpeed * 3.6))
-                    if (run.maxSpeed > 0) add("Max Speed" to String.format("%.1f km/h", maxSpeedKmh))
+                    if (avgSpeedKmh > 0) add("Avg Speed" to String.format(Locale.US, "%.1f km/h", avgSpeedKmh))
+                    if (maxSpeedKmh > 0) add("Max Speed" to String.format(Locale.US, "%.1f km/h", maxSpeedKmh))
                 }
             )
         }
