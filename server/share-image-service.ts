@@ -289,7 +289,7 @@ function metricRing(
   const unitY = valueY + unitFontSize + 5;
 
   return `
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${trackColorHex}" stroke-width="${strokeW}" opacity="0.35"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${trackColorHex}" stroke-width="${strokeW}" opacity="0.55"/>
     <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="url(#${gradId})" stroke-width="${strokeW}" stroke-linecap="round" stroke-dasharray="${dashLen} ${gapLen}" transform="rotate(-90 ${cx} ${cy})" filter="url(#ringGlow)"/>
     <circle cx="${cx}" cy="${cy}" r="${r - strokeW * 0.8}" fill="none" stroke="url(#${gradId})" stroke-width="1.5" opacity="0.06"/>
     <text x="${cx}" y="${labelY}" font-family="${FONT}" font-size="${labelFontSize}" font-weight="600" fill="${C.textLight}" text-anchor="middle" letter-spacing="0.5">${esc(label)}</text>
