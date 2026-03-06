@@ -22,6 +22,7 @@ import javax.inject.Inject
 sealed class AiAnalysisState {
     object Idle : AiAnalysisState()
     object Loading : AiAnalysisState()
+    data class Freeform(val markdown: String, val title: String?) : AiAnalysisState()
     data class Comprehensive(val analysis: ComprehensiveRunAnalysis) : AiAnalysisState()
     data class Basic(val insights: BasicRunInsights) : AiAnalysisState()
     data class Error(val message: String) : AiAnalysisState()
@@ -215,19 +216,20 @@ class RunSummaryViewModel @Inject constructor(
      * Used by UI to hide the generate button once analysis exists.
      */
     fun hasAnalysis(): Boolean {
-        return _analysisState.value is AiAnalysisState.Comprehensive || _analysisState.value is AiAnalysisState.Basic
+        val state = _analysisState.value
+        return state is AiAnalysisState.Freeform || state is AiAnalysisState.Comprehensive || state is AiAnalysisState.Basic
     }
 
     /**
-     * Generate comprehensive AI analysis with all context.
-     * If analysis already exists (cached on backend), it will be returned without re-generating.
+     * Generate a freeform AI analysis — sends ALL run context to the backend
+     * and gets back a unique, bespoke markdown analysis. No rigid structure.
      */
     fun generateAIAnalysis() {
         val session = _runSession.value ?: return
-        
+
         // Don't re-generate if we already have a loaded analysis
         if (hasAnalysis()) return
-        
+
         viewModelScope.launch {
             _analysisState.value = AiAnalysisState.Loading
             try {
@@ -237,24 +239,271 @@ class RunSummaryViewModel @Inject constructor(
                     userComments = _userPostRunComments.value.ifBlank { null },
                     strugglePoints = _strugglePoints.value
                 )
-                apiService.updateRunProgress(updateRequest)
+                try { apiService.updateRunProgress(updateRequest) } catch (_: Exception) {}
 
-                // Primary: comprehensive analysis (Garmin-aware)
-                val comprehensive = apiService.getComprehensiveRunAnalysis(session.id)
-                _analysisState.value = AiAnalysisState.Comprehensive(comprehensive.analysis)
+                // Build the comprehensive freeform request
+                val user = getUserFromPrefs()
+                val goals = loadActiveGoals(user)
+                val request = buildFreeformRequest(session, user, goals)
+
+                // Call the freeform analysis endpoint
+                val response = apiService.generateFreeformAnalysis(session.id, request)
+                _analysisState.value = AiAnalysisState.Freeform(
+                    markdown = response.analysis,
+                    title = response.title
+                )
+
+                // Save freeform analysis for future loading
+                val saveJson = gson.toJsonTree(mapOf(
+                    "freeform" to true,
+                    "markdown" to response.analysis,
+                    "title" to response.title
+                ))
+                try { apiService.saveRunAnalysis(session.id, SaveRunAnalysisRequest(saveJson)) } catch (_: Exception) {}
+
             } catch (e: Exception) {
-                // Fallback: basic AI insights
-                try {
-                    val insights = apiService.getBasicRunInsights(session.id)
-                    _analysisState.value = AiAnalysisState.Basic(insights)
-
-                    // Persist basic insights to analysis table
-                    val json = gson.toJsonTree(insights)
-                    apiService.saveRunAnalysis(session.id, SaveRunAnalysisRequest(json))
-                } catch (inner: Exception) {
-                    _analysisState.value = AiAnalysisState.Error(inner.message ?: "Failed to generate run analysis")
-                }
+                Log.e("RunSummaryViewModel", "Freeform analysis failed", e)
+                _analysisState.value = AiAnalysisState.Error(
+                    e.message ?: "Failed to generate AI analysis"
+                )
             }
+        }
+    }
+
+    /**
+     * Build the FreeformAnalysisRequest with every piece of context we have.
+     */
+    private suspend fun buildFreeformRequest(
+        session: RunSession,
+        user: User?,
+        goals: List<Goal>
+    ): FreeformAnalysisRequest {
+        // Calculate weather performance index for this run
+        val weatherResult = calculateWeatherPerformance(session.weatherAtStart)
+        val userWeatherInsights = loadUserWeatherInsights(user)
+
+        return FreeformAnalysisRequest(
+            runId = session.id,
+            distance = session.distance,
+            duration = session.duration,
+            averagePace = session.averagePace,
+            averageHeartRate = session.heartRate.takeIf { it > 0 },
+            maxHeartRate = session.heartRateData?.maxOrNull(),
+            averageCadence = session.cadence.takeIf { it > 0 },
+            elevationGain = session.totalElevationGain,
+            elevationLoss = session.totalElevationLoss,
+            calories = session.calories,
+            terrainType = session.terrainType.name,
+            maxGradient = session.maxGradient,
+            steepestIncline = session.steepestIncline,
+            steepestDecline = session.steepestDecline,
+
+            kmSplits = session.kmSplits.map { split ->
+                KmSplitData(km = split.km, time = split.time, pace = split.pace)
+            },
+            strugglePoints = _strugglePoints.value.filter { it.isRelevant }.map { sp ->
+                StrugglePointData(
+                    timestamp = sp.timestamp,
+                    distanceMeters = sp.distanceMeters,
+                    paceDropPercent = sp.paceDropPercent,
+                    currentGrade = sp.currentGrade,
+                    heartRate = sp.heartRate,
+                    userComment = sp.userComment
+                )
+            },
+
+            weatherAtStart = session.weatherAtStart?.let {
+                WeatherConditions(
+                    temperature = it.temperature,
+                    feelsLike = it.feelsLike ?: it.temperature,
+                    humidity = it.humidity.toInt(),
+                    windSpeed = it.windSpeed,
+                    windDirection = it.windDirection,
+                    condition = it.condition ?: it.description,
+                    uvIndex = it.uvIndex
+                )
+            },
+            weatherAtEnd = session.weatherAtEnd?.let {
+                WeatherConditions(
+                    temperature = it.temperature,
+                    feelsLike = it.feelsLike ?: it.temperature,
+                    humidity = it.humidity.toInt(),
+                    windSpeed = it.windSpeed,
+                    windDirection = it.windDirection,
+                    condition = it.condition ?: it.description,
+                    uvIndex = it.uvIndex
+                )
+            },
+
+            weatherPerformancePercent = weatherResult?.first,
+            weatherImpactFactors = weatherResult?.second,
+            userWeatherInsights = userWeatherInsights,
+
+            userPostRunComments = _userPostRunComments.value.ifBlank { null },
+            targetDistance = targetDistance,
+            targetTime = targetTime,
+
+            userName = user?.name,
+            userAge = user?.age,
+            userGender = user?.gender,
+            userWeight = user?.weight,
+            userHeight = user?.height,
+            userFitnessLevel = user?.fitnessLevel,
+
+            activeGoals = goals.filter { it.isActive }.map { goal ->
+                FreeformGoalData(
+                    type = goal.type,
+                    title = goal.title,
+                    description = goal.description,
+                    notes = goal.notes,
+                    targetDate = goal.targetDate,
+                    eventName = goal.eventName,
+                    distanceTarget = goal.distanceTarget,
+                    timeTargetSeconds = goal.timeTargetSeconds,
+                    currentProgress = goal.currentProgress,
+                    isActive = goal.isActive
+                )
+            },
+
+            coachName = user?.coachName,
+            coachGender = user?.coachGender,
+            coachAccent = user?.coachAccent,
+            coachTone = user?.coachTone,
+
+            lastSimilarRun = null, // TODO: fetch last similar run from backend
+            isGarminConnected = _isGarminConnected.value,
+            aiCoachingNotes = session.aiCoachingNotes.takeIf { it.isNotEmpty() }
+                ?.joinToString("\n") { it.message }
+        )
+    }
+
+    /**
+     * Load active goals for the current user.
+     */
+    private suspend fun loadActiveGoals(user: User?): List<Goal> {
+        return try {
+            val userId = sharedPrefs.getString("userId", null) ?: user?.id ?: return emptyList()
+            apiService.getGoals(userId).filter { it.isActive }
+        } catch (e: Exception) {
+            Log.w("RunSummaryViewModel", "Failed to load goals for analysis", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * Calculate weather performance index for this run.
+     * Returns (performancePercent, list of factors) or null if no weather data.
+     */
+    private fun calculateWeatherPerformance(
+        weather: WeatherData?
+    ): Pair<Double, List<WeatherImpactFactor>>? {
+        weather ?: return null
+        val factors = mutableListOf<WeatherImpactFactor>()
+
+        // Temperature impact
+        val temp = weather.temperature
+        val tempPenalty = when {
+            temp < 5 -> kotlin.math.abs(temp - 12) * 0.3
+            temp in 5.0..15.0 -> 0.0
+            temp in 15.0..20.0 -> (temp - 15) * 0.5
+            temp in 20.0..25.0 -> (temp - 15) * 0.8
+            temp in 25.0..30.0 -> (temp - 15) * 1.2
+            else -> (temp - 15) * 1.5
+        }
+        val tempLabel = when {
+            temp < 5 -> "Cold"
+            temp in 5.0..15.0 -> "Optimal"
+            temp in 15.0..25.0 -> "Warm"
+            else -> "Hot"
+        }
+        val tempImpact = when {
+            tempPenalty <= 0.5 -> "positive"
+            tempPenalty <= 3.0 -> "neutral"
+            else -> "negative"
+        }
+        factors.add(WeatherImpactFactor("Temperature", "${temp.toInt()}°C ($tempLabel)", tempImpact, tempPenalty))
+
+        // Humidity impact
+        val humidity = weather.humidity
+        val humidityPenalty = when {
+            humidity < 40 -> 0.0
+            humidity in 40.0..60.0 -> (humidity - 40) * 0.1
+            humidity in 60.0..80.0 -> (humidity - 40) * 0.2
+            else -> (humidity - 40) * 0.3
+        }
+        val humImpact = if (humidity > 70) "negative" else if (humidity > 50) "neutral" else "positive"
+        factors.add(WeatherImpactFactor("Humidity", "${humidity.toInt()}%", humImpact, humidityPenalty))
+
+        // Wind impact
+        val wind = weather.windSpeed
+        val windPenalty = when {
+            wind < 10 -> 0.0
+            wind in 10.0..20.0 -> (wind - 10) * 0.3
+            else -> (wind - 10) * 0.5
+        }
+        val windImpact = if (wind > 20) "negative" else if (wind > 10) "neutral" else "positive"
+        factors.add(WeatherImpactFactor("Wind", "${wind.toInt()} km/h", windImpact, windPenalty))
+
+        val totalPenalty = factors.sumOf { it.penaltyPercent }
+        val performancePercent = (100 - totalPenalty).coerceIn(70.0, 100.0)
+
+        return Pair(performancePercent, factors)
+    }
+
+    /**
+     * Load the user's historical weather impact data — how they perform across different conditions.
+     */
+    private suspend fun loadUserWeatherInsights(user: User?): UserWeatherInsights? {
+        return try {
+            val userId = sharedPrefs.getString("userId", null) ?: user?.id ?: return null
+            val data = apiService.getWeatherImpact(userId)
+            if (!data.hasEnoughData) return null
+
+            // Find optimal temperature range (bucket with best avg pace)
+            val bestTempBucket = data.temperatureAnalysis
+                ?.filter { (it.avgPace ?: Int.MAX_VALUE) > 0 }
+                ?.minByOrNull { it.avgPace ?: Int.MAX_VALUE }
+            val worstTempBucket = data.temperatureAnalysis
+                ?.filter { (it.avgPace ?: 0) > 0 }
+                ?.maxByOrNull { it.avgPace ?: 0 }
+
+            // Find best/worst weather condition
+            val bestCondition = data.conditionAnalysis
+                ?.filter { (it.avgPace ?: Int.MAX_VALUE) > 0 }
+                ?.minByOrNull { it.avgPace ?: Int.MAX_VALUE }
+            val worstCondition = data.conditionAnalysis
+                ?.filter { (it.avgPace ?: 0) > 0 }
+                ?.maxByOrNull { it.avgPace ?: 0 }
+
+            // Determine heat sensitivity
+            val heatSensitivity = if (bestTempBucket != null && worstTempBucket != null) {
+                val bestPace = bestTempBucket.avgPace ?: 0
+                val worstPace = worstTempBucket.avgPace ?: 0
+                val pctDiff = if (bestPace > 0) ((worstPace - bestPace).toDouble() / bestPace * 100) else 0.0
+                when {
+                    pctDiff > 15 -> "high"
+                    pctDiff > 8 -> "moderate"
+                    else -> "low"
+                }
+            } else null
+
+            UserWeatherInsights(
+                runsAnalyzed = data.runsAnalyzed,
+                optimalTempRange = bestTempBucket?.label,
+                bestCondition = bestCondition?.condition,
+                worstCondition = worstCondition?.condition,
+                heatSensitivity = heatSensitivity,
+                overallAvgPace = data.overallAvgPace,
+                summary = data.insights?.let { insights ->
+                    buildString {
+                        insights.bestCondition?.let { append("Fastest in ${it.label}. ") }
+                        insights.worstCondition?.let { append("Slowest in ${it.label}.") }
+                    }.ifBlank { null }
+                }
+            )
+        } catch (e: Exception) {
+            Log.w("RunSummaryViewModel", "Failed to load weather insights", e)
+            null
         }
     }
 
@@ -265,12 +514,21 @@ class RunSummaryViewModel @Inject constructor(
                 val analysisJson = record.analysis ?: return@launch
                 var obj = analysisJson.asJsonObject
 
+                // Check for freeform format first (new approach)
+                if (obj.has("freeform") && obj.get("freeform").asBoolean) {
+                    val markdown = obj.get("markdown")?.asString ?: return@launch
+                    val title = obj.get("title")?.asString
+                    _analysisState.value = AiAnalysisState.Freeform(markdown, title)
+                    return@launch
+                }
+
                 // Handle legacy double-nested format: { analysis: { performanceScore: ... } }
                 if (!obj.has("performanceScore") && !obj.has("overallScore") && obj.has("analysis")) {
                     val inner = obj.getAsJsonObject("analysis")
                     if (inner != null) obj = inner
                 }
 
+                // Legacy structured formats
                 if (obj.has("performanceScore")) {
                     val comprehensive = gson.fromJson(obj, ComprehensiveRunAnalysis::class.java)
                     _analysisState.value = AiAnalysisState.Comprehensive(comprehensive)

@@ -65,7 +65,9 @@ class RunTrackingService : Service(), SensorEventListener {
     private lateinit var weatherRepository: WeatherRepository
     private lateinit var sensorManager: SensorManager
     private var stepCounterSensor: Sensor? = null
+    private var stepDetectorSensor: Sensor? = null  // Fallback: fires per step
     private var heartRateSensor: Sensor? = null
+    private var usingStepDetector = false  // Track which sensor is active
     private var wakeLock: PowerManager.WakeLock? = null
     
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -109,10 +111,17 @@ class RunTrackingService : Service(), SensorEventListener {
     private var maxSpeed: Float = 0f
     private var currentPace: String = "0:00" // Real-time/instant pace based on recent GPS
     private var isTracking = false
+    // Pause tracking — ensures paused time is excluded from all duration/pace calculations
+    private var totalPausedMs: Long = 0          // Accumulated paused milliseconds
+    private var pauseStartTime: Long = 0         // When the current pause started (0 = not paused)
+    private var splitPausedMs: Long = 0          // Paused time within the current km split
     private var currentCadence: Int = 0
     private var currentHeartRate: Int = 0
     private var initialStepCount: Int = -1
     private var lastStepTimestamp: Long = 0
+    // Step detector cadence tracking (fallback)
+    private var stepDetectorSteps: Int = 0
+    private var stepDetectorWindowStart: Long = 0
     
     // Cadence tracking for average/max (mirrors HR tracking)
     private var cadenceSum: Long = 0
@@ -277,7 +286,9 @@ class RunTrackingService : Service(), SensorEventListener {
         weatherRepository = WeatherRepository(this)
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+        stepDetectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
         heartRateSensor = sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE)
+        Log.d("RunTrackingService", "Sensors available - StepCounter: ${stepCounterSensor != null}, StepDetector: ${stepDetectorSensor != null}, HeartRate: ${heartRateSensor != null}")
         
         // Initialize session manager and coaching feature preferences
         sessionManager = SessionManager(this)
@@ -295,40 +306,16 @@ class RunTrackingService : Service(), SensorEventListener {
         // Initialize the shared audio queue (handles both OpenAI TTS and device TTS fallback)
         CoachingAudioQueue.init(this)
         
-        // Load user profile for coach settings and goals for AI context
+        // Load user profile for coach settings
         serviceScope.launch {
             try {
                 val userId = sessionManager.getUserId()
                 if (userId != null) {
                     currentUser = apiService.getUser(userId)
                     Log.d("RunTrackingService", "Loaded user profile: ${currentUser?.coachName}")
-
-                    // Load active goals sorted by date (soonest first, no date last)
-                    val allGoals = apiService.getGoals(userId)
-                    activeGoals = allGoals
-                        .filter { it.isActive && !it.isCompleted && it.id != null }
-                        .map { goal ->
-                            ActiveGoalInfo(
-                                id = goal.id!!,
-                                title = goal.title,
-                                goalType = goal.type,  // EVENT, DISTANCE_TIME, HEALTH_WELLBEING, CONSISTENCY
-                                description = goal.description,
-                                notes = goal.notes,
-                                targetDate = goal.targetDate,
-                                eventName = goal.eventName,
-                                distanceTarget = goal.distanceTarget,
-                                customDistanceKm = goal.distanceTarget?.let { parseDistanceToKm(it) },
-                                timeTargetSeconds = goal.timeTargetSeconds,
-                                currentProgress = goal.currentProgress.toDouble(),
-                                progressPercent = (goal.currentProgress * 100).toDouble().coerceIn(0.0, 100.0)
-                            )
-                        }
-                        .sortedWith(compareBy(nullsLast()) { it.targetDate })
-                    Log.d("RunTrackingService", "Loaded ${activeGoals.size} active goals for AI coaching")
-                    Log.d("RunTrackingService", "Loaded ${activeGoals.size} active goals for AI coaching")
                 }
             } catch (e: Exception) {
-                Log.e("RunTrackingService", "Failed to load user profile or goals", e)
+                Log.e("RunTrackingService", "Failed to load user profile", e)
             }
         }
         
@@ -393,6 +380,9 @@ class RunTrackingService : Service(), SensorEventListener {
         _isServiceRunning.value = true
         startTime = System.currentTimeMillis()
         lastSplitTime = startTime
+        totalPausedMs = 0      // Reset pause tracking for new run
+        pauseStartTime = 0
+        splitPausedMs = 0
         routePoints.clear()
         kmSplits.clear()
         lastKmSplit = 0
@@ -412,6 +402,9 @@ class RunTrackingService : Service(), SensorEventListener {
         currentHeartRate = 0
         initialStepCount = -1
         lastStepTimestamp = 0
+        stepDetectorSteps = 0
+        stepDetectorWindowStart = 0
+        usingStepDetector = false
         baselinePace = 0f
         lastBaselineUpdateDistance = 0.0
         hasCadenceCoachingFired = false
@@ -801,7 +794,7 @@ class RunTrackingService : Service(), SensorEventListener {
         _latestCoachingText.value = navigationText
         
         coachingHistory.add(AiCoachingNote(
-            time = System.currentTimeMillis() - startTime,
+            time = getActiveRunDuration(),
             message = "Nav: $navigationText"
         ))
         
@@ -811,7 +804,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     phase = _currentRunSession.value?.phase?.name ?: "STEADY",
                     distance = totalDistance / 1000.0,
                     targetDistance = targetDistance,
-                    elapsedTime = System.currentTimeMillis() - startTime,
+                    elapsedTime = getActiveRunDuration(),
                     currentPace = _currentRunSession.value?.averagePace ?: "0:00",
                     currentGrade = calculateAverageGradient().toDouble(),
                     totalElevationGain = totalElevationGain,
@@ -827,15 +820,14 @@ class RunTrackingService : Service(), SensorEventListener {
                     hasRoute = true,
                     triggerType = "navigation_turn",
                     navigationInstruction = navigationText,
-                    navigationDistance = distanceMeters,
-                    activeGoals = activeGoals.takeIf { it.isNotEmpty() }
+                    navigationDistance = distanceMeters
                 )
                 
                 val response = apiService.getPhaseCoaching(update)
                 Log.d("Navigation", "LLM navigation response: ${response.message}")
                 
                 coachingHistory.add(AiCoachingNote(
-                    time = System.currentTimeMillis() - startTime,
+                    time = getActiveRunDuration(),
                     message = "Nav LLM: ${response.message}"
                 ))
                 
@@ -935,8 +927,8 @@ class RunTrackingService : Service(), SensorEventListener {
         // Skip if we're in the last 100m (final sprint, no nagging)
         if (remainingDistance < 100.0) return
         
-        // Calculate current average pace for the whole run so far
-        val elapsedMs = now - startTime
+        // Calculate current average pace for the whole run so far (excluding paused time)
+        val elapsedMs = getActiveRunDuration()
         val elapsedSeconds = elapsedMs / 1000.0
         val distKm = totalDistance / 1000.0
         if (distKm <= 0 || elapsedSeconds <= 0) return
@@ -1091,7 +1083,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     phase = _currentRunSession.value?.phase?.name ?: "STEADY",
                     distance = totalDistance / 1000.0, // km
                     targetDistance = tDist,
-                    elapsedTime = System.currentTimeMillis() - startTime,
+                    elapsedTime = getActiveRunDuration(),
                     currentPace = currentPace,
                     currentGrade = currentGradient,
                     totalElevationGain = totalElevationGain,
@@ -1117,8 +1109,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     projectedFinishSeconds = projectedFinishSeconds,
                     currentAvgPaceSecondsPerKm = currentAvgPace,
                     rollingPaceSecondsPerKm = rollingPace,
-                    progressPercent = progressFraction * 100,
-                    activeGoals = activeGoals.takeIf { it.isNotEmpty() }
+                    progressPercent = progressFraction * 100
                 )
                 
                 Log.d("PaceCoaching", "Requesting LLM pace coaching: triggerType=${update.triggerType}, " +
@@ -1145,29 +1136,7 @@ class RunTrackingService : Service(), SensorEventListener {
         val seconds = (secondsPerKm % 60).toInt()
         return String.format("%d:%02d", minutes, seconds)
     }
-
-    /**
-     * Parse distance string to kilometers.
-     */
-    private fun parseDistanceToKm(distanceStr: String): Double? {
-        return when (distanceStr.uppercase().replace(" ", "").replace("-", "")) {
-            "5K", "5KM" -> 5.0
-            "10K", "10KM" -> 10.0
-            "HALFMARATHON", "HALF" -> 21.0975
-            "MARATHON", "FULL" -> 42.195
-            "ULTRA" -> 50.0
-            "1K", "1KM" -> 1.0
-            "2K", "2KM" -> 2.0
-            "3K", "3KM" -> 3.0
-            "4K", "4KM" -> 4.0
-            "6K", "6KM" -> 6.0
-            "7K", "7KM" -> 7.0
-            "8K", "8KM" -> 8.0
-            "9K", "9KM" -> 9.0
-            else -> null
-        }
-    }
-
+    
     // ==================== STRIDE ANALYSIS (shared by all coaching triggers) ====================
 
     data class StrideSnapshot(
@@ -1402,7 +1371,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun updatePaceAndStruggle(currentPaceSeconds: Float) {
         // Update baseline (session average pace) every 500m after the first 1km
         if (totalDistance >= 1000 && (totalDistance - lastBaselineUpdateDistance) >= 500) {
-            val elapsedSeconds = (System.currentTimeMillis() - startTime) / 1000.0
+            val elapsedSeconds = (getActiveRunDuration()) / 1000.0
             if (elapsedSeconds > 0 && totalDistance > 0) {
                 baselinePace = (elapsedSeconds / (totalDistance / 1000.0)).toFloat() // seconds per km
                 lastBaselineUpdateDistance = totalDistance
@@ -1426,12 +1395,13 @@ class RunTrackingService : Service(), SensorEventListener {
         val currentKm = (totalDistance / 1000).toInt()
         if (currentKm > lastKmSplit) {
             val now = System.currentTimeMillis()
-            val splitTime = now - lastSplitTime
-            val splitSpeedKmh = (1000f / (splitTime / 1000f)) * 3.6f // m/s → km/h
+            val splitTime = (now - lastSplitTime) - splitPausedMs  // Exclude paused time from this split
+            val splitSpeedKmh = if (splitTime > 0) (1000f / (splitTime / 1000f)) * 3.6f else 0f // m/s → km/h
             val split = KmSplit(km = currentKm, time = splitTime, pace = calculatePace(splitSpeedKmh))
             kmSplits.add(split)
             lastKmSplit = currentKm
             lastSplitTime = now
+            splitPausedMs = 0  // Reset pause accumulator for next split
             Log.d("RunTrackingService", "Reached ${currentKm}km split")
             
             // Only trigger AI coaching at the user's chosen interval (1km, 2km, 3km, 5km, 10km)
@@ -1454,7 +1424,7 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     private fun updateRunSession() {
-        val duration = System.currentTimeMillis() - startTime
+        val duration = getActiveRunDuration()
         
         // Only show distance/pace after user has moved at least 5 meters (filters GPS drift)
         val minDistanceMeters = 5.0
@@ -1611,7 +1581,7 @@ class RunTrackingService : Service(), SensorEventListener {
         if (targetDistance == null && targetTime == null) return null
         
         val achievedDistance = (targetDistance != null && totalDistance / 1000.0 >= targetDistance!! - 0.1) // Allow 10% margin
-        val achievedTime = (targetTime != null && (System.currentTimeMillis() - startTime) <= targetTime!!)
+        val achievedTime = (targetTime != null && (getActiveRunDuration()) <= targetTime!!)
         
         return if (targetDistance != null && targetTime != null) {
             achievedDistance && achievedTime
@@ -1658,17 +1628,36 @@ class RunTrackingService : Service(), SensorEventListener {
 
     private fun pauseTracking() { 
         isTracking = false
+        pauseStartTime = System.currentTimeMillis()  // Record when pause started
         stopTimer()  // Stop timer when paused
         fusedLocationClient.removeLocationUpdates(locationCallback)
         sensorManager.unregisterListener(this)
         updateNotification()
+        Log.d("RunTrackingService", "Paused at ${pauseStartTime}ms, totalPausedMs so far: ${totalPausedMs}")
     }
 
     private fun resumeTracking() { 
         isTracking = true
+        // Accumulate the paused duration
+        if (pauseStartTime > 0) {
+            val thisPauseDuration = System.currentTimeMillis() - pauseStartTime
+            totalPausedMs += thisPauseDuration
+            splitPausedMs += thisPauseDuration  // Track pause within current km split
+            Log.d("RunTrackingService", "Resumed after ${thisPauseDuration}ms pause, totalPausedMs: ${totalPausedMs}")
+            pauseStartTime = 0
+        }
         startTimer()  // Restart timer when resuming
         requestLocationUpdates()
         startSensorTracking()
+    }
+
+    /**
+     * Get the actual active running duration, excluding all paused time.
+     * Use this instead of raw (System.currentTimeMillis() - startTime) everywhere.
+     */
+    private fun getActiveRunDuration(): Long {
+        val totalElapsed = System.currentTimeMillis() - startTime
+        return totalElapsed - totalPausedMs
     }
 
     private fun stopTracking() {
@@ -1978,7 +1967,7 @@ class RunTrackingService : Service(), SensorEventListener {
                         phase = _currentRunSession.value?.phase?.name ?: "STEADY",
                         distance = totalDistance / 1000.0,
                         targetDistance = targetDistance,
-                        elapsedTime = System.currentTimeMillis() - startTime,
+                        elapsedTime = getActiveRunDuration(),
                         currentPace = _currentRunSession.value?.averagePace ?: "0:00",
                         currentGrade = calculateAverageGradient().toDouble(),
                         totalElevationGain = totalElevationGain,
@@ -1991,18 +1980,17 @@ class RunTrackingService : Service(), SensorEventListener {
                         fitnessLevel = currentUser?.fitnessLevel,
                         runnerName = currentUser?.name,
                         runnerAge = currentUser?.age,
-                        runnerWeight = currentUser?.weight,
-                        runnerHeight = currentUser?.height,
+                    runnerWeight = currentUser?.weight,
+                    runnerHeight = currentUser?.height,
                         activityType = "run",
                         hasRoute = hasRoute,
                         targetTime = targetTime?.let { (it / 1000).toInt() },
                         targetPace = targetPaceStr,
-                        triggerType = "500m_checkin",
-                        activeGoals = activeGoals.takeIf { it.isNotEmpty() }
+                        triggerType = "500m_checkin"
                     )
                     val response = apiService.getPhaseCoaching(update)
                     coachingHistory.add(AiCoachingNote(
-                        time = System.currentTimeMillis() - startTime,
+                        time = getActiveRunDuration(),
                         message = "500m: ${response.message}"
                     ))
                     Log.d("RunTrackingService", "500m coaching response: ${response.message}")
@@ -2045,7 +2033,7 @@ class RunTrackingService : Service(), SensorEventListener {
                         phase = newPhase.name,
                         distance = totalDistance / 1000.0,
                         targetDistance = targetDistance,
-                        elapsedTime = System.currentTimeMillis() - startTime,
+                        elapsedTime = getActiveRunDuration(),
                         currentPace = _currentRunSession.value?.averagePace ?: "0:00",
                         currentGrade = calculateAverageGradient().toDouble(),
                         totalElevationGain = totalElevationGain,
@@ -2058,18 +2046,17 @@ class RunTrackingService : Service(), SensorEventListener {
                         fitnessLevel = currentUser?.fitnessLevel,
                         runnerName = currentUser?.name,
                         runnerAge = currentUser?.age,
-                        runnerWeight = currentUser?.weight,
-                        runnerHeight = currentUser?.height,
+                    runnerWeight = currentUser?.weight,
+                    runnerHeight = currentUser?.height,
                         activityType = "run",
                         hasRoute = hasRoute,
                         targetTime = targetTime?.let { (it / 1000).toInt() },
                         targetPace = phaseTargetPaceStr,
-                        triggerType = "phase_change",
-                        activeGoals = activeGoals.takeIf { it.isNotEmpty() }
+                        triggerType = "phase_change"
                     )
                     val response = apiService.getPhaseCoaching(update)
                     coachingHistory.add(AiCoachingNote(
-                        time = System.currentTimeMillis() - startTime,
+                        time = getActiveRunDuration(),
                         message = "Phase change: ${response.message}"
                     ))
                     Log.d("RunTrackingService", "Phase coaching response: ${response.message}")
@@ -2102,7 +2089,7 @@ class RunTrackingService : Service(), SensorEventListener {
         // Add struggle point to the list for post-run summary
         val strugglePoint = StrugglePoint(
             id = UUID.randomUUID().toString(),
-            timestamp = System.currentTimeMillis() - startTime,
+            timestamp = getActiveRunDuration(),
             distanceMeters = totalDistance,
             paceAtStruggle = currentPaceFormatted,
             baselinePace = baselinePaceFormatted,
@@ -2117,7 +2104,7 @@ class RunTrackingService : Service(), SensorEventListener {
             try {
                 val update = StruggleUpdate(
                     distance = totalDistance / 1000.0,
-                    elapsedTime = System.currentTimeMillis() - startTime,
+                    elapsedTime = getActiveRunDuration(),
                     currentPace = currentPaceFormatted,
                     baselinePace = baselinePaceFormatted,
                     paceDropPercent = paceDropPercent.toDouble(),
@@ -2132,7 +2119,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 val response = apiService.getStruggleCoaching(update)
                 // Note: Struggle point already added above before launching coroutine
                 coachingHistory.add(AiCoachingNote(
-                    time = System.currentTimeMillis() - startTime,
+                    time = getActiveRunDuration(),
                     message = "Struggle: ${response.message}"
                 ))
                 
@@ -2154,7 +2141,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     distance = totalDistance / 1000.0,
                     targetDistance = targetDistance,
                     currentPace = split.pace,
-                    elapsedTime = System.currentTimeMillis() - startTime,
+                    elapsedTime = getActiveRunDuration(),
                     coachName = currentUser?.coachName,
                     coachTone = currentUser?.coachTone,
                     coachGender = currentUser?.coachGender,
@@ -2170,7 +2157,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 )
                 val response = apiService.getPaceUpdate(update)
                 coachingHistory.add(AiCoachingNote(
-                    time = System.currentTimeMillis() - startTime,
+                    time = getActiveRunDuration(),
                     message = "Km ${split.km}: ${response.message}"
                 ))
                 Log.d("RunTrackingService", "Km ${split.km} split coaching: ${response.message}")
@@ -2189,7 +2176,7 @@ class RunTrackingService : Service(), SensorEventListener {
         if (!coachingFeaturePrefs.heartRateCoachingEnabled) return
         if (currentHeartRate <= 0) return
         val now = System.currentTimeMillis()
-        val elapsedMinutes = ((now - startTime) / 60000).toInt()
+        val elapsedMinutes = (getActiveRunDuration() / 60000).toInt()
         if (elapsedMinutes <= 0) return
         if (elapsedMinutes % 3 != 0) return
         if (elapsedMinutes == lastHrCoachingMinute) return
@@ -2212,13 +2199,11 @@ class RunTrackingService : Service(), SensorEventListener {
                     targetZone = 0, // Unknown; backend should avoid assumptions
                     elapsedMinutes = elapsedMinutes,
                     coachName = currentUser?.coachName,
-                    coachTone = currentUser?.coachTone,
-                    coachGender = currentUser?.coachGender,
-                    coachAccent = currentUser?.coachAccent
+                    coachTone = currentUser?.coachTone
                 )
                 val response = apiService.getHeartRateCoaching(request)
                 coachingHistory.add(AiCoachingNote(
-                    time = System.currentTimeMillis() - startTime,
+                    time = getActiveRunDuration(),
                     message = "HR: ${response.message}"
                 ))
 
@@ -2268,7 +2253,7 @@ class RunTrackingService : Service(), SensorEventListener {
                         if (dt > 0) calculateDistance(prev, last) / dt else 0.0
                     } else 0.0,
                     distance = totalDistance / 1000.0,
-                    elapsedTime = System.currentTimeMillis() - startTime,
+                    elapsedTime = getActiveRunDuration(),
                     heartRate = if (currentHeartRate > 0) currentHeartRate else null,
                     userHeight = currentUser?.height?.let { it / 100.0 },
                     userWeight = currentUser?.weight?.toDouble(),
@@ -2284,7 +2269,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 )
                 val response = apiService.getCadenceCoaching(request)
                 coachingHistory.add(AiCoachingNote(
-                    time = System.currentTimeMillis() - startTime,
+                    time = getActiveRunDuration(),
                     message = "Cadence: ${response.message}"
                 ))
                 if (!isMuted) {
@@ -2475,7 +2460,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 val response = apiService.getEliteCoaching(request)
                 if (response.message.isNotBlank()) {
                     coachingHistory.add(AiCoachingNote(
-                        time = System.currentTimeMillis() - startTime,
+                        time = getActiveRunDuration(),
                         message = "$label: ${response.message}"
                     ))
                     Log.d("RunTrackingService", "Elite coaching ($label): ${response.message}")
@@ -2717,14 +2702,14 @@ class RunTrackingService : Service(), SensorEventListener {
                 val paceSpread = if (paceSecs.size >= 2) paceSecs.max() - paceSecs.min() else null
                 val isNegSplit = if (paceSecs.size >= 3) paceSecs.zipWithNext().all { (a, b) -> b <= a } else null
 
-                val avgSpeed = if (totalDistance > 0 && (System.currentTimeMillis() - startTime) > 0) {
-                    (totalDistance / ((System.currentTimeMillis() - startTime) / 1000.0)).toFloat()
+                val avgSpeed = if (totalDistance > 0 && (getActiveRunDuration()) > 0) {
+                    (totalDistance / ((getActiveRunDuration()) / 1000.0)).toFloat()
                 } else 0f
 
                 val request = ElevationCoachingRequest(
                     eventType = eventType,
                     distance = distKm,
-                    elapsedTime = System.currentTimeMillis() - startTime,
+                    elapsedTime = getActiveRunDuration(),
                     currentGrade = gradePercent,
                     segmentDistanceMeters = segmentDistanceMeters,
                     totalElevationGain = totalElevationGain,
@@ -2751,7 +2736,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 )
                 val response = apiService.getElevationCoaching(request)
                 coachingHistory.add(AiCoachingNote(
-                    time = System.currentTimeMillis() - startTime,
+                    time = getActiveRunDuration(),
                     message = "Elevation: ${response.message}"
                 ))
 

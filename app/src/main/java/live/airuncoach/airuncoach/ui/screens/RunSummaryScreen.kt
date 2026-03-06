@@ -58,8 +58,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -167,7 +171,7 @@ fun RunSummaryScreenFlagship(
                 onShare = {
                     viewModel.shareRunWithLink(context)
                 },
-                difficultyLabel = runSession?.let { formatTerrainLabel(it.difficulty ?: it.getDifficultyLevel()) }
+                difficultyLabel = runSession?.let { formatTerrainLabel(it.getDifficultyLevel()) }
             )
         }
     ) { padding ->
@@ -203,7 +207,7 @@ fun RunSummaryScreenFlagship(
                             onStruggleComment = viewModel::updateStrugglePointComment,
                             onStruggleDismiss = viewModel::dismissStrugglePoint,
                             onStruggleRestore = viewModel::restoreStrugglePoint,
-                            difficultyLabel = runSession?.let { formatTerrainLabel(it.difficulty ?: it.getDifficultyLevel()) },
+                            difficultyLabel = runSession?.let { formatTerrainLabel(it.getDifficultyLevel()) },
                             onCreateShareImage = { onNavigateToShareImage(runId) },
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it }
@@ -917,30 +921,57 @@ private fun SummaryStatTile(
     }
 }
 
-/* ----------------------------- HEADER DISTANCE ----------------------------- */
+/* ----------------------------- HEADER DISTANCE & TIME ------------------------ */
 
 @Composable
 private fun HeaderDistanceBlockFlagship(run: RunSession) {
     val distanceKm = run.distance / 1000.0
+    val duration = run.getFormattedDuration()
+
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                text = String.format(Locale.US, "%.2f", distanceKm),
-                style = AppTextStyles.stat.copy(fontSize = 48.sp, lineHeight = 54.sp),
-                color = Colors.primary
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "km",
-                style = AppTextStyles.h3.copy(fontWeight = FontWeight.SemiBold),
-                color = Colors.textPrimary,
-                modifier = Modifier.padding(bottom = 6.dp)
-            )
+        // Time and Distance side by side
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom
+        ) {
+            // Time on the left
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = duration,
+                    style = AppTextStyles.stat.copy(fontSize = 36.sp, lineHeight = 42.sp),
+                    color = Colors.textPrimary
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "time",
+                    style = AppTextStyles.caption.copy(fontWeight = FontWeight.Medium),
+                    color = Colors.textSecondary,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+            }
+
+            // Distance on the right
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = String.format(Locale.US, "%.2f", distanceKm),
+                    style = AppTextStyles.stat.copy(fontSize = 36.sp, lineHeight = 42.sp),
+                    color = Colors.primary
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "km",
+                    style = AppTextStyles.h3.copy(fontWeight = FontWeight.SemiBold),
+                    color = Colors.textPrimary,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+            }
         }
 
+        // Difficulty chip below
         val difficulty = (run.difficulty ?: run.getDifficultyLevel())
         DifficultyChipFlagship(difficulty)
     }
@@ -1086,6 +1117,13 @@ private fun AiSectionFlagship(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             when (analysisState) {
+                is AiAnalysisState.Freeform -> {
+                    FreeformAnalysisFlagship(
+                        markdown = analysisState.markdown,
+                        title = analysisState.title
+                    )
+                }
+
                 is AiAnalysisState.Comprehensive -> {
                     ExpandableAiBlock(
                         title = "Comprehensive Insights",
@@ -1165,6 +1203,201 @@ private fun AiSectionFlagship(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Freeform AI analysis — renders markdown as styled text.
+ * Each run gets a unique, bespoke analysis.
+ */
+@Composable
+private fun FreeformAnalysisFlagship(markdown: String, title: String?) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (!title.isNullOrBlank()) {
+            Text(
+                text = title,
+                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                color = Colors.textPrimary
+            )
+        }
+
+        // Parse and render markdown as styled text
+        MarkdownText(markdown = markdown)
+    }
+}
+
+/**
+ * Simple markdown renderer — converts markdown text to styled composable text.
+ * Handles: headers (## / ###), bold (**text**), bullet points (- item),
+ * numbered lists, and paragraphs.
+ */
+@Composable
+private fun MarkdownText(markdown: String) {
+    val blocks = parseMarkdownBlocks(markdown)
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (block in blocks) {
+            when (block) {
+                is MarkdownBlock.Header2 -> {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = block.text,
+                        style = AppTextStyles.body.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        ),
+                        color = Colors.primary
+                    )
+                }
+                is MarkdownBlock.Header3 -> {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = block.text,
+                        style = AppTextStyles.body.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        ),
+                        color = Colors.textPrimary
+                    )
+                }
+                is MarkdownBlock.BulletItem -> {
+                    Row(modifier = Modifier.padding(start = 8.dp)) {
+                        Text(
+                            text = "\u2022 ",
+                            style = AppTextStyles.body,
+                            color = Colors.primary
+                        )
+                        Text(
+                            text = parseInlineFormatting(block.text),
+                            style = AppTextStyles.body,
+                            color = Colors.textSecondary
+                        )
+                    }
+                }
+                is MarkdownBlock.NumberedItem -> {
+                    Row(modifier = Modifier.padding(start = 8.dp)) {
+                        Text(
+                            text = "${block.number}. ",
+                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.primary
+                        )
+                        Text(
+                            text = parseInlineFormatting(block.text),
+                            style = AppTextStyles.body,
+                            color = Colors.textSecondary
+                        )
+                    }
+                }
+                is MarkdownBlock.Paragraph -> {
+                    Text(
+                        text = parseInlineFormatting(block.text),
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary,
+                        lineHeight = 22.sp
+                    )
+                }
+                is MarkdownBlock.Divider -> {
+                    HorizontalDivider(
+                        color = Colors.border.copy(alpha = 0.4f),
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+private sealed class MarkdownBlock {
+    data class Header2(val text: String) : MarkdownBlock()
+    data class Header3(val text: String) : MarkdownBlock()
+    data class BulletItem(val text: String) : MarkdownBlock()
+    data class NumberedItem(val number: Int, val text: String) : MarkdownBlock()
+    data class Paragraph(val text: String) : MarkdownBlock()
+    object Divider : MarkdownBlock()
+}
+
+private fun parseMarkdownBlocks(markdown: String): List<MarkdownBlock> {
+    val blocks = mutableListOf<MarkdownBlock>()
+    val lines = markdown.lines()
+    val paragraphBuffer = StringBuilder()
+
+    fun flushParagraph() {
+        val text = paragraphBuffer.toString().trim()
+        if (text.isNotEmpty()) {
+            blocks.add(MarkdownBlock.Paragraph(text))
+        }
+        paragraphBuffer.clear()
+    }
+
+    for (line in lines) {
+        val trimmed = line.trim()
+        when {
+            trimmed.isEmpty() -> flushParagraph()
+            trimmed.startsWith("### ") -> {
+                flushParagraph()
+                blocks.add(MarkdownBlock.Header3(trimmed.removePrefix("### ").trim()))
+            }
+            trimmed.startsWith("## ") -> {
+                flushParagraph()
+                blocks.add(MarkdownBlock.Header2(trimmed.removePrefix("## ").trim()))
+            }
+            trimmed.startsWith("# ") -> {
+                flushParagraph()
+                blocks.add(MarkdownBlock.Header2(trimmed.removePrefix("# ").trim()))
+            }
+            trimmed.startsWith("---") || trimmed.startsWith("***") -> {
+                flushParagraph()
+                blocks.add(MarkdownBlock.Divider)
+            }
+            trimmed.startsWith("- ") || trimmed.startsWith("* ") -> {
+                flushParagraph()
+                blocks.add(MarkdownBlock.BulletItem(trimmed.removePrefix("- ").removePrefix("* ").trim()))
+            }
+            trimmed.matches(Regex("^\\d+\\.\\s+.*")) -> {
+                flushParagraph()
+                val num = trimmed.substringBefore('.').toIntOrNull() ?: 1
+                val text = trimmed.substringAfter('.').trim()
+                blocks.add(MarkdownBlock.NumberedItem(num, text))
+            }
+            else -> {
+                if (paragraphBuffer.isNotEmpty()) paragraphBuffer.append(" ")
+                paragraphBuffer.append(trimmed)
+            }
+        }
+    }
+    flushParagraph()
+    return blocks
+}
+
+/**
+ * Parse inline markdown formatting (bold) into AnnotatedString.
+ */
+private fun parseInlineFormatting(text: String): AnnotatedString {
+    return buildAnnotatedString {
+        var remaining = text
+        while (remaining.isNotEmpty()) {
+            val boldStart = remaining.indexOf("**")
+            if (boldStart == -1) {
+                append(remaining)
+                break
+            }
+            // Append text before bold
+            append(remaining.substring(0, boldStart))
+            remaining = remaining.substring(boldStart + 2)
+
+            val boldEnd = remaining.indexOf("**")
+            if (boldEnd == -1) {
+                // No closing ** — just append the rest
+                append("**")
+                append(remaining)
+                break
+            }
+            // Append bold text
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = Colors.textPrimary)) {
+                append(remaining.substring(0, boldEnd))
+            }
+            remaining = remaining.substring(boldEnd + 2)
         }
     }
 }
@@ -2257,8 +2490,31 @@ private fun RunLineChartCanvas(
             if (n < 2) return@Canvas
 
             val yVals = series.y
-            val minY = yVals.minOrNull() ?: 0.0
-            val maxY = yVals.maxOrNull() ?: 0.0
+
+            // Use 5th/95th percentile values to clip outliers (GPS spikes, stop/start artifacts)
+            val sorted = yVals.sorted()
+            val p05 = sorted[(sorted.size * 0.05).toInt().coerceIn(0, sorted.size - 1)]
+            val p95 = sorted[(sorted.size * 0.95).toInt().coerceIn(0, sorted.size - 1)]
+            val dataRange = (p95 - p05).coerceAtLeast(1.0)
+
+            // For pace (invertY): slow pace is maxY. Add 25% of slowest pace value as padding
+            // so consistent runs don't look erratic. For other charts use a 20% range buffer.
+            val axisMinY: Double
+            val axisMaxY: Double
+            if (invertY) {
+                // Pace: faster (lower num) at top, slower (higher num) at bottom
+                // Fast end: small 5% of value buffer so the line doesn't hug the top
+                axisMinY = p05 * 0.97
+                // Slow end: 25% of the slowest pace value padded below, making variance look gentle
+                axisMaxY = p95 + (p95 * 0.25)
+            } else {
+                val buf = dataRange * 0.20
+                axisMinY = p05 - buf
+                axisMaxY = p95 + buf
+            }
+
+            val minY = axisMinY
+            val maxY = axisMaxY
             val rangeY = (maxY - minY).takeIf { it > 1e-9 } ?: 1.0
 
             // padding inside the canvas for axis labels
@@ -3510,15 +3766,26 @@ private fun analyzeSplits(splits: List<KmSplit>): SplitAnalysis {
 
 @Composable
 private fun KmSplitsVisualChart(kmSplits: List<KmSplit>) {
-    val paces = remember(kmSplits) {
-        kmSplits.map { parsePaceToSeconds(it.pace).toDouble() }.filter { it > 0 }
+    // Keep all splits including the last one — don't filter by pace validity
+    // so a 5km run always shows 5 bars. Use 0 as fallback for missing pace.
+    val splitData = remember(kmSplits) {
+        kmSplits.mapIndexed { idx, split ->
+            val paceSeconds = parsePaceToSeconds(split.pace).toDouble()
+            Pair(split, paceSeconds)
+        }
     }
-    if (paces.size < 2) return
+    if (splitData.size < 2) return
 
-    val fastestIdx = paces.indexOf(paces.min())
-    val slowestIdx = paces.indexOf(paces.max())
-    val minPace = paces.min()
-    val maxPace = paces.max()
+    val validPaces = splitData.map { it.second }.filter { it > 0 }
+    if (validPaces.isEmpty()) return
+
+    // Average pace — use this as the baseline for coloring, not fastest vs slowest.
+    // This way consistent km splits all look green/neutral rather than orange.
+    val avgPace = validPaces.average()
+    val minPace = validPaces.min()
+    val maxPace = validPaces.max()
+    val fastestIdx = splitData.indexOfFirst { it.second == minPace }
+    val slowestIdx = splitData.indexOfFirst { it.second == maxPace }
 
     Card(
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
@@ -3536,25 +3803,32 @@ private fun KmSplitsVisualChart(kmSplits: List<KmSplit>) {
                 color = Colors.textPrimary
             )
 
-            // Bar chart
-            paces.forEachIndexed { idx, pace ->
-                val fraction = if (maxPace > minPace) {
-                    ((pace - minPace) / (maxPace - minPace)).toFloat()
-                } else 0.5f
-                // Invert: fastest = longest bar (lowest pace = best)
-                val barFraction = (1f - fraction).coerceIn(0.15f, 1f)
+            splitData.forEachIndexed { idx, (split, pace) ->
+                // Bar length: all splits get a meaningful bar. Use avg ± 20% as the
+                // "full range" so consistent pacing gives similar-length bars.
+                val axisMin = avgPace * 0.85   // 15% faster than avg = longest bar
+                val axisMax = avgPace * 1.25   // 25% slower than avg = shortest bar
+                val barFraction = if (pace > 0) {
+                    val norm = ((pace - axisMin) / (axisMax - axisMin)).coerceIn(0.0, 1.0)
+                    (1.0 - norm).toFloat().coerceIn(0.15f, 1f)
+                } else 0.15f
 
-                val barColor = when (idx) {
-                    fastestIdx -> Color(0xFF4CAF50)
-                    slowestIdx -> Colors.error
-                    else -> paceToColor(pace, minPace, maxPace)
+                // Color relative to average: within ±5% = green, 5-12% slow = yellow,
+                // 12-20% slow = orange, >20% slower = red. Fastest km = always green.
+                val deviationFromAvg = if (avgPace > 0 && pace > 0) (pace - avgPace) / avgPace else 0.0
+                val barColor = when {
+                    idx == fastestIdx -> Color(0xFF4CAF50)
+                    idx == slowestIdx && deviationFromAvg > 0.12 -> Colors.error
+                    deviationFromAvg <= 0.05 -> Color(0xFF4CAF50)        // within 5% of avg = green
+                    deviationFromAvg <= 0.12 -> Color(0xFFFFC107)        // 5–12% slower = yellow
+                    deviationFromAvg <= 0.20 -> Color(0xFFFF9800)        // 12–20% slower = orange
+                    else -> Colors.error                                  // >20% slower = red
                 }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Km label
                     Text(
                         "Km ${idx + 1}",
                         style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
@@ -3562,7 +3836,6 @@ private fun KmSplitsVisualChart(kmSplits: List<KmSplit>) {
                         modifier = Modifier.width(42.dp)
                     )
 
-                    // Bar
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -3581,15 +3854,14 @@ private fun KmSplitsVisualChart(kmSplits: List<KmSplit>) {
 
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    // Pace label
                     Text(
-                        kmSplits[idx].pace,
+                        if (pace > 0) split.pace else "—",
                         style = AppTextStyles.caption.copy(
                             fontWeight = if (idx == fastestIdx || idx == slowestIdx) FontWeight.ExtraBold else FontWeight.Medium
                         ),
-                        color = when (idx) {
-                            fastestIdx -> Color(0xFF4CAF50)
-                            slowestIdx -> Colors.error
+                        color = when {
+                            idx == fastestIdx -> Color(0xFF4CAF50)
+                            idx == slowestIdx && deviationFromAvg > 0.12 -> Colors.error
                             else -> Colors.textPrimary
                         },
                         modifier = Modifier.width(48.dp),
@@ -3598,7 +3870,7 @@ private fun KmSplitsVisualChart(kmSplits: List<KmSplit>) {
                 }
             }
 
-            // Legend
+            // Legend — explain what the colors mean
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -3606,12 +3878,17 @@ private fun KmSplitsVisualChart(kmSplits: List<KmSplit>) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(modifier = Modifier.size(8.dp).background(Color(0xFF4CAF50), CircleShape))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Fastest", style = AppTextStyles.caption, color = Colors.textMuted)
+                    Text("On pace", style = AppTextStyles.caption, color = Colors.textMuted)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.size(8.dp).background(Color(0xFFFFC107), CircleShape))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Slightly slower", style = AppTextStyles.caption, color = Colors.textMuted)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(modifier = Modifier.size(8.dp).background(Colors.error, CircleShape))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Slowest", style = AppTextStyles.caption, color = Colors.textMuted)
+                    Text("Notably slow", style = AppTextStyles.caption, color = Colors.textMuted)
                 }
             }
         }
@@ -4135,14 +4412,17 @@ private fun FatigueCurveCard(run: RunSession) {
     val paces = run.kmSplits.map { parsePaceToSeconds(it.pace).toDouble() }.filter { it > 0 }
     if (paces.size < 3) return
 
-    // Calculate fatigue rate: pace increase per km (seconds/km per km run)
-    val firstThirdAvg = paces.take((paces.size / 3).coerceAtLeast(1)).average()
-    val lastThirdAvg = paces.takeLast((paces.size / 3).coerceAtLeast(1)).average()
-    val totalFatiguePercent = ((lastThirdAvg - firstThirdAvg) / firstThirdAvg * 100)
-    val fatiguePerKm = (lastThirdAvg - firstThirdAvg) / (paces.size * 2.0 / 3.0)
+    val thirdSize = (paces.size / 3).coerceAtLeast(1)
+    val middleThirdAvg = paces.drop(thirdSize).take(thirdSize).average()
+    val lastThirdAvg = paces.takeLast(thirdSize).average()
+
+    // Fatigue = how much slower the last third is vs the MIDDLE third.
+    // Using middle→last avoids penalising a fast start — it measures whether
+    // the runner actually slowed down from their sustainable cruising pace.
+    val totalFatiguePercent = ((lastThirdAvg - middleThirdAvg) / middleThirdAvg * 100)
 
     val (rating, color) = when {
-        totalFatiguePercent <= 0 -> "Excellent (negative fatigue!)" to Color(0xFF4CAF50)
+        totalFatiguePercent <= 0 -> "Negative split!" to Color(0xFF4CAF50)
         totalFatiguePercent <= 3 -> "Strong fatigue resistance" to Color(0xFF8BC34A)
         totalFatiguePercent <= 6 -> "Normal fatigue" to Color(0xFFFFC107)
         totalFatiguePercent <= 10 -> "Moderate fatigue" to Color(0xFFFF9800)
@@ -4165,7 +4445,8 @@ private fun FatigueCurveCard(run: RunSession) {
                 color = Colors.textPrimary
             )
 
-            // Visual: pace trend bars showing fatigue
+            // Visual: pace trend bars — colored relative to average pace
+            // so a consistent run shows mostly green regardless of fast start
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -4173,13 +4454,25 @@ private fun FatigueCurveCard(run: RunSession) {
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.Bottom
             ) {
-                val maxPace = paces.max()
-                val minPace = paces.min()
-                val range = (maxPace - minPace).coerceAtLeast(1.0)
+                val avgPace = paces.average()
+                // Axis: ±25% around average so bars have consistent visual scale
+                val axisMin = avgPace * 0.85
+                val axisMax = avgPace * 1.25
+                val axisRange = (axisMax - axisMin).coerceAtLeast(1.0)
 
-                paces.forEachIndexed { idx, pace ->
-                    val heightFraction = ((pace - minPace) / range * 0.7 + 0.3).toFloat()
-                    val barColor = paceToColor(pace, minPace, maxPace)
+                paces.forEachIndexed { _, pace ->
+                    // Height: shorter bar = slower pace (more fatigued)
+                    val heightFraction = (1.0 - ((pace - axisMin) / axisRange).coerceIn(0.0, 1.0))
+                        .toFloat().coerceIn(0.15f, 1f)
+
+                    // Color relative to average (not fastest→slowest)
+                    val dev = if (avgPace > 0) (pace - avgPace) / avgPace else 0.0
+                    val barColor = when {
+                        dev <= 0.05 -> Color(0xFF4CAF50)   // within 5% of avg = green
+                        dev <= 0.12 -> Color(0xFFFFC107)   // 5–12% slower = yellow
+                        dev <= 0.20 -> Color(0xFFFF9800)   // 12–20% slower = orange
+                        else -> Colors.error               // >20% slower = red
+                    }
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -4201,17 +4494,17 @@ private fun FatigueCurveCard(run: RunSession) {
 
             HorizontalDivider(color = Colors.border.copy(alpha = 0.3f))
 
-            // Stats
+            // Stats — Decay is middle→last so a fast start doesn't count as fatigue
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column {
-                    Text("First Third Avg", style = AppTextStyles.caption, color = Colors.textMuted)
+                    Text("Mid Avg", style = AppTextStyles.caption, color = Colors.textMuted)
                     Text(
-                        formatPaceSeconds(firstThirdAvg.toLong()) + "/km",
+                        formatPaceSeconds(middleThirdAvg.toLong()) + "/km",
                         style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
-                        color = Color(0xFF4CAF50)
+                        color = Colors.textPrimary
                     )
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -4223,11 +4516,11 @@ private fun FatigueCurveCard(run: RunSession) {
                     )
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("Last Third Avg", style = AppTextStyles.caption, color = Colors.textMuted)
+                    Text("Last Avg", style = AppTextStyles.caption, color = Colors.textMuted)
                     Text(
                         formatPaceSeconds(lastThirdAvg.toLong()) + "/km",
                         style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
-                        color = if (totalFatiguePercent > 3) Colors.error else Colors.textPrimary
+                        color = if (totalFatiguePercent > 6) Colors.error else Colors.textPrimary
                     )
                 }
             }

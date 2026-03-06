@@ -124,6 +124,12 @@ interface ApiService {
         @Path("id") runId: String,
         @Body request: Map<String, String> = emptyMap()
     ): BasicRunInsights
+
+    @POST("/api/runs/{id}/freeform-analysis")
+    suspend fun generateFreeformAnalysis(
+        @Path("id") runId: String,
+        @Body request: FreeformAnalysisRequest
+    ): FreeformAnalysisResponse
     
     @POST("/api/runs")
     suspend fun uploadRun(@Body request: UploadRunRequest): UploadRunResponse

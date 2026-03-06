@@ -97,20 +97,22 @@ data class RunSession(
     }
     
     fun getDifficultyLevel(): String {
-        // Use elevation gain per km as the primary metric - this reflects the 
+        // Use elevation gain per km as the primary metric - this reflects the
         // actual climbing effort regardless of route shape (out-and-back vs loop)
         if (distance <= 0 || totalElevationGain <= 0) {
             return "flat"
         }
 
-        val elevationPerKm = (totalElevationGain / 1000.0) / (distance / 1000.0)
+        // totalElevationGain is in metres, distance is in metres
+        // elevationPerKm = metres gained per km of running
+        val elevationPerKm = totalElevationGain / (distance / 1000.0)
 
         return when {
-            elevationPerKm < 8.0 -> "flat"         // < 8 m/km - gentle terrain
-            elevationPerKm < 18.0 -> "rolling"     // 8-18 m/km - moderate hills
-            elevationPerKm < 30.0 -> "hilly"       // 18-30 m/km - significant climbing
-            elevationPerKm < 45.0 -> "steep"       // 30-45 m/km - challenging terrain
-            else -> "extreme"                      // > 45 m/km - very steep
+            elevationPerKm < 8.0 -> "flat"         // < 8 m/km  - essentially flat
+            elevationPerKm < 18.0 -> "rolling"     // 8–18 m/km - gentle undulations
+            elevationPerKm < 30.0 -> "hilly"       // 18–30 m/km - noticeable hills
+            elevationPerKm < 45.0 -> "steep"       // 30–45 m/km - challenging terrain
+            else -> "extreme"                      // > 45 m/km  - very steep
         }
     }
     
