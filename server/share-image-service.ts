@@ -289,7 +289,7 @@ function metricRing(
   const unitY = valueY + unitFontSize + 5;
 
   return `
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${trackColorHex}" stroke-width="${strokeW}" opacity="0.18"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${trackColorHex}" stroke-width="${strokeW}" opacity="0.35"/>
     <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="url(#${gradId})" stroke-width="${strokeW}" stroke-linecap="round" stroke-dasharray="${dashLen} ${gapLen}" transform="rotate(-90 ${cx} ${cy})" filter="url(#ringGlow)"/>
     <circle cx="${cx}" cy="${cy}" r="${r - strokeW * 0.8}" fill="none" stroke="url(#${gradId})" stroke-width="1.5" opacity="0.06"/>
     <text x="${cx}" y="${labelY}" font-family="${FONT}" font-size="${labelFontSize}" font-weight="600" fill="${C.textLight}" text-anchor="middle" letter-spacing="0.5">${esc(label)}</text>
@@ -1093,13 +1093,39 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
   return svgBuffer;
 }
 
+function encodePolyline(points: Array<{ lat: number; lng: number }>): string {
+  let encoded = "";
+  let prevLat = 0;
+  let prevLng = 0;
+  for (const pt of points) {
+    const lat = Math.round(pt.lat * 1e5);
+    const lng = Math.round(pt.lng * 1e5);
+    let dLat = lat - prevLat;
+    let dLng = lng - prevLng;
+    prevLat = lat;
+    prevLng = lng;
+    for (const d of [dLat, dLng]) {
+      let v = d < 0 ? ~(d << 1) : d << 1;
+      while (v >= 0x20) {
+        encoded += String.fromCharCode((0x20 | (v & 0x1f)) + 63);
+        v >>= 5;
+      }
+      encoded += String.fromCharCode(v + 63);
+    }
+  }
+  return encoded;
+}
+
 async function fetchMapTileWithRoute(
   gpsTrack: Array<{ lat: number; lng: number }>,
   tileW: number, tileH: number,
   paceData?: Array<{ km: number; pace: string; paceSeconds: number }>
 ): Promise<Buffer | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) {
+    console.error("No Google Maps API key found");
+    return null;
+  }
 
   const reqW = Math.min(Math.round(tileW / 2), 640);
   const reqH = Math.min(Math.round(tileH / 2), 640);
@@ -1116,17 +1142,16 @@ async function fetchMapTileWithRoute(
     "style=feature:road|element:geometry.stroke|color:0xe2e8f0",
   ].join("&");
 
-  const sampleCount = Math.min(gpsTrack.length, 80);
+  const sampleCount = Math.min(gpsTrack.length, 60);
   const step = gpsTrack.length / sampleCount;
-  const sampled = [];
+  const sampled: Array<{ lat: number; lng: number }> = [];
   for (let i = 0; i < sampleCount; i++) {
-    const pt = gpsTrack[Math.floor(i * step)];
-    sampled.push(`${pt.lat.toFixed(5)},${pt.lng.toFixed(5)}`);
+    sampled.push(gpsTrack[Math.floor(i * step)]);
   }
-  const last = gpsTrack[gpsTrack.length - 1];
-  sampled.push(`${last.lat.toFixed(5)},${last.lng.toFixed(5)}`);
+  sampled.push(gpsTrack[gpsTrack.length - 1]);
 
-  const pathParam = `path=color:0x00D4FFCC|weight:5|${sampled.join("|")}`;
+  const encodedPath = encodePolyline(sampled);
+  const pathParam = `path=color:0x00D4FFCC|weight:5|enc:${encodeURIComponent(encodedPath)}`;
 
   const startPt = gpsTrack[0];
   const endPt = gpsTrack[gpsTrack.length - 1];
@@ -1136,6 +1161,8 @@ async function fetchMapTileWithRoute(
   ].join("&");
 
   const url = `https://maps.googleapis.com/maps/api/staticmap?size=${reqW}x${reqH}&scale=2&maptype=roadmap&${lightStyle}&${pathParam}&${markers}&key=${apiKey}`;
+
+  console.log("Map tile URL length:", url.length, "chars");
 
   try {
     const controller = new AbortController();
@@ -1147,7 +1174,17 @@ async function fetchMapTileWithRoute(
       console.error("Map tile fetch failed:", resp.status, resp.statusText, body.substring(0, 200));
       return null;
     }
+    const contentType = resp.headers.get("content-type") || "";
+    if (!contentType.includes("image")) {
+      const body = await resp.text().catch(() => "");
+      console.error("Map tile returned non-image content:", contentType, body.substring(0, 200));
+      return null;
+    }
     const buf = Buffer.from(await resp.arrayBuffer());
+    if (buf.length < 1000) {
+      console.error("Map tile suspiciously small:", buf.length, "bytes — may be an error image");
+    }
+    console.log("Map tile fetched:", buf.length, "bytes");
     return buf;
   } catch (err: any) {
     console.error("Map tile fetch error:", err.message);
