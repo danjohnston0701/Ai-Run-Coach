@@ -190,3 +190,10 @@ data class FreeformAnalysisResponse(
     @SerializedName("analysis") val analysis: String, // Markdown text
     @SerializedName("title") val title: String? = null // Optional short title/headline
 )
+
+/**
+ * Request: update a struggle point's user comment.
+ */
+data class UpdateStrugglePointCommentRequest(
+    @SerializedName("userComment") val userComment: String
+)

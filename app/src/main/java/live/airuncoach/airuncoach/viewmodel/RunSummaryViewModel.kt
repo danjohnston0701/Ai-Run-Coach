@@ -41,6 +41,8 @@ class RunSummaryViewModel @Inject constructor(
     private val _runSession = MutableStateFlow<RunSession?>(null)
     val runSession: StateFlow<RunSession?> = _runSession.asStateFlow()
 
+    private var currentRunId: String? = null // Stored for API calls
+
     private val _strugglePoints = MutableStateFlow<List<StrugglePoint>>(emptyList())
     val strugglePoints: StateFlow<List<StrugglePoint>> = _strugglePoints.asStateFlow()
     
@@ -84,6 +86,7 @@ class RunSummaryViewModel @Inject constructor(
      * (e.g. 404 after a failed upload, or NumberFormatException from date parsing).
      */
     fun loadRunById(runId: String) {
+        currentRunId = runId // Store for API calls
         viewModelScope.launch {
             _isLoadingRun.value = true
             _loadError.value = null
@@ -167,14 +170,29 @@ class RunSummaryViewModel @Inject constructor(
     }
 
     /**
-     * Update a struggle point with user comment
+     * Update a struggle point with user comment and save to backend
      */
     fun updateStrugglePointComment(strugglePointId: String, comment: String) {
+        // Update local state immediately for responsiveness
         _strugglePoints.value = _strugglePoints.value.map { point ->
             if (point.id == strugglePointId) {
                 point.copy(userComment = comment)
             } else {
                 point
+            }
+        }
+
+        // Persist to backend
+        val runId = currentRunId ?: return
+        viewModelScope.launch {
+            try {
+                apiService.updateStrugglePointComment(
+                    runId = runId,
+                    pointId = strugglePointId,
+                    request = UpdateStrugglePointCommentRequest(userComment = comment)
+                )
+            } catch (e: Exception) {
+                Log.e("RunSummaryViewModel", "Failed to save struggle point comment", e)
             }
         }
     }
