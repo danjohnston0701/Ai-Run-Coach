@@ -97,27 +97,20 @@ data class RunSession(
     }
     
     fun getDifficultyLevel(): String {
-        // Calculate difficulty based on pace (min/km)
-        val pace = averagePace ?: return "unknown"
-        
-        // Check if pace has the expected format before splitting
-        if (!pace.contains("'") && !pace.contains("/")) {
-            return "unknown"
+        // Use elevation gain per km as the primary metric - this reflects the 
+        // actual climbing effort regardless of route shape (out-and-back vs loop)
+        if (distance <= 0 || totalElevationGain <= 0) {
+            return "flat"
         }
-        
-        val paceComponents = pace.split("'")
-        if (paceComponents.size >= 2) {
-            val minutes = paceComponents[0].toIntOrNull() ?: 0
-            val seconds = paceComponents[1].replace("\"", "").replace("/km", "").trim().toIntOrNull() ?: 0
-            val totalSeconds = minutes * 60 + seconds
-            
-            return when {
-                totalSeconds < 300 -> "easy"      // < 5:00/km
-                totalSeconds < 360 -> "moderate"  // 5:00-6:00/km
-                else -> "hard"                    // > 6:00/km
-            }
-        } else {
-            return "unknown"
+
+        val elevationPerKm = (totalElevationGain / 1000.0) / (distance / 1000.0)
+
+        return when {
+            elevationPerKm < 8.0 -> "flat"         // < 8 m/km - gentle terrain
+            elevationPerKm < 18.0 -> "rolling"     // 8-18 m/km - moderate hills
+            elevationPerKm < 30.0 -> "hilly"       // 18-30 m/km - significant climbing
+            elevationPerKm < 45.0 -> "steep"       // 30-45 m/km - challenging terrain
+            else -> "extreme"                      // > 45 m/km - very steep
         }
     }
     

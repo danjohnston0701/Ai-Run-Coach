@@ -89,7 +89,7 @@ fun PreviousRunsScreen(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "RUN HISTORY",
-                    style = AppTextStyles.h1.copy(fontWeight = FontWeight.Bold),
+                    style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
                     color = Colors.primary
                 )
                 Text(
@@ -193,17 +193,15 @@ fun PreviousRunsScreen(
                     Spacer(modifier = Modifier.height(Spacing.md))
                 }
                 
-                // Weather Impact Analysis (only show if enough real data)
+                // Weather Impact Analysis - always show card (will display "not enough data" message if needed)
                 item {
                     weatherImpact?.let { impact ->
-                        if (impact.hasEnoughData) {
-                            WeatherImpactAnalysisCard(
-                                weatherImpact = impact,
-                                isExpanded = isWeatherImpactExpanded,
-                                onToggleExpanded = { isWeatherImpactExpanded = !isWeatherImpactExpanded }
-                            )
-                            Spacer(modifier = Modifier.height(Spacing.lg))
-                        }
+                        WeatherImpactAnalysisCard(
+                            weatherImpact = impact,
+                            isExpanded = isWeatherImpactExpanded,
+                            onToggleExpanded = { isWeatherImpactExpanded = !isWeatherImpactExpanded }
+                        )
+                        Spacer(modifier = Modifier.height(Spacing.lg))
                     }
                 }
                 
@@ -285,12 +283,9 @@ fun TimeFilterDropdown(
 fun SummaryStatsCard(runs: List<RunSession>) {
     val totalSessions = runs.size
     val totalDistance = runs.sumOf { it.distance / 1000.0 }
-    val totalTimeMs = runs.sumOf { it.duration }
-    val totalMinutes = totalTimeMs / (1000 * 60)
-    val hours = totalMinutes / 60
-    val minutes = totalMinutes % 60
-    val timeDisplay = if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
-
+    val totalTime = runs.sumOf { it.duration }
+    val hours = totalTime / (1000 * 60 * 60)
+    
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween
@@ -310,7 +305,7 @@ fun SummaryStatsCard(runs: List<RunSession>) {
         Spacer(modifier = Modifier.width(Spacing.md))
         StatCard(
             title = "TIME",
-            value = timeDisplay,
+            value = "${hours}h",
             unit = "TOTAL",
             modifier = Modifier.weight(1f)
         )
@@ -1045,15 +1040,21 @@ fun RunListItem(run: RunSession, onClick: () -> Unit) {
                 text = difficulty.uppercase(),
                 style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
                 color = when (difficulty) {
-                    "easy" -> Colors.success
-                    "hard" -> Colors.error
+                    "flat" -> Colors.success
+                    "rolling" -> Colors.success
+                    "hilly" -> Colors.warning
+                    "steep" -> Colors.accent
+                    "extreme" -> Colors.error
                     else -> Colors.warning
                 },
                 modifier = Modifier
                     .background(
                         color = when (difficulty) {
-                            "easy" -> Colors.success.copy(alpha = 0.2f)
-                            "hard" -> Colors.error.copy(alpha = 0.2f)
+                            "flat" -> Colors.success.copy(alpha = 0.2f)
+                            "rolling" -> Colors.success.copy(alpha = 0.2f)
+                            "hilly" -> Colors.warning.copy(alpha = 0.2f)
+                            "steep" -> Colors.accent.copy(alpha = 0.2f)
+                            "extreme" -> Colors.error.copy(alpha = 0.2f)
                             else -> Colors.warning.copy(alpha = 0.2f)
                         },
                         shape = RoundedCornerShape(4.dp)

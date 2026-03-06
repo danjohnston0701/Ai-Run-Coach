@@ -167,7 +167,7 @@ fun RunSummaryScreenFlagship(
                 onShare = {
                     viewModel.shareRunWithLink(context)
                 },
-                difficultyLabel = runSession?.let { (it.difficulty ?: it.getDifficultyLevel()).uppercase(Locale.getDefault()) }
+                difficultyLabel = runSession?.let { formatTerrainLabel(it.difficulty ?: it.getDifficultyLevel()) }
             )
         }
     ) { padding ->
@@ -181,7 +181,7 @@ fun RunSummaryScreenFlagship(
                         .padding(padding)
                 ) {
                     when (selectedTab) {
-                        0 -> SummaryTabFlagship(
+                        0 -> AiInsightsTabContent(
                             run = runSession!!,
                             lastRunForDelta = lastRunForDelta,
                             analysisState = analysisState,
@@ -194,7 +194,6 @@ fun RunSummaryScreenFlagship(
                                 // share a “summary card” (text now; optional bitmap helper included below)
                                 viewModel.shareRunWithLink(context)
                             },
-                            isAdmin = isAdmin,
                             onDelete = {
                                 viewModel.deleteRun(
                                     onSuccess = { onNavigateBack() },
@@ -204,21 +203,57 @@ fun RunSummaryScreenFlagship(
                             onStruggleComment = viewModel::updateStrugglePointComment,
                             onStruggleDismiss = viewModel::dismissStrugglePoint,
                             onStruggleRestore = viewModel::restoreStrugglePoint,
-                            difficultyLabel = runSession?.let { (it.difficulty ?: it.getDifficultyLevel()).uppercase(Locale.getDefault()) },
-                            onRename = { showRenameDialog = true },
+                            difficultyLabel = runSession?.let { formatTerrainLabel(it.difficulty ?: it.getDifficultyLevel()) },
                             onCreateShareImage = { onNavigateToShareImage(runId) },
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it }
                         )
 
-                        1 -> DataTabFlagship(
-                            runSession!!,
+                        1 -> SummaryTabContent(
+                            run = runSession!!,
+                            lastRunForDelta = lastRunForDelta,
+                            onDelete = {
+                                viewModel.deleteRun(
+                                    onSuccess = { onNavigateBack() },
+                                    onError = { error -> Log.e("RunSummaryScreen", "Delete error: $error") }
+                                )
+                            },
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it }
                         )
-                        2 -> AchievementsTabFlagship(
-                            runSession!!,
-                            analysisState,
+
+                        2 -> GraphsTabContent(
+                            run = runSession!!,
+                            onDelete = {
+                                viewModel.deleteRun(
+                                    onSuccess = { onNavigateBack() },
+                                    onError = { error -> Log.e("RunSummaryScreen", "Delete error: $error") }
+                                )
+                            },
+                            selectedTab = selectedTab,
+                            onTabSelected = { selectedTab = it }
+                        )
+
+                        3 -> DataTabFlagship(
+                            run = runSession!!,
+                            onDelete = {
+                                viewModel.deleteRun(
+                                    onSuccess = { onNavigateBack() },
+                                    onError = { error -> Log.e("RunSummaryScreen", "Delete error: $error") }
+                                )
+                            },
+                            selectedTab = selectedTab,
+                            onTabSelected = { selectedTab = it }
+                        )
+                        4 -> AchievementsTabFlagship(
+                            run = runSession!!,
+                            analysisState = analysisState,
+                            onDelete = {
+                                viewModel.deleteRun(
+                                    onSuccess = { onNavigateBack() },
+                                    onError = { error -> Log.e("RunSummaryScreen", "Delete error: $error") }
+                                )
+                            },
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it }
                         )
@@ -279,6 +314,18 @@ private fun RunSummaryTopBarFlagship(
     }
 }
 
+/** Format terrain label for display */
+private fun formatTerrainLabel(terrain: String): String {
+    return when (terrain.lowercase()) {
+        "flat" -> "FLAT"
+        "rolling" -> "ROLLING"
+        "hilly" -> "HILLY"
+        "steep" -> "STEEP"
+        "extreme" -> "EXTREME"
+        else -> terrain.uppercase()
+    }
+}
+
 @Composable
 private fun DifficultyPillFlagship(label: String) {
     Box(
@@ -299,12 +346,12 @@ private fun DifficultyPillFlagship(label: String) {
 
 @Composable
 private fun RunTabsFlagship(selected: Int, onSelected: (Int) -> Unit) {
-    val labels = listOf("Summary", "Data", "Badges")
-    TabRow(
+    val labels = listOf("Ai Insights", "Summary", "Graphs", "Data", "Badges")
+    ScrollableTabRow(
         selectedTabIndex = selected,
         containerColor = Colors.backgroundRoot,
         contentColor = Colors.primary,
-        divider = { HorizontalDivider(color = Colors.border) }
+        edgePadding = Spacing.lg
     ) {
         labels.forEachIndexed { index, text ->
             Tab(
@@ -313,20 +360,22 @@ private fun RunTabsFlagship(selected: Int, onSelected: (Int) -> Unit) {
                 text = {
                     Text(
                         text = text,
-                        style = AppTextStyles.body.copy(
+                        style = AppTextStyles.caption.copy(
                             fontWeight = if (selected == index) FontWeight.Bold else FontWeight.Medium
                         )
                     )
-                }
+                },
+                selectedContentColor = Colors.primary,
+                unselectedContentColor = Colors.textMuted
             )
         }
     }
 }
 
-/* ------------------------------- TAB: SUMMARY ------------------------------ */
+/* ------------------------------- TAB: AI INSIGHTS ------------------------------ */
 
 @Composable
-private fun SummaryTabFlagship(
+private fun AiInsightsTabContent(
     run: RunSession,
     lastRunForDelta: RunSession?,
     analysisState: AiAnalysisState,
@@ -337,12 +386,10 @@ private fun SummaryTabFlagship(
     isGarminConnected: Boolean = false,
     onShareCard: () -> Unit,
     onDelete: () -> Unit,
-    isAdmin: Boolean = false,
     onStruggleComment: (String, String) -> Unit = { _, _ -> },
     onStruggleDismiss: (String, DismissReason) -> Unit = { _, _ -> },
     onStruggleRestore: (String) -> Unit = {},
     difficultyLabel: String? = null,
-    onRename: () -> Unit = {},
     onCreateShareImage: () -> Unit = {},
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
@@ -354,12 +401,9 @@ private fun SummaryTabFlagship(
         contentPadding = PaddingValues(bottom = Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Spacing.lg)
     ) {
-        // Tabs scroll with content — not pinned
+        // Tabs for navigation
         item {
-            RunTabsFlagship(
-                selected = selectedTab,
-                onSelected = onTabSelected
-            )
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected)
         }
 
         // Run Completed banner with optional difficulty pill
@@ -419,11 +463,61 @@ private fun SummaryTabFlagship(
             )
         }
 
+        // Delete run button at the bottom of the tab
+        item {
+            Spacer(modifier = Modifier.height(Spacing.md))
+            OutlinedButton(
+                onClick = onDelete,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = Colors.error
+                ),
+                border = ButtonDefaults.outlinedButtonBorder.copy(
+                    brush = SolidColor(Colors.error)
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Delete",
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Delete Run", fontWeight = FontWeight.Medium)
+            }
+        }
+
+        item { Spacer(modifier = Modifier.height(Spacing.sm)) }
+    }
+}
+
+/* ------------------------------- TAB: SUMMARY (MAP + STATS) ------------------------------ */
+
+@Composable
+private fun SummaryTabContent(
+    run: RunSession,
+    lastRunForDelta: RunSession?,
+    onDelete: () -> Unit,
+    selectedTab: Int = 0,
+    onTabSelected: (Int) -> Unit = {},
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = Spacing.lg),
+        contentPadding = PaddingValues(bottom = Spacing.md),
+        verticalArrangement = Arrangement.spacedBy(Spacing.lg)
+    ) {
+        // Tabs for navigation
+        item {
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected)
+        }
+
+        // Map
         item {
             if (run.routePoints.isNotEmpty()) {
                 RouteMapCardFlagship(
                     points = run.routePoints,
-                    strugglePoints = strugglePoints.filter { it.isRelevant },
+                    strugglePoints = emptyList(),
                     coachingNotes = run.aiCoachingNotes
                 )
             }
@@ -455,12 +549,6 @@ private fun SummaryTabFlagship(
 
         // Effort Score / Training Load
         item { EffortScoreCard(run = run) }
-
-        // Fatigue Analysis
-        item { FatigueCurveCard(run = run) }
-
-        // Race Time Predictor
-        item { RaceTimePredictorCard(run = run) }
 
         // Delete run button at the bottom of the tab
         item {
@@ -519,22 +607,19 @@ private fun GraphsTabContent(
 
         // ===== UNIQUE DIFFERENTIATING FEATURES =====
 
-        // AI Coaching Replay Timeline
-        item {
-            if (run.aiCoachingNotes.isNotEmpty()) {
-                CoachingReplayTimeline(
-                    coachingNotes = run.aiCoachingNotes,
-                    routePoints = run.routePoints,
-                    totalDuration = run.duration
-                )
-            }
-        }
+        // (AI Coaching Replay Timeline - hidden for all users)
+
+        // Pace Decay / Fatigue Curve
+        item { FatigueCurveCard(run = run) }
 
         // Aerobic Decoupling
         item { AerobicDecouplingCard(run = run) }
 
         // Running Economy (Pace vs HR)
         item { RunningEconomyCard(run = run) }
+
+        // Race Time Predictor
+        item { RaceTimePredictorCard(run = run) }
 
         // Weather Performance Index
         item {
@@ -543,7 +628,7 @@ private fun GraphsTabContent(
             }
         }
 
-        // Delete run button at the bottom of the screen
+        // Delete run button at the bottom of the tab
         item {
             Spacer(modifier = Modifier.height(Spacing.md))
             OutlinedButton(
@@ -563,53 +648,6 @@ private fun GraphsTabContent(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Delete Run", fontWeight = FontWeight.Medium)
-            }
-        }
-
-        // AI Coaching Log - only visible to admin users
-        if (isAdmin && run.aiCoachingNotes.isNotEmpty()) {
-            item {
-                Spacer(modifier = Modifier.height(Spacing.md))
-                Text(
-                    text = "AI Coaching Log",
-                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                    color = Colors.primary
-                )
-            }
-
-            item {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(Spacing.md)) {
-                        run.aiCoachingNotes.forEach { note ->
-                            val timeStr = formatDuration(note.time)
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = Spacing.sm)
-                            ) {
-                                Text(
-                                    text = timeStr,
-                                    style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
-                                    color = Colors.primary
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = note.message,
-                                    style = AppTextStyles.body,
-                                    color = Colors.textSecondary
-                                )
-                            }
-                            HorizontalDivider(
-                                color = Colors.textMuted.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = Spacing.xs)
-                            )
-                        }
-                    }
-                }
             }
         }
 
@@ -1819,26 +1857,6 @@ private data class LabeledSeries(
     val labels: List<String>
 )
 
-/** Dynamic Y-axis: prevents erratic charts for consistent data */
-private fun calculateDynamicYAxis(
-    dataMin: Double,
-    dataMax: Double,
-    bufferPercent: Double = 0.25,
-    minBuffer: Double = 0.0,
-    minRange: Double = 0.0,
-    boundsMin: Double? = null,
-    boundsMax: Double? = null
-): Pair<Double, Double> {
-    val rng = (dataMax - dataMin).coerceAtLeast(1e-9)
-    val buf = (rng * bufferPercent).coerceAtLeast(minBuffer)
-    var minY = dataMin - buf
-    var maxY = dataMax + buf
-    if (minRange > 0 && (maxY - minY) < minRange) { val c = (minY + maxY) / 2; minY = c - minRange / 2; maxY = c + minRange / 2 }
-    if (boundsMin != null) minY = minY.coerceAtLeast(boundsMin)
-    if (boundsMax != null) maxY = maxY.coerceAtMost(boundsMax)
-    return minY to maxY
-}
-
 /* --------------------------------- SECTION -------------------------------- */
 
 @Composable
@@ -1858,13 +1876,6 @@ private fun ChartsSectionFlagship(run: RunSession) {
         }
 
         if (paceSeries.y.size >= 2) {
-            val minPace = paceSeries.y.minOrNull() ?: 0.0  // slowest (highest number)
-            val maxPace = paceSeries.y.maxOrNull() ?: 0.0  // fastest (lowest number)
-            // Dynamic Y-axis: 25% buffer with minimum 60 sec/km range for consistency
-            val (dynamicMin, dynamicMax) = calculateDynamicYAxis(
-                dataMin = minPace, dataMax = maxPace,
-                bufferPercent = 0.25, minBuffer = 15.0, minRange = 60.0
-            )
             LineChartCardFlagship(
                 title = "Pace",
                 subtitleLeft = "Avg: ${run.averagePace ?: "—"}",
@@ -1876,11 +1887,8 @@ private fun ChartsSectionFlagship(run: RunSession) {
                     lineColor = Colors.primary,
                     xTitle = if (mode == ChartMode.Time) "Time (min)" else "Distance (km)",
                     yFormatter = { secondsPerKm -> formatPaceSeconds(secondsPerKm.toLong()) },
-                    yUnitHint = "min/km"
                     yUnitHint = "min/km",
-                    invertY = true,  // Fastest pace (lower number) at top
-                    minYOverride = dynamicMin,
-                    maxYOverride = dynamicMax
+                    invertY = true  // Fastest pace (lower number) at top
                 )
             }
         }
@@ -1893,11 +1901,6 @@ private fun ChartsSectionFlagship(run: RunSession) {
             val minAlt = elevationSeries.y.minOrNull() ?: 0.0
             val maxAlt = elevationSeries.y.maxOrNull() ?: 0.0
             if (maxAlt - minAlt >= 0.5) {
-                // Dynamic Y-axis: 10% buffer with minimum 20m range
-                val (dynamicMin, dynamicMax) = calculateDynamicYAxis(
-                    dataMin = minAlt, dataMax = maxAlt,
-                    bufferPercent = 0.10, minBuffer = 5.0, minRange = 20.0
-                )
                 LineChartCardFlagship(
                     title = "Elevation",
                     subtitleLeft = "Gain: ${run.totalElevationGain.roundToInt()} m",
@@ -1909,9 +1912,7 @@ private fun ChartsSectionFlagship(run: RunSession) {
                         lineColor = Colors.success,
                         xTitle = if (mode == ChartMode.Time) "Time (min)" else "Distance (km)",
                         yFormatter = { v -> String.format(java.util.Locale.US, "%.0f", v) },
-                        yUnitHint = "m",
-                        minYOverride = dynamicMin,
-                        maxYOverride = dynamicMax
+                        yUnitHint = "m"
                     )
                 }
             }
@@ -1925,13 +1926,6 @@ private fun ChartsSectionFlagship(run: RunSession) {
         if (hrSeries.y.size >= 2) {
             val avgHr = hrSeries.y.average().roundToInt()
             val maxHr = hrSeries.y.maxOrNull()?.roundToInt() ?: 0
-            val minHr = hrSeries.y.minOrNull()?.roundToInt() ?: 0
-            // Dynamic Y-axis: 25% buffer with minimum 30 bpm range
-            val (dynamicMin, dynamicMax) = calculateDynamicYAxis(
-                dataMin = minHr.toDouble(), dataMax = maxHr.toDouble(),
-                bufferPercent = 0.25, minBuffer = 10.0, minRange = 30.0,
-                boundsMin = 60.0, boundsMax = 220.0
-            )
             LineChartCardFlagship(
                 title = "Heart Rate",
                 subtitleLeft = "Avg: $avgHr bpm",
@@ -1943,9 +1937,7 @@ private fun ChartsSectionFlagship(run: RunSession) {
                     lineColor = Colors.error,
                     xTitle = if (mode == ChartMode.Time) "Time (min)" else "Distance (km)",
                     yFormatter = { v -> "${v.roundToInt()}" },
-                    yUnitHint = "bpm",
-                    minYOverride = dynamicMin,
-                    maxYOverride = dynamicMax
+                    yUnitHint = "bpm"
                 )
             }
         }
@@ -1958,12 +1950,6 @@ private fun ChartsSectionFlagship(run: RunSession) {
         if (cadenceSeries.y.size >= 2) {
             val avgCad = cadenceSeries.y.average().roundToInt()
             val maxCad = cadenceSeries.y.maxOrNull()?.roundToInt() ?: 0
-            val minCad = cadenceSeries.y.minOrNull()?.roundToInt() ?: 0
-            // Dynamic Y-axis: 25% buffer of data range with minimum 30 spm range for consistent runs
-            val dataRange = (maxCad - minCad).coerceAtLeast(1)
-            val buffer = (dataRange * 0.25).coerceAtLeast(15.0) // At least 15 spm buffer each side = 30 min range
-            val dynamicMin = (minCad - buffer).toInt().coerceIn(100, 200)
-            val dynamicMax = (maxCad + buffer).toInt().coerceIn(140, 240)
             LineChartCardFlagship(
                 title = "Cadence",
                 subtitleLeft = "Avg: $avgCad spm",
@@ -1975,9 +1961,7 @@ private fun ChartsSectionFlagship(run: RunSession) {
                     lineColor = Color(0xFF9C27B0),
                     xTitle = if (mode == ChartMode.Time) "Time (min)" else "Distance (km)",
                     yFormatter = { v -> "${v.roundToInt()}" },
-                    yUnitHint = "spm",
-                    minYOverride = dynamicMin.toDouble(),
-                    maxYOverride = dynamicMax.toDouble()
+                    yUnitHint = "spm"
                 )
             }
         }
@@ -1988,17 +1972,6 @@ private fun ChartsSectionFlagship(run: RunSession) {
         }
 
         if (paceElevData.paceY.size >= 2 && paceElevData.elevY.size >= 2) {
-            // Dynamic Y-axis for both pace and elevation
-            val (paceMin, paceMax) = calculateDynamicYAxis(
-                dataMin = paceElevData.paceY.minOrNull() ?: 0.0,
-                dataMax = paceElevData.paceY.maxOrNull() ?: 0.0,
-                bufferPercent = 0.25, minBuffer = 15.0, minRange = 60.0
-            )
-            val (elevMin, elevMax) = calculateDynamicYAxis(
-                dataMin = paceElevData.elevY.minOrNull() ?: 0.0,
-                dataMax = paceElevData.elevY.maxOrNull() ?: 0.0,
-                bufferPercent = 0.10, minBuffer = 5.0, minRange = 20.0
-            )
             LineChartCardFlagship(
                 title = "Pace vs Elevation",
                 subtitleLeft = "Pace: ${run.averagePace ?: "—"}",
@@ -2017,11 +1990,7 @@ private fun ChartsSectionFlagship(run: RunSession) {
                     primaryFormatter = { v -> formatPaceSeconds(v.toLong()) },
                     secondaryFormatter = { v -> String.format(java.util.Locale.US, "%.0f", v) },
                     fillSecondary = true,
-                    invertPrimary = true,   // Faster pace (lower number) at top
-                    primaryMinYOverride = paceMin,
-                    primaryMaxYOverride = paceMax,
-                    secondaryMinYOverride = elevMin,
-                    secondaryMaxYOverride = elevMax
+                    invertPrimary = true   // Faster pace (lower number) at top
                 )
             }
         }
@@ -2033,19 +2002,6 @@ private fun ChartsSectionFlagship(run: RunSession) {
 
         if (cadElevData.paceY.size >= 2 && cadElevData.elevY.size >= 2) {
             val avgCadElev = cadElevData.paceY.average().roundToInt()
-            val minCadElev = cadElevData.paceY.minOrNull()?.roundToInt() ?: 0
-            val maxCadElev = cadElevData.paceY.maxOrNull()?.roundToInt() ?: 0
-            // Dynamic Y-axis for cadence: 25% buffer with minimum 30 spm range
-            val dataRange = (maxCadElev - minCadElev).coerceAtLeast(1)
-            val buffer = (dataRange * 0.25).coerceAtLeast(15.0)
-            val dynamicMin = (minCadElev - buffer).toInt().coerceIn(100, 200)
-            val dynamicMax = (maxCadElev + buffer).toInt().coerceIn(140, 240)
-            // Dynamic Y-axis for elevation: 10% buffer with minimum 20m range
-            val (elevMin, elevMax) = calculateDynamicYAxis(
-                dataMin = cadElevData.elevY.minOrNull() ?: 0.0,
-                dataMax = cadElevData.elevY.maxOrNull() ?: 0.0,
-                bufferPercent = 0.10, minBuffer = 5.0, minRange = 20.0
-            )
             LineChartCardFlagship(
                 title = "Cadence vs Elevation",
                 subtitleLeft = "Avg: $avgCadElev spm",
@@ -2063,11 +2019,7 @@ private fun ChartsSectionFlagship(run: RunSession) {
                     xTitle = "Distance (km)",
                     primaryFormatter = { v -> "${v.roundToInt()}" },
                     secondaryFormatter = { v -> String.format(java.util.Locale.US, "%.0f", v) },
-                    fillSecondary = true,
-                    primaryMinYOverride = dynamicMin.toDouble(),
-                    primaryMaxYOverride = dynamicMax.toDouble(),
-                    secondaryMinYOverride = elevMin,
-                    secondaryMaxYOverride = elevMax
+                    fillSecondary = true
                 )
             }
         }
@@ -2264,10 +2216,9 @@ private fun RunLineChartCanvas(
     xTitle: String,
     yFormatter: (Double) -> String,
     yUnitHint: String,
+    invertY: Boolean = false,  // When true, lower Y values at top (for pace: faster = top)
     modifier: Modifier = Modifier,
-    height: Dp = 220.dp,
-    minYOverride: Double? = null,  // Optional override for min Y value (e.g., for cadence buffer)
-    maxYOverride: Double? = null   // Optional override for max Y value
+    height: Dp = 220.dp
 ) {
     val isFullscreen = LocalFullscreenChart.current
     if (series.y.size < 2) {
@@ -2306,16 +2257,13 @@ private fun RunLineChartCanvas(
             if (n < 2) return@Canvas
 
             val yVals = series.y
-            val dataMinY = yVals.minOrNull() ?: 0.0
-            val dataMaxY = yVals.maxOrNull() ?: 0.0
-            // Use overrides if provided, otherwise use data min/max with 5% buffer for smoother display
-            val minY = minYOverride ?: (dataMinY - (dataMaxY - dataMinY) * 0.05)
-            val maxY = maxYOverride ?: (dataMaxY + (dataMaxY - dataMinY) * 0.05)
+            val minY = yVals.minOrNull() ?: 0.0
+            val maxY = yVals.maxOrNull() ?: 0.0
             val rangeY = (maxY - minY).takeIf { it > 1e-9 } ?: 1.0
 
             // padding inside the canvas for axis labels
             val leftPadPx = 46.dp.toPx()
-            val bottomPadPx = 22.dp.toPx()
+            val bottomPadPx = 40.dp.toPx()  // Increased to make room for axis title below values
             val topPadPx = 8.dp.toPx()
             val rightPadPx = 8.dp.toPx()
 
@@ -2331,7 +2279,9 @@ private fun RunLineChartCanvas(
 
             fun yFor(v: Double): Float {
                 val t = ((v - minY) / rangeY).toFloat() // 0..1
-                return topPadPx + (1f - t) * plotH
+                // When inverted: lower values (e.g. faster pace) at top, higher values at bottom
+                return if (invertY) topPadPx + t * plotH
+                else topPadPx + (1f - t) * plotH
             }
 
             // --- gridlines + y labels (3 ticks) ---
@@ -2352,7 +2302,9 @@ private fun RunLineChartCanvas(
                     pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
                 )
 
-                val value = maxY - (t.toDouble() * rangeY)
+                // When inverted: top = minY (fastest), bottom = maxY (slowest)
+                val value = if (invertY) minY + (t.toDouble() * rangeY)
+                            else maxY - (t.toDouble() * rangeY)
                 drawContext.canvas.nativeCanvas.apply {
                     val text = yFormatter(value)
                     val p = android.graphics.Paint().apply {
@@ -2384,14 +2336,14 @@ private fun RunLineChartCanvas(
                 close()
             }
 
-            // Fill gradient
+            // Fill gradient — solid Garmin-style fill
             drawPath(
                 path = fillPath,
                 brush = Brush.verticalGradient(
                     colors = listOf(
-                        lineColor.copy(alpha = 0.22f),
-                        lineColor.copy(alpha = 0.02f),
-                        Color.Transparent
+                        lineColor.copy(alpha = 0.55f),
+                        lineColor.copy(alpha = 0.35f),
+                        lineColor.copy(alpha = 0.10f)
                     ),
                     startY = topPadPx,
                     endY = topPadPx + plotH
@@ -2410,8 +2362,12 @@ private fun RunLineChartCanvas(
             drawCircle(color = lineColor, radius = 4.dp.toPx(), center = end)
             drawCircle(color = Colors.backgroundRoot, radius = 2.dp.toPx(), center = end)
 
-            // --- x labels (start / mid / end) ---
-            val xLabelIndices = listOf(0, (n - 1) / 2, n - 1).distinct()
+            // --- x labels (evenly spaced across the ACTUAL axis values, not data indices) ---
+            // Show 4-5 evenly spaced labels using the real label values (km or minutes)
+            val numXLabels = if (n > 10) 5 else 3
+            val xLabelIndices = (0 until numXLabels).map { tick ->
+                ((tick.toFloat() / (numXLabels - 1).toFloat()) * (n - 1)).roundToInt().coerceIn(0, n - 1)
+            }.distinct()
             xLabelIndices.forEach { idx ->
                 val label = series.labels.getOrNull(idx) ?: idx.toString()
                 val x = xFor(idx)
@@ -2422,7 +2378,7 @@ private fun RunLineChartCanvas(
                         textSize = 11.sp.toPx()
                         textAlign = android.graphics.Paint.Align.CENTER
                     }
-                    drawText(label, x, topPadPx + plotH + 16.dp.toPx(), p)
+                    drawText(label, x, topPadPx + plotH + 14.dp.toPx(), p)
                 }
             }
 
@@ -2437,7 +2393,7 @@ private fun RunLineChartCanvas(
                 drawText(yUnitHint, leftPadPx, 12.dp.toPx(), p)
             }
 
-            // x title (bottom-right)
+            // x title (bottom-right, below axis values)
             drawContext.canvas.nativeCanvas.apply {
                 val p = android.graphics.Paint().apply {
                     isAntiAlias = true
@@ -2445,7 +2401,7 @@ private fun RunLineChartCanvas(
                     textSize = 11.sp.toPx()
                     textAlign = android.graphics.Paint.Align.RIGHT
                 }
-                drawText(xTitle, leftPadPx + plotW, topPadPx + plotH + 16.dp.toPx(), p)
+                drawText(xTitle, leftPadPx + plotW, topPadPx + plotH + 30.dp.toPx(), p)
             }
         }
     }
@@ -2505,47 +2461,60 @@ private fun paceFromRoute(points: List<LocationPoint>, mode: ChartMode): Labeled
     val valid = points.filter { it.latitude != 0.0 && it.longitude != 0.0 }
     if (valid.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
 
+    // Pre-compute cumulative distance for ALL points so stepping doesn't lose distance
+    val cumulativeDist = DoubleArray(valid.size)
+    for (j in 1 until valid.size) {
+        cumulativeDist[j] = cumulativeDist[j - 1] +
+                haversineMeters(valid[j - 1].latitude, valid[j - 1].longitude,
+                    valid[j].latitude, valid[j].longitude)
+    }
+
     val xOut = mutableListOf<Double>()
     val yOut = mutableListOf<Double>()
     val labels = mutableListOf<String>()
 
     val startTs = valid.first().timestamp
-    var cumulativeMeters = 0.0
-    val step = (valid.size / 260f).coerceAtLeast(1f).toInt()
+    // Use ~200 data points max for a clean chart
+    val step = (valid.size / 200f).coerceAtLeast(1f).toInt()
 
-    var i = 1
+    var i = step
     while (i < valid.size) {
-        val prev = valid[i - 1]
+        val prevIdx = i - step
+        val prev = valid[prevIdx]
         val curr = valid[i]
 
         val dtSec = (curr.timestamp - prev.timestamp) / 1000.0
         if (dtSec <= 0) { i += step; continue }
 
-        val d = haversineMeters(prev.latitude, prev.longitude, curr.latitude, curr.longitude)
+        val d = cumulativeDist[i] - cumulativeDist[prevIdx]
         if (d < 1.0) { i += step; continue }
 
-        cumulativeMeters += d
         val speed = d / dtSec
         if (speed <= 0) { i += step; continue }
 
         val paceSecPerKm = (1000.0 / speed)
 
+        // Clamp outliers: ignore pace outside 2:00–15:00 min/km range (GPS spike protection)
+        val clampedPace = paceSecPerKm.coerceIn(120.0, 900.0)
+
         val xLabel = if (mode == ChartMode.Time) {
             val minutes = ((curr.timestamp - startTs) / 1000.0 / 60.0)
             String.format(java.util.Locale.US, "%.0f", minutes)
         } else {
-            val km = cumulativeMeters / 1000.0
+            val km = cumulativeDist[i] / 1000.0
             String.format(java.util.Locale.US, "%.1f", km)
         }
 
         xOut.add(xOut.size.toDouble())
-        yOut.add(paceSecPerKm)
+        yOut.add(clampedPace)
         labels.add(xLabel)
 
         i += step
     }
 
-    val smoothedY = smoothY(yOut, window = 7)
+    // Median-filter to remove remaining GPS spikes, then smooth with a wider window
+    val medianFiltered = medianFilter(yOut, window = 5)
+    val smoothedY = smoothY(medianFiltered, window = 15)
     return LabeledSeries(
         x = xOut,
         y = smoothedY,
@@ -2585,20 +2554,24 @@ private fun buildElevationSeries(points: List<LocationPoint>, mode: ChartMode): 
     val valid = points.filter { it.latitude != 0.0 && it.longitude != 0.0 && it.altitude != null }
     if (valid.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
 
+    // Pre-compute cumulative distance for ALL points so stepping doesn't lose distance
+    val cumulativeDist = DoubleArray(valid.size)
+    for (j in 1 until valid.size) {
+        cumulativeDist[j] = cumulativeDist[j - 1] +
+                haversineMeters(valid[j - 1].latitude, valid[j - 1].longitude,
+                    valid[j].latitude, valid[j].longitude)
+    }
+
     val xOut = mutableListOf<Double>()
     val yOut = mutableListOf<Double>()
     val labels = mutableListOf<String>()
 
     val startTs = valid.first().timestamp
-    var cumulativeMeters = 0.0
     val step = (valid.size / 260f).coerceAtLeast(1f).toInt()
 
-    var i = 1
+    var i = 0
     while (i < valid.size) {
-        val prev = valid[i - 1]
         val curr = valid[i]
-
-        cumulativeMeters += haversineMeters(prev.latitude, prev.longitude, curr.latitude, curr.longitude)
 
         val alt = curr.altitude ?: run { i += step; continue }
 
@@ -2606,7 +2579,7 @@ private fun buildElevationSeries(points: List<LocationPoint>, mode: ChartMode): 
             val minutes = ((curr.timestamp - startTs) / 1000.0 / 60.0)
             String.format(java.util.Locale.US, "%.0f", minutes)
         } else {
-            val km = cumulativeMeters / 1000.0
+            val km = cumulativeDist[i] / 1000.0
             String.format(java.util.Locale.US, "%.1f", km)
         }
 
@@ -2617,7 +2590,7 @@ private fun buildElevationSeries(points: List<LocationPoint>, mode: ChartMode): 
         i += step
     }
 
-    val smoothedY = smoothY(yOut, window = 5)
+    val smoothedY = smoothY(yOut, window = 11)
     return LabeledSeries(
         x = xOut,
         y = smoothedY,
@@ -2632,6 +2605,23 @@ private fun smoothY(values: List<Double>, window: Int): List<Double> {
         val start = (idx - half).coerceAtLeast(0)
         val end = (idx + half).coerceAtMost(values.lastIndex)
         values.subList(start, end + 1).average()
+    }
+}
+
+/**
+ * Median filter — removes sharp spikes by replacing each value with the median of its neighbours.
+ * Much better than averaging for GPS pace data because it doesn't let a single 2:00 spike
+ * drag the average down. Applied before smoothY for a clean two-stage pipeline.
+ */
+private fun medianFilter(values: List<Double>, window: Int): List<Double> {
+    if (values.size < window || window <= 1) return values
+    val half = window / 2
+    return values.mapIndexed { idx, _ ->
+        val start = (idx - half).coerceAtLeast(0)
+        val end = (idx + half).coerceAtMost(values.lastIndex)
+        values.subList(start, end + 1).sorted().let { sorted ->
+            sorted[sorted.size / 2] // median
+        }
     }
 }
 
@@ -2673,30 +2663,35 @@ private fun buildHeartRateSeries(
         i += step
     }
 
-    return LabeledSeries(xOut, smoothY(yOut, 5), labels)
+    return LabeledSeries(xOut, smoothY(yOut, 11), labels)
 }
 
 private fun hrFromRoutePoints(points: List<LocationPoint>, mode: ChartMode): LabeledSeries {
     val valid = points.filter { it.heartRate != null && it.heartRate > 0 && it.latitude != 0.0 }
     if (valid.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
 
+    // Pre-compute cumulative distance for ALL points so stepping doesn't lose distance
+    val cumulativeDist = DoubleArray(valid.size)
+    for (j in 1 until valid.size) {
+        cumulativeDist[j] = cumulativeDist[j - 1] +
+                haversineMeters(valid[j - 1].latitude, valid[j - 1].longitude,
+                    valid[j].latitude, valid[j].longitude)
+    }
+
     val xOut = mutableListOf<Double>()
     val yOut = mutableListOf<Double>()
     val labels = mutableListOf<String>()
     val startTs = valid.first().timestamp
-    var cumulativeMeters = 0.0
     val step = (valid.size / 200f).coerceAtLeast(1f).toInt()
 
-    var i = 1
+    var i = 0
     while (i < valid.size) {
-        val prev = valid[i - 1]
         val curr = valid[i]
-        cumulativeMeters += haversineMeters(prev.latitude, prev.longitude, curr.latitude, curr.longitude)
 
         val xLabel = if (mode == ChartMode.Time) {
             String.format(java.util.Locale.US, "%.0f", (curr.timestamp - startTs) / 60000.0)
         } else {
-            String.format(java.util.Locale.US, "%.1f", cumulativeMeters / 1000.0)
+            String.format(java.util.Locale.US, "%.1f", cumulativeDist[i] / 1000.0)
         }
 
         xOut.add(xOut.size.toDouble())
@@ -2706,30 +2701,35 @@ private fun hrFromRoutePoints(points: List<LocationPoint>, mode: ChartMode): Lab
         i += step
     }
 
-    return LabeledSeries(xOut, smoothY(yOut, 5), labels)
+    return LabeledSeries(xOut, smoothY(yOut, 11), labels)
 }
 
 private fun buildCadenceSeries(points: List<LocationPoint>, mode: ChartMode): LabeledSeries {
     val valid = points.filter { it.cadence != null && it.cadence > 0 && it.latitude != 0.0 }
     if (valid.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
 
+    // Pre-compute cumulative distance for ALL points so stepping doesn't lose distance
+    val cumulativeDist = DoubleArray(valid.size)
+    for (j in 1 until valid.size) {
+        cumulativeDist[j] = cumulativeDist[j - 1] +
+                haversineMeters(valid[j - 1].latitude, valid[j - 1].longitude,
+                    valid[j].latitude, valid[j].longitude)
+    }
+
     val xOut = mutableListOf<Double>()
     val yOut = mutableListOf<Double>()
     val labels = mutableListOf<String>()
     val startTs = valid.first().timestamp
-    var cumulativeMeters = 0.0
     val step = (valid.size / 200f).coerceAtLeast(1f).toInt()
 
-    var i = 1
+    var i = 0
     while (i < valid.size) {
-        val prev = valid[i - 1]
         val curr = valid[i]
-        cumulativeMeters += haversineMeters(prev.latitude, prev.longitude, curr.latitude, curr.longitude)
 
         val xLabel = if (mode == ChartMode.Time) {
             String.format(java.util.Locale.US, "%.0f", (curr.timestamp - startTs) / 60000.0)
         } else {
-            String.format(java.util.Locale.US, "%.1f", cumulativeMeters / 1000.0)
+            String.format(java.util.Locale.US, "%.1f", cumulativeDist[i] / 1000.0)
         }
 
         xOut.add(xOut.size.toDouble())
@@ -2739,7 +2739,7 @@ private fun buildCadenceSeries(points: List<LocationPoint>, mode: ChartMode): La
         i += step
     }
 
-    return LabeledSeries(xOut, smoothY(yOut, 5), labels)
+    return LabeledSeries(xOut, smoothY(yOut, 11), labels)
 }
 
 /* -------------------- DUAL-AXIS SERIES DATA -------------------- */
@@ -2763,18 +2763,23 @@ private fun buildPaceElevationDualSeries(
     }
     if (valid.size < 4) return DualSeriesData(emptyList(), emptyList(), emptyList())
 
+    // Pre-compute cumulative distance for ALL points so stepping doesn't lose distance
+    val cumulativeDist = DoubleArray(valid.size)
+    for (j in 1 until valid.size) {
+        cumulativeDist[j] = cumulativeDist[j - 1] +
+                haversineMeters(valid[j - 1].latitude, valid[j - 1].longitude,
+                    valid[j].latitude, valid[j].longitude)
+    }
+
     val paceOut = mutableListOf<Double>()
     val elevOut = mutableListOf<Double>()
     val labels = mutableListOf<String>()
 
-    var cumulativeMeters = 0.0
     val step = (valid.size / 200f).coerceAtLeast(1f).toInt()
 
-    var i = 1
+    var i = 0
     while (i < valid.size) {
-        val prev = valid[i - 1]
         val curr = valid[i]
-        cumulativeMeters += haversineMeters(prev.latitude, prev.longitude, curr.latitude, curr.longitude)
 
         val alt = curr.altitude ?: run { i += step; continue }
         val speed = curr.speed ?: run { i += step; continue }
@@ -2783,7 +2788,7 @@ private fun buildPaceElevationDualSeries(
         // Pace in seconds per km
         val paceSecPerKm = 1000.0 / speed.toDouble()
 
-        val km = cumulativeMeters / 1000.0
+        val km = cumulativeDist[i] / 1000.0
         labels.add(String.format(java.util.Locale.US, "%.1f", km))
         paceOut.add(paceSecPerKm)
         elevOut.add(alt.toDouble())
@@ -2794,8 +2799,8 @@ private fun buildPaceElevationDualSeries(
     if (paceOut.size < 2) return DualSeriesData(emptyList(), emptyList(), emptyList())
 
     return DualSeriesData(
-        paceY = smoothY(paceOut, 7),
-        elevY = smoothY(elevOut, 5),
+        paceY = smoothY(medianFilter(paceOut, 5), 15),
+        elevY = smoothY(elevOut, 11),
         labels = labels
     )
 }
@@ -2812,23 +2817,28 @@ private fun buildCadenceElevationDualSeries(
     }
     if (valid.size < 4) return DualSeriesData(emptyList(), emptyList(), emptyList())
 
+    // Pre-compute cumulative distance for ALL points so stepping doesn't lose distance
+    val cumulativeDist = DoubleArray(valid.size)
+    for (j in 1 until valid.size) {
+        cumulativeDist[j] = cumulativeDist[j - 1] +
+                haversineMeters(valid[j - 1].latitude, valid[j - 1].longitude,
+                    valid[j].latitude, valid[j].longitude)
+    }
+
     val cadOut = mutableListOf<Double>()
     val elevOut = mutableListOf<Double>()
     val labels = mutableListOf<String>()
 
-    var cumulativeMeters = 0.0
     val step = (valid.size / 200f).coerceAtLeast(1f).toInt()
 
-    var i = 1
+    var i = 0
     while (i < valid.size) {
-        val prev = valid[i - 1]
         val curr = valid[i]
-        cumulativeMeters += haversineMeters(prev.latitude, prev.longitude, curr.latitude, curr.longitude)
 
         val alt = curr.altitude ?: run { i += step; continue }
         val cad = curr.cadence ?: run { i += step; continue }
 
-        val km = cumulativeMeters / 1000.0
+        val km = cumulativeDist[i] / 1000.0
         labels.add(String.format(java.util.Locale.US, "%.1f", km))
         cadOut.add(cad.toDouble())
         elevOut.add(alt.toDouble())
@@ -2839,8 +2849,8 @@ private fun buildCadenceElevationDualSeries(
     if (cadOut.size < 2) return DualSeriesData(emptyList(), emptyList(), emptyList())
 
     return DualSeriesData(
-        paceY = smoothY(cadOut, 5),
-        elevY = smoothY(elevOut, 5),
+        paceY = smoothY(cadOut, 11),
+        elevY = smoothY(elevOut, 11),
         labels = labels
     )
 }
@@ -2866,11 +2876,7 @@ private fun DualAxisChartCanvas(
     fillSecondary: Boolean = true,
     invertPrimary: Boolean = false,  // When true, lower Y values are at top (for pace: faster = top)
     modifier: Modifier = Modifier,
-    height: Dp = 250.dp,
-    primaryMinYOverride: Double? = null,  // Optional override for primary Y min value (e.g., cadence)
-    primaryMaxYOverride: Double? = null,  // Optional override for primary Y max value
-    secondaryMinYOverride: Double? = null, // Optional override for secondary Y min value (e.g., elevation)
-    secondaryMaxYOverride: Double? = null  // Optional override for secondary Y max value
+    height: Dp = 250.dp
 ) {
     val isFullscreen = LocalFullscreenChart.current
     val n = primaryY.size.coerceAtMost(secondaryY.size)
@@ -2905,17 +2911,13 @@ private fun DualAxisChartCanvas(
         androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
             if (n < 2) return@Canvas
 
-            // Compute ranges - use overrides if provided, otherwise add 5% buffer
-            val dataPriMin = primaryY.take(n).minOrNull() ?: 0.0
-            val dataPriMax = primaryY.take(n).maxOrNull() ?: 0.0
-            val priMin = primaryMinYOverride ?: (dataPriMin - (dataPriMax - dataPriMin) * 0.05)
-            val priMax = primaryMaxYOverride ?: (dataPriMax + (dataPriMax - dataPriMin) * 0.05)
+            // Compute ranges
+            val priMin = primaryY.take(n).minOrNull() ?: 0.0
+            val priMax = primaryY.take(n).maxOrNull() ?: 0.0
             val priRange = (priMax - priMin).takeIf { it > 1e-9 } ?: 1.0
 
-            val dataSecMin = secondaryY.take(n).minOrNull() ?: 0.0
-            val dataSecMax = secondaryY.take(n).maxOrNull() ?: 0.0
-            val secMin = secondaryMinYOverride ?: (dataSecMin - (dataSecMax - dataSecMin) * 0.05)
-            val secMax = secondaryMaxYOverride ?: (dataSecMax + (dataSecMax - dataSecMin) * 0.05)
+            val secMin = secondaryY.take(n).minOrNull() ?: 0.0
+            val secMax = secondaryY.take(n).maxOrNull() ?: 0.0
             val secRange = (secMax - secMin).takeIf { it > 1e-9 } ?: 1.0
 
             val leftPadPx = 50.dp.toPx()
@@ -3038,8 +3040,11 @@ private fun DualAxisChartCanvas(
             drawCircle(color = primaryColor, radius = 4.dp.toPx(), center = priEnd)
             drawCircle(color = Colors.backgroundRoot, radius = 2.dp.toPx(), center = priEnd)
 
-            // --- x labels ---
-            val xLabelIndices = listOf(0, (n - 1) / 2, n - 1).distinct()
+            // --- x labels (evenly spaced across chart) ---
+            val numXLabels = if (n > 10) 5 else 3
+            val xLabelIndices = (0 until numXLabels).map { tick ->
+                ((tick.toFloat() / (numXLabels - 1).toFloat()) * (n - 1)).roundToInt().coerceIn(0, n - 1)
+            }.distinct()
             xLabelIndices.forEach { idx ->
                 val label = labels.getOrNull(idx) ?: idx.toString()
                 val x = xFor(idx)
@@ -4702,8 +4707,9 @@ private fun WeatherPerformanceCard(weather: WeatherData) {
 @Composable
 private fun DataTabFlagship(
     run: RunSession,
-    selectedTab: Int = 1,
-    onTabSelected: (Int) -> Unit = {}
+    onDelete: () -> Unit = {},
+    selectedTab: Int = 0,
+    onTabSelected: (Int) -> Unit = {},
 ) {
     LazyColumn(
         modifier = Modifier
@@ -4712,9 +4718,11 @@ private fun DataTabFlagship(
         contentPadding = PaddingValues(bottom = Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
+        // Tabs for navigation
         item {
             RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected)
         }
+
         // ==================== PACE SECTION ====================
         item {
             DataSectionCard(
@@ -4851,6 +4859,29 @@ private fun DataTabFlagship(
         item {
             if (run.kmSplits.isNotEmpty()) {
                 KmSplitsCard(run.kmSplits)
+            }
+        }
+
+        // Delete run button at the bottom of the tab
+        item {
+            Spacer(modifier = Modifier.height(Spacing.md))
+            OutlinedButton(
+                onClick = onDelete,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = Colors.error
+                ),
+                border = ButtonDefaults.outlinedButtonBorder.copy(
+                    brush = SolidColor(Colors.error)
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Delete",
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Delete Run", fontWeight = FontWeight.Medium)
             }
         }
 
@@ -5052,8 +5083,9 @@ private fun WeatherMetricFlagship(label: String, value: String) {
 private fun AchievementsTabFlagship(
     run: RunSession,
     analysisState: AiAnalysisState,
-    selectedTab: Int = 2,
-    onTabSelected: (Int) -> Unit = {}
+    onDelete: () -> Unit = {},
+    selectedTab: Int = 0,
+    onTabSelected: (Int) -> Unit = {},
 ) {
     LazyColumn(
         modifier = Modifier
@@ -5062,9 +5094,11 @@ private fun AchievementsTabFlagship(
         contentPadding = PaddingValues(bottom = Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Spacing.lg)
     ) {
+        // Tabs for navigation
         item {
             RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected)
         }
+
         item {
             Text(
                 text = "Badges",
@@ -5099,6 +5133,29 @@ private fun AchievementsTabFlagship(
                     Text("Rate This Run", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
                     Text("Add ratings and badges here later.", style = AppTextStyles.body, color = Colors.textSecondary)
                 }
+            }
+        }
+
+        // Delete run button at the bottom of the tab
+        item {
+            Spacer(modifier = Modifier.height(Spacing.md))
+            OutlinedButton(
+                onClick = onDelete,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = Colors.error
+                ),
+                border = ButtonDefaults.outlinedButtonBorder.copy(
+                    brush = SolidColor(Colors.error)
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Delete",
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Delete Run", fontWeight = FontWeight.Medium)
             }
         }
 
