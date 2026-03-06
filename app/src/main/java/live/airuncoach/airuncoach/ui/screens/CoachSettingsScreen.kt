@@ -71,13 +71,42 @@ fun CoachSettingsScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot)
             )
         },
-        containerColor = Colors.backgroundRoot
+        containerColor = Colors.backgroundRoot,
+        bottomBar = {
+            // Sticky save button at the bottom
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Colors.backgroundRoot,
+                shadowElevation = 8.dp
+            ) {
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            viewModel.saveSettings()
+                            // Clear coach setup flag and complete onboarding
+                            sessionManager.setNeedsCoachSetup(false)
+                            sessionManager.clearOnboardingFlags()
+                            // Navigate to dashboard (location permission handled by navigation)
+                            onNavigateToDashboard()
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg, vertical = Spacing.md)
+                        .height(50.dp),
+                    shape = RoundedCornerShape(BorderRadius.lg),
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
+                ) {
+                    Text("Save Changes", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold))
+                }
+            }
+        }
     ) { padding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(Spacing.lg)
+                .padding(horizontal = Spacing.lg)
         ) {
             item {
                 SectionTitle(title = "Coach Name")
@@ -247,29 +276,6 @@ fun CoachSettingsScreen(
                     enabled = motivationalCoachingEnabled,
                     onToggle = viewModel::onMotivationalCoachingToggled
                 )
-                Spacer(modifier = Modifier.height(Spacing.xl))
-            }
-
-            item {
-                Button(
-                    onClick = {
-                        coroutineScope.launch {
-                            viewModel.saveSettings()
-                            // Clear coach setup flag and complete onboarding
-                            sessionManager.setNeedsCoachSetup(false)
-                            sessionManager.clearOnboardingFlags()
-                            // Navigate to dashboard (location permission handled by navigation)
-                            onNavigateToDashboard()
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp),
-                    shape = RoundedCornerShape(BorderRadius.lg),
-                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
-                ) {
-                    Text("Save Changes", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold))
-                }
             }
         }
     }
