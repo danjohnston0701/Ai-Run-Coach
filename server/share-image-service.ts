@@ -594,9 +594,13 @@ function buildRouteMapSvg(w: number, h: number, run: RunDataForImage, userName?:
       ? buildGpsRouteElite(0, 0, w, mapH, run.gpsTrack, run.paceData)
       : `<text x="${w / 2}" y="${mapH / 2}" font-family="${FONT}" font-size="22" fill="${C.textMuted}" text-anchor="middle">No GPS data available</text>`);
 
+  const bgRect = hasMapTile
+    ? `<rect width="${w}" height="${h}" fill="none"/><rect x="0" y="${mapH}" width="${w}" height="${h - mapH}" fill="${C.bg}"/>`
+    : `<rect width="${w}" height="${h}" fill="${C.bg}"/>`;
+
   return `
     ${globalDefs(w, h)}
-    <rect width="${w}" height="${h}" fill="${C.bg}"/>
+    ${bgRect}
     ${mapBg}
     ${routeSvg}
     ${legend}
