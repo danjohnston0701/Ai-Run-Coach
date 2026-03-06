@@ -25,7 +25,10 @@ class LoginViewModel @Inject constructor(
     private val apiService: ApiService,
     private val sessionManager: SessionManager
 ) : ViewModel() {
-    
+
+    // Expose sessionManager for navigation logic in UI
+    val sessionManagerGetter: SessionManager get() = sessionManager
+
     private val sharedPrefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
 
@@ -288,9 +291,33 @@ class LoginViewModel @Inject constructor(
                     _loginState.update { it.copy(isLoading = false, error = "Failed to verify user data save") }
                     return@launch
                 }
+
+                // Set onboarding flags for new user (they need to complete profile + coach setup)
+                sessionManager.setNeedsProfileSetup(true)
+                sessionManager.setNeedsCoachSetup(true)
                 
                 _loginState.update { it.copy(isLoading = false, error = null, isLoginSuccessful = true) }
                 android.util.Log.d("LoginViewModel", "🎉 Registration complete and verified!")
+            } catch (e: retrofit2.HttpException) {
+                val errorBody = e.response()?.errorBody()?.string()
+                android.util.Log.e("LoginViewModel", "❌ Registration HTTP Error ${e.code()}: $errorBody", e)
+
+                // Try to parse error message from backend
+                val errorMessage = try {
+                    val json = com.google.gson.JsonParser.parseString(errorBody).asJsonObject
+                    json.get("error")?.asString ?: json.get("message")?.asString ?: "Registration failed"
+                } catch (ex: Exception) {
+                    "Registration failed"
+                }
+
+                val userFriendlyError = when (e.code()) {
+                    409 -> "The email address is already registered to a user, please try logging in, or reset your password"
+                    400 -> "Invalid request: $errorMessage"
+                    500 -> "Server error. Please try again later."
+                    else -> "Error (${e.code()}): $errorMessage"
+                }
+
+                _loginState.update { it.copy(isLoading = false, error = userFriendlyError) }
             } catch (e: Exception) {
                 android.util.Log.e("LoginViewModel", "Registration failed: ${e.message}", e)
                 _loginState.update { it.copy(isLoading = false, error = e.message ?: "Registration failed") }

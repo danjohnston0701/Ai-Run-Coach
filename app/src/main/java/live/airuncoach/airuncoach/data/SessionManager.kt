@@ -93,4 +93,48 @@ class SessionManager(context: Context) {
             null
         }
     }
+
+    // ===== Onboarding Flags =====
+
+    /**
+     * Marks user as needing profile setup (first time registration)
+     */
+    fun setNeedsProfileSetup(needs: Boolean) {
+        sharedPreferences.edit {
+            putBoolean("needs_profile_setup", needs)
+        }
+    }
+
+    /**
+     * Checks if user needs to complete profile setup
+     */
+    fun needsProfileSetup(): Boolean {
+        return sharedPreferences.getBoolean("needs_profile_setup", false)
+    }
+
+    /**
+     * Marks user as needing coach settings setup
+     */
+    fun setNeedsCoachSetup(needs: Boolean) {
+        sharedPreferences.edit {
+            putBoolean("needs_coach_setup", needs)
+        }
+    }
+
+    /**
+     * Checks if user needs to complete coach settings
+     */
+    fun needsCoachSetup(): Boolean {
+        return sharedPreferences.getBoolean("needs_coach_setup", false)
+    }
+
+    /**
+     * Clears onboarding flags (called after user completes all setup)
+     */
+    fun clearOnboardingFlags() {
+        sharedPreferences.edit {
+            remove("needs_profile_setup")
+            remove("needs_coach_setup")
+        }
+    }
 }

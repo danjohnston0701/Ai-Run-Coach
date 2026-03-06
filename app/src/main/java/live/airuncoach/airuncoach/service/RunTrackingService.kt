@@ -77,6 +77,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private lateinit var textToSpeechHelper: TextToSpeechHelper
     private lateinit var audioPlayerHelper: AudioPlayerHelper
     private var currentUser: User? = null
+    private var activeGoals: List<ActiveGoalInfo> = emptyList()  // Goals for AI coaching context
     private var lastPhase: CoachingPhase? = null
     private var last500mMilestone = 0
     private val coachingHistory = mutableListOf<AiCoachingNote>() // Track what coaching has been given with timestamps
@@ -294,16 +295,40 @@ class RunTrackingService : Service(), SensorEventListener {
         // Initialize the shared audio queue (handles both OpenAI TTS and device TTS fallback)
         CoachingAudioQueue.init(this)
         
-        // Load user profile for coach settings
+        // Load user profile for coach settings and goals for AI context
         serviceScope.launch {
             try {
                 val userId = sessionManager.getUserId()
                 if (userId != null) {
                     currentUser = apiService.getUser(userId)
                     Log.d("RunTrackingService", "Loaded user profile: ${currentUser?.coachName}")
+
+                    // Load active goals sorted by date (soonest first, no date last)
+                    val allGoals = apiService.getGoals(userId)
+                    activeGoals = allGoals
+                        .filter { it.isActive && !it.isCompleted && it.id != null }
+                        .map { goal ->
+                            ActiveGoalInfo(
+                                id = goal.id!!,
+                                title = goal.title,
+                                goalType = goal.type,  // EVENT, DISTANCE_TIME, HEALTH_WELLBEING, CONSISTENCY
+                                description = goal.description,
+                                notes = goal.notes,
+                                targetDate = goal.targetDate,
+                                eventName = goal.eventName,
+                                distanceTarget = goal.distanceTarget,
+                                customDistanceKm = goal.distanceTarget?.let { parseDistanceToKm(it) },
+                                timeTargetSeconds = goal.timeTargetSeconds,
+                                currentProgress = goal.currentProgress.toDouble(),
+                                progressPercent = (goal.currentProgress * 100).toDouble().coerceIn(0.0, 100.0)
+                            )
+                        }
+                        .sortedWith(compareBy(nullsLast()) { it.targetDate })
+                    Log.d("RunTrackingService", "Loaded ${activeGoals.size} active goals for AI coaching")
+                    Log.d("RunTrackingService", "Loaded ${activeGoals.size} active goals for AI coaching")
                 }
             } catch (e: Exception) {
-                Log.e("RunTrackingService", "Failed to load user profile", e)
+                Log.e("RunTrackingService", "Failed to load user profile or goals", e)
             }
         }
         
@@ -802,7 +827,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     hasRoute = true,
                     triggerType = "navigation_turn",
                     navigationInstruction = navigationText,
-                    navigationDistance = distanceMeters
+                    navigationDistance = distanceMeters,
+                    activeGoals = activeGoals.takeIf { it.isNotEmpty() }
                 )
                 
                 val response = apiService.getPhaseCoaching(update)
@@ -1091,7 +1117,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     projectedFinishSeconds = projectedFinishSeconds,
                     currentAvgPaceSecondsPerKm = currentAvgPace,
                     rollingPaceSecondsPerKm = rollingPace,
-                    progressPercent = progressFraction * 100
+                    progressPercent = progressFraction * 100,
+                    activeGoals = activeGoals.takeIf { it.isNotEmpty() }
                 )
                 
                 Log.d("PaceCoaching", "Requesting LLM pace coaching: triggerType=${update.triggerType}, " +
@@ -1118,7 +1145,29 @@ class RunTrackingService : Service(), SensorEventListener {
         val seconds = (secondsPerKm % 60).toInt()
         return String.format("%d:%02d", minutes, seconds)
     }
-    
+
+    /**
+     * Parse distance string to kilometers.
+     */
+    private fun parseDistanceToKm(distanceStr: String): Double? {
+        return when (distanceStr.uppercase().replace(" ", "").replace("-", "")) {
+            "5K", "5KM" -> 5.0
+            "10K", "10KM" -> 10.0
+            "HALFMARATHON", "HALF" -> 21.0975
+            "MARATHON", "FULL" -> 42.195
+            "ULTRA" -> 50.0
+            "1K", "1KM" -> 1.0
+            "2K", "2KM" -> 2.0
+            "3K", "3KM" -> 3.0
+            "4K", "4KM" -> 4.0
+            "6K", "6KM" -> 6.0
+            "7K", "7KM" -> 7.0
+            "8K", "8KM" -> 8.0
+            "9K", "9KM" -> 9.0
+            else -> null
+        }
+    }
+
     // ==================== STRIDE ANALYSIS (shared by all coaching triggers) ====================
 
     data class StrideSnapshot(
@@ -1942,13 +1991,14 @@ class RunTrackingService : Service(), SensorEventListener {
                         fitnessLevel = currentUser?.fitnessLevel,
                         runnerName = currentUser?.name,
                         runnerAge = currentUser?.age,
-                    runnerWeight = currentUser?.weight,
-                    runnerHeight = currentUser?.height,
+                        runnerWeight = currentUser?.weight,
+                        runnerHeight = currentUser?.height,
                         activityType = "run",
                         hasRoute = hasRoute,
                         targetTime = targetTime?.let { (it / 1000).toInt() },
                         targetPace = targetPaceStr,
-                        triggerType = "500m_checkin"
+                        triggerType = "500m_checkin",
+                        activeGoals = activeGoals.takeIf { it.isNotEmpty() }
                     )
                     val response = apiService.getPhaseCoaching(update)
                     coachingHistory.add(AiCoachingNote(
@@ -2008,13 +2058,14 @@ class RunTrackingService : Service(), SensorEventListener {
                         fitnessLevel = currentUser?.fitnessLevel,
                         runnerName = currentUser?.name,
                         runnerAge = currentUser?.age,
-                    runnerWeight = currentUser?.weight,
-                    runnerHeight = currentUser?.height,
+                        runnerWeight = currentUser?.weight,
+                        runnerHeight = currentUser?.height,
                         activityType = "run",
                         hasRoute = hasRoute,
                         targetTime = targetTime?.let { (it / 1000).toInt() },
                         targetPace = phaseTargetPaceStr,
-                        triggerType = "phase_change"
+                        triggerType = "phase_change",
+                        activeGoals = activeGoals.takeIf { it.isNotEmpty() }
                     )
                     val response = apiService.getPhaseCoaching(update)
                     coachingHistory.add(AiCoachingNote(

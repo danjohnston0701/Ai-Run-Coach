@@ -285,9 +285,12 @@ fun TimeFilterDropdown(
 fun SummaryStatsCard(runs: List<RunSession>) {
     val totalSessions = runs.size
     val totalDistance = runs.sumOf { it.distance / 1000.0 }
-    val totalTime = runs.sumOf { it.duration }
-    val hours = totalTime / (1000 * 60 * 60)
-    
+    val totalTimeMs = runs.sumOf { it.duration }
+    val totalMinutes = totalTimeMs / (1000 * 60)
+    val hours = totalMinutes / 60
+    val minutes = totalMinutes % 60
+    val timeDisplay = if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween
@@ -307,7 +310,7 @@ fun SummaryStatsCard(runs: List<RunSession>) {
         Spacer(modifier = Modifier.width(Spacing.md))
         StatCard(
             title = "TIME",
-            value = "${hours}h",
+            value = timeDisplay,
             unit = "TOTAL",
             modifier = Modifier.weight(1f)
         )

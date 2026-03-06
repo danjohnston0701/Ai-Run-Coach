@@ -45,5 +45,22 @@ data class PhaseCoachingUpdate(
     @SerializedName("runnerName") val runnerName: String? = null,
     @SerializedName("runnerAge") val runnerAge: Int? = null,
     @SerializedName("runnerWeight") val runnerWeight: Double? = null,
-    @SerializedName("runnerHeight") val runnerHeight: Double? = null  // cm
+    @SerializedName("runnerHeight") val runnerHeight: Double? = null,  // cm
+    // Active goals for AI coaching context - sorted by date (soonest first, no date last)
+    @SerializedName("activeGoals") val activeGoals: List<ActiveGoalInfo>? = null
+)
+
+data class ActiveGoalInfo(
+    @SerializedName("id") val id: String,
+    @SerializedName("title") val title: String,
+    @SerializedName("goalType") val goalType: String,  // EVENT, DISTANCE_TIME, HEALTH_WELLBEING, CONSISTENCY
+    @SerializedName("description") val description: String?,
+    @SerializedName("notes") val notes: String?,
+    @SerializedName("targetDate") val targetDate: String?,  // ISO date string, null if no deadline
+    @SerializedName("eventName") val eventName: String?,  // For EVENT type goals
+    @SerializedName("distanceTarget") val distanceTarget: String?,  // "5K", "10K", "Half Marathon", etc.
+    @SerializedName("customDistanceKm") val customDistanceKm: Double?,  // Custom distance in km
+    @SerializedName("timeTargetSeconds") val timeTargetSeconds: Int?,  // Time target in seconds
+    @SerializedName("currentProgress") val currentProgress: Double?,
+    @SerializedName("progressPercent") val progressPercent: Double?  // 0-100 progress
 )

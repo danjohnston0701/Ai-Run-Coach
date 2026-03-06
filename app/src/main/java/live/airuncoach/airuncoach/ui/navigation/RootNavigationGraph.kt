@@ -58,6 +58,20 @@ fun RootNavigationGraph(navController: NavHostController) {
                 },
                 onNavigateToSignIn = {
                     navController.popBackStack()
+                },
+                onNavigateToProfile = {
+                    navController.navigate("personal_details") {
+                        popUpTo("sign_up") {
+                            inclusive = true
+                        }
+                    }
+                },
+                onNavigateToCoachSettings = {
+                    navController.navigate("coach_settings") {
+                        popUpTo("sign_up") {
+                            inclusive = true
+                        }
+                    }
                 }
             )
         }

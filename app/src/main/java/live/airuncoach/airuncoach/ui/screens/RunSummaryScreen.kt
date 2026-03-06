@@ -456,6 +456,60 @@ private fun SummaryTabFlagship(
         // Effort Score / Training Load
         item { EffortScoreCard(run = run) }
 
+        // Fatigue Analysis
+        item { FatigueCurveCard(run = run) }
+
+        // Race Time Predictor
+        item { RaceTimePredictorCard(run = run) }
+
+        // Delete run button at the bottom of the tab
+        item {
+            Spacer(modifier = Modifier.height(Spacing.md))
+            OutlinedButton(
+                onClick = onDelete,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = Colors.error
+                ),
+                border = ButtonDefaults.outlinedButtonBorder.copy(
+                    brush = SolidColor(Colors.error)
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Delete",
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Delete Run", fontWeight = FontWeight.Medium)
+            }
+        }
+
+        item { Spacer(modifier = Modifier.height(Spacing.sm)) }
+    }
+}
+
+/* ------------------------------- TAB: GRAPHS ------------------------------ */
+
+@Composable
+private fun GraphsTabContent(
+    run: RunSession,
+    onDelete: () -> Unit,
+    selectedTab: Int = 0,
+    onTabSelected: (Int) -> Unit = {},
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = Spacing.lg),
+        contentPadding = PaddingValues(bottom = Spacing.md),
+        verticalArrangement = Arrangement.spacedBy(Spacing.lg)
+    ) {
+        // Tabs for navigation
+        item {
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected)
+        }
+
         item { ChartsSectionFlagship(run = run) }
 
         item { HeartRateZonesVisualCard(heartRateData = run.heartRateData) }
@@ -476,17 +530,11 @@ private fun SummaryTabFlagship(
             }
         }
 
-        // Pace Decay / Fatigue Curve
-        item { FatigueCurveCard(run = run) }
-
         // Aerobic Decoupling
         item { AerobicDecouplingCard(run = run) }
 
         // Running Economy (Pace vs HR)
         item { RunningEconomyCard(run = run) }
-
-        // Race Time Predictor
-        item { RaceTimePredictorCard(run = run) }
 
         // Weather Performance Index
         item {
@@ -1771,6 +1819,26 @@ private data class LabeledSeries(
     val labels: List<String>
 )
 
+/** Dynamic Y-axis: prevents erratic charts for consistent data */
+private fun calculateDynamicYAxis(
+    dataMin: Double,
+    dataMax: Double,
+    bufferPercent: Double = 0.25,
+    minBuffer: Double = 0.0,
+    minRange: Double = 0.0,
+    boundsMin: Double? = null,
+    boundsMax: Double? = null
+): Pair<Double, Double> {
+    val rng = (dataMax - dataMin).coerceAtLeast(1e-9)
+    val buf = (rng * bufferPercent).coerceAtLeast(minBuffer)
+    var minY = dataMin - buf
+    var maxY = dataMax + buf
+    if (minRange > 0 && (maxY - minY) < minRange) { val c = (minY + maxY) / 2; minY = c - minRange / 2; maxY = c + minRange / 2 }
+    if (boundsMin != null) minY = minY.coerceAtLeast(boundsMin)
+    if (boundsMax != null) maxY = maxY.coerceAtMost(boundsMax)
+    return minY to maxY
+}
+
 /* --------------------------------- SECTION -------------------------------- */
 
 @Composable
@@ -1790,6 +1858,13 @@ private fun ChartsSectionFlagship(run: RunSession) {
         }
 
         if (paceSeries.y.size >= 2) {
+            val minPace = paceSeries.y.minOrNull() ?: 0.0  // slowest (highest number)
+            val maxPace = paceSeries.y.maxOrNull() ?: 0.0  // fastest (lowest number)
+            // Dynamic Y-axis: 25% buffer with minimum 60 sec/km range for consistency
+            val (dynamicMin, dynamicMax) = calculateDynamicYAxis(
+                dataMin = minPace, dataMax = maxPace,
+                bufferPercent = 0.25, minBuffer = 15.0, minRange = 60.0
+            )
             LineChartCardFlagship(
                 title = "Pace",
                 subtitleLeft = "Avg: ${run.averagePace ?: "—"}",
@@ -1802,6 +1877,10 @@ private fun ChartsSectionFlagship(run: RunSession) {
                     xTitle = if (mode == ChartMode.Time) "Time (min)" else "Distance (km)",
                     yFormatter = { secondsPerKm -> formatPaceSeconds(secondsPerKm.toLong()) },
                     yUnitHint = "min/km"
+                    yUnitHint = "min/km",
+                    invertY = true,  // Fastest pace (lower number) at top
+                    minYOverride = dynamicMin,
+                    maxYOverride = dynamicMax
                 )
             }
         }
@@ -1814,6 +1893,11 @@ private fun ChartsSectionFlagship(run: RunSession) {
             val minAlt = elevationSeries.y.minOrNull() ?: 0.0
             val maxAlt = elevationSeries.y.maxOrNull() ?: 0.0
             if (maxAlt - minAlt >= 0.5) {
+                // Dynamic Y-axis: 10% buffer with minimum 20m range
+                val (dynamicMin, dynamicMax) = calculateDynamicYAxis(
+                    dataMin = minAlt, dataMax = maxAlt,
+                    bufferPercent = 0.10, minBuffer = 5.0, minRange = 20.0
+                )
                 LineChartCardFlagship(
                     title = "Elevation",
                     subtitleLeft = "Gain: ${run.totalElevationGain.roundToInt()} m",
@@ -1825,7 +1909,9 @@ private fun ChartsSectionFlagship(run: RunSession) {
                         lineColor = Colors.success,
                         xTitle = if (mode == ChartMode.Time) "Time (min)" else "Distance (km)",
                         yFormatter = { v -> String.format(java.util.Locale.US, "%.0f", v) },
-                        yUnitHint = "m"
+                        yUnitHint = "m",
+                        minYOverride = dynamicMin,
+                        maxYOverride = dynamicMax
                     )
                 }
             }
@@ -1839,6 +1925,13 @@ private fun ChartsSectionFlagship(run: RunSession) {
         if (hrSeries.y.size >= 2) {
             val avgHr = hrSeries.y.average().roundToInt()
             val maxHr = hrSeries.y.maxOrNull()?.roundToInt() ?: 0
+            val minHr = hrSeries.y.minOrNull()?.roundToInt() ?: 0
+            // Dynamic Y-axis: 25% buffer with minimum 30 bpm range
+            val (dynamicMin, dynamicMax) = calculateDynamicYAxis(
+                dataMin = minHr.toDouble(), dataMax = maxHr.toDouble(),
+                bufferPercent = 0.25, minBuffer = 10.0, minRange = 30.0,
+                boundsMin = 60.0, boundsMax = 220.0
+            )
             LineChartCardFlagship(
                 title = "Heart Rate",
                 subtitleLeft = "Avg: $avgHr bpm",
@@ -1850,7 +1943,9 @@ private fun ChartsSectionFlagship(run: RunSession) {
                     lineColor = Colors.error,
                     xTitle = if (mode == ChartMode.Time) "Time (min)" else "Distance (km)",
                     yFormatter = { v -> "${v.roundToInt()}" },
-                    yUnitHint = "bpm"
+                    yUnitHint = "bpm",
+                    minYOverride = dynamicMin,
+                    maxYOverride = dynamicMax
                 )
             }
         }
@@ -1863,6 +1958,12 @@ private fun ChartsSectionFlagship(run: RunSession) {
         if (cadenceSeries.y.size >= 2) {
             val avgCad = cadenceSeries.y.average().roundToInt()
             val maxCad = cadenceSeries.y.maxOrNull()?.roundToInt() ?: 0
+            val minCad = cadenceSeries.y.minOrNull()?.roundToInt() ?: 0
+            // Dynamic Y-axis: 25% buffer of data range with minimum 30 spm range for consistent runs
+            val dataRange = (maxCad - minCad).coerceAtLeast(1)
+            val buffer = (dataRange * 0.25).coerceAtLeast(15.0) // At least 15 spm buffer each side = 30 min range
+            val dynamicMin = (minCad - buffer).toInt().coerceIn(100, 200)
+            val dynamicMax = (maxCad + buffer).toInt().coerceIn(140, 240)
             LineChartCardFlagship(
                 title = "Cadence",
                 subtitleLeft = "Avg: $avgCad spm",
@@ -1874,7 +1975,9 @@ private fun ChartsSectionFlagship(run: RunSession) {
                     lineColor = Color(0xFF9C27B0),
                     xTitle = if (mode == ChartMode.Time) "Time (min)" else "Distance (km)",
                     yFormatter = { v -> "${v.roundToInt()}" },
-                    yUnitHint = "spm"
+                    yUnitHint = "spm",
+                    minYOverride = dynamicMin.toDouble(),
+                    maxYOverride = dynamicMax.toDouble()
                 )
             }
         }
@@ -1885,6 +1988,17 @@ private fun ChartsSectionFlagship(run: RunSession) {
         }
 
         if (paceElevData.paceY.size >= 2 && paceElevData.elevY.size >= 2) {
+            // Dynamic Y-axis for both pace and elevation
+            val (paceMin, paceMax) = calculateDynamicYAxis(
+                dataMin = paceElevData.paceY.minOrNull() ?: 0.0,
+                dataMax = paceElevData.paceY.maxOrNull() ?: 0.0,
+                bufferPercent = 0.25, minBuffer = 15.0, minRange = 60.0
+            )
+            val (elevMin, elevMax) = calculateDynamicYAxis(
+                dataMin = paceElevData.elevY.minOrNull() ?: 0.0,
+                dataMax = paceElevData.elevY.maxOrNull() ?: 0.0,
+                bufferPercent = 0.10, minBuffer = 5.0, minRange = 20.0
+            )
             LineChartCardFlagship(
                 title = "Pace vs Elevation",
                 subtitleLeft = "Pace: ${run.averagePace ?: "—"}",
@@ -1903,7 +2017,11 @@ private fun ChartsSectionFlagship(run: RunSession) {
                     primaryFormatter = { v -> formatPaceSeconds(v.toLong()) },
                     secondaryFormatter = { v -> String.format(java.util.Locale.US, "%.0f", v) },
                     fillSecondary = true,
-                    invertPrimary = true   // Faster pace (lower number) at top
+                    invertPrimary = true,   // Faster pace (lower number) at top
+                    primaryMinYOverride = paceMin,
+                    primaryMaxYOverride = paceMax,
+                    secondaryMinYOverride = elevMin,
+                    secondaryMaxYOverride = elevMax
                 )
             }
         }
@@ -1915,6 +2033,19 @@ private fun ChartsSectionFlagship(run: RunSession) {
 
         if (cadElevData.paceY.size >= 2 && cadElevData.elevY.size >= 2) {
             val avgCadElev = cadElevData.paceY.average().roundToInt()
+            val minCadElev = cadElevData.paceY.minOrNull()?.roundToInt() ?: 0
+            val maxCadElev = cadElevData.paceY.maxOrNull()?.roundToInt() ?: 0
+            // Dynamic Y-axis for cadence: 25% buffer with minimum 30 spm range
+            val dataRange = (maxCadElev - minCadElev).coerceAtLeast(1)
+            val buffer = (dataRange * 0.25).coerceAtLeast(15.0)
+            val dynamicMin = (minCadElev - buffer).toInt().coerceIn(100, 200)
+            val dynamicMax = (maxCadElev + buffer).toInt().coerceIn(140, 240)
+            // Dynamic Y-axis for elevation: 10% buffer with minimum 20m range
+            val (elevMin, elevMax) = calculateDynamicYAxis(
+                dataMin = cadElevData.elevY.minOrNull() ?: 0.0,
+                dataMax = cadElevData.elevY.maxOrNull() ?: 0.0,
+                bufferPercent = 0.10, minBuffer = 5.0, minRange = 20.0
+            )
             LineChartCardFlagship(
                 title = "Cadence vs Elevation",
                 subtitleLeft = "Avg: $avgCadElev spm",
@@ -1932,7 +2063,11 @@ private fun ChartsSectionFlagship(run: RunSession) {
                     xTitle = "Distance (km)",
                     primaryFormatter = { v -> "${v.roundToInt()}" },
                     secondaryFormatter = { v -> String.format(java.util.Locale.US, "%.0f", v) },
-                    fillSecondary = true
+                    fillSecondary = true,
+                    primaryMinYOverride = dynamicMin.toDouble(),
+                    primaryMaxYOverride = dynamicMax.toDouble(),
+                    secondaryMinYOverride = elevMin,
+                    secondaryMaxYOverride = elevMax
                 )
             }
         }
@@ -2130,7 +2265,9 @@ private fun RunLineChartCanvas(
     yFormatter: (Double) -> String,
     yUnitHint: String,
     modifier: Modifier = Modifier,
-    height: Dp = 220.dp
+    height: Dp = 220.dp,
+    minYOverride: Double? = null,  // Optional override for min Y value (e.g., for cadence buffer)
+    maxYOverride: Double? = null   // Optional override for max Y value
 ) {
     val isFullscreen = LocalFullscreenChart.current
     if (series.y.size < 2) {
@@ -2169,8 +2306,11 @@ private fun RunLineChartCanvas(
             if (n < 2) return@Canvas
 
             val yVals = series.y
-            val minY = yVals.minOrNull() ?: 0.0
-            val maxY = yVals.maxOrNull() ?: 0.0
+            val dataMinY = yVals.minOrNull() ?: 0.0
+            val dataMaxY = yVals.maxOrNull() ?: 0.0
+            // Use overrides if provided, otherwise use data min/max with 5% buffer for smoother display
+            val minY = minYOverride ?: (dataMinY - (dataMaxY - dataMinY) * 0.05)
+            val maxY = maxYOverride ?: (dataMaxY + (dataMaxY - dataMinY) * 0.05)
             val rangeY = (maxY - minY).takeIf { it > 1e-9 } ?: 1.0
 
             // padding inside the canvas for axis labels
@@ -2726,7 +2866,11 @@ private fun DualAxisChartCanvas(
     fillSecondary: Boolean = true,
     invertPrimary: Boolean = false,  // When true, lower Y values are at top (for pace: faster = top)
     modifier: Modifier = Modifier,
-    height: Dp = 250.dp
+    height: Dp = 250.dp,
+    primaryMinYOverride: Double? = null,  // Optional override for primary Y min value (e.g., cadence)
+    primaryMaxYOverride: Double? = null,  // Optional override for primary Y max value
+    secondaryMinYOverride: Double? = null, // Optional override for secondary Y min value (e.g., elevation)
+    secondaryMaxYOverride: Double? = null  // Optional override for secondary Y max value
 ) {
     val isFullscreen = LocalFullscreenChart.current
     val n = primaryY.size.coerceAtMost(secondaryY.size)
@@ -2761,13 +2905,17 @@ private fun DualAxisChartCanvas(
         androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
             if (n < 2) return@Canvas
 
-            // Compute ranges
-            val priMin = primaryY.take(n).minOrNull() ?: 0.0
-            val priMax = primaryY.take(n).maxOrNull() ?: 0.0
+            // Compute ranges - use overrides if provided, otherwise add 5% buffer
+            val dataPriMin = primaryY.take(n).minOrNull() ?: 0.0
+            val dataPriMax = primaryY.take(n).maxOrNull() ?: 0.0
+            val priMin = primaryMinYOverride ?: (dataPriMin - (dataPriMax - dataPriMin) * 0.05)
+            val priMax = primaryMaxYOverride ?: (dataPriMax + (dataPriMax - dataPriMin) * 0.05)
             val priRange = (priMax - priMin).takeIf { it > 1e-9 } ?: 1.0
 
-            val secMin = secondaryY.take(n).minOrNull() ?: 0.0
-            val secMax = secondaryY.take(n).maxOrNull() ?: 0.0
+            val dataSecMin = secondaryY.take(n).minOrNull() ?: 0.0
+            val dataSecMax = secondaryY.take(n).maxOrNull() ?: 0.0
+            val secMin = secondaryMinYOverride ?: (dataSecMin - (dataSecMax - dataSecMin) * 0.05)
+            val secMax = secondaryMaxYOverride ?: (dataSecMax + (dataSecMax - dataSecMin) * 0.05)
             val secRange = (secMax - secMin).takeIf { it > 1e-9 } ?: 1.0
 
             val leftPadPx = 50.dp.toPx()

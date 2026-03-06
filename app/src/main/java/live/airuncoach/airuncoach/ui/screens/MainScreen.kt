@@ -499,8 +499,27 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             composable("create_group_run") {
                 CreateGroupRunScreen(onNavigateBack = { navController.popBackStack() })
             }
-            composable("coach_settings") { CoachSettingsScreen(onNavigateBack = { navController.popBackStack() }) }
-            composable("personal_details") { PersonalDetailsScreen(onNavigateBack = { navController.popBackStack() }) }
+            composable("coach_settings") {
+                CoachSettingsScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToDashboard = {
+                        // After onboarding, go to location permission then dashboard
+                        navController.navigate("location_permission") {
+                            popUpTo("coach_settings") { inclusive = true }
+                        }
+                    }
+                )
+            }
+            composable("personal_details") {
+                PersonalDetailsScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToCoachSettings = {
+                        navController.navigate("coach_settings") {
+                            popUpTo("personal_details") { inclusive = true }
+                        }
+                    }
+                )
+            }
             composable("fitness_level") { FitnessLevelScreen(onNavigateBack = { navController.popBackStack() }) }
             composable("distance_scale") { DistanceScaleScreen(onNavigateBack = { navController.popBackStack() }) }
             composable("notifications") { NotificationsScreen(onNavigateBack = { navController.popBackStack() }) }

@@ -101,7 +101,7 @@ class IsoDateLongAdapterFactory : TypeAdapterFactory {
                 if (date != null) {
                     return date.time
                 }
-            } catch (_: Exception) { /* try next format */ }
+            } catch (_: Exception) { /* try nex t format */ }
         }
 
         Log.w("IsoDateLongAdapter", "Could not parse date string: $dateStr, returning 0")

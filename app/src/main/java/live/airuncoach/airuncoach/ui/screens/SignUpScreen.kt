@@ -27,6 +27,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.R
+import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
@@ -40,12 +41,14 @@ fun SignUpScreen(
     onNavigateToLocationPermission: () -> Unit = {},
     onNavigateToMain: () -> Unit = {},
     onNavigateToSignIn: () -> Unit = {},
+    onNavigateToProfile: () -> Unit = {},
+    onNavigateToCoachSettings: () -> Unit = {},
     viewModel: LoginViewModel = hiltViewModel()
 ) {
     val loginState by viewModel.loginState.collectAsState()
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
-    
+
     // Keyboard handling
     val nameBringIntoView = remember { BringIntoViewRequester() }
     val emailBringIntoView = remember { BringIntoViewRequester() }
@@ -56,8 +59,22 @@ fun SignUpScreen(
     // Navigate on successful registration
     LaunchedEffect(loginState.isLoginSuccessful) {
         if (loginState.isLoginSuccessful) {
-            // After sign up, always show location permission screen
-            onNavigateToLocationPermission()
+            // Check onboarding flags for new user flow
+            val sessionMgr = viewModel.sessionManagerGetter
+            when {
+                sessionMgr.needsProfileSetup() -> {
+                    // New user: first go to profile setup
+                    onNavigateToProfile()
+                }
+                sessionMgr.needsCoachSetup() -> {
+                    // User completed profile: go to coach settings
+                    onNavigateToCoachSettings()
+                }
+                else -> {
+                    // Returning user: go to location permission or main
+                    onNavigateToLocationPermission()
+                }
+            }
         }
     }
 

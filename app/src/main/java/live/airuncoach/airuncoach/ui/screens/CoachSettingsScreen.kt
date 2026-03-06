@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -18,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import live.airuncoach.airuncoach.data.SessionManager
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
@@ -32,9 +34,13 @@ import live.airuncoach.airuncoach.viewmodel.CoachingTone
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CoachSettingsScreen(onNavigateBack: () -> Unit) {
+fun CoachSettingsScreen(
+    onNavigateBack: () -> Unit = {},
+    onNavigateToDashboard: () -> Unit = {}
+) {
     val context = LocalContext.current
     val viewModel: CoachSettingsViewModel = viewModel(factory = CoachSettingsViewModelFactory(context))
+    val sessionManager = remember { SessionManager(context) }
     val coachName by viewModel.coachName.collectAsState()
     val voiceGender by viewModel.voiceGender.collectAsState()
     val accent by viewModel.accent.collectAsState()
@@ -249,7 +255,11 @@ fun CoachSettingsScreen(onNavigateBack: () -> Unit) {
                     onClick = {
                         coroutineScope.launch {
                             viewModel.saveSettings()
-                            onNavigateBack()
+                            // Clear coach setup flag and complete onboarding
+                            sessionManager.setNeedsCoachSetup(false)
+                            sessionManager.clearOnboardingFlags()
+                            // Navigate to dashboard (location permission handled by navigation)
+                            onNavigateToDashboard()
                         }
                     },
                     modifier = Modifier

@@ -18,6 +18,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.hilt.navigation.compose.hiltViewModel
+import live.airuncoach.airuncoach.data.SessionManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -34,9 +36,13 @@ import live.airuncoach.airuncoach.viewmodel.PersonalDetailsViewModelFactory
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PersonalDetailsScreen(onNavigateBack: () -> Unit) {
+fun PersonalDetailsScreen(
+    onNavigateBack: () -> Unit = {},
+    onNavigateToCoachSettings: () -> Unit = {}
+) {
     val context = LocalContext.current
     val viewModel: PersonalDetailsViewModel = viewModel(factory = PersonalDetailsViewModelFactory(context))
+    val sessionManager = remember { SessionManager(context) }
     val name by viewModel.name.collectAsState()
     val email by viewModel.email.collectAsState()
     val dateOfBirth by viewModel.dateOfBirth.collectAsState()
@@ -217,8 +223,14 @@ fun PersonalDetailsScreen(onNavigateBack: () -> Unit) {
                     onClick = {
                         coroutineScope.launch {
                             viewModel.saveDetails()
+                            // Clear profile setup flag and navigate accordingly
+                            sessionManager.setNeedsProfileSetup(false)
+                            if (sessionManager.needsCoachSetup()) {
+                                onNavigateToCoachSettings()
+                            } else {
+                                onNavigateBack()
+                            }
                         }
-                        onNavigateBack()
                     },
                     modifier = Modifier
                         .fillMaxWidth()
