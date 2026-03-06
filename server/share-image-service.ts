@@ -1044,21 +1044,27 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
     const mapRegionH = getRouteMapHeight(w, h);
     const mapTileBuffer = await fetchMapTileWithRoute(req.runData.gpsTrack, w, mapRegionH, req.runData.paceData);
     if (mapTileBuffer) {
-      const overlaySvg = buildRouteMapSvg(w, h, req.runData, req.userName, true);
-      const overlaySvgFull = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${overlaySvg}${stickersSvg}</svg>`;
-      const overlayBuffer = await sharp(Buffer.from(overlaySvgFull)).png().toBuffer();
+      try {
+        const overlaySvg = buildRouteMapSvg(w, h, req.runData, req.userName, true);
+        const overlaySvgFull = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${overlaySvg}${stickersSvg}</svg>`;
+        const overlayBuffer = await sharp(Buffer.from(overlaySvgFull)).png().toBuffer();
 
-      const mapResized = await sharp(mapTileBuffer).resize(w, mapRegionH, { fit: "cover" }).toBuffer();
+        const mapResized = await sharp(mapTileBuffer).resize(w, mapRegionH, { fit: "cover" }).png().toBuffer();
+        console.log(`Map composite: canvas=${w}x${h}, mapRegion=${w}x${mapRegionH}, mapResized=${mapResized.length} bytes, overlay=${overlayBuffer.length} bytes`);
 
-      svgBuffer = await sharp({
-        create: { width: w, height: h, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 255 } }
-      })
-        .composite([
-          { input: mapResized, top: 0, left: 0 },
-          { input: overlayBuffer, top: 0, left: 0 },
-        ])
-        .png({ quality: 95 })
-        .toBuffer();
+        svgBuffer = await sharp({
+          create: { width: w, height: h, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 255 } }
+        })
+          .composite([
+            { input: mapResized, top: 0, left: 0 },
+            { input: overlayBuffer, top: 0, left: 0 },
+          ])
+          .png({ quality: 95 })
+          .toBuffer();
+        console.log(`Map composite result: ${svgBuffer.length} bytes`);
+      } catch (e: any) {
+        console.error("Map composite error:", e.message);
+      }
     }
   }
 
