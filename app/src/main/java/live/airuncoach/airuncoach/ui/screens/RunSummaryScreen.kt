@@ -216,6 +216,7 @@ fun RunSummaryScreenFlagship(
                         1 -> SummaryTabContent(
                             run = runSession!!,
                             lastRunForDelta = lastRunForDelta,
+                            strugglePoints = strugglePoints,
                             onDelete = {
                                 viewModel.deleteRun(
                                     onSuccess = { onNavigateBack() },
@@ -500,6 +501,7 @@ private fun AiInsightsTabContent(
 private fun SummaryTabContent(
     run: RunSession,
     lastRunForDelta: RunSession?,
+    strugglePoints: List<StrugglePoint> = emptyList(),
     onDelete: () -> Unit,
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
@@ -521,7 +523,7 @@ private fun SummaryTabContent(
             if (run.routePoints.isNotEmpty()) {
                 RouteMapCardFlagship(
                     points = run.routePoints,
-                    strugglePoints = emptyList(),
+                    strugglePoints = strugglePoints,
                     coachingNotes = run.aiCoachingNotes
                 )
             }
