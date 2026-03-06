@@ -503,9 +503,9 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 CoachSettingsScreen(
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToDashboard = {
-                        // After onboarding, go to location permission then dashboard
-                        navController.navigate("location_permission") {
-                            popUpTo("coach_settings") { inclusive = true }
+                        // After onboarding complete, clear backstack and go to home/dashboard
+                        navController.navigate("home") {
+                            popUpTo(0) { inclusive = true }
                         }
                     }
                 )
