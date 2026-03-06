@@ -99,8 +99,9 @@ class RunTrackingService : Service(), SensorEventListener {
     private val KM_SPLIT_EXCLUSION_ZONE_M = 200.0         // Suppress pace coaching within 200m of a km boundary
     
     // Run data
-    private var targetDistance: Double? = null // For mapped runs
+    private var targetDistance: Double? = null // For mapped runs (metres or km depending on caller)
     private var targetTime: Long? = null     // For time-based goals (milliseconds)
+    private val FINAL_STRETCH_METERS = 500.0 // Last 500m: only motivation coaching allowed
     private var hasRoute: Boolean = false
     private val routePoints = mutableListOf<LocationPoint>()
     private val kmSplits = mutableListOf<KmSplit>()
@@ -1137,6 +1138,23 @@ class RunTrackingService : Service(), SensorEventListener {
         return String.format("%d:%02d", minutes, seconds)
     }
     
+    // ==================== FINAL STRETCH GATE ====================
+    
+    /**
+     * Returns true if the runner is in the last 500m of their target distance.
+     * When true, only motivation/finishing coaching should fire — no analysis, summaries, 
+     * HR coaching, cadence coaching, pace analysis, or split breakdowns.
+     */
+    private fun isInFinalStretch(): Boolean {
+        val td = targetDistance ?: return false
+        if (td <= 0) return false
+        // targetDistance could be in metres or km — handle both:
+        // If td > 100, assume metres. If td < 100, assume km.
+        val targetMeters = if (td > 100) td else td * 1000.0
+        val remaining = targetMeters - totalDistance
+        return remaining in 0.0..FINAL_STRETCH_METERS
+    }
+    
     // ==================== STRIDE ANALYSIS (shared by all coaching triggers) ====================
 
     data class StrideSnapshot(
@@ -1342,7 +1360,10 @@ class RunTrackingService : Service(), SensorEventListener {
                 updatePaceAndStruggle(currentPaceSeconds)
                 checkForKmSplit()
                 // Pace coaching — smart interval checks against target pace
-                checkPaceCoaching()
+                // Suppressed in final 500m (only motivation coaching allowed)
+                if (!isInFinalStretch()) {
+                    checkPaceCoaching()
+                }
                 updateRunSession()
                 updateNotification()
             } else {
@@ -1384,7 +1405,10 @@ class RunTrackingService : Service(), SensorEventListener {
             if (paceDropPercent > 20 && (now - lastStruggleTriggerTime) > STRUGGLE_COOLDOWN_MS) {
                 isStruggling = true
                 lastStruggleTriggerTime = now
-                triggerStruggleCoaching(currentPaceSeconds, paceDropPercent) // Trigger AI coaching for struggle
+                // Suppress struggle coaching in the final 500m — only motivation allowed
+                if (!isInFinalStretch()) {
+                    triggerStruggleCoaching(currentPaceSeconds, paceDropPercent)
+                }
             } else {
                 isStruggling = false
             }
@@ -1405,8 +1429,9 @@ class RunTrackingService : Service(), SensorEventListener {
             Log.d("RunTrackingService", "Reached ${currentKm}km split")
             
             // Only trigger AI coaching at the user's chosen interval (1km, 2km, 3km, 5km, 10km)
+            // Suppress split coaching in the final 500m — only motivation allowed
             val interval = coachingFeaturePrefs.kmSplitIntervalKm
-            if (currentKm % interval == 0 && canFireCoaching()) {
+            if (currentKm % interval == 0 && canFireCoaching() && !isInFinalStretch()) {
                 Log.d("RunTrackingService", "Triggering split coaching at ${currentKm}km (interval: every ${interval}km)")
                 hasCoachingFiredThisTick = true
                 recordCoachingFired()
@@ -1448,26 +1473,34 @@ class RunTrackingService : Service(), SensorEventListener {
         // Reset per-tick flag - only one coaching trigger fires per location update
         hasCoachingFiredThisTick = false
 
-        // Check for phase changes and trigger coaching (includes 500m check-in)
-        // Phase changes use the global gate internally
-        checkPhaseChange(phase)
+        // ── FINAL STRETCH GATE ──
+        // In the last 500m, ONLY elite coaching fires (handles final_500m / final_100m motivation).
+        // All analysis, summaries, HR, cadence, pace coaching, km splits are suppressed.
+        val inFinalStretch = isInFinalStretch()
+        
+        if (!inFinalStretch) {
+            // Check for phase changes and trigger coaching (includes 500m check-in)
+            // Phase changes use the global gate internally
+            checkPhaseChange(phase)
 
-        // Check for 500m milestones (skipped if phase change just fired OR global cooldown active)
-        if (!hasCoachingFiredThisTick && canFireCoaching()) {
-            check500mMilestones()
+            // Check for 500m milestones (skipped if phase change just fired OR global cooldown active)
+            if (!hasCoachingFiredThisTick && canFireCoaching()) {
+                check500mMilestones()
+            }
+
+            // Check for heart rate coaching (respects global cooldown)
+            if (!hasCoachingFiredThisTick && canFireCoaching()) {
+                maybeTriggerHeartRateCoaching()
+            }
+
+            // Check for cadence/stride coaching (respects global cooldown)
+            if (!hasCoachingFiredThisTick && canFireCoaching()) {
+                maybeTriggerCadenceCoaching()
+            }
         }
 
-        // Check for heart rate coaching (respects global cooldown)
-        if (!hasCoachingFiredThisTick && canFireCoaching()) {
-            maybeTriggerHeartRateCoaching()
-        }
-
-        // Check for cadence/stride coaching (respects global cooldown)
-        if (!hasCoachingFiredThisTick && canFireCoaching()) {
-            maybeTriggerCadenceCoaching()
-        }
-
-        // Elite coaching triggers — technique, milestones, reinforcement, ETA, trends, elevation
+        // Elite coaching triggers — always checked because it handles final 500m/100m motivation
+        // The elite coaching function itself decides whether to fire motivation or analysis
         if (!hasCoachingFiredThisTick && canFireCoaching()) {
             maybeFireEliteCoaching(displayDistance, duration, avgSpeed, phase)
         }
@@ -2337,6 +2370,9 @@ class RunTrackingService : Service(), SensorEventListener {
             return
         }
 
+        // In the final 500m, don't fire any analysis/summary coaching — only final motivation above
+        if (isInFinalStretch()) return
+        
         // Standard elite coaching — respect cooldowns
         if ((now - lastEliteCoachingTime) < ELITE_COACHING_COOLDOWN_MS) return
         if ((now - lastCoachingTime) < COACHING_COOLDOWN_MS) return
