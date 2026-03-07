@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import live.airuncoach.airuncoach.domain.model.*
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.service.RunTrackingService
@@ -264,23 +265,41 @@ class RunSummaryViewModel @Inject constructor(
                 val goals = loadActiveGoals(user)
                 val request = buildFreeformRequest(session, user, goals)
 
-                // Call the freeform analysis endpoint
-                val response = apiService.generateFreeformAnalysis(session.id, request)
-                _analysisState.value = AiAnalysisState.Freeform(
-                    markdown = response.analysis,
-                    title = response.title
-                )
+                // Try freeform endpoint first (30s timeout), fall back to old comprehensive endpoint
+                try {
+                    val response = withTimeout(30_000L) {
+                        apiService.generateFreeformAnalysis(session.id, request)
+                    }
+                    _analysisState.value = AiAnalysisState.Freeform(
+                        markdown = response.analysis,
+                        title = response.title
+                    )
 
-                // Save freeform analysis for future loading
-                val saveJson = gson.toJsonTree(mapOf(
-                    "freeform" to true,
-                    "markdown" to response.analysis,
-                    "title" to response.title
-                ))
-                try { apiService.saveRunAnalysis(session.id, SaveRunAnalysisRequest(saveJson)) } catch (_: Exception) {}
+                    // Save freeform analysis for future loading
+                    val saveJson = gson.toJsonTree(mapOf(
+                        "freeform" to true,
+                        "markdown" to response.analysis,
+                        "title" to response.title
+                    ))
+                    try { apiService.saveRunAnalysis(session.id, SaveRunAnalysisRequest(saveJson)) } catch (_: Exception) {}
+                } catch (freeformError: Exception) {
+                    Log.w("RunSummaryViewModel", "Freeform analysis failed, falling back to comprehensive", freeformError)
+                    // Fall back to the old comprehensive analysis endpoint (just needs runId)
+                    try {
+                        val fallbackResponse = withTimeout(30_000L) {
+                            apiService.getComprehensiveRunAnalysis(session.id)
+                        }
+                        _analysisState.value = AiAnalysisState.Comprehensive(fallbackResponse.analysis)
+                    } catch (fallbackError: Exception) {
+                        Log.e("RunSummaryViewModel", "Comprehensive fallback also failed", fallbackError)
+                        _analysisState.value = AiAnalysisState.Error(
+                            "AI analysis unavailable. Please try again later."
+                        )
+                    }
+                }
 
             } catch (e: Exception) {
-                Log.e("RunSummaryViewModel", "Freeform analysis failed", e)
+                Log.e("RunSummaryViewModel", "Analysis failed", e)
                 _analysisState.value = AiAnalysisState.Error(
                     e.message ?: "Failed to generate AI analysis"
                 )
