@@ -1511,8 +1511,8 @@ class RunTrackingService : Service(), SensorEventListener {
             endTime = null,
             duration = duration,
             distance = displayDistance,
-            averageSpeed = avgSpeed,
-            maxSpeed = if (hasMovedEnough) maxSpeed else 0f,
+            averageSpeed = avgSpeed / 3.6f, // Convert km/h → m/s for consistent storage
+            maxSpeed = if (hasMovedEnough) maxSpeed else 0f, // Already m/s from Location.speed
             averagePace = calculatePace(avgSpeed),
             currentPace = currentPace,
             calories = calculateCalories(displayDistance, duration),
@@ -1539,13 +1539,33 @@ class RunTrackingService : Service(), SensorEventListener {
             targetDistance = targetDistance,
             targetTime = targetTime,
             wasTargetAchieved = calculateWasTargetAchieved(),
-            maxCadence = maxCadenceValue.takeIf { it > 0 }
+            maxCadence = maxCadenceValue.takeIf { it > 0 },
+            steepestIncline = if (hasMovedEnough) calculateSteepestIncline() else null,
+            steepestDecline = if (hasMovedEnough) calculateSteepestDecline() else null
         )
     }
     
     private fun calculateAverageGradient(): Float = if (totalDistance == 0.0) 0f else ((totalElevationGain - totalElevationLoss) / totalDistance * 100).toFloat()
     
     private fun calculateMaxGradient(): Float = (1 until routePoints.size).mapNotNull { i-> val p1=routePoints[i-1]; val p2=routePoints[i]; if(p1.altitude!=null&&p2.altitude!=null) { val d=calculateDistance(p1,p2); if(d>0) ((p2.altitude-p1.altitude)/d * 100).toFloat() else null } else null }.maxOrNull() ?: 0f
+    
+    /** Steepest uphill gradient (positive %) across all consecutive point pairs */
+    private fun calculateSteepestIncline(): Float = (1 until routePoints.size).mapNotNull { i ->
+        val p1 = routePoints[i - 1]; val p2 = routePoints[i]
+        if (p1.altitude != null && p2.altitude != null) {
+            val d = calculateDistance(p1, p2)
+            if (d > 2) ((p2.altitude - p1.altitude) / d * 100).toFloat() else null // min 2m to avoid noise
+        } else null
+    }.filter { it > 0 }.maxOrNull() ?: 0f
+    
+    /** Steepest downhill gradient (positive % — magnitude of descent) across all consecutive point pairs */
+    private fun calculateSteepestDecline(): Float = (1 until routePoints.size).mapNotNull { i ->
+        val p1 = routePoints[i - 1]; val p2 = routePoints[i]
+        if (p1.altitude != null && p2.altitude != null) {
+            val d = calculateDistance(p1, p2)
+            if (d > 2) ((p1.altitude - p2.altitude) / d * 100).toFloat() else null // inverted: positive = downhill
+        } else null
+    }.filter { it > 0 }.maxOrNull() ?: 0f
     
     private fun determineTerrainType(avgGradient: Float): TerrainType = when { abs(avgGradient) < 2f -> TerrainType.FLAT; abs(avgGradient) < 5f -> TerrainType.ROLLING; abs(avgGradient) < 10f -> TerrainType.HILLY; else -> TerrainType.MOUNTAINOUS }
     

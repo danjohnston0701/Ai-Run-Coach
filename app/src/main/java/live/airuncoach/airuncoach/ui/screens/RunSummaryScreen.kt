@@ -1044,8 +1044,10 @@ private fun MainStatsGridFlagship(run: RunSession, lastRunForDelta: RunSession?)
                 add(StatTile("Elev Gain", "0 m", R.drawable.icon_trending_vector, Colors.textMuted))
             }
             // Bottom right: Max Incline (steepest incline, converted from % to degrees: 0°=flat, 90°=vertical)
-            if (run.steepestIncline != null && run.steepestIncline > 0) {
-                val maxInclineDegrees = Math.toDegrees(Math.atan(run.steepestIncline / 100.0))
+            // Fall back to maxGradient if steepestIncline is not available (older runs)
+            val inclinePercent = (run.steepestIncline?.takeIf { it > 0 }) ?: (run.maxGradient.takeIf { it > 0 })
+            if (inclinePercent != null && inclinePercent > 0) {
+                val maxInclineDegrees = Math.toDegrees(Math.atan(inclinePercent / 100.0))
                 add(StatTile("Max Incline", "${maxInclineDegrees.roundToInt()}°", R.drawable.icon_trending_vector, Colors.warning))
             } else {
                 add(StatTile("Max Incline", "0°", R.drawable.icon_trending_vector, Colors.textMuted))
@@ -5119,12 +5121,12 @@ private fun DataTabFlagship(
 
         // ==================== SPEED SECTION ====================
         item {
-            // Use avgSpeed (moving speed) if available, otherwise fall back to averageSpeed
+            // All speed fields are stored in m/s — convert to km/h for display
             val rawAvgSpeed = run.avgSpeed ?: run.averageSpeed
-            val avgSpeedKmh = if (rawAvgSpeed > 50) rawAvgSpeed else rawAvgSpeed * 3.6f
+            val avgSpeedKmh = rawAvgSpeed * 3.6f
             
             val rawMaxSpeed = run.maxSpeed
-            val maxSpeedKmh = if (rawMaxSpeed > 50) rawMaxSpeed else rawMaxSpeed * 3.6f
+            val maxSpeedKmh = rawMaxSpeed * 3.6f
             
             // Calculate fastest and slowest speeds from km splits (pace is in min/km)
             val fastestPaceSeconds = run.kmSplits.minOfOrNull { parsePaceToSeconds(it.pace) } ?: 0
@@ -5193,9 +5195,11 @@ private fun DataTabFlagship(
                     run.minElevation?.let { add("Min Elevation" to "${it.toInt()} m") }
                     run.maxElevation?.let { add("Max Elevation" to "${it.toInt()} m") }
                     // Convert percentage to degrees: 0°=flat, 90°=vertical
-                    run.steepestIncline?.let { 
+                    // Fall back to maxGradient for older runs that don't have steepest fields
+                    val incline = run.steepestIncline ?: run.maxGradient.takeIf { it > 0 }
+                    incline?.let {
                         val degrees = Math.toDegrees(Math.atan(it / 100.0))
-                        add("Steepest Incline" to "${degrees.roundToInt()}°") 
+                        add("Steepest Incline" to "${degrees.roundToInt()}°")
                     }
                     run.steepestDecline?.let { 
                         val degrees = Math.toDegrees(Math.atan(it / 100.0))
