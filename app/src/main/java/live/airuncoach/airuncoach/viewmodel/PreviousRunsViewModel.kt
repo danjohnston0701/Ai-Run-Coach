@@ -168,9 +168,18 @@ class PreviousRunsViewModel @Inject constructor(
     private fun filterRunsByTimeRange(runs: List<RunSession>): List<RunSession> {
         val now = System.currentTimeMillis()
         val cutoff = when (_selectedFilter.value) {
-            "Last 7 Days" -> now - (7 * 24 * 60 * 60 * 1000L)
-            "Last 30 Days" -> now - (30 * 24 * 60 * 60 * 1000L)
-            "Last 3 Months" -> now - (90 * 24 * 60 * 60 * 1000L)
+            "Last 7 Days" -> {
+                // Use start of day 7 days ago to include the full 7 days (Saturday to Saturday)
+                val calendar = java.util.Calendar.getInstance()
+                calendar.add(java.util.Calendar.DAY_OF_YEAR, -7)
+                calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                calendar.set(java.util.Calendar.MINUTE, 0)
+                calendar.set(java.util.Calendar.SECOND, 0)
+                calendar.set(java.util.Calendar.MILLISECOND, 0)
+                calendar.timeInMillis
+            }
+            "Last 30 Days" -> now - (30L * 24 * 60 * 60 * 1000L)
+            "Last 3 Months" -> now - (90L * 24 * 60 * 60 * 1000L)
             else -> 0L // All Time
         }
         
