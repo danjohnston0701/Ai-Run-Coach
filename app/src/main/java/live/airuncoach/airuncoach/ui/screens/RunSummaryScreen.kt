@@ -296,12 +296,12 @@ private fun RunSummaryTopBarFlagship(
     onShare: () -> Unit,
     difficultyLabel: String?
 ) {
-    // Compact header pinned to top — no statusBarsPadding here because the Scaffold
-    // already accounts for it via the `padding` values passed to the content lambda.
+    // Compact header pinned to top — uses statusBarsPadding to fill the status bar area
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(Colors.backgroundRoot)
+            .statusBarsPadding()
             .padding(horizontal = 4.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -5121,12 +5121,13 @@ private fun DataTabFlagship(
 
         // ==================== SPEED SECTION ====================
         item {
-            // All speed fields are stored in m/s — convert to km/h for display
+            // Detect if speed is already in km/h (>30 = clearly not m/s) or needs conversion from m/s
+            // New runs from the app store in m/s, old runs from backend may be in km/h
             val rawAvgSpeed = run.avgSpeed ?: run.averageSpeed
-            val avgSpeedKmh = rawAvgSpeed * 3.6f
+            val avgSpeedKmh = if (rawAvgSpeed > 30) rawAvgSpeed else rawAvgSpeed * 3.6f
             
             val rawMaxSpeed = run.maxSpeed
-            val maxSpeedKmh = rawMaxSpeed * 3.6f
+            val maxSpeedKmh = if (rawMaxSpeed > 30) rawMaxSpeed else rawMaxSpeed * 3.6f
             
             // Calculate fastest and slowest speeds from km splits (pace is in min/km)
             val fastestPaceSeconds = run.kmSplits.minOfOrNull { parsePaceToSeconds(it.pace) } ?: 0
