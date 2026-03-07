@@ -5123,11 +5123,22 @@ private fun DataTabFlagship(
         item {
             // Detect if speed is already in km/h (>30 = clearly not m/s) or needs conversion from m/s
             // New runs from the app store in m/s, old runs from backend may be in km/h
+            // Cap at 50 km/h to filter out garbage data (max human running speed ~45 km/h)
             val rawAvgSpeed = run.avgSpeed ?: run.averageSpeed
-            val avgSpeedKmh = if (rawAvgSpeed > 30) rawAvgSpeed else rawAvgSpeed * 3.6f
+            val avgSpeedKmh = when {
+                rawAvgSpeed <= 0 -> 0f
+                rawAvgSpeed > 50 -> 0f // Invalid data - show nothing
+                rawAvgSpeed > 30 -> rawAvgSpeed // Likely already km/h
+                else -> rawAvgSpeed * 3.6f // Convert from m/s
+            }
             
             val rawMaxSpeed = run.maxSpeed
-            val maxSpeedKmh = if (rawMaxSpeed > 30) rawMaxSpeed else rawMaxSpeed * 3.6f
+            val maxSpeedKmh = when {
+                rawMaxSpeed <= 0 -> 0f
+                rawMaxSpeed > 50 -> 0f // Invalid data
+                rawMaxSpeed > 30 -> rawMaxSpeed
+                else -> rawMaxSpeed * 3.6f
+            }
             
             // Calculate fastest and slowest speeds from km splits (pace is in min/km)
             val fastestPaceSeconds = run.kmSplits.minOfOrNull { parsePaceToSeconds(it.pace) } ?: 0
