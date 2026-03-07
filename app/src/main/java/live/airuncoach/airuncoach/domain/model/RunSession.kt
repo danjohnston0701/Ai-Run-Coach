@@ -77,6 +77,7 @@ data class RunSession(
     val maxElevation: Double? = null, // meters
     val steepestIncline: Float? = null, // percent
     val steepestDecline: Float? = null, // percent
+    val totalSteps: Int? = null, // total steps taken during the run (from step counter)
     val activeCalories: Int? = null, // kcal
     val restingCalories: Int? = null, // kcal
     val estSweatLoss: Float? = null, // liters

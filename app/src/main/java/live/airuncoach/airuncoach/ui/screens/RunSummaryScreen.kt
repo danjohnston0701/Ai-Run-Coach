@@ -5220,16 +5220,21 @@ private fun DataTabFlagship(
             )
         }
 
-        // ==================== CALORIES SECTION ====================
+        // ==================== STEPS SECTION ====================
         item {
             DataSectionCard(
-                title = "Calories",
-                icon = "🔥",
+                title = "Steps",
+                icon = "👟",
                 metrics = buildList {
-                    if (run.calories > 0) add("Total Calories" to "${run.calories} kcal")
-                    run.activeCalories?.let { add("Active Calories" to "$it kcal") }
-                    run.restingCalories?.let { add("Resting Calories" to "$it kcal") }
-                    run.estSweatLoss?.let { add("Est. Sweat Loss" to String.format("%.1f L", it)) }
+                    run.totalSteps?.let { 
+                        add("Total Steps" to "$it steps")
+                        // Estimate calories from steps (roughly 0.04 kcal per step for running)
+                        val estimatedCalories = (it * 0.04).toInt()
+                        add("Est. Calories" to "$estimatedCalories kcal")
+                    }
+                    if (run.totalSteps == null || run.totalSteps == 0) {
+                        add("Total Steps" to "-- steps")
+                    }
                 }
             )
         }

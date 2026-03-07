@@ -123,6 +123,7 @@ class RunTrackingService : Service(), SensorEventListener {
     // Step detector cadence tracking (fallback)
     private var stepDetectorSteps: Int = 0
     private var stepDetectorWindowStart: Long = 0
+    private var totalStepsDuringRun: Int = 0 // Accumulated steps in this run (from step counter)
     
     // Cadence tracking for average/max (mirrors HR tracking)
     private var cadenceSum: Long = 0
@@ -404,6 +405,7 @@ class RunTrackingService : Service(), SensorEventListener {
         initialStepCount = -1
         lastStepTimestamp = 0
         stepDetectorSteps = 0
+        totalStepsDuringRun = 0
         stepDetectorWindowStart = 0
         usingStepDetector = false
         baselinePace = 0f
@@ -1541,7 +1543,8 @@ class RunTrackingService : Service(), SensorEventListener {
             wasTargetAchieved = calculateWasTargetAchieved(),
             maxCadence = maxCadenceValue.takeIf { it > 0 },
             steepestIncline = if (hasMovedEnough) calculateSteepestIncline() else null,
-            steepestDecline = if (hasMovedEnough) calculateSteepestDecline() else null
+            steepestDecline = if (hasMovedEnough) calculateSteepestDecline() else null,
+            totalSteps = totalStepsDuringRun.takeIf { it > 0 }
         )
     }
     
@@ -2838,6 +2841,8 @@ class RunTrackingService : Service(), SensorEventListener {
                 val steps = event.values[0].toInt()
                 if (initialStepCount == -1) initialStepCount = steps
                 val sD = steps-initialStepCount; val tD = System.currentTimeMillis()-lastStepTimestamp
+                // Track total steps taken during this run
+                if (sD > 0) totalStepsDuringRun = sD
                 if (tD > 2000) {
                     currentCadence = (sD*60000/tD).toInt()
                     initialStepCount = steps
