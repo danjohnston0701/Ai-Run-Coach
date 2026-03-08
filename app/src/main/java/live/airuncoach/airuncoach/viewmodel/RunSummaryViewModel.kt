@@ -342,7 +342,7 @@ class RunSummaryViewModel @Inject constructor(
             elevationGain = session.totalElevationGain,
             elevationLoss = session.totalElevationLoss,
             calories = session.calories,
-            terrainType = session.terrainType.name,
+            terrainType = try { session.terrainType.name } catch (_: Exception) { "UNKNOWN" },
             maxGradient = session.maxGradient,
             steepestIncline = session.steepestIncline,
             steepestDecline = session.steepestDecline,
