@@ -2603,8 +2603,25 @@ class RunTrackingService : Service(), SensorEventListener {
 
     // --- Fire functions ---
 
+    /**
+     * Format distance for AI: 4.0 km → "4 km", 3.48 km → "3.4 km"
+     */
+    private fun formatDistanceForAI(km: Double): String {
+        return if (km == km.toInt().toDouble()) {
+            "${km.toInt()} km"
+        } else {
+            "${String.format("%.1f", km)} km"
+        }
+    }
+
     private fun buildBaseEliteRequest(type: String, distKm: Double, duration: Long, avgSpeed: Float): EliteCoachingRequest {
         val elapsedSec = duration / 1000
+
+        // Calculate remaining distance for AI
+        val remainingKm = targetDistance?.let { (it - totalDistance) / 1000.0 }?.takeIf { it > 0 }
+        val remainingFormatted = remainingKm?.let { formatDistanceForAI(it) }
+        val distanceCompletedFormatted = formatDistanceForAI(distKm)
+
         return EliteCoachingRequest(
             coachingType = type,
             distance = distKm,
@@ -2624,7 +2641,9 @@ class RunTrackingService : Service(), SensorEventListener {
             totalElevationLoss = totalElevationLoss,
             targetTime = targetTime?.let { it / 1000 },
             targetPace = null, // TODO: pass if user has set one
-            kmSplits = kmSplits.map { KmSplitBrief(it.km, it.pace) }
+            kmSplits = kmSplits.map { KmSplitBrief(it.km, it.pace) },
+            remainingDistanceFormatted = remainingFormatted,
+            distanceCompletedFormatted = distanceCompletedFormatted
         )
     }
 

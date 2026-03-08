@@ -41,6 +41,8 @@ data class EliteCoachingRequest(
     @SerializedName("targetTimeCategory") val targetTimeCategory: String? = null,
     @SerializedName("etaOverTargetPercent") val etaOverTargetPercent: Double? = null,
     @SerializedName("remainingMeters") val remainingMeters: Int? = null,
+    @SerializedName("remainingDistanceFormatted") val remainingDistanceFormatted: String? = null,  // e.g., "4 km" or "3.4 km"
+    @SerializedName("distanceCompletedFormatted") val distanceCompletedFormatted: String? = null,  // e.g., "3.4 km"
 
     // Technique coaching — specific category and contextual hint for the AI
     @SerializedName("techniqueCategory") val techniqueCategory: String? = null,
