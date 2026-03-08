@@ -2624,18 +2624,77 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun fireStartCoaching() {
         if (!coachingFeaturePrefs.motivationalCoachingEnabled) return
 
-        // Short start prompts — pick one randomly
+        // 50 start prompts — variety to keep it fresh
         val prompts = listOf(
+            // Action & Energy
             "Let's go! You've got this.",
-            "Great start — find your rhythm.",
-            "Smooth and steady — let's run.",
-            "One step at a time — let's do this.",
-            "Today is your day — let's run.",
-            "Focus on form — you'll nail this.",
-            "Breathe deep — run strong.",
-            "You've trained for this — enjoy it.",
-            "Stay present — one step at a time.",
-            "Run your own race — you've got this."
+            "Time to fly — let's run!",
+            "Here we go — let's do this!",
+            "Run hard, run happy!",
+            "Let's crush this run!",
+            
+            // Confidence
+            "You've trained for this — own it.",
+            "You're ready — let's run.",
+            "Trust your training — let's go.",
+            "This is your moment — run it.",
+            "You've got everything you need.",
+            
+            // Rhythm & Form
+            "Find your rhythm — stay smooth.",
+            "Relax and run easy — you've got this.",
+            "Breathe deep, run strong.",
+            "Focus on form — the speed will come.",
+            "One step at a time — that's all.",
+            
+            // Mindset
+            "Stay present — run now.",
+            "Clear your mind — just run.",
+            "Think less, run more.",
+            "This is your time — enjoy it.",
+            "Let go and run free.",
+            
+            // Encouragement
+            "Great start — keep it going.",
+            "You're moving — stay with it.",
+            "Every step counts — let's go.",
+            "Progress, not perfection — let's run.",
+            "You've started strong — finish stronger.",
+            
+            // Fun & Joy
+            "Smile — running is awesome!",
+            "Running is the best therapy — enjoy it.",
+            "This is your happy place — run it.",
+            "Feel the joy of running — let's go!",
+            "Running beats sitting — let's do this!",
+            
+            // Challenge
+            "Push through — you're stronger than you think.",
+            "Embrace the effort — it makes you.",
+            "Challenge is where growth happens.",
+            "This is what you trained for.",
+            "Leave it all out there today.",
+            
+            // Simplicity
+            "Just run — that's all.",
+            "Forward is the only direction.",
+            "Run your own pace, your own race.",
+            "Simple: put one foot in front of the other.",
+            "Running doesn't need to be complicated.",
+            
+            // Nature & Body
+            "Feel your feet hitting the ground.",
+            "Match your breath to your steps.",
+            "Run like the wind — feel alive!",
+            "Your body knows how to do this.",
+            "Listen to your body — it knows the way.",
+            
+            // Memory & Pride
+            "Remember why you started — this is it.",
+            "Every run builds who you are.",
+            "You did the work — now enjoy it.",
+            "Today's run becomes tomorrow's strength.",
+            "This run is yours — make it count."
         )
         val startMessage = prompts.random()
         val startTime = System.currentTimeMillis()
