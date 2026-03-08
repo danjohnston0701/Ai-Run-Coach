@@ -2735,7 +2735,7 @@ class RunTrackingService : Service(), SensorEventListener {
             coachTone = currentUser?.coachTone,
             coachGender = currentUser?.coachGender,
             coachAccent = currentUser?.coachAccent,
-            nicknameStyle = currentUser?.nicknameStyle ?: "occasional",
+            nicknameStyle = "occasional",  // Default: use nicknames sparingly in coaching
             hasRoute = hasRoute,
             heartRate = if (currentHeartRate > 0) currentHeartRate else null,
             cadence = if (currentCadence > 0) currentCadence else null,
