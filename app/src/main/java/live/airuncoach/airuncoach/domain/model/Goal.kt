@@ -28,8 +28,40 @@ data class Goal(
     val isActive: Boolean = true,
     val isCompleted: Boolean = false,
     
+    // Related run sessions (multiple runs can be linked to a goal)
+    val relatedRunSessionIds: List<String> = emptyList(),
+    
+    // Badge awarded when goal is completed
+    val badge: String? = null,
+    
     // Metadata
     val createdAt: String? = null,
     val updatedAt: String? = null,
     val completedAt: String? = null
-)
+) {
+    /**
+     * Get the distance target in meters for comparison with run distances
+     */
+    fun getDistanceTargetInMeters(): Double? {
+        return when (distanceTarget) {
+            "5K" -> 5000.0
+            "10K" -> 10000.0
+            "Half Marathon" -> 21097.5
+            "Marathon" -> 42195.0
+            "Ultra Marathon" -> 50000.0 // Conservative default for ultra
+            else -> distanceTarget?.toDoubleOrNull()
+        }
+    }
+    
+    /**
+     * Check if a run session distance meets the goal criteria
+     * For event goals: distance must be within 10% of target or exceed it
+     */
+    fun isGoalMetByRun(runDistanceMeters: Double): Boolean {
+        val targetMeters = getDistanceTargetInMeters() ?: return false
+        
+        // Check if run distance is at least 90% of target (within 10%)
+        val minRequiredDistance = targetMeters * 0.9
+        return runDistanceMeters >= minRequiredDistance
+    }
+}

@@ -16,6 +16,7 @@ import live.airuncoach.airuncoach.domain.model.Goal
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.network.model.CreateGoalRequest
+import live.airuncoach.airuncoach.network.model.UpdateGoalRequest
 
 sealed class GoalsUiState {
     object Loading : GoalsUiState()
@@ -173,6 +174,184 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
             } catch (e: Exception) {
                 android.util.Log.e("GoalsViewModel", "Failed to delete goal: ${e.message}", e)
             }
+        }
+    }
+
+    fun editGoal(
+        goalId: String,
+        title: String,
+        description: String?,
+        notes: String?,
+        targetDate: String?,
+        eventName: String?,
+        eventLocation: String?,
+        distanceTarget: String?,
+        timeTargetSeconds: Int?,
+        healthTarget: String?,
+        weeklyRunTarget: Int?
+    ) {
+        viewModelScope.launch {
+            try {
+                _createGoalState.value = CreateGoalState.Loading
+                
+                val request = UpdateGoalRequest(
+                    title = title,
+                    description = description,
+                    notes = notes,
+                    targetDate = targetDate,
+                    eventName = eventName,
+                    eventLocation = eventLocation,
+                    distanceTarget = distanceTarget,
+                    timeTargetSeconds = timeTargetSeconds,
+                    healthTarget = healthTarget,
+                    weeklyRunTarget = weeklyRunTarget
+                )
+
+                apiService.updateGoal(goalId, request)
+                _createGoalState.value = CreateGoalState.Success
+                
+                // Reload goals to update the list
+                loadGoals()
+            } catch (e: Exception) {
+                _createGoalState.value = CreateGoalState.Error(e.message ?: "Failed to update goal")
+                android.util.Log.e("GoalsViewModel", "Failed to update goal: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * Mark a goal as complete and link it to a run session
+     * @param goalId The goal to complete
+     * @param runSessionId The run session to link to the goal
+     * @param keepActive If true, keeps the goal active but links the run session
+     */
+    fun completeGoal(goalId: String, runSessionId: String, keepActive: Boolean = false) {
+        viewModelScope.launch {
+            try {
+                val currentGoal = _allGoals.value.find { it.id == goalId }
+                if (currentGoal == null) {
+                    android.util.Log.e("GoalsViewModel", "Goal not found: $goalId")
+                    return@launch
+                }
+
+                val updatedRelatedSessions = if (keepActive) {
+                    // Add the run session to the list but keep goal active
+                    currentGoal.relatedRunSessionIds + runSessionId
+                } else {
+                    // Mark as complete and add the run session
+                    currentGoal.relatedRunSessionIds + runSessionId
+                }
+
+                val completedAt = if (!keepActive) {
+                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault())
+                    sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                    sdf.format(java.util.Date())
+                } else null
+
+                val request = UpdateGoalRequest(
+                    title = currentGoal.title,
+                    description = currentGoal.description,
+                    notes = currentGoal.notes,
+                    targetDate = currentGoal.targetDate,
+                    eventName = currentGoal.eventName,
+                    eventLocation = currentGoal.eventLocation,
+                    distanceTarget = currentGoal.distanceTarget,
+                    timeTargetSeconds = currentGoal.timeTargetSeconds,
+                    healthTarget = currentGoal.healthTarget,
+                    weeklyRunTarget = currentGoal.weeklyRunTarget,
+                    isActive = keepActive,
+                    isCompleted = !keepActive,
+                    currentProgress = if (!keepActive) 100f else currentGoal.currentProgress,
+                    completedAt = completedAt,
+                    relatedRunSessionIds = updatedRelatedSessions
+                )
+
+                apiService.updateGoal(goalId, request)
+                loadGoals()
+                android.util.Log.d("GoalsViewModel", "Goal $goalId completed, linked to run $runSessionId")
+            } catch (e: Exception) {
+                android.util.Log.e("GoalsViewModel", "Failed to complete goal: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * Link a run session to a goal without completing it
+     */
+    fun linkRunSessionToGoal(goalId: String, runSessionId: String) {
+        viewModelScope.launch {
+            try {
+                val currentGoal = _allGoals.value.find { it.id == goalId }
+                if (currentGoal == null) {
+                    android.util.Log.e("GoalsViewModel", "Goal not found: $goalId")
+                    return@launch
+                }
+
+                val updatedRelatedSessions = currentGoal.relatedRunSessionIds + runSessionId
+
+                val request = UpdateGoalRequest(
+                    title = currentGoal.title,
+                    description = currentGoal.description,
+                    notes = currentGoal.notes,
+                    targetDate = currentGoal.targetDate,
+                    eventName = currentGoal.eventName,
+                    eventLocation = currentGoal.eventLocation,
+                    distanceTarget = currentGoal.distanceTarget,
+                    timeTargetSeconds = currentGoal.timeTargetSeconds,
+                    healthTarget = currentGoal.healthTarget,
+                    weeklyRunTarget = currentGoal.weeklyRunTarget,
+                    relatedRunSessionIds = updatedRelatedSessions
+                )
+
+                apiService.updateGoal(goalId, request)
+                loadGoals()
+                android.util.Log.d("GoalsViewModel", "Linked run $runSessionId to goal $goalId")
+            } catch (e: Exception) {
+                android.util.Log.e("GoalsViewModel", "Failed to link run to goal: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * Check if any active goals are met by the given run session
+     * Returns a list of goals that were achieved by this run
+     */
+    fun checkGoalsMetByRun(runDistanceMeters: Double, runDate: Long): List<Goal> {
+        val activeGoals = _allGoals.value.filter { it.isActive && !it.isCompleted }
+        
+        return activeGoals.filter { goal ->
+            // Check if goal has a distance target
+            val distanceTargetMeters = goal.getDistanceTargetInMeters()
+            if (distanceTargetMeters == null) {
+                // For non-distance goals, check based on target date
+                goal.targetDate?.let { targetDateStr ->
+                    try {
+                        val sdf = java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault())
+                        val targetDate = sdf.parse(targetDateStr)?.time ?: return@filter false
+                        val runDateObj = java.util.Date(runDate)
+                        
+                        // Check if run was on or before the target date
+                        return@filter runDateObj.time <= targetDate
+                    } catch (e: Exception) {
+                        return@filter false
+                    }
+                }
+                return@filter false
+            }
+            
+            // Check if run distance meets the goal criteria
+            goal.isGoalMetByRun(runDistanceMeters)
+        }
+    }
+
+    /**
+     * Get formatted distance string for display
+     */
+    fun getFormattedDistance(meters: Double): String {
+        return if (meters >= 1000) {
+            String.format("%.2f km", meters / 1000)
+        } else {
+            String.format("%.0f m", meters)
         }
     }
 

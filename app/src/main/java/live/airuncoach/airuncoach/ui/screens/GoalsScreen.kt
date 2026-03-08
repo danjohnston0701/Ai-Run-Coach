@@ -38,6 +38,9 @@ fun GoalsScreen(
     val selectedTab by viewModel.selectedTab.collectAsState()
     var goalToDelete by remember { mutableStateOf<Goal?>(null) }
     var showGoalDetails by remember { mutableStateOf<Goal?>(null) }
+    var goalToEdit by remember { mutableStateOf<Goal?>(null) }
+    var showCelebrationDialog by remember { mutableStateOf<Goal?>(null) }
+    var celebrationRunDistance by remember { mutableStateOf("") }
 
     // Refresh goals every time this screen becomes visible (e.g. after creating/deleting a goal)
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
@@ -264,10 +267,42 @@ fun GoalsScreen(
         GoalDetailsBottomSheet(
             goal = goal,
             onDismiss = { showGoalDetails = null },
+            onEdit = {
+                goalToEdit = goal
+                showGoalDetails = null
+            },
             onDelete = {
                 goalToDelete = goal
                 showGoalDetails = null
             }
+        )
+    }
+    
+    // Edit Goal Screen
+    goalToEdit?.let { goal ->
+        EditGoalScreen(
+            goal = goal,
+            onDismiss = { goalToEdit = null },
+            onSaveComplete = { goalToEdit = null }
+        )
+    }
+    
+    // Goal Achieved Celebration Dialog
+    showCelebrationDialog?.let { goal ->
+        GoalAchievedCelebrationDialog(
+            goalTitle = goal.title,
+            goalType = goal.type,
+            runDistance = celebrationRunDistance,
+            onKeepActive = {
+                // Keep goal active and link run session
+                // The run session ID should be stored or passed appropriately
+                showCelebrationDialog = null
+            },
+            onMarkComplete = {
+                // Mark goal as complete and link run session
+                showCelebrationDialog = null
+            },
+            onDismiss = { showCelebrationDialog = null }
         )
     }
 }
@@ -500,6 +535,7 @@ fun Chip(text: String, icon: Int) {
 fun GoalDetailsBottomSheet(
     goal: Goal,
     onDismiss: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     ModalBottomSheet(
@@ -553,6 +589,21 @@ fun GoalDetailsBottomSheet(
                         color = Colors.textMuted
                     )
                 }
+                
+                // Status badge
+                if (goal.isCompleted) {
+                    Box(
+                        modifier = Modifier
+                            .background(Colors.success.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "Completed",
+                            style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.success
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(Spacing.lg))
@@ -569,7 +620,7 @@ fun GoalDetailsBottomSheet(
             }
             
             goal.distanceTarget?.let {
-                DetailRow(label = "Distance", value = it)
+                DetailRow(label = "Distance Target", value = it)
             }
             
             goal.timeTargetSeconds?.let {
@@ -582,10 +633,54 @@ fun GoalDetailsBottomSheet(
             goal.notes?.let {
                 DetailRow(label = "Notes", value = it)
             }
+            
+            // Show related run sessions count
+            if (goal.relatedRunSessionIds.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(Spacing.md))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Colors.backgroundTertiary, RoundedCornerShape(8.dp))
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.icon_location_vector),
+                        contentDescription = null,
+                        tint = Colors.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = "${goal.relatedRunSessionIds.size} run${if (goal.relatedRunSessionIds.size > 1) "s" else ""} linked to this goal",
+                        style = AppTextStyles.body,
+                        color = Colors.textPrimary
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(Spacing.lg))
 
             // Actions
+            // Edit Button
+            Button(
+                onClick = onEdit,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+                shape = RoundedCornerShape(BorderRadius.md)
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.icon_info_vector),
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Edit Goal")
+            }
+            
+            Spacer(modifier = Modifier.height(Spacing.md))
+            
+            // Delete Button
             Button(
                 onClick = onDelete,
                 modifier = Modifier.fillMaxWidth(),

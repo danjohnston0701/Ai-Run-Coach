@@ -97,6 +97,8 @@ import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.AiAnalysisState
+import live.airuncoach.airuncoach.viewmodel.GoalsViewModel
+import live.airuncoach.airuncoach.viewmodel.GoalsViewModelFactory
 import live.airuncoach.airuncoach.viewmodel.RunSummaryViewModel
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -151,9 +153,36 @@ fun RunSummaryScreenFlagship(
     var selectedTab by remember { mutableStateOf(0) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var runNameDraft by remember { mutableStateOf("") }
+    
+    // Goal celebration dialog state
+    var showGoalCelebration by remember { mutableStateOf(false) }
+    var achievedGoals by remember { mutableStateOf<List<live.airuncoach.airuncoach.domain.model.Goal>>(emptyList()) }
+    var selectedGoalForCompletion by remember { mutableStateOf<live.airuncoach.airuncoach.domain.model.Goal?>(null) }
+    
+    // Create GoalsViewModel to check for achieved goals
+    val goalsViewModel = remember { GoalsViewModel(LocalContext.current) }
 
     LaunchedEffect(runSession?.name) {
         runNameDraft = runSession?.name.orEmpty()
+    }
+    
+    // Check for achieved goals when run session is loaded
+    LaunchedEffect(runSession) {
+        runSession?.let { session ->
+            // Load goals first if not already loaded
+            goalsViewModel.loadGoals()
+            
+            // Wait a bit for goals to load
+            kotlinx.coroutines.delay(500)
+            
+            // Check if any goals were achieved by this run
+            val goals = goalsViewModel.checkGoalsMetByRun(session.distance, session.startTime)
+            if (goals.isNotEmpty()) {
+                achievedGoals = goals
+                selectedGoalForCompletion = goals.first()
+                showGoalCelebration = true
+            }
+        }
     }
 
     Scaffold(
@@ -265,6 +294,37 @@ fun RunSummaryScreenFlagship(
                             onTabSelected = { selectedTab = it }
                         )
                     }
+                }
+                
+                // Goal Achieved Celebration Dialog
+                if (showGoalCelebration && selectedGoalForCompletion != null && runSession != null) {
+                    val runDistance = runSession!!.getDistanceInKm()
+                    val formattedDistance = if (runDistance >= 1) {
+                        String.format(Locale.US, "%.2f km", runDistance)
+                    } else {
+                        String.format(Locale.US, "%.0f m", runSession!!.distance)
+                    }
+                    
+                    GoalAchievedCelebrationDialog(
+                        goalTitle = selectedGoalForCompletion!!.title,
+                        goalType = selectedGoalForCompletion!!.type,
+                        runDistance = formattedDistance,
+                        onKeepActive = {
+                            // Keep goal active and link this run session to it
+                            selectedGoalForCompletion?.id?.let { goalId ->
+                                goalsViewModel.linkRunSessionToGoal(goalId, runSession!!.id)
+                            }
+                            showGoalCelebration = false
+                        },
+                        onMarkComplete = {
+                            // Mark goal as complete and link this run session to it
+                            selectedGoalForCompletion?.id?.let { goalId ->
+                                goalsViewModel.completeGoal(goalId, runSession!!.id, keepActive = false)
+                            }
+                            showGoalCelebration = false
+                        },
+                        onDismiss = { showGoalCelebration = false }
+                    )
                 }
 
                 if (showRenameDialog) {
