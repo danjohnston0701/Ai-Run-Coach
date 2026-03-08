@@ -99,7 +99,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private val KM_SPLIT_EXCLUSION_ZONE_M = 200.0         // Suppress pace coaching within 200m of a km boundary
     
     // Run data
-    private var targetDistance: Double? = null // For mapped runs (metres or km depending on caller)
+    private var targetDistance: Double? = null // ALWAYS in metres (normalized on receipt)
     private var targetTime: Long? = null     // For time-based goals (milliseconds)
     private val FINAL_STRETCH_METERS = 500.0 // Last 500m: only motivation coaching allowed
     private var hasRoute: Boolean = false
@@ -330,7 +330,14 @@ class RunTrackingService : Service(), SensorEventListener {
     private var navSimulationPolyline: String? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        targetDistance = intent?.getDoubleExtra(EXTRA_TARGET_DISTANCE, 0.0)?.takeIf { it > 0 }
+        // targetDistance comes from RunSetupConfig.targetDistance which is in KILOMETERS.
+        // Normalize to METRES here so all internal calculations use metres consistently.
+        val rawTargetDist = intent?.getDoubleExtra(EXTRA_TARGET_DISTANCE, 0.0)?.takeIf { it > 0 }
+        targetDistance = rawTargetDist?.let {
+            // If value <= 100, it's in km (e.g., 5.0, 10.0, 42.195). Convert to metres.
+            // If value > 100, it's already in metres (e.g., 5000, 10000). Keep as-is.
+            if (it <= 100.0) it * 1000.0 else it
+        }
         targetTime = intent?.getLongExtra(EXTRA_TARGET_TIME, 0)?.takeIf { it > 0 }
         hasRoute = intent?.getBooleanExtra(EXTRA_HAS_ROUTE, false) == true
         navSimulationPolyline = intent?.getStringExtra("EXTRA_ROUTE_POLYLINE")
@@ -588,7 +595,7 @@ class RunTrackingService : Service(), SensorEventListener {
             TurnInstruction("Arrive at finish near Belfast City Hall", 54.5964, -5.9301, 2.95)
         )
         NavigationRouteHolder.set(null, testInstructions)
-        targetDistance = 3.0
+        targetDistance = 3000.0 // 3km in metres
         return RouteFollowingSimulator.createBelfastTestRoute()
     }
 
@@ -1148,12 +1155,9 @@ class RunTrackingService : Service(), SensorEventListener {
      * HR coaching, cadence coaching, pace analysis, or split breakdowns.
      */
     private fun isInFinalStretch(): Boolean {
-        val td = targetDistance ?: return false
+        val td = targetDistance ?: return false // Always in metres (normalized on receipt)
         if (td <= 0) return false
-        // targetDistance could be in metres or km — handle both:
-        // If td > 100, assume metres. If td < 100, assume km.
-        val targetMeters = if (td > 100) td else td * 1000.0
-        val remaining = targetMeters - totalDistance
+        val remaining = td - totalDistance
         return remaining in 0.0..FINAL_STRETCH_METERS
     }
     
@@ -1470,7 +1474,7 @@ class RunTrackingService : Service(), SensorEventListener {
             (displayDistanceKm / durationHours).toFloat()
         } else 0f
         
-        val phase = determinePhase(displayDistance / 1000.0, targetDistance)
+        val phase = determinePhase(displayDistance / 1000.0, targetDistance?.let { it / 1000.0 })
         
         // Reset per-tick flag - only one coaching trigger fires per location update
         hasCoachingFiredThisTick = false
@@ -1538,7 +1542,7 @@ class RunTrackingService : Service(), SensorEventListener {
             isActive = true,
             aiCoachingNotes = coachingHistory.toList(),
             strugglePoints = strugglePointsList.toList(),
-            targetDistance = targetDistance,
+            targetDistance = targetDistance?.let { it / 1000.0 }, // Convert metres → km for RunSession storage
             targetTime = targetTime,
             wasTargetAchieved = calculateWasTargetAchieved(),
             maxCadence = maxCadenceValue.takeIf { it > 0 },
@@ -1636,7 +1640,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun calculateWasTargetAchieved(): Boolean? {
         if (targetDistance == null && targetTime == null) return null
         
-        val achievedDistance = (targetDistance != null && totalDistance / 1000.0 >= targetDistance!! - 0.1) // Allow 10% margin
+        val achievedDistance = (targetDistance != null && totalDistance >= targetDistance!! - 100.0) // Allow 100m margin
         val achievedTime = (targetTime != null && (getActiveRunDuration()) <= targetTime!!)
         
         return if (targetDistance != null && targetTime != null) {
@@ -1789,7 +1793,7 @@ class RunTrackingService : Service(), SensorEventListener {
             terrainType = runSession.terrainType.name.lowercase(),
             userComments = null,
             // Run goals - target tracking
-            targetDistance = targetDistance,
+            targetDistance = targetDistance?.let { it / 1000.0 }, // Convert metres → km for upload
             targetTime = targetTime,
             wasTargetAchieved = calculateWasTargetAchieved(),
             // Struggle points detected during the run
@@ -2375,8 +2379,8 @@ class RunTrackingService : Service(), SensorEventListener {
 
         val distKm = displayDistance / 1000.0
         val currentKm = distKm.toInt()
-        val td = targetDistance
-        val remainingMeters = if (td != null && td > 0) (td * 1000 - displayDistance) else null
+        val td = targetDistance // Already in metres
+        val remainingMeters = if (td != null && td > 0) (td - displayDistance) else null
 
         // FINAL 100m — highest priority, bypasses cooldowns (fires once)
         if (!hasFinal100mFired && remainingMeters != null && remainingMeters in 0.0..120.0) {
@@ -2729,7 +2733,7 @@ class RunTrackingService : Service(), SensorEventListener {
             slopeDistanceMeters >= DOWNHILL_MIN_DISTANCE_M &&
             slopeElevationLoss >= MIN_ELEVATION_LOSS_M
         ) {
-            val remainingDistanceKm = targetDistance?.let { it - (totalDistance / 1000.0) }
+            val remainingDistanceKm = targetDistance?.let { (it - totalDistance) / 1000.0 }
             if (!downhillFinishTriggered &&
                 hasRoute &&
                 remainingDistanceKm != null &&
