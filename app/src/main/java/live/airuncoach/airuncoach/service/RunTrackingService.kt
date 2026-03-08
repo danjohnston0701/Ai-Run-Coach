@@ -136,6 +136,11 @@ class RunTrackingService : Service(), SensorEventListener {
     private var lastStruggleTriggerTime: Long = 0
     private var isStruggling = false
     private val strugglePointsList = mutableListOf<StrugglePoint>()
+    // Rolling window for pace smoothing — prevents GPS jitter from creating false struggle/coaching readings
+    // Stores recent (distance, time) pairs; smoothed pace = sum(time) / sum(distance) * 1000
+    private val recentPaceDistances = mutableListOf<Double>()  // metres
+    private val recentPaceTimes = mutableListOf<Double>()       // seconds
+    private val PACE_WINDOW_SIZE = 8  // ~8 GPS points ≈ 8-16 seconds of data
 
     // Elevation coaching
     private var lastElevationCoachingTime: Long = 0
@@ -439,6 +444,8 @@ class RunTrackingService : Service(), SensorEventListener {
         lastStruggleTriggerTime = 0
         isStruggling = false
         strugglePointsList.clear()
+        recentPaceDistances.clear()
+        recentPaceTimes.clear()
         lastElevationCoachingTime = 0
         lastHillTopAckTime = 0
         slopeDirection = 0
@@ -1317,15 +1324,34 @@ class RunTrackingService : Service(), SensorEventListener {
             val isSpeedReasonable = impliedSpeedKmh < 40.0 || isFirstLocations
 
             if (location.accuracy <= maxAcceptableAccuracy && isDistanceReasonable && isSpeedReasonable) {
-                // Calculate pace from our own distance/time (more reliable than GPS speed which can be noisy/wrong)
+                // Calculate instantaneous pace from consecutive GPS points (for UI display)
                 val currentPaceSeconds = if (timeSinceLastPoint > 0 && distanceIncrement > 0) {
                     (1000.0 * timeSinceLastPoint / distanceIncrement).toFloat() // seconds per km
                 } else 0f
                 
-                // Update current real-time pace (convert from seconds/km to pace string)
-                currentPace = if (currentPaceSeconds > 0 && currentPaceSeconds < 3600) { // sanity check: < 60 min/km
-                    val minutes = (currentPaceSeconds / 60).toInt()
-                    val seconds = (currentPaceSeconds % 60).toInt()
+                // Feed rolling window for smoothed pace (used by struggle detection & coaching)
+                if (timeSinceLastPoint > 0 && distanceIncrement > 0) {
+                    recentPaceDistances.add(distanceIncrement)
+                    recentPaceTimes.add(timeSinceLastPoint)
+                    while (recentPaceDistances.size > PACE_WINDOW_SIZE) {
+                        recentPaceDistances.removeAt(0)
+                        recentPaceTimes.removeAt(0)
+                    }
+                }
+                // Smoothed pace: average over the last ~8 GPS points (~8-16 seconds)
+                // This prevents a single GPS jitter from triggering false struggles or wrong coaching
+                val smoothedPaceSeconds = if (recentPaceDistances.size >= 3) {
+                    val totalDist = recentPaceDistances.sum()
+                    val totalTime = recentPaceTimes.sum()
+                    if (totalDist > 0) (1000.0 * totalTime / totalDist).toFloat() else currentPaceSeconds
+                } else {
+                    currentPaceSeconds // Not enough data yet, use raw value
+                }
+                
+                // Update current real-time pace display (use smoothed for better UX)
+                currentPace = if (smoothedPaceSeconds > 0 && smoothedPaceSeconds < 3600) {
+                    val minutes = (smoothedPaceSeconds / 60).toInt()
+                    val seconds = (smoothedPaceSeconds % 60).toInt()
                     String.format("%d:%02d", minutes, seconds)
                 } else {
                     "0:00"
@@ -1363,7 +1389,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 routePoints.add(newPoint)
                 if (location.speed > maxSpeed) maxSpeed = location.speed
                 
-                updatePaceAndStruggle(currentPaceSeconds)
+                updatePaceAndStruggle(smoothedPaceSeconds)
                 checkForKmSplit()
                 // Pace coaching — smart interval checks against target pace
                 // Suppressed in final 500m (only motivation coaching allowed)
@@ -1395,7 +1421,12 @@ class RunTrackingService : Service(), SensorEventListener {
         }
     }
     
-    private fun updatePaceAndStruggle(currentPaceSeconds: Float) {
+    /**
+     * Detect struggles using SMOOTHED pace (not single-point GPS).
+     * The input `smoothedPaceSeconds` is averaged over ~8 GPS points (8-16 seconds),
+     * so a single GPS jitter can't trigger a false 8:00/km reading.
+     */
+    private fun updatePaceAndStruggle(smoothedPaceSeconds: Float) {
         // Update baseline (session average pace) every 500m after the first 1km
         if (totalDistance >= 1000 && (totalDistance - lastBaselineUpdateDistance) >= 500) {
             val elapsedSeconds = (getActiveRunDuration()) / 1000.0
@@ -1406,14 +1437,15 @@ class RunTrackingService : Service(), SensorEventListener {
         }
         
         if (baselinePace > 0f) {
-            val paceDropPercent = (currentPaceSeconds - baselinePace) / baselinePace * 100
+            val paceDropPercent = (smoothedPaceSeconds - baselinePace) / baselinePace * 100
             val now = System.currentTimeMillis()
-            if (paceDropPercent > 20 && (now - lastStruggleTriggerTime) > STRUGGLE_COOLDOWN_MS) {
+            // 25% drop threshold on smoothed data = genuine struggle, not GPS noise
+            if (paceDropPercent > 25 && (now - lastStruggleTriggerTime) > STRUGGLE_COOLDOWN_MS) {
                 isStruggling = true
                 lastStruggleTriggerTime = now
                 // Suppress struggle coaching in the final 500m — only motivation allowed
                 if (!isInFinalStretch()) {
-                    triggerStruggleCoaching(currentPaceSeconds, paceDropPercent)
+                    triggerStruggleCoaching(smoothedPaceSeconds, paceDropPercent)
                 }
             } else {
                 isStruggling = false
