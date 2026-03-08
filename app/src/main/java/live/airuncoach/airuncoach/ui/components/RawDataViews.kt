@@ -128,7 +128,7 @@ fun RawDataTab(runSession: RunSession) {
                 RawDataRow("Net Elevation Change (m)", String.format("%.2f", runSession.totalElevationGain - runSession.totalElevationLoss))
                 RawDataRow("Average Gradient (%)", String.format("%.2f", runSession.averageGradient))
                 RawDataRow("Max Gradient (%)", String.format("%.2f", runSession.maxGradient))
-                RawDataRow("Terrain Type", try { runSession.terrainType.name } catch (_: Exception) { "Unknown" })
+                RawDataRow("Terrain Type", runSession.terrainType?.name ?: "Unknown")
                 RawDataRow("Highest Point (m)", getMaxAltitude(runSession.routePoints))
                 RawDataRow("Lowest Point (m)", getMinAltitude(runSession.routePoints))
             }

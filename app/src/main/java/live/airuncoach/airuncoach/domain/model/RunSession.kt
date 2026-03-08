@@ -1,5 +1,6 @@
 package live.airuncoach.airuncoach.domain.model
 
+import com.google.gson.annotations.SerializedName
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -32,7 +33,7 @@ data class RunSession(
     val totalElevationLoss: Double, // meters descended
     val averageGradient: Float, // percentage
     val maxGradient: Float, // percentage
-    val terrainType: TerrainType, // flat, hilly, mountainous
+    val terrainType: TerrainType? = null, // flat, hilly, mountainous — nullable for old runs
     
     // Route identification for comparison
     val routeHash: String?, // Hash of route coordinates for similarity matching
@@ -165,8 +166,12 @@ data class RunSession(
 }
 
 enum class TerrainType {
+    @SerializedName("FLAT", alternate = ["flat", "Flat"])
     FLAT,           // < 2% average gradient
+    @SerializedName("ROLLING", alternate = ["rolling", "Rolling"])
     ROLLING,        // 2-5% average gradient
+    @SerializedName("HILLY", alternate = ["hilly", "Hilly"])
     HILLY,          // 5-10% average gradient
+    @SerializedName("MOUNTAINOUS", alternate = ["mountainous", "Mountainous"])
     MOUNTAINOUS     // > 10% average gradient
 }

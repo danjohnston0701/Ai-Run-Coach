@@ -1883,7 +1883,7 @@ class RunTrackingService : Service(), SensorEventListener {
             gap = null, // Backend will calculate
             isPublic = true,
             kmSplits = runSession.kmSplits,
-            terrainType = runSession.terrainType.name.lowercase(),
+            terrainType = (runSession.terrainType ?: TerrainType.FLAT).name.lowercase(),
             userComments = null,
             // Run goals - target tracking
             targetDistance = targetDistance?.let { it / 1000.0 }, // Convert metres → km for upload
