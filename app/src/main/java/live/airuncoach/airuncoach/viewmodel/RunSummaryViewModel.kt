@@ -246,7 +246,8 @@ class RunSummaryViewModel @Inject constructor(
     fun generateAIAnalysis() {
         val session = _runSession.value ?: return
 
-        // Don't re-generate if we already have a loaded analysis
+        // Don't re-generate if we already have a successful analysis
+        // Allow retry if in Error or Idle state
         if (hasAnalysis()) return
 
         viewModelScope.launch {
@@ -265,11 +266,13 @@ class RunSummaryViewModel @Inject constructor(
                 val goals = loadActiveGoals(user)
                 val request = buildFreeformRequest(session, user, goals)
 
-                // Try freeform endpoint first (30s timeout), fall back to old comprehensive endpoint
+                // Try freeform endpoint (90s timeout — LLM needs time for large context)
                 try {
-                    val response = withTimeout(30_000L) {
+                    Log.d("RunSummaryViewModel", "Calling freeform analysis for run ${session.id}...")
+                    val response = withTimeout(90_000L) {
                         apiService.generateFreeformAnalysis(session.id, request)
                     }
+                    Log.d("RunSummaryViewModel", "Freeform analysis received (${response.analysis.length} chars)")
                     _analysisState.value = AiAnalysisState.Freeform(
                         markdown = response.analysis,
                         title = response.title
@@ -283,28 +286,37 @@ class RunSummaryViewModel @Inject constructor(
                     ))
                     try { apiService.saveRunAnalysis(session.id, SaveRunAnalysisRequest(saveJson)) } catch (_: Exception) {}
                 } catch (freeformError: Exception) {
-                    Log.w("RunSummaryViewModel", "Freeform analysis failed, falling back to comprehensive", freeformError)
+                    Log.w("RunSummaryViewModel", "Freeform analysis failed: ${freeformError.message}", freeformError)
                     // Fall back to the old comprehensive analysis endpoint (just needs runId)
                     try {
-                        val fallbackResponse = withTimeout(30_000L) {
+                        Log.d("RunSummaryViewModel", "Falling back to comprehensive analysis...")
+                        val fallbackResponse = withTimeout(60_000L) {
                             apiService.getComprehensiveRunAnalysis(session.id)
                         }
                         _analysisState.value = AiAnalysisState.Comprehensive(fallbackResponse.analysis)
                     } catch (fallbackError: Exception) {
-                        Log.e("RunSummaryViewModel", "Comprehensive fallback also failed", fallbackError)
+                        Log.e("RunSummaryViewModel", "Comprehensive fallback also failed: ${fallbackError.message}", fallbackError)
                         _analysisState.value = AiAnalysisState.Error(
-                            "AI analysis unavailable. Please try again later."
+                            "AI analysis unavailable. Tap to try again."
                         )
                     }
                 }
 
             } catch (e: Exception) {
-                Log.e("RunSummaryViewModel", "Analysis failed", e)
+                Log.e("RunSummaryViewModel", "Analysis failed: ${e.message}", e)
                 _analysisState.value = AiAnalysisState.Error(
-                    e.message ?: "Failed to generate AI analysis"
+                    e.message ?: "Failed to generate AI analysis. Tap to try again."
                 )
             }
         }
+    }
+
+    /**
+     * Force retry — resets state to Idle so generateAIAnalysis() can run again.
+     */
+    fun retryAIAnalysis() {
+        _analysisState.value = AiAnalysisState.Idle
+        generateAIAnalysis()
     }
 
     /**

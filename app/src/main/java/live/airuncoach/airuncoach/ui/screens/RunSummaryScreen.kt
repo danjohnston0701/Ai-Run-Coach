@@ -193,6 +193,7 @@ fun RunSummaryScreenFlagship(
                             comments = userPostRunComments,
                             onCommentsChange = viewModel::updatePostRunComments,
                             onGenerateAi = { viewModel.generateAIAnalysis() },
+                            onRetryAi = { viewModel.retryAIAnalysis() },
                             isGarminConnected = isGarminConnected,
                             coachingNotes = runSession!!.aiCoachingNotes,
                             onShareCard = {
@@ -389,6 +390,7 @@ private fun AiInsightsTabContent(
     comments: String,
     onCommentsChange: (String) -> Unit,
     onGenerateAi: () -> Unit,
+    onRetryAi: () -> Unit = {},
     isGarminConnected: Boolean = false,
     coachingNotes: List<AiCoachingNote> = emptyList(),
     onShareCard: () -> Unit,
@@ -467,7 +469,8 @@ private fun AiInsightsTabContent(
                 comments = comments,
                 coachingNotes = coachingNotes,
                 onCommentsChange = onCommentsChange,
-                onGenerateAi = onGenerateAi
+                onGenerateAi = onGenerateAi,
+                onRetryAi = onRetryAi
             )
         }
 
@@ -1118,7 +1121,8 @@ private fun AiSectionFlagship(
     comments: String,
     coachingNotes: List<AiCoachingNote> = emptyList(),
     onCommentsChange: (String) -> Unit,
-    onGenerateAi: () -> Unit
+    onGenerateAi: () -> Unit,
+    onRetryAi: () -> Unit = {}
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
@@ -1180,7 +1184,21 @@ private fun AiSectionFlagship(
                     }
                 }
 
-                is AiAnalysisState.Error,
+                is AiAnalysisState.Error -> {
+                    // Show error with retry button
+                    Text(
+                        text = analysisState.message,
+                        style = AppTextStyles.body,
+                        color = Colors.error
+                    )
+
+                    PrimaryActionButtonFlagship(
+                        text = "Retry AI Insights",
+                        loading = false,
+                        onClick = onRetryAi
+                    )
+                }
+
                 AiAnalysisState.Idle -> {
                     Text(
                         text = "Get personalized insights from your AI coach about this run.",
@@ -1214,17 +1232,9 @@ private fun AiSectionFlagship(
 
                     PrimaryActionButtonFlagship(
                         text = "Generate AI Insights",
-                        loading = analysisState is AiAnalysisState.Loading,
+                        loading = false,
                         onClick = onGenerateAi
                     )
-
-                    if (analysisState is AiAnalysisState.Error) {
-                        Text(
-                            text = analysisState.message,
-                            style = AppTextStyles.caption,
-                            color = Colors.error
-                        )
-                    }
                 }
             }
         }
