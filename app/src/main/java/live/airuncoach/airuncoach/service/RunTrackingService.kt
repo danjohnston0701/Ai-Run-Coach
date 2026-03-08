@@ -174,6 +174,62 @@ class RunTrackingService : Service(), SensorEventListener {
     private val ELITE_COACHING_COOLDOWN_MS = 45_000L // 45 second gap between elite coaching
     private var lastTechniqueCoachingTime: Long = 0
     private val TECHNIQUE_INTERVAL_MS = 180_000L // Technique coaching every ~3 minutes
+
+    // Technique coaching category rotation — ensures variety across 30+ technique areas
+    // Each category is tracked so we never repeat the same one consecutively
+    private val techniqueCategories = listOf(
+        // POSTURE & ALIGNMENT
+        "posture_head_neck",         // Head position, look ahead, chin level
+        "posture_shoulders",         // Shoulders relaxed and low, not hunched
+        "posture_torso_lean",        // Slight forward lean from ankles, tall spine
+        "posture_core_engagement",   // Core bracing, pelvis neutral, avoid slouching
+
+        // ARM TECHNIQUE
+        "arms_swing_direction",      // Arms swing forward-backward, not across body
+        "arms_elbow_angle",          // 90-degree elbow bend, compact arms
+        "arms_hand_relaxation",      // Loose fists, imagine holding crisps/eggs
+        "arms_drive_power",          // Use arm drive to power up hills
+
+        // HIP & PELVIS
+        "hips_extension",            // Full hip extension behind you on push-off
+        "hips_alignment",            // Hips level and square, no dropping
+        "hips_forward_drive",        // Drive knees forward, hips over feet
+
+        // KNEE & LEG MECHANICS
+        "knees_lift",                // Appropriate knee lift for pace
+        "knees_alignment",           // Knees tracking over toes, not collapsing in
+        "knees_soft_landing",        // Soft bent knee on landing, absorb impact
+
+        // FOOT PLACEMENT & STRIKE
+        "feet_cadence",              // Quick light steps, aim for 170-180 spm
+        "feet_strike_pattern",       // Midfoot/forefoot strike, land under hips
+        "feet_push_off",             // Strong push-off through toes, ankle extension
+        "feet_ground_contact",       // Minimise ground contact time, quick turnover
+
+        // HILL-SPECIFIC TECHNIQUE
+        "hill_uphill_technique",     // Shorten stride, lean into hill, pump arms
+        "hill_downhill_technique",   // Controlled descent, slight lean forward, quick feet
+        "hill_crest_transition",     // Don't ease off at the top, maintain through the crest
+
+        // BREATHING
+        "breathing_rhythm",          // Match breathing to stride (2:2 or 3:2 pattern)
+        "breathing_deep_belly",      // Breathe from diaphragm, not chest
+        "breathing_exhale_power",    // Strong exhale, let inhale happen naturally
+
+        // MENTAL & EMOTIONAL
+        "mental_smile",              // Smile — it actually reduces perceived effort
+        "mental_mantras",            // Use a power word or mantra (strong, smooth, fast)
+        "mental_chunking",           // Break remaining distance into small chunks
+        "mental_focus_reset",        // Quick body scan, reset focus from head to feet
+        "mental_visualisation",      // Visualise the finish line, imagine floating
+
+        // ACTIVE RECOVERY / SHAKE-OUT
+        "recovery_arm_shakeout",     // Drop arms and shake them out for 10 seconds
+        "recovery_shoulder_roll",    // Roll shoulders backward 5 times to release tension
+        "recovery_hand_flex"         // Open and close fists, wiggle fingers to release tension
+    )
+    private var techniqueRotationIndex = 0
+    private val usedTechniqueCategories = mutableSetOf<String>()
     private var lastMilestonePercent: Int = 0 // Track which milestones have been triggered (25, 50, 75)
     private var lastTargetEtaKm: Int = 0 // Track last km an ETA was given
     private var lastPaceTrendCheckKm: Int = 0 // Track last km a pace trend was analysed
@@ -440,6 +496,8 @@ class RunTrackingService : Service(), SensorEventListener {
         hasFinal500mFired = false
         hasFinal100mFired = false
         lastFlatTerrainCoachingKm = 0
+        techniqueRotationIndex = 0
+        usedTechniqueCategories.clear()
         hasCoachingFiredThisTick = false
         lastStruggleTriggerTime = 0
         isStruggling = false
@@ -2700,12 +2758,167 @@ class RunTrackingService : Service(), SensorEventListener {
         fireEliteCoaching(request, "Positive Reinforcement")
     }
 
-    @Suppress("UNUSED_PARAMETER")
+    /**
+     * Fire context-aware technique coaching with category rotation.
+     * Selects the most relevant technique category based on current conditions:
+     * - On a hill? → hill technique
+     * - Late in the run / fatigued? → mental/recovery techniques
+     * - Early in the run? → posture/breathing fundamentals
+     * - Otherwise → rotate through all categories, never repeating in the same run
+     */
     private fun fireTechniqueCoaching(distKm: Double, duration: Long, avgSpeed: Float, phase: CoachingPhase) {
         lastTechniqueCoachingTime = System.currentTimeMillis()
-        val request = buildBaseEliteRequest("technique_form", distKm, duration, avgSpeed)
-        fireEliteCoaching(request, "Technique")
+
+        // Determine current context
+        val grade = calculateAverageGradient()
+        val isOnHill = abs(grade) > 3f
+        val isUphill = grade > 3f
+        val isDownhill = grade < -3f
+
+        // Estimate fatigue from pace trend (smoothed vs baseline)
+        val fatigueLevel = when {
+            baselinePace <= 0f -> "FRESH"
+            recentPaceDistances.size >= 3 -> {
+                val totalDist = recentPaceDistances.sum()
+                val totalTime = recentPaceTimes.sum()
+                val smoothedPace = if (totalDist > 0) (1000.0 * totalTime / totalDist).toFloat() else baselinePace
+                val dropPct = (smoothedPace - baselinePace) / baselinePace * 100
+                when {
+                    dropPct > 15 -> "FATIGUED"
+                    dropPct > 8 -> "MODERATE"
+                    else -> "FRESH"
+                }
+            }
+            else -> "FRESH"
+        }
+
+        // Select the best technique category based on context
+        val category = selectTechniqueCategory(phase, isUphill, isDownhill, fatigueLevel)
+
+        // Build the hint map for this category — tells the AI what specific cue to give
+        val hint = techniqueHints[category] ?: "Focus on good running form"
+
+        // Track what we've used this run
+        usedTechniqueCategories.add(category)
+
+        // Build request with rich technique context
+        val baseRequest = buildBaseEliteRequest("technique_form", distKm, duration, avgSpeed)
+        val request = baseRequest.copy(
+            techniqueCategory = category,
+            techniqueHint = hint,
+            runPhase = phase.name,
+            isOnHill = isOnHill,
+            isUphill = isUphill,
+            fatigueLevel = fatigueLevel,
+            // Send the last 3 categories so the AI knows what was already coached
+            recentTechniqueCategories = usedTechniqueCategories.toList().takeLast(5)
+        )
+        fireEliteCoaching(request, "Technique ($category)")
     }
+
+    /**
+     * Context-aware technique category selection:
+     * 1. If on a hill → pick a hill-specific technique
+     * 2. If fatigued → pick a mental/recovery technique
+     * 3. If early in run → pick a fundamental technique (posture, breathing)
+     * 4. Otherwise → rotate through unused categories
+     */
+    private fun selectTechniqueCategory(phase: CoachingPhase, isUphill: Boolean, isDownhill: Boolean, fatigueLevel: String): String {
+        // Priority 1: Hill-specific technique when on a hill
+        if (isUphill) {
+            val hillCategories = listOf("hill_uphill_technique", "arms_drive_power", "hips_forward_drive", "breathing_exhale_power")
+            val unused = hillCategories.filter { it !in usedTechniqueCategories }
+            if (unused.isNotEmpty()) return unused.random()
+        }
+        if (isDownhill) {
+            val downhillCategories = listOf("hill_downhill_technique", "knees_soft_landing", "feet_cadence", "posture_torso_lean")
+            val unused = downhillCategories.filter { it !in usedTechniqueCategories }
+            if (unused.isNotEmpty()) return unused.random()
+        }
+
+        // Priority 2: Recovery/mental techniques when fatigued or in late phase
+        if (fatigueLevel == "FATIGUED" || phase == CoachingPhase.FINAL || phase == CoachingPhase.LATE) {
+            val fatigueCategories = listOf(
+                "mental_smile", "mental_mantras", "mental_chunking", "mental_focus_reset", "mental_visualisation",
+                "recovery_arm_shakeout", "recovery_shoulder_roll", "recovery_hand_flex",
+                "breathing_rhythm", "breathing_deep_belly"
+            )
+            val unused = fatigueCategories.filter { it !in usedTechniqueCategories }
+            if (unused.isNotEmpty()) return unused.random()
+        }
+
+        // Priority 3: Fundamentals early in the run
+        if (phase == CoachingPhase.EARLY) {
+            val earlyCategories = listOf(
+                "posture_head_neck", "posture_shoulders", "posture_torso_lean",
+                "breathing_rhythm", "arms_swing_direction", "arms_hand_relaxation",
+                "feet_strike_pattern", "feet_cadence"
+            )
+            val unused = earlyCategories.filter { it !in usedTechniqueCategories }
+            if (unused.isNotEmpty()) return unused.random()
+        }
+
+        // Priority 4: Rotate through ALL unused categories
+        val unused = techniqueCategories.filter { it !in usedTechniqueCategories }
+        if (unused.isNotEmpty()) return unused.random()
+
+        // All categories used this run — reset and start fresh
+        usedTechniqueCategories.clear()
+        return techniqueCategories.random()
+    }
+
+    /** Specific coaching cues for each technique category — sent to the AI as context */
+    private val techniqueHints = mapOf(
+        // Posture
+        "posture_head_neck" to "Look 20-30m ahead, not at feet. Imagine being pulled up by a string from the crown of your head. Keep chin level.",
+        "posture_shoulders" to "Drop your shoulders away from your ears. Shake them out if they've crept up. Relaxed shoulders = efficient running.",
+        "posture_torso_lean" to "Lean slightly forward from your ankles (not waist). Your body should be a straight line from ankle to head. Think 'tall and tilted'.",
+        "posture_core_engagement" to "Gently brace your core — imagine you're about to be lightly tapped on the stomach. Keep your pelvis neutral, avoid arching your back.",
+
+        // Arms
+        "arms_swing_direction" to "Swing arms forward and back, not across your body. Your hands should never cross your midline. Think 'hip pocket to chest pocket'.",
+        "arms_elbow_angle" to "Keep elbows at about 90 degrees. Compact arms are more efficient. If they're straightening out, you're wasting energy.",
+        "arms_hand_relaxation" to "Unclench your fists! Imagine holding a crisp in each hand without crushing it. Loose hands = relaxed arms = relaxed shoulders.",
+        "arms_drive_power" to "Drive your elbows back powerfully — the harder you pump your arms, the more your legs respond. Use your arms to power through this section.",
+
+        // Hips
+        "hips_extension" to "On each stride, fully extend your hip behind you before your foot leaves the ground. More extension = more power = longer stride.",
+        "hips_alignment" to "Keep your hips level — don't let one side drop when the opposite foot lifts. Strong glutes keep you stable.",
+        "hips_forward_drive" to "Drive your knee forward and up. Think 'run from the hips' rather than reaching with your feet.",
+
+        // Knees
+        "knees_lift" to "Lift your knees to a height that matches your pace. Higher knee drive = faster pace. At easy pace, a gentle lift is fine.",
+        "knees_alignment" to "Make sure your knees track directly over your toes. If they collapse inward, focus on 'pushing knees out' slightly.",
+        "knees_soft_landing" to "Land with a soft, slightly bent knee. Never lock your knee on impact — that's how injuries happen. Absorb the ground.",
+
+        // Feet
+        "feet_cadence" to "Quick light steps! Aim for 170-180 steps per minute. If your feet feel heavy, imagine running on hot coals.",
+        "feet_strike_pattern" to "Land with your foot directly under your body, not out in front. Midfoot strike, soft and quiet. If you can hear your feet slapping, you're overstriding.",
+        "feet_push_off" to "Push off strongly through your big toe. Feel the ground spring you forward. Active ankle extension adds free speed.",
+        "feet_ground_contact" to "Minimise time on the ground — quick turnover, like a wheel rolling. The less time each foot spends on the ground, the faster and more efficient you are.",
+
+        // Hills
+        "hill_uphill_technique" to "Shorten your stride, increase cadence, lean into the hill from your ankles. Pump your arms harder. Attack the hill with quick feet, not big strides.",
+        "hill_downhill_technique" to "Let gravity help! Lean slightly forward (don't lean back). Quick light steps, slightly wider foot placement. Control your speed with cadence, not braking.",
+        "hill_crest_transition" to "Don't ease off at the top of the hill! Many runners lose 5-10 seconds by relaxing at the crest. Push through and over the top, then settle into rhythm.",
+
+        // Breathing
+        "breathing_rhythm" to "Match your breathing to your stride. Try a 2:2 pattern — breathe in for 2 steps, out for 2 steps. At easy pace, try 3:3.",
+        "breathing_deep_belly" to "Breathe from your belly, not your chest. Put your hand on your stomach — it should push out when you inhale. Belly breathing gets more oxygen to your muscles.",
+        "breathing_exhale_power" to "Focus on a strong exhale — blow the air out forcefully. The inhale will happen naturally. A powerful exhale clears CO2 and makes room for fresh oxygen.",
+
+        // Mental
+        "mental_smile" to "Smile! Seriously — studies show smiling while running reduces perceived effort by up to 2%. It relaxes your face and tricks your brain into thinking this is easier.",
+        "mental_mantras" to "Pick a power word and repeat it with each step. 'Strong. Smooth. Fast.' or 'I. Am. Running.' A mantra drowns out the voice that says to slow down.",
+        "mental_chunking" to "Don't think about the whole distance. Just focus on the next 500 metres. Then the next 500. Small chunks are always manageable.",
+        "mental_focus_reset" to "Do a quick body scan: head relaxed, shoulders down, arms loose, core engaged, hips forward, feet light. Fix anything that's tensed up.",
+        "mental_visualisation" to "Picture yourself crossing the finish line strong. Visualise your best running form — smooth, powerful, effortless. Run like that person in your mind.",
+
+        // Recovery/Shake-out
+        "recovery_arm_shakeout" to "Drop your arms to your sides and shake them out for 10 seconds. Let them go completely limp. Then bring them back up refreshed.",
+        "recovery_shoulder_roll" to "Roll your shoulders backward 5 times, big circles. Release any tension that's built up. Your upper body should feel loose and free.",
+        "recovery_hand_flex" to "Open and close your fists 10 times. Wiggle your fingers. If you've been clenching, this releases tension all the way up your arms to your shoulders."
+    )
 
     private fun fireElevationInsightCoaching(distKm: Double, duration: Long, avgSpeed: Float) {
         lastElevationInsightTime = System.currentTimeMillis()

@@ -40,7 +40,16 @@ data class EliteCoachingRequest(
     @SerializedName("fastestSplitPace") val fastestSplitPace: String? = null,
     @SerializedName("targetTimeCategory") val targetTimeCategory: String? = null,
     @SerializedName("etaOverTargetPercent") val etaOverTargetPercent: Double? = null,
-    @SerializedName("remainingMeters") val remainingMeters: Int? = null
+    @SerializedName("remainingMeters") val remainingMeters: Int? = null,
+
+    // Technique coaching — specific category and contextual hint for the AI
+    @SerializedName("techniqueCategory") val techniqueCategory: String? = null,
+    @SerializedName("techniqueHint") val techniqueHint: String? = null,
+    @SerializedName("runPhase") val runPhase: String? = null,  // EARLY, BUILDING, SUSTAINING, FINISHING
+    @SerializedName("isOnHill") val isOnHill: Boolean? = null,
+    @SerializedName("isUphill") val isUphill: Boolean? = null,
+    @SerializedName("fatigueLevel") val fatigueLevel: String? = null,  // FRESH, MODERATE, FATIGUED
+    @SerializedName("recentTechniqueCategories") val recentTechniqueCategories: List<String>? = null
 )
 
 data class KmSplitBrief(
