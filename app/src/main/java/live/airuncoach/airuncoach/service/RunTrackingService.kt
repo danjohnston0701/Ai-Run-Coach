@@ -548,6 +548,9 @@ class RunTrackingService : Service(), SensorEventListener {
                 Log.e("RunTrackingService", "Failed to fetch weather", e)
             }
         }
+
+        // Fire start coaching — short motivational prompt to confirm AI is active
+        fireStartCoaching()
     }
 
     // ==================== SIMULATION MODE ====================
@@ -2612,6 +2615,46 @@ class RunTrackingService : Service(), SensorEventListener {
         } else {
             "${String.format("%.1f", km)} km"
         }
+    }
+
+    /**
+     * Fire a short motivational start prompt when the run begins.
+     * Short, direct, under 10 words — just to confirm AI is active.
+     */
+    private fun fireStartCoaching() {
+        if (!coachingFeaturePrefs.motivationalCoachingEnabled) return
+
+        // Short start prompts — pick one randomly
+        val prompts = listOf(
+            "Let's go! You've got this.",
+            "Great start — find your rhythm.",
+            "Smooth and steady — let's run.",
+            "One step at a time — let's do this.",
+            "Today is your day — let's run.",
+            "Focus on form — you'll nail this.",
+            "Breathe deep — run strong.",
+            "You've trained for this — enjoy it.",
+            "Stay present — one step at a time.",
+            "Run your own race — you've got this."
+        )
+        val startMessage = prompts.random()
+        val startTime = System.currentTimeMillis()
+
+        // Fire via audio immediately
+        serviceScope.launch {
+            audioPlayerHelper.speakWithCoachVoice(startMessage)
+        }
+
+        // Also log as a coaching note for the run history
+        coachingHistory.add(AiCoachingNote(
+            time = 0,
+            message = startMessage,
+            audioPath = null,
+            isAudioPlayed = true
+        ))
+
+        Log.d("RunTrackingService", "Start coaching: $startMessage")
+    }
     }
 
     private fun buildBaseEliteRequest(type: String, distKm: Double, duration: Long, avgSpeed: Float): EliteCoachingRequest {
