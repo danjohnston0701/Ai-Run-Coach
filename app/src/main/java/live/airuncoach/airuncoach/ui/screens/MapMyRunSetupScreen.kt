@@ -659,6 +659,9 @@ fun TargetDistanceCard(distance: Float, onDistanceChanged: (Float) -> Unit) {
             value = distance,
             onValueChange = onDistanceChanged,
             valueRange = 1f..50f,
+            // Snap to whole kilometers (1-50 range = 49 steps of 1km each)
+            // This ensures 0 decimal places setting actually works
+            steps = 48,
             modifier = Modifier.fillMaxWidth(),
             colors = SliderDefaults.colors(
                 thumbColor = Colors.primary,
