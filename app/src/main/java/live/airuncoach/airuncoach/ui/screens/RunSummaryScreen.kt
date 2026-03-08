@@ -74,6 +74,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.core.view.drawToBitmap
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
@@ -159,8 +160,8 @@ fun RunSummaryScreenFlagship(
     var achievedGoals by remember { mutableStateOf<List<live.airuncoach.airuncoach.domain.model.Goal>>(emptyList()) }
     var selectedGoalForCompletion by remember { mutableStateOf<live.airuncoach.airuncoach.domain.model.Goal?>(null) }
     
-    // Create GoalsViewModel to check for achieved goals
-    val goalsViewModel = remember { GoalsViewModel(LocalContext.current) }
+    // Create GoalsViewModel to check for achieved goals (using compose viewModel with factory)
+    val goalsViewModel: GoalsViewModel = viewModel(factory = GoalsViewModelFactory(LocalContext.current))
 
     LaunchedEffect(runSession?.name) {
         runNameDraft = runSession?.name.orEmpty()

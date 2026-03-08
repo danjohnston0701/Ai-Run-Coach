@@ -35,5 +35,17 @@ data class UploadRunRequest(
     val targetDistance: Double?,
     val targetTime: Long?,
     val wasTargetAchieved: Boolean?,
-    val aiCoachingNotes: List<AiCoachingNote>? = null
+    val aiCoachingNotes: List<AiCoachingNote>? = null,
+    // Extended elevation metrics
+    val maxInclinePercent: Float? = null,
+    val maxDeclinePercent: Float? = null,
+    val minElevation: Double? = null,
+    val maxElevation: Double? = null,
+    // Additional metrics
+    val totalSteps: Int? = null,
+    val activeCalories: Int? = null,
+    val avgSpeed: Float? = null,
+    val movingTime: Long? = null,
+    val elapsedTime: Long? = null,
+    val avgStrideLength: Float? = null
 )

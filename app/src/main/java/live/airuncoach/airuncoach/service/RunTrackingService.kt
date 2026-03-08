@@ -1538,6 +1538,32 @@ class RunTrackingService : Service(), SensorEventListener {
             }
         }
     }
+    
+    /**
+     * Add the final partial km split if it's within 100m of a full km.
+     * For runs like 4.95km or 9.92km, we want to show the final partial km.
+     */
+    private fun addPartialKmSplitIfNeeded(): List<KmSplit> {
+        val splits = kmSplits.toMutableList()
+        
+        if (splits.isEmpty() || totalDistance < 1000) return splits
+        
+        val lastSplit = splits.last()
+        val distanceOfLastFullKm = lastSplit.km * 1000.0 // meters
+        val distanceCoveredInLastKm = totalDistance - distanceOfLastFullKm // meters since last full km
+        
+        // If the partial km is within 100m of a full km, include it
+        if (distanceCoveredInLastKm >= 900) { // 900m or more (within 100m of 1km)
+            val now = System.currentTimeMillis()
+            val splitTime = (now - lastSplitTime) - splitPausedMs
+            val splitSpeedKmh: Float = if (splitTime > 0) (distanceCoveredInLastKm / (splitTime / 1000f) * 3.6f).toFloat() else 0f
+            val partialSplit = KmSplit(km = lastSplit.km + 1, time = splitTime, pace = calculatePace(speedKmh = splitSpeedKmh))
+            splits.add(partialSplit)
+            Log.d("RunTrackingService", "Added partial km split: ${lastSplit.km + 1}km (${String.format("%.0f", distanceCoveredInLastKm)}m)")
+        }
+        
+        return splits
+    }
 
     private fun calculateDistance(p1: LocationPoint, p2: LocationPoint): Double {
         val r = 6371000.0
@@ -1618,7 +1644,7 @@ class RunTrackingService : Service(), SensorEventListener {
             cadence = if (cadenceCount > 0) (cadenceSum / cadenceCount).toInt() else currentCadence,
             heartRate = currentHeartRate,
             routePoints = routePoints.toList(),
-            kmSplits = kmSplits.toList(),
+            kmSplits = addPartialKmSplitIfNeeded(),
             isStruggling = isStruggling,
             phase = phase,
             weatherAtStart = weatherAtStart,
@@ -1641,6 +1667,8 @@ class RunTrackingService : Service(), SensorEventListener {
             maxCadence = maxCadenceValue.takeIf { it > 0 },
             steepestIncline = if (hasMovedEnough) calculateSteepestIncline() else null,
             steepestDecline = if (hasMovedEnough) calculateSteepestDecline() else null,
+            minElevation = if (hasMovedEnough) calculateMinElevation() else null,
+            maxElevation = if (hasMovedEnough) calculateMaxElevation() else null,
             totalSteps = totalStepsDuringRun.takeIf { it > 0 }
         )
     }
@@ -1666,6 +1694,16 @@ class RunTrackingService : Service(), SensorEventListener {
             if (d > 2) ((p1.altitude - p2.altitude) / d * 100).toFloat() else null // inverted: positive = downhill
         } else null
     }.filter { it > 0 }.maxOrNull() ?: 0f
+    
+    /** Minimum elevation (lowest point) during the run */
+    private fun calculateMinElevation(): Double? {
+        return routePoints.mapNotNull { it.altitude }.minOrNull()
+    }
+    
+    /** Maximum elevation (highest point) during the run */
+    private fun calculateMaxElevation(): Double? {
+        return routePoints.mapNotNull { it.altitude }.maxOrNull()
+    }
     
     private fun determineTerrainType(avgGradient: Float): TerrainType = when { abs(avgGradient) < 2f -> TerrainType.FLAT; abs(avgGradient) < 5f -> TerrainType.ROLLING; abs(avgGradient) < 10f -> TerrainType.HILLY; else -> TerrainType.MOUNTAINOUS }
     
@@ -1892,7 +1930,19 @@ class RunTrackingService : Service(), SensorEventListener {
             // Struggle points detected during the run
             strugglePoints = runSession.strugglePoints,
             // AI coaching notes from the run
-            aiCoachingNotes = runSession.aiCoachingNotes.ifEmpty { null }
+            aiCoachingNotes = runSession.aiCoachingNotes.ifEmpty { null },
+            // Extended elevation metrics
+            maxInclinePercent = runSession.steepestIncline,
+            maxDeclinePercent = runSession.steepestDecline,
+            minElevation = runSession.minElevation,
+            maxElevation = runSession.maxElevation,
+            // Additional metrics
+            totalSteps = runSession.totalSteps,
+            activeCalories = runSession.activeCalories,
+            avgSpeed = runSession.avgSpeed,
+            movingTime = runSession.movingTime,
+            elapsedTime = runSession.elapsedTime,
+            avgStrideLength = runSession.avgStrideLength
         )
 
         // Retry up to 3 times with exponential backoff for server errors
