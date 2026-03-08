@@ -37,6 +37,9 @@ class CoachSettingsViewModel(private val context: Context) : ViewModel() {
     private val _coachingTone = MutableStateFlow("energetic")
     val coachingTone: StateFlow<String> = _coachingTone.asStateFlow()
 
+    private val _nicknameStyle = MutableStateFlow("occasional")
+    val nicknameStyle: StateFlow<String> = _nicknameStyle.asStateFlow()
+
     // In-Run AI Coaching feature toggles (all default to enabled)
     private val _paceCoachingEnabled = MutableStateFlow(true)
     val paceCoachingEnabled: StateFlow<Boolean> = _paceCoachingEnabled.asStateFlow()
@@ -99,6 +102,7 @@ class CoachSettingsViewModel(private val context: Context) : ViewModel() {
             _voiceGender.value = user.coachGender
             _accent.value = user.coachAccent
             _coachingTone.value = user.coachTone
+            _nicknameStyle.value = user.nicknameStyle
             // Sync coaching feature prefs from server-stored User model to local prefs
             featurePrefs.loadFromUser(user)
         }
@@ -129,6 +133,10 @@ class CoachSettingsViewModel(private val context: Context) : ViewModel() {
 
     fun onCoachingToneChanged(tone: String) {
         _coachingTone.value = tone
+    }
+
+    fun onNicknameStyleChanged(style: String) {
+        _nicknameStyle.value = style
     }
 
     // Coaching feature toggle handlers — save immediately to SharedPreferences
@@ -191,6 +199,7 @@ class CoachSettingsViewModel(private val context: Context) : ViewModel() {
                 coachGender = _voiceGender.value,
                 coachAccent = _accent.value,
                 coachTone = _coachingTone.value,
+                nicknameStyle = _nicknameStyle.value,
                 // Include all coaching feature preferences so they persist to server
                 coachPaceEnabled = _paceCoachingEnabled.value,
                 coachNavigationEnabled = _routeNavigationEnabled.value,

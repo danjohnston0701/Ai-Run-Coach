@@ -17,6 +17,7 @@ data class EliteCoachingRequest(
     @SerializedName("coachTone") val coachTone: String?,
     @SerializedName("coachGender") val coachGender: String?,
     @SerializedName("coachAccent") val coachAccent: String?,
+    @SerializedName("nicknameStyle") val nicknameStyle: String? = "occasional",  // "none" | "occasional" | "frequent"
     @SerializedName("hasRoute") val hasRoute: Boolean,
 
     // Optional context

@@ -5,6 +5,7 @@ data class UpdateCoachSettingsRequest(
     val coachGender: String,
     val coachAccent: String,
     val coachTone: String,
+    val nicknameStyle: String = "occasional",  // "none" | "occasional" | "frequent"
     // In-Run AI Coaching feature preferences
     val coachPaceEnabled: Boolean? = null,
     val coachNavigationEnabled: Boolean? = null,

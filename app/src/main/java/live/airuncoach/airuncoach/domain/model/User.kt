@@ -16,6 +16,7 @@ data class User(
     val coachGender: String = "male",
     val coachAccent: String = "british",
     val coachTone: String = "energetic",
+    val nicknameStyle: String = "occasional",  // "none" | "occasional" | "frequent"
     val profilePic: String? = null,
     val distanceMinKm: Float = 0f,
     val distanceMaxKm: Float = 50f,

@@ -45,6 +45,7 @@ fun CoachSettingsScreen(
     val voiceGender by viewModel.voiceGender.collectAsState()
     val accent by viewModel.accent.collectAsState()
     val coachingTone by viewModel.coachingTone.collectAsState()
+    val nicknameStyle by viewModel.nicknameStyle.collectAsState()
     val coroutineScope = rememberCoroutineScope()
 
     // In-Run AI Coaching feature toggles
@@ -168,6 +169,33 @@ fun CoachSettingsScreen(
                             tone = tone,
                             isSelected = coachingTone.equals(tone.name, ignoreCase = true),
                             onClick = { viewModel.onCoachingToneChanged(tone.name) }
+                        )
+                        Spacer(modifier = Modifier.height(Spacing.sm))
+                    }
+                }
+                Spacer(modifier = Modifier.height(Spacing.xl))
+            }
+
+            // Nickname style selector
+            item {
+                SectionTitle(title = "Nicknames")
+                Text(
+                    text = "How often should the AI use nicknames like 'legend', 'champ'?",
+                    style = AppTextStyles.body,
+                    color = Colors.textSecondary,
+                    modifier = Modifier.padding(bottom = Spacing.md)
+                )
+                Column {
+                    listOf(
+                        "none" to "None — don't use nicknames",
+                        "occasional" to "Occasional — use sparingly",
+                        "frequent" to "Frequent — use often"
+                    ).forEach { (style, label) ->
+                        NicknameStyleOption(
+                            style = style,
+                            label = label,
+                            isSelected = nicknameStyle.equals(style, ignoreCase = true),
+                            onClick = { viewModel.onNicknameStyleChanged(style) }
                         )
                         Spacer(modifier = Modifier.height(Spacing.sm))
                     }
@@ -324,6 +352,45 @@ fun AccentSelector(accent: String, isSelected: Boolean, onClick: () -> Unit) {
             if (isSelected) {
                 Icon(
                     painter = painterResource(id = R.drawable.icon_check_vector),
+                    contentDescription = "Selected",
+                    tint = Colors.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun NicknameStyleOption(style: String, label: String, isSelected: Boolean, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = 2.dp,
+                color = if (isSelected) Colors.primary else Color.Transparent,
+                shape = RoundedCornerShape(BorderRadius.md)
+            )
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(BorderRadius.md),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundCard)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = label,
+                    style = AppTextStyles.body,
+                    color = Colors.textPrimary
+                )
+            }
+            if (isSelected) {
+                Icon(
+                    imageVector = Icons.Filled.Check,
                     contentDescription = "Selected",
                     tint = Colors.primary,
                     modifier = Modifier.size(20.dp)
