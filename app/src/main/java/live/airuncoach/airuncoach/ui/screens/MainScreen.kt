@@ -220,6 +220,11 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         if (navController.previousBackStackEntry != null) {
                             navController.popBackStack()
                         }
+                    },
+                    onGeneratePlanForGoal = { goal ->
+                        // Store goal for wizard prefill then navigate
+                        live.airuncoach.airuncoach.util.GoalPlanHolder.prefilledGoal = goal
+                        navController.navigate("generate_plan")
                     }
                 )
             }
@@ -235,7 +240,8 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onNavigateToDistanceScale = { navController.navigate("distance_scale") },
                     onNavigateToNotifications = { navController.navigate("notifications") },
                     onNavigateToConnectedDevices = { navController.navigate("connected_devices") },
-                    onNavigateToSubscription = { navController.navigate("subscription") }
+                    onNavigateToSubscription = { navController.navigate("subscription") },
+                    onNavigateToCoachingProgramme = { navController.navigate("coaching_programme") }
                 )
             }
             // Map My Run Setup Screen (the beautiful redesigned one!)
@@ -490,6 +496,61 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
+            // ── Coaching Programme routes ───────────────────────────────────────
+            composable("coaching_programme") {
+                CoachingProgrammeScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onCreatePlan = { navController.navigate("generate_plan") },
+                    onOpenPlan = { planId -> navController.navigate("training_plan/$planId") }
+                )
+            }
+            composable("generate_plan") {
+                val goal = live.airuncoach.airuncoach.util.GoalPlanHolder.consume()
+                GeneratePlanScreen(
+                    prefilledGoal = goal,
+                    onNavigateBack = { navController.popBackStack() },
+                    onPlanCreated = { planId ->
+                        navController.navigate("training_plan/$planId") {
+                            popUpTo("coaching_programme")
+                        }
+                    }
+                )
+            }
+            composable("training_plan/{planId}") { backStackEntry ->
+                val planId = backStackEntry.arguments?.getString("planId") ?: return@composable
+                TrainingPlanDashboardScreen(
+                    planId = planId,
+                    onNavigateBack = { navController.popBackStack() },
+                    onStartWorkout = { workout ->
+                        live.airuncoach.airuncoach.util.WorkoutHolder.currentWorkout = workout
+                        navController.navigate("workout_detail")
+                    },
+                    onViewWorkoutDetail = { workout ->
+                        live.airuncoach.airuncoach.util.WorkoutHolder.currentWorkout = workout
+                        navController.navigate("workout_detail")
+                    }
+                )
+            }
+            composable("workout_detail") {
+                val workout = live.airuncoach.airuncoach.util.WorkoutHolder.currentWorkout
+                if (workout == null) {
+                    navController.popBackStack()
+                } else {
+                    WorkoutDetailScreen(
+                        workout = workout,
+                        onNavigateBack = { navController.popBackStack() },
+                        onStartWorkout = { _ ->
+                            // TODO: Pre-load workout context into run session
+                            navController.navigate("run_session")
+                        },
+                        onMarkComplete = { _ ->
+                            // TODO: call completeWorkout on ViewModel
+                            navController.popBackStack()
+                        }
+                    )
+                }
+            }
+
             composable("group_runs") {
                 GroupRunsScreen(
                     onCreateGroupRun = { navController.navigate("create_group_run") },

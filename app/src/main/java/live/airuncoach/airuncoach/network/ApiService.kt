@@ -8,6 +8,13 @@ import live.airuncoach.airuncoach.network.model.GroupRunRespondRequest
 import live.airuncoach.airuncoach.network.model.GroupRunCompleteRequest
 import live.airuncoach.airuncoach.network.model.GroupRunResultsResponse
 import live.airuncoach.airuncoach.network.model.*
+import live.airuncoach.airuncoach.network.model.GeneratePlanRequest
+import live.airuncoach.airuncoach.network.model.GeneratePlanResponse
+import live.airuncoach.airuncoach.network.model.TrainingPlanSummary
+import live.airuncoach.airuncoach.network.model.TrainingPlanDetails
+import live.airuncoach.airuncoach.network.model.TodayWorkoutResponse
+import live.airuncoach.airuncoach.network.model.TrainingPlanProgress
+import live.airuncoach.airuncoach.network.model.CompleteWorkoutRequest
 import live.airuncoach.airuncoach.domain.model.ConnectedDevice
 import live.airuncoach.airuncoach.domain.model.WellnessSyncResponse
 import okhttp3.MultipartBody
@@ -254,34 +261,39 @@ interface ApiService {
     suspend fun getSegmentsForRun(@Path("runId") runId: String): List<SegmentMatch>
 
     // ========== TRAINING PLANS ==========
-    
-    @GET("/api/training-plans")
-    suspend fun getTrainingPlans(
-        @Query("goal") goal: String,
-        @Query("level") level: String
-    ): List<TrainingPlan>
 
-    @GET("/api/training-plans/{planId}")
-    suspend fun getTrainingPlan(@Path("planId") planId: String): TrainingPlan
+    @POST("/api/training-plans/generate")
+    suspend fun generateTrainingPlan(@Body request: GeneratePlanRequest): GeneratePlanResponse
 
-    @POST("/api/training-plans/{userId}/generate")
-    suspend fun generateAITrainingPlan(
+    @GET("/api/training-plans/{userId}")
+    suspend fun getUserTrainingPlans(
         @Path("userId") userId: String,
-        @Body goal: TrainingGoal
-    ): TrainingPlan
+        @Query("status") status: String = "active"
+    ): List<TrainingPlanSummary>
 
-    @POST("/api/training-plans/{planId}/enroll")
-    suspend fun enrollInPlan(@Path("planId") planId: String)
+    @GET("/api/training-plans/details/{planId}")
+    suspend fun getTrainingPlanDetails(@Path("planId") planId: String): TrainingPlanDetails
 
-    @PUT("/api/training-plans/{planId}/workouts/{workoutId}")
-    suspend fun completeWorkout(
-        @Path("planId") planId: String,
-        @Path("workoutId") workoutId: String,
-        @Body runId: String
-    )
+    @GET("/api/training-plans/{planId}/today")
+    suspend fun getTodayWorkout(@Path("planId") planId: String): TodayWorkoutResponse
 
     @GET("/api/training-plans/{planId}/progress")
-    suspend fun getPlanProgress(@Path("planId") planId: String): PlanProgress
+    suspend fun getTrainingPlanProgress(@Path("planId") planId: String): TrainingPlanProgress
+
+    @PUT("/api/training-plans/workouts/{workoutId}/complete")
+    suspend fun completeWorkout(
+        @Path("workoutId") workoutId: String,
+        @Body request: CompleteWorkoutRequest
+    ): Response<Unit>
+
+    @PUT("/api/training-plans/workouts/{workoutId}/skip")
+    suspend fun skipWorkout(@Path("workoutId") workoutId: String): Response<Unit>
+
+    @PUT("/api/training-plans/{planId}/status")
+    suspend fun updatePlanStatus(
+        @Path("planId") planId: String,
+        @Body request: Map<String, String>
+    ): Response<Unit>
 
     // ========== SOCIAL FEED ==========
     

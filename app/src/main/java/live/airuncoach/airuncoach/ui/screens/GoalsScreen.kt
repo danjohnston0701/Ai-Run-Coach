@@ -32,6 +32,7 @@ import live.airuncoach.airuncoach.viewmodel.GoalsViewModelFactory
 fun GoalsScreen(
     onCreateGoal: () -> Unit = {},
     onNavigateBack: (() -> Unit)? = null,
+    onGeneratePlanForGoal: ((Goal) -> Unit)? = null,
     viewModel: GoalsViewModel = viewModel(factory = GoalsViewModelFactory(LocalContext.current))
 ) {
     val goalsState by viewModel.goalsState.collectAsState()
@@ -201,7 +202,8 @@ fun GoalsScreen(
                         GoalsListContent(
                             goals = state.goals,
                             onGoalClick = { goal -> showGoalDetails = goal },
-                            onDeleteClick = { goal -> goalToDelete = goal }
+                            onDeleteClick = { goal -> goalToDelete = goal },
+                            onGeneratePlan = onGeneratePlanForGoal
                         )
                     }
                 }
@@ -362,7 +364,8 @@ fun EmptyGoalsState(tab: Int, onCreateGoal: () -> Unit) {
 fun GoalsListContent(
     goals: List<Goal>,
     onGoalClick: (Goal) -> Unit,
-    onDeleteClick: (Goal) -> Unit
+    onDeleteClick: (Goal) -> Unit,
+    onGeneratePlan: ((Goal) -> Unit)? = null
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -373,7 +376,10 @@ fun GoalsListContent(
             GoalCard(
                 goal = goal,
                 onClick = { onGoalClick(goal) },
-                onDeleteClick = { onDeleteClick(goal) }
+                onDeleteClick = { onDeleteClick(goal) },
+                onGeneratePlan = if (onGeneratePlan != null && goal.isActive && !goal.isCompleted) {
+                    { onGeneratePlan(goal) }
+                } else null
             )
         }
     }
@@ -383,7 +389,8 @@ fun GoalsListContent(
 fun GoalCard(
     goal: Goal,
     onClick: () -> Unit,
-    onDeleteClick: () -> Unit
+    onDeleteClick: () -> Unit,
+    onGeneratePlan: (() -> Unit)? = null
 ) {
     Card(
         modifier = Modifier
@@ -498,6 +505,30 @@ fun GoalCard(
                     painter = painterResource(id = R.drawable.icon_more_vertical),
                     contentDescription = "Options",
                     tint = Colors.textMuted
+                )
+            }
+        }
+
+        // "Get Training Plan" CTA — shown for active distance/time goals
+        if (onGeneratePlan != null && (goal.type == "DISTANCE_TIME" || goal.type == "EVENT")) {
+            HorizontalDivider(color = Colors.backgroundRoot, thickness = 1.dp, modifier = Modifier.padding(horizontal = Spacing.lg))
+            TextButton(
+                onClick = onGeneratePlan,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.md, vertical = 4.dp)
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.icon_ai_vector),
+                    contentDescription = null,
+                    tint = Colors.primary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    "Get AI Training Plan",
+                    style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.primary
                 )
             }
         }

@@ -6300,6 +6300,149 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
+  // Get today's workout for a plan
+  app.get("/api/training-plans/:planId/today", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { planId } = req.params;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      const todaysWorkouts = await db.select().from(plannedWorkouts)
+        .where(and(
+          eq(plannedWorkouts.trainingPlanId, planId),
+          gte(plannedWorkouts.scheduledDate, today),
+        ))
+        .orderBy(plannedWorkouts.scheduledDate)
+        .limit(1);
+
+      if (todaysWorkouts.length === 0) {
+        // Look ahead up to 3 days for next workout
+        const threeDays = new Date(today);
+        threeDays.setDate(threeDays.getDate() + 3);
+        const upcoming = await db.select().from(plannedWorkouts)
+          .where(and(
+            eq(plannedWorkouts.trainingPlanId, planId),
+            eq(plannedWorkouts.isCompleted, false)
+          ))
+          .orderBy(plannedWorkouts.scheduledDate)
+          .limit(1);
+        return res.json({ workout: upcoming[0] || null, isToday: false });
+      }
+
+      res.json({ workout: todaysWorkouts[0], isToday: true });
+    } catch (error: any) {
+      console.error("Get today workout error:", error);
+      res.status(500).json({ error: "Failed to get today's workout" });
+    }
+  });
+
+  // Get training plan progress stats
+  app.get("/api/training-plans/:planId/progress", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { planId } = req.params;
+
+      const [plan] = await db.select().from(trainingPlans).where(eq(trainingPlans.id, planId));
+      if (!plan) return res.status(404).json({ error: "Plan not found" });
+
+      const allWorkouts = await db.select().from(plannedWorkouts).where(eq(plannedWorkouts.trainingPlanId, planId));
+      const completedCount = allWorkouts.filter(w => w.isCompleted).length;
+      const totalCount = allWorkouts.length;
+
+      // Weekly breakdown
+      const allWeeks = await db.select().from(weeklyPlans).where(eq(weeklyPlans.trainingPlanId, planId)).orderBy(weeklyPlans.weekNumber);
+      const weekStats = await Promise.all(allWeeks.map(async (week) => {
+        const weekWorkouts = allWorkouts.filter(w => w.weeklyPlanId === week.id);
+        const completed = weekWorkouts.filter(w => w.isCompleted).length;
+        return {
+          weekNumber: week.weekNumber,
+          weekDescription: week.weekDescription,
+          totalDistance: week.totalDistance,
+          focusArea: week.focusArea,
+          intensityLevel: week.intensityLevel,
+          totalWorkouts: weekWorkouts.length,
+          completedWorkouts: completed,
+          completionRate: weekWorkouts.length > 0 ? completed / weekWorkouts.length : 0,
+        };
+      }));
+
+      res.json({
+        planId,
+        currentWeek: plan.currentWeek,
+        totalWeeks: plan.totalWeeks,
+        goalType: plan.goalType,
+        targetDistance: plan.targetDistance,
+        targetTime: plan.targetTime,
+        status: plan.status,
+        completedWorkouts: completedCount,
+        totalWorkouts: totalCount,
+        overallCompletion: totalCount > 0 ? completedCount / totalCount : 0,
+        weeks: weekStats,
+      });
+    } catch (error: any) {
+      console.error("Get plan progress error:", error);
+      res.status(500).json({ error: "Failed to get plan progress" });
+    }
+  });
+
+  // Complete a workout (link to a run session)
+  app.put("/api/training-plans/workouts/:workoutId/complete", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { workoutId } = req.params;
+      const { runId } = req.body;
+
+      await db.update(plannedWorkouts)
+        .set({ isCompleted: true, completedRunId: runId || null })
+        .where(eq(plannedWorkouts.id, workoutId));
+
+      // Check if we need to advance currentWeek on the parent plan
+      const [workout] = await db.select().from(plannedWorkouts).where(eq(plannedWorkouts.id, workoutId));
+      if (workout) {
+        const weekWorkouts = await db.select().from(plannedWorkouts)
+          .where(eq(plannedWorkouts.weeklyPlanId, workout.weeklyPlanId!));
+        const allComplete = weekWorkouts.every(w => w.isCompleted);
+        if (allComplete) {
+          // Advance to next week
+          const [week] = await db.select().from(weeklyPlans).where(eq(weeklyPlans.id, workout.weeklyPlanId!));
+          if (week) {
+            await db.update(trainingPlans)
+              .set({ currentWeek: week.weekNumber + 1 })
+              .where(eq(trainingPlans.id, workout.trainingPlanId));
+          }
+        }
+      }
+
+      res.json({ success: true, workoutId });
+    } catch (error: any) {
+      console.error("Complete workout error:", error);
+      res.status(500).json({ error: "Failed to complete workout" });
+    }
+  });
+
+  // Skip a workout (mark rest day / missed)
+  app.put("/api/training-plans/workouts/:workoutId/skip", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { workoutId } = req.params;
+      await db.update(plannedWorkouts).set({ isCompleted: true }).where(eq(plannedWorkouts.id, workoutId));
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to skip workout" });
+    }
+  });
+
+  // Pause or cancel a plan
+  app.put("/api/training-plans/:planId/status", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { planId } = req.params;
+      const { status } = req.body as { status: 'active' | 'paused' | 'cancelled' };
+      await db.update(trainingPlans).set({ status }).where(eq(trainingPlans.id, planId));
+      res.json({ success: true, planId, status });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to update plan status" });
+    }
+  });
+
   // ==================== CLUBS ENDPOINTS ====================
   
   // Get clubs

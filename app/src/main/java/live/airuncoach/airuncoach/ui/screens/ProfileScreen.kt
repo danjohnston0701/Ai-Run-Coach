@@ -65,6 +65,7 @@ fun ProfileScreen(
     onNavigateToNotifications: () -> Unit,
     onNavigateToConnectedDevices: () -> Unit,
     onNavigateToSubscription: () -> Unit,
+    onNavigateToCoachingProgramme: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val viewModel: ProfileViewModel = hiltViewModel()
@@ -203,6 +204,7 @@ fun ProfileScreen(
         item {
             SettingsSection {
                 SettingsItem(icon = R.drawable.icon_ai_vector, text = "Ai Coach Settings", onClick = onNavigateToCoachSettings)
+                SettingsItem(icon = R.drawable.icon_calendar_vector, text = "Coaching Programme", onClick = onNavigateToCoachingProgramme)
             }
         }
         item { Spacer(modifier = Modifier.height(Spacing.lg)) }
