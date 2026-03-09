@@ -10,6 +10,7 @@ import java.io.File
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -41,7 +42,6 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import live.airuncoach.airuncoach.network.model.CustomSticker
 import live.airuncoach.airuncoach.network.model.PlacedSticker
 import live.airuncoach.airuncoach.network.model.ShareTemplate
 import live.airuncoach.airuncoach.network.model.StickerWidget
@@ -67,7 +67,9 @@ fun ShareImageEditorScreen(
 
     var isStickerPanelExpanded by remember { mutableStateOf(false) }
     var isBackgroundPanelExpanded by remember { mutableStateOf(false) }
-    var isCustomStickerPanelExpanded by remember { mutableStateOf(false) }
+    
+    // Collapsible control strip state
+    var isControlStripExpanded by remember { mutableStateOf(true) }
 
     val cameraPhotoUri = remember {
         val photoFile = File(context.cacheDir, "share_bg_photo.jpg")
@@ -88,17 +90,10 @@ fun ShareImageEditorScreen(
         uri?.let { viewModel.setCustomBackground(it) }
     }
 
-    val stickerPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri ->
-        uri?.let { viewModel.addCustomSticker(it) }
-    }
-
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF050A12))
-            .statusBarsPadding()
     ) {
         if (state.isLoadingTemplates) {
             Box(
@@ -134,46 +129,119 @@ fun ShareImageEditorScreen(
                     )
                 }
 
-                // ─── Compact control strip ───
-                ControlStrip(
-                    templates = state.templates,
-                    selectedTemplate = state.selectedTemplate,
-                    selectedAspectRatio = state.selectedAspectRatio,
-                    onSelectTemplate = { viewModel.selectTemplate(it) },
-                    onSelectAspectRatio = { viewModel.selectAspectRatio(it) },
-                    isStickerPanelExpanded = isStickerPanelExpanded,
-                    onToggleStickers = { isStickerPanelExpanded = !isStickerPanelExpanded },
-                    placedStickerCount = state.placedStickers.size,
-                    stickers = state.stickers,
-                    placedStickerIds = state.placedStickers.map { it.widgetId }.toSet(),
-                    onAddSticker = { viewModel.addSticker(it) },
-                    onRemoveSticker = { viewModel.removeSticker(it) },
-                    // Background
-                    isBackgroundPanelExpanded = isBackgroundPanelExpanded,
-                    onToggleBackground = { isBackgroundPanelExpanded = !isBackgroundPanelExpanded },
-                    hasCustomBackground = state.customBackgroundBase64 != null,
-                    backgroundOpacity = state.backgroundOpacity,
-                    backgroundBlur = state.backgroundBlur,
-                    onPickBackground = { backgroundPickerLauncher.launch("image/*") },
-                    onTakePhoto = { cameraLauncher.launch(cameraPhotoUri) },
-                    onRemoveBackground = { viewModel.removeCustomBackground() },
-                    onBackgroundOpacityChange = { viewModel.setBackgroundOpacity(it) },
-                    onBackgroundBlurChange = { viewModel.setBackgroundBlur(it) },
-                    // Custom stickers
-                    isCustomStickerPanelExpanded = isCustomStickerPanelExpanded,
-                    onToggleCustomStickers = { isCustomStickerPanelExpanded = !isCustomStickerPanelExpanded },
-                    customStickers = state.customStickers,
-                    onPickCustomSticker = { stickerPickerLauncher.launch("image/*") },
-                    onRemoveCustomSticker = { viewModel.removeCustomSticker(it) },
-                    onCustomStickerScaleChange = { idx, scale -> viewModel.updateCustomStickerScale(idx, scale) },
-                    onCustomStickerRotationChange = { idx, rotation -> viewModel.updateCustomStickerRotation(idx, rotation) },
-                    onCustomStickerOpacityChange = { idx, opacity -> viewModel.updateCustomStickerOpacity(idx, opacity) },
-                    // Actions
-                    isSaving = state.isSaving,
-                    isGenerating = state.isGenerating,
-                    onDownload = { viewModel.saveToGallery() },
-                    onShare = { viewModel.shareImage() }
-                )
+                // ─── Collapsible control strip ───
+                AnimatedVisibility(
+                    visible = isControlStripExpanded,
+                    enter = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(),
+                    exit = shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut()
+                ) {
+                    ControlStrip(
+                        templates = state.templates,
+                        selectedTemplate = state.selectedTemplate,
+                        selectedAspectRatio = state.selectedAspectRatio,
+                        onSelectTemplate = { viewModel.selectTemplate(it) },
+                        onSelectAspectRatio = { viewModel.selectAspectRatio(it) },
+                        isStickerPanelExpanded = isStickerPanelExpanded,
+                        onToggleStickers = { isStickerPanelExpanded = !isStickerPanelExpanded },
+                        placedStickerCount = state.placedStickers.size,
+                        stickers = state.stickers,
+                        placedStickerIds = state.placedStickers.map { it.widgetId }.toSet(),
+                        onAddSticker = { viewModel.addSticker(it) },
+                        onRemoveSticker = { viewModel.removeSticker(it) },
+                        // Background
+                        isBackgroundPanelExpanded = isBackgroundPanelExpanded,
+                        onToggleBackground = { isBackgroundPanelExpanded = !isBackgroundPanelExpanded },
+                        hasCustomBackground = state.customBackgroundBase64 != null,
+                        backgroundOpacity = state.backgroundOpacity,
+                        backgroundBlur = state.backgroundBlur,
+                        onPickBackground = { backgroundPickerLauncher.launch("image/*") },
+                        onTakePhoto = { cameraLauncher.launch(cameraPhotoUri) },
+                        onRemoveBackground = { viewModel.removeCustomBackground() },
+                        onBackgroundOpacityChange = { viewModel.setBackgroundOpacity(it) },
+                        onBackgroundBlurChange = { viewModel.setBackgroundBlur(it) },
+                        // Actions
+                        isSaving = state.isSaving,
+                        isGenerating = state.isGenerating,
+                        onDownload = { viewModel.saveToGallery() },
+                        onShare = { viewModel.shareImage() },
+                        // Collapse
+                        onCollapse = { isControlStripExpanded = false }
+                    )
+                }
+                
+                // ─── Collapsed mini bar when controls are hidden ───
+                if (!isControlStripExpanded) {
+                    Surface(
+                        color = Color(0xFF0D1117),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .pointerInput(Unit) {
+                                detectVerticalDragGestures { _, dragAmount ->
+                                    if (dragAmount < -30) { // Swipe up to expand
+                                        isControlStripExpanded = true
+                                    }
+                                }
+                            }
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .navigationBarsPadding()
+                                .padding(vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            // Swipe up hint
+                            Box(
+                                modifier = Modifier
+                                    .width(36.dp)
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(Colors.border)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Swipe up for controls",
+                                style = AppTextStyles.caption,
+                                color = Colors.textMuted
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            // Minimal action row
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = { viewModel.saveToGallery() },
+                                    enabled = !state.isSaving && !state.isGenerating,
+                                    modifier = Modifier.weight(1f).height(42.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    border = BorderStroke(1.5.dp, Colors.primary),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
+                                ) {
+                                    Icon(Icons.Default.Download, null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Download", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                }
+                                Button(
+                                    onClick = { viewModel.shareImage() },
+                                    enabled = !state.isSaving && !state.isGenerating,
+                                    modifier = Modifier.weight(1f).height(42.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Colors.primary,
+                                        contentColor = Colors.buttonText
+                                    )
+                                ) {
+                                    Icon(Icons.Default.Share, null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Share", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // ─── Back button floating top-left ───
@@ -183,6 +251,7 @@ fun ShareImageEditorScreen(
                 color = Color.Black.copy(alpha = 0.6f),
                 border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.4f)),
                 modifier = Modifier
+                    .statusBarsPadding()
                     .padding(start = 12.dp, top = 8.dp)
                     .size(40.dp)
             ) {
@@ -398,20 +467,13 @@ private fun ControlStrip(
     onRemoveBackground: () -> Unit,
     onBackgroundOpacityChange: (Float) -> Unit,
     onBackgroundBlurChange: (Int) -> Unit,
-    // Custom stickers
-    isCustomStickerPanelExpanded: Boolean,
-    onToggleCustomStickers: () -> Unit,
-    customStickers: List<CustomSticker>,
-    onPickCustomSticker: () -> Unit,
-    onRemoveCustomSticker: (Int) -> Unit,
-    onCustomStickerScaleChange: (Int, Float) -> Unit,
-    onCustomStickerRotationChange: (Int, Float) -> Unit,
-    onCustomStickerOpacityChange: (Int, Float) -> Unit,
     // Actions
     isSaving: Boolean,
     isGenerating: Boolean,
     onDownload: () -> Unit,
-    onShare: () -> Unit
+    onShare: () -> Unit,
+    // Collapse
+    onCollapse: () -> Unit
 ) {
     Surface(
         color = Color(0xFF0D1117),
@@ -424,6 +486,13 @@ private fun ControlStrip(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures { _, dragAmount ->
+                        if (dragAmount > 50) { // Swipe down to collapse
+                            onCollapse()
+                        }
+                    }
+                }
         ) {
             // Drag handle
             Box(
@@ -600,74 +669,6 @@ private fun ControlStrip(
                     onRemoveBackground = onRemoveBackground,
                     onOpacityChange = onBackgroundOpacityChange,
                     onBlurChange = onBackgroundBlurChange
-                )
-            }
-
-            // ─── Custom stickers toggle ───
-            Surface(
-                onClick = onToggleCustomStickers,
-                color = Color.Transparent
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AddPhotoAlternate,
-                        contentDescription = null,
-                        tint = Colors.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Custom Stickers",
-                        style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold),
-                        color = Colors.textPrimary,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (customStickers.isNotEmpty()) {
-                        Surface(
-                            shape = CircleShape,
-                            color = Colors.primary,
-                            modifier = Modifier.size(20.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    "${customStickers.size}",
-                                    style = AppTextStyles.caption.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 10.sp
-                                    ),
-                                    color = Colors.buttonText
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(4.dp))
-                    }
-                    Icon(
-                        imageVector = if (isCustomStickerPanelExpanded) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
-                        contentDescription = null,
-                        tint = Colors.textSecondary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-
-            // Expandable custom sticker panel
-            AnimatedVisibility(
-                visible = isCustomStickerPanelExpanded,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut()
-            ) {
-                CustomStickerPanel(
-                    customStickers = customStickers,
-                    onPickSticker = onPickCustomSticker,
-                    onRemove = onRemoveCustomSticker,
-                    onScaleChange = onCustomStickerScaleChange,
-                    onRotationChange = onCustomStickerRotationChange,
-                    onOpacityChange = onCustomStickerOpacityChange
                 )
             }
 
@@ -1208,129 +1209,6 @@ private fun BackgroundControlPanel(
                     modifier = Modifier.width(36.dp),
                     textAlign = TextAlign.End
                 )
-            }
-        }
-    }
-}
-
-/* ═══════════════════════ CUSTOM STICKER PANEL ═══════════════════════ */
-
-@Composable
-private fun CustomStickerPanel(
-    customStickers: List<CustomSticker>,
-    onPickSticker: () -> Unit,
-    onRemove: (Int) -> Unit,
-    onScaleChange: (Int, Float) -> Unit,
-    onRotationChange: (Int, Float) -> Unit,
-    onOpacityChange: (Int, Float) -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
-    ) {
-        // Add sticker button
-        OutlinedButton(
-            onClick = onPickSticker,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(10.dp),
-            border = BorderStroke(1.dp, Colors.primary.copy(alpha = 0.5f)),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary),
-            enabled = customStickers.size < 10
-        ) {
-            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                if (customStickers.size < 10) "Add Image Sticker" else "Max 10 stickers",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-
-        if (customStickers.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-
-        // List of placed custom stickers with controls
-        customStickers.forEachIndexed { index, sticker ->
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2332)),
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.4f)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 3.dp)
-            ) {
-                Column(modifier = Modifier.padding(10.dp)) {
-                    // Header row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.Image,
-                            contentDescription = null,
-                            tint = Colors.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            "Sticker ${index + 1}",
-                            style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold),
-                            color = Colors.textPrimary,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(
-                            onClick = { onRemove(index) },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(Icons.Default.Close, null, tint = Colors.error, modifier = Modifier.size(16.dp))
-                        }
-                    }
-
-                    // Scale slider
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Size", style = AppTextStyles.caption, color = Colors.textMuted, modifier = Modifier.width(48.dp))
-                        Slider(
-                            value = sticker.scale,
-                            onValueChange = { onScaleChange(index, it) },
-                            valueRange = 0.1f..3.0f,
-                            modifier = Modifier.weight(1f),
-                            colors = SliderDefaults.colors(thumbColor = Colors.primary, activeTrackColor = Colors.primary)
-                        )
-                    }
-
-                    // Rotation slider
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Rotate", style = AppTextStyles.caption, color = Colors.textMuted, modifier = Modifier.width(48.dp))
-                        Slider(
-                            value = sticker.rotation,
-                            onValueChange = { onRotationChange(index, it) },
-                            valueRange = -180f..180f,
-                            modifier = Modifier.weight(1f),
-                            colors = SliderDefaults.colors(thumbColor = Colors.accent, activeTrackColor = Colors.accent)
-                        )
-                        Text(
-                            "${sticker.rotation.toInt()}°",
-                            style = AppTextStyles.caption,
-                            color = Colors.textSecondary,
-                            modifier = Modifier.width(36.dp),
-                            textAlign = TextAlign.End
-                        )
-                    }
-
-                    // Opacity slider
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Fade", style = AppTextStyles.caption, color = Colors.textMuted, modifier = Modifier.width(48.dp))
-                        Slider(
-                            value = sticker.opacity,
-                            onValueChange = { onOpacityChange(index, it) },
-                            valueRange = 0.1f..1.0f,
-                            modifier = Modifier.weight(1f),
-                            colors = SliderDefaults.colors(thumbColor = Colors.primary, activeTrackColor = Colors.primary)
-                        )
-                    }
-                }
             }
         }
     }

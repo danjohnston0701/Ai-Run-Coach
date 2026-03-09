@@ -103,7 +103,7 @@ fun EditGoalScreen(
     }
     
     // Function to handle goal update
-    val handleUpdateGoal = {
+    val handleUpdateGoal: () -> Unit = {
         if (goalTitle.isBlank()) {
             showError = "Please enter a goal title"
         } else {

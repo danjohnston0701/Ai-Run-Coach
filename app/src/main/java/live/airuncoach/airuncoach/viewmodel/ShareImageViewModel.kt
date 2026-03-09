@@ -172,39 +172,84 @@ class ShareImageViewModel @Inject constructor(
     fun setCustomBackground(uri: Uri) {
         viewModelScope.launch {
             try {
-                val inputStream = context.contentResolver.openInputStream(uri) ?: return@launch
-                val bitmap = BitmapFactory.decodeStream(inputStream)
-                inputStream.close()
-
-                if (bitmap == null) {
-                    _state.update { it.copy(error = "Failed to load image") }
-                    return@launch
+                // Get the actual file path from URI for better reliability
+                val inputStream = if (uri.scheme == "file") {
+                    java.io.FileInputStream(java.io.File(uri.path!!))
+                } else {
+                    context.contentResolver.openInputStream(uri)
                 }
 
-                // Resize to max 1080px on longest side to keep base64 reasonable
-                val maxDim = 1080
-                val scale = maxDim.toFloat() / maxOf(bitmap.width, bitmap.height)
-                val resized = if (scale < 1f) {
-                    Bitmap.createScaledBitmap(
-                        bitmap,
-                        (bitmap.width * scale).toInt(),
-                        (bitmap.height * scale).toInt(),
-                        true
+                inputStream?.use { stream ->
+                    // First pass: decode bitmap
+                    val bitmap = BitmapFactory.decodeStream(stream)
+                    if (bitmap == null) {
+                        _state.update { it.copy(error = "Failed to load image") }
+                        return@launch
+                    }
+
+                    // Read EXIF orientation and rotate if needed
+                    val rotatedBitmap = try {
+                        val exifStream = if (uri.scheme == "file") {
+                            java.io.FileInputStream(java.io.File(uri.path!!))
+                        } else {
+                            context.contentResolver.openInputStream(uri)
+                        }
+                        val rotated = exifStream?.use { exifInputStream ->
+                            val exif = android.media.ExifInterface(exifInputStream)
+                            val orientation = exif.getAttributeInt(
+                                android.media.ExifInterface.TAG_ORIENTATION,
+                                android.media.ExifInterface.ORIENTATION_NORMAL
+                            )
+                            rotateBitmapByOrientation(bitmap, orientation)
+                        }
+                        rotated ?: bitmap
+                    } catch (e: Exception) {
+                        // If EXIF fails, use original bitmap
+                        bitmap
+                    }
+
+                    // Resize to max 1080px on longest side to keep base64 reasonable
+                    val maxDim = 1080
+                    val scale = maxDim.toFloat() / maxOf(rotatedBitmap.width, rotatedBitmap.height)
+                    val resized = if (scale < 1f) {
+                        Bitmap.createScaledBitmap(
+                            rotatedBitmap,
+                            (rotatedBitmap.width * scale).toInt(),
+                            (rotatedBitmap.height * scale).toInt(),
+                            true
+                        )
+                    } else rotatedBitmap
+
+                    val outputStream = ByteArrayOutputStream()
+                    resized.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
+                    val base64 = "data:image/jpeg;base64," + Base64.encodeToString(
+                        outputStream.toByteArray(), Base64.NO_WRAP
                     )
-                } else bitmap
 
-                val outputStream = ByteArrayOutputStream()
-                resized.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
-                val base64 = "data:image/jpeg;base64," + Base64.encodeToString(
-                    outputStream.toByteArray(), Base64.NO_WRAP
-                )
-
-                _state.update { it.copy(customBackgroundBase64 = base64) }
-                requestPreviewDebounced()
+                    _state.update { it.copy(customBackgroundBase64 = base64) }
+                    requestPreviewDebounced()
+                }
             } catch (e: Exception) {
                 Log.e("ShareImageVM", "Failed to process background image", e)
                 _state.update { it.copy(error = "Failed to load background image") }
             }
+        }
+    }
+
+    private fun rotateBitmapByOrientation(bitmap: Bitmap, orientation: Int): Bitmap {
+        val matrix = android.graphics.Matrix()
+        when (orientation) {
+            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            android.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.preScale(-1f, 1f)
+            android.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.preScale(1f, -1f)
+            else -> return bitmap
+        }
+        return try {
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        } catch (e: Exception) {
+            bitmap
         }
     }
 

@@ -261,45 +261,26 @@ class RunSummaryViewModel @Inject constructor(
                 )
                 try { apiService.updateRunProgress(updateRequest) } catch (_: Exception) {}
 
-                // Build the comprehensive freeform request
-                val user = getUserFromPrefs()
-                val goals = loadActiveGoals(user)
-                val request = buildFreeformRequest(session, user, goals)
-
-                // Try freeform endpoint (90s timeout — LLM needs time for large context)
+                // Use the comprehensive analysis endpoint (provides structured insights)
                 try {
-                    Log.d("RunSummaryViewModel", "Calling freeform analysis for run ${session.id}...")
-                    val response = withTimeout(90_000L) {
-                        apiService.generateFreeformAnalysis(session.id, request)
+                    Log.d("RunSummaryViewModel", "Calling comprehensive analysis for run ${session.id}...")
+                    val response = withTimeout(60_000L) {
+                        apiService.getComprehensiveRunAnalysis(session.id)
                     }
-                    Log.d("RunSummaryViewModel", "Freeform analysis received (${response.analysis.length} chars)")
-                    _analysisState.value = AiAnalysisState.Freeform(
-                        markdown = response.analysis,
-                        title = response.title
-                    )
+                    Log.d("RunSummaryViewModel", "Comprehensive analysis received")
+                    _analysisState.value = AiAnalysisState.Comprehensive(response.analysis)
 
-                    // Save freeform analysis for future loading
+                    // Save analysis for future loading
                     val saveJson = gson.toJsonTree(mapOf(
-                        "freeform" to true,
-                        "markdown" to response.analysis,
-                        "title" to response.title
+                        "comprehensive" to true,
+                        "analysis" to response.analysis
                     ))
                     try { apiService.saveRunAnalysis(session.id, SaveRunAnalysisRequest(saveJson)) } catch (_: Exception) {}
-                } catch (freeformError: Exception) {
-                    Log.w("RunSummaryViewModel", "Freeform analysis failed: ${freeformError.message}", freeformError)
-                    // Fall back to the old comprehensive analysis endpoint (just needs runId)
-                    try {
-                        Log.d("RunSummaryViewModel", "Falling back to comprehensive analysis...")
-                        val fallbackResponse = withTimeout(60_000L) {
-                            apiService.getComprehensiveRunAnalysis(session.id)
-                        }
-                        _analysisState.value = AiAnalysisState.Comprehensive(fallbackResponse.analysis)
-                    } catch (fallbackError: Exception) {
-                        Log.e("RunSummaryViewModel", "Comprehensive fallback also failed: ${fallbackError.message}", fallbackError)
-                        _analysisState.value = AiAnalysisState.Error(
-                            "AI analysis unavailable. Tap to try again."
-                        )
-                    }
+                } catch (analysisError: Exception) {
+                    Log.w("RunSummaryViewModel", "Comprehensive analysis failed: ${analysisError.message}", analysisError)
+                    _analysisState.value = AiAnalysisState.Error(
+                        "AI analysis unavailable. Tap to try again."
+                    )
                 }
 
             } catch (e: Exception) {
