@@ -11,5 +11,9 @@ data class HeartRateCoachingRequest(
     @SerializedName("coachName") val coachName: String?,
     @SerializedName("coachTone") val coachTone: String?,
     @SerializedName("coachGender") val coachGender: String? = null,
-    @SerializedName("coachAccent") val coachAccent: String? = null
+    @SerializedName("coachAccent") val coachAccent: String? = null,
+    // User profile for personalised zone calculation
+    @SerializedName("runnerAge") val runnerAge: Int? = null,
+    @SerializedName("fitnessLevel") val fitnessLevel: String? = null,
+    @SerializedName("runnerName") val runnerName: String? = null
 )

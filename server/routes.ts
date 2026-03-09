@@ -475,6 +475,104 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ─── Run History Stats ───────────────────────────────────────────────────────
+  // Returns aggregated stats from the user's recent runs to personalise AI coaching.
+  // Fetches the last 10 completed runs, filters to the 4 most similar in distance,
+  // and computes trends the coaching engine can reference.
+  app.get("/api/users/:userId/run-history-stats", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.params.userId;
+      const targetDistanceKm = req.query.targetDistanceKm ? parseFloat(req.query.targetDistanceKm as string) : null;
+
+      const allRuns = await storage.getUserRuns(userId);
+      const completedRuns = allRuns
+        .filter(r => r.completedAt && r.distanceInMeters && r.distanceInMeters > 500)
+        .sort((a, b) => new Date(b.completedAt!).getTime() - new Date(a.completedAt!).getTime());
+
+      if (completedRuns.length === 0) {
+        return res.json({ runsAnalysed: 0, avgPaceSecondsPerKm: 0, avgPaceFormatted: 'N/A', avgDistanceKm: 0, consistencyTrend: 'consistent' });
+      }
+
+      // Filter to similar-distance runs if a target is provided (within 50%)
+      const recentRuns = (targetDistanceKm && targetDistanceKm > 0)
+        ? completedRuns.filter(r => {
+            const dKm = (r.distanceInMeters ?? 0) / 1000;
+            return dKm >= targetDistanceKm * 0.5 && dKm <= targetDistanceKm * 1.5;
+          }).slice(0, 4)
+        : completedRuns.slice(0, 5);
+
+      const analysedRuns = recentRuns.length > 0 ? recentRuns : completedRuns.slice(0, 4);
+
+      // Helper: parse "M:SS" pace string → seconds
+      const paceToSeconds = (pace: string | null | undefined): number | null => {
+        if (!pace) return null;
+        const clean = pace.replace('/km', '').trim();
+        const parts = clean.split(':');
+        if (parts.length !== 2) return null;
+        const mins = parseInt(parts[0]);
+        const secs = parseInt(parts[1]);
+        if (isNaN(mins) || isNaN(secs)) return null;
+        return mins * 60 + secs;
+      };
+
+      const paceSeconds = analysedRuns.map(r => paceToSeconds(r.averagePace)).filter((s): s is number => s !== null && s > 60 && s < 900);
+      const avgPaceSec = paceSeconds.length > 0 ? Math.round(paceSeconds.reduce((a, b) => a + b, 0) / paceSeconds.length) : 0;
+      const bestPaceSec = paceSeconds.length > 0 ? Math.min(...paceSeconds) : null;
+      const avgDistanceKm = analysedRuns.reduce((a, r) => a + (r.distanceInMeters ?? 0) / 1000, 0) / analysedRuns.length;
+
+      const cadences = analysedRuns.map(r => r.averageCadence).filter((c): c is number => !!c && c > 100);
+      const avgCadence = cadences.length > 0 ? Math.round(cadences.reduce((a, b) => a + b, 0) / cadences.length) : undefined;
+
+      const heartRates = analysedRuns.map(r => r.averageHeartRate).filter((h): h is number => !!h && h > 40);
+      const avgHeartRate = heartRates.length > 0 ? Math.round(heartRates.reduce((a, b) => a + b, 0) / heartRates.length) : undefined;
+
+      // Consistency trend: compare first half pace vs second half pace of analysed runs
+      let consistencyTrend: 'improving' | 'declining' | 'consistent' | 'inconsistent' = 'consistent';
+      if (paceSeconds.length >= 3) {
+        const mid = Math.floor(paceSeconds.length / 2);
+        const older = paceSeconds.slice(mid);
+        const newer = paceSeconds.slice(0, mid);
+        const olderAvg = older.reduce((a, b) => a + b, 0) / older.length;
+        const newerAvg = newer.reduce((a, b) => a + b, 0) / newer.length;
+        const diff = newerAvg - olderAvg; // negative = getting faster = improving
+        if (diff < -10) consistencyTrend = 'improving';
+        else if (diff > 10) consistencyTrend = 'declining';
+        else if (Math.max(...paceSeconds) - Math.min(...paceSeconds) > 45) consistencyTrend = 'inconsistent';
+        else consistencyTrend = 'consistent';
+      }
+
+      // Format seconds → "M:SS"
+      const secToFormatted = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+
+      // Last run context
+      const lastRun = completedRuns[0];
+      const lastRunPace = lastRun ? paceToSeconds(lastRun.averagePace) : null;
+      const daysSinceLastRun = lastRun?.completedAt
+        ? Math.round((Date.now() - new Date(lastRun.completedAt).getTime()) / 86400000)
+        : null;
+      const lastRunDateLabel = daysSinceLastRun !== null
+        ? daysSinceLastRun === 0 ? 'today' : daysSinceLastRun === 1 ? 'yesterday' : `${daysSinceLastRun} days ago`
+        : undefined;
+
+      res.json({
+        runsAnalysed: analysedRuns.length,
+        avgPaceSecondsPerKm: avgPaceSec,
+        avgPaceFormatted: avgPaceSec > 0 ? secToFormatted(avgPaceSec) : 'N/A',
+        bestPaceFormatted: bestPaceSec ? secToFormatted(bestPaceSec) : undefined,
+        avgDistanceKm: Math.round(avgDistanceKm * 10) / 10,
+        avgCadence,
+        avgHeartRate,
+        consistencyTrend,
+        lastRunPaceFormatted: lastRunPace ? secToFormatted(lastRunPace) : undefined,
+        lastRunDate: lastRunDateLabel,
+        totalRunsAllTime: completedRuns.length,
+      });
+    } catch (error: any) {
+      console.error("Run history stats error:", error);
+      res.status(500).json({ error: "Failed to compute run history stats" });
+    }
+  });
+
   app.get("/api/runs/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       console.log(`[GET /api/runs/${req.params.id}] Fetching run for user: ${req.user?.userId}`);
@@ -4233,6 +4331,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       const aiService = await import("./ai-service");
+      // Prefer age sent from the device (req.body.runnerAge), fall back to profile
+      const runnerAge = req.body.runnerAge ?? (user as any)?.age ?? undefined;
       const response = await aiService.generateHeartRateCoaching({
         currentHR,
         avgHR,
@@ -4242,7 +4342,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         coachName,
         coachTone: effectiveTone,
         coachAccent: user?.coachAccent || 'british',
+        coachGender: user?.coachGender,
         wellness,
+        runnerAge,
+        fitnessLevel: req.body.fitnessLevel ?? (user as any)?.fitnessLevel ?? undefined,
+        runnerName: req.body.runnerName ?? user?.name ?? undefined,
       });
       
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)

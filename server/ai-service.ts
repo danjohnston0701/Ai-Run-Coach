@@ -203,6 +203,61 @@ Be encouraging, specific to the conditions, and give one actionable tip. Speak n
   return completion.choices[0].message.content || "Take it easy at the start and find your rhythm. Good luck!";
 }
 
+/**
+ * Historical run statistics passed from the Android app at run-start.
+ * Calculated from the user's last 3-5 completed runs of similar distance.
+ */
+export interface RunHistoryStats {
+  runsAnalysed: number;            // How many runs were used
+  avgPaceSecondsPerKm: number;     // Average pace across recent runs (sec/km)
+  avgPaceFormatted: string;        // e.g. "5:42"
+  bestPaceFormatted?: string;      // Personal best pace for similar distance
+  avgDistanceKm: number;           // Average distance of recent runs
+  avgCadence?: number;             // Average cadence (spm)
+  avgHeartRate?: number;           // Average HR
+  consistencyTrend: 'improving' | 'declining' | 'consistent' | 'inconsistent';
+  avgPaceDropPercent?: number;     // Typical % pace drop they experience mid-run
+  lastRunPaceFormatted?: string;   // Their pace on the most recent run
+  lastRunDate?: string;            // e.g. "3 days ago"
+  totalRunsAllTime?: number;       // Total run count — tells us how experienced they are
+}
+
+/**
+ * Build a concise natural-language context string from run history stats.
+ * Compares current pace to their recent average so the AI can comment meaningfully.
+ */
+function buildRunHistoryContext(history: RunHistoryStats, currentPace?: string): string {
+  if (!history || history.runsAnalysed === 0) return '';
+
+  let ctx = `Based on their last ${history.runsAnalysed} runs: avg pace ${history.avgPaceFormatted}/km`;
+
+  if (currentPace && history.avgPaceSecondsPerKm > 0) {
+    // Parse current pace to seconds
+    const parts = currentPace.replace('/km', '').split(':');
+    if (parts.length === 2) {
+      const currentSec = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+      const diff = currentSec - history.avgPaceSecondsPerKm;
+      if (diff < -10) {
+        ctx += ` — they're running ${Math.abs(Math.round(diff))}s/km FASTER than their usual pace (performing above average today)`;
+      } else if (diff > 10) {
+        ctx += ` — they're running ${Math.round(diff)}s/km SLOWER than their usual pace`;
+      } else {
+        ctx += ` — they're running close to their typical pace`;
+      }
+    }
+  }
+
+  if (history.bestPaceFormatted) ctx += `. PB: ${history.bestPaceFormatted}/km`;
+  if (history.avgCadence) ctx += `. Typical cadence: ${history.avgCadence}spm`;
+  if (history.consistencyTrend !== 'consistent') {
+    const trendLabel = { improving: 'on an improving trend', declining: 'on a recent dip in form', inconsistent: 'running inconsistently lately' }[history.consistencyTrend];
+    ctx += `. Trend: ${trendLabel}`;
+  }
+  if (history.lastRunPaceFormatted) ctx += `. Last run: ${history.lastRunPaceFormatted}/km (${history.lastRunDate || 'recently'})`;
+
+  return ctx + '.';
+}
+
 export async function generatePaceUpdate(params: {
   distance: number;
   targetDistance: number;
@@ -211,6 +266,7 @@ export async function generatePaceUpdate(params: {
   coachName: string;
   coachTone: string;
   coachAccent?: string;
+  coachGender?: string;
   isSplit: boolean;
   splitKm?: number;
   splitPace?: string;
@@ -219,8 +275,14 @@ export async function generatePaceUpdate(params: {
   isOnHill?: boolean;
   kmSplits?: Array<{ km: number; time: number; pace: string }>;
   hasRoute?: boolean;
+  // User profile
+  fitnessLevel?: string;
+  runnerName?: string;
+  runnerAge?: number;
+  // Historical context
+  runHistory?: RunHistoryStats;
 }): Promise<string> {
-  const { distance, targetDistance, currentPace, elapsedTime, coachName, coachTone, isSplit, splitKm, splitPace, currentGrade, totalElevationGain, isOnHill, kmSplits, hasRoute } = params;
+  const { distance, targetDistance, currentPace, elapsedTime, coachName, coachTone, isSplit, splitKm, splitPace, currentGrade, totalElevationGain, isOnHill, kmSplits, hasRoute, fitnessLevel, runnerName, runHistory } = params;
   const accentRule = accentDirective((params as any).coachAccent);
   
   const progress = Math.round((distance / targetDistance) * 100);
@@ -262,14 +324,23 @@ export async function generatePaceUpdate(params: {
   // Build the no-terrain rule when there's no route
   const noTerrainRule = hasRoute === true ? '' : `
 CRITICAL: This runner has NO planned route. Do NOT mention hills, terrain, elevation, climbing, descending, flat, undulating, conquering hills, or any route/terrain characteristics. You have NO idea what terrain they are running on. Focus only on pace, effort, form, and motivation.`;
-  
+
+  // Build runner profile + history context
+  const runnerFirstNamePace = runnerName ? runnerName.split(' ')[0] : null;
+  let runnerContext = '';
+  if (runnerFirstNamePace) runnerContext += `Runner: ${runnerFirstNamePace}. `;
+  if (fitnessLevel) runnerContext += `Fitness level: ${fitnessLevel}. `;
+  if (runHistory) {
+    runnerContext += buildRunHistoryContext(runHistory, currentPace);
+  }
+
   const spokenCurrentPace = formatPaceForTTS(currentPace);
   const spokenSplitPace = formatPaceForTTS(splitPace);
   
   let prompt: string;
   if (isSplit && splitKm && splitPace) {
     prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
-    
+${runnerContext ? `\nRunner context: ${runnerContext}` : ''}
 The runner just completed kilometer ${splitKm} with a split pace of ${spokenSplitPace}.
 - Overall progress: ${distance.toFixed(1)}km of ${targetDistance}km (${progress}%)
 - Time elapsed: ${timeMin} minutes
@@ -277,10 +348,10 @@ The runner just completed kilometer ${splitKm} with a split pace of ${spokenSpli
 ${terrainContext}${paceTrend}
 ${noTerrainRule}
 ${PACE_FORMAT_RULE}
-Give a brief (1-2 sentences) split update. You MUST mention their split pace (${spokenSplitPace}) and at least one other data point (progress, time, or pace trend). ${hasRoute === true && isOnHill ? 'Acknowledge the hill effort. ' : ''}${paceTrend ? 'Comment on their pace trend if relevant.' : ''}`;
+Give a brief (1-2 sentences) split update. You MUST mention their split pace (${spokenSplitPace}) and at least one other data point (progress, time, pace trend, or how this compares to their recent runs). ${hasRoute === true && isOnHill ? 'Acknowledge the hill effort. ' : ''}${paceTrend ? 'Comment on their pace trend if relevant.' : ''}`;
   } else {
     prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
-    
+${runnerContext ? `\nRunner context: ${runnerContext}` : ''}
 500m pace check: Runner is at ${distance.toFixed(2)}km, pace ${spokenCurrentPace}, ${timeMin} minutes in.
 ${terrainContext}
 ${noTerrainRule}
@@ -291,10 +362,10 @@ Give a very brief (1-2 sentences) pace update. You MUST cite their pace (${spoke
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). ${PACE_FORMAT_RULE} ${hasRoute === true ? 'Be elevation-aware when hills are mentioned. ' : 'Do NOT mention hills, terrain, or elevation. '}${toneDirective(coachTone)}${accentRule ? ' ' + accentRule : ''}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). When run history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${hasRoute === true ? 'Be elevation-aware when hills are mentioned. ' : 'Do NOT mention hills, terrain, or elevation. '}${toneDirective(coachTone)}${accentRule ? ' ' + accentRule : ''}` },
       { role: "user", content: prompt }
     ],
-    max_tokens: 100,
+    max_tokens: 110,
     temperature: 0.7,
   });
 
@@ -716,10 +787,17 @@ CRITICAL: You MUST weave in at least 2 specific data points from the Runner Stat
   return completion.choices[0].message.content || "You're doing great, keep it up!";
 }
 
+// Helper: calculate age-adjusted max heart rate (Tanaka formula is more accurate than 220-age)
+function calcMaxHR(age?: number): number {
+  if (age && age > 10 && age < 100) {
+    return Math.round(208 - 0.7 * age); // Tanaka formula — more accurate than 220-age
+  }
+  return 190; // Fallback for unknown age
+}
+
 // Helper function to determine heart rate zone
-function getHeartRateZone(hr: number): string {
-  // Assuming max HR around 190-200 for general population
-  const maxHR = 190;
+function getHeartRateZone(hr: number, age?: number): string {
+  const maxHR = calcMaxHR(age);
   const percentage = (hr / maxHR) * 100;
 
   if (percentage < 60) return 'Zone 1 (Recovery)';
@@ -740,9 +818,16 @@ export async function generateStruggleCoaching(params: {
   coachName: string;
   coachTone: string;
   coachAccent?: string;
+  coachGender?: string;
   hasRoute?: boolean;
+  // User profile
+  fitnessLevel?: string;
+  runnerName?: string;
+  runnerAge?: number;
+  // Historical context
+  runHistory?: RunHistoryStats;
 }): Promise<string> {
-  const { distance, elapsedTime, currentPace, baselinePace, paceDropPercent, currentGrade, totalElevationGain, coachName, coachTone, coachAccent, hasRoute } = params;
+  const { distance, elapsedTime, currentPace, baselinePace, paceDropPercent, currentGrade, totalElevationGain, coachName, coachTone, coachAccent, hasRoute, fitnessLevel, runnerName, runHistory } = params;
   
   const timeMin = Math.floor(elapsedTime / 60);
   
@@ -762,9 +847,35 @@ CRITICAL: This runner has NO planned route. Do NOT mention hills, terrain, eleva
   
   const spokenCurrentPaceStruggle = formatPaceForTTS(currentPace);
   const spokenBaselinePace = formatPaceForTTS(baselinePace);
-  
-  const prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
 
+  // Build runner profile + history context for struggle coaching
+  const runnerFirstNameStruggle = runnerName ? runnerName.split(' ')[0] : null;
+  let struggleRunnerContext = '';
+  if (runnerFirstNameStruggle) struggleRunnerContext += `Runner: ${runnerFirstNameStruggle}. `;
+  if (fitnessLevel) struggleRunnerContext += `Fitness level: ${fitnessLevel}. `;
+  if (runHistory) {
+    // Specifically flag if this pace drop is normal for them or unusual
+    if (runHistory.avgPaceDropPercent !== undefined) {
+      const dropDiff = paceDropPercent - runHistory.avgPaceDropPercent;
+      if (dropDiff > 5) {
+        struggleRunnerContext += `This pace drop (${Math.round(paceDropPercent)}%) is larger than their typical drop (${Math.round(runHistory.avgPaceDropPercent)}%) — they're struggling more than usual. `;
+      } else {
+        struggleRunnerContext += `Pace drops of this size are normal for this runner (avg ${Math.round(runHistory.avgPaceDropPercent)}%). `;
+      }
+    }
+    if (runHistory.avgDistanceKm) {
+      const distDiff = distance - runHistory.avgDistanceKm;
+      if (distDiff > 0.5) struggleRunnerContext += `They're already further than their recent average of ${runHistory.avgDistanceKm.toFixed(1)}km — this is new territory. `;
+    }
+    if (runHistory.consistencyTrend === 'improving') {
+      struggleRunnerContext += `Their recent runs show an improving trend — they have the fitness to push through. `;
+    } else if (runHistory.consistencyTrend === 'declining') {
+      struggleRunnerContext += `They've been having tougher runs recently — be supportive and suggest adjusting effort. `;
+    }
+  }
+
+  const prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
+${struggleRunnerContext ? `\nRunner context: ${struggleRunnerContext}` : ''}
 The runner is struggling. Their pace has dropped ${Math.round(paceDropPercent)}% from their baseline.
 - Current pace: ${spokenCurrentPaceStruggle} (baseline was ${spokenBaselinePace})
 - Distance: ${distance.toFixed(2)}km
@@ -772,7 +883,7 @@ The runner is struggling. Their pace has dropped ${Math.round(paceDropPercent)}%
 ${terrainContext}
 ${noTerrainRule}
 ${PACE_FORMAT_RULE}
-Give a brief (1-2 sentences) supportive message to help them through this tough moment. You MUST cite at least one specific number (e.g. their pace or distance). Acknowledge their struggle, but encourage them to push through or adjust their strategy.`;
+Give a brief (1-2 sentences) supportive message tailored to this runner's fitness level and history. You MUST cite at least one specific number. Acknowledge their struggle, but encourage them to push through or adjust their strategy based on what you know about their recent form.`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -1256,7 +1367,7 @@ function buildCoachingSystemPrompt(context: CoachingContext): string {
   }
   
   if (context.heartRate) {
-    const maxHR = 190;
+    const maxHR = calcMaxHR((context as any).runnerAge);
     const hrPercent = (context.heartRate / maxHR) * 100;
     let zone = 'Zone 1 (Recovery)';
     let zoneAdvice = 'easy effort';
@@ -1907,12 +2018,19 @@ export async function generateHeartRateCoaching(params: {
   coachName: string;
   coachTone: string;
   coachAccent?: string;
+  coachGender?: string;
   wellness?: WellnessContext;
+  runnerAge?: number;
+  fitnessLevel?: string;
+  runnerName?: string;
 }): Promise<string> {
-  const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes, coachName, coachTone, coachAccent, wellness } = params;
-  
-  const currentZone = getHeartRateZoneNumber(currentHR, maxHR);
-  const percentMax = Math.round((currentHR / maxHR) * 100);
+  const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes, coachName, coachTone, coachAccent, wellness, runnerAge, fitnessLevel, runnerName } = params;
+
+  // Use age-adjusted max HR — more accurate than whatever device reported
+  const effectiveMaxHR = runnerAge ? calcMaxHR(runnerAge) : maxHR;
+  const currentZone = getHeartRateZoneNumber(currentHR, effectiveMaxHR);
+  const percentMax = Math.round((currentHR / effectiveMaxHR) * 100);
+  const runnerFirstName = runnerName ? runnerName.split(' ')[0] : null;
   
   const zoneNames = ['', 'Recovery', 'Aerobic', 'Tempo', 'Threshold', 'Maximum'];
   
@@ -1929,16 +2047,22 @@ export async function generateHeartRateCoaching(params: {
     }
   }
   
-  const prompt = `You are ${coachName}, a ${coachTone} running coach giving real-time heart rate guidance.
+  // Build runner profile context for personalised HR coaching
+  let runnerProfileContext = '';
+  if (runnerFirstName) runnerProfileContext += `Runner's name: ${runnerFirstName}. `;
+  if (runnerAge) runnerProfileContext += `Age: ${runnerAge} (max HR ~${effectiveMaxHR} bpm). `;
+  if (fitnessLevel) runnerProfileContext += `Fitness level: ${fitnessLevel}. `;
 
+  const prompt = `You are ${coachName}, a ${coachTone} running coach giving real-time heart rate guidance.
+${runnerProfileContext ? `\nRunner profile: ${runnerProfileContext}` : ''}
 Current stats (${elapsedMinutes} minutes into run):
-- Heart Rate: ${currentHR} bpm (${percentMax}% of max)
+- Heart Rate: ${currentHR} bpm (${percentMax}% of age-adjusted max)
 - Current Zone: Zone ${currentZone} (${zoneNames[currentZone]})
-- Average HR: ${avgHR} bpm
+- Average HR this run: ${avgHR} bpm
 ${targetZone ? `- Target Zone: Zone ${targetZone} (${zoneNames[targetZone]})` : ''}
 ${wellnessContext ? `\nWellness context: ${wellnessContext}` : ''}
 
-Give a brief (1-2 sentences) heart rate coaching tip. You MUST mention their actual heart rate (${currentHR} bpm) and zone (Zone ${currentZone}). ${
+Give a brief (1-2 sentences) heart rate coaching tip tailored to this runner's age and fitness level. You MUST mention their actual heart rate (${currentHR} bpm) and zone (Zone ${currentZone}). ${
   targetZone && currentZone !== targetZone 
     ? currentZone > targetZone 
       ? 'They need to slow down to hit their target zone.' 

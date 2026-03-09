@@ -79,6 +79,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private lateinit var textToSpeechHelper: TextToSpeechHelper
     private lateinit var audioPlayerHelper: AudioPlayerHelper
     private var currentUser: User? = null
+    private var runHistoryStats: live.airuncoach.airuncoach.network.model.RunHistoryStats? = null
     private var activeGoals: List<ActiveGoalInfo> = emptyList()  // Goals for AI coaching context
     private var lastPhase: CoachingPhase? = null
     private var last500mMilestone = 0
@@ -369,13 +370,20 @@ class RunTrackingService : Service(), SensorEventListener {
         // Initialize the shared audio queue (handles both OpenAI TTS and device TTS fallback)
         CoachingAudioQueue.init(this)
         
-        // Load user profile for coach settings
+        // Load user profile and run history for coach personalisation
         serviceScope.launch {
             try {
                 val userId = sessionManager.getUserId()
                 if (userId != null) {
                     currentUser = apiService.getUser(userId)
                     Log.d("RunTrackingService", "Loaded user profile: ${currentUser?.coachName}")
+                    // Load run history stats (will be refreshed at run-start with the target distance)
+                    try {
+                        runHistoryStats = apiService.getRunHistoryStats(userId)
+                        Log.d("RunTrackingService", "Loaded run history: ${runHistoryStats?.runsAnalysed} runs, avg pace ${runHistoryStats?.avgPaceFormatted}")
+                    } catch (e: Exception) {
+                        Log.w("RunTrackingService", "Could not load run history stats (non-fatal)", e)
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("RunTrackingService", "Failed to load user profile", e)
@@ -546,6 +554,20 @@ class RunTrackingService : Service(), SensorEventListener {
                 Log.d("RunTrackingService", "Weather fetched: $weatherAtStart")
             } catch (e: Exception) {
                 Log.e("RunTrackingService", "Failed to fetch weather", e)
+            }
+        }
+
+        // Refresh run history stats with target distance for better similarity matching
+        serviceScope.launch {
+            try {
+                val userId = sessionManager.getUserId()
+                if (userId != null) {
+                    val targetKm = targetDistance?.let { it / 1000.0 }
+                    runHistoryStats = apiService.getRunHistoryStats(userId, targetKm)
+                    Log.d("RunTrackingService", "Run history refreshed: ${runHistoryStats?.runsAnalysed} similar runs, trend=${runHistoryStats?.consistencyTrend}")
+                }
+            } catch (e: Exception) {
+                Log.w("RunTrackingService", "Could not refresh run history stats (non-fatal)", e)
             }
         }
 
@@ -2339,7 +2361,13 @@ class RunTrackingService : Service(), SensorEventListener {
                     coachTone = currentUser?.coachTone,
                     coachGender = currentUser?.coachGender,
                     coachAccent = currentUser?.coachAccent,
-                    hasRoute = hasRoute
+                    hasRoute = hasRoute,
+                    // User profile
+                    fitnessLevel = currentUser?.fitnessLevel,
+                    runnerName = currentUser?.name,
+                    runnerAge = currentUser?.age,
+                    // Historical run context
+                    runHistory = runHistoryStats
                 )
                 val response = apiService.getStruggleCoaching(update)
                 // Note: Struggle point already added above before launching coroutine
@@ -2383,7 +2411,13 @@ class RunTrackingService : Service(), SensorEventListener {
                     totalElevationGain = totalElevationGain,
                     isOnHill = abs(calculateAverageGradient()) > 3f,
                     kmSplits = splitsForBackend,  // Send with seconds, not milliseconds
-                    hasRoute = hasRoute
+                    hasRoute = hasRoute,
+                    // User profile
+                    fitnessLevel = currentUser?.fitnessLevel,
+                    runnerName = currentUser?.name,
+                    runnerAge = currentUser?.age,
+                    // Historical run context
+                    runHistory = runHistoryStats
                 )
                 val response = apiService.getPaceUpdate(update)
                 coachingHistory.add(AiCoachingNote(
@@ -2429,7 +2463,13 @@ class RunTrackingService : Service(), SensorEventListener {
                     targetZone = 0, // Unknown; backend should avoid assumptions
                     elapsedMinutes = elapsedMinutes,
                     coachName = currentUser?.coachName,
-                    coachTone = currentUser?.coachTone
+                    coachTone = currentUser?.coachTone,
+                    coachGender = currentUser?.coachGender,
+                    coachAccent = currentUser?.coachAccent,
+                    // User profile for age-adjusted HR zones
+                    runnerAge = currentUser?.age,
+                    fitnessLevel = currentUser?.fitnessLevel,
+                    runnerName = currentUser?.name
                 )
                 val response = apiService.getHeartRateCoaching(request)
                 coachingHistory.add(AiCoachingNote(
@@ -2749,21 +2789,18 @@ class RunTrackingService : Service(), SensorEventListener {
         val startMessage = prompts.random()
         val startTime = System.currentTimeMillis()
 
-        // Fire via audio immediately
-        serviceScope.launch {
-            audioPlayerHelper.speakWithCoachVoice(startMessage)
-        }
-
         // Also log as a coaching note for the run history
         coachingHistory.add(AiCoachingNote(
             time = 0,
-            message = startMessage,
-            audioPath = null,
-            isAudioPlayed = true
+            message = startMessage
         ))
 
+        // Fire via audio immediately
+        if (!isMuted) {
+            playCoachingAudio(null, null, startMessage)
+        }
+
         Log.d("RunTrackingService", "Start coaching: $startMessage")
-    }
     }
 
     private fun buildBaseEliteRequest(type: String, distKm: Double, duration: Long, avgSpeed: Float): EliteCoachingRequest {

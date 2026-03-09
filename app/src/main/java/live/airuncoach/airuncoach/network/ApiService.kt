@@ -164,6 +164,12 @@ interface ApiService {
     @GET("/api/users/{userId}/runs")
     suspend fun getRunsForUser(@Path("userId") userId: String): List<RunSession>
 
+    @GET("/api/users/{userId}/run-history-stats")
+    suspend fun getRunHistoryStats(
+        @Path("userId") userId: String,
+        @Query("targetDistanceKm") targetDistanceKm: Double? = null
+    ): RunHistoryStats
+
     // ========== FITNESS & FRESHNESS ==========
     
     @GET("/api/fitness/trend/{userId}")

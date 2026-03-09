@@ -14,5 +14,11 @@ data class StruggleUpdate(
     @SerializedName("coachTone") val coachTone: String?,
     @SerializedName("coachGender") val coachGender: String?,
     @SerializedName("coachAccent") val coachAccent: String?,
-    @SerializedName("hasRoute") val hasRoute: Boolean = false
+    @SerializedName("hasRoute") val hasRoute: Boolean = false,
+    // User profile for personalisation
+    @SerializedName("fitnessLevel") val fitnessLevel: String? = null,
+    @SerializedName("runnerName") val runnerName: String? = null,
+    @SerializedName("runnerAge") val runnerAge: Int? = null,
+    // Historical run context
+    @SerializedName("runHistory") val runHistory: RunHistoryStats? = null
 )
