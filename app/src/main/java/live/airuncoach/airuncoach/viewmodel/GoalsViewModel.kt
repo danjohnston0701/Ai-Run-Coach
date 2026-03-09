@@ -234,12 +234,12 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
                     return@launch
                 }
 
-                val updatedRelatedSessions = if (keepActive) {
-                    // Add the run session to the list but keep goal active
-                    currentGoal.relatedRunSessionIds + runSessionId
+                // Safely handle relatedRunSessionIds - handle null case
+                val currentSessions: List<String> = currentGoal.relatedRunSessionIds?.toList() ?: emptyList()
+                val updatedRelatedSessions: List<String> = if (!runSessionId.isNullOrEmpty()) {
+                    currentSessions + runSessionId
                 } else {
-                    // Mark as complete and add the run session
-                    currentGoal.relatedRunSessionIds + runSessionId
+                    currentSessions
                 }
 
                 val completedAt = if (!keepActive) {
@@ -266,7 +266,11 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
                     relatedRunSessionIds = updatedRelatedSessions
                 )
 
-                apiService.updateGoal(goalId, request)
+                // Make the API call and wait for response to ensure it succeeded
+                val response = apiService.updateGoal(goalId, request)
+                android.util.Log.d("GoalsViewModel", "Goal update response: $response")
+                
+                // Reload goals to get updated status
                 loadGoals()
                 android.util.Log.d("GoalsViewModel", "Goal $goalId completed, linked to run $runSessionId")
             } catch (e: Exception) {
@@ -287,7 +291,13 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
                     return@launch
                 }
 
-                val updatedRelatedSessions = currentGoal.relatedRunSessionIds + runSessionId
+                // Safely handle relatedRunSessionIds - handle null case
+                val currentSessions: List<String> = currentGoal.relatedRunSessionIds?.toList() ?: emptyList()
+                val updatedRelatedSessions: List<String> = if (!runSessionId.isNullOrEmpty()) {
+                    currentSessions + runSessionId
+                } else {
+                    currentSessions
+                }
 
                 val request = UpdateGoalRequest(
                     title = currentGoal.title,
@@ -303,7 +313,11 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
                     relatedRunSessionIds = updatedRelatedSessions
                 )
 
-                apiService.updateGoal(goalId, request)
+                // Make the API call and wait for response
+                val response = apiService.updateGoal(goalId, request)
+                android.util.Log.d("GoalsViewModel", "Goal link update response: $response")
+                
+                // Reload goals to get updated status
                 loadGoals()
                 android.util.Log.d("GoalsViewModel", "Linked run $runSessionId to goal $goalId")
             } catch (e: Exception) {
@@ -313,32 +327,20 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
     }
 
     /**
-     * Check if any active goals are met by the given run session
-     * Returns a list of goals that were achieved by this run
+     * Check if any active goals are met by the given run session.
+     * Only goals with a distance target are checked — the run distance must
+     * meet the goal criteria (≥ 90 % of target).  Goals without a distance
+     * target (e.g. health / consistency / date-only events) are never
+     * auto-celebrated because there is no objective run-level criterion to
+     * evaluate.
      */
     fun checkGoalsMetByRun(runDistanceMeters: Double, runDate: Long): List<Goal> {
         val activeGoals = _allGoals.value.filter { it.isActive && !it.isCompleted }
-        
+
         return activeGoals.filter { goal ->
-            // Check if goal has a distance target
-            val distanceTargetMeters = goal.getDistanceTargetInMeters()
-            if (distanceTargetMeters == null) {
-                // For non-distance goals, check based on target date
-                goal.targetDate?.let { targetDateStr ->
-                    try {
-                        val sdf = java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault())
-                        val targetDate = sdf.parse(targetDateStr)?.time ?: return@filter false
-                        val runDateObj = java.util.Date(runDate)
-                        
-                        // Check if run was on or before the target date
-                        return@filter runDateObj.time <= targetDate
-                    } catch (e: Exception) {
-                        return@filter false
-                    }
-                }
-                return@filter false
-            }
-            
+            // Only celebrate goals that have a concrete distance target
+            goal.getDistanceTargetInMeters() ?: return@filter false
+
             // Check if run distance meets the goal criteria
             goal.isGoalMetByRun(runDistanceMeters)
         }

@@ -178,9 +178,15 @@ fun RunSummaryScreenFlagship(
             
             // Check if any goals were achieved by this run
             val goals = goalsViewModel.checkGoalsMetByRun(session.distance, session.startTime)
-            if (goals.isNotEmpty()) {
-                achievedGoals = goals
-                selectedGoalForCompletion = goals.first()
+            
+            // Filter out goals that are already completed or already linked to this run session
+            val validGoals = goals.filter { goal ->
+                !goal.isCompleted && (goal.relatedRunSessionIds?.contains(session.id) != true)
+            }
+            
+            if (validGoals.isNotEmpty()) {
+                achievedGoals = validGoals
+                selectedGoalForCompletion = validGoals.first()
                 showGoalCelebration = true
             }
         }

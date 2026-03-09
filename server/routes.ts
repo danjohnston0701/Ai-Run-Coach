@@ -1109,6 +1109,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         currentProgress: goal.progressPercent ?? 0,
         isActive: goal.status === 'active',
         isCompleted: !!goal.completedAt,
+        relatedRunSessionIds: (goal as any).relatedRunSessionIds ?? [],
         createdAt: goal.createdAt?.toISOString(),
         updatedAt: goal.updatedAt?.toISOString(),
         completedAt: goal.completedAt?.toISOString(),
@@ -1167,6 +1168,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         currentProgress: rawGoal.progressPercent ?? 0,
         isActive: rawGoal.status === 'active',
         isCompleted: !!rawGoal.completedAt,
+        relatedRunSessionIds: (rawGoal as any).relatedRunSessionIds ?? [],
         createdAt: rawGoal.createdAt?.toISOString(),
         updatedAt: rawGoal.updatedAt?.toISOString(),
         completedAt: rawGoal.completedAt?.toISOString(),
@@ -1182,7 +1184,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/goals/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       // Transform Android app format to backend format
-      const updateData = {
+      const updateData: Record<string, any> = {
         type: req.body.type,
         title: req.body.title,
         description: req.body.description || null,
@@ -1195,7 +1197,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         healthTarget: req.body.healthTarget || null,
         weeklyRunTarget: req.body.weeklyRunTarget || null,
       };
-      
+
+      // Handle completion / status fields sent by the app
+      if (req.body.isCompleted === true) {
+        updateData.status = 'completed';
+        updateData.completedAt = req.body.completedAt ? new Date(req.body.completedAt) : new Date();
+      } else if (req.body.isActive === false) {
+        updateData.status = 'abandoned';
+      } else if (req.body.isActive === true) {
+        updateData.status = 'active';
+      }
+
+      if (req.body.currentProgress != null) {
+        updateData.progressPercent = Math.round(req.body.currentProgress);
+      }
+
+      // Persist related run session IDs (linked runs for this goal)
+      if (Array.isArray(req.body.relatedRunSessionIds)) {
+        updateData.relatedRunSessionIds = req.body.relatedRunSessionIds;
+      }
+
       const rawGoal = await storage.updateGoal(req.params.id, updateData);
       if (!rawGoal) {
         return res.status(404).json({ error: "Goal not found" });
@@ -1219,6 +1240,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         currentProgress: rawGoal.progressPercent ?? 0,
         isActive: rawGoal.status === 'active',
         isCompleted: !!rawGoal.completedAt,
+        relatedRunSessionIds: (rawGoal as any).relatedRunSessionIds ?? [],
         createdAt: rawGoal.createdAt?.toISOString(),
         updatedAt: rawGoal.updatedAt?.toISOString(),
         completedAt: rawGoal.completedAt?.toISOString(),

@@ -208,6 +208,7 @@ export const goals = pgTable("goals", {
   eventLocation: text("event_location"),
   notes: text("notes"),
   progressPercent: integer("progress_percent").default(0),
+  relatedRunSessionIds: jsonb("related_run_session_ids").default([]),
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
