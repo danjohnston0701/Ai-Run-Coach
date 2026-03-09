@@ -493,11 +493,34 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             composable("group_runs") {
                 GroupRunsScreen(
                     onCreateGroupRun = { navController.navigate("create_group_run") },
+                    onNavigateToDetail = { groupRunId -> navController.navigate("group_run_detail/$groupRunId") },
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
             composable("create_group_run") {
-                CreateGroupRunScreen(onNavigateBack = { navController.popBackStack() })
+                CreateGroupRunScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onCreated = { groupRunId ->
+                        // Navigate to the detail screen after creation
+                        navController.navigate("group_run_detail/$groupRunId") {
+                            popUpTo("group_runs")
+                        }
+                    }
+                )
+            }
+            composable("group_run_detail/{groupRunId}") { backStackEntry ->
+                val groupRunId = backStackEntry.arguments?.getString("groupRunId") ?: return@composable
+                GroupRunDetailScreen(
+                    groupRunId = groupRunId,
+                    onNavigateBack = { navController.popBackStack() },
+                    onStartRun = { _ ->
+                        // TODO: Start run with groupRunId context — pass groupRunId to RunSession
+                        navController.navigate("run_session")
+                    },
+                    onViewResults = { grId ->
+                        navController.navigate("group_run_results/$grId")
+                    }
+                )
             }
             composable("coach_settings") {
                 CoachSettingsScreen(

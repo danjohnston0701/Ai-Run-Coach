@@ -1,11 +1,12 @@
 package live.airuncoach.airuncoach.network
 
 import live.airuncoach.airuncoach.domain.model.*
-import live.airuncoach.airuncoach.network.model.PaceUpdateResponse
-import live.airuncoach.airuncoach.network.model.StruggleUpdateResponse
-import live.airuncoach.airuncoach.network.model.PhaseCoachingResponse
-import live.airuncoach.airuncoach.network.model.TalkToCoachResponse
-import live.airuncoach.airuncoach.network.model.HeartRateCoachingResponse
+import live.airuncoach.airuncoach.network.model.GroupRunsResponse
+import live.airuncoach.airuncoach.network.model.CreateGroupRunRequest
+import live.airuncoach.airuncoach.network.model.InviteFriendsRequest
+import live.airuncoach.airuncoach.network.model.GroupRunRespondRequest
+import live.airuncoach.airuncoach.network.model.GroupRunCompleteRequest
+import live.airuncoach.airuncoach.network.model.GroupRunResultsResponse
 import live.airuncoach.airuncoach.network.model.*
 import live.airuncoach.airuncoach.domain.model.ConnectedDevice
 import live.airuncoach.airuncoach.domain.model.WellnessSyncResponse
@@ -97,7 +98,43 @@ interface ApiService {
     suspend fun getEliteCoaching(@Body request: EliteCoachingRequest): EliteCoachingResponse
 
     @GET("/api/group-runs")
-    suspend fun getGroupRuns(): List<GroupRun>
+    suspend fun getGroupRuns(@Query("my_groups") myGroups: Boolean? = null): GroupRunsResponse
+
+    @GET("/api/group-runs/{id}")
+    suspend fun getGroupRun(@Path("id") groupRunId: String): GroupRun
+
+    @POST("/api/group-runs")
+    suspend fun createGroupRun(@Body request: CreateGroupRunRequest): GroupRun
+
+    @POST("/api/group-runs/{id}/invite")
+    suspend fun inviteFriendsToGroupRun(
+        @Path("id") groupRunId: String,
+        @Body request: InviteFriendsRequest
+    ): Response<Unit>
+
+    @POST("/api/group-runs/{id}/respond")
+    suspend fun respondToGroupRun(
+        @Path("id") groupRunId: String,
+        @Body request: GroupRunRespondRequest
+    ): GroupRun
+
+    @POST("/api/group-runs/{id}/ready")
+    suspend fun markReadyToStart(@Path("id") groupRunId: String): GroupRun
+
+    @POST("/api/group-runs/{id}/start")
+    suspend fun startGroupRun(@Path("id") groupRunId: String): GroupRun
+
+    @POST("/api/group-runs/{id}/complete")
+    suspend fun completeGroupRun(
+        @Path("id") groupRunId: String,
+        @Body request: GroupRunCompleteRequest
+    ): GroupRun
+
+    @GET("/api/group-runs/{id}/results")
+    suspend fun getGroupRunResults(@Path("id") groupRunId: String): GroupRunResultsResponse
+
+    @DELETE("/api/group-runs/{id}/leave")
+    suspend fun leaveGroupRun(@Path("id") groupRunId: String): Response<Unit>
 
     @GET("/api/events/grouped")
     suspend fun getEventsGrouped(): Map<String, List<Event>>
