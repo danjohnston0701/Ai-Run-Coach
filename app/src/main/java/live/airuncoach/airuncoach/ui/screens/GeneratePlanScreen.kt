@@ -29,6 +29,8 @@ import live.airuncoach.airuncoach.domain.model.RegularSession
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
+import live.airuncoach.airuncoach.viewmodel.FITNESS_LEVEL_DESCRIPTIONS
+import live.airuncoach.airuncoach.viewmodel.FITNESS_LEVELS
 import live.airuncoach.airuncoach.viewmodel.GeneratePlanState
 import live.airuncoach.airuncoach.viewmodel.GeneratePlanViewModel
 
@@ -42,6 +44,7 @@ fun GeneratePlanScreen(
     val viewModel: GeneratePlanViewModel = hiltViewModel()
     val goalType by viewModel.goalType.collectAsState()
     val targetDistance by viewModel.targetDistance.collectAsState()
+    val targetHours by viewModel.targetHours.collectAsState()
     val targetMinutes by viewModel.targetMinutes.collectAsState()
     val targetSeconds by viewModel.targetSeconds.collectAsState()
     val hasTimeGoal by viewModel.hasTimeGoal.collectAsState()
@@ -170,50 +173,91 @@ fun GeneratePlanScreen(
                     AnimatedVisibility(visible = hasTimeGoal) {
                         Column {
                             Spacer(modifier = Modifier.height(Spacing.md))
-                            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = targetHours,
+                                    onValueChange = { v ->
+                                        val filtered = v.filter { it.isDigit() }.take(2)
+                                        viewModel.setTargetHours(filtered)
+                                    },
+                                    label = { Text("Hrs") },
+                                    placeholder = { Text("00") },
+                                    modifier = Modifier.weight(1f),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    colors = groupRunTextFieldColors(),
+                                    singleLine = true
+                                )
+                                Text(":", style = AppTextStyles.h3, color = Colors.textPrimary)
                                 OutlinedTextField(
                                     value = targetMinutes,
-                                    onValueChange = viewModel::setTargetMinutes,
+                                    onValueChange = { v ->
+                                        val filtered = v.filter { it.isDigit() }.take(2)
+                                        viewModel.setTargetMinutes(filtered)
+                                    },
                                     label = { Text("Min") },
+                                    placeholder = { Text("00") },
                                     modifier = Modifier.weight(1f),
-                                    colors = groupRunTextFieldColors()
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    colors = groupRunTextFieldColors(),
+                                    singleLine = true
                                 )
-                                Text(
-                                    ":",
-                                    style = AppTextStyles.h3,
-                                    color = Colors.textPrimary,
-                                    modifier = Modifier.align(Alignment.CenterVertically)
-                                )
+                                Text(":", style = AppTextStyles.h3, color = Colors.textPrimary)
                                 OutlinedTextField(
                                     value = targetSeconds,
-                                    onValueChange = viewModel::setTargetSeconds,
+                                    onValueChange = { v ->
+                                        val filtered = v.filter { it.isDigit() }.take(2)
+                                        viewModel.setTargetSeconds(filtered)
+                                    },
                                     label = { Text("Sec") },
+                                    placeholder = { Text("00") },
                                     modifier = Modifier.weight(1f),
-                                    colors = groupRunTextFieldColors()
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    colors = groupRunTextFieldColors(),
+                                    singleLine = true
                                 )
                             }
+                            Spacer(modifier = Modifier.height(Spacing.xs))
+                            Text(
+                                "e.g. 00:20:00 for a sub-20 min 5K · 03:30:00 for a marathon",
+                                style = AppTextStyles.small,
+                                color = Colors.textMuted
+                            )
                         }
                     }
 
                     Spacer(modifier = Modifier.height(Spacing.xl))
 
-                    // ── Section 3: Experience Level ──────────────────────────────────────
+                    // ── Section 3: Experience Level (synced with user profile) ───────────
                     SectionHeader(title = "Your current fitness level", icon = R.drawable.icon_trending_vector)
+                    Spacer(modifier = Modifier.height(Spacing.xs))
+                    Text(
+                        "Pre-filled from your profile — any change here updates your profile too.",
+                        style = AppTextStyles.small,
+                        color = Colors.textMuted
+                    )
                     Spacer(modifier = Modifier.height(Spacing.md))
 
-                    val levelOptions = listOf(
-                        "beginner" to Triple("Beginner", "Running < 6 months", R.drawable.icon_play_vector),
-                        "intermediate" to Triple("Intermediate", "Running 6–18 months", R.drawable.icon_chart_vector),
-                        "advanced" to Triple("Advanced", "Running 18+ months", R.drawable.icon_trophy_vector)
+                    val levelIcons = listOf(
+                        R.drawable.icon_play_vector,      // Newcomer
+                        R.drawable.icon_play_vector,      // Beginner
+                        R.drawable.icon_chart_vector,     // Casual
+                        R.drawable.icon_chart_vector,     // Regular
+                        R.drawable.icon_chart_vector,     // Committed
+                        R.drawable.icon_trophy_vector,    // Competitive
+                        R.drawable.icon_trophy_vector,    // Advanced
+                        R.drawable.icon_trophy_vector,    // Elite
+                        R.drawable.icon_trophy_vector     // Professional
                     )
-                    levelOptions.forEach { (key, info) ->
-                        val (label, subtitle, icon) = info
+                    FITNESS_LEVELS.forEachIndexed { index, level ->
                         SelectableCard(
-                            icon = icon,
-                            title = label,
-                            subtitle = subtitle,
-                            selected = experienceLevel == key,
-                            onClick = { viewModel.setExperienceLevel(key) }
+                            icon = levelIcons[index],
+                            title = level,
+                            subtitle = FITNESS_LEVEL_DESCRIPTIONS[level] ?: "",
+                            selected = experienceLevel == level,
+                            onClick = { viewModel.setExperienceLevel(level) }
                         )
                         Spacer(modifier = Modifier.height(Spacing.sm))
                     }
