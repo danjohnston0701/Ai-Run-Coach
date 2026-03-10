@@ -171,63 +171,65 @@ class RunSummaryViewModel @Inject constructor(
     }
 
     /**
-     * Update a struggle point with user comment and save to backend
+     * Persists the current struggle points list (with isRelevant + userComment state) to Neon.
+     * Called immediately whenever any struggle point is changed so the DB is always in sync.
+     */
+    private fun persistStrugglePoints() {
+        val runId = currentRunId ?: _runSession.value?.id ?: return
+        val points = _strugglePoints.value
+        viewModelScope.launch {
+            try {
+                apiService.updateRunProgress(
+                    UpdateRunProgressRequest(
+                        runId = runId,
+                        userComments = _userPostRunComments.value.ifBlank { null },
+                        strugglePoints = points
+                    )
+                )
+            } catch (e: Exception) {
+                Log.e("RunSummaryViewModel", "Failed to persist struggle points", e)
+            }
+        }
+    }
+
+    /**
+     * Update a struggle point with a user comment and immediately save to Neon.
      */
     fun updateStrugglePointComment(strugglePointId: String, comment: String) {
         // Update local state immediately for responsiveness
         _strugglePoints.value = _strugglePoints.value.map { point ->
-            if (point.id == strugglePointId) {
-                point.copy(userComment = comment)
-            } else {
-                point
-            }
+            if (point.id == strugglePointId) point.copy(userComment = comment) else point
         }
-
-        // Persist to backend
-        val runId = currentRunId ?: return
-        viewModelScope.launch {
-            try {
-                apiService.updateStrugglePointComment(
-                    runId = runId,
-                    pointId = strugglePointId,
-                    request = UpdateStrugglePointCommentRequest(userComment = comment)
-                )
-            } catch (e: Exception) {
-                Log.e("RunSummaryViewModel", "Failed to save struggle point comment", e)
-            }
-        }
+        // Persist the full updated list (captures isRelevant + all comments in one call)
+        persistStrugglePoints()
     }
 
     /**
-     * Mark a struggle point as irrelevant with a reason
+     * Mark a struggle point as dismissed with a reason and immediately save to Neon.
      */
     fun dismissStrugglePoint(strugglePointId: String, reason: DismissReason) {
         _strugglePoints.value = _strugglePoints.value.map { point ->
             if (point.id == strugglePointId) {
-                point.copy(
-                    isRelevant = false,
-                    dismissReason = reason
-                )
+                point.copy(isRelevant = false, dismissReason = reason)
             } else {
                 point
             }
         }
+        persistStrugglePoints()
     }
 
     /**
-     * Restore a previously dismissed struggle point
+     * Restore a previously dismissed struggle point and immediately save to Neon.
      */
     fun restoreStrugglePoint(strugglePointId: String) {
         _strugglePoints.value = _strugglePoints.value.map { point ->
             if (point.id == strugglePointId) {
-                point.copy(
-                    isRelevant = true,
-                    dismissReason = null
-                )
+                point.copy(isRelevant = true, dismissReason = null)
             } else {
                 point
             }
         }
+        persistStrugglePoints()
     }
 
     /**

@@ -2329,6 +2329,35 @@ Analyze this run comprehensively using all available data from the runner's Garm
     });
   }
 
+  // Add runner-confirmed struggle points (dismissed ones already excluded by the server)
+  const strugglePoints: any[] = Array.isArray(runData.strugglePoints) ? runData.strugglePoints : [];
+  if (strugglePoints.length > 0) {
+    prompt += `
+## RUNNER-CONFIRMED STRUGGLE POINTS (${strugglePoints.length} detected, dismissed ones excluded):
+These are real pace drops the runner confirmed as genuine difficulties — not stops like traffic lights or shoe tying.
+`;
+    strugglePoints.forEach((sp: any, i: number) => {
+      const distKm = sp.distanceMeters != null ? (sp.distanceMeters / 1000).toFixed(2) : '?';
+      const drop = sp.paceDropPercent != null ? `${Math.round(sp.paceDropPercent)}% pace drop` : '';
+      const hr = sp.heartRate != null ? `, HR ${sp.heartRate}bpm` : '';
+      const grade = sp.currentGrade != null ? `, grade ${sp.currentGrade.toFixed(1)}%` : '';
+      prompt += `${i + 1}. At ${distKm}km — pace dropped from ${sp.baselinePace || '?'}/km to ${sp.paceAtStruggle || '?'}/km (${drop}${hr}${grade})`;
+      if (sp.userComment) {
+        prompt += `\n   Runner's note: "${sp.userComment}"`;
+      }
+      prompt += '\n';
+    });
+    prompt += `Use these struggle points in your analysis — explain likely causes (fatigue, elevation, pacing, etc.) and give targeted advice for each km zone.\n`;
+  }
+
+  // Add runner's overall post-run comments
+  if (runData.userComments) {
+    prompt += `
+## RUNNER'S POST-RUN NOTES:
+"${runData.userComments}"
+Take these notes into account when assessing performance and writing your summary — the runner may have context about conditions, how they felt, or external factors that the data alone can't show.\n`;
+  }
+
   prompt += `
 ## ANALYSIS REQUIRED:
 Based on ALL the data above, provide a comprehensive JSON analysis with these fields:

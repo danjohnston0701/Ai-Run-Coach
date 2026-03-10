@@ -5617,6 +5617,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const coachTone = body.coachTone || user?.coachTone || "energetic";
 
       // Build runData for the AI service (merge DB + request so we capture everything Android provides)
+      // All struggle points from DB (includes isRelevant + userComment on each)
+      const allStrugglePoints: any[] = Array.isArray(run.strugglePoints) ? run.strugglePoints : [];
+
+      // Only pass NON-dismissed struggle points to the AI.
+      // Dismissed ones (isRelevant === false) were excluded by the user (e.g. traffic light stop)
+      // and should not influence the analysis.
+      const relevantStrugglePoints = allStrugglePoints.filter(
+        (sp: any) => sp.isRelevant !== false
+      );
+
       const runDataForAi = {
         ...run,
         ...body,
@@ -5626,7 +5636,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         elevationLoss: body.elevationLoss ?? run.elevationLoss,
         terrainType: body.terrainType || run.terrainType,
         kmSplits: body.kmSplits || run.kmSplits,
-        strugglePoints: body.relevantStrugglePoints || run.strugglePoints,
+        // Only relevant (non-dismissed) struggle points reach the AI
+        strugglePoints: relevantStrugglePoints,
+        // Overall post-run comment from the user
         userComments: body.userPostRunComments || run.userComments,
       };
 
