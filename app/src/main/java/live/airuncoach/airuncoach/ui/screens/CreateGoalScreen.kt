@@ -1,5 +1,6 @@
 package live.airuncoach.airuncoach.ui.screens
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,7 +22,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.gson.Gson
 import live.airuncoach.airuncoach.R
+import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.ui.theme.*
 import live.airuncoach.airuncoach.viewmodel.CreateGoalState
 import live.airuncoach.airuncoach.viewmodel.GoalsViewModel
@@ -60,6 +63,23 @@ fun CreateGoalScreen(
     // Health & Wellbeing fields
     var selectedHealthTarget by remember { mutableStateOf("") }
     var customHealthGoal by remember { mutableStateOf("") }
+    var targetWeightKg by remember { mutableStateOf("") }
+    var startingWeightKg by remember { mutableStateOf("") }
+    
+    // Load user data to get current weight
+    val sharedPrefs = LocalContext.current.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+    val gson = Gson()
+    val userWeight = remember {
+        val userJson = sharedPrefs.getString("user", null)
+        if (userJson != null) {
+            try {
+                val user = gson.fromJson(userJson, User::class.java)
+                user.weight
+            } catch (e: Exception) {
+                null
+            }
+        } else null
+    }
     
     // Consistency fields
     var weeklyRunTarget by remember { mutableStateOf("") }
@@ -120,7 +140,9 @@ fun CreateGoalScreen(
                 distanceTarget = finalDistanceTarget,
                 timeTargetSeconds = timeTargetSeconds,
                 healthTarget = finalHealthTarget,
-                weeklyRunTarget = finalWeeklyTarget
+                weeklyRunTarget = finalWeeklyTarget,
+                targetWeightKg = targetWeightKg.toDoubleOrNull(),
+                startingWeightKg = startingWeightKg.toDoubleOrNull()
             )
         }
     }
@@ -332,6 +354,18 @@ fun CreateGoalScreen(
                                 onCustomGoalChange = { customHealthGoal = it }
                             )
                             Spacer(modifier = Modifier.height(Spacing.md))
+                        }
+                        // Weight inputs for "Lose weight" goal
+                        if (selectedHealthTarget == "Lose weight") {
+                            item {
+                                WeightTargetSection(
+                                    startingWeight = userWeight?.toString() ?: "",
+                                    targetWeight = targetWeightKg,
+                                    onStartingWeightChange = { startingWeightKg = it },
+                                    onTargetWeightChange = { targetWeightKg = it }
+                                )
+                                Spacer(modifier = Modifier.height(Spacing.md))
+                            }
                         }
                     }
                     GoalType.CONSISTENCY -> {
@@ -551,7 +585,8 @@ fun FormField(
     label: String,
     value: String,
     onValueChange: (String) -> Unit,
-    placeholder: String
+    placeholder: String,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default
 ) {
     FormFieldLabel(text = label)
     Spacer(modifier = Modifier.height(Spacing.sm))
@@ -560,6 +595,7 @@ fun FormField(
         onValueChange = onValueChange,
         textStyle = AppTextStyles.body.copy(color = Colors.textPrimary),
         cursorBrush = SolidColor(Colors.primary),
+        keyboardOptions = keyboardOptions,
         modifier = Modifier
             .fillMaxWidth()
             .height(50.dp)
@@ -706,7 +742,7 @@ fun DistanceChip(
 ) {
     Box(
         modifier = modifier
-            .height(44.dp)
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(BorderRadius.full))
             .background(if (isSelected) Colors.primary.copy(alpha = 0.2f) else Colors.backgroundSecondary)
             .border(
@@ -721,7 +757,8 @@ fun DistanceChip(
         Text(
             text = text,
             style = AppTextStyles.body.copy(fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal),
-            color = if (isSelected) Colors.primary else Colors.textPrimary
+            color = if (isSelected) Colors.primary else Colors.textPrimary,
+            maxLines = 2
         )
     }
 }
@@ -859,10 +896,21 @@ fun HealthTargetSection(
                 onClick = { onTargetSelected("Build strength") },
                 modifier = Modifier.weight(1f)
             )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
             DistanceChip(
                 text = "Better recovery",
                 isSelected = selectedTarget == "Better recovery",
                 onClick = { onTargetSelected("Better recovery") },
+                modifier = Modifier.weight(1f)
+            )
+            DistanceChip(
+                text = "Mental wellbeing",
+                isSelected = selectedTarget == "Mental wellbeing",
+                onClick = { onTargetSelected("Mental wellbeing") },
                 modifier = Modifier.weight(1f)
             )
         }
@@ -895,6 +943,66 @@ fun HealthTargetSection(
                 }
             }
         )
+    }
+}
+
+@Composable
+fun WeightTargetSection(
+    startingWeight: String,
+    targetWeight: String,
+    onStartingWeightChange: (String) -> Unit,
+    onTargetWeightChange: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+        FormFieldLabel(text = "Weight Details")
+        
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+        ) {
+            // Current/Starting Weight
+            Column(modifier = Modifier.weight(1f)) {
+                if (startingWeight.isNotEmpty()) {
+                    Text(
+                        text = "Current Weight",
+                        style = AppTextStyles.caption,
+                        color = Colors.textMuted
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+                FormField(
+                    label = if (startingWeight.isEmpty()) "Current Weight (kg)" else "",
+                    value = startingWeight,
+                    onValueChange = onStartingWeightChange,
+                    placeholder = "e.g., 80",
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                )
+            }
+            
+            // Target Weight
+            Column(modifier = Modifier.weight(1f)) {
+                FormField(
+                    label = "Target Weight (kg)",
+                    value = targetWeight,
+                    onValueChange = onTargetWeightChange,
+                    placeholder = "e.g., 70",
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                )
+            }
+        }
+        
+        if (startingWeight.isNotEmpty() && targetWeight.isNotEmpty()) {
+            val startKg = startingWeight.toDoubleOrNull()
+            val targetKg = targetWeight.toDoubleOrNull()
+            if (startKg != null && targetKg != null && startKg > targetKg) {
+                val diff = startKg - targetKg
+                Text(
+                    text = "Goal: Lose ${String.format("%.1f", diff)} kg",
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.success
+                )
+            }
+        }
     }
 }
 

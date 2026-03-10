@@ -28,6 +28,8 @@ import live.airuncoach.airuncoach.network.model.TodayWorkoutResponse
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
+import live.airuncoach.airuncoach.util.WorkoutHolder
+import live.airuncoach.airuncoach.util.WorkoutPlanContext
 import live.airuncoach.airuncoach.viewmodel.PlanDetailState
 import live.airuncoach.airuncoach.viewmodel.PlansListState
 import live.airuncoach.airuncoach.viewmodel.TrainingPlanViewModel
@@ -298,6 +300,23 @@ fun PlanDashboardContent(
     onClearError: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Helpers that stamp plan context into WorkoutHolder before delegating to nav callbacks.
+    // This allows WorkoutDetailScreen → run_session to build a plan-aware RunSetupConfig.
+    val planContext = WorkoutPlanContext(
+        planId = details.plan.id,
+        goalType = details.plan.goalType,
+        weekNumber = progress.currentWeek,
+        totalWeeks = progress.totalWeeks
+    )
+    val startWithContext: (WorkoutDetails) -> Unit = { w ->
+        WorkoutHolder.planContext = planContext
+        onStartWorkout(w)
+    }
+    val viewWithContext: (WorkoutDetails) -> Unit = { w ->
+        WorkoutHolder.planContext = planContext
+        onViewWorkoutDetail(w)
+    }
+
     LazyColumn(modifier = modifier.fillMaxSize(), contentPadding = PaddingValues(Spacing.lg)) {
 
         // ── Overall progress card ─────────────────────────────────────────────
@@ -333,9 +352,9 @@ fun PlanDashboardContent(
                 TodayWorkoutCard(
                     workout = workout,
                     isLoading = actionLoading,
-                    onStart = { onStartWorkout(workout) },
+                    onStart = { startWithContext(workout) },
                     onComplete = { onCompleteWorkout(workout) },
-                    onViewDetail = { onViewWorkoutDetail(workout) }
+                    onViewDetail = { viewWithContext(workout) }
                 )
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
@@ -362,7 +381,7 @@ fun PlanDashboardContent(
         val currentWeek = details.weeks.getOrNull(currentWeekIndex) ?: details.weeks.firstOrNull()
         if (currentWeek != null) {
             item {
-                WeekCard(week = currentWeek, onWorkoutTap = onViewWorkoutDetail)
+                WeekCard(week = currentWeek, onWorkoutTap = viewWithContext)
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
         }

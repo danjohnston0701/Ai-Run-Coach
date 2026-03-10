@@ -4,10 +4,12 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.model.CompleteWorkoutRequest
@@ -15,6 +17,7 @@ import live.airuncoach.airuncoach.network.model.TrainingPlanDetails
 import live.airuncoach.airuncoach.network.model.TrainingPlanProgress
 import live.airuncoach.airuncoach.network.model.TrainingPlanSummary
 import live.airuncoach.airuncoach.network.model.TodayWorkoutResponse
+import live.airuncoach.airuncoach.network.model.WeekProgress
 import retrofit2.HttpException
 import javax.inject.Inject
 
@@ -74,8 +77,22 @@ class TrainingPlanViewModel @Inject constructor(
         viewModelScope.launch {
             _planDetailState.value = PlanDetailState.Loading
             try {
-                val details = apiService.getTrainingPlanDetails(planId)
-                val progress = apiService.getTrainingPlanProgress(planId)
+                // Fetch details and progress in parallel to reduce total wait time
+                val detailsDeferred = async { apiService.getTrainingPlanDetails(planId) }
+                val progressDeferred = async {
+                    // Give progress a 10s window — it can be slow on new plans.
+                    // If it times out or errors we synthesize it from the details.
+                    withTimeoutOrNull(10_000L) {
+                        try { apiService.getTrainingPlanProgress(planId) }
+                        catch (e: Exception) {
+                            Log.w("TrainingPlanVM", "Progress fetch failed (${e.message}), will synthesize")
+                            null
+                        }
+                    }
+                }
+
+                val details = detailsDeferred.await()
+                val progress = progressDeferred.await() ?: synthesizeProgress(details)
                 val today = try { apiService.getTodayWorkout(planId) } catch (_: Exception) { null }
                 _planDetailState.value = PlanDetailState.Success(details, progress, today)
             } catch (e: Exception) {
@@ -83,6 +100,41 @@ class TrainingPlanViewModel @Inject constructor(
                 _planDetailState.value = PlanDetailState.Error(e.message ?: "Failed to load plan")
             }
         }
+    }
+
+    /**
+     * Builds a [TrainingPlanProgress] directly from the plan details when the
+     * /progress endpoint is unavailable or too slow. Counts completed workouts
+     * by reading the isCompleted flag already present in the details response.
+     */
+    private fun synthesizeProgress(details: TrainingPlanDetails): TrainingPlanProgress {
+        val totalWorkouts = details.weeks.sumOf { it.workouts.size }
+        val completedWorkouts = details.weeks.sumOf { week -> week.workouts.count { it.isCompleted } }
+        return TrainingPlanProgress(
+            planId = details.plan.id,
+            currentWeek = details.plan.currentWeek,
+            totalWeeks = details.plan.totalWeeks,
+            goalType = details.plan.goalType,
+            targetDistance = details.plan.targetDistance,
+            targetTime = details.plan.targetTime,
+            status = details.plan.status,
+            completedWorkouts = completedWorkouts,
+            totalWorkouts = totalWorkouts,
+            overallCompletion = if (totalWorkouts > 0) completedWorkouts.toDouble() / totalWorkouts else 0.0,
+            weeks = details.weeks.map { week ->
+                val weekCompleted = week.workouts.count { it.isCompleted }
+                WeekProgress(
+                    weekNumber = week.weekNumber,
+                    weekDescription = week.weekDescription,
+                    totalDistance = week.totalDistance,
+                    focusArea = week.focusArea,
+                    intensityLevel = week.intensityLevel,
+                    totalWorkouts = week.workouts.size,
+                    completedWorkouts = weekCompleted,
+                    completionRate = if (week.workouts.isNotEmpty()) weekCompleted.toDouble() / week.workouts.size else 0.0
+                )
+            }
+        )
     }
 
     fun completeWorkout(workoutId: String, runId: String? = null, planId: String) {

@@ -19,6 +19,8 @@ data class Goal(
     
     // Health & Wellbeing fields
     val healthTarget: String? = null, // "Improve fitness", "Improve endurance", etc.
+    val targetWeightKg: Double? = null, // Target weight for "Lose weight" goal
+    val startingWeightKg: Double? = null, // Starting weight for "Lose weight" goal
     
     // Consistency fields
     val weeklyRunTarget: Int? = null, // Number of runs per week

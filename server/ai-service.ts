@@ -2477,6 +2477,15 @@ export interface EliteCoachingParams {
   targetTimeCategory?: 'on_track' | 'strong_effort' | 'no_mention'; // for final_500m, final_100m
   etaOverTargetPercent?: number;         // how far over target as % (negative = under)
   remainingMeters?: number;              // meters remaining for final triggers
+
+  // Coaching programme context — populated when run is a scheduled plan workout
+  trainingPlanId?: string;
+  workoutId?: string;
+  workoutType?: string;       // easy | tempo | intervals | long_run | hill_repeats | recovery
+  workoutDescription?: string;
+  planGoalType?: string;      // 5k | 10k | half_marathon | marathon
+  planWeekNumber?: number;
+  planTotalWeeks?: number;
 }
 
 export async function generateEliteCoaching(params: EliteCoachingParams): Promise<string> {
@@ -2488,7 +2497,8 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
     paceTrendDirection, paceTrendDeltaPerKm,
     projectedFinishTime, consecutiveConsistentSplits, isNegativeSplitting,
     fastestSplitKm, fastestSplitPace,
-    targetTimeCategory, etaOverTargetPercent, remainingMeters
+    targetTimeCategory, etaOverTargetPercent, remainingMeters,
+    trainingPlanId, workoutType, workoutDescription, planGoalType, planWeekNumber, planTotalWeeks
   } = params;
 
   const timeMin = Math.floor(elapsedTime / 60);
@@ -2511,6 +2521,24 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
   if (hasRoute && totalElevationGain && totalElevationGain > 0) status += `\n- Elevation climbed: ${Math.round(totalElevationGain)}m`;
   if (hasRoute && currentGrade && Math.abs(currentGrade) > 2) status += `\n- Current gradient: ${currentGrade.toFixed(1)}%`;
   if (kmSplits && kmSplits.length > 0) status += `\n- Splits: ${kmSplits.map(s => `km${s.km}=${s.pace}`).join(', ')}`;
+
+  // Coaching programme context — adds plan awareness to every insight
+  if (trainingPlanId && planGoalType) {
+    const goalLabel = planGoalType.replace('_', ' ').toUpperCase();
+    status += `\n\nCoaching Programme Context:`;
+    status += `\n- This run is a SCHEDULED WORKOUT in the runner's AI coaching programme`;
+    status += `\n- Programme goal: ${goalLabel}`;
+    if (planWeekNumber && planTotalWeeks) {
+      status += `\n- Week ${planWeekNumber} of ${planTotalWeeks}`;
+    }
+    if (workoutType) {
+      status += `\n- Session type: ${workoutType.replace('_', ' ')}`;
+    }
+    if (workoutDescription) {
+      status += `\n- Today's workout: "${workoutDescription}"`;
+    }
+    status += `\nUse this context to give plan-aware coaching — reference their ${goalLabel} goal, compare current effort to what this workout is building towards, and reinforce how today's session fits the bigger picture.`;
+  }
 
   let typePrompt = '';
   let systemExtra = '';

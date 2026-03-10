@@ -191,7 +191,11 @@ fun RunSessionScreen(
                 onPause = { showPauseConfirm = true },
                 onResume = { viewModel.resumeRun() },
                 onStop = { showStopConfirm = true },
-                onCancel = onCancel,
+                onCancel = {
+                    // Stop AI audio and reset state before navigating back
+                    viewModel.cancelRunSetup()
+                    onCancel()
+                },
                 onSimulate = { viewModel.startSimulatedRun() },
                 onSimulateNav = { viewModel.startNavigationSimulatedRun() },
                 hasRouteLoaded = routePolyline != null
@@ -248,7 +252,14 @@ fun RunSessionScreen(
                 when {
                     hasRoute -> {
 
-                        // 1️⃣ Elite Rings Dashboard (same as Free Mode)
+                        // 1️⃣ AI Coach Panel (navigation + insights) - at TOP, above timer
+                        AiCoachLivePanel(
+                            message = runState.latestCoachMessage,
+                            isLoading = runState.isLoadingBriefing,
+                            modifier = Modifier.padding(horizontal = Spacing.md)
+                        )
+
+                        // 2️⃣ Elite Rings Dashboard (timer + stats)
                         FreeRunEliteDashboard(
                             time = runState.time,
                             distanceKmStr = runState.distance,
@@ -256,27 +267,27 @@ fun RunSessionScreen(
                             currentPaceStr = runState.currentPace, //Realtime Pace
                             cadenceStr = runState.cadence,
                             heartRateStr = runState.heartRate,
-                            aiCoachMessage = runState.latestCoachMessage,
+                            aiCoachMessage = null, // Already shown above
                             aiSpeaking = runState.latestCoachMessage != null || runState.isLoadingBriefing,
                             isRunning = runState.isRunning,
                             isLoadingBriefing = runState.isLoadingBriefing
                         )
 
-                        // 2️⃣ Route Map (NEW ELITE VERSION)
+                        // 3️⃣ Route Map (NEW ELITE VERSION)
                         EliteRouteMap(
                             runSession = runSession,
                             routePolyline = routePolyline
                         )
+                    }
 
-                        // 3️⃣ AI Coach Panel (navigation + insights)
+                    isGarminConnected -> {
+
+                        // 1️⃣ AI Coach Panel - at TOP
                         AiCoachLivePanel(
                             message = runState.latestCoachMessage,
                             isLoading = runState.isLoadingBriefing,
                             modifier = Modifier.padding(horizontal = Spacing.md)
                         )
-                    }
-
-                    isGarminConnected -> {
 
                         GarminElitePlusDashboard(
                             time = runState.time,
@@ -285,21 +296,22 @@ fun RunSessionScreen(
                             heartRateStr = runState.heartRate,
                             powerWatts = null,
                             hrZone = null,
-                            insightText = runState.latestCoachMessage,
+                            insightText = null, // Already shown above
                             aiSpeaking = runState.latestCoachMessage != null
                                     || runState.isLoadingBriefing,
                             isRunning = runState.isRunning,
                             isLoadingBriefing = runState.isLoadingBriefing
                         )
+                    }
 
+                    else -> {
+
+                        // 1️⃣ AI Coach Panel - at TOP
                         AiCoachLivePanel(
                             message = runState.latestCoachMessage,
                             isLoading = runState.isLoadingBriefing,
                             modifier = Modifier.padding(horizontal = Spacing.md)
                         )
-                    }
-
-                    else -> {
 
                         FreeRunEliteDashboard(
                             time = runState.time,
@@ -308,17 +320,11 @@ fun RunSessionScreen(
                             currentPaceStr = runState.currentPace,
                             cadenceStr = runState.cadence,
                             heartRateStr = runState.heartRate,
-                            aiCoachMessage = runState.latestCoachMessage,
+                            aiCoachMessage = null, // Already shown above
                             aiSpeaking = runState.latestCoachMessage != null
                                     || runState.isLoadingBriefing,
                             isRunning = runState.isRunning,
                             isLoadingBriefing = runState.isLoadingBriefing
-                        )
-
-                        AiCoachLivePanel(
-                            message = runState.latestCoachMessage,
-                            isLoading = runState.isLoadingBriefing,
-                            modifier = Modifier.padding(horizontal = Spacing.md)
                         )
                     }
                 }
@@ -1933,34 +1939,18 @@ fun ControlButtons(
                 }
             }
         } else {
-            // Not started yet - show Start Run and Cancel buttons
-            Row(
+            // Not started yet - show Start Run full width, with Cancel below
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
-                verticalAlignment = Alignment.CenterVertically
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(Spacing.md)
             ) {
-                // Cancel button
-                OutlinedButton(
-                    onClick = onCancel,
-                    modifier = Modifier.weight(1f).height(56.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = Colors.textSecondary
-                    ),
-                    border = ButtonDefaults.outlinedButtonBorder.copy(
-                        brush = SolidColor(Colors.border)
-                    )
-                ) {
-                    Text(
-                        text = "Cancel",
-                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
-                        color = Colors.textSecondary
-                    )
-                }
-
-                // Start Run button
+                // Start Run button - full width
                 Button(
                     onClick = onStart,
-                    modifier = Modifier.weight(1f).height(56.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Colors.primary
                     ),
@@ -1977,6 +1967,26 @@ fun ControlButtons(
                         text = "Start Run",
                         style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
                         color = Colors.backgroundRoot
+                    )
+                }
+
+                // Cancel button - below, full width
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Colors.textSecondary
+                    ),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(
+                        brush = SolidColor(Colors.border)
+                    )
+                ) {
+                    Text(
+                        text = "Cancel",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
+                        color = Colors.textSecondary
                     )
                 }
             }

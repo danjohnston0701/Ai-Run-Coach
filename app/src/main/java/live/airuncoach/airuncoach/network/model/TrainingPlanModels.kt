@@ -2,6 +2,19 @@ package live.airuncoach.airuncoach.network.model
 
 import com.google.gson.annotations.SerializedName
 
+/**
+ * A regular run the user attends each week that the AI should factor into the plan
+ * (e.g. Parkrun every Saturday, running club on Tuesday evenings).
+ */
+data class RegularSessionRequest(
+    @SerializedName("name") val name: String,
+    @SerializedName("dayOfWeek") val dayOfWeek: Int,               // 0=Sun … 6=Sat
+    @SerializedName("timeHour") val timeHour: Int,
+    @SerializedName("timeMinute") val timeMinute: Int,
+    @SerializedName("distanceKm") val distanceKm: Double,
+    @SerializedName("countsTowardWeeklyTotal") val countsTowardWeeklyTotal: Boolean
+)
+
 /** POST /api/training-plans/generate */
 data class GeneratePlanRequest(
     @SerializedName("goalType") val goalType: String,       // "5k","10k","half_marathon","marathon","custom"
@@ -10,7 +23,9 @@ data class GeneratePlanRequest(
     @SerializedName("targetDate") val targetDate: String?,  // ISO
     @SerializedName("experienceLevel") val experienceLevel: String, // beginner/intermediate/advanced
     @SerializedName("daysPerWeek") val daysPerWeek: Int = 4,
-    @SerializedName("goalId") val goalId: String? = null    // optionally link to a Goal
+    @SerializedName("goalId") val goalId: String? = null,   // optionally link to a Goal
+    @SerializedName("firstSessionStart") val firstSessionStart: String = "flexible", // "today" | "tomorrow" | "flexible"
+    @SerializedName("regularSessions") val regularSessions: List<RegularSessionRequest> = emptyList()
 )
 
 /** Response from generate */

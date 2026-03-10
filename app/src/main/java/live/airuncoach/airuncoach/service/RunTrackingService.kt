@@ -328,6 +328,14 @@ class RunTrackingService : Service(), SensorEventListener {
         const val EXTRA_TARGET_TIME = "EXTRA_TARGET_TIME"
         const val EXTRA_HAS_ROUTE = "EXTRA_HAS_ROUTE"
         const val EXTRA_ACTIVE_RUN = "extra_active_run"
+        // Coaching programme context
+        const val EXTRA_TRAINING_PLAN_ID = "EXTRA_TRAINING_PLAN_ID"
+        const val EXTRA_WORKOUT_ID = "EXTRA_WORKOUT_ID"
+        const val EXTRA_WORKOUT_TYPE = "EXTRA_WORKOUT_TYPE"
+        const val EXTRA_WORKOUT_DESCRIPTION = "EXTRA_WORKOUT_DESCRIPTION"
+        const val EXTRA_PLAN_GOAL_TYPE = "EXTRA_PLAN_GOAL_TYPE"
+        const val EXTRA_PLAN_WEEK_NUMBER = "EXTRA_PLAN_WEEK_NUMBER"
+        const val EXTRA_PLAN_TOTAL_WEEKS = "EXTRA_PLAN_TOTAL_WEEKS"
         
         private val _currentRunSession = MutableStateFlow<RunSession?>(null)
         val currentRunSession: StateFlow<RunSession?> = _currentRunSession
@@ -398,6 +406,15 @@ class RunTrackingService : Service(), SensorEventListener {
     // Polyline passed via intent for nav simulation
     private var navSimulationPolyline: String? = null
 
+    // Coaching programme context (null when not a plan workout)
+    private var planTrainingPlanId: String? = null
+    private var planWorkoutId: String? = null
+    private var planWorkoutType: String? = null
+    private var planWorkoutDescription: String? = null
+    private var planGoalType: String? = null
+    private var planWeekNumber: Int? = null
+    private var planTotalWeeks: Int? = null
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // targetDistance comes from RunSetupConfig.targetDistance which is in KILOMETERS.
         // Normalize to METRES here so all internal calculations use metres consistently.
@@ -410,6 +427,14 @@ class RunTrackingService : Service(), SensorEventListener {
         targetTime = intent?.getLongExtra(EXTRA_TARGET_TIME, 0)?.takeIf { it > 0 }
         hasRoute = intent?.getBooleanExtra(EXTRA_HAS_ROUTE, false) == true
         navSimulationPolyline = intent?.getStringExtra("EXTRA_ROUTE_POLYLINE")
+        // Coaching programme context
+        planTrainingPlanId = intent?.getStringExtra(EXTRA_TRAINING_PLAN_ID)
+        planWorkoutId = intent?.getStringExtra(EXTRA_WORKOUT_ID)
+        planWorkoutType = intent?.getStringExtra(EXTRA_WORKOUT_TYPE)
+        planWorkoutDescription = intent?.getStringExtra(EXTRA_WORKOUT_DESCRIPTION)
+        planGoalType = intent?.getStringExtra(EXTRA_PLAN_GOAL_TYPE)
+        planWeekNumber = intent?.getIntExtra(EXTRA_PLAN_WEEK_NUMBER, 0)?.takeIf { it > 0 }
+        planTotalWeeks = intent?.getIntExtra(EXTRA_PLAN_TOTAL_WEEKS, 0)?.takeIf { it > 0 }
 
         when (intent?.action) {
             ACTION_START_TRACKING -> startTracking()
@@ -2833,7 +2858,15 @@ class RunTrackingService : Service(), SensorEventListener {
             targetPace = null, // TODO: pass if user has set one
             kmSplits = kmSplits.map { KmSplitBrief(it.km, it.pace) },
             remainingDistanceFormatted = remainingFormatted,
-            distanceCompletedFormatted = distanceCompletedFormatted
+            distanceCompletedFormatted = distanceCompletedFormatted,
+            // Coaching programme context — non-null only when this is a plan workout
+            trainingPlanId = planTrainingPlanId,
+            workoutId = planWorkoutId,
+            workoutType = planWorkoutType,
+            workoutDescription = planWorkoutDescription,
+            planGoalType = planGoalType,
+            planWeekNumber = planWeekNumber,
+            planTotalWeeks = planTotalWeeks
         )
     }
 

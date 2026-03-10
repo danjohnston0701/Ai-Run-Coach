@@ -18,6 +18,8 @@ data class CreateGoalRequest(
     
     // Health & Wellbeing fields
     val healthTarget: String? = null,
+    val targetWeightKg: Double? = null,
+    val startingWeightKg: Double? = null,
     
     // Consistency fields
     val weeklyRunTarget: Int? = null

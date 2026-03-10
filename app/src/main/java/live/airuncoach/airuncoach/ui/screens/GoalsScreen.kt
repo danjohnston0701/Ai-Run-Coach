@@ -40,6 +40,7 @@ fun GoalsScreen(
     var goalToDelete by remember { mutableStateOf<Goal?>(null) }
     var showGoalDetails by remember { mutableStateOf<Goal?>(null) }
     var goalToEdit by remember { mutableStateOf<Goal?>(null) }
+    var goalToMarkComplete by remember { mutableStateOf<Goal?>(null) }
     var showCelebrationDialog by remember { mutableStateOf<Goal?>(null) }
     var celebrationRunDistance by remember { mutableStateOf("") }
 
@@ -203,6 +204,8 @@ fun GoalsScreen(
                             goals = state.goals,
                             onGoalClick = { goal -> showGoalDetails = goal },
                             onDeleteClick = { goal -> goalToDelete = goal },
+                            onEditClick = { goal -> goalToEdit = goal },
+                            onMarkCompleteClick = { goal -> goalToMarkComplete = goal },
                             onGeneratePlan = onGeneratePlanForGoal
                         )
                     }
@@ -257,6 +260,38 @@ fun GoalsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { goalToDelete = null }) {
+                    Text("Cancel", color = Colors.textPrimary)
+                }
+            },
+            containerColor = Colors.backgroundSecondary
+        )
+    }
+
+    // Mark as Complete Dialog
+    goalToMarkComplete?.let { goal ->
+        AlertDialog(
+            onDismissRequest = { goalToMarkComplete = null },
+            title = { Text("Mark as Complete?", style = AppTextStyles.h3) },
+            text = {
+                Text(
+                    "Mark \"${goal.title}\" as completed?",
+                    style = AppTextStyles.body,
+                    color = Colors.textSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        goal.id?.let { viewModel.completeGoal(it, "") }
+                        goalToMarkComplete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.success)
+                ) {
+                    Text("Complete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { goalToMarkComplete = null }) {
                     Text("Cancel", color = Colors.textPrimary)
                 }
             },
@@ -365,6 +400,8 @@ fun GoalsListContent(
     goals: List<Goal>,
     onGoalClick: (Goal) -> Unit,
     onDeleteClick: (Goal) -> Unit,
+    onEditClick: (Goal) -> Unit,
+    onMarkCompleteClick: (Goal) -> Unit,
     onGeneratePlan: ((Goal) -> Unit)? = null
 ) {
     LazyColumn(
@@ -377,6 +414,8 @@ fun GoalsListContent(
                 goal = goal,
                 onClick = { onGoalClick(goal) },
                 onDeleteClick = { onDeleteClick(goal) },
+                onEditClick = { onEditClick(goal) },
+                onMarkCompleteClick = { onMarkCompleteClick(goal) },
                 onGeneratePlan = if (onGeneratePlan != null && goal.isActive && !goal.isCompleted) {
                     { onGeneratePlan(goal) }
                 } else null
@@ -390,8 +429,12 @@ fun GoalCard(
     goal: Goal,
     onClick: () -> Unit,
     onDeleteClick: () -> Unit,
+    onEditClick: () -> Unit,
+    onMarkCompleteClick: () -> Unit,
     onGeneratePlan: (() -> Unit)? = null
 ) {
+    var showMenu by remember { mutableStateOf(false) }
+    
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -499,18 +542,48 @@ fun GoalCard(
                 }
             }
 
-            // Menu Button
-            IconButton(onClick = onDeleteClick) {
-                Icon(
-                    painter = painterResource(id = R.drawable.icon_more_vertical),
-                    contentDescription = "Options",
-                    tint = Colors.textMuted
-                )
+            // Menu Button with Dropdown
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.icon_more_vertical),
+                        contentDescription = "Options",
+                        tint = Colors.textMuted
+                    )
+                }
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Edit", style = AppTextStyles.body) },
+                        onClick = {
+                            showMenu = false
+                            onEditClick()
+                        }
+                    )
+                    if (!goal.isCompleted) {
+                        DropdownMenuItem(
+                            text = { Text("Mark as Complete", style = AppTextStyles.body) },
+                            onClick = {
+                                showMenu = false
+                                onMarkCompleteClick()
+                            }
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("Delete", style = AppTextStyles.body.copy(color = Colors.error)) },
+                        onClick = {
+                            showMenu = false
+                            onDeleteClick()
+                        }
+                    )
+                }
             }
         }
 
         // "Get Training Plan" CTA — shown for active distance/time goals
-        if (onGeneratePlan != null && (goal.type == "DISTANCE_TIME" || goal.type == "EVENT")) {
+        if (onGeneratePlan != null && (goal.type == "DISTANCE_TIME" || goal.type == "EVENT" || goal.type == "HEALTH_WELLBEING")) {
             HorizontalDivider(color = Colors.backgroundRoot, thickness = 1.dp, modifier = Modifier.padding(horizontal = Spacing.lg))
             TextButton(
                 onClick = onGeneratePlan,
@@ -666,7 +739,7 @@ fun GoalDetailsBottomSheet(
             }
             
             // Show related run sessions count
-            if (goal.relatedRunSessionIds.isNotEmpty()) {
+            if (!goal.relatedRunSessionIds.isNullOrEmpty()) {
                 Spacer(modifier = Modifier.height(Spacing.md))
                 Row(
                     modifier = Modifier
@@ -683,7 +756,7 @@ fun GoalDetailsBottomSheet(
                         modifier = Modifier.size(20.dp)
                     )
                     Text(
-                        text = "${goal.relatedRunSessionIds.size} run${if (goal.relatedRunSessionIds.size > 1) "s" else ""} linked to this goal",
+                        text = "${goal.relatedRunSessionIds?.size ?: 0} run${if ((goal.relatedRunSessionIds?.size ?: 0) > 1) "s" else ""} linked to this goal",
                         style = AppTextStyles.body,
                         color = Colors.textPrimary
                     )

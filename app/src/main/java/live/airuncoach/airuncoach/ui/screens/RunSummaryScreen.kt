@@ -194,6 +194,7 @@ fun RunSummaryScreenFlagship(
 
     Scaffold(
         containerColor = Colors.backgroundRoot,
+        contentWindowInsets = WindowInsets(0), // outer Scaffold already handles nav bar insets
         topBar = {
             RunSummaryTopBarFlagship(
                 title = "Run Insights",
@@ -5449,11 +5450,7 @@ private fun DataSectionCard(
 
 @Composable
 private fun KmSplitsCard(kmSplits: List<KmSplit>) {
-    // Calculate per-km times from cumulative times
-    val splitsWithPerKmTime = kmSplits.mapIndexed { index, split ->
-        val perKmTime = if (index == 0) split.time else split.time - kmSplits[index - 1].time
-        split to perKmTime
-    }
+    // split.time is already the duration of just that km in milliseconds — no subtraction needed
     
     Card(
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
@@ -5487,8 +5484,8 @@ private fun KmSplitsCard(kmSplits: List<KmSplit>) {
             
             HorizontalDivider(color = Colors.border.copy(alpha = 0.3f), modifier = Modifier.padding(vertical = 8.dp))
             
-            // Show all splits (not just first 10)
-            splitsWithPerKmTime.forEach { (split, perKmTime) ->
+            // Show all splits — split.time is ms, divide by 1000 to get seconds
+            kmSplits.forEach { split ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -5496,7 +5493,7 @@ private fun KmSplitsCard(kmSplits: List<KmSplit>) {
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text("${split.km}", style = AppTextStyles.body, color = Colors.textSecondary, modifier = Modifier.weight(0.8f))
-                    Text(formatSecondsToHMS(perKmTime), style = AppTextStyles.body, color = Colors.textSecondary, modifier = Modifier.weight(1f))
+                    Text(formatSecondsToHMS(split.time / 1000), style = AppTextStyles.body, color = Colors.textSecondary, modifier = Modifier.weight(1f))
                     Text("${split.pace}/km", style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold), color = Colors.primary, modifier = Modifier.weight(1f))
                 }
             }

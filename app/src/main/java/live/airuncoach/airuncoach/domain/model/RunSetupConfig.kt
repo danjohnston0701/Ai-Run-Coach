@@ -15,7 +15,18 @@ data class RunSetupConfig(
     val liveTrackingObservers: List<String> = emptyList(), // User IDs
     val isGroupRun: Boolean = false,
     val groupRunParticipants: List<String> = emptyList(),   // User IDs
-    val route: GeneratedRoute? = null   // Generated route with polyline and turn instructions
+    val route: GeneratedRoute? = null,  // Generated route with polyline and turn instructions
+
+    // ── Coaching Programme context ────────────────────────────────────────────
+    // Populated when this run is part of an AI coaching plan workout.
+    // Passed through to the in-run AI coach so it can give plan-aware insights.
+    val trainingPlanId: String? = null,
+    val workoutId: String? = null,
+    val workoutType: String? = null,      // "easy" | "tempo" | "intervals" | "long_run" | etc.
+    val workoutDescription: String? = null,
+    val planGoalType: String? = null,     // "5k" | "10k" | "half_marathon" | "marathon"
+    val planWeekNumber: Int? = null,
+    val planTotalWeeks: Int? = null
 ) {
     /**
      * Get formatted target time string

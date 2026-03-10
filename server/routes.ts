@@ -1213,6 +1213,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timeTargetSeconds: goal.timeTargetSeconds,
         healthTarget: goal.healthTarget,
         weeklyRunTarget: goal.weeklyRunTarget,
+        targetWeightKg: (goal as any).targetWeightKg ?? null,
+        startingWeightKg: (goal as any).startingWeightKg ?? null,
         currentProgress: goal.progressPercent ?? 0,
         isActive: goal.status === 'active',
         isCompleted: !!goal.completedAt,
@@ -1251,6 +1253,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timeTargetSeconds: req.body.timeTargetSeconds || null,
         healthTarget: req.body.healthTarget || null,
         weeklyRunTarget: req.body.weeklyRunTarget || null,
+        targetWeightKg: req.body.targetWeightKg || null,
+        startingWeightKg: req.body.startingWeightKg || null,
         status: 'active',
         progressPercent: 0,
       };
@@ -1272,6 +1276,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timeTargetSeconds: rawGoal.timeTargetSeconds,
         healthTarget: rawGoal.healthTarget,
         weeklyRunTarget: rawGoal.weeklyRunTarget,
+        targetWeightKg: (rawGoal as any).targetWeightKg ?? null,
+        startingWeightKg: (rawGoal as any).startingWeightKg ?? null,
         currentProgress: rawGoal.progressPercent ?? 0,
         isActive: rawGoal.status === 'active',
         isCompleted: !!rawGoal.completedAt,
@@ -1280,7 +1286,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         updatedAt: rawGoal.updatedAt?.toISOString(),
         completedAt: rawGoal.completedAt?.toISOString(),
       };
-      
+
       res.status(201).json(goal);
     } catch (error: any) {
       console.error("Create goal error:", error);
@@ -1303,6 +1309,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timeTargetSeconds: req.body.timeTargetSeconds || null,
         healthTarget: req.body.healthTarget || null,
         weeklyRunTarget: req.body.weeklyRunTarget || null,
+        targetWeightKg: req.body.targetWeightKg || null,
+        startingWeightKg: req.body.startingWeightKg || null,
       };
 
       // Handle completion / status fields sent by the app
@@ -1344,6 +1352,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timeTargetSeconds: rawGoal.timeTargetSeconds,
         healthTarget: rawGoal.healthTarget,
         weeklyRunTarget: rawGoal.weeklyRunTarget,
+        targetWeightKg: (rawGoal as any).targetWeightKg ?? null,
+        startingWeightKg: (rawGoal as any).startingWeightKg ?? null,
         currentProgress: rawGoal.progressPercent ?? 0,
         isActive: rawGoal.status === 'active',
         isCompleted: !!rawGoal.completedAt,
@@ -1352,7 +1362,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         updatedAt: rawGoal.updatedAt?.toISOString(),
         completedAt: rawGoal.completedAt?.toISOString(),
       };
-      
+
       res.json(goal);
     } catch (error: any) {
       console.error("Update goal error:", error);
@@ -3471,7 +3481,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // COMMON - Deregistrations (user disconnects Garmin)
+  // USER_DEREG ping — Garmin sends a GET to verify the endpoint is alive
+  app.get("/api/garmin/webhook/deregistrations", (_req: Request, res: Response) => {
+    res.status(200).json({ success: true });
+  });
+  app.get("/api/garmin/webhooks/deregistrations", (_req: Request, res: Response) => {
+    res.status(200).json({ success: true });
+  });
+
+  // COMMON - Deregistrations (user disconnects Garmin) — POST for actual payloads
   garminWebhook("deregistrations", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received deregistration:', JSON.stringify(req.body).slice(0, 500));
@@ -6005,13 +6023,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         targetTime,
         targetDate,
         experienceLevel,
-        daysPerWeek
+        daysPerWeek,
+        firstSessionStart = "flexible", // "today" | "tomorrow" | "flexible"
+        regularSessions = []  // recurring runs the user already does each week
       } = req.body;
-      
+
       if (!goalType || !targetDistance) {
         return res.status(400).json({ error: "goalType and targetDistance are required" });
       }
-      
+
       const planId = await generateTrainingPlan(
         userId,
         goalType,
@@ -6019,7 +6039,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         targetTime,
         targetDate ? new Date(targetDate) : undefined,
         experienceLevel || "intermediate",
-        daysPerWeek || 4
+        daysPerWeek || 4,
+        regularSessions,
+        firstSessionStart
       );
       
       res.status(201).json({

@@ -52,7 +52,16 @@ data class EliteCoachingRequest(
     @SerializedName("isOnHill") val isOnHill: Boolean? = null,
     @SerializedName("isUphill") val isUphill: Boolean? = null,
     @SerializedName("fatigueLevel") val fatigueLevel: String? = null,  // FRESH, MODERATE, FATIGUED
-    @SerializedName("recentTechniqueCategories") val recentTechniqueCategories: List<String>? = null
+    @SerializedName("recentTechniqueCategories") val recentTechniqueCategories: List<String>? = null,
+
+    // Coaching programme context — populated when this run is a scheduled plan workout
+    @SerializedName("trainingPlanId") val trainingPlanId: String? = null,
+    @SerializedName("workoutId") val workoutId: String? = null,
+    @SerializedName("workoutType") val workoutType: String? = null,        // easy / tempo / intervals / long_run
+    @SerializedName("workoutDescription") val workoutDescription: String? = null,
+    @SerializedName("planGoalType") val planGoalType: String? = null,      // 5k / 10k / half_marathon / marathon
+    @SerializedName("planWeekNumber") val planWeekNumber: Int? = null,
+    @SerializedName("planTotalWeeks") val planTotalWeeks: Int? = null
 )
 
 data class KmSplitBrief(

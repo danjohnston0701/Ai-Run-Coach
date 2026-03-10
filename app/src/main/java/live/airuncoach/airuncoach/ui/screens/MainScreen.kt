@@ -40,6 +40,7 @@ import live.airuncoach.airuncoach.domain.model.RunSetupConfig
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.util.RunConfigHolder
+import live.airuncoach.airuncoach.util.WorkoutHolder
 import live.airuncoach.airuncoach.viewmodel.DashboardViewModel
 import live.airuncoach.airuncoach.viewmodel.RouteGenerationViewModel
 
@@ -510,8 +511,11 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     prefilledGoal = goal,
                     onNavigateBack = { navController.popBackStack() },
                     onPlanCreated = { planId ->
+                        // Pop the generate_plan screen off the stack (inclusive),
+                        // then navigate to the new plan — works whether we came from
+                        // coaching_programme OR the goals screen.
                         navController.navigate("training_plan/$planId") {
-                            popUpTo("coaching_programme")
+                            popUpTo("generate_plan") { inclusive = true }
                         }
                     }
                 )
@@ -522,29 +526,52 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     planId = planId,
                     onNavigateBack = { navController.popBackStack() },
                     onStartWorkout = { workout ->
-                        live.airuncoach.airuncoach.util.WorkoutHolder.currentWorkout = workout
+                        WorkoutHolder.currentWorkout = workout
                         navController.navigate("workout_detail")
                     },
                     onViewWorkoutDetail = { workout ->
-                        live.airuncoach.airuncoach.util.WorkoutHolder.currentWorkout = workout
+                        WorkoutHolder.currentWorkout = workout
                         navController.navigate("workout_detail")
                     }
                 )
             }
             composable("workout_detail") {
-                val workout = live.airuncoach.airuncoach.util.WorkoutHolder.currentWorkout
+                val workout = WorkoutHolder.currentWorkout
                 if (workout == null) {
                     navController.popBackStack()
                 } else {
                     WorkoutDetailScreen(
                         workout = workout,
                         onNavigateBack = { navController.popBackStack() },
-                        onStartWorkout = { _ ->
-                            // TODO: Pre-load workout context into run session
+                        onStartWorkout = { w ->
+                            // Build a RunSetupConfig pre-loaded with coaching plan context
+                            // so the in-run AI coach knows which plan workout is being executed.
+                            val planCtx = WorkoutHolder.planContext
+                            val targetDistanceKm = (w.distance ?: 5.0).toFloat()
+                            val config = RunSetupConfig(
+                                activityType = PhysicalActivityType.RUN,
+                                targetDistance = targetDistanceKm,
+                                // Wire target time if the workout has a duration set
+                                hasTargetTime = w.duration != null,
+                                targetHours   = (w.duration ?: 0) / 3600,
+                                targetMinutes = ((w.duration ?: 0) % 3600) / 60,
+                                targetSeconds = (w.duration ?: 0) % 60,
+                                // Coaching programme context
+                                trainingPlanId      = planCtx?.planId,
+                                workoutId           = w.id,
+                                workoutType         = w.workoutType,
+                                workoutDescription  = w.description,
+                                planGoalType        = planCtx?.goalType,
+                                planWeekNumber      = planCtx?.weekNumber,
+                                planTotalWeeks      = planCtx?.totalWeeks
+                            )
+                            RunConfigHolder.setConfig(config)
+                            WorkoutHolder.clear()
                             navController.navigate("run_session")
                         },
                         onMarkComplete = { _ ->
                             // TODO: call completeWorkout on ViewModel
+                            WorkoutHolder.clear()
                             navController.popBackStack()
                         }
                     )

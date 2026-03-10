@@ -9,8 +9,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.domain.model.Goal
+import live.airuncoach.airuncoach.domain.model.RegularSession
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.model.GeneratePlanRequest
+import live.airuncoach.airuncoach.network.model.RegularSessionRequest
 import javax.inject.Inject
 
 sealed class GeneratePlanState {
@@ -55,6 +57,14 @@ class GeneratePlanViewModel @Inject constructor(
     private val _experienceLevel = MutableStateFlow("intermediate")
     val experienceLevel: StateFlow<String> = _experienceLevel.asStateFlow()
 
+    // "today" | "tomorrow" | "flexible"
+    private val _firstSessionStart = MutableStateFlow("flexible")
+    val firstSessionStart: StateFlow<String> = _firstSessionStart.asStateFlow()
+
+    // Regular sessions the user does each week (e.g. Parkrun, running club)
+    private val _regularSessions = MutableStateFlow<List<RegularSession>>(emptyList())
+    val regularSessions: StateFlow<List<RegularSession>> = _regularSessions.asStateFlow()
+
     // Linked goal (optional — pre-fills the form)
     private val _linkedGoal = MutableStateFlow<Goal?>(null)
     val linkedGoal: StateFlow<Goal?> = _linkedGoal.asStateFlow()
@@ -95,6 +105,23 @@ class GeneratePlanViewModel @Inject constructor(
     fun setDaysPerWeek(days: Int) { _daysPerWeek.value = days }
     fun setDurationWeeks(weeks: Int) { _durationWeeks.value = weeks }
     fun setExperienceLevel(level: String) { _experienceLevel.value = level }
+    fun setFirstSessionStart(value: String) { _firstSessionStart.value = value }
+
+    // ── Regular sessions ──────────────────────────────────────────────────────
+    fun addRegularSession(session: RegularSession) {
+        _regularSessions.value = _regularSessions.value + session
+    }
+
+    fun removeRegularSession(sessionId: String) {
+        _regularSessions.value = _regularSessions.value.filter { it.id != sessionId }
+    }
+
+    fun toggleSessionCountsTowardTotal(sessionId: String) {
+        _regularSessions.value = _regularSessions.value.map { s ->
+            if (s.id == sessionId) s.copy(countsTowardWeeklyTotal = !s.countsTowardWeeklyTotal)
+            else s
+        }
+    }
 
     fun generatePlan() {
         val distKm = _targetDistance.value.toDoubleOrNull() ?: 5.0
@@ -114,7 +141,18 @@ class GeneratePlanViewModel @Inject constructor(
                     targetDate = null, // Could be wired from goal.targetDate
                     experienceLevel = _experienceLevel.value,
                     daysPerWeek = _daysPerWeek.value,
-                    goalId = _linkedGoal.value?.id
+                    goalId = _linkedGoal.value?.id,
+                    firstSessionStart = _firstSessionStart.value,
+                    regularSessions = _regularSessions.value.map { s ->
+                        RegularSessionRequest(
+                            name = s.name,
+                            dayOfWeek = s.dayOfWeek,
+                            timeHour = s.timeHour,
+                            timeMinute = s.timeMinute,
+                            distanceKm = s.distanceKm,
+                            countsTowardWeeklyTotal = s.countsTowardWeeklyTotal
+                        )
+                    }
                 )
                 val response = apiService.generateTrainingPlan(request)
                 _generateState.value = GeneratePlanState.Success(response.planId)

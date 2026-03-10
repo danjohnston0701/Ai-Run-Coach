@@ -47,6 +47,9 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
 
     val selectedTab: StateFlow<Int> = _selectedTab.asStateFlow()
 
+    // Track if initial load has completed to avoid redundant API calls
+    private var hasLoadedGoals = false
+
     private val _createGoalState = MutableStateFlow<CreateGoalState>(CreateGoalState.Idle)
     val createGoalState: StateFlow<CreateGoalState> = _createGoalState.asStateFlow()
 
@@ -74,8 +77,14 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    fun loadGoals() {
+    fun loadGoals(forceRefresh: Boolean = false) {
         viewModelScope.launch {
+            // Skip API call if already loaded and not forcing refresh
+            if (hasLoadedGoals && !forceRefresh && _allGoals.value.isNotEmpty()) {
+                android.util.Log.d("GoalsViewModel", "📱 Goals already loaded, skipping API call")
+                return@launch
+            }
+            
             try {
                 _goalsState.value = GoalsUiState.Loading
                 val userId = _user.value?.id
@@ -83,6 +92,7 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
                     android.util.Log.d("GoalsViewModel", "📡 Fetching goals for user: $userId")
                     val goals = apiService.getGoals(userId)
                     _allGoals.value = goals
+                    hasLoadedGoals = true
                     android.util.Log.d("GoalsViewModel", "✅ Successfully loaded ${goals.size} goals")
                 } else {
                     _goalsState.value = GoalsUiState.Error("User not logged in")
@@ -127,12 +137,14 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
         distanceTarget: String?,
         timeTargetSeconds: Int?,
         healthTarget: String?,
-        weeklyRunTarget: Int?
+        weeklyRunTarget: Int?,
+        targetWeightKg: Double? = null,
+        startingWeightKg: Double? = null
     ) {
         viewModelScope.launch {
             try {
                 _createGoalState.value = CreateGoalState.Loading
-                
+
                 val userId = _user.value?.id
                 if (userId == null) {
                     _createGoalState.value = CreateGoalState.Error("User not logged in")
@@ -151,14 +163,18 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
                     distanceTarget = distanceTarget,
                     timeTargetSeconds = timeTargetSeconds,
                     healthTarget = healthTarget,
-                    weeklyRunTarget = weeklyRunTarget
+                    weeklyRunTarget = weeklyRunTarget,
+                    targetWeightKg = targetWeightKg,
+                    startingWeightKg = startingWeightKg
                 )
 
                 val createdGoal = apiService.createGoal(request)
                 _createGoalState.value = CreateGoalState.Success
                 
+                // Reset cache to ensure fresh data on next load
+                hasLoadedGoals = false
                 // Reload goals to update the list
-                loadGoals()
+                loadGoals(forceRefresh = true)
             } catch (e: Exception) {
                 _createGoalState.value = CreateGoalState.Error(e.message ?: "Failed to create goal")
                 android.util.Log.e("GoalsViewModel", "Failed to create goal: ${e.message}", e)
@@ -170,7 +186,9 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
         viewModelScope.launch {
             try {
                 apiService.deleteGoal(goalId)
-                loadGoals() // Reload goals after deletion
+                // Reset cache and reload goals after deletion
+                hasLoadedGoals = false
+                loadGoals(forceRefresh = true)
             } catch (e: Exception) {
                 android.util.Log.e("GoalsViewModel", "Failed to delete goal: ${e.message}", e)
             }
@@ -210,8 +228,10 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
                 apiService.updateGoal(goalId, request)
                 _createGoalState.value = CreateGoalState.Success
                 
+                // Reset cache to ensure fresh data on next load
+                hasLoadedGoals = false
                 // Reload goals to update the list
-                loadGoals()
+                loadGoals(forceRefresh = true)
             } catch (e: Exception) {
                 _createGoalState.value = CreateGoalState.Error(e.message ?: "Failed to update goal")
                 android.util.Log.e("GoalsViewModel", "Failed to update goal: ${e.message}", e)
@@ -271,7 +291,8 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
                 android.util.Log.d("GoalsViewModel", "Goal update response: $response")
                 
                 // Reload goals to get updated status
-                loadGoals()
+                hasLoadedGoals = false
+                loadGoals(forceRefresh = true)
                 android.util.Log.d("GoalsViewModel", "Goal $goalId completed, linked to run $runSessionId")
             } catch (e: Exception) {
                 android.util.Log.e("GoalsViewModel", "Failed to complete goal: ${e.message}", e)
@@ -318,7 +339,8 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
                 android.util.Log.d("GoalsViewModel", "Goal link update response: $response")
                 
                 // Reload goals to get updated status
-                loadGoals()
+                hasLoadedGoals = false
+                loadGoals(forceRefresh = true)
                 android.util.Log.d("GoalsViewModel", "Linked run $runSessionId to goal $goalId")
             } catch (e: Exception) {
                 android.util.Log.e("GoalsViewModel", "Failed to link run to goal: ${e.message}", e)

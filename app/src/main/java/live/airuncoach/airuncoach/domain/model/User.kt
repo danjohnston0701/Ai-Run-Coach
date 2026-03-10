@@ -17,7 +17,7 @@ data class User(
     val coachGender: String = "male",
     val coachAccent: String = "british",
     val coachTone: String = "energetic",
-    val nicknameStyle: String = "occasional",  // "none" | "occasional" | "frequent"
+    val nicknameStyle: String? = "occasional",  // "none" | "occasional" | "frequent" — nullable so Gson can handle cached JSON missing this field
     val profilePic: String? = null,
     val distanceMinKm: Float = 0f,
     val distanceMaxKm: Float = 50f,

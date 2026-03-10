@@ -27,6 +27,15 @@ interface WorkoutTemplate {
 /**
  * Generate AI-powered training plan
  */
+interface RegularSessionInput {
+  name: string;
+  dayOfWeek: number;   // 0=Sun … 6=Sat
+  timeHour: number;
+  timeMinute: number;
+  distanceKm: number;
+  countsTowardWeeklyTotal: boolean;
+}
+
 export async function generateTrainingPlan(
   userId: string,
   goalType: string, // 5k, 10k, half_marathon, marathon, ultra
@@ -34,7 +43,9 @@ export async function generateTrainingPlan(
   targetTime?: number, // seconds
   targetDate?: Date,
   experienceLevel: string = "intermediate", // beginner, intermediate, advanced
-  daysPerWeek: number = 4
+  daysPerWeek: number = 4,
+  regularSessions: RegularSessionInput[] = [],
+  firstSessionStart: string = "flexible"  // "today" | "tomorrow" | "flexible"
 ): Promise<string> {
   try {
     // Get user profile
@@ -102,7 +113,18 @@ export async function generateTrainingPlan(
         includeSpeedWork: true,
         includeHillWork: true,
         includeLongRuns: true,
-      }
+      },
+      regularSessions: regularSessions.length > 0 ? regularSessions.map(s => {
+        const dayNames = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+        const time = `${String(s.timeHour).padStart(2,"0")}:${String(s.timeMinute).padStart(2,"0")}`;
+        return {
+          name: s.name,
+          day: dayNames[s.dayOfWeek] ?? `Day ${s.dayOfWeek}`,
+          time,
+          distanceKm: s.distanceKm,
+          countsTowardWeeklyTotal: s.countsTowardWeeklyTotal,
+        };
+      }) : undefined,
     };
 
     // Generate plan with OpenAI
@@ -119,6 +141,26 @@ Goal:
 - ${goalType.toUpperCase()} (${targetDistance}km)
 ${targetTime ? `- Target time: ${Math.floor(targetTime / 60)} minutes` : ''}
 ${targetDate ? `- Race date: ${targetDate.toDateString()}` : ''}
+
+${regularSessions.length > 0 ? `
+Regular Weekly Runs (already in the user's schedule):
+${regularSessions.map(s => {
+  const dayNames = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const time = `${String(s.timeHour).padStart(2,"0")}:${String(s.timeMinute).padStart(2,"0")}`;
+  const countNote = s.countsTowardWeeklyTotal
+    ? "counts towards weekly session total"
+    : "EXTRA – does NOT count towards weekly session total";
+  return `- ${s.name}: every ${dayNames[s.dayOfWeek] ?? `Day ${s.dayOfWeek}`} at ${time}, ${s.distanceKm}km (${countNote})`;
+}).join("\n")}
+
+IMPORTANT: Place these sessions on the correct days in the plan. Sessions marked "EXTRA" should be treated as additional workload on top of the ${daysPerWeek} AI-generated sessions per week — do not replace an AI session with them. Sessions that count towards the total should be included in the ${daysPerWeek} sessions for that week.
+` : ""}
+Schedule:
+- First session: ${
+  firstSessionStart === "today" ? `TODAY (${new Date().toDateString()}) — schedule the first workout for today` :
+  firstSessionStart === "tomorrow" ? `TOMORROW (${new Date(Date.now() + 86400000).toDateString()}) — schedule the first workout for tomorrow` :
+  "Flexible — AI should choose the optimal start day based on the weekly pattern and days per week"
+}
 
 Requirements:
 1. Build gradually from current ${weeklyMileageBase.toFixed(1)}km/week base

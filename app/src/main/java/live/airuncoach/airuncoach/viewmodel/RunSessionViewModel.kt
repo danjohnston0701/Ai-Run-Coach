@@ -451,6 +451,14 @@ class RunSessionViewModel @Inject constructor(
                         putExtra(RunTrackingService.EXTRA_TARGET_TIME, targetTimeMs)
                     }
                     putExtra(RunTrackingService.EXTRA_HAS_ROUTE, it.route != null)
+                    // Coaching programme context
+                    it.trainingPlanId?.let { id -> putExtra(RunTrackingService.EXTRA_TRAINING_PLAN_ID, id) }
+                    it.workoutId?.let { id -> putExtra(RunTrackingService.EXTRA_WORKOUT_ID, id) }
+                    it.workoutType?.let { t -> putExtra(RunTrackingService.EXTRA_WORKOUT_TYPE, t) }
+                    it.workoutDescription?.let { d -> putExtra(RunTrackingService.EXTRA_WORKOUT_DESCRIPTION, d) }
+                    it.planGoalType?.let { g -> putExtra(RunTrackingService.EXTRA_PLAN_GOAL_TYPE, g) }
+                    it.planWeekNumber?.let { w -> putExtra(RunTrackingService.EXTRA_PLAN_WEEK_NUMBER, w) }
+                    it.planTotalWeeks?.let { total -> putExtra(RunTrackingService.EXTRA_PLAN_TOTAL_WEEKS, total) }
                 }
             }
             
@@ -593,7 +601,22 @@ class RunSessionViewModel @Inject constructor(
     fun toggleMute() {
         _runState.update { it.copy(isMuted = !it.isMuted) }
     }
-    
+
+    /**
+     * Cancel the run setup. Stops all AI audio, clears the coaching message,
+     * and resets state ready for a new run. Called when user taps Cancel
+     * before starting a run.
+     */
+    fun cancelRunSetup() {
+        Log.d("RunSessionViewModel", "Cancelling run setup - stopping all audio")
+        // Stop all AI audio playback
+        CoachingAudioQueue.stopAll()
+        // Clear the coach message so UI hides the panel
+        _runState.update { it.copy(latestCoachMessage = null) }
+        // Reset briefing audio flag
+        isBriefingAudioPlaying = false
+    }
+
     override fun onCleared() {
         super.onCleared()
         textToSpeechHelper.destroy()

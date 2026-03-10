@@ -254,7 +254,7 @@ fun MapMyRunSetupScreen(
                     onManageGroupRun = { /* Navigate to group run setup */ }
                 )
             }
-
+/*Hide AI Pre-Summary text
             if (mode == "no_route") {
                 item { Spacer(modifier = Modifier.height(Spacing.lg)) }
 
@@ -267,6 +267,8 @@ fun MapMyRunSetupScreen(
                     )
                 }
             }
+
+ */
 
             item { Spacer(modifier = Modifier.height(Spacing.xxl)) }
         }
