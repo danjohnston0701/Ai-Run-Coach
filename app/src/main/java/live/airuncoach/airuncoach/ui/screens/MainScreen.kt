@@ -47,16 +47,16 @@ import live.airuncoach.airuncoach.viewmodel.RouteGenerationViewModel
 sealed class Screen(val route: String, val label: String, val resourceId: Int) {
     object Home : Screen("home", "Home", R.drawable.icon_home_vector)
     object History : Screen("history", "History", R.drawable.icon_chart_vector)
-    object Events : Screen("events", "Events", R.drawable.icon_calendar_vector)
     object Goals : Screen("goals", "Goals", R.drawable.icon_target_vector)
+    object AiPlans : Screen("ai_plans", "AI Plans", R.drawable.icon_trending_vector)
     object Profile : Screen("profile", "Profile", R.drawable.icon_profile_vector)
 }
 
 val items = listOf(
     Screen.Home,
     Screen.History,
-    Screen.Events,
     Screen.Goals,
+    Screen.AiPlans,
     Screen.Profile,
 )
 
@@ -213,7 +213,6 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     }
                 )
             }
-            composable(Screen.Events.route) { EventsScreen() }
             composable(Screen.Goals.route) {
                 GoalsScreen(
                     onCreateGoal = { navController.navigate("create_goal") },
@@ -498,6 +497,14 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 )
             }
             // ── Coaching Programme routes ───────────────────────────────────────
+            composable(Screen.AiPlans.route) {
+                CoachingProgrammeScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onCreatePlan = { navController.navigate("generate_plan") },
+                    onOpenPlan = { planId -> navController.navigate("training_plan/$planId") }
+                )
+            }
+            // Keep legacy route for backwards compatibility with ProfileScreen
             composable("coaching_programme") {
                 CoachingProgrammeScreen(
                     onNavigateBack = { navController.popBackStack() },
