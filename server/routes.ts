@@ -6086,7 +6086,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         )
         .orderBy(desc(trainingPlans.createdAt));
       
-      res.json(plans);
+      // For each plan, count total workouts and completed workouts
+      const plansWithCounts = await Promise.all(plans.map(async (plan) => {
+        // Get total workouts for this plan
+        const totalWorkouts = await db
+          .select({ count: count() })
+          .from(plannedWorkouts)
+          .innerJoin(weeklyPlanTable, eq(plannedWorkouts.weeklyPlanId, weeklyPlanTable.id))
+          .where(eq(weeklyPlanTable.trainingPlanId, plan.id));
+
+        // Get completed workouts for this plan
+        const completedWorkouts = await db
+          .select({ count: count() })
+          .from(plannedWorkouts)
+          .innerJoin(weeklyPlanTable, eq(plannedWorkouts.weeklyPlanId, weeklyPlanTable.id))
+          .where(
+            and(
+              eq(weeklyPlanTable.trainingPlanId, plan.id),
+              eq(plannedWorkouts.completed, true)
+            )
+          );
+
+        return {
+          ...plan,
+          totalWorkouts: totalWorkouts[0]?.count || 0,
+          completedWorkouts: completedWorkouts[0]?.count || 0
+        };
+      }));
+      
+      res.json(plansWithCounts);
     } catch (error: any) {
       console.error("Get training plans error:", error);
       res.status(500).json({ error: "Failed to get training plans" });
@@ -6481,11 +6509,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/training-plans/:planId/status", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { planId } = req.params;
-      const { status } = req.body as { status: 'active' | 'paused' | 'cancelled' };
+      const { status } = req.body as { status: 'active' | 'paused' | 'cancelled' | 'abandoned' };
       await db.update(trainingPlans).set({ status }).where(eq(trainingPlans.id, planId));
       res.json({ success: true, planId, status });
     } catch (error: any) {
       res.status(500).json({ error: "Failed to update plan status" });
+    }
+  });
+
+  // Delete a training plan and all associated data
+  app.delete("/api/training-plans/:planId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { planId } = req.params;
+      const userId = req.user?.userId;
+
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      // Verify the plan belongs to the user
+      const plan = await db
+        .select()
+        .from(trainingPlans)
+        .where(and(eq(trainingPlans.id, planId), eq(trainingPlans.userId, userId)))
+        .limit(1);
+
+      if (plan.length === 0) {
+        return res.status(404).json({ error: "Plan not found or not authorized" });
+      }
+
+      // Delete all weekly plans and workouts cascading from this training plan
+      // First get all weekly plan IDs for this training plan
+      const weeklyPlans = await db
+        .select({ id: weeklyPlanTable.id })
+        .from(weeklyPlanTable)
+        .where(eq(weeklyPlanTable.trainingPlanId, planId));
+
+      // Delete all planned workouts for these weekly plans
+      for (const week of weeklyPlans) {
+        await db.delete(plannedWorkouts).where(eq(plannedWorkouts.weeklyPlanId, week.id));
+      }
+
+      // Delete all weekly plans
+      await db.delete(weeklyPlanTable).where(eq(weeklyPlanTable.trainingPlanId, planId));
+
+      // Finally delete the training plan itself
+      await db.delete(trainingPlans).where(eq(trainingPlans.id, planId));
+
+      res.json({ success: true, planId, message: "Training plan deleted permanently" });
+    } catch (error: any) {
+      console.error("Delete training plan error:", error);
+      res.status(500).json({ error: "Failed to delete training plan" });
     }
   });
 

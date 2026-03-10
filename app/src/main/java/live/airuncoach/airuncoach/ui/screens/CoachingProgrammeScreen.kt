@@ -48,10 +48,6 @@ fun CoachingProgrammeScreen(
     val viewModel: TrainingPlanViewModel = hiltViewModel()
     val state by viewModel.plansListState.collectAsState()
     val selectedTab by viewModel.selectedTab.collectAsState()
-    val actionLoading by viewModel.actionLoading.collectAsState()
-    
-    var planToDelete by remember { mutableStateOf<TrainingPlanSummary?>(null) }
-    var planToAbandon by remember { mutableStateOf<TrainingPlanSummary?>(null) }
 
     LaunchedEffect(Unit) { viewModel.loadUserPlans() }
 
@@ -149,82 +145,12 @@ fun CoachingProgrammeScreen(
                     items(s.plans) { plan ->
                         PlanSummaryCard(
                             plan = plan,
-                            onClick = { onOpenPlan(plan.id) },
-                            onAbandon = { planToAbandon = plan },
-                            onDelete = { planToDelete = plan }
+                            onClick = { onOpenPlan(plan.id) }
                         )
                     }
                 }
             }
             }
-        }
-
-        // Delete Confirmation Dialog
-        planToDelete?.let { plan ->
-            AlertDialog(
-                onDismissRequest = { planToDelete = null },
-                title = { Text("Delete Plan?", style = AppTextStyles.h3) },
-                text = {
-                    Text(
-                        "Are you sure you want to permanently delete \"${plan.goalType}\"? This action cannot be undone.",
-                        style = AppTextStyles.body,
-                        color = Colors.textSecondary
-                    )
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            viewModel.deletePlan(plan.id)
-                            planToDelete = null
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Colors.error),
-                        enabled = !actionLoading
-                    ) {
-                        if (actionLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Colors.buttonText, strokeWidth = 2.dp)
-                        else Text("Delete")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { planToDelete = null }) {
-                        Text("Cancel", color = Colors.textPrimary)
-                    }
-                },
-                containerColor = Colors.backgroundSecondary
-            )
-        }
-
-        // Abandon Confirmation Dialog
-        planToAbandon?.let { plan ->
-            AlertDialog(
-                onDismissRequest = { planToAbandon = null },
-                title = { Text("Abandon Plan?", style = AppTextStyles.h3) },
-                text = {
-                    Text(
-                        "Are you sure you want to abandon this plan? Your progress will be saved, and the plan will move to the Abandoned tab.",
-                        style = AppTextStyles.body,
-                        color = Colors.textSecondary
-                    )
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            viewModel.abandonPlan(plan.id)
-                            planToAbandon = null
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
-                        enabled = !actionLoading
-                    ) {
-                        if (actionLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Colors.buttonText, strokeWidth = 2.dp)
-                        else Text("Abandon")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { planToAbandon = null }) {
-                        Text("Cancel", color = Colors.textPrimary)
-                    }
-                },
-                containerColor = Colors.backgroundSecondary
-            )
         }
     }
 }
@@ -272,21 +198,20 @@ fun NoPlanState(onCreatePlan: () -> Unit) {
 @Composable
 fun PlanSummaryCard(
     plan: TrainingPlanSummary,
-    onClick: () -> Unit,
-    onAbandon: () -> Unit = {},
-    onDelete: () -> Unit = {}
+    onClick: () -> Unit
 ) {
     val goalLabel = formatGoalType(plan.goalType)
-    val progressFraction = plan.currentWeek.toFloat() / plan.totalWeeks.toFloat()
+    // Use workout completion % instead of week progress
+    val completionFraction = if (plan.totalWorkouts > 0) plan.completedWorkouts.toFloat() / plan.totalWorkouts.toFloat() else 0f
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
         shape = RoundedCornerShape(16.dp)
     ) {
         Column(modifier = Modifier.padding(Spacing.lg)) {
             Row(
-                modifier = Modifier.fillMaxWidth().clickable { onClick() },
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Top
             ) {
@@ -311,15 +236,15 @@ fun PlanSummaryCard(
 
             Spacer(modifier = Modifier.height(Spacing.md))
 
-            // Progress bar
+            // Progress bar — shows workout completion %
             Column {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Week ${plan.currentWeek} of ${plan.totalWeeks}", style = AppTextStyles.small, color = Colors.textSecondary)
-                    Text("${(progressFraction * 100).toInt()}%", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.primary)
+                    Text("${plan.completedWorkouts}/${plan.totalWorkouts} workouts done", style = AppTextStyles.small, color = Colors.textSecondary)
+                    Text("${(completionFraction * 100).toInt()}%", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.primary)
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 LinearProgressIndicator(
-                    progress = { progressFraction.coerceIn(0f, 1f) },
+                    progress = { completionFraction.coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
                     color = Colors.primary,
                     trackColor = Colors.backgroundTertiary
@@ -331,28 +256,6 @@ fun PlanSummaryCard(
                 PlanStatChip(R.drawable.icon_calendar_vector, "${plan.daysPerWeek}x/week")
                 PlanStatChip(R.drawable.icon_clock_vector, "${plan.totalWeeks} weeks")
                 PlanStatChip(R.drawable.icon_trending_vector, plan.experienceLevel.replaceFirstChar { it.uppercase() })
-            }
-
-            Spacer(modifier = Modifier.height(Spacing.md))
-
-            // Action buttons
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedButton(
-                    onClick = onAbandon,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("Abandon", style = AppTextStyles.small)
-                }
-                OutlinedButton(
-                    onClick = onDelete,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.error)
-                ) {
-                    Text("Delete", style = AppTextStyles.small)
-                }
             }
         }
     }
@@ -384,6 +287,9 @@ fun TrainingPlanDashboardScreen(
     val actionLoading by viewModel.actionLoading.collectAsState()
     val actionError by viewModel.actionError.collectAsState()
 
+    var showAbandonDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
     LaunchedEffect(planId) { viewModel.loadPlanDetail(planId) }
 
     Scaffold(
@@ -402,6 +308,17 @@ fun TrainingPlanDashboardScreen(
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(painterResource(R.drawable.icon_arrow_back_vector), "Back", tint = Colors.textPrimary)
+                    }
+                },
+                actions = {
+                    // Abandon and Delete buttons
+                    if (state is PlanDetailState.Success) {
+                        IconButton(onClick = { showAbandonDialog = true }) {
+                            Icon(painterResource(R.drawable.icon_x_vector), "Abandon plan", tint = Colors.textPrimary)
+                        }
+                        IconButton(onClick = { showDeleteDialog = true }) {
+                            Icon(painterResource(R.drawable.icon_trash_vector), "Delete plan", tint = Colors.error)
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot)
@@ -435,6 +352,76 @@ fun TrainingPlanDashboardScreen(
                 modifier = Modifier.padding(padding)
             )
         }
+    }
+
+    // Abandon Plan Dialog
+    if (showAbandonDialog && state is PlanDetailState.Success) {
+        AlertDialog(
+            onDismissRequest = { showAbandonDialog = false },
+            title = { Text("Abandon Plan?", style = AppTextStyles.h3) },
+            text = {
+                Text(
+                    "Are you sure you want to abandon this plan? Your progress will be saved, and the plan will move to the Abandoned tab.",
+                    style = AppTextStyles.body,
+                    color = Colors.textSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.abandonPlan(planId)
+                        showAbandonDialog = false
+                        onNavigateBack()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+                    enabled = !actionLoading
+                ) {
+                    if (actionLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Colors.buttonText, strokeWidth = 2.dp)
+                    else Text("Abandon")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAbandonDialog = false }) {
+                    Text("Cancel", color = Colors.textPrimary)
+                }
+            },
+            containerColor = Colors.backgroundSecondary
+        )
+    }
+
+    // Delete Plan Dialog
+    if (showDeleteDialog && state is PlanDetailState.Success) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete Plan?", style = AppTextStyles.h3) },
+            text = {
+                Text(
+                    "Are you sure you want to permanently delete this plan? This action cannot be undone.",
+                    style = AppTextStyles.body,
+                    color = Colors.textSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deletePlan(planId)
+                        showDeleteDialog = false
+                        onNavigateBack()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.error),
+                    enabled = !actionLoading
+                ) {
+                    if (actionLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Colors.buttonText, strokeWidth = 2.dp)
+                    else Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancel", color = Colors.textPrimary)
+                }
+            },
+            containerColor = Colors.backgroundSecondary
+        )
     }
 }
 

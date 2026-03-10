@@ -48,7 +48,9 @@ data class TrainingPlanSummary(
     @SerializedName("status") val status: String,           // active/paused/completed/cancelled
     @SerializedName("aiGenerated") val aiGenerated: Boolean,
     @SerializedName("createdAt") val createdAt: String?,
-    @SerializedName("weeklyMileageBase") val weeklyMileageBase: Double? = null
+    @SerializedName("weeklyMileageBase") val weeklyMileageBase: Double? = null,
+    @SerializedName("completedWorkouts") val completedWorkouts: Int = 0,
+    @SerializedName("totalWorkouts") val totalWorkouts: Int = 0
 )
 
 /** Full plan returned from GET /api/training-plans/details/:planId */
