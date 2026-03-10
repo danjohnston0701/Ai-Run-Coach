@@ -422,8 +422,8 @@ class RunTrackingService : Service(), SensorEventListener {
                         // Push auth + current run state to watch now that it's ready
                         serviceScope.launch {
                             val token = sessionManager.getAuthToken()
-                            val name  = currentUser?.displayName ?: ""
-                            if (token != null) garminWatchManager?.sendAuth(token, name)
+                    val name  = currentUser?.name ?: ""
+                    if (token != null) garminWatchManager?.sendAuth(token, name)
                         }
                     }
                 }
@@ -1756,7 +1756,7 @@ class RunTrackingService : Service(), SensorEventListener {
         try {
             val session = _currentRunSession.value
             if (session != null && garminWatchManager?.isWatchConnected?.value == true) {
-                val paceSeconds = parsePaceToSeconds(session.currentPace)
+                val paceSeconds = parsePaceToSeconds(session.currentPace ?: "0:00")
                 garminWatchManager?.sendRunUpdate(
                     paceSecPerKm   = paceSeconds,
                     distanceMetres = session.distance * 1000.0,

@@ -138,10 +138,9 @@ dependencies {
     implementation("oauth.signpost:signpost-core:2.1.1")
 
     // --- Garmin ConnectIQ SDK (Scenario 2 — Phone + Watch BT bridge) ---
-    // Download connectiq.aar from https://developer.garmin.com/connect-iq/core-topics/
-    // and place it in app/libs/ before building.
-    // Uncomment the line below once the AAR is in place:
-    // implementation(files("libs/connectiq.aar"))
+    // Available on Maven Central — no AAR download needed.
+    // Requires Garmin Connect app installed on the user's phone to communicate with the watch.
+    implementation("com.garmin.connectiq:ciq-companion-app-sdk:2.3.0@aar")
 
     // --- Testing Libraries ---
     testImplementation("junit:junit:4.13.2")
