@@ -79,11 +79,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const hashedPassword = await hashPassword(password);
       const userCode = `RC${Date.now().toString(36).toUpperCase()}`;
       
+      // Generate a short 6-character user ID for friend sharing
+      const generateShortUserId = () => {
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+      };
+      const shortUserId = generateShortUserId();
+
       const user = await storage.createUser({
         email,
         password: hashedPassword,
         name,
         userCode,
+        shortUserId,
       });
       
       const token = generateToken({ userId: user.id, email: user.email });
@@ -140,6 +148,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         email: u.email,
         profilePic: u.profilePic,
         userCode: u.userCode,
+        shortUserId: u.shortUserId,
       }));
       res.json(sanitized);
     } catch (error: any) {

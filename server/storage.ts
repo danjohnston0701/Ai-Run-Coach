@@ -133,7 +133,8 @@ export class DatabaseStorage implements IStorage {
       or(
         ilike(users.name, `%${query}%`),
         ilike(users.email, `%${query}%`),
-        ilike(users.userCode, `%${query}%`)
+        ilike(users.userCode, `%${query}%`),
+        ilike(users.shortUserId, `%${query}%`)
       )
     ).limit(20);
   }
