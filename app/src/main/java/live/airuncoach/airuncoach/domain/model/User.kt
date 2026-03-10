@@ -4,7 +4,7 @@ data class User(
     val id: String,
     val email: String,
     val name: String,
-    val shortUserId: String? = null, // Short ID for friend sharing (e.g., "ABC123")
+    val shortUserId: String? = null, // Short 8-digit numeric ID for friend sharing (e.g., "12345678")
     val location: String? = null,
     val age: Int? = null,
     val dob: String? = null,

@@ -32,7 +32,7 @@ export const users = pgTable("users", {
   distanceMaxKm: real("distance_max_km").default(50),
   distanceDecimalsEnabled: boolean("distance_decimals_enabled").default(false),
   userCode: text("user_code").unique(),
-  shortUserId: text("short_user_id").unique(), // 6-character ID for friend sharing
+  shortUserId: text("short_user_id").unique(), // 8-digit numeric ID for friend sharing (e.g., "12345678")
   // In-Run AI Coaching feature preferences (all default to enabled)
   coachPaceEnabled: boolean("coach_pace_enabled").default(true),
   coachNavigationEnabled: boolean("coach_navigation_enabled").default(true),

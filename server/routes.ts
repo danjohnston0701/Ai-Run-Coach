@@ -81,8 +81,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Generate a short 6-character user ID for friend sharing
       const generateShortUserId = () => {
-        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+        // Generate a unique 8-digit numerical ID (10,000,000 to 99,999,999)
+        // ensures max 8 digits and numeric-only
+        const min = 10000000;
+        const max = 99999999;
+        return Math.floor(Math.random() * (max - min + 1) + min).toString();
       };
       const shortUserId = generateShortUserId();
 
