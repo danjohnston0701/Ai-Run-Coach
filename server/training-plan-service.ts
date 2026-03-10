@@ -236,10 +236,11 @@ ${regularSessions.map(s => {
 IMPORTANT: Place these sessions on the correct days in the plan. Sessions marked "EXTRA" should be treated as additional workload on top of the ${daysPerWeek} AI-generated sessions per week — do not replace an AI session with them. Sessions that count towards the total should be included in the ${daysPerWeek} sessions for that week.
 ` : ""}
 Schedule:
+- Today is ${new Date().toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })} (day ${new Date().getDay()} of the week, 0=Sun)
 - First session: ${
-  firstSessionStart === "today" ? `TODAY (${new Date().toDateString()}) — schedule the first workout for today` :
-  firstSessionStart === "tomorrow" ? `TOMORROW (${new Date(Date.now() + 86400000).toDateString()}) — schedule the first workout for tomorrow` :
-  "Flexible — AI should choose the optimal start day based on the weekly pattern and days per week"
+  firstSessionStart === "today" ? `TODAY — the first workout must be on or after today. Any sessions earlier in week 1 (e.g. Monday/Tuesday if today is Wednesday) should be omitted; week 1 may have fewer sessions than usual.` :
+  firstSessionStart === "tomorrow" ? `TOMORROW — first workout on or after tomorrow. Omit any week-1 sessions that fall before tomorrow.` :
+  "Flexible — schedule week 1 starting from the current calendar week. Sessions that would fall before today in week 1 are automatically dropped, so you may schedule them from today onwards."
 }
 
 Requirements:
@@ -340,9 +341,41 @@ Include all ${weeksUntilTarget} weeks with ${daysPerWeek} workouts per week.`;
 
       // Create individual workouts
       for (const workout of week.workouts) {
-        // Calculate scheduled date
-        const scheduledDate = new Date();
-        scheduledDate.setDate(scheduledDate.getDate() + ((week.weekNumber - 1) * 7) + workout.dayOfWeek);
+        // ── Scheduled date calculation ──────────────────────────────────────
+        // dayOfWeek: 0=Sun, 1=Mon, 2=Tue … 6=Sat (matches JS Date.getDay())
+        //
+        // Anchor to Monday of the current week so that week 1 aligns with the
+        // real calendar week. For week N, advance (N-1) * 7 days then add the
+        // day offset from Monday: ((dayOfWeek + 6) % 7) gives 0=Mon…6=Sun.
+        //
+        // Example — generated on Wednesday (today.getDay()=3):
+        //   weekStart = this Monday
+        //   week 1 Mon (dayOfWeek=1): weekStart + 0 = Mon  ← in the past, SKIP
+        //   week 1 Wed (dayOfWeek=3): weekStart + 2 = Wed  ← today, KEEP
+        //   week 1 Fri (dayOfWeek=5): weekStart + 4 = Fri  ← future, KEEP
+        //   week 2 Mon (dayOfWeek=1): weekStart + 7 = next Mon ← KEEP
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        // Monday of the current week
+        const daysSinceMonday = today.getDay() === 0 ? 6 : today.getDay() - 1;
+        const weekStart = new Date(today);
+        weekStart.setDate(today.getDate() - daysSinceMonday);
+
+        // Day offset from Monday (Mon=0, Tue=1 … Sun=6)
+        const dayOffsetFromMonday = (workout.dayOfWeek + 6) % 7;
+
+        const scheduledDate = new Date(weekStart);
+        scheduledDate.setDate(
+          weekStart.getDate() + ((week.weekNumber - 1) * 7) + dayOffsetFromMonday
+        );
+
+        // Skip week-1 workouts that fall before today — the user already
+        // passed those days, so we just start from today onwards.
+        if (week.weekNumber === 1 && scheduledDate < today) {
+          continue;
+        }
 
         await db.insert(plannedWorkouts).values({
           weeklyPlanId,

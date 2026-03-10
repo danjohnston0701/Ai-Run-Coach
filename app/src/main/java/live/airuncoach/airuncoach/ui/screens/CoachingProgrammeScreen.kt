@@ -470,7 +470,12 @@ fun TodayWorkoutCard(
 
             Row(horizontalArrangement = Arrangement.spacedBy(Spacing.lg)) {
                 workout.distance?.let { PlanStatChip(R.drawable.icon_target_vector, "${it}km") }
-                workout.targetPace?.let { PlanStatChip(R.drawable.icon_timer_vector, "$it/km") }
+                workout.targetPace?.let { raw ->
+                    // targetPace from DB already contains "/km" (e.g. "5:30/km") — strip it
+                    // so we can append the friendly label "min/km"
+                    val paceValue = raw.replace("/km", "").trim()
+                    PlanStatChip(R.drawable.icon_timer_vector, "$paceValue min/km")
+                }
                 workout.intensity?.let { PlanStatChip(R.drawable.icon_heart_vector, it.uppercase()) }
             }
 
@@ -537,8 +542,22 @@ fun WorkoutRow(workout: WorkoutDetails, onClick: () -> Unit) {
         Spacer(modifier = Modifier.width(Spacing.sm))
         Box(modifier = Modifier.size(8.dp).background(workoutTypeColor(workout.workoutType), RoundedCornerShape(4.dp)))
         Spacer(modifier = Modifier.width(Spacing.sm))
-        Text(workout.description ?: workoutTypeLabel(workout.workoutType), style = AppTextStyles.small, color = Colors.textPrimary, modifier = Modifier.weight(1f))
-        workout.distance?.let { Text("${it}km", style = AppTextStyles.small, color = Colors.textMuted) }
+        Text(
+            workout.description ?: workoutTypeLabel(workout.workoutType),
+            style = AppTextStyles.small,
+            color = Colors.textPrimary,
+            modifier = Modifier.weight(1f)
+        )
+        // Distance + pace stacked on the right
+        Column(horizontalAlignment = Alignment.End) {
+            workout.distance?.let {
+                Text("${it}km", style = AppTextStyles.small, color = Colors.textMuted)
+            }
+            workout.targetPace?.let { raw ->
+                val paceValue = raw.replace("/km", "").trim()
+                Text("$paceValue/km", style = AppTextStyles.small.copy(fontSize = 10.sp), color = Colors.textMuted)
+            }
+        }
         if (workout.isCompleted) {
             Spacer(modifier = Modifier.width(Spacing.sm))
             Icon(painterResource(R.drawable.icon_check_vector), null, tint = Colors.success, modifier = Modifier.size(14.dp))
