@@ -67,6 +67,7 @@ class SessionManager(context: Context) {
         sharedPreferences.edit {
             remove("auth_token")
             remove("user_id")
+            remove("short_user_id")
         }
     }
     
@@ -91,6 +92,44 @@ class SessionManager(context: Context) {
         } catch (e: Exception) {
             Log.e("SessionManager", "Failed to get user ID: ${e.message}")
             null
+        }
+    }
+
+    /**
+     * Generates a short user ID for friend sharing (6 characters, alphanumeric uppercase).
+     */
+    fun generateShortUserId(): String {
+        val characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        return (1..6).map { characters.random() }.joinToString("")
+    }
+
+    /**
+     * Saves the short user ID to the encrypted preferences.
+     */
+    fun saveShortUserId(shortUserId: String?) {
+        if (shortUserId.isNullOrBlank()) {
+            return
+        }
+        sharedPreferences.edit {
+            putString("short_user_id", shortUserId)
+        }
+    }
+
+    /**
+     * Retrieves the short user ID from the encrypted preferences.
+     * If not set, generates and saves a new one.
+     */
+    fun getShortUserId(): String? {
+        return try {
+            var shortId = sharedPreferences.getString("short_user_id", null)
+            if (shortId.isNullOrBlank()) {
+                shortId = generateShortUserId()
+                saveShortUserId(shortId)
+            }
+            shortId
+        } catch (e: Exception) {
+            Log.e("SessionManager", "Failed to get short user ID: ${e.message}")
+            generateShortUserId()
         }
     }
 

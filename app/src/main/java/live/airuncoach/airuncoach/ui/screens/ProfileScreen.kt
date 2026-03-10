@@ -326,11 +326,14 @@ fun ProfileHeader(user: User, onImageClick: () -> Unit) {
             style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
             color = Colors.textPrimary
         )
-        Text(
-            text = user.email,
-            style = AppTextStyles.body,
-            color = Colors.textSecondary
-        )
+        // Display short user ID for friend sharing
+        user.shortUserId?.let { shortId ->
+            Text(
+                text = "ID: $shortId",
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
+                color = Colors.primary
+            )
+        }
         Spacer(modifier = Modifier.height(Spacing.xs))
         Box(
             modifier = Modifier

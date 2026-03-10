@@ -66,8 +66,12 @@ class ProfileViewModel @Inject constructor(
         if (userJson != null) {
             try {
                 val user = gson.fromJson(userJson, User::class.java)
-                _user.value = user
-                android.util.Log.d("ProfileViewModel", "✅ User loaded: ${user.name} (ID: ${user.id})")
+                // Get or generate short user ID for friend sharing
+                val shortUserId = sessionManager.getShortUserId()
+                // Create a new user object with the shortUserId attached
+                val userWithShortId = user.copy(shortUserId = shortUserId)
+                _user.value = userWithShortId
+                android.util.Log.d("ProfileViewModel", "✅ User loaded: ${user.name} (ID: ${user.id}, ShortID: $shortUserId)")
             } catch (e: Exception) {
                 android.util.Log.e("ProfileViewModel", "❌ Failed to parse user JSON: ${e.message}")
                 android.util.Log.e("ProfileViewModel", "JSON was: $userJson")
