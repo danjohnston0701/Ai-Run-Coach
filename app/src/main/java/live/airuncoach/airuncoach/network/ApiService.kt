@@ -295,6 +295,9 @@ interface ApiService {
         @Body request: Map<String, String>
     ): Response<Unit>
 
+    @DELETE("/api/training-plans/{planId}")
+    suspend fun deleteTrainingPlan(@Path("planId") planId: String): Response<Unit>
+
     // ========== SOCIAL FEED ==========
     
     @GET("/api/feed")

@@ -56,6 +56,16 @@ class TrainingPlanViewModel @Inject constructor(
     private val _actionError = MutableStateFlow<String?>(null)
     val actionError: StateFlow<String?> = _actionError.asStateFlow()
 
+    // Tab selection: 0=Active, 1=Completed, 2=Abandoned
+    private val _selectedTab = MutableStateFlow(0)
+    val selectedTab: StateFlow<Int> = _selectedTab.asStateFlow()
+
+    fun selectTab(index: Int) {
+        _selectedTab.value = index
+        val statusMap = mapOf(0 to "active", 1 to "completed", 2 to "abandoned")
+        loadUserPlans(statusMap[index] ?: "active")
+    }
+
     fun loadUserPlans(status: String = "active") {
         viewModelScope.launch {
             _plansListState.value = PlansListState.Loading
@@ -173,6 +183,38 @@ class TrainingPlanViewModel @Inject constructor(
                 loadUserPlans()
             } catch (e: Exception) {
                 _actionError.value = "Failed to pause plan: ${e.message}"
+            }
+        }
+    }
+
+    fun abandonPlan(planId: String) {
+        viewModelScope.launch {
+            _actionLoading.value = true
+            try {
+                apiService.updatePlanStatus(planId, mapOf("status" to "abandoned"))
+                // Reload the current tab to refresh the list
+                val statusMap = mapOf(0 to "active", 1 to "completed", 2 to "abandoned")
+                loadUserPlans(statusMap[_selectedTab.value] ?: "active")
+            } catch (e: Exception) {
+                _actionError.value = "Failed to abandon plan: ${e.message}"
+            } finally {
+                _actionLoading.value = false
+            }
+        }
+    }
+
+    fun deletePlan(planId: String) {
+        viewModelScope.launch {
+            _actionLoading.value = true
+            try {
+                apiService.deleteTrainingPlan(planId)
+                // Reload the current tab to refresh the list
+                val statusMap = mapOf(0 to "active", 1 to "completed", 2 to "abandoned")
+                loadUserPlans(statusMap[_selectedTab.value] ?: "active")
+            } catch (e: Exception) {
+                _actionError.value = "Failed to delete plan: ${e.message}"
+            } finally {
+                _actionLoading.value = false
             }
         }
     }

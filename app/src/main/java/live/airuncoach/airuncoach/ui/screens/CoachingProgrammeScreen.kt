@@ -47,6 +47,11 @@ fun CoachingProgrammeScreen(
 ) {
     val viewModel: TrainingPlanViewModel = hiltViewModel()
     val state by viewModel.plansListState.collectAsState()
+    val selectedTab by viewModel.selectedTab.collectAsState()
+    val actionLoading by viewModel.actionLoading.collectAsState()
+    
+    var planToDelete by remember { mutableStateOf<TrainingPlanSummary?>(null) }
+    var planToAbandon by remember { mutableStateOf<TrainingPlanSummary?>(null) }
 
     LaunchedEffect(Unit) { viewModel.loadUserPlans() }
 
@@ -74,7 +79,48 @@ fun CoachingProgrammeScreen(
         },
         containerColor = Colors.backgroundRoot
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            // Tab Row: Active / Completed / Abandoned
+            TabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = Colors.backgroundRoot,
+                contentColor = Colors.primary,
+                indicator = { tabPositions ->
+                    if (selectedTab < tabPositions.size) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .wrapContentSize(Alignment.BottomStart)
+                                .offset(x = tabPositions[selectedTab].left)
+                                .width(tabPositions[selectedTab].width)
+                                .padding(horizontal = Spacing.lg)
+                                .height(3.dp)
+                                .background(Colors.primary)
+                        )
+                    }
+                },
+                divider = { HorizontalDivider(color = Colors.backgroundSecondary, thickness = 1.dp) }
+            ) {
+                val tabs = listOf("Active", "Completed", "Abandoned")
+                tabs.forEachIndexed { index, title ->
+                    Tab(
+                        selected = selectedTab == index,
+                        onClick = { viewModel.selectTab(index) },
+                        modifier = Modifier.padding(vertical = Spacing.md),
+                        selectedContentColor = Colors.primary,
+                        unselectedContentColor = Colors.textMuted
+                    ) {
+                        Text(
+                            text = title,
+                            style = AppTextStyles.body.copy(
+                                fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
+                            )
+                        )
+                    }
+                }
+            }
+
+            Box(modifier = Modifier.fillMaxSize()) {
             when (val s = state) {
                 is PlansListState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Colors.primary)
 
@@ -101,10 +147,84 @@ fun CoachingProgrammeScreen(
                         Spacer(modifier = Modifier.height(Spacing.sm))
                     }
                     items(s.plans) { plan ->
-                        PlanSummaryCard(plan = plan, onClick = { onOpenPlan(plan.id) })
+                        PlanSummaryCard(
+                            plan = plan,
+                            onClick = { onOpenPlan(plan.id) },
+                            onAbandon = { planToAbandon = plan },
+                            onDelete = { planToDelete = plan }
+                        )
                     }
                 }
             }
+            }
+        }
+
+        // Delete Confirmation Dialog
+        planToDelete?.let { plan ->
+            AlertDialog(
+                onDismissRequest = { planToDelete = null },
+                title = { Text("Delete Plan?", style = AppTextStyles.h3) },
+                text = {
+                    Text(
+                        "Are you sure you want to permanently delete \"${plan.goalType}\"? This action cannot be undone.",
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.deletePlan(plan.id)
+                            planToDelete = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Colors.error),
+                        enabled = !actionLoading
+                    ) {
+                        if (actionLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Colors.buttonText, strokeWidth = 2.dp)
+                        else Text("Delete")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { planToDelete = null }) {
+                        Text("Cancel", color = Colors.textPrimary)
+                    }
+                },
+                containerColor = Colors.backgroundSecondary
+            )
+        }
+
+        // Abandon Confirmation Dialog
+        planToAbandon?.let { plan ->
+            AlertDialog(
+                onDismissRequest = { planToAbandon = null },
+                title = { Text("Abandon Plan?", style = AppTextStyles.h3) },
+                text = {
+                    Text(
+                        "Are you sure you want to abandon this plan? Your progress will be saved, and the plan will move to the Abandoned tab.",
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.abandonPlan(plan.id)
+                            planToAbandon = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+                        enabled = !actionLoading
+                    ) {
+                        if (actionLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Colors.buttonText, strokeWidth = 2.dp)
+                        else Text("Abandon")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { planToAbandon = null }) {
+                        Text("Cancel", color = Colors.textPrimary)
+                    }
+                },
+                containerColor = Colors.backgroundSecondary
+            )
         }
     }
 }
@@ -150,17 +270,26 @@ fun NoPlanState(onCreatePlan: () -> Unit) {
 }
 
 @Composable
-fun PlanSummaryCard(plan: TrainingPlanSummary, onClick: () -> Unit) {
+fun PlanSummaryCard(
+    plan: TrainingPlanSummary,
+    onClick: () -> Unit,
+    onAbandon: () -> Unit = {},
+    onDelete: () -> Unit = {}
+) {
     val goalLabel = formatGoalType(plan.goalType)
     val progressFraction = plan.currentWeek.toFloat() / plan.totalWeeks.toFloat()
 
     Card(
-        modifier = Modifier.fillMaxWidth().clickable { onClick() },
+        modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
         shape = RoundedCornerShape(16.dp)
     ) {
         Column(modifier = Modifier.padding(Spacing.lg)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { onClick() },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(goalLabel, style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
                     if (plan.targetDistance != null) {
@@ -202,6 +331,28 @@ fun PlanSummaryCard(plan: TrainingPlanSummary, onClick: () -> Unit) {
                 PlanStatChip(R.drawable.icon_calendar_vector, "${plan.daysPerWeek}x/week")
                 PlanStatChip(R.drawable.icon_clock_vector, "${plan.totalWeeks} weeks")
                 PlanStatChip(R.drawable.icon_trending_vector, plan.experienceLevel.replaceFirstChar { it.uppercase() })
+            }
+
+            Spacer(modifier = Modifier.height(Spacing.md))
+
+            // Action buttons
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedButton(
+                    onClick = onAbandon,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Abandon", style = AppTextStyles.small)
+                }
+                OutlinedButton(
+                    onClick = onDelete,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.error)
+                ) {
+                    Text("Delete", style = AppTextStyles.small)
+                }
             }
         }
     }
