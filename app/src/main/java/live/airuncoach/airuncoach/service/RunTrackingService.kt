@@ -71,7 +71,12 @@ class RunTrackingService : Service(), SensorEventListener {
     private var wakeLock: PowerManager.WakeLock? = null
     
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    
+
+    // ── Garmin watch bridge (Scenario 2 — Phone + Watch) ──────────────────────
+    // Sends live run state to the watch and receives start/pause/resume/stop commands.
+    // Gracefully no-ops if the ConnectIQ SDK is not present or no watch is paired.
+    private var garminWatchManager: GarminWatchManager? = null
+
     // AI Coaching
     private lateinit var coachingFeaturePrefs: live.airuncoach.airuncoach.data.CoachingFeaturePreferences
     private lateinit var apiService: ApiService
@@ -401,6 +406,32 @@ class RunTrackingService : Service(), SensorEventListener {
         createNotificationChannel()
         acquireWakeLock()
         setupLocationCallback()
+
+        // Initialise Garmin watch bridge — wraps ConnectIQ SDK, no-ops gracefully if unavailable
+        try {
+            garminWatchManager = GarminWatchManager(this)
+            garminWatchManager?.initialize()
+            garminWatchManager?.onWatchCommand = { action ->
+                Log.d("RunTrackingService", "Watch command received: $action")
+                when (action) {
+                    "start"      -> startForegroundService(Intent(this, RunTrackingService::class.java).apply { this.action = ACTION_START_TRACKING })
+                    "pause"      -> pauseTracking()
+                    "resume"     -> resumeTracking()
+                    "stop"       -> stopTracking()
+                    "watchReady" -> {
+                        // Push auth + current run state to watch now that it's ready
+                        serviceScope.launch {
+                            val token = sessionManager.getAuthToken()
+                            val name  = currentUser?.displayName ?: ""
+                            if (token != null) garminWatchManager?.sendAuth(token, name)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "GarminWatchManager init failed (non-fatal): ${e.message}")
+            garminWatchManager = null
+        }
     }
 
     // Polyline passed via intent for nav simulation
@@ -1718,8 +1749,38 @@ class RunTrackingService : Service(), SensorEventListener {
             maxElevation = if (hasMovedEnough) calculateMaxElevation() else null,
             totalSteps = totalStepsDuringRun.takeIf { it > 0 }
         )
+
+        // ── Broadcast to Garmin watch (Scenario 2) ────────────────────────
+        // Sends a lightweight runUpdate so the watch mirrors live metrics.
+        // No-ops gracefully if no watch is connected.
+        try {
+            val session = _currentRunSession.value
+            if (session != null && garminWatchManager?.isWatchConnected?.value == true) {
+                val paceSeconds = parsePaceToSeconds(session.currentPace)
+                garminWatchManager?.sendRunUpdate(
+                    paceSecPerKm   = paceSeconds,
+                    distanceMetres = session.distance * 1000.0,
+                    heartRate      = session.heartRate ?: 0,
+                    elapsedSeconds = (session.duration / 1000L),
+                    cadence        = session.cadence ?: 0,
+                    isRunning      = isTracking,
+                    isPaused       = !isTracking && pauseStartTime > 0
+                )
+            }
+        } catch (e: Exception) {
+            // Non-fatal — watch broadcast should never break the run session
+            Log.w("RunTrackingService", "Watch broadcast failed: ${e.message}")
+        }
     }
-    
+
+    /** Converts "M:SS" pace string → seconds/km (e.g. "4:32" → 272.0) */
+    private fun parsePaceToSeconds(pace: String): Double {
+        return try {
+            val parts = pace.split(":")
+            if (parts.size == 2) parts[0].toInt() * 60.0 + parts[1].toInt() else 0.0
+        } catch (e: Exception) { 0.0 }
+    }
+
     private fun calculateAverageGradient(): Float = if (totalDistance == 0.0) 0f else ((totalElevationGain - totalElevationLoss) / totalDistance * 100).toFloat()
     
     private fun calculateMaxGradient(): Float = (1 until routePoints.size).mapNotNull { i-> val p1=routePoints[i-1]; val p2=routePoints[i]; if(p1.altitude!=null&&p2.altitude!=null) { val d=calculateDistance(p1,p2); if(d>0) ((p2.altitude-p1.altitude)/d * 100).toFloat() else null } else null }.maxOrNull() ?: 0f
@@ -2117,6 +2178,13 @@ class RunTrackingService : Service(), SensorEventListener {
         audioPlayerHelper.destroy() // Clean up OpenAI TTS audio player
         CoachingAudioQueue.stopAll() // Stop any queued coaching audio
         _latestCoachingText.value = null
+        // Notify watch the session has ended, then shut down ConnectIQ bridge
+        try {
+            garminWatchManager?.sendSessionEnded()
+            garminWatchManager?.shutdown()
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "GarminWatchManager shutdown: ${e.message}")
+        }
         serviceScope.cancel()
         Log.d("RunTrackingService", "Service destroyed")
     }

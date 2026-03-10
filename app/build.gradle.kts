@@ -132,10 +132,16 @@ dependencies {
     // --- Garmin OAuth Dependencies ---
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
-    
+
     // OAuth 1.0a signing (for Garmin Connect API)
     implementation("se.akerfeldt:okhttp-signpost:1.1.0")
     implementation("oauth.signpost:signpost-core:2.1.1")
+
+    // --- Garmin ConnectIQ SDK (Scenario 2 — Phone + Watch BT bridge) ---
+    // Download connectiq.aar from https://developer.garmin.com/connect-iq/core-topics/
+    // and place it in app/libs/ before building.
+    // Uncomment the line below once the AAR is in place:
+    // implementation(files("libs/connectiq.aar"))
 
     // --- Testing Libraries ---
     testImplementation("junit:junit:4.13.2")

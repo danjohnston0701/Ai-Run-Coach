@@ -6,9 +6,7 @@ using Toybox.WatchUi as Ui;
 using Toybox.System as Sys;
 
 class AiRunCoachApp extends App.AppBase {
-    
-    private var _session = null;
-    
+
     function initialize() {
         AppBase.initialize();
     }
@@ -21,20 +19,17 @@ class AiRunCoachApp extends App.AppBase {
     // Called when the app is stopped
     function onStop(state) {
         Sys.println("AI Run Coach stopped");
-        
-        // Clean up session if active
-        if (_session != null) {
-            _session.stop();
-            _session = null;
-        }
     }
 
-    // Return the initial view
+    // Return the initial view — pass the view to its delegate so the delegate
+    // can call view methods (isAuthenticated, launchRunView).
     function getInitialView() {
-        return [new StartView(), new StartDelegate()];
+        var view     = new StartView();
+        var delegate = new StartDelegate(view);
+        return [view, delegate];
     }
-    
-    // Handle settings changes
+
+    // Handle settings changes (e.g. from Garmin Connect app)
     function onSettingsChanged() {
         Ui.requestUpdate();
     }
