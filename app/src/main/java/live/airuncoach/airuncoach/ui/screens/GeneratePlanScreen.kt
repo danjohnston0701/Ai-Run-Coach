@@ -72,8 +72,8 @@ fun GeneratePlanScreen(
             TopAppBar(
                 title = {
                     Text(
-                        "AI Coaching Programme",
-                        style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
+                        "Ai Coaching Programme",
+                        style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
                         color = Colors.textPrimary
                     )
                 },
@@ -158,7 +158,7 @@ fun GeneratePlanScreen(
                     ) {
                         Column {
                             Text("Target time", style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium), color = Colors.textPrimary)
-                            Text("e.g. sub-20min for 5K", style = AppTextStyles.small, color = Colors.textMuted)
+                            Text("e.g. sub-25min for 5K", style = AppTextStyles.small, color = Colors.textMuted)
                         }
                         Switch(
                             checked = hasTimeGoal,

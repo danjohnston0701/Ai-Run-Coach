@@ -58,25 +58,87 @@ export async function generateTrainingPlan(
     // Get current fitness
     const fitness = await getCurrentFitness(userId);
 
-    // Get recent run history (last 30 days)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    
+    // Get recent run history (last 90 days — wider window gives better baselines)
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
     const recentRuns = await db
       .select()
       .from(runs)
       .where(
         and(
           eq(runs.userId, userId),
-          gte(runs.completedAt, thirtyDaysAgo)
+          gte(runs.completedAt, ninetyDaysAgo)
         )
       )
       .orderBy(desc(runs.completedAt))
-      .limit(20);
+      .limit(30);
 
-    // Calculate weekly mileage base
-    const totalDistance = recentRuns.reduce((sum, r) => sum + (r.distance || 0), 0);
-    const weeklyMileageBase = recentRuns.length > 0 ? (totalDistance / 4) : 20; // Default 20km/week
+    // ── Weekly mileage base (last 30 days only to reflect current load)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const runsLast30 = recentRuns.filter(r => r.completedAt && new Date(r.completedAt) >= thirtyDaysAgo);
+    const totalDistanceLast30 = runsLast30.reduce((sum, r) => sum + (r.distance || 0), 0);
+    const weeklyMileageBase = runsLast30.length > 0 ? (totalDistanceLast30 / 4) : 20;
+
+    // ── Helper: parse a "M:SS/km" pace string into total seconds per km
+    const parsePaceSecs = (pace: string | null | undefined): number | null => {
+      if (!pace) return null;
+      const parts = pace.replace(/\/km.*/, "").trim().split(":");
+      if (parts.length !== 2) return null;
+      const m = parseInt(parts[0], 10);
+      const s = parseInt(parts[1], 10);
+      if (isNaN(m) || isNaN(s)) return null;
+      return m * 60 + s;
+    };
+
+    // ── Average pace across all recent runs with valid pace data
+    const paceValues = recentRuns.map(r => parsePaceSecs(r.avgPace)).filter((v): v is number => v !== null);
+    const avgPaceSecs = paceValues.length > 0 ? paceValues.reduce((a, b) => a + b, 0) / paceValues.length : null;
+    const avgPaceStr = avgPaceSecs != null
+      ? `${Math.floor(avgPaceSecs / 60)}:${String(Math.round(avgPaceSecs % 60)).padStart(2, "0")}/km`
+      : null;
+
+    // ── Best pace in any recent run
+    const bestPaceSecs = paceValues.length > 0 ? Math.min(...paceValues) : null;
+    const bestPaceStr = bestPaceSecs != null
+      ? `${Math.floor(bestPaceSecs / 60)}:${String(Math.round(bestPaceSecs % 60)).padStart(2, "0")}/km`
+      : null;
+
+    // ── Runs closest to the goal distance (±20%) — e.g. 4–6km runs for a 5k goal
+    const distanceTolerance = targetDistance * 0.20;
+    const similarDistanceRuns = recentRuns.filter(r => {
+      const km = r.distance ? r.distance / 1000 : (r.distanceInMeters ? r.distanceInMeters / 1000 : null);
+      return km != null && Math.abs(km - targetDistance) <= distanceTolerance;
+    });
+
+    // Average time at goal distance (for e.g. "how long does this runner currently take to run 5km?")
+    const goalDistanceTimes = similarDistanceRuns
+      .map(r => r.duration ? r.duration / 1000 : null) // duration stored in ms → convert to seconds
+      .filter((v): v is number => v !== null && v > 0);
+    const avgTimeAtGoalDistanceSecs = goalDistanceTimes.length > 0
+      ? goalDistanceTimes.reduce((a, b) => a + b, 0) / goalDistanceTimes.length
+      : null;
+    const avgTimeAtGoalDistanceStr = avgTimeAtGoalDistanceSecs != null
+      ? `${Math.floor(avgTimeAtGoalDistanceSecs / 60)}:${String(Math.round(avgTimeAtGoalDistanceSecs % 60)).padStart(2, "0")}`
+      : null;
+
+    // Best time at goal distance
+    const bestTimeAtGoalSecs = goalDistanceTimes.length > 0 ? Math.min(...goalDistanceTimes) : null;
+    const bestTimeAtGoalStr = bestTimeAtGoalSecs != null
+      ? `${Math.floor(bestTimeAtGoalSecs / 60)}:${String(Math.round(bestTimeAtGoalSecs % 60)).padStart(2, "0")}`
+      : null;
+
+    // ── Pace trend: compare oldest 3 vs newest 3 runs
+    let paceTrend: string | null = null;
+    if (paceValues.length >= 6) {
+      const newestAvg = paceValues.slice(0, 3).reduce((a, b) => a + b, 0) / 3;
+      const oldestAvg = paceValues.slice(-3).reduce((a, b) => a + b, 0) / 3;
+      const diffSecs = oldestAvg - newestAvg; // positive = runner is getting faster
+      if (diffSecs > 15) paceTrend = `improving (≈${Math.round(diffSecs)}s/km faster than 3 months ago)`;
+      else if (diffSecs < -15) paceTrend = `declining (≈${Math.round(Math.abs(diffSecs))}s/km slower than 3 months ago)`;
+      else paceTrend = "consistent";
+    }
 
     // Calculate plan duration
     const weeksUntilTarget = targetDate ? 
@@ -97,9 +159,15 @@ export async function generateTrainingPlan(
         status: fitness.status,
       } : null,
       recentActivity: {
-        runsLast30Days: recentRuns.length,
+        runsLast30Days: runsLast30.length,
+        runsLast90Days: recentRuns.length,
         avgWeeklyDistance: weeklyMileageBase,
-        avgPace: recentRuns[0]?.avgPace,
+        avgPace: avgPaceStr || recentRuns[0]?.avgPace,
+        bestPace: bestPaceStr,
+        avgTimeAtGoalDistance: avgTimeAtGoalDistanceStr,
+        bestTimeAtGoalDistance: bestTimeAtGoalStr,
+        similarDistanceRunsFound: similarDistanceRuns.length,
+        paceTrend,
       },
       goal: {
         type: goalType,
@@ -131,15 +199,27 @@ export async function generateTrainingPlan(
     const prompt = `You are an expert running coach. Generate a ${weeksUntilTarget}-week training plan for a ${experienceLevel} runner preparing for a ${goalType} (${targetDistance}km).
 
 Runner Profile:
-- Current weekly mileage: ${weeklyMileageBase.toFixed(1)}km
 - Fitness level: ${experienceLevel}
 - Training days per week: ${daysPerWeek}
 - Current fitness (CTL): ${fitness?.ctl || 'N/A'}
 - Training status: ${fitness?.status || 'N/A'}
 
+Current Performance Baseline (from last ${recentRuns.length} runs over 90 days):
+- Weekly mileage (last 30 days): ${weeklyMileageBase.toFixed(1)}km/week
+- Runs in last 30 days: ${runsLast30.length}
+${avgPaceStr ? `- Average pace across recent runs: ${avgPaceStr}` : ''}
+${bestPaceStr ? `- Best pace in a recent run: ${bestPaceStr}` : ''}
+${paceTrend ? `- Pace trend: ${paceTrend}` : ''}
+${similarDistanceRuns.length > 0 ? `
+Recent runs at ${targetDistance}km distance (${similarDistanceRuns.length} found):
+${avgTimeAtGoalDistanceStr ? `- Average time for ${targetDistance}km: ${avgTimeAtGoalDistanceStr} (mm:ss)` : ''}
+${bestTimeAtGoalStr ? `- Best time for ${targetDistance}km: ${bestTimeAtGoalStr} (mm:ss)` : ''}
+${avgPaceSecs && avgTimeAtGoalDistanceSecs ? `- Current estimated ability: this runner currently takes approximately ${avgTimeAtGoalDistanceStr} to run ${targetDistance}km.` : ''}` : `- No recent runs found at exactly ${targetDistance}km — use their average pace and weekly mileage as the baseline.`}
+
 Goal:
 - ${goalType.toUpperCase()} (${targetDistance}km)
-${targetTime ? `- Target time: ${Math.floor(targetTime / 60)} minutes` : ''}
+${targetTime ? `- Target time: ${Math.floor(targetTime / 60)}:${String(Math.round((targetTime % 60))).padStart(2,'0')} (mm:ss)
+- Gap to close: ${avgTimeAtGoalDistanceSecs && targetTime ? `runner currently averages ${avgTimeAtGoalDistanceStr}, needs to improve by approximately ${Math.round((avgTimeAtGoalDistanceSecs - targetTime) / 60)} minute(s) ${Math.abs(Math.round((avgTimeAtGoalDistanceSecs - targetTime) % 60))}s` : 'use your expert judgment based on their current pace'}` : ''}
 ${targetDate ? `- Race date: ${targetDate.toDateString()}` : ''}
 
 ${regularSessions.length > 0 ? `
@@ -163,12 +243,14 @@ Schedule:
 }
 
 Requirements:
-1. Build gradually from current ${weeklyMileageBase.toFixed(1)}km/week base
-2. Include easy runs, tempo runs, intervals, and long runs
-3. Follow 80/20 rule (80% easy, 20% hard)
-4. Build for 3 weeks, recover 1 week pattern
-5. Taper for final 2 weeks before race
-6. Increase weekly volume by max 10% per week
+1. Base all paces on the runner's actual current ability shown above — NOT generic tables. If their current ${targetDistance}km time is ${avgTimeAtGoalDistanceStr || 'unknown'}, pace prescriptions must start from that reality.
+2. Build gradually from current ${weeklyMileageBase.toFixed(1)}km/week base
+3. Include easy runs, tempo runs, intervals, and long runs
+4. Follow 80/20 rule (80% easy, 20% hard)
+5. Build for 3 weeks, recover 1 week pattern
+6. Taper for final 2 weeks before race
+7. Increase weekly volume by max 10% per week
+8. Reference the runner's current performance data when writing workout descriptions (e.g. "your current 5km is around ${avgTimeAtGoalDistanceStr || 'estimated from pace data'} — today's tempo target will bring you closer to your goal")
 
 Return JSON with this exact structure:
 {
