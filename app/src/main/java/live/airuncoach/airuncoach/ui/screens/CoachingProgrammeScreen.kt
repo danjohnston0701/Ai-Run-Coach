@@ -23,6 +23,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.R
+import live.airuncoach.airuncoach.domain.model.Injury
+import live.airuncoach.airuncoach.domain.model.InjuryStatus
 import live.airuncoach.airuncoach.network.model.TrainingPlanDetails
 import live.airuncoach.airuncoach.network.model.TrainingPlanProgress
 import live.airuncoach.airuncoach.network.model.TrainingPlanSummary
@@ -306,6 +308,7 @@ fun TrainingPlanDashboardScreen(
 
     var showAbandonDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showAddInjuryDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(planId) { viewModel.loadPlanDetail(planId) }
 
@@ -360,6 +363,7 @@ fun TrainingPlanDashboardScreen(
                 onClearError = { viewModel.clearActionError() },
                 onShowAbandonDialog = { showAbandonDialog = true },
                 onShowDeleteDialog = { showDeleteDialog = true },
+                onAddInjury = { showAddInjuryDialog = true },
                 modifier = Modifier.fillMaxSize().padding(padding)
             )
             }
@@ -435,6 +439,140 @@ fun TrainingPlanDashboardScreen(
             containerColor = Colors.backgroundSecondary
         )
     }
+
+    // Add Injury Dialog with Re-assessment option
+    if (showAddInjuryDialog && state is PlanDetailState.Success) {
+        AddInjuryRecalibrateDialog(
+            onDismiss = { showAddInjuryDialog = false },
+            onConfirm = { bodyPart, status, notes, shouldRecalculate ->
+                // Save injury to user profile
+                val sharedPrefs = viewModel.javaClass.getDeclaredField("context").let {
+                    // Get context through viewModel - simplified approach
+                }
+                
+                // For now, just show the dialog and save the injury
+                // The recalculation would require a backend API call
+                showAddInjuryDialog = false
+                
+                // TODO: Implement actual injury save and plan recalculation via API
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddInjuryRecalibrateDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String, InjuryStatus, String?, Boolean) -> Unit
+) {
+    var selectedBodyPart by remember { mutableStateOf("") }
+    var selectedStatus by remember { mutableStateOf(InjuryStatus.RECOVERING) }
+    var notes by remember { mutableStateOf("") }
+    var recalculatePlan by remember { mutableStateOf(true) }
+    
+    val bodyParts = listOf("Knee", "Ankle", "Shin", "Hip", "Back", "Foot", "Calf", "Hamstring", "Quad", "Groin", "Shoulder", "Wrist", "Other")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Injury/Condition", style = AppTextStyles.h3) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                Text("We'll adjust your training plan to accommodate this injury.", style = AppTextStyles.body, color = Colors.textSecondary)
+                
+                // Body part dropdown
+                Text("Body Part", style = AppTextStyles.small, color = Colors.textMuted)
+                var expanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { expanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = selectedBodyPart,
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        bodyParts.forEach { part ->
+                            DropdownMenuItem(
+                                text = { Text(part) },
+                                onClick = {
+                                    selectedBodyPart = part
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Status
+                Text("Status", style = AppTextStyles.small, color = Colors.textMuted)
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    InjuryStatus.values().forEach { status ->
+                        val selected = selectedStatus == status
+                        FilterChip(
+                            selected = selected,
+                            onClick = { selectedStatus = status },
+                            label = {
+                                Text(
+                                    when (status) {
+                                        InjuryStatus.RECOVERING -> "Recovering"
+                                        InjuryStatus.HEALED -> "Healed"
+                                        InjuryStatus.CHRONIC -> "Chronic"
+                                    }
+                                )
+                            }
+                        )
+                    }
+                }
+
+                // Notes
+                Text("Notes (optional)", style = AppTextStyles.small, color = Colors.textMuted)
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    placeholder = { Text("e.g., Started in January, improving") },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 3
+                )
+                
+                // Recalculate option
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { recalculatePlan = !recalculatePlan },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = recalculatePlan,
+                        onCheckedChange = { recalculatePlan = it }
+                    )
+                    Spacer(modifier = Modifier.width(Spacing.sm))
+                    Column {
+                        Text("Re-calibrate training plan", style = AppTextStyles.body, color = Colors.textPrimary)
+                        Text("The AI will adjust future workouts based on this injury", style = AppTextStyles.small, color = Colors.textMuted)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(selectedBodyPart, selectedStatus, notes.ifBlank { null }, recalculatePlan) },
+                enabled = selectedBodyPart.isNotBlank()
+            ) {
+                Text("Add")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        containerColor = Colors.backgroundSecondary
+    )
 }
 
 @Composable
@@ -450,6 +588,7 @@ fun PlanDashboardContent(
     onClearError: () -> Unit,
     onShowAbandonDialog: () -> Unit,
     onShowDeleteDialog: () -> Unit,
+    onAddInjury: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Helpers that stamp plan context into WorkoutHolder before delegating to nav callbacks.
@@ -551,6 +690,20 @@ fun PlanDashboardContent(
         // ── Abandon and Delete buttons at the bottom ───────────────────────────
         item {
             Spacer(modifier = Modifier.height(Spacing.lg))
+            
+            // Add Injury button
+            OutlinedButton(
+                onClick = onAddInjury,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.warning)
+            ) {
+                Icon(painterResource(R.drawable.icon_heart_vector), null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(Spacing.sm))
+                Text("Add Injury/Condition")
+            }
+            
+            Spacer(modifier = Modifier.height(Spacing.md))
+            
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.md)

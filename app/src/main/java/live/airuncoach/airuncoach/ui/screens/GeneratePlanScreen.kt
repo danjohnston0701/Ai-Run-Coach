@@ -25,6 +25,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.Goal
+import live.airuncoach.airuncoach.domain.model.Injury
+import live.airuncoach.airuncoach.domain.model.InjuryStatus
 import live.airuncoach.airuncoach.domain.model.RegularSession
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
@@ -54,9 +56,14 @@ fun GeneratePlanScreen(
     val generateState by viewModel.generateState.collectAsState()
     val regularSessions by viewModel.regularSessions.collectAsState()
     val firstSessionStart by viewModel.firstSessionStart.collectAsState()
+    val injuries by viewModel.injuries.collectAsState()
 
     // Dialog state for adding a regular session
     var showAddSessionDialog by remember { mutableStateOf(false) }
+    
+    // Dialog state for adding an injury
+    var showAddInjuryDialog by remember { mutableStateOf(false) }
+    var editingInjury by remember { mutableStateOf<Injury?>(null) }
 
     // Pre-fill from linked goal
     LaunchedEffect(prefilledGoal) {
@@ -308,6 +315,76 @@ fun GeneratePlanScreen(
 
                     Spacer(modifier = Modifier.height(Spacing.xl))
 
+                    // ── Section 4b: Injuries ──────────────────────────────────────────────
+                    SectionHeader(title = "Injuries & Conditions", icon = R.drawable.icon_heart_vector)
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                    Text(
+                        "Add any injuries or conditions we're aware of so the AI can design a safe training plan.",
+                        style = AppTextStyles.small,
+                        color = Colors.textMuted
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.md))
+
+                    // Show existing injuries
+                    if (injuries.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                            injuries.forEach { injury ->
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(Spacing.md),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                injury.bodyPart,
+                                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
+                                                color = Colors.textPrimary
+                                            )
+                                            Text(
+                                                when (injury.status) {
+                                                    InjuryStatus.RECOVERING -> "Recovering"
+                                                    InjuryStatus.HEALED -> "Healed"
+                                                    InjuryStatus.CHRONIC -> "Chronic"
+                                                },
+                                                style = AppTextStyles.small,
+                                                color = if (injury.status == InjuryStatus.RECOVERING) Colors.warning else Colors.textMuted
+                                            )
+                                            injury.notes?.let { notes ->
+                                                Text(notes, style = AppTextStyles.small, color = Colors.textMuted)
+                                            }
+                                        }
+                                        IconButton(onClick = { viewModel.removeInjury(injury.id!!) }) {
+                                            Icon(painterResource(R.drawable.icon_trash_vector), "Remove", tint = Colors.error)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(Spacing.md))
+                    }
+
+                    // Add injury button
+                    OutlinedButton(
+                        onClick = { 
+                            editingInjury = null
+                            showAddInjuryDialog = true 
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
+                    ) {
+                        Icon(painterResource(R.drawable.icon_plus_vector), null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(Spacing.sm))
+                        Text(if (injuries.isEmpty()) "Add an injury or condition" else "Add another")
+                    }
+
+                    Spacer(modifier = Modifier.height(Spacing.xl))
+
                     // ── Section 5: First Session Start ───────────────────────────────────
                     SectionHeader(title = "When do you want to start?", icon = R.drawable.icon_calendar_vector)
                     Spacer(modifier = Modifier.height(Spacing.sm))
@@ -484,6 +561,130 @@ fun GeneratePlanScreen(
             }
         )
     }
+
+    // ── Add Injury Dialog ────────────────────────────────────────────────────
+    if (showAddInjuryDialog) {
+        AddInjuryDialog(
+            injury = editingInjury,
+            onDismiss = { 
+                showAddInjuryDialog = false
+                editingInjury = null
+            },
+            onConfirm = { bodyPart, status, notes ->
+                if (editingInjury != null) {
+                    viewModel.updateInjury(editingInjury!!.id!!, bodyPart, status, notes)
+                } else {
+                    viewModel.addInjury(bodyPart, status, notes)
+                }
+                showAddInjuryDialog = false
+                editingInjury = null
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddInjuryDialog(
+    injury: Injury?,
+    onDismiss: () -> Unit,
+    onConfirm: (String, InjuryStatus, String?) -> Unit
+) {
+    var selectedBodyPart by remember { mutableStateOf(injury?.bodyPart ?: "") }
+    var selectedStatus by remember { mutableStateOf(injury?.status ?: InjuryStatus.RECOVERING) }
+    var notes by remember { mutableStateOf(injury?.notes ?: "") }
+    
+    val bodyParts = listOf("Knee", "Ankle", "Shin", "Hip", "Back", "Foot", "Calf", "Hamstring", "Quad", "Groin", "Shoulder", "Wrist", "Other")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (injury == null) "Add Injury/Condition" else "Edit Injury/Condition", style = AppTextStyles.h3) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                // Body part dropdown
+                Text("Body Part", style = AppTextStyles.small, color = Colors.textMuted)
+                var expanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { expanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = selectedBodyPart,
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        bodyParts.forEach { part ->
+                            DropdownMenuItem(
+                                text = { Text(part) },
+                                onClick = {
+                                    selectedBodyPart = part
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Status
+                Text("Status", style = AppTextStyles.small, color = Colors.textMuted)
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    InjuryStatus.values().forEach { status ->
+                        val selected = selectedStatus == status
+                        FilterChip(
+                            selected = selected,
+                            onClick = { selectedStatus = status },
+                            label = {
+                                Text(
+                                    when (status) {
+                                        InjuryStatus.RECOVERING -> "Recovering"
+                                        InjuryStatus.HEALED -> "Healed"
+                                        InjuryStatus.CHRONIC -> "Chronic"
+                                    }
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = when (status) {
+                                    InjuryStatus.RECOVERING -> Colors.warning.copy(alpha = 0.2f)
+                                    InjuryStatus.HEALED -> Colors.success.copy(alpha = 0.2f)
+                                    InjuryStatus.CHRONIC -> Colors.primary.copy(alpha = 0.2f)
+                                }
+                            )
+                        )
+                    }
+                }
+
+                // Notes
+                Text("Notes (optional)", style = AppTextStyles.small, color = Colors.textMuted)
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    placeholder = { Text("e.g., Started in January, improving") },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 3
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(selectedBodyPart, selectedStatus, notes.ifBlank { null }) },
+                enabled = selectedBodyPart.isNotBlank()
+            ) {
+                Text(if (injury == null) "Add" else "Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        containerColor = Colors.backgroundSecondary
+    )
 }
 
 @Composable

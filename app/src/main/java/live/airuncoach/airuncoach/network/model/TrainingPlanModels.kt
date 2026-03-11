@@ -15,6 +15,15 @@ data class RegularSessionRequest(
     @SerializedName("countsTowardWeeklyTotal") val countsTowardWeeklyTotal: Boolean
 )
 
+/**
+ * User injury for AI to consider when designing training plan
+ */
+data class InjuryRequest(
+    @SerializedName("bodyPart") val bodyPart: String,   // "knee", "ankle", "shin", etc.
+    @SerializedName("status") val status: String,       // "recovering", "healed", "chronic"
+    @SerializedName("notes") val notes: String? = null  // optional details
+)
+
 /** POST /api/training-plans/generate */
 data class GeneratePlanRequest(
     @SerializedName("goalType") val goalType: String,       // "5k","10k","half_marathon","marathon","custom"
@@ -30,7 +39,9 @@ data class GeneratePlanRequest(
     @SerializedName("age") val age: Int? = null,
     @SerializedName("gender") val gender: String? = null,
     @SerializedName("height") val height: Double? = null,   // cm
-    @SerializedName("weight") val weight: Double? = null    // kg
+    @SerializedName("weight") val weight: Double? = null,   // kg
+    // User injuries for AI to design appropriate training (avoid aggravating recovering injuries)
+    @SerializedName("injuries") val injuries: List<InjuryRequest> = emptyList()
 )
 
 /** Response from generate */

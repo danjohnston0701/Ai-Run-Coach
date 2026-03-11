@@ -12,10 +12,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.domain.model.Goal
+import live.airuncoach.airuncoach.domain.model.Injury
+import live.airuncoach.airuncoach.domain.model.InjuryStatus
 import live.airuncoach.airuncoach.domain.model.RegularSession
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.model.GeneratePlanRequest
+import live.airuncoach.airuncoach.network.model.InjuryRequest
 import live.airuncoach.airuncoach.network.model.RegularSessionRequest
 import live.airuncoach.airuncoach.network.model.UpdateUserRequest
 import javax.inject.Inject
@@ -107,11 +110,29 @@ class GeneratePlanViewModel @Inject constructor(
     private val _linkedGoal = MutableStateFlow<Goal?>(null)
     val linkedGoal: StateFlow<Goal?> = _linkedGoal.asStateFlow()
 
+    // User injuries for AI to consider in plan design
+    private val _injuries = MutableStateFlow<List<Injury>>(emptyList())
+    val injuries: StateFlow<List<Injury>> = _injuries.asStateFlow()
+
     private val _generateState = MutableStateFlow<GeneratePlanState>(GeneratePlanState.Idle)
     val generateState: StateFlow<GeneratePlanState> = _generateState.asStateFlow()
 
     init {
         loadFitnessLevelFromProfile()
+        loadInjuriesFromProfile()
+    }
+
+    /**
+     * Reads the user's injuries from SharedPreferences for AI to consider in plan design.
+     */
+    private fun loadInjuriesFromProfile() {
+        val userJson = sharedPrefs.getString("user", null) ?: return
+        try {
+            val user = gson.fromJson(userJson, User::class.java)
+            _injuries.value = user.injuries ?: emptyList()
+        } catch (e: Exception) {
+            Log.w("GeneratePlanVM", "Could not read user injuries", e)
+        }
     }
 
     /**
@@ -229,6 +250,15 @@ class GeneratePlanViewModel @Inject constructor(
                 // Get user demographics for AI to use in plan calculation
                 val demographics = getUserDemographics()
                 
+                // Convert injuries to API request format
+                val injuriesList = _injuries.value.map { injury ->
+                    InjuryRequest(
+                        bodyPart = injury.bodyPart.lowercase(),
+                        status = injury.status.name.lowercase(),
+                        notes = injury.notes
+                    )
+                }
+                
                 val request = GeneratePlanRequest(
                     goalType = _goalType.value,
                     targetDistance = distKm,
@@ -252,7 +282,9 @@ class GeneratePlanViewModel @Inject constructor(
                     age = demographics.age,
                     gender = demographics.gender,
                     height = demographics.height,
-                    weight = demographics.weight
+                    weight = demographics.weight,
+                    // User injuries for AI to design appropriate training
+                    injuries = injuriesList
                 )
                 val response = apiService.generateTrainingPlan(request)
                 _generateState.value = GeneratePlanState.Success(response.planId)
@@ -288,6 +320,60 @@ class GeneratePlanViewModel @Inject constructor(
         val height: Double?,  // cm
         val weight: Double?   // kg
     )
+
+    // ========== Injury Management ==========
+    
+    /**
+     * Add a new injury to be considered in plan design
+     */
+    fun addInjury(bodyPart: String, status: InjuryStatus, notes: String? = null) {
+        val newInjury = Injury(
+            id = System.currentTimeMillis().toString(),
+            bodyPart = bodyPart,
+            status = status,
+            notes = notes
+        )
+        _injuries.value = _injuries.value + newInjury
+        saveInjuriesToProfile()
+    }
+    
+    /**
+     * Remove an injury from the list
+     */
+    fun removeInjury(injuryId: String) {
+        _injuries.value = _injuries.value.filter { it.id != injuryId }
+        saveInjuriesToProfile()
+    }
+    
+    /**
+     * Update an existing injury
+     */
+    fun updateInjury(injuryId: String, bodyPart: String, status: InjuryStatus, notes: String?) {
+        _injuries.value = _injuries.value.map { injury ->
+            if (injury.id == injuryId) {
+                injury.copy(bodyPart = bodyPart, status = status, notes = notes)
+            } else {
+                injury
+            }
+        }
+        saveInjuriesToProfile()
+    }
+    
+    /**
+     * Save injuries back to user profile in SharedPreferences
+     */
+    private fun saveInjuriesToProfile() {
+        try {
+            val userJson = sharedPrefs.getString("user", null) ?: return
+            val user = gson.fromJson(userJson, User::class.java)
+            val updatedUser = user.copy(injuries = _injuries.value)
+            sharedPrefs.edit().putString("user", gson.toJson(updatedUser)).apply()
+        } catch (e: Exception) {
+            Log.w("GeneratePlanVM", "Could not save injuries to profile", e)
+        }
+    }
+    
+    // =========================================
 
     fun resetState() {
         _generateState.value = GeneratePlanState.Idle
