@@ -1,6 +1,7 @@
 package live.airuncoach.airuncoach.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -23,6 +24,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.R
+import live.airuncoach.airuncoach.domain.model.HeartRateZones
 import live.airuncoach.airuncoach.domain.model.Injury
 import live.airuncoach.airuncoach.domain.model.InjuryStatus
 import live.airuncoach.airuncoach.network.model.TrainingPlanDetails
@@ -610,6 +612,12 @@ fun PlanDashboardContent(
 
     LazyColumn(modifier = modifier.fillMaxSize(), contentPadding = PaddingValues(Spacing.lg)) {
 
+        // ── AI Summary: What we know about you and what we're working on ──────
+        item {
+            AiPlanSummary(details = details)
+            Spacer(modifier = Modifier.height(Spacing.lg))
+        }
+
         // ── Overall progress card ─────────────────────────────────────────────
         item {
             OverallProgressCard(progress)
@@ -980,6 +988,62 @@ fun workoutTypeLabel(type: String): String = when (type) {
     "rest" -> "Rest Day"
     "cross_training" -> "Cross Training"
     else -> type.replace("_", " ").replaceFirstChar { it.uppercase() }
+}
+
+@Composable
+fun AiPlanSummary(details: TrainingPlanDetails) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, Colors.primary.copy(alpha = 0.3f), RoundedCornerShape(16.dp)),
+        colors = CardDefaults.cardColors(containerColor = Colors.primary.copy(alpha = 0.1f)),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(modifier = Modifier.padding(Spacing.lg)) {
+            // Header
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(painterResource(R.drawable.icon_ai_vector), null, tint = Colors.primary, modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(Spacing.sm))
+                Text("Coaching Plan Summary", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.primary)
+            }
+            
+            Spacer(modifier = Modifier.height(Spacing.md))
+            
+            // What we know about you
+            Text("About You", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+            Spacer(modifier = Modifier.height(Spacing.sm))
+            Text(
+                "Based on your profile:\n" +
+                "• ${details.plan.experienceLevel.replaceFirstChar { it.uppercase() }} runner\n" +
+                "• ${details.plan.daysPerWeek}x per week commitment\n" +
+                "• ${details.plan.totalWeeks}-week programme",
+                style = AppTextStyles.small,
+                color = Colors.textSecondary,
+                lineHeight = 18.sp
+            )
+            
+            Spacer(modifier = Modifier.height(Spacing.md))
+            
+            // What we're working on
+            Text("Your Focus", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+            Spacer(modifier = Modifier.height(Spacing.sm))
+            Text(
+                "This plan will build your aerobic base through consistent Zone 2 running, " +
+                "develop your speed and power with targeted intensity sessions, " +
+                "and prepare you to achieve your ${formatGoalType(details.plan.goalType).lowercase()} goal.",
+                style = AppTextStyles.small,
+                color = Colors.textSecondary,
+                lineHeight = 18.sp
+            )
+            
+            Spacer(modifier = Modifier.height(Spacing.sm))
+            Text(
+                "💡 Tip: The majority of your running will be at an easy, conversational pace to build your aerobic foundation.",
+                style = AppTextStyles.small.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic),
+                color = Colors.primary
+            )
+        }
+    }
 }
 
 @Composable

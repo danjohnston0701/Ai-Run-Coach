@@ -1,6 +1,7 @@
 package live.airuncoach.airuncoach.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -13,7 +14,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import live.airuncoach.airuncoach.R
+import live.airuncoach.airuncoach.domain.model.HeartRateZones
 import live.airuncoach.airuncoach.network.model.WorkoutDetails
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
@@ -91,6 +94,53 @@ fun WorkoutDetailScreen(
                         // Convert "z1" to "Zone 1", "z2" to "Zone 2", etc.
                         val zoneLabel = it.replace(Regex("^z([1-5])$")) { match -> "Zone ${match.groupValues[1].uppercase()}" }
                         WorkoutStatCard(label = "Intensity", value = zoneLabel, icon = R.drawable.icon_heart_vector, modifier = Modifier.weight(1f))
+                    }
+                }
+                Spacer(modifier = Modifier.height(Spacing.lg))
+
+                // ── Zone description and pace guidance ─────────────────────────────
+                workout.intensity?.let { intensity ->
+                    val zoneNumber = intensity.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 2
+                    val zoneInfo = HeartRateZones.getZoneInfo(zoneNumber)
+                    
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, zoneInfo.run { 
+                                when(zone) {
+                                    1 -> Colors.success.copy(alpha = 0.3f)
+                                    2 -> Colors.primary.copy(alpha = 0.3f)
+                                    3 -> Colors.warning.copy(alpha = 0.3f)
+                                    4, 5 -> Colors.error.copy(alpha = 0.3f)
+                                    else -> Colors.textMuted.copy(alpha = 0.3f)
+                                }
+                            }, RoundedCornerShape(12.dp)),
+                        colors = CardDefaults.cardColors(containerColor = zoneInfo.run { 
+                            when(zone) {
+                                1 -> Colors.success.copy(alpha = 0.05f)
+                                2 -> Colors.primary.copy(alpha = 0.05f)
+                                3 -> Colors.warning.copy(alpha = 0.05f)
+                                4, 5 -> Colors.error.copy(alpha = 0.05f)
+                                else -> Colors.backgroundSecondary
+                            }
+                        }),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(Spacing.lg)) {
+                            Text(zoneInfo.name, style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+                            Spacer(modifier = Modifier.height(Spacing.sm))
+                            
+                            Text("What it feels like:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
+                            Text(zoneInfo.description, style = AppTextStyles.small, color = Colors.textSecondary)
+                            
+                            Spacer(modifier = Modifier.height(Spacing.sm))
+                            Text("Pace guidance:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
+                            Text(zoneInfo.paceGuidance, style = AppTextStyles.small, color = Colors.textSecondary)
+                            
+                            Spacer(modifier = Modifier.height(Spacing.sm))
+                            Text("Benefits:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
+                            Text(zoneInfo.benefits, style = AppTextStyles.small, color = Colors.textSecondary)
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(Spacing.lg))

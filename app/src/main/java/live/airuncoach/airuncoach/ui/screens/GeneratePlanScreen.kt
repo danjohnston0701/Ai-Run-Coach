@@ -22,12 +22,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.Goal
+import live.airuncoach.airuncoach.domain.model.HeartRateZones
 import live.airuncoach.airuncoach.domain.model.Injury
 import live.airuncoach.airuncoach.domain.model.InjuryStatus
 import live.airuncoach.airuncoach.domain.model.RegularSession
+import live.airuncoach.airuncoach.domain.model.Zone2PaceDetector
+import live.airuncoach.airuncoach.domain.model.RunSession
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
@@ -271,7 +275,12 @@ fun GeneratePlanScreen(
 
                     Spacer(modifier = Modifier.height(Spacing.xl))
 
-                    // ── Section 4: Training Preferences ─────────────────────────────────
+                    // ── Section 4: Zone 2 Pace Detection ──────────────────────────────
+                    Zone2PaceGuidanceSection(experienceLevel = experienceLevel)
+
+                    Spacer(modifier = Modifier.height(Spacing.xl))
+
+                    // ── Section 5: Training Preferences ─────────────────────────────────
                     SectionHeader(title = "Training preferences", icon = R.drawable.icon_calendar_vector)
                     Spacer(modifier = Modifier.height(Spacing.md))
 
@@ -315,7 +324,7 @@ fun GeneratePlanScreen(
 
                     Spacer(modifier = Modifier.height(Spacing.xl))
 
-                    // ── Section 4b: Injuries ──────────────────────────────────────────────
+                    // ── Section 6: Injuries ──────────────────────────────────────────────
                     SectionHeader(title = "Injuries & Conditions", icon = R.drawable.icon_heart_vector)
                     Spacer(modifier = Modifier.height(Spacing.sm))
                     Text(
@@ -1151,4 +1160,68 @@ fun AddRegularSessionDialog(
             }
         }
     )
+}
+
+@Composable
+fun Zone2PaceGuidanceSection(experienceLevel: String) {
+    SectionHeader(title = "Your Zone 2 Pace", icon = R.drawable.icon_heart_vector)
+    Spacer(modifier = Modifier.height(Spacing.md))
+    
+    // Get theoretical zone 2 pace
+    val theoreticalPace = HeartRateZones.estimateZone2Pace(180, 30, experienceLevel)
+    val paceMinutes = theoreticalPace.toInt()
+    val paceSeconds = ((theoreticalPace - paceMinutes) * 60).toInt()
+    
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, Colors.primary.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = Colors.primary.copy(alpha = 0.05f)),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(Spacing.lg)) {
+            Text(
+                "Zone 2 is your aerobic base zone",
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                color = Colors.primary
+            )
+            Spacer(modifier = Modifier.height(Spacing.sm))
+            
+            Text(
+                "Based on your fitness level ($experienceLevel), your Zone 2 pace is approximately:",
+                style = AppTextStyles.small,
+                color = Colors.textSecondary
+            )
+            Spacer(modifier = Modifier.height(Spacing.md))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "$paceMinutes:${paceSeconds.toString().padStart(2, '0')} min/km",
+                    style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.primary
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(Spacing.md))
+            
+            Text(
+                "💡 This should feel conversational - you can hold a full sentence without gasping. " +
+                "Most of your easy runs will be in this zone.",
+                style = AppTextStyles.small,
+                color = Colors.textSecondary,
+                lineHeight = 16.sp
+            )
+            
+            Spacer(modifier = Modifier.height(Spacing.sm))
+            Text(
+                "As you complete runs, we'll learn your actual Zone 2 pace and refine this estimate.",
+                style = AppTextStyles.small.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic),
+                color = Colors.textMuted
+            )
+        }
+    }
 }
