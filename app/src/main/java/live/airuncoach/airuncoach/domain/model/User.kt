@@ -38,5 +38,5 @@ data class User(
     val coachHalfKmCheckInEnabled: Boolean? = null,
     val coachKmSplitIntervalKm: Int? = null,
     // User injuries for AI to consider in training plan design
-    val injuries: List<Injury> = emptyList()
+    val injuries: List<Injury>? = null
 )

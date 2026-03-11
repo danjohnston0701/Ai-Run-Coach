@@ -6,9 +6,10 @@
  */
 
 import { db } from "./db";
-import { trainingPlans, weeklyPlans, plannedWorkouts, users, runs, goals } from "@shared/schema";
+import { trainingPlans, weeklyPlans, plannedWorkouts, users, runs, goals, connectedDevices } from "@shared/schema";
 import { eq, and, desc, gte } from "drizzle-orm";
 import { getCurrentFitness } from "./fitness-service";
+import { HeartRateZones } from "./heart-rate-zones"; // Assuming we create this utility
 import OpenAI from "openai";
 
 const openai = new OpenAI({
@@ -55,6 +56,14 @@ export async function generateTrainingPlan(
       .where(eq(users.id, userId))
       .limit(1);
 
+    // ── Detect device connectivity and HR history ──
+    const connectedDevice = await db
+      .select()
+      .from(connectedDevices)
+      .where(eq(connectedDevices.userId, userId))
+      .limit(1);
+    const hasConnectedDevice = connectedDevice.length > 0;
+
     // Get current fitness
     const fitness = await getCurrentFitness(userId);
 
@@ -73,6 +82,18 @@ export async function generateTrainingPlan(
       )
       .orderBy(desc(runs.completedAt))
       .limit(30);
+
+    // ── Check if user has HR data in recent runs ──
+    const runsWithHRData = recentRuns.filter(r => r.heartRate && r.heartRate > 0);
+    const hasHRHistory = runsWithHRData.length >= 3; // At least 3 runs with HR data
+
+    // Determine which HR zone scenario applies
+    let hrZoneScenario: 'device' | 'history' | 'effort' = 'effort'; // Default to effort-based
+    if (hasConnectedDevice) {
+      hrZoneScenario = 'device';
+    } else if (hasHRHistory) {
+      hrZoneScenario = 'history';
+    }
 
     // ── Weekly mileage base (last 30 days only to reflect current load)
     const thirtyDaysAgo = new Date();
@@ -129,6 +150,37 @@ export async function generateTrainingPlan(
       ? `${Math.floor(bestTimeAtGoalSecs / 60)}:${String(Math.round(bestTimeAtGoalSecs % 60)).padStart(2, "0")}`
       : null;
 
+    // ── Last 3 runs for baseline snapshot ──
+    const last3Runs = recentRuns.slice(0, 3);
+    let daysSpanBetweenFirstAndLatest: number | null = null;
+    if (last3Runs.length >= 2) {
+      const firstRunDate = new Date(last3Runs[last3Runs.length - 1].completedAt || 0);
+      const latestRunDate = new Date(last3Runs[0].completedAt || 0);
+      daysSpanBetweenFirstAndLatest = Math.floor(
+        (latestRunDate.getTime() - firstRunDate.getTime()) / (1000 * 60 * 60 * 24)
+      );
+    }
+
+    // Average data from last 3 runs (for coaching summary)
+    const last3AvgData = last3Runs.length > 0 ? {
+      count: last3Runs.length,
+      avgDistance: last3Runs.reduce((sum, r) => sum + (r.distance || 0), 0) / last3Runs.length,
+      avgPace: last3Runs
+        .map(r => parsePaceSecs(r.avgPace))
+        .filter((v): v is number => v !== null)
+        .reduce((a, b, _, arr) => a + b / arr.length, 0),
+      avgHeartRate: last3Runs
+        .filter(r => r.heartRate && r.heartRate > 0)
+        .reduce((sum, r) => sum + (r.heartRate || 0), 0) / Math.max(last3Runs.length, 1),
+      daysSpan: daysSpanBetweenFirstAndLatest,
+    } : null;
+
+    // ── Calculate BMI from user profile ──
+    const userHeight = user[0]?.height || 170; // cm
+    const userWeight = user[0]?.weight || 70; // kg
+    const bmi = userWeight / ((userHeight / 100) ** 2);
+    const bmiCategory = bmi < 18.5 ? 'underweight' : bmi < 25 ? 'normal' : bmi < 30 ? 'overweight' : 'obese';
+
     // ── Pace trend: compare oldest 3 vs newest 3 runs
     let paceTrend: string | null = null;
     if (paceValues.length >= 6) {
@@ -145,22 +197,41 @@ export async function generateTrainingPlan(
       Math.ceil((targetDate.getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000)) : 
       getPlanDuration(goalType, experienceLevel);
 
+    // Calculate user age for HR zone calculations
+    const userAge = user[0]?.dob ? Math.floor((Date.now() - new Date(user[0].dob).getTime()) / 31557600000) : 30;
+    const maxHR = HeartRateZones.getMaxHeartRate(userAge);
+
     // Build context for AI
     const context = {
       user: {
-        fitnessLevel: user[0]?.fitnessLevel || experienceLevel,
-        age: user[0]?.dob ? Math.floor((Date.now() - new Date(user[0].dob).getTime()) / 31557600000) : null,
+        name: user[0]?.name,
         gender: user[0]?.gender,
+        age: userAge,
+        height: userHeight,
+        weight: userWeight,
+        bmi: bmi.toFixed(1),
+        bmiCategory,
+        fitnessLevel: user[0]?.fitnessLevel || experienceLevel,
+        maxHeartRate: maxHR,
       },
+      deviceConnectivity: {
+        hasConnectedDevice,
+        deviceType: hasConnectedDevice ? connectedDevice[0]?.deviceType : null,
+      },
+      hrZoneScenario,
+      hasHRHistory,
       fitness: fitness ? {
         ctl: fitness.ctl,
         atl: fitness.atl,
         tsb: fitness.tsb,
         status: fitness.status,
       } : null,
+      last3Runs: last3AvgData,
       recentActivity: {
+        totalRunsOnRecord: recentRuns.length,
         runsLast30Days: runsLast30.length,
         runsLast90Days: recentRuns.length,
+        runsWithHRData: runsWithHRData.length,
         avgWeeklyDistance: weeklyMileageBase,
         avgPace: avgPaceStr || recentRuns[0]?.avgPace,
         bestPace: bestPaceStr,
@@ -195,8 +266,42 @@ export async function generateTrainingPlan(
       }) : undefined,
     };
 
+    // Build personalized runner profile section  
+    const runnerProfileSection = `
+Runner Profile (Personal Details):
+- Name: ${user[0]?.name || 'Runner'}
+- Gender: ${user[0]?.gender || 'Not specified'}
+- Age: ${userAge} years old
+- Height: ${userHeight}cm
+- Weight: ${userWeight}kg
+- BMI: ${bmi.toFixed(1)} (${bmiCategory}) — tailor recovery and injury prevention strategies to this metric
+- Fitness level: ${experienceLevel}
+- Training days per week: ${daysPerWeek}
+- Current fitness (CTL): ${fitness?.ctl || 'N/A'}
+- Training status: ${fitness?.status || 'N/A'}
+
+${hasRunHistory ? `Recent Running History Summary:
+- Total runs on record: ${recentRuns.length}
+- Runs in last 30 days: ${runsLast30.length}
+- Weekly mileage (last 30 days): ${weeklyMileageBase.toFixed(1)}km/week
+
+Last 3 Run Sessions Snapshot:
+- Number of recent sessions: ${last3AvgData?.count || 0}
+- Average distance per run: ${last3AvgData ? (last3AvgData.avgDistance / 1000).toFixed(2) : '0'}km
+- Average pace: ${last3AvgData ? Math.floor(last3AvgData.avgPace / 60) + ':' + String(Math.round(last3AvgData.avgPace % 60)).padStart(2, '0') : 'N/A'}/km
+- Time span between sessions: ${last3AvgData?.daysSpan || 0} days
+
+Pace Trend: ${paceTrend || 'Not enough data yet'}` : `IMPORTANT: This runner has NO previous run data recorded. 
+We will use their stated fitness level (${experienceLevel}) to estimate baseline pace and mileage. 
+Create a plan that starts conservatively and includes baseline-building runs in the first week to establish their actual current fitness. 
+Then adjust subsequent weeks based on performance.`}
+`;
+
     // Generate plan with OpenAI
-    const prompt = `You are an expert running coach. Generate a ${weeksUntilTarget}-week training plan for a ${experienceLevel} runner preparing for a ${goalType} (${targetDistance}km).
+    const hasRunHistory = recentRuns.length > 0;
+    const prompt = `You are an expert running coach. Generate a tailored ${weeksUntilTarget}-week training plan for a ${experienceLevel} runner preparing for a ${goalType} (${targetDistance}km).
+
+${runnerProfileSection}
 
 Runner Profile:
 - Fitness level: ${experienceLevel}
@@ -257,6 +362,15 @@ Return JSON with this exact structure:
 {
   "planName": "12-Week Half Marathon Plan",
   "totalWeeks": 12,
+  "coachingProgrammeSummary": {
+    "aiDeterminedFitnessLevel": "intermediate",
+    "comment": "Based on your current running data, you show a consistent aerobic base with room for speed development.",
+    "keyMetrics": {
+      "estimatedAveragePace": "7:30/km",
+      "estimatedWeeklyMileage": "30-35km",
+      "focusAreas": ["build aerobic capacity", "improve lactate threshold", "injury prevention"]
+    }
+  },
   "weeks": [
     {
       "weekNumber": 1,
@@ -279,7 +393,21 @@ Return JSON with this exact structure:
   ]
 }
 
-Include all ${weeksUntilTarget} weeks with ${daysPerWeek} workouts per week.`;
+Include all ${weeksUntilTarget} weeks with ${daysPerWeek} workouts per week.
+
+COACHING PROGRAMME SUMMARY REQUIREMENTS:
+- aiDeterminedFitnessLevel: Your assessment of the runner's ACTUAL fitness level based on the data provided (may differ from their stated level)
+- comment: A short paragraph assessing their fitness and what you observe from their running patterns
+- keyMetrics.estimatedAveragePace: The realistic average pace they should target for easy runs (not a PR pace)
+- keyMetrics.estimatedWeeklyMileage: Your recommended weekly volume for this plan (e.g. "30-35km")
+- keyMetrics.focusAreas: Array of 3-4 focus areas for this specific runner (e.g. "build aerobic base", "improve speed", "injury prevention")
+
+If runner has NO previous runs:
+- aiDeterminedFitnessLevel: base on their age, height, weight, BMI and stated level - be conservative
+- comment: "No previous running history. Starting with conservative baseline to establish fitness levels."
+- estimatedAveragePace: estimate based on their profile metrics
+- estimatedWeeklyMileage: appropriate starting point for a beginner
+- focusAreas: should include "establish baseline", "build aerobic foundation", "injury prevention"`;
 
     const response = await openai.chat.completions.create({
       model: "gpt-4-turbo-preview",
@@ -377,6 +505,27 @@ Include all ${weeksUntilTarget} weeks with ${daysPerWeek} workouts per week.`;
           continue;
         }
 
+        // ── Parse HR zone from intensity field (z1-z5) and populate HR metadata ──
+        const intensityStr = workout.intensity || '';
+        const hrZoneMatch = intensityStr.match(/z(\d)/i);
+        const hrZoneNumber = hrZoneMatch ? parseInt(hrZoneMatch[1], 10) : null;
+
+        let hrZoneMinBpm: number | null = null;
+        let hrZoneMaxBpm: number | null = null;
+        let effortDescription: string | null = null;
+
+        if (hrZoneNumber && hrZoneNumber >= 1 && hrZoneNumber <= 5) {
+          const zoneRange = HeartRateZones.getZoneRange(hrZoneNumber, maxHR);
+          hrZoneMinBpm = zoneRange.min;
+          hrZoneMaxBpm = zoneRange.max;
+
+          // Set effort description based on scenario
+          if (hrZoneScenario === 'effort') {
+            const zoneDesc = HeartRateZones.getZoneDescription(hrZoneNumber);
+            effortDescription = zoneDesc.effortLabel;
+          }
+        }
+
         await db.insert(plannedWorkouts).values({
           weeklyPlanId,
           trainingPlanId: planId,
@@ -386,6 +535,11 @@ Include all ${weeksUntilTarget} weeks with ${daysPerWeek} workouts per week.`;
           distance: workout.distance,
           targetPace: workout.targetPace,
           intensity: workout.intensity,
+          hrZoneNumber,
+          hrZoneMinBpm,
+          hrZoneMaxBpm,
+          hrZoneScenario: hrZoneNumber ? (hrZoneScenario as 'device' | 'history' | 'effort') : null,
+          effortDescription,
           description: workout.description,
           instructions: workout.instructions,
           isCompleted: false,

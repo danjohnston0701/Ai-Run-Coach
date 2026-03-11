@@ -801,6 +801,12 @@ export const plannedWorkouts = pgTable("planned_workouts", {
   duration: integer("duration"), // seconds
   targetPace: text("target_pace"), // min/km
   intensity: text("intensity"), // z1, z2, z3, z4, z5 (heart rate zones)
+  // HR Zone metadata — added to support personalized guidance based on device/HR history
+  hrZoneNumber: integer("hr_zone_number"), // 1-5 if this workout focuses on a specific HR zone
+  hrZoneMinBpm: integer("hr_zone_min_bpm"), // minimum BPM for target zone (calculated from age)
+  hrZoneMaxBpm: integer("hr_zone_max_bpm"), // maximum BPM for target zone (calculated from age)
+  hrZoneScenario: text("hr_zone_scenario"), // 'device' | 'history' | 'effort' | null — which scenario applies
+  effortDescription: text("effort_description"), // For non-device scenarios: "gentle jog", "comfortably hold conversation", etc.
   description: text("description"),
   instructions: text("instructions"), // Detailed workout instructions
   isCompleted: boolean("is_completed").default(false),

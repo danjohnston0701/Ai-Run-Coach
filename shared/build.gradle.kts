@@ -10,6 +10,7 @@ kotlin {
     iosSimulatorArm64()
 
     cocoapods {
+        version = "1.0.0"
         summary = "Shared AI Run Coach logic for iOS"
         homepage = "https://airuncoach.live"
         ios.deploymentTarget = "16.0"
@@ -17,6 +18,10 @@ kotlin {
             baseName = "AiruncoachShared"
             isStatic = false
         }
+        // License configuration for CocoaPods compliance
+        license = "MIT"
+        // Author information
+        authors = "AI Run Coach Team"
     }
 
     sourceSets {

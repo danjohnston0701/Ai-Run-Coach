@@ -37,6 +37,7 @@ export interface IStorage {
   getUserRuns(userId: string): Promise<Run[]>;
   createRun(run: InsertRun): Promise<Run>;
   updateRun(id: string, data: Partial<Run>): Promise<Run | undefined>;
+  deleteRun(id: string): Promise<void>;
   
   // Routes
   getRoute(id: string): Promise<Route | undefined>;
@@ -241,6 +242,10 @@ export class DatabaseStorage implements IStorage {
     const sanitized = this.convertDateFields(data);
     const [run] = await db.update(runs).set(sanitized).where(eq(runs.id, id)).returning();
     return run || undefined;
+  }
+
+  async deleteRun(id: string): Promise<void> {
+    await db.delete(runs).where(eq(runs.id, id));
   }
 
   private convertDateFields(data: Record<string, any>): Record<string, any> {

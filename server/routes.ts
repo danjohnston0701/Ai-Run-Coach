@@ -5555,8 +5555,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: "Not authorized to delete this run" });
       }
       
-      // Delete run (this would need to be added to storage.ts)
-      await db.delete(runs).where(eq(runs.id, id));
+      // Delete run using storage abstraction
+      await storage.deleteRun(id);
       
       // Recalculate fitness after deletion
       if (run.completedAt && run.tss) {
