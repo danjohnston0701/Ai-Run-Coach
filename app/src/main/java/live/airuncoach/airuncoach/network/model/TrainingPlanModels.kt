@@ -25,7 +25,12 @@ data class GeneratePlanRequest(
     @SerializedName("daysPerWeek") val daysPerWeek: Int = 4,
     @SerializedName("goalId") val goalId: String? = null,   // optionally link to a Goal
     @SerializedName("firstSessionStart") val firstSessionStart: String = "flexible", // "today" | "tomorrow" | "flexible"
-    @SerializedName("regularSessions") val regularSessions: List<RegularSessionRequest> = emptyList()
+    @SerializedName("regularSessions") val regularSessions: List<RegularSessionRequest> = emptyList(),
+    // User demographics for AI to calculate BMI, fitness level, health metrics
+    @SerializedName("age") val age: Int? = null,
+    @SerializedName("gender") val gender: String? = null,
+    @SerializedName("height") val height: Double? = null,   // cm
+    @SerializedName("weight") val weight: Double? = null    // kg
 )
 
 /** Response from generate */

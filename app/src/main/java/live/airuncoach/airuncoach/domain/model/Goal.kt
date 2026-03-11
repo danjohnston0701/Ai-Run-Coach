@@ -56,14 +56,23 @@ data class Goal(
     }
     
     /**
-     * Check if a run session distance meets the goal criteria
-     * For event goals: distance must be within 10% of target or exceed it
+     * Check if a run session meets the goal criteria
+     * Both distance and time must meet or exceed the goal targets
+     * 
+     * Distance: run must be >= target AND <= target * 1.05 (within 5% above target)
+     * Time: run duration must be <= target time (faster or equal)
      */
-    fun isGoalMetByRun(runDistanceMeters: Double): Boolean {
+    fun isGoalMetByRun(runDistanceMeters: Double, runDurationSeconds: Long): Boolean {
         val targetMeters = getDistanceTargetInMeters() ?: return false
-        
-        // Check if run distance is at least 90% of target (within 10%)
-        val minRequiredDistance = targetMeters * 0.9
-        return runDistanceMeters >= minRequiredDistance
+
+        // Check distance: run must be at least the target distance but not more than 5% above
+        if (runDistanceMeters < targetMeters) return false
+        if (runDistanceMeters > targetMeters * 1.05) return false
+
+        // Check time: if there's a time target, run must be <= target time (faster or equal)
+        val targetSeconds = timeTargetSeconds
+        if (targetSeconds != null && runDurationSeconds > targetSeconds) return false
+
+        return true
     }
 }

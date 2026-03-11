@@ -48,7 +48,7 @@ sealed class Screen(val route: String, val label: String, val resourceId: Int) {
     object Home : Screen("home", "Home", R.drawable.icon_home_vector)
     object History : Screen("history", "History", R.drawable.icon_chart_vector)
     object Goals : Screen("goals", "Goals", R.drawable.icon_target_vector)
-    object AiPlans : Screen("ai_plans", "AI Plans", R.drawable.icon_trending_vector)
+    object AiPlans : Screen("ai_plans", "Ai Plans", R.drawable.icon_calendar_vector)
     object Profile : Screen("profile", "Profile", R.drawable.icon_profile_vector)
 }
 

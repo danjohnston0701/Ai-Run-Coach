@@ -351,20 +351,20 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
     /**
      * Check if any active goals are met by the given run session.
      * Only goals with a distance target are checked — the run distance must
-     * meet the goal criteria (≥ 90 % of target).  Goals without a distance
-     * target (e.g. health / consistency / date-only events) are never
-     * auto-celebrated because there is no objective run-level criterion to
+     * meet the goal criteria (within 5% of target) and time must be <= target.
+     * Goals without a distance target (e.g. health / consistency / date-only events) 
+     * are never auto-celebrated because there is no objective run-level criterion to
      * evaluate.
      */
-    fun checkGoalsMetByRun(runDistanceMeters: Double, runDate: Long): List<Goal> {
+    fun checkGoalsMetByRun(runDistanceMeters: Double, runDurationSeconds: Long, runDate: Long): List<Goal> {
         val activeGoals = _allGoals.value.filter { it.isActive && !it.isCompleted }
 
         return activeGoals.filter { goal ->
             // Only celebrate goals that have a concrete distance target
             goal.getDistanceTargetInMeters() ?: return@filter false
 
-            // Check if run distance meets the goal criteria
-            goal.isGoalMetByRun(runDistanceMeters)
+            // Check if run meets both distance and time criteria
+            goal.isGoalMetByRun(runDistanceMeters, runDurationSeconds)
         }
     }
 

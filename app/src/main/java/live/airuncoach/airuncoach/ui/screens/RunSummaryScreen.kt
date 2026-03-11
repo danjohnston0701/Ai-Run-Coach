@@ -177,7 +177,8 @@ fun RunSummaryScreenFlagship(
             kotlinx.coroutines.delay(500)
             
             // Check if any goals were achieved by this run
-            val goals = goalsViewModel.checkGoalsMetByRun(session.distance, session.startTime)
+            val runDurationSeconds = session.duration / 1000 // Convert milliseconds to seconds
+            val goals = goalsViewModel.checkGoalsMetByRun(session.distance, runDurationSeconds, session.startTime)
             
             // Filter out goals that are already completed or already linked to this run session
             val validGoals = goals.filter { goal ->

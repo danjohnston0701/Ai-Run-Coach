@@ -88,7 +88,9 @@ fun WorkoutDetailScreen(
                         WorkoutStatCard(label = "Target Pace", value = "$it/km", icon = R.drawable.icon_timer_vector, modifier = Modifier.weight(1f))
                     }
                     workout.intensity?.let {
-                        WorkoutStatCard(label = "Intensity", value = it.uppercase(), icon = R.drawable.icon_heart_vector, modifier = Modifier.weight(1f))
+                        // Convert "z1" to "Zone 1", "z2" to "Zone 2", etc.
+                        val zoneLabel = it.replace(Regex("^z([1-5])$")) { match -> "Zone ${match.groupValues[1].uppercase()}" }
+                        WorkoutStatCard(label = "Intensity", value = zoneLabel, icon = R.drawable.icon_heart_vector, modifier = Modifier.weight(1f))
                     }
                 }
                 Spacer(modifier = Modifier.height(Spacing.lg))

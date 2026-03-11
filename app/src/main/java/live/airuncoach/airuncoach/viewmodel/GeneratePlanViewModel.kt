@@ -226,6 +226,9 @@ class GeneratePlanViewModel @Inject constructor(
         viewModelScope.launch {
             _generateState.value = GeneratePlanState.Generating
             try {
+                // Get user demographics for AI to use in plan calculation
+                val demographics = getUserDemographics()
+                
                 val request = GeneratePlanRequest(
                     goalType = _goalType.value,
                     targetDistance = distKm,
@@ -244,7 +247,12 @@ class GeneratePlanViewModel @Inject constructor(
                             distanceKm = s.distanceKm,
                             countsTowardWeeklyTotal = s.countsTowardWeeklyTotal
                         )
-                    }
+                    },
+                    // User demographics for AI to calculate BMI, fitness level, health metrics
+                    age = demographics.age,
+                    gender = demographics.gender,
+                    height = demographics.height,
+                    weight = demographics.weight
                 )
                 val response = apiService.generateTrainingPlan(request)
                 _generateState.value = GeneratePlanState.Success(response.planId)
@@ -254,6 +262,32 @@ class GeneratePlanViewModel @Inject constructor(
             }
         }
     }
+
+    /**
+     * Get user demographics from SharedPreferences for AI to use in plan calculation.
+     * Returns age, gender, height (cm), and weight (kg) for BMI and fitness calculations.
+     */
+    private fun getUserDemographics(): UserDemographics {
+        val userJson = sharedPrefs.getString("user", null)
+        if (userJson == null) {
+            return UserDemographics(null, null, null, null)
+        }
+        return try {
+            val user = gson.fromJson(userJson, User::class.java)
+            UserDemographics(user.age, user.gender, user.height, user.weight)
+        } catch (e: Exception) {
+            Log.w("GeneratePlanVM", "Could not read user demographics", e)
+            UserDemographics(null, null, null, null)
+        }
+    }
+
+    /** Simple data class to hold user demographics */
+    private data class UserDemographics(
+        val age: Int?,
+        val gender: String?,
+        val height: Double?,  // cm
+        val weight: Double?   // kg
+    )
 
     fun resetState() {
         _generateState.value = GeneratePlanState.Idle

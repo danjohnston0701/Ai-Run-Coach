@@ -8,10 +8,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -49,7 +53,19 @@ fun CoachingProgrammeScreen(
     val state by viewModel.plansListState.collectAsState()
     val selectedTab by viewModel.selectedTab.collectAsState()
 
-    LaunchedEffect(Unit) { viewModel.loadUserPlans() }
+    // Reload plans when screen resumes (e.g., after deleting a plan and navigating back)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.loadUserPlans()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -73,7 +89,8 @@ fun CoachingProgrammeScreen(
                 Icon(painterResource(R.drawable.icon_plus_vector), "New plan", tint = Colors.buttonText)
             }
         },
-        containerColor = Colors.backgroundRoot
+        containerColor = Colors.backgroundRoot,
+        contentWindowInsets = WindowInsets(0)
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             // Tab Row: Active / Completed / Abandoned
@@ -310,36 +327,28 @@ fun TrainingPlanDashboardScreen(
                         Icon(painterResource(R.drawable.icon_arrow_back_vector), "Back", tint = Colors.textPrimary)
                     }
                 },
-                actions = {
-                    // Abandon and Delete buttons
-                    if (state is PlanDetailState.Success) {
-                        IconButton(onClick = { showAbandonDialog = true }) {
-                            Icon(painterResource(R.drawable.icon_x_vector), "Abandon plan", tint = Colors.textPrimary)
-                        }
-                        IconButton(onClick = { showDeleteDialog = true }) {
-                            Icon(painterResource(R.drawable.icon_trash_vector), "Delete plan", tint = Colors.error)
-                        }
-                    }
-                },
+                actions = {},
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot)
             )
         },
-        containerColor = Colors.backgroundRoot
+        containerColor = Colors.backgroundRoot,
+        contentWindowInsets = WindowInsets(0)
     ) { padding ->
-        when (val s = state) {
-            is PlanDetailState.Loading -> Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Colors.primary)
-            }
-            is PlanDetailState.Error -> Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(s.message, style = AppTextStyles.body, color = Colors.textSecondary)
-                    Spacer(modifier = Modifier.height(Spacing.md))
-                    Button(onClick = { viewModel.loadPlanDetail(planId) }, colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)) {
-                        Text("Retry", color = Colors.buttonText)
+        Column(modifier = Modifier.fillMaxSize()) {
+            when (val s = state) {
+                is PlanDetailState.Loading -> Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Colors.primary)
+                }
+                is PlanDetailState.Error -> Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(s.message, style = AppTextStyles.body, color = Colors.textSecondary)
+                        Spacer(modifier = Modifier.height(Spacing.md))
+                        Button(onClick = { viewModel.loadPlanDetail(planId) }, colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)) {
+                            Text("Retry", color = Colors.buttonText)
+                        }
                     }
                 }
-            }
-            is PlanDetailState.Success -> PlanDashboardContent(
+                is PlanDetailState.Success -> PlanDashboardContent(
                 details = s.details,
                 progress = s.progress,
                 todayWorkout = s.todayWorkout,
@@ -349,8 +358,11 @@ fun TrainingPlanDashboardScreen(
                 onViewWorkoutDetail = onViewWorkoutDetail,
                 onCompleteWorkout = { workout -> viewModel.completeWorkout(workout.id, null, planId) },
                 onClearError = { viewModel.clearActionError() },
-                modifier = Modifier.padding(padding)
+                onShowAbandonDialog = { showAbandonDialog = true },
+                onShowDeleteDialog = { showDeleteDialog = true },
+                modifier = Modifier.fillMaxSize().padding(padding)
             )
+            }
         }
     }
 
@@ -436,6 +448,8 @@ fun PlanDashboardContent(
     onViewWorkoutDetail: (WorkoutDetails) -> Unit,
     onCompleteWorkout: (WorkoutDetails) -> Unit,
     onClearError: () -> Unit,
+    onShowAbandonDialog: () -> Unit,
+    onShowDeleteDialog: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Helpers that stamp plan context into WorkoutHolder before delegating to nav callbacks.
@@ -533,6 +547,31 @@ fun PlanDashboardContent(
             WeekSummaryRow(week = week, isCurrent = week.weekNumber == progress.currentWeek)
             Spacer(modifier = Modifier.height(Spacing.sm))
         }
+
+        // ── Abandon and Delete buttons at the bottom ───────────────────────────
+        item {
+            Spacer(modifier = Modifier.height(Spacing.lg))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+            ) {
+                OutlinedButton(
+                    onClick = onShowAbandonDialog,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.textSecondary),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(brush = SolidColor(Colors.textSecondary))
+                ) {
+                    Text("Abandon")
+                }
+                Button(
+                    onClick = onShowDeleteDialog,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.error)
+                ) {
+                    Text("Delete")
+                }
+            }
+        }
     }
 }
 
@@ -614,7 +653,11 @@ fun TodayWorkoutCard(
                     val paceValue = raw.replace("/km", "").trim()
                     PlanStatChip(R.drawable.icon_timer_vector, "$paceValue min/km")
                 }
-                workout.intensity?.let { PlanStatChip(R.drawable.icon_heart_vector, it.uppercase()) }
+                workout.intensity?.let { 
+                    // Convert "z1" to "Zone 1", "z2" to "Zone 2", etc.
+                    val zoneLabel = it.replace(Regex("^z([1-5])$")) { match -> "Zone ${match.groupValues[1].uppercase()}" }
+                    PlanStatChip(R.drawable.icon_heart_vector, zoneLabel)
+                }
             }
 
             Spacer(modifier = Modifier.height(Spacing.lg))
