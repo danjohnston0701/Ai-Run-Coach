@@ -129,6 +129,8 @@ class RunTrackingService : Service(), SensorEventListener {
     // Step detector cadence tracking (fallback)
     private var stepDetectorSteps: Int = 0
     private var stepDetectorWindowStart: Long = 0
+    private var stepCountFromDetector: Int = 0 // Step counter from TYPE_STEP_DETECTOR
+    private var lastDetectorCadenceCalcTime: Long = 0 // Last time cadence was calculated from detector
     private var totalStepsDuringRun: Int = 0 // Accumulated steps in this run (from step counter)
     
     // Cadence tracking for average/max (mirrors HR tracking)
@@ -537,6 +539,8 @@ class RunTrackingService : Service(), SensorEventListener {
         initialStepCount = -1
         lastStepTimestamp = 0
         stepDetectorSteps = 0
+        stepCountFromDetector = 0
+        lastDetectorCadenceCalcTime = 0
         totalStepsDuringRun = 0
         stepDetectorWindowStart = 0
         usingStepDetector = false
@@ -1428,6 +1432,23 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun onNewLocation(location: Location) {
         if (!isTracking) return
 
+        // Calculate incline degrees from elevation change
+        var inclineDegrees: Float? = null
+        if (location.hasAltitude()) {
+            if (routePoints.isNotEmpty()) {
+                val prevAlt = routePoints.last().altitude
+                if (prevAlt != null) {
+                    val altChange = location.altitude - prevAlt
+                    val distToNextPoint = calculateDistance(routePoints.last(), 
+                        LocationPoint(location.latitude, location.longitude, location.time, 
+                            null, null, null, null, null, null))
+                    if (distToNextPoint > 0) {
+                        inclineDegrees = kotlin.math.atan(altChange / distToNextPoint) * (180 / kotlin.math.PI).toFloat()
+                    }
+                }
+            }
+        }
+
         val newPoint = LocationPoint(
             latitude = location.latitude,
             longitude = location.longitude,
@@ -1436,7 +1457,8 @@ class RunTrackingService : Service(), SensorEventListener {
             altitude = location.altitude.takeIf { location.hasAltitude() },
             heartRate = null,
             bearing = location.bearing.takeIf { location.hasBearing() },
-            cadence = currentCadence.takeIf { it > 0 }
+            cadence = currentCadence.takeIf { it > 0 },
+            inclineDegrees = inclineDegrees
         )
 
         if (routePoints.isNotEmpty()) {
@@ -3412,6 +3434,35 @@ class RunTrackingService : Service(), SensorEventListener {
                         cadenceCount += 1
                         if (currentCadence > maxCadenceValue) maxCadenceValue = currentCadence
                     }
+                }
+            }
+            Sensor.TYPE_STEP_DETECTOR -> {
+                // Step detector fires once per step - use for cadence calculation
+                // Maintain running window of steps and time to calculate live cadence
+                val currentTime = System.currentTimeMillis()
+                lastStepTimestamp = currentTime
+                
+                // Increment step counter from detector
+                stepCountFromDetector++
+                totalStepsDuringRun++
+                
+                // Calculate cadence from step detector (every 10 steps or every 3 seconds)
+                val timeSinceLastCadenceCalc = currentTime - lastDetectorCadenceCalcTime
+                if (stepCountFromDetector >= 10 || timeSinceLastCadenceCalc > 3000) {
+                    if (timeSinceLastCadenceCalc > 0) {
+                        currentCadence = ((stepCountFromDetector * 60000) / timeSinceLastCadenceCalc).toInt()
+                        
+                        // Accumulate for average/max (only valid readings)
+                        if (currentCadence > 0) {
+                            cadenceSum += currentCadence
+                            cadenceCount += 1
+                            if (currentCadence > maxCadenceValue) maxCadenceValue = currentCadence
+                        }
+                    }
+                    
+                    // Reset for next window
+                    stepCountFromDetector = 0
+                    lastDetectorCadenceCalcTime = currentTime
                 }
             }
             Sensor.TYPE_HEART_RATE -> {
