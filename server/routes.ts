@@ -876,15 +876,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Store the analysis (save the analysis object directly, not wrapped)
       await storage.upsertRunAnalysis(runId, analysis);
       
-      // Update run with ai insights summary
+      // Update run with ai insights summary - ensure proper serialization
       await storage.updateRun(runId, { 
         aiInsights: JSON.stringify({
           summary: analysis.summary,
           performanceScore: analysis.performanceScore,
           highlights: analysis.highlights,
-        }),
-        aiCoachingNotes: analysis,
-      });
+        } as any),
+        // Ensure aiCoachingNotes is properly handled - may be stringified by db
+        aiCoachingNotes: analysis as any,
+      } as any);
       
       res.json({
         success: true,
@@ -893,8 +894,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         hasWellnessData: !!wellness,
       });
     } catch (error: any) {
-      console.error("Comprehensive run analysis error:", error);
-      res.status(500).json({ error: "Failed to generate comprehensive analysis" });
+      console.error("Comprehensive run analysis error:", {
+        message: error?.message,
+        code: error?.code,
+        stack: error?.stack,
+        errorFull: JSON.stringify(error)
+      });
+      res.status(500).json({ 
+        error: "Failed to generate comprehensive analysis",
+        details: error?.message || "Unknown error"
+      });
     }
   });
 
