@@ -351,6 +351,10 @@ class RunTrackingService : Service(), SensorEventListener {
         private const val HILL_TOP_COOLDOWN_MS = 180_000 // 3 minutes
         private const val HR_COOLDOWN_MS = 180_000 // 3 minutes
 
+        // ELEVATION NOISE FILTER — GPS altitude is very noisy (±5-10m error)
+        // Only count elevation changes larger than this to avoid summing GPS jitter
+        private const val ELEVATION_NOISE_THRESHOLD = 1.5 // Ignore changes < 1.5m (they're GPS noise)
+        
         // ELEVATION-BASED TRIGGERS (Primary) — More reliable than grade % which can be noisy from GPS
         private const val UPHILL_ELEVATION_TRIGGER_M = 10.0  // Trigger uphill coaching after gaining 10m elevation
         private const val DOWNHILL_ELEVATION_TRIGGER_M = 10.0 // Trigger downhill coaching after losing 10m elevation
@@ -1583,7 +1587,11 @@ class RunTrackingService : Service(), SensorEventListener {
                 }
                 if (newPoint.altitude != null && prevPoint.altitude != null) {
                     val elevChange = newPoint.altitude - prevPoint.altitude
-                    if (elevChange > 0) totalElevationGain += elevChange else totalElevationLoss += abs(elevChange)
+                    // Only count elevation changes > threshold to filter out GPS noise
+                    // GPS altitude has ±5-10m error, so ignore small fluctuations
+                    if (abs(elevChange) > ELEVATION_NOISE_THRESHOLD) {
+                        if (elevChange > 0) totalElevationGain += elevChange else totalElevationLoss += abs(elevChange)
+                    }
                     
                     // Smooth altitude for elevation coaching (reduces GPS noise)
                     recentAltitudes.add(newPoint.altitude)
