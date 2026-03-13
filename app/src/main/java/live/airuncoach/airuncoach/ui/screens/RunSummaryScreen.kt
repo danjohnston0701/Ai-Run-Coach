@@ -2656,26 +2656,27 @@ private fun RunLineChartCanvas(
 
             val yVals = series.y
 
-            // Use 5th/95th percentile values to clip outliers (GPS spikes, stop/start artifacts)
-            val sorted = yVals.sorted()
-            val p05 = sorted[(sorted.size * 0.05).toInt().coerceIn(0, sorted.size - 1)]
-            val p95 = sorted[(sorted.size * 0.95).toInt().coerceIn(0, sorted.size - 1)]
-            val dataRange = (p95 - p05).coerceAtLeast(1.0)
+            // Use actual min/max values to ensure ALL data points fit on the chart
+            // (Previously used 5th/95th percentile which clipped the actual extremes)
+            val actualMin = yVals.minOrNull() ?: 0.0
+            val actualMax = yVals.maxOrNull() ?: 1.0
+            val dataRange = (actualMax - actualMin).coerceAtLeast(1.0)
 
             // For pace (invertY): slow pace is maxY. Add 25% of slowest pace value as padding
-            // so consistent runs don't look erratic. For other charts use a 20% range buffer.
+            // so consistent runs don't look erratic. For other charts use a 15% range buffer.
             val axisMinY: Double
             val axisMaxY: Double
             if (invertY) {
                 // Pace: faster (lower num) at top, slower (higher num) at bottom
-                // Fast end: small 5% of value buffer so the line doesn't hug the top
-                axisMinY = p05 * 0.97
-                // Slow end: 25% of the slowest pace value padded below, making variance look gentle
-                axisMaxY = p95 + (p95 * 0.25)
+                // Fast end: small 2% of value buffer so the line doesn't hug the top
+                axisMinY = actualMin * 0.98
+                // Slow end: 15% padding above actual max so all data points fit
+                axisMaxY = actualMax + (dataRange * 0.15)
             } else {
-                val buf = dataRange * 0.20
-                axisMinY = p05 - buf
-                axisMaxY = p95 + buf
+                // Other metrics: 15% padding on both sides
+                val buf = dataRange * 0.15
+                axisMinY = actualMin - buf
+                axisMaxY = actualMax + buf
             }
 
             val minY = axisMinY
