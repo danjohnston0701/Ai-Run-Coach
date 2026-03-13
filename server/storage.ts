@@ -2,7 +2,7 @@ import {
   users, friends, friendRequests, runs, routes, goals, 
   notifications, notificationPreferences, liveRunSessions,
   groupRuns, groupRunParticipants, events, routeRatings, runAnalyses,
-  connectedDevices, deviceData, garminWellnessMetrics,
+  connectedDevices, deviceData, garminWellnessMetrics, activityMergeLog,
   type User, type InsertUser, type Run, type InsertRun,
   type Route, type InsertRoute, type Goal, type InsertGoal,
   type Friend, type FriendRequest, type Notification, type NotificationPreference,
@@ -245,7 +245,45 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteRun(id: string): Promise<void> {
-    await db.delete(runs).where(eq(runs.id, id));
+    // Delete related records before deleting the run itself (due to foreign key constraints)
+    // Delete in order of dependencies
+    
+    try {
+      // Delete route data  
+      await db.delete(routes).where(eq(routes.runId, id));
+    } catch (e) {
+      console.error("Error deleting routes:", e);
+    }
+    
+    try {
+      // Delete device data
+      await db.delete(deviceData).where(eq(deviceData.runId, id));
+    } catch (e) {
+      console.error("Error deleting device data:", e);
+    }
+    
+    try {
+      // Delete run analyses
+      await db.delete(runAnalyses).where(eq(runAnalyses.runId, id));
+    } catch (e) {
+      console.error("Error deleting run analyses:", e);
+    }
+    
+    try {
+      // Delete activity merge logs
+      await db.delete(activityMergeLog).where(eq(activityMergeLog.aiRunCoachRunId, id));
+    } catch (e) {
+      console.error("Error deleting activity merge logs:", e);
+    }
+    
+    try {
+      // Finally delete the run itself
+      const result = await db.delete(runs).where(eq(runs.id, id));
+      console.log(`[Storage] Successfully deleted run ${id}`);
+    } catch (e) {
+      console.error("Error deleting run:", e);
+      throw new Error(`Failed to delete run: ${e}`);
+    }
   }
 
   private convertDateFields(data: Record<string, any>): Record<string, any> {
