@@ -44,6 +44,7 @@ data class DeviceInfo(
 fun ConnectedDevicesScreen(
     onNavigateBack: () -> Unit,
     onNavigateToGarminConnect: () -> Unit = {},
+    onNavigateToGarminPermissions: () -> Unit = {},
     viewModel: ConnectedDevicesViewModel = hiltViewModel()
 ) {
     val garminConnectionStatus by viewModel.garminConnectionStatus.collectAsState()
@@ -234,6 +235,31 @@ fun ConnectedDevicesScreen(
                                     )
                                 )
                             }
+                        }
+
+                        // Manage Permissions button
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = { onNavigateToGarminPermissions() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF1A1A1A),
+                                contentColor = Color(0xFF00D4FF)
+                            ),
+                            shape = RoundedCornerShape(BorderRadius.md)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Manage",
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "Manage Permissions",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium)
+                            )
                         }
 
                         // "Health Data powered by Garmin" badge

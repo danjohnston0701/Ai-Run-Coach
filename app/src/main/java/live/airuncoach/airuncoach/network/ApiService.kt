@@ -385,6 +385,16 @@ interface ApiService {
     
     @POST("/api/garmin/upload-run")
     suspend fun uploadRunToGarmin(@Body request: GarminUploadRequest): GarminUploadResponse
+    
+    // Garmin Permissions Management
+    @GET("/api/garmin/permissions")
+    suspend fun getGarminPermissions(): List<GarminPermissionItem>
+    
+    @POST("/api/garmin/reauthorize")
+    suspend fun getGarminReauthorizationUrl(): GarminAuthUrlResponse
+    
+    @POST("/api/garmin/disconnect")
+    suspend fun disconnectGarminDevice(): Unit
 
     // ========== SHARE RUN LINKS ==========
     @POST("/api/runs/{id}/share-link")

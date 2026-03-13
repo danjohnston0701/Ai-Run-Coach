@@ -644,11 +644,17 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             composable("connected_devices") { 
                 ConnectedDevicesScreen(
                     onNavigateBack = { navController.popBackStack() },
-                    onNavigateToGarminConnect = { navController.navigate("garmin_connect") }
+                    onNavigateToGarminConnect = { navController.navigate("garmin_connect") },
+                    onNavigateToGarminPermissions = { navController.navigate("garmin_permissions") }
                 )
             }
             composable("garmin_connect") { 
                 GarminConnectScreen(onNavigateBack = { navController.popBackStack() })
+            }
+            composable("garmin_permissions") { 
+                // GarminPermissionsScreen - Manages Garmin data access permissions
+                // User can view which permissions are granted and re-authorize for new scopes
+                GarminPermissionsScreenWrapper(onNavigateBack = { navController.popBackStack() })
             }
             composable("subscription") { SubscriptionScreen(onNavigateBack = { navController.popBackStack() }) }
         }
