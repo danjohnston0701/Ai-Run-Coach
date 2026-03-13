@@ -351,17 +351,29 @@ class RunTrackingService : Service(), SensorEventListener {
         private const val HILL_TOP_COOLDOWN_MS = 180_000 // 3 minutes
         private const val HR_COOLDOWN_MS = 180_000 // 3 minutes
 
-        private const val UPHILL_GRADE_THRESHOLD = 3.0      // Min grade to count as "uphill" for slope tracking
-        private const val STEEP_UPHILL_GRADE_THRESHOLD = 5.0 // Smoothed grade needed to trigger uphill coaching
-        private const val DOWNHILL_GRADE_THRESHOLD = -3.0    // Min grade to count as "downhill" for slope tracking
-        private const val STEEP_DOWNHILL_GRADE_THRESHOLD = -5.0 // Smoothed grade needed to trigger downhill coaching
-        private const val HILL_TOP_MIN_DISTANCE_M = 200.0    // Min uphill distance before hill-top ack fires
-        private const val UPHILL_MIN_DISTANCE_M = 200.0      // Min sustained uphill distance to trigger coaching
-        private const val DOWNHILL_MIN_DISTANCE_M = 250.0    // Min sustained downhill distance to trigger coaching
+        // ELEVATION-BASED TRIGGERS (Primary) — More reliable than grade % which can be noisy from GPS
+        private const val UPHILL_ELEVATION_TRIGGER_M = 10.0  // Trigger uphill coaching after gaining 10m elevation
+        private const val DOWNHILL_ELEVATION_TRIGGER_M = 10.0 // Trigger downhill coaching after losing 10m elevation
+        private const val GENTLE_HILL_ELEVATION_M = 8.0      // Gentle hill awareness for 8m+ gains
+        private const val MODERATE_HILL_ELEVATION_M = 15.0   // Moderate hill coaching for 15m+ gains
+        private const val STEEP_HILL_ELEVATION_M = 25.0      // Steep hill coaching for 25m+ gains
+        
+        // GRADE-BASED TRIGGERS (Secondary) — For context and validation, not primary driver
+        private const val UPHILL_GRADE_THRESHOLD = 2.0       // Lowered: Min grade to count as "uphill" (reduced from 3%)
+        private const val STEEP_UPHILL_GRADE_THRESHOLD = 4.0 // Lowered: Smoothed grade for steep uphill (reduced from 5%)
+        private const val DOWNHILL_GRADE_THRESHOLD = -2.0    // Lowered: Min grade to count as "downhill" (reduced from -3%)
+        private const val STEEP_DOWNHILL_GRADE_THRESHOLD = -4.0 // Lowered: Smoothed grade for steep downhill (reduced from -5%)
+        
+        // DISTANCE AND COOLDOWN TRIGGERS
+        private const val HILL_TOP_MIN_DISTANCE_M = 150.0    // Min uphill distance before hill-top ack (reduced from 200m)
+        private const val UPHILL_MIN_DISTANCE_M = 150.0      // Min sustained uphill distance (reduced from 200m)
+        private const val DOWNHILL_MIN_DISTANCE_M = 200.0    // Min sustained downhill distance (reduced from 250m)
         private const val DOWNHILL_FINISH_DISTANCE_KM = 1.0  // Within this distance of finish for downhill_finish
-        private const val MIN_ELEVATION_GAIN_M = 15.0        // Min metres climbed in segment to trigger uphill coaching
-        private const val MIN_ELEVATION_LOSS_M = 15.0        // Min metres descended in segment to trigger downhill coaching
-        private const val HILL_TOP_MIN_GAIN_M = 12.0         // Min metres gained before hill-top ack
+        
+        // These are now SECONDARY — elevation metres trigger first
+        private const val MIN_ELEVATION_GAIN_M = 10.0        // Min metres climbed in segment (reduced from 15m)
+        private const val MIN_ELEVATION_LOSS_M = 10.0        // Min metres descended in segment (reduced from 15m)
+        private const val HILL_TOP_MIN_GAIN_M = 8.0          // Min metres gained before hill-top ack (reduced from 12m)
         private const val ALTITUDE_SMOOTHING_WINDOW = 5      // Number of altitude readings to average for smoothing
         
         const val ACTION_START_TRACKING = "ACTION_START_TRACKING"
@@ -3333,37 +3345,65 @@ class RunTrackingService : Service(), SensorEventListener {
         // Cooldown check
         if (now - lastElevationCoachingTime < ELEVATION_COOLDOWN_MS) return
 
-        // UPHILL coaching: sustained steep climb with meaningful elevation gain
+        // UPHILL coaching: triggered primarily by elevation gain (metres), validated by grade
+        // More reliable than grade % which can be noisy from GPS altitude fluctuations
         if (direction == 1 &&
-            gradePercent >= STEEP_UPHILL_GRADE_THRESHOLD &&
-            slopeDistanceMeters >= UPHILL_MIN_DISTANCE_M &&
-            slopeElevationGain >= MIN_ELEVATION_GAIN_M
+            slopeDistanceMeters >= UPHILL_MIN_DISTANCE_M
         ) {
-            Log.d("ElevationCoaching", "Uphill trigger: ${gradePercent.toInt()}% grade, ${slopeElevationGain.toInt()}m gained over ${slopeDistanceMeters.toInt()}m")
-            lastElevationCoachingTime = now
-            triggerElevationCoaching("uphill", gradePercent, slopeDistanceMeters)
-        }
-        // DOWNHILL coaching: sustained steep descent with meaningful elevation loss
-        else if (direction == -1 &&
-            gradePercent <= STEEP_DOWNHILL_GRADE_THRESHOLD &&
-            slopeDistanceMeters >= DOWNHILL_MIN_DISTANCE_M &&
-            slopeElevationLoss >= MIN_ELEVATION_LOSS_M
-        ) {
-            val remainingDistanceKm = targetDistance?.let { (it - totalDistance) / 1000.0 }
-            if (!downhillFinishTriggered &&
-                hasRoute &&
-                remainingDistanceKm != null &&
-                remainingDistanceKm <= DOWNHILL_FINISH_DISTANCE_KM
-            ) {
-                downhillFinishTriggered = true
+            // Primary trigger: elevation metres gained
+            // Secondary validation: grade threshold (but more lenient now to avoid GPS noise)
+            val byElevationGain = slopeElevationGain >= UPHILL_ELEVATION_TRIGGER_M
+            val byGrade = gradePercent >= UPHILL_GRADE_THRESHOLD
+            
+            if (byElevationGain && byGrade) {
+                // Determine intensity based on elevation gain
+                val coachingType = when {
+                    slopeElevationGain >= STEEP_HILL_ELEVATION_M -> "uphill"        // Steep: 25m+
+                    slopeElevationGain >= MODERATE_HILL_ELEVATION_M -> "uphill"     // Moderate: 15m+
+                    slopeElevationGain >= GENTLE_HILL_ELEVATION_M -> "hill_uphill_technique" // Gentle: 8m+
+                    else -> "uphill"
+                }
+                
+                Log.d("ElevationCoaching", "Uphill trigger: ${slopeElevationGain.toInt()}m gained (${gradePercent.toInt()}% grade) over ${slopeDistanceMeters.toInt()}m")
                 lastElevationCoachingTime = now
-                Log.d("ElevationCoaching", "Downhill finish trigger: ${slopeElevationLoss.toInt()}m lost, ${remainingDistanceKm}km to go")
-                triggerElevationCoaching("downhill_finish", gradePercent, slopeDistanceMeters)
-                return
+                triggerElevationCoaching(coachingType, gradePercent, slopeDistanceMeters)
             }
-            Log.d("ElevationCoaching", "Downhill trigger: ${gradePercent.toInt()}% grade, ${slopeElevationLoss.toInt()}m lost over ${slopeDistanceMeters.toInt()}m")
-            lastElevationCoachingTime = now
-            triggerElevationCoaching("downhill", gradePercent, slopeDistanceMeters)
+        }
+        // DOWNHILL coaching: triggered primarily by elevation loss (metres), validated by grade
+        else if (direction == -1 &&
+            slopeDistanceMeters >= DOWNHILL_MIN_DISTANCE_M
+        ) {
+            // Primary trigger: elevation metres lost
+            // Secondary validation: grade threshold (but more lenient now to avoid GPS noise)
+            val byElevationLoss = slopeElevationLoss >= DOWNHILL_ELEVATION_TRIGGER_M
+            val byGrade = gradePercent <= DOWNHILL_GRADE_THRESHOLD
+            
+            if (byElevationLoss && byGrade) {
+                val remainingDistanceKm = targetDistance?.let { (it - totalDistance) / 1000.0 }
+                if (!downhillFinishTriggered &&
+                    hasRoute &&
+                    remainingDistanceKm != null &&
+                    remainingDistanceKm <= DOWNHILL_FINISH_DISTANCE_KM
+                ) {
+                    downhillFinishTriggered = true
+                    lastElevationCoachingTime = now
+                    Log.d("ElevationCoaching", "Downhill finish trigger: ${slopeElevationLoss.toInt()}m lost, ${remainingDistanceKm}km to go")
+                    triggerElevationCoaching("downhill_finish", gradePercent, slopeDistanceMeters)
+                    return
+                }
+                
+                // Determine intensity based on elevation loss
+                val coachingType = when {
+                    slopeElevationLoss >= STEEP_HILL_ELEVATION_M -> "downhill"        // Steep: 25m+
+                    slopeElevationLoss >= MODERATE_HILL_ELEVATION_M -> "downhill"     // Moderate: 15m+
+                    slopeElevationLoss >= GENTLE_HILL_ELEVATION_M -> "hill_downhill_technique" // Gentle: 8m+
+                    else -> "downhill"
+                }
+                
+                Log.d("ElevationCoaching", "Downhill trigger: ${slopeElevationLoss.toInt()}m lost (${gradePercent.toInt()}% grade) over ${slopeDistanceMeters.toInt()}m")
+                lastElevationCoachingTime = now
+                triggerElevationCoaching(coachingType, gradePercent, slopeDistanceMeters)
+            }
         }
 
         // FLAT TERRAIN coaching: on flat/undulating routes, give terrain-aware insights
