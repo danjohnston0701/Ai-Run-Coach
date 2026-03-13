@@ -1494,7 +1494,7 @@ class RunTrackingService : Service(), SensorEventListener {
                         LocationPoint(location.latitude, location.longitude, location.time, 
                             null, null, null, null, null, null))
                     if (distToNextPoint > 0) {
-                        inclineDegrees = kotlin.math.atan(altChange / distToNextPoint) * (180 / kotlin.math.PI).toFloat()
+                        inclineDegrees = (kotlin.math.atan(altChange / distToNextPoint) * (180 / kotlin.math.PI)).toFloat()
                     }
                 }
             }
