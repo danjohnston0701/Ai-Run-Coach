@@ -8,15 +8,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.network.model.GarminPermissionItem
 import javax.inject.Inject
-
-data class GarminPermissionItem(
-    val id: String,
-    val name: String,
-    val description: String,
-    val category: String, // "activities", "health", "wellness", "advanced"
-    val isGranted: Boolean
-)
 
 data class GarminPermissionsUiState(
     val deviceName: String = "",
