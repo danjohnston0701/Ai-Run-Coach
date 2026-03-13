@@ -1,476 +1,320 @@
-# 🗄️ Database Migration Guide for Neon.com
+# Garmin Integration - Database Migration Guide
 
-## Overview
-You need to add **12 new table categories** plus updates to existing tables. This guide shows you exactly what to run and in what order.
+## 🗄️ Overview
 
----
-
-## 📊 Summary of Changes
-
-### New Tables: **39 tables total**
-- Fitness & Freshness: 2 tables
-- Segments & Leaderboards: 3 tables
-- Training Plans: 6 tables
-- Social Feed: 3 tables
-- Clubs: 2 tables
-- Challenges: 2 tables
-- Achievements: 2 tables
-- Notifications: 1 table
-
-### Modified Tables:
-- `runs` table: Add 4 new columns
-
-### New Indexes: **25 indexes**
-### New Views: **3 views**
-### New Functions: **2 functions**
+You need to execute SQL migrations on your Neon database to add all the tables and columns required for Garmin integration. This guide walks you through the process.
 
 ---
 
-## 🚀 Step-by-Step Migration
+## 📋 What Gets Created
 
-### STEP 1: Backup Your Database
-```sql
--- In Neon.com dashboard:
--- 1. Go to your project
--- 2. Click "Backups"
--- 3. Create manual backup
--- 4. Wait for completion before proceeding
-```
+### **14 New/Modified Database Objects**
 
-### STEP 2: Run Core Schema (Required for MVP)
-These are CRITICAL for basic functionality:
-
-```sql
--- 1. Update existing runs table
-ALTER TABLE runs ADD COLUMN IF NOT EXISTS tss INT DEFAULT 0;
-ALTER TABLE runs ADD COLUMN IF NOT EXISTS gap VARCHAR(20);
-ALTER TABLE runs ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT true;
-ALTER TABLE runs ADD COLUMN IF NOT EXISTS kudos_count INT DEFAULT 0;
-ALTER TABLE runs ADD COLUMN IF NOT EXISTS comment_count INT DEFAULT 0;
-
-CREATE INDEX IF NOT EXISTS idx_runs_public ON runs(user_id, is_public, start_time DESC);
-
--- 2. Fitness & Freshness tables
-CREATE TABLE daily_fitness (...);  -- See DATABASE_SCHEMA.sql
-CREATE TABLE fitness_summary (...);
-```
-
-### STEP 3: Run Segments Schema (High Priority)
-```sql
-CREATE TABLE segments (...);
-CREATE TABLE segment_efforts (...);
-CREATE TABLE segment_stars (...);
-
--- Don't forget the indexes!
-CREATE INDEX idx_segments_location ON segments USING GIST (ll_to_earth(start_lat, start_lng));
--- ... etc
-```
-
-### STEP 4: Run Training Plans Schema (Medium Priority)
-```sql
-CREATE TABLE training_plans (...);
-CREATE TABLE plan_enrollments (...);
-CREATE TABLE weekly_plans (...);
-CREATE TABLE planned_workouts (...);
-CREATE TABLE workout_completions (...);
-CREATE TABLE plan_adaptations (...);
-```
-
-### STEP 5: Run Social Schema (Can wait for V2)
-```sql
-CREATE TABLE feed_activities (...);
-CREATE TABLE reactions (...);
-CREATE TABLE activity_comments (...);
-CREATE TABLE comment_likes (...);
-CREATE TABLE clubs (...);
-CREATE TABLE club_memberships (...);
-CREATE TABLE challenges (...);
-CREATE TABLE challenge_participants (...);
-```
-
-### STEP 6: Run Achievements & Notifications
-```sql
-CREATE TABLE achievements (...);
-CREATE TABLE user_achievements (...);
-CREATE TABLE notifications (...);
-
--- Insert achievement definitions
-INSERT INTO achievements VALUES (...);
-```
-
-### STEP 7: Create Views & Functions
-```sql
-CREATE OR REPLACE VIEW current_fitness_view AS ...;
-CREATE OR REPLACE VIEW segment_leaderboard_view AS ...;
-CREATE OR REPLACE VIEW activity_feed_view AS ...;
-
-CREATE OR REPLACE FUNCTION update_segment_ranks(...) ...;
-CREATE OR REPLACE FUNCTION update_challenge_progress(...) ...;
-```
+1. ✅ **Extend `runs` table** - Add Garmin linking fields
+2. ✅ **`activity_merge_log`** - Track merged activities
+3. ✅ **`garmin_activity_samples`** - Store time-series GPS data
+4. ✅ **Extend `garmin_wellness_metrics`** - Add all wellness fields
+5. ✅ **`garmin_skin_temperature`** - Temperature tracking
+6. ✅ **`garmin_blood_pressure`** - Blood pressure readings
+7. ✅ **`garmin_move_iq`** - Activity classification
+8. ✅ **`garmin_epochs_raw`** - Minute-by-minute data (7-day)
+9. ✅ **`garmin_epochs_aggregate`** - Daily summaries (permanent)
+10. ✅ **`garmin_health_snapshots`** - Multi-metric data (30-day)
+11. ✅ **`webhook_failure_queue`** - Retry tracking
+12. ✅ **Indexes** - For performance optimization
+13. ✅ **Views** - Convenient data access
+14. ✅ **Cleanup policies** - Auto-delete old data
 
 ---
 
-## 🎯 Quick Start (Minimum Viable Product)
+## 🚀 How to Execute Migrations
 
-If you want to launch quickly, just run these first:
+### **Option 1: Neon Dashboard (Recommended for First Time)**
 
-```sql
--- PHASE 1: CORE (Do this NOW)
--- 1. runs table updates
-ALTER TABLE runs ADD COLUMN IF NOT EXISTS tss INT DEFAULT 0;
-ALTER TABLE runs ADD COLUMN IF NOT EXISTS gap VARCHAR(20);
+1. Go to [https://console.neon.tech](https://console.neon.tech)
+2. Select your AiRunCoach project
+3. Navigate to **SQL Editor**
+4. Open `GARMIN_DATABASE_MIGRATIONS.sql`
+5. Copy all content
+6. Paste into Neon SQL Editor
+7. Click **Execute** (or `Ctrl+Enter`)
+8. Wait for completion - should see "14 statements executed"
 
--- 2. Fitness tracking
-CREATE TABLE daily_fitness (...);
-CREATE TABLE fitness_summary (...);
+### **Option 2: Neon CLI**
 
--- DONE! You can now:
--- ✅ Track TSS
--- ✅ Calculate Fitness & Freshness
--- ✅ Show GAP
-```
-
-Then add features incrementally:
-
-```sql
--- PHASE 2: COMPETITION (Week 2)
-CREATE TABLE segments (...);
-CREATE TABLE segment_efforts (...);
-
--- PHASE 3: TRAINING (Week 3-4)
-CREATE TABLE training_plans (...);
-CREATE TABLE plan_enrollments (...);
-
--- PHASE 4: SOCIAL (Week 5-6)
-CREATE TABLE feed_activities (...);
-CREATE TABLE reactions (...);
-```
-
----
-
-## 📝 SQL File Execution in Neon.com
-
-### Method 1: Neon.com SQL Editor (Recommended)
-1. Login to Neon.com
-2. Select your project
-3. Click "SQL Editor"
-4. Copy/paste sections from `DATABASE_SCHEMA.sql`
-5. Click "Run" for each section
-6. Verify "Query succeeded" message
-
-### Method 2: psql CLI
 ```bash
-# Get connection string from Neon.com
-psql "postgresql://user:pass@host/dbname?sslmode=require"
+# Install Neon CLI if not already installed
+npm install -g @neondatabase/cli
 
-# Run the SQL file
-\i /path/to/DATABASE_SCHEMA.sql
+# Authenticate with Neon
+neon auth
 
-# Or run specific sections
-\i /path/to/fitness_tables.sql
+# Execute SQL file
+neon sql < GARMIN_DATABASE_MIGRATIONS.sql
+
+# Or execute directly from project
+cat GARMIN_DATABASE_MIGRATIONS.sql | neon sql
 ```
 
-### Method 3: Code Migration (Cleanest)
-Create a migration script in your backend:
+### **Option 3: From Your Application**
 
-```javascript
-// migrations/001_add_fitness_tables.js
-exports.up = async (db) => {
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS daily_fitness (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id VARCHAR(255) NOT NULL,
-      // ... rest of schema
-    );
-  `);
-};
+If you're using Drizzle ORM (which you likely are), you can also run migrations through your migration system:
 
-exports.down = async (db) => {
-  await db.query(`DROP TABLE IF EXISTS daily_fitness CASCADE;`);
-};
+```bash
+# If using Drizzle migrations
+drizzle-kit generate:migrations
+
+# Then apply
+drizzle-kit migrate
+```
+
+### **Option 4: PostgreSQL psql Client (If you have local access)**
+
+```bash
+# Get your Neon connection string
+export DATABASE_URL="postgresql://user:password@host/dbname"
+
+# Execute the migration file
+psql $DATABASE_URL < GARMIN_DATABASE_MIGRATIONS.sql
 ```
 
 ---
 
-## ✅ Verification Checklist
+## ⚠️ Important Notes
 
-After migration, verify everything worked:
+### **Backup First**
+Before running migrations on production:
+```bash
+# Neon automatically backs up, but you can also export data
+neon export
 
+# Or use pg_dump
+pg_dump $DATABASE_URL > backup_$(date +%Y%m%d).sql
+```
+
+### **Run in Development First**
+1. Create a development branch in Neon
+2. Test migrations there first
+3. Verify everything works
+4. Then apply to production
+
+### **Check Prerequisites**
+Make sure you have:
+- ✅ Access to Neon console or CLI
+- ✅ Database connection string available
+- ✅ Backup of existing data
+- ✅ The `GARMIN_DATABASE_MIGRATIONS.sql` file
+
+---
+
+## 📊 Verify Migrations Succeeded
+
+### **Check Tables Were Created**
 ```sql
--- Check all tables exist
 SELECT table_name 
 FROM information_schema.tables 
 WHERE table_schema = 'public' 
+AND (table_name LIKE 'garmin%' 
+     OR table_name LIKE 'activity_merge%' 
+     OR table_name LIKE 'webhook%')
 ORDER BY table_name;
+```
 
--- Should see:
--- - daily_fitness
--- - fitness_summary
--- - segments
--- - segment_efforts
--- - training_plans
--- - ... etc (39 total)
+Expected output should show:
+- `activity_merge_log`
+- `garmin_activity_samples`
+- `garmin_blood_pressure`
+- `garmin_epochs_aggregate`
+- `garmin_epochs_raw`
+- `garmin_health_snapshots`
+- `garmin_move_iq`
+- `garmin_skin_temperature`
+- `webhook_failure_queue`
 
--- Check indexes
-SELECT tablename, indexname 
+### **Check Columns Were Added to runs**
+```sql
+SELECT column_name, data_type 
+FROM information_schema.columns 
+WHERE table_name = 'runs' 
+AND column_name LIKE '%garmin%' OR column_name LIKE '%merge%'
+ORDER BY column_name;
+```
+
+Expected columns:
+- `garmin_activity_id`
+- `garmin_summary_id`
+- `activity_sub_type`
+- `has_garmin_data`
+- `device_name`
+- `distance_garmin`
+- `duration_garmin`
+- `elevation_gain_garmin`
+- `merge_score`
+- `merge_confidence`
+
+### **Check garmin_wellness_metrics Columns**
+```sql
+SELECT column_name, data_type 
+FROM information_schema.columns 
+WHERE table_name = 'garmin_wellness_metrics' 
+ORDER BY column_name;
+```
+
+Should have 100+ columns covering all health metrics.
+
+### **Check Indexes Were Created**
+```sql
+SELECT indexname, tablename 
 FROM pg_indexes 
 WHERE schemaname = 'public' 
+AND indexname LIKE 'idx_%'
 ORDER BY tablename;
+```
 
--- Check views
+Should see indexes on key tables for performance.
+
+### **Check View Was Created**
+```sql
 SELECT table_name 
 FROM information_schema.views 
 WHERE table_schema = 'public';
-
--- Should see:
--- - current_fitness_view
--- - segment_leaderboard_view
--- - activity_feed_view
-
--- Check functions
-SELECT routine_name 
-FROM information_schema.routines 
-WHERE routine_schema = 'public' 
-AND routine_type = 'FUNCTION';
-
--- Should see:
--- - update_segment_ranks
--- - update_challenge_progress
 ```
+
+Should include `wellness_daily_summary` view.
 
 ---
 
-## 🔧 Common Issues & Solutions
+## 🔧 If Something Goes Wrong
 
-### Issue 1: "relation already exists"
-**Solution:** Table already created. Safe to skip.
-```sql
--- Add IF NOT EXISTS to all CREATE statements
-CREATE TABLE IF NOT EXISTS daily_fitness (...);
-```
+### **Rollback Changes**
+If migrations fail, you can:
 
-### Issue 2: "column already exists"
-**Solution:** Column already added. Safe to skip.
-```sql
--- Add IF NOT EXISTS to ALTER statements
-ALTER TABLE runs ADD COLUMN IF NOT EXISTS tss INT DEFAULT 0;
-```
+1. **Revert to backup**
+   ```bash
+   psql $DATABASE_URL < backup_$(date +%Y%m%d).sql
+   ```
 
-### Issue 3: "foreign key constraint violation"
-**Solution:** Create tables in correct order.
-```sql
--- ALWAYS create parent tables first!
--- 1. users (should already exist)
--- 2. runs (should already exist)
--- 3. Then segments, training_plans, etc.
-```
+2. **Or drop problematic tables** (be careful!)
+   ```sql
+   DROP TABLE IF EXISTS activity_merge_log CASCADE;
+   DROP TABLE IF EXISTS garmin_activity_samples CASCADE;
+   DROP TABLE IF EXISTS garmin_blood_pressure CASCADE;
+   -- etc.
+   ```
 
-### Issue 4: "permission denied"
-**Solution:** Ensure you're using the owner/admin account in Neon.
-```sql
--- Check your role
-SELECT current_user;
+3. **Check Neon transaction history** in dashboard to see what failed
 
--- Should be the database owner
-```
+### **Common Issues**
 
-### Issue 5: PostGIS extension not available
-**Solution:** For segment geolocation, you might need PostGIS
-```sql
--- Create extension (if available)
-CREATE EXTENSION IF NOT EXISTS postgis;
+**Issue**: "UNIQUE constraint violation"
+- **Cause**: Table already exists
+- **Fix**: Migrations use `IF NOT EXISTS` so this shouldn't happen
 
--- If not available, remove the GIST index line and use regular indexes
--- CREATE INDEX idx_segments_location ON segments(start_lat, start_lng);
-```
+**Issue**: "Column already exists"
+- **Cause**: Column was added in previous migration
+- **Fix**: Migrations use `IF NOT EXISTS` so this is safe to re-run
+
+**Issue**: "Referenced table doesn't exist"
+- **Cause**: Foreign key constraint failed
+- **Fix**: Ensure `users` and `runs` tables exist first
+
+**Issue**: "Insufficient permissions"
+- **Cause**: User role doesn't have CREATE permission
+- **Fix**: Use superuser or admin role to run migrations
 
 ---
 
-## 📊 Data Migration (Historical Data)
+## 📈 Performance Considerations
 
-After creating tables, you need to populate historical data:
+### **Indexes Created**
+These indexes optimize common queries:
 
-### 1. Calculate TSS for existing runs
-```sql
--- Update TSS for all existing runs
--- Formula: duration (hours) × intensity × distance_multiplier
-UPDATE runs
-SET tss = (
-  EXTRACT(EPOCH FROM duration) / 3600 * 
-  CASE 
-    WHEN average_hr > 170 THEN 1.5
-    WHEN average_hr > 150 THEN 1.2
-    ELSE 1.0
-  END *
-  (distance / 1000)
-)::INT
-WHERE tss = 0 OR tss IS NULL;
+```
+Activity Merging:
+- idx_runs_garmin_activity_id - Fast lookups by Garmin ID
+- idx_runs_garmin_summary_id - Fast lookups by summary ID
+- idx_activity_merge_log_user_id - Fast merge lookups
+
+Wellness Queries:
+- idx_garmin_wellness_user_date - Most common wellness queries
+- idx_garmin_skin_temp_user_date - Temperature trends
+- idx_garmin_blood_pressure_user_date - BP history
+
+Cleanup:
+- idx_garmin_epochs_raw_expires - For auto-deletion of old epochs
+- idx_garmin_health_snapshots_expires - For auto-deletion of old snapshots
 ```
 
-### 2. Calculate historical fitness
-```sql
--- Calculate fitness for the past 90 days for all users
--- This should be done via backend API call to:
--- POST /api/fitness/calculate-historical
+### **Storage Estimates**
 
--- Or run a script:
--- node scripts/calculate-historical-fitness.js
-```
+For a typical user with 1 year of data:
 
-### 3. Detect segments from existing runs
-```sql
--- This requires backend processing
--- POST /api/segments/detect-from-historical-runs
+| Table | Rows | Size |
+|-------|------|------|
+| activity_merge_log | 365 | ~100 KB |
+| garmin_activity_samples | 365 | ~50 MB |
+| garmin_wellness_metrics | 365 | ~10 MB |
+| garmin_epochs_raw (7-day) | 960 | ~15 MB |
+| garmin_epochs_aggregate | 365 | ~2 MB |
+| garmin_health_snapshots (30-day) | 720 | ~30 MB |
+| garmin_blood_pressure | 90 | ~200 KB |
+| garmin_skin_temperature | 365 | ~5 MB |
+| **TOTAL** | | **~115 MB** |
 
--- Or run a script:
--- node scripts/detect-historical-segments.js
-```
+With cleanup policies removing old data:
+- Real storage usage: **~30-40 MB per user**
 
 ---
 
-## 🎯 Rollback Plan
+## ✅ Post-Migration Checklist
 
-If something goes wrong:
+After running migrations:
 
-```sql
--- Drop new tables in reverse order (most dependencies first)
-DROP TABLE IF EXISTS comment_likes CASCADE;
-DROP TABLE IF EXISTS activity_comments CASCADE;
-DROP TABLE IF EXISTS reactions CASCADE;
-DROP TABLE IF EXISTS feed_activities CASCADE;
-
-DROP TABLE IF EXISTS challenge_participants CASCADE;
-DROP TABLE IF EXISTS challenges CASCADE;
-
-DROP TABLE IF EXISTS club_memberships CASCADE;
-DROP TABLE IF EXISTS clubs CASCADE;
-
-DROP TABLE IF EXISTS user_achievements CASCADE;
-DROP TABLE IF EXISTS achievements CASCADE;
-
-DROP TABLE IF EXISTS notifications CASCADE;
-
-DROP TABLE IF EXISTS plan_adaptations CASCADE;
-DROP TABLE IF EXISTS workout_completions CASCADE;
-DROP TABLE IF EXISTS planned_workouts CASCADE;
-DROP TABLE IF EXISTS weekly_plans CASCADE;
-DROP TABLE IF EXISTS plan_enrollments CASCADE;
-DROP TABLE IF EXISTS training_plans CASCADE;
-
-DROP TABLE IF EXISTS segment_stars CASCADE;
-DROP TABLE IF EXISTS segment_efforts CASCADE;
-DROP TABLE IF EXISTS segments CASCADE;
-
-DROP TABLE IF EXISTS fitness_summary CASCADE;
-DROP TABLE IF EXISTS daily_fitness CASCADE;
-
--- Remove added columns from runs
-ALTER TABLE runs DROP COLUMN IF EXISTS tss;
-ALTER TABLE runs DROP COLUMN IF EXISTS gap;
-ALTER TABLE runs DROP COLUMN IF EXISTS is_public;
-ALTER TABLE runs DROP COLUMN IF EXISTS kudos_count;
-ALTER TABLE runs DROP COLUMN IF EXISTS comment_count;
-
--- Drop views
-DROP VIEW IF EXISTS current_fitness_view;
-DROP VIEW IF EXISTS segment_leaderboard_view;
-DROP VIEW IF EXISTS activity_feed_view;
-
--- Drop functions
-DROP FUNCTION IF EXISTS update_segment_ranks;
-DROP FUNCTION IF EXISTS update_challenge_progress;
-```
+- [ ] All 14 tables/objects created successfully
+- [ ] All indexes are in place
+- [ ] Can query `wellness_daily_summary` view
+- [ ] Verified in Neon dashboard
+- [ ] Ran verification queries above
+- [ ] Backup was taken
+- [ ] Tested with sample data (optional)
+- [ ] Ready to deploy webhook handlers
 
 ---
 
-## 📈 Performance Optimization
+## 🔄 Running Migrations in CI/CD Pipeline
 
-After migration, optimize for performance:
+If you use GitHub Actions or similar:
 
-```sql
--- Analyze tables to update statistics
-ANALYZE daily_fitness;
-ANALYZE segments;
-ANALYZE segment_efforts;
-ANALYZE feed_activities;
-
--- Vacuum to reclaim space
-VACUUM ANALYZE;
-
--- Check table sizes
-SELECT 
-  schemaname,
-  tablename,
-  pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size
-FROM pg_tables
-WHERE schemaname = 'public'
-ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+```yaml
+- name: Run Database Migrations
+  run: |
+    echo "${{ secrets.DATABASE_URL }}" | psql
+    psql $DATABASE_URL < GARMIN_DATABASE_MIGRATIONS.sql
+  env:
+    DATABASE_URL: ${{ secrets.DATABASE_URL }}
 ```
-
----
-
-## 🚀 Estimated Migration Time
-
-| Phase | Tables | Time | Can Run Async? |
-|-------|--------|------|----------------|
-| Prep & Backup | - | 5 min | No |
-| Core (runs, fitness) | 2 | 2 min | No |
-| Segments | 3 | 3 min | No |
-| Training Plans | 6 | 5 min | Yes |
-| Social | 8 | 8 min | Yes |
-| Achievements | 3 | 3 min | Yes |
-| Views & Functions | 5 | 2 min | Yes |
-| Verification | - | 3 min | No |
-| **TOTAL** | **27** | **~30 min** | - |
-
-**Historical data population: 1-2 hours** (run overnight)
 
 ---
 
 ## 📞 Need Help?
 
-### Neon.com Support
-- Docs: https://neon.tech/docs
-- Discord: https://discord.gg/neon
-- Email: support@neon.tech
+If you encounter issues:
 
-### PostgreSQL Resources
-- Migration guide: https://www.postgresql.org/docs/current/sql-commands.html
-- Indexes: https://www.postgresql.org/docs/current/indexes.html
-
----
-
-## ✅ Final Checklist
-
-Before deploying to production:
-
-- [ ] Backup created
-- [ ] All tables created successfully
-- [ ] All indexes created
-- [ ] All views created
-- [ ] All functions created
-- [ ] `runs` table updated with new columns
-- [ ] Verification queries passed
-- [ ] Historical TSS calculated
-- [ ] Performance optimization run
-- [ ] Backend updated to use new tables
-- [ ] API endpoints tested
-- [ ] Mobile app tested with new data
+1. **Check Neon dashboard** for error messages
+2. **Review migration file** for syntax errors
+3. **Test in development branch** first
+4. **Contact Neon support** if database-level issues
+5. **Check your timezone** - Neon uses UTC by default
 
 ---
 
-## 🎯 Summary
+## 🎉 You're All Set!
 
-**YES**, you need significant database updates for all the new features:
+Once migrations complete successfully, your database is ready for:
+- ✅ Garmin webhook processing
+- ✅ Activity data storage and merging
+- ✅ Wellness data aggregation
+- ✅ User health insights
+- ✅ Historical trend analysis
 
-1. **39 new tables**
-2. **4 new columns** in existing `runs` table
-3. **25 new indexes** for performance
-4. **3 views** for common queries
-5. **2 functions** for complex calculations
-
-**Good news:** You can do it incrementally!
-
-Start with Fitness & Freshness (2 tables), then add Segments, then Training Plans, then Social features.
-
-The full `DATABASE_SCHEMA.sql` file is ready to run in Neon.com. Just copy/paste into SQL Editor and execute! 🚀
+The TypeScript code we created earlier will now work seamlessly with this database schema!

@@ -171,6 +171,7 @@ export const runs = pgTable("runs", {
   // Garmin upload tracking (two-way sync)
   uploadedToGarmin: boolean("uploaded_to_garmin").default(false), // TRUE if uploaded to Garmin Connect
   garminActivityId: varchar("garmin_activity_id"), // Garmin activity ID if uploaded
+  hasGarminData: boolean("has_garmin_data").default(false), // TRUE if enriched with Garmin data
 
   // Extended metrics for detailed run data
   maxSpeed: real("max_speed"), // m/s
@@ -186,6 +187,8 @@ export const runs = pgTable("runs", {
   activeCalories: integer("active_calories"), // kcal
   restingCalories: integer("resting_calories"), // kcal
   estSweatLoss: real("est_sweat_loss"), // liters
+  createdAt: timestamp("created_at").defaultNow(), // When record was created in database
+  updatedAt: timestamp("updated_at").defaultNow(), // When record was last updated
 });
 
 // Goals table
@@ -443,17 +446,43 @@ export const garminWellnessMetrics = pgTable("garmin_wellness_metrics", {
   
   // Activity/Daily metrics
   steps: integer("steps"),
+  pushes: integer("pushes"), // Wheelchair metric
   distanceMeters: integer("distance_meters"),
+  pushDistanceInMeters: real("push_distance_meters"), // Wheelchair metric
   activeKilocalories: integer("active_kilocalories"),
   bmrKilocalories: integer("bmr_kilocalories"),
   floorsClimbed: integer("floors_climbed"),
   floorsDescended: integer("floors_descended"),
+  
+  // Duration breakdown
+  durationInSeconds: integer("duration_in_seconds"), // Total time awake
+  activeTimeInSeconds: integer("active_time_in_seconds"), // Time in activity
   moderateIntensityDuration: integer("moderate_intensity_duration"),
   vigorousIntensityDuration: integer("vigorous_intensity_duration"),
   intensityDuration: integer("intensity_duration"),
   sedentaryDuration: integer("sedentary_duration"),
   sleepingDuration: integer("sleeping_duration"),
   activeDuration: integer("active_duration"),
+  
+  // Daily goals
+  stepsGoal: integer("steps_goal"),
+  pushesGoal: integer("pushes_goal"),
+  floorsClimbedGoal: integer("floors_climbed_goal"),
+  intensityGoal: integer("intensity_goal"),
+  
+  // Stress duration breakdown (additional fields)
+  stressDurationInSeconds: integer("stress_duration_seconds"),
+  restStressDurationInSeconds: integer("rest_stress_duration_seconds"),
+  activityStressDurationInSeconds: integer("activity_stress_duration_seconds"),
+  lowStressDurationInSeconds: integer("low_stress_duration_seconds"),
+  mediumStressDurationInSeconds: integer("medium_stress_duration_seconds"),
+  highStressDurationInSeconds: integer("high_stress_duration_seconds"),
+  
+  // Metadata
+  summaryId: text("summary_id"),
+  activityType: text("activity_type"),
+  startTimeInSeconds: integer("start_time_in_seconds"),
+  startTimeOffsetInSeconds: integer("start_time_offset_in_seconds"),
   
   // Raw data for debugging
   rawData: jsonb("raw_data"),
@@ -471,6 +500,7 @@ export const garminActivities = pgTable("garmin_activities", {
   // Basic activity info
   activityName: text("activity_name"),
   activityType: text("activity_type"), // running, walking, cycling, etc.
+  activitySubType: text("activity_sub_type"), // MoveIQ sub-type (e.g., Hurdles, Intervals, Trail)
   eventType: text("event_type"), // race, workout, training, etc.
   startTimeInSeconds: integer("start_time_in_seconds"),
   startTimeOffsetInSeconds: integer("start_time_offset_in_seconds"),
@@ -538,12 +568,53 @@ export const garminActivities = pgTable("garmin_activities", {
   // Device info
   deviceName: text("device_name"),
   
+  // Wheelchair-specific metrics
+  averagePushCadenceInPushesPerMinute: real("avg_push_cadence"),
+  maxPushCadenceInPushesPerMinute: real("max_push_cadence"),
+  pushes: integer("pushes"),
+  
+  // Additional activity info
+  summaryId: text("summary_id"), // Alternate activity ID from Garmin
+  activityDescription: text("activity_description"),
+  
+  // Webhook tracking
+  userAccessToken: text("user_access_token"), // For lookup if needed
+  webhookReceivedAt: timestamp("webhook_received_at").defaultNow(),
+  
   // Full raw data
   rawData: jsonb("raw_data"),
   
   // Metadata
   isProcessed: boolean("is_processed").default(false),
   aiAnalysisGenerated: boolean("ai_analysis_generated").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// ==================== SKIN TEMPERATURE MONITORING ====================
+
+// Garmin Skin Temperature table
+export const garminSkinTemperature = pgTable("garmin_skin_temperature", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  date: text("date").notNull(), // YYYY-MM-DD
+  
+  // Temperature readings (Celsius)
+  avgTemperature: real("avg_temperature"), // Average skin temp for the day
+  minTemperature: real("min_temperature"), // Lowest recorded temp
+  maxTemperature: real("max_temperature"), // Highest recorded temp
+  
+  // Context
+  temperatureTrendType: text("temperature_trend_type"), // STABLE, WARMING, COOLING
+  
+  // Time-series data (5-min intervals)
+  temperatureReadings: jsonb("temperature_readings"), // { "0": 36.5, "300": 36.6, ... }
+  
+  // Metadata
+  summaryId: text("summary_id"),
+  startTimeInSeconds: integer("start_time_in_seconds"),
+  startTimeOffsetInSeconds: integer("start_time_offset_in_seconds"),
+  rawData: jsonb("raw_data"),
+  syncedAt: timestamp("synced_at").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -566,6 +637,163 @@ export const garminBodyComposition = pgTable("garmin_body_composition", {
   
   rawData: jsonb("raw_data"),
   createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Garmin Blood Pressure table
+export const garminBloodPressure = pgTable("garmin_blood_pressure", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  
+  // Blood Pressure Readings
+  systolic: integer("systolic").notNull(), // mmHg (top number)
+  diastolic: integer("diastolic").notNull(), // mmHg (bottom number)
+  pulse: integer("pulse"), // bpm (heart rate at measurement)
+  
+  // Measurement Details
+  summaryId: text("summary_id"), // Garmin summary ID
+  sourceType: text("source_type"), // 'MANUAL' | 'AUTOMATIC' | 'EXERCISE'
+  measurementTimeInSeconds: integer("measurement_time_in_seconds"),
+  measurementTimeOffsetInSeconds: integer("measurement_time_offset_in_seconds"), // Timezone offset
+  
+  // Classification (calculated from systolic/diastolic)
+  classification: text("classification"), // 'OPTIMAL' | 'NORMAL' | 'ELEVATED' | 'STAGE_1_HYPERTENSION' | 'STAGE_2_HYPERTENSION' | 'CRISIS'
+  
+  // Metadata
+  rawData: jsonb("raw_data"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// ==================== HEALTH SNAPSHOTS - REAL-TIME MULTI-METRIC DATA ====================
+
+// Garmin Health Snapshots - Real-time health metrics (5-second intervals)
+// Stores detailed multi-metric health data with minute-level granularity
+export const garminHealthSnapshots = pgTable("garmin_health_snapshots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  
+  // Snapshot Metadata
+  summaryId: text("summary_id").notNull().unique(),
+  snapshotDate: text("snapshot_date").notNull(), // YYYY-MM-DD
+  startTimeInSeconds: integer("start_time_in_seconds").notNull(),
+  durationInSeconds: integer("duration_in_seconds"),
+  startTimeOffsetInSeconds: integer("start_time_offset_in_seconds"),
+  
+  // Heart Rate Metrics
+  hrMinValue: real("hr_min_value"),
+  hrMaxValue: real("hr_max_value"),
+  hrAvgValue: real("hr_avg_value"),
+  hrEpochs: jsonb("hr_epochs"), // 5-sec interval HR data
+  
+  // Stress Metrics
+  stressMinValue: real("stress_min_value"),
+  stressMaxValue: real("stress_max_value"),
+  stressAvgValue: real("stress_avg_value"),
+  stressEpochs: jsonb("stress_epochs"), // 5-sec interval stress
+  
+  // SpO2 (Oxygen Saturation) Metrics
+  spo2MinValue: real("spo2_min_value"),
+  spo2MaxValue: real("spo2_max_value"),
+  spo2AvgValue: real("spo2_avg_value"),
+  spo2Epochs: jsonb("spo2_epochs"), // 5-sec interval oxygen
+  
+  // Respiration Rate Metrics
+  respMinValue: real("resp_min_value"),
+  respMaxValue: real("resp_max_value"),
+  respAvgValue: real("resp_avg_value"),
+  respEpochs: jsonb("resp_epochs"), // 5-sec interval respiration
+  
+  // Full raw data (for reprocessing if needed)
+  rawData: jsonb("raw_data"),
+  
+  // Storage Management
+  createdAt: timestamp("created_at").defaultNow(),
+  expiresAt: timestamp("expires_at"), // Auto-delete after 30 days for storage optimization
+});
+
+// ==================== EPOCHS - MINUTE-BY-MINUTE ACTIVITY DATA ====================
+
+// Garmin Epochs - Compressed storage (keeping 7 days, compressed after that)
+// Stores all raw epoch data for short-term detailed visualization
+export const garminEpochsRaw = pgTable("garmin_epochs_raw", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  
+  // Epoch Date Tracking
+  epochDate: text("epoch_date").notNull(), // YYYY-MM-DD
+  startTimeInSeconds: integer("start_time_in_seconds").notNull(), // Epoch timestamp
+  
+  // Activity Classification
+  activityType: text("activity_type"), // WALKING, RUNNING, WHEELCHAIR_PUSHING, SEDENTARY
+  intensity: text("intensity"), // SEDENTARY | ACTIVE | HIGHLY_ACTIVE
+  
+  // Metrics
+  met: real("met"), // Metabolic equivalent (intensity: 1.0 = resting, 50+ = max exertion)
+  meanMotionIntensity: real("mean_motion_intensity"),
+  maxMotionIntensity: real("max_motion_intensity"),
+  
+  // Activity Details
+  activeKilocalories: real("active_kilocalories"),
+  durationInSeconds: integer("duration_in_seconds"),
+  activeTimeInSeconds: integer("active_time_in_seconds"),
+  steps: integer("steps"),
+  pushes: integer("pushes"), // Wheelchair metric
+  distanceInMeters: real("distance_in_meters"),
+  pushDistanceInMeters: real("push_distance_in_meters"), // Wheelchair metric
+  
+  // Metadata
+  summaryId: text("summary_id"),
+  startTimeOffsetInSeconds: integer("start_time_offset_in_seconds"),
+  
+  // Storage Management
+  createdAt: timestamp("created_at").defaultNow(),
+  expiresAt: timestamp("expires_at"), // Auto-delete after 7 days
+});
+
+// Garmin Epochs Aggregates - Compressed long-term storage
+// Daily aggregates of epochs (keep forever, much smaller)
+export const garminEpochsAggregate = pgTable("garmin_epochs_aggregate", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  epochDate: text("epoch_date").notNull(), // YYYY-MM-DD
+  
+  // Activity Type Distribution (seconds per type)
+  sedentaryDurationSeconds: integer("sedentary_duration_seconds").default(0),
+  activeDurationSeconds: integer("active_duration_seconds").default(0),
+  highlyActiveDurationSeconds: integer("highly_active_duration_seconds").default(0),
+  
+  // Intensity Distribution (time in each intensity level)
+  sedentaryIntensitySeconds: integer("sedentary_intensity_seconds").default(0),
+  activeIntensitySeconds: integer("active_intensity_seconds").default(0),
+  highlyActiveIntensitySeconds: integer("highly_active_intensity_seconds").default(0),
+  
+  // Activity Breakdown (seconds per activity type)
+  walkingSeconds: integer("walking_seconds").default(0),
+  runningSeconds: integer("running_seconds").default(0),
+  wheelchairPushingSeconds: integer("wheelchair_pushing_seconds").default(0),
+  
+  // Aggregate Metrics
+  totalMet: real("total_met").default(0),
+  averageMet: real("average_met").default(0),
+  peakMet: real("peak_met").default(0),
+  
+  averageMotionIntensity: real("average_motion_intensity").default(0),
+  maxMotionIntensity: real("max_motion_intensity").default(0),
+  
+  // Activity Totals
+  totalActiveKilocalories: real("total_active_kilocalories").default(0),
+  totalSteps: integer("total_steps").default(0),
+  totalPushes: integer("total_pushes").default(0),
+  totalDistance: real("total_distance").default(0),
+  totalPushDistance: real("total_push_distance").default(0),
+  
+  // Epoch Count
+  totalEpochs: integer("total_epochs").default(0), // How many epochs in this day
+  
+  // Raw compressed data (for restore if needed)
+  compressedData: text("compressed_data"), // gzip compressed JSON of all epochs
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  compressedAt: timestamp("compressed_at"), // When was this data compressed
 });
 
 // Device Data table (for Garmin, Samsung, Apple, Coros, Strava data)
@@ -600,6 +828,8 @@ export const connectedDevices = pgTable("connected_devices", {
   lastSyncAt: timestamp("last_sync_at"),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(), // NEW: Track permission changes
+  grantedScopes: text("granted_scopes"), // NEW: Comma-separated list of granted OAuth scopes (Garmin only)
 });
 
 // Garmin Companion Real-time Data table
@@ -968,6 +1198,49 @@ export const userAchievements = pgTable("user_achievements", {
   notificationSent: boolean("notification_sent").default(false),
 });
 
+// ==================== MOVEIQ ACTIVITY CLASSIFICATION ====================
+
+// Garmin MoveIQ - AI-powered activity type detection
+// Classifies activities into sub-types (e.g., Hurdles, Intervals, Trail)
+export const garminMoveIQ = pgTable("garmin_move_iq", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  runId: varchar("run_id").references(() => runs.id), // Link to our runs table
+  garminActivityId: text("garmin_activity_id"), // Reference to activity
+  
+  // MoveIQ Classification
+  summaryId: text("summary_id"), // MoveIQ summary ID
+  activityType: text("activity_type"), // e.g., "Running"
+  activitySubType: text("activity_sub_type"), // e.g., "Hurdles", "Intervals", "Trail"
+  
+  // Timing
+  calendarDate: text("calendar_date"), // YYYY-MM-DD
+  startTimeInSeconds: integer("start_time_in_seconds"),
+  durationInSeconds: integer("duration_in_seconds"),
+  offsetInSeconds: integer("offset_in_seconds"), // Timezone offset
+  
+  // Metadata
+  detectedAt: timestamp("detected_at").defaultNow(),
+  rawData: jsonb("raw_data"), // Full MoveIQ payload
+});
+
+// ==================== WEBHOOK PROCESSING TABLES ====================
+
+// Garmin Webhook Failure Queue for retry logic
+export const webhookFailureQueue = pgTable("webhook_failure_queue", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  webhookType: text("webhook_type").notNull(), // 'activities', 'sleep', 'daily', etc.
+  userId: varchar("user_id"), // User ID if known
+  payload: jsonb("payload").notNull(), // Full webhook payload
+  error: text("error"), // Error message from processing
+  retryCount: integer("retry_count").default(0),
+  maxRetries: integer("max_retries").default(3),
+  nextRetryAt: timestamp("next_retry_at").defaultNow(),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 export const insertRunSchema = createInsertSchema(runs).omit({ id: true, completedAt: true });
@@ -1004,6 +1277,7 @@ export type ConnectedDevice = typeof connectedDevices.$inferSelect;
 export type GarminWellnessMetric = typeof garminWellnessMetrics.$inferSelect;
 export type GarminActivity = typeof garminActivities.$inferSelect;
 export type GarminBodyComposition = typeof garminBodyComposition.$inferSelect;
+export type GarminSkinTemperature = typeof garminSkinTemperature.$inferSelect;
 export type GarminRealtimeData = typeof garminRealtimeData.$inferSelect;
 export type GarminCompanionSession = typeof garminCompanionSessions.$inferSelect;
 export type DailyFitness = typeof dailyFitness.$inferSelect;
@@ -1025,3 +1299,9 @@ export type ChallengeParticipant = typeof challengeParticipants.$inferSelect;
 export type Achievement = typeof achievements.$inferSelect;
 export type UserAchievement = typeof userAchievements.$inferSelect;
 export type SharedRun = typeof sharedRuns.$inferSelect;
+export type WebhookFailureQueue = typeof webhookFailureQueue.$inferSelect;
+export type GarminMoveIQ = typeof garminMoveIQ.$inferSelect;
+export type GarminBloodPressure = typeof garminBloodPressure.$inferSelect;
+export type GarminEpochRaw = typeof garminEpochsRaw.$inferSelect;
+export type GarminEpochAggregate = typeof garminEpochsAggregate.$inferSelect;
+export type GarminHealthSnapshot = typeof garminHealthSnapshots.$inferSelect;

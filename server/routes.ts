@@ -11,7 +11,8 @@ import {
   feedActivities, reactions, activityComments, commentLikes,
   clubs, clubMemberships, challenges, challengeParticipants, groupRunParticipants, groupRuns,
   achievements, userAchievements, goals, users,
-  sharedRuns
+  sharedRuns, webhookFailureQueue, garminMoveIQ, garminBloodPressure,
+  garminEpochsRaw, garminEpochsAggregate, garminHealthSnapshots, garminSkinTemperature
 } from "@shared/schema";
 import { sql } from "drizzle-orm";
 import { 
@@ -30,6 +31,11 @@ import {
   getCurrentFitness,
   getFitnessRecommendations
 } from "./fitness-service";
+import {
+  fuzzyMatchGarminToAiRunCoachRun,
+  mergeGarminActivityWithAiRunCoachRun,
+  processGarminActivityForMerge,
+} from "./activity-merge-service";
 import {
   matchRunToSegments,
   reprocessRunForSegments,
@@ -2785,6 +2791,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==================== GARMIN PERMISSIONS MANAGEMENT ====================
+
+  /**
+   * GET /api/garmin/permissions
+   * Get current Garmin permissions for the authenticated user
+   */
+  app.get("/api/garmin/permissions", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { getCurrentPermissions } = await import('./garmin-permissions-service');
+      const permissions = await getCurrentPermissions(req.user!.id);
+      res.json(permissions);
+    } catch (error: any) {
+      console.error('Get permissions error:', error);
+      res.status(500).json({ error: 'Failed to get permissions' });
+    }
+  });
+
+  /**
+   * POST /api/garmin/reauthorize
+   * Get Garmin OAuth URL for re-authorization with updated scopes
+   */
+  app.post("/api/garmin/reauthorize", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { getReauthorizationUrl } = await import('./garmin-permissions-service');
+      const baseUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+      const authUrl = await getReauthorizationUrl(req.user!.id, baseUrl);
+      res.json({ authUrl });
+    } catch (error: any) {
+      console.error('Reauthorize error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /**
+   * POST /api/garmin/disconnect
+   * Disconnect Garmin device and stop receiving data
+   */
+  app.post("/api/garmin/disconnect", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { disconnectDevice } = await import('./garmin-permissions-service');
+      await disconnectDevice(req.user!.id);
+      res.json({ success: true, message: 'Device disconnected' });
+    } catch (error: any) {
+      console.error('Disconnect error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ==========================================
   // GARMIN PRODUCTION API ENDPOINTS
   // Required for Garmin Production App Approval
@@ -2977,26 +3031,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
 
   // ACTIVITY - Activities (when user completes a run/walk)
+  // Enhanced with better error handling, field mapping, and retry logic
   garminWebhook("activities", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received activities push:', JSON.stringify(req.body).slice(0, 1000));
       
+      // IMPORTANT: Return 200 immediately to Garmin before processing
+      res.status(200).json({ success: true });
+      
+      // Process activities asynchronously (non-blocking)
       const activities = req.body.activities || [];
+      
+      if (activities.length === 0) {
+        console.log('[Garmin Webhook] No activities in payload');
+        return;
+      }
+      
+      console.log(`[Garmin Webhook] Processing ${activities.length} activities`);
+      
       for (const activity of activities) {
-        const userAccessToken = activity.userAccessToken;
-        const device = await findUserByGarminToken(userAccessToken);
-        
-        if (device) {
-          const activityType = activity.activityType || 'RUNNING';
-          const isRunOrWalk = ['RUNNING', 'WALKING', 'TRAIL_RUNNING', 'TREADMILL_RUNNING', 'INDOOR_WALKING'].includes(activityType);
+        try {
+          // Determine user - handle both access token and direct user ID lookup
+          const userAccessToken = activity.userAccessToken;
+          let device;
           
-          console.log(`[Garmin Webhook] Processing activity for user ${device.userId}: ${activity.activityName || activityType}`);
+          if (userAccessToken) {
+            device = await findUserByGarminToken(userAccessToken);
+          } else if (activity.userId) {
+            // Fallback: lookup by Garmin user ID if access token not provided
+            device = await db.query.connectedDevices.findFirst({
+              where: (d, { and, eq }) => and(
+                eq(d.deviceType, 'garmin'),
+                eq(d.deviceId, activity.userId)
+              ),
+            });
+          }
           
-          // Store full activity in garmin_activities table
+          if (!device) {
+            console.warn(`⚠️ [Garmin Webhook] Could not map activity ${activity.activityId} to user (userId: ${activity.userId}, hasToken: ${!!userAccessToken})`);
+            // Queue for retry if user not found
+            await db.insert(webhookFailureQueue).values({
+              webhookType: 'activities',
+              payload: activity,
+              error: 'User not found for activity',
+              nextRetryAt: new Date(Date.now() + 5 * 60 * 1000), // Retry in 5 minutes
+            });
+            continue;
+          }
+          
+          const activityType = (activity.activityType || 'RUNNING').toUpperCase();
+          const isRunOrWalk = [
+            'RUNNING', 'WALKING', 'TRAIL_RUNNING', 'TREADMILL_RUNNING', 
+            'INDOOR_WALKING', 'WHEELCHAIR_PUSH_WALK', 'WHEELCHAIR_PUSH_RUN',
+            'INDOOR_RUNNING', 'TRAIL_WALK', 'OUTDOOR_WALK'
+          ].includes(activityType);
+          
+          console.log(`[Garmin Webhook] Processing activity for user ${device.userId}: ${activity.activityName || activityType} (type: ${activityType})`);
+          
+          // Store full activity in garmin_activities table with all available fields
           const [garminActivity] = await db.insert(garminActivities).values({
             userId: device.userId,
             garminActivityId: String(activity.activityId),
+            summaryId: activity.summaryId,
             activityName: activity.activityName,
+            activityDescription: activity.activityDescription,
             activityType: activityType,
             eventType: activity.eventType,
             startTimeInSeconds: activity.startTimeInSeconds,
@@ -3013,6 +3111,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             normalizedPowerInWatts: activity.normalizedPowerInWatts,
             averageRunCadenceInStepsPerMinute: activity.averageRunCadenceInStepsPerMinute,
             maxRunCadenceInStepsPerMinute: activity.maxRunCadenceInStepsPerMinute,
+            averagePushCadenceInPushesPerMinute: activity.averagePushCadenceInPushesPerMinute,
+            maxPushCadenceInPushesPerMinute: activity.maxPushCadenceInPushesPerMinute,
+            pushes: activity.pushes,
             startLatitude: activity.startingLatitudeInDegree,
             startLongitude: activity.startingLongitudeInDegree,
             totalElevationGainInMeters: activity.totalElevationGainInMeters,
@@ -3024,10 +3125,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             trainingEffectLabel: activity.trainingEffectLabel,
             vo2Max: activity.vO2Max,
             deviceName: activity.deviceName,
+            userAccessToken: userAccessToken,
             rawData: activity,
           }).returning();
           
-          // If it's a run/walk, create a run record in the user's history
+          // If it's a run/walk, process for merging or create new run record
           if (isRunOrWalk && activity.distanceInMeters > 0) {
             const startTime = new Date((activity.startTimeInSeconds || 0) * 1000);
             const durationSeconds = activity.durationInSeconds || 0;
@@ -3042,204 +3144,682 @@ export async function registerRoutes(app: Express): Promise<Server> {
               avgPace = `${mins}:${secs.toString().padStart(2, '0')}`;
             }
             
-            // Create run record
-            const [newRun] = await db.insert(runs).values({
-              userId: device.userId,
-              distance: distanceKm,
-              duration: durationSeconds,
-              avgPace,
-              avgHeartRate: activity.averageHeartRateInBeatsPerMinute,
-              maxHeartRate: activity.maxHeartRateInBeatsPerMinute,
-              calories: activity.activeKilocalories,
-              cadence: activity.averageRunCadenceInStepsPerMinute ? Math.round(activity.averageRunCadenceInStepsPerMinute) : null,
-              elevation: activity.totalElevationGainInMeters,
-              elevationGain: activity.totalElevationGainInMeters,
-              elevationLoss: activity.totalElevationLossInMeters,
-              difficulty: activityType === 'TRAIL_RUNNING' ? 'hard' : 'moderate',
-              startLat: activity.startingLatitudeInDegree,
-              startLng: activity.startingLongitudeInDegree,
-              name: activity.activityName || `${activityType.replace(/_/g, ' ')} from Garmin`,
-              runDate: startTime.toISOString().split('T')[0],
-              runTime: startTime.toTimeString().split(' ')[0].slice(0, 5),
-              completedAt: startTime,
-            }).returning();
+            // FUZZY MATCH: Try to find existing AiRunCoach run to merge with
+            const mergeCandidate = await fuzzyMatchGarminToAiRunCoachRun(
+              {
+                id: garminActivity.id,
+                userId: device.userId,
+                activityType: activityType,
+                startTimeInSeconds: activity.startTimeInSeconds,
+                durationInSeconds: durationSeconds,
+                distanceInMeters: activity.distanceInMeters,
+                averageHeartRateInBeatsPerMinute: activity.averageHeartRateInBeatsPerMinute,
+                maxHeartRateInBeatsPerMinute: activity.maxHeartRateInBeatsPerMinute,
+                averageSpeedInMetersPerSecond: activity.averageSpeedInMetersPerSecond,
+                maxSpeedInMetersPerSecond: activity.maxSpeedInMetersPerSecond,
+                averagePaceInMinutesPerKilometer: activity.averagePaceInMinutesPerKilometer,
+                distanceInMeters: activity.distanceInMeters,
+                totalElevationGainInMeters: activity.totalElevationGainInMeters,
+                totalElevationLossInMeters: activity.totalElevationLossInMeters,
+                activeKilocalories: activity.activeKilocalories,
+                deviceName: activity.deviceName,
+                summaryId: activity.summaryId,
+              } as any,
+              device.userId
+            );
+
+            let runId: string;
+
+            if (mergeCandidate && mergeCandidate.matchScore > 50) {
+              // MERGE: Enhance existing run with Garmin data
+              console.log(`[Garmin Webhook] 🔗 Fuzzy matched to existing run ${mergeCandidate.aiRunCoachRunId}`);
+              console.log(`   Match confidence: ${mergeCandidate.matchScore}% - ${mergeCandidate.matchReasons.join(", ")}`);
+              
+              // Merge Garmin data into existing run
+              await mergeGarminActivityWithAiRunCoachRun(
+                mergeCandidate.aiRunCoachRunId,
+                {
+                  id: garminActivity.id,
+                  userId: device.userId,
+                  activityType: activityType,
+                  startTimeInSeconds: activity.startTimeInSeconds,
+                  durationInSeconds: durationSeconds,
+                  distanceInMeters: activity.distanceInMeters,
+                  averageHeartRateInBeatsPerMinute: activity.averageHeartRateInBeatsPerMinute,
+                  maxHeartRateInBeatsPerMinute: activity.maxHeartRateInBeatsPerMinute,
+                  averageSpeedInMetersPerSecond: activity.averageSpeedInMetersPerSecond,
+                  maxSpeedInMetersPerSecond: activity.maxSpeedInMetersPerSecond,
+                  averagePaceInMinutesPerKilometer: activity.averagePaceInMinutesPerKilometer,
+                  totalElevationGainInMeters: activity.totalElevationGainInMeters,
+                  totalElevationLossInMeters: activity.totalElevationLossInMeters,
+                  activeKilocalories: activity.activeKilocalories,
+                  deviceName: activity.deviceName,
+                  summaryId: activity.summaryId,
+                } as any,
+                mergeCandidate,
+                device.userId
+              );
+
+              runId = mergeCandidate.aiRunCoachRunId;
+              console.log(`✅ [Garmin Webhook] Merged Garmin activity with existing run`);
+
+            } else {
+              // CREATE: No match found, create new run record
+              console.log(`[Garmin Webhook] ➕ No matching run found, creating new record`);
+              
+              const [newRun] = await db.insert(runs).values({
+                userId: device.userId,
+                distance: distanceKm,
+                duration: durationSeconds,
+                avgPace,
+                avgHeartRate: activity.averageHeartRateInBeatsPerMinute,
+                maxHeartRate: activity.maxHeartRateInBeatsPerMinute,
+                calories: activity.activeKilocalories,
+                cadence: activity.averageRunCadenceInStepsPerMinute ? Math.round(activity.averageRunCadenceInStepsPerMinute) : null,
+                elevation: activity.totalElevationGainInMeters,
+                elevationGain: activity.totalElevationGainInMeters,
+                elevationLoss: activity.totalElevationLossInMeters,
+                difficulty: activityType === 'TRAIL_RUNNING' || activityType === 'TRAIL_WALK' ? 'hard' : 'moderate',
+                startLat: activity.startingLatitudeInDegree,
+                startLng: activity.startingLongitudeInDegree,
+                name: activity.activityName || `${activityType.replace(/_/g, ' ')} from Garmin`,
+                runDate: startTime.toISOString().split('T')[0],
+                runTime: startTime.toTimeString().split(' ')[0].slice(0, 5),
+                completedAt: startTime,
+                externalId: String(activity.activityId),
+                externalSource: 'garmin',
+                terrainType: determineTerrain(activityType),
+                isPublic: false,
+                hasGarminData: true,
+                garminActivityId: String(activity.activityId),
+                garminSummaryId: activity.summaryId,
+              }).returning();
+
+              runId = newRun.id;
+              console.log(`[Garmin Webhook] Created new run record ${newRun.id} from Garmin activity ${activity.activityId}`);
+            }
             
             // Link the Garmin activity to the run
             await db.update(garminActivities)
-              .set({ runId: newRun.id, isProcessed: true })
+              .set({ runId, isProcessed: true })
               .where(eq(garminActivities.id, garminActivity.id));
             
-            console.log(`[Garmin Webhook] Created run record ${newRun.id} from Garmin activity ${activity.activityId}`);
+          } else if (!isRunOrWalk) {
+            console.log(`⏭️ [Garmin Webhook] Skipping non-running activity: ${activityType}`);
+          } else if (activity.distanceInMeters <= 0) {
+            console.log(`⏭️ [Garmin Webhook] Skipping activity with no distance: ${activity.activityId}`);
           }
+          
+        } catch (activityError: any) {
+          console.error(`❌ [Garmin Webhook] Error processing activity ${activity.activityId}:`, activityError.message);
+          // Queue failed activity for retry
+          await db.insert(webhookFailureQueue).values({
+            webhookType: 'activities',
+            userId: activity.userId,
+            payload: activity,
+            error: activityError.message,
+            nextRetryAt: new Date(Date.now() + 10 * 60 * 1000), // Retry in 10 minutes
+          }).catch(queueError => {
+            console.error(`❌ Failed to queue activity for retry:`, queueError);
+          });
+          // Continue processing other activities
         }
       }
       
-      res.status(200).json({ success: true });
-    } catch (error) {
-      console.error('[Garmin Webhook] Activities error:', error);
-      res.status(200).json({ success: true }); // Always return 200 to Garmin
+      console.log(`[Garmin Webhook] Finished processing ${activities.length} activities`);
+      
+    } catch (error: any) {
+      console.error('[Garmin Webhook] Activities handler error:', error);
+      // Note: HTTP 200 already sent to Garmin, so we can't change response here
     }
   });
 
-  // ACTIVITY - Activity Details (detailed activity metrics)
+  // Helper function to determine terrain type from activity type
+  function determineTerrain(activityType: string): string {
+    const type = activityType.toUpperCase();
+    if (type.includes('TRAIL')) return 'trail';
+    if (type.includes('TREADMILL') || type.includes('INDOOR')) return 'treadmill';
+    if (type.includes('TRACK')) return 'track';
+    return 'road';
+  }
+
+  // ACTIVITY - Activity Details (detailed activity metrics with GPS/pace samples)
+  // Enhanced to handle detailed activity data including time series samples
   garminWebhook("activity-details", async (req: Request, res: Response) => {
     try {
-      console.log('[Garmin Webhook] Received activity details push');
+      console.log('[Garmin Webhook] Received activity details push:', JSON.stringify(req.body).slice(0, 1000));
+      
+      // IMPORTANT: Return 200 immediately to Garmin before processing
       res.status(200).json({ success: true });
-    } catch (error) {
-      console.error('[Garmin Webhook] Activity details error:', error);
-      res.status(200).json({ success: true });
+      
+      // Process details asynchronously (non-blocking)
+      const details = req.body || [];
+      
+      if (!Array.isArray(details) || details.length === 0) {
+        console.log('[Garmin Webhook] No activity details in payload');
+        return;
+      }
+      
+      console.log(`[Garmin Webhook] Processing ${details.length} activity detail records`);
+      
+      for (const detail of details) {
+        try {
+          // Extract nested summary
+          const summary = detail.summary || detail;
+          const activityId = summary.activityId || detail.activityId;
+          const samples = detail.samples || [];
+          
+          if (!activityId) {
+            console.warn('[Garmin Webhook] Activity details missing activityId');
+            continue;
+          }
+          
+          // Find user via Garmin access token (if provided)
+          const userAccessToken = summary.userAccessToken || detail.userAccessToken;
+          let device;
+          
+          if (userAccessToken) {
+            device = await findUserByGarminToken(userAccessToken);
+          }
+          
+          if (!device) {
+            console.warn(`⚠️ [Garmin Webhook] Could not map activity details ${activityId} to user`);
+            continue;
+          }
+          
+          console.log(`[Garmin Webhook] Processing detailed activity ${activityId} for user ${device.userId}`);
+          
+          // Find existing garmin activity record
+          const existingActivity = await db.query.garminActivities.findFirst({
+            where: eq(garminActivities.garminActivityId, String(activityId)),
+          });
+          
+          if (existingActivity) {
+            // Update with detailed information and samples
+            const processedSamples = processSamples(samples);
+            
+            await db
+              .update(garminActivities)
+              .set({
+                samples: samples.length > 0 ? processedSamples : null, // Store time series
+                laps: detail.laps || null,
+                splits: detail.splits || null,
+                isProcessed: true,
+                aiAnalysisGenerated: false,
+              })
+              .where(eq(garminActivities.id, existingActivity.id));
+            
+            console.log(`[Garmin Webhook] Updated activity ${activityId} with ${samples.length} samples`);
+            
+            // Update runs record with additional detail data if it exists
+            if (existingActivity.runId) {
+              const paceData = extractPaceData(samples);
+              const splits = detail.splits || null;
+              
+              await db
+                .update(runs)
+                .set({
+                  paceData: paceData.length > 0 ? { samples: paceData } : null,
+                  kmSplits: splits,
+                })
+                .where(eq(runs.id, existingActivity.runId));
+              
+              console.log(`[Garmin Webhook] Updated runs record ${existingActivity.runId} with detailed metrics`);
+            }
+          } else {
+            console.warn(`[Garmin Webhook] No existing garmin_activity found for ${activityId}, skipping detail update`);
+          }
+          
+        } catch (detailError: any) {
+          console.error(`❌ [Garmin Webhook] Error processing activity detail:`, detailError.message);
+          // Queue for retry
+          await db.insert(webhookFailureQueue).values({
+            webhookType: 'activity-details',
+            userId: device?.userId,
+            payload: detail,
+            error: detailError.message,
+            nextRetryAt: new Date(Date.now() + 10 * 60 * 1000),
+          }).catch(queueError => {
+            console.error(`❌ Failed to queue activity details for retry:`, queueError);
+          });
+        }
+      }
+      
+      console.log(`[Garmin Webhook] Finished processing ${details.length} activity detail records`);
+      
+    } catch (error: any) {
+      console.error('[Garmin Webhook] Activity details handler error:', error);
+      // HTTP 200 already sent to Garmin
     }
   });
 
+  // Helper: Process time series samples into structured data
+  function processSamples(samples: any[]): any[] {
+    if (!samples || samples.length === 0) return [];
+    
+    return samples.map(sample => ({
+      timestamp: (sample.startTimeInSeconds || 0) * 1000, // Convert to ms
+      speed: sample.speedMetersPerSecond,
+      distance: sample.totalDistanceInMeters,
+      timerDuration: sample.timerDurationInSeconds,
+      clockDuration: sample.clockDurationInSeconds,
+      movingDuration: sample.movingDurationInSeconds,
+    }));
+  }
+
+  // Helper: Extract pace data from samples for runs table
+  function extractPaceData(samples: any[]): any[] {
+    if (!samples || samples.length === 0) return [];
+    
+    return samples
+      .filter(s => s.speedMetersPerSecond !== undefined && s.speedMetersPerSecond > 0)
+      .map(sample => ({
+        timestamp: (sample.startTimeInSeconds || 0) * 1000,
+        speed: sample.speedMetersPerSecond,
+        pace: sample.speedMetersPerSecond > 0 ? 1000 / sample.speedMetersPerSecond / 60 : null, // min/km
+        distance: sample.totalDistanceInMeters,
+      }));
+  }
+
   // HEALTH - Sleeps (sleep data push)
+  // HEALTH - Sleeps (detailed sleep analysis with stages, naps, SpO2)
+  // Enhanced to handle complete sleep payload with naps array
   garminWebhook("sleeps", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received sleeps push:', JSON.stringify(req.body).slice(0, 1000));
       
-      const sleeps = req.body.sleeps || [];
+      // IMPORTANT: Return 200 immediately to Garmin before processing
+      res.status(200).json({ success: true });
+      
+      // Process sleep data asynchronously (non-blocking)
+      const sleeps = Array.isArray(req.body) ? req.body : (req.body.sleeps || []);
+      
+      if (sleeps.length === 0) {
+        console.log('[Garmin Webhook] No sleep data in payload');
+        return;
+      }
+      
+      console.log(`[Garmin Webhook] Processing ${sleeps.length} sleep records`);
+      
+      // Find users
+      const devices = await db.query.connectedDevices.findMany({
+        where: eq(connectedDevices.deviceType, 'garmin'),
+      });
+      
+      if (devices.length === 0) {
+        console.warn('[Garmin Webhook] No active Garmin devices found for sleep');
+        return;
+      }
+      
       for (const sleep of sleeps) {
-        const userAccessToken = sleep.userAccessToken;
-        const device = await findUserByGarminToken(userAccessToken);
-        
-        if (device) {
-          const date = new Date(sleep.startTimeInSeconds * 1000).toISOString().split('T')[0];
-          console.log(`[Garmin Webhook] Processing sleep for user ${device.userId}, date: ${date}`);
+        try {
+          const date = sleep.calendarDate || new Date((sleep.startTimeInSeconds || 0) * 1000).toISOString().split('T')[0];
+          
+          // Find user by recent activity matching date
+          let userId: string | undefined;
+          for (const device of devices) {
+            const recentRun = await db.query.runs.findFirst({
+              where: and(
+                eq(runs.userId, device.userId),
+                gte(runs.completedAt, new Date(`${date}T00:00:00`)),
+                lte(runs.completedAt, new Date(`${date}T23:59:59`))
+              ),
+              limit: 1,
+            });
+            
+            if (recentRun) {
+              userId = device.userId;
+              break;
+            }
+          }
+          
+          if (!userId) {
+            console.warn(`⚠️ [Garmin Webhook] Could not map sleep to user for date ${date}`);
+            continue;
+          }
+          
+          console.log(`[Garmin Webhook] Processing sleep for user ${userId}, date: ${date}`);
+          
+          // Calculate sleep stage percentages
+          const totalSleep = sleep.durationInSeconds || 1;
+          const deepPercent = ((sleep.deepSleepDurationInSeconds || 0) / totalSleep) * 100;
+          const lightPercent = ((sleep.lightSleepDurationInSeconds || 0) / totalSleep) * 100;
+          const remPercent = ((sleep.remSleepInSeconds || 0) / totalSleep) * 100;
+          
+          // Calculate sleep quality score (0-100)
+          // Based on: deep%, REM%, restlessness, awake count
+          const deepScore = Math.min(deepPercent * 1.5, 30); // Target 20%
+          const remScore = Math.min(remPercent * 1.2, 25); // Target 20-25%
+          const restlessnessScore = (sleep.sleepScores?.restlessness?.qualifierKey === 'EXCELLENT') ? 20 : 
+                                   (sleep.sleepScores?.restlessness?.qualifierKey === 'GOOD') ? 15 : 10;
+          const awakeScore = (sleep.sleepScores?.awakeCount?.qualifierKey === 'EXCELLENT') ? 15 : 
+                            (sleep.sleepScores?.awakeCount?.qualifierKey === 'GOOD') ? 10 : 5;
           
           // Store all sleep fields
           const sleepData = {
-            userId: device.userId,
+            userId,
             date,
             totalSleepSeconds: sleep.durationInSeconds,
             deepSleepSeconds: sleep.deepSleepDurationInSeconds,
             lightSleepSeconds: sleep.lightSleepDurationInSeconds,
-            remSleepSeconds: sleep.remSleepDurationInSeconds,
+            remSleepSeconds: sleep.remSleepInSeconds,
             awakeSleepSeconds: sleep.awakeDurationInSeconds,
-            sleepScore: sleep.overallSleepScore?.value || sleep.sleepScores?.overall?.value,
-            sleepQuality: sleep.overallSleepScore?.qualifierKey || sleep.sleepScores?.overall?.qualifierKey,
-            sleepStartTimeGMT: sleep.startTimeGMT,
-            sleepEndTimeGMT: sleep.endTimeGMT,
-            sleepLevelsMap: sleep.sleepLevelsMap,
-            avgSleepRespirationValue: sleep.avgSleepRespirationValue,
-            lowestRespirationValue: sleep.lowestRespirationValue,
-            highestRespirationValue: sleep.highestRespirationValue,
-            avgSpO2: sleep.avgSpO2Value,
-            restingHeartRate: sleep.restingHeartRate,
-            averageHeartRate: sleep.averageHeartRate,
+            unmeasurableSleepSeconds: sleep.unmeasurableSleepInSeconds,
+            totalNapDurationSeconds: sleep.totalNapDurationInSeconds,
+            napCount: (sleep.naps || []).length,
+            deepSleepPercent: deepPercent,
+            lightSleepPercent: lightPercent,
+            remSleepPercent: remPercent,
+            sleepScore: sleep.overallSleepScore?.value || 0,
+            sleepQuality: sleep.overallSleepScore?.qualifierKey || 'UNKNOWN',
+            validationType: sleep.validation, // AUTO_FINAL, MANUAL, etc.
+            deepPercentageRating: sleep.sleepScores?.deepPercentage?.qualifierKey,
+            lightPercentageRating: sleep.sleepScores?.lightPercentage?.qualifierKey,
+            remPercentageRating: sleep.sleepScores?.remPercentage?.qualifierKey,
+            restlessnessRating: sleep.sleepScores?.restlessness?.qualifierKey,
+            awakeCountRating: sleep.sleepScores?.awakeCount?.qualifierKey,
+            stressRating: sleep.sleepScores?.stress?.qualifierKey,
+            totalDurationRating: sleep.sleepScores?.totalDuration?.qualifierKey,
+            sleepSpO2Readings: sleep.timeOffsetSleepSpo2 || {},
+            napsData: sleep.naps || [],
+            summaryId: sleep.summaryId,
+            startTimeInSeconds: sleep.startTimeInSeconds,
+            startTimeOffsetInSeconds: sleep.startTimeOffsetInSeconds,
             rawData: sleep,
+            syncedAt: new Date(),
           };
           
           // Try upsert - if conflict, update existing
           const existing = await db.query.garminWellnessMetrics.findFirst({
             where: and(
-              eq(garminWellnessMetrics.userId, device.userId),
+              eq(garminWellnessMetrics.userId, userId),
               eq(garminWellnessMetrics.date, date)
             )
           });
           
           if (existing) {
             await db.update(garminWellnessMetrics)
-              .set({ ...sleepData, syncedAt: new Date() })
+              .set(sleepData)
               .where(eq(garminWellnessMetrics.id, existing.id));
+            console.log(`[Garmin Webhook] Updated sleep for ${date}: score=${sleep.overallSleepScore?.value}, quality=${sleep.overallSleepScore?.qualifierKey}, deep=${deepPercent.toFixed(0)}%, REM=${remPercent.toFixed(0)}%, naps=${(sleep.naps || []).length}`);
           } else {
             await db.insert(garminWellnessMetrics).values(sleepData);
+            console.log(`[Garmin Webhook] Created sleep for ${date}: score=${sleep.overallSleepScore?.value}, quality=${sleep.overallSleepScore?.qualifierKey}, deep=${deepPercent.toFixed(0)}%, REM=${remPercent.toFixed(0)}%, naps=${(sleep.naps || []).length}`);
           }
+          
+        } catch (sleepError: any) {
+          console.error(`❌ [Garmin Webhook] Error processing sleep:`, sleepError.message);
+          // Queue for retry
+          await db.insert(webhookFailureQueue).values({
+            webhookType: 'sleeps',
+            payload: sleep,
+            error: sleepError.message,
+            nextRetryAt: new Date(Date.now() + 30 * 60 * 1000),
+          }).catch(queueError => {
+            console.error(`❌ Failed to queue sleep for retry:`, queueError);
+          });
         }
       }
       
-      res.status(200).json({ success: true });
-    } catch (error) {
-      console.error('[Garmin Webhook] Sleeps error:', error);
-      res.status(200).json({ success: true });
+      console.log(`[Garmin Webhook] Finished processing ${sleeps.length} sleep records`);
+      
+    } catch (error: any) {
+      console.error('[Garmin Webhook] Sleep handler error:', error);
+      // HTTP 200 already sent to Garmin
     }
   });
 
-  // HEALTH - Stress (stress data push)
+  // HEALTH - Stress (daily stress & body battery with activity breakdown)
+  // Enhanced to handle time-series stress, body battery, and activity events
   garminWebhook("stress", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received stress push:', JSON.stringify(req.body).slice(0, 1000));
       
-      const stressData = req.body.allDayStress || req.body.stressDetails || [];
+      // IMPORTANT: Return 200 immediately to Garmin before processing
+      res.status(200).json({ success: true });
+      
+      // Process stress data asynchronously (non-blocking)
+      const stressData = Array.isArray(req.body) ? req.body : (req.body.stressData || []);
+      
+      if (stressData.length === 0) {
+        console.log('[Garmin Webhook] No stress data in payload');
+        return;
+      }
+      
+      console.log(`[Garmin Webhook] Processing ${stressData.length} stress records`);
+      
+      // Find users
+      const devices = await db.query.connectedDevices.findMany({
+        where: eq(connectedDevices.deviceType, 'garmin'),
+      });
+      
+      if (devices.length === 0) {
+        console.warn('[Garmin Webhook] No active Garmin devices found for stress');
+        return;
+      }
+      
       for (const stress of stressData) {
-        const userAccessToken = stress.userAccessToken;
-        const device = await findUserByGarminToken(userAccessToken);
-        
-        if (device) {
-          const date = new Date((stress.startTimeInSeconds || stress.calendarDate) * 1000).toISOString().split('T')[0];
-          console.log(`[Garmin Webhook] Processing stress for user ${device.userId}, date: ${date}`);
+        try {
+          const date = stress.calendarDate || new Date((stress.startTimeInSeconds || 0) * 1000).toISOString().split('T')[0];
           
+          // Find user by recent activity matching date
+          let userId: string | undefined;
+          for (const device of devices) {
+            const recentRun = await db.query.runs.findFirst({
+              where: and(
+                eq(runs.userId, device.userId),
+                gte(runs.completedAt, new Date(`${date}T00:00:00`)),
+                lte(runs.completedAt, new Date(`${date}T23:59:59`))
+              ),
+              limit: 1,
+            });
+            
+            if (recentRun) {
+              userId = device.userId;
+              break;
+            }
+          }
+          
+          if (!userId) {
+            console.warn(`⚠️ [Garmin Webhook] Could not map stress to user for date ${date}`);
+            continue;
+          }
+          
+          console.log(`[Garmin Webhook] Processing stress for user ${userId}, date: ${date}`);
+          
+          // Calculate average stress from time-series data
+          const stressValues = Object.values(stress.timeOffsetStressLevelValues || {}) as number[];
+          const bodyBatteryValues = Object.values(stress.timeOffsetBodyBatteryValues || {}) as number[];
+          
+          let avgStress = 0;
+          let maxStress = 0;
+          let minStress = 100;
+          
+          if (stressValues.length > 0) {
+            avgStress = stressValues.reduce((a, b) => a + b, 0) / stressValues.length;
+            maxStress = Math.max(...stressValues);
+            minStress = Math.min(...stressValues);
+          }
+          
+          let avgBodyBattery = 0;
+          let maxBodyBattery = 0;
+          let minBodyBattery = 100;
+          
+          if (bodyBatteryValues.length > 0) {
+            avgBodyBattery = bodyBatteryValues.reduce((a, b) => a + b, 0) / bodyBatteryValues.length;
+            maxBodyBattery = Math.max(...bodyBatteryValues);
+            minBodyBattery = Math.min(...bodyBatteryValues);
+          }
+          
+          // Calculate activity event impacts
+          const activityEvents = stress.bodyBatteryActivityEvents || [];
+          const sleepImpact = activityEvents
+            .filter((e: any) => e.eventType === 'SLEEP')
+            .reduce((sum: number, e: any) => sum + (e.bodyBatteryImpact || 0), 0);
+          
+          const napImpact = activityEvents
+            .filter((e: any) => e.eventType === 'NAP')
+            .reduce((sum: number, e: any) => sum + (e.bodyBatteryImpact || 0), 0);
+          
+          const activityImpact = activityEvents
+            .filter((e: any) => e.eventType === 'ACTIVITY')
+            .reduce((sum: number, e: any) => sum + (e.bodyBatteryImpact || 0), 0);
+          
+          const recoveryImpact = activityEvents
+            .filter((e: any) => e.eventType === 'RECOVERY')
+            .reduce((sum: number, e: any) => sum + (e.bodyBatteryImpact || 0), 0);
+          
+          // Map stress level to qualifier
+          let stressQualifier = 'MODERATE';
+          if (avgStress < 20) stressQualifier = 'LOW';
+          else if (avgStress < 40) stressQualifier = 'MODERATE';
+          else if (avgStress < 60) stressQualifier = 'HIGH';
+          else stressQualifier = 'VERY_HIGH';
+          
+          // Store stress & body battery data
           const stressFields = {
-            averageStressLevel: stress.averageStressLevel,
-            maxStressLevel: stress.maxStressLevel,
-            stressDuration: stress.stressDurationInSeconds,
-            restDuration: stress.restDurationInSeconds,
-            activityDuration: stress.activityDurationInSeconds,
-            lowStressDuration: stress.lowStressDurationInSeconds,
-            mediumStressDuration: stress.mediumStressDurationInSeconds,
-            highStressDuration: stress.highStressDurationInSeconds,
-            stressQualifier: stress.stressQualifier,
-            bodyBatteryHigh: stress.bodyBatteryHighValue,
-            bodyBatteryLow: stress.bodyBatteryLowValue,
-            bodyBatteryCharged: stress.bodyBatteryChargedValue,
-            bodyBatteryDrained: stress.bodyBatteryDrainedValue,
+            userId,
+            date,
+            averageStressLevel: Math.round(avgStress),
+            maxStressLevel: maxStress,
+            minStressLevel: minStress,
+            stressQualifier,
+            stressReadings: stress.timeOffsetStressLevelValues || {},
+            averageBodyBattery: Math.round(avgBodyBattery),
+            maxBodyBattery,
+            minBodyBattery,
+            currentBodyBatteryLevel: stress.bodyBatteryDynamicFeedbackEvent?.bodyBatteryLevel || 'UNKNOWN',
+            bodyBatteryReadings: stress.timeOffsetBodyBatteryValues || {},
+            sleepBodyBatteryImpact: sleepImpact,
+            napBodyBatteryImpact: napImpact,
+            activityBodyBatteryImpact: activityImpact,
+            recoveryBodyBatteryImpact: recoveryImpact,
+            bodyBatteryActivityEvents: activityEvents,
+            summaryId: stress.summaryId,
+            startTimeInSeconds: stress.startTimeInSeconds,
+            startTimeOffsetInSeconds: stress.startTimeOffsetInSeconds,
+            durationInSeconds: stress.durationInSeconds,
+            rawData: stress,
+            syncedAt: new Date(),
           };
           
+          // Try upsert - if conflict, update existing
           const existing = await db.query.garminWellnessMetrics.findFirst({
             where: and(
-              eq(garminWellnessMetrics.userId, device.userId),
+              eq(garminWellnessMetrics.userId, userId),
               eq(garminWellnessMetrics.date, date)
             )
           });
           
           if (existing) {
             await db.update(garminWellnessMetrics)
-              .set({ ...stressFields, syncedAt: new Date() })
+              .set(stressFields)
               .where(eq(garminWellnessMetrics.id, existing.id));
+            console.log(`[Garmin Webhook] Updated stress for ${date}: avg=${avgStress.toFixed(0)}/100, battery=${avgBodyBattery.toFixed(0)}/100 (${stress.bodyBatteryDynamicFeedbackEvent?.bodyBatteryLevel}), events=${activityEvents.length}`);
           } else {
-            await db.insert(garminWellnessMetrics).values({
-              userId: device.userId,
-              date,
-              ...stressFields,
-            });
+            await db.insert(garminWellnessMetrics).values(stressFields);
+            console.log(`[Garmin Webhook] Created stress for ${date}: avg=${avgStress.toFixed(0)}/100, battery=${avgBodyBattery.toFixed(0)}/100 (${stress.bodyBatteryDynamicFeedbackEvent?.bodyBatteryLevel}), events=${activityEvents.length}`);
           }
+          
+        } catch (stressError: any) {
+          console.error(`❌ [Garmin Webhook] Error processing stress:`, stressError.message);
+          // Queue for retry
+          await db.insert(webhookFailureQueue).values({
+            webhookType: 'stress',
+            payload: stress,
+            error: stressError.message,
+            nextRetryAt: new Date(Date.now() + 30 * 60 * 1000),
+          }).catch(queueError => {
+            console.error(`❌ Failed to queue stress for retry:`, queueError);
+          });
         }
       }
       
-      res.status(200).json({ success: true });
-    } catch (error) {
-      console.error('[Garmin Webhook] Stress error:', error);
-      res.status(200).json({ success: true });
+      console.log(`[Garmin Webhook] Finished processing ${stressData.length} stress records`);
+      
+    } catch (error: any) {
+      console.error('[Garmin Webhook] Stress handler error:', error);
+      // HTTP 200 already sent to Garmin
     }
   });
 
   // HEALTH - HRV Summary (heart rate variability)
+  // HEALTH - HRV (Heart Rate Variability - sleep quality indicator)
+  // Enhanced to handle complete HRV data with time-series readings
   garminWebhook("hrv", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received HRV push:', JSON.stringify(req.body).slice(0, 1000));
       
-      const hrvData = req.body.hrvSummaries || [];
-      for (const hrv of hrvData) {
-        const userAccessToken = hrv.userAccessToken;
-        const device = await findUserByGarminToken(userAccessToken);
-        
-        if (device) {
+      // IMPORTANT: Return 200 immediately to Garmin before processing
+      res.status(200).json({ success: true });
+      
+      // Process HRV data asynchronously (non-blocking)
+      const hrvData = req.body.hrvSummaries || req.body || [];
+      const hrvArray = Array.isArray(hrvData) ? hrvData : [hrvData];
+      
+      if (hrvArray.length === 0) {
+        console.log('[Garmin Webhook] No HRV data in payload');
+        return;
+      }
+      
+      console.log(`[Garmin Webhook] Processing ${hrvArray.length} HRV records`);
+      
+      for (const hrv of hrvArray) {
+        try {
+          const userAccessToken = hrv.userAccessToken;
+          const device = await findUserByGarminToken(userAccessToken);
+          
+          if (!device) {
+            console.warn(`⚠️ [Garmin Webhook] Could not map HRV to user`);
+            continue;
+          }
+          
           const date = hrv.calendarDate || new Date((hrv.startTimeInSeconds || 0) * 1000).toISOString().split('T')[0];
           console.log(`[Garmin Webhook] Processing HRV for user ${device.userId}, date: ${date}`);
           
+          // Calculate HRV metrics from time series data
+          let weeklyAvg = hrv.weeklyAvg;
+          let statusQualifier = hrv.hrvStatus;
+          
+          if (hrv.hrvValues && Object.keys(hrv.hrvValues).length > 0) {
+            const hrvReadingValues = Object.values(hrv.hrvValues) as number[];
+            const avgReading = hrvReadingValues.reduce((a, b) => a + b, 0) / hrvReadingValues.length;
+            
+            // Determine status based on readings
+            if (!statusQualifier) {
+              if (avgReading >= 100) statusQualifier = 'BALANCED';
+              else if (avgReading >= 70) statusQualifier = 'BALANCED';
+              else if (avgReading >= 50) statusQualifier = 'UNBALANCED';
+              else statusQualifier = 'LOW';
+            }
+          }
+          
+          // Map all available fields
           const hrvFields = {
-            hrvWeeklyAvg: hrv.weeklyAvg,
+            // Core HRV metrics
+            hrvWeeklyAvg: hrv.weeklyAvg || weeklyAvg,
             hrvLastNightAvg: hrv.lastNightAvg,
             hrvLastNight5MinHigh: hrv.lastNight5MinHigh,
-            hrvStatus: hrv.hrvStatus,
-            hrvFeedback: hrv.feedbackPhrase,
+            hrvStatus: statusQualifier || hrv.hrvStatus,
+            hrvFeedback: hrv.feedbackPhrase || hrv.feedback,
+            
+            // Baseline values (if provided)
             hrvBaselineLowUpper: hrv.baseline?.lowUpper,
-            hrvBaselineBalancedLower: hrv.baseline?.balancedLow,
+            hrvBaselineBalancedLower: hrv.baseline?.balancedLow || hrv.baseline?.balancedLower,
             hrvBaselineBalancedUpper: hrv.baseline?.balancedUpper,
-            hrvStartTimeGMT: hrv.startTimeGMT,
-            hrvEndTimeGMT: hrv.endTimeGMT,
+            
+            // Time range
+            hrvStartTimeGMT: hrv.startTimeGMT || new Date((hrv.startTimeInSeconds || 0) * 1000).toISOString(),
+            hrvEndTimeGMT: hrv.endTimeGMT || new Date(((hrv.startTimeInSeconds || 0) + (hrv.durationInSeconds || 0)) * 1000).toISOString(),
+            
+            // Time series readings (for detailed analysis)
             hrvReadings: hrv.hrvValues,
+            
+            // Metadata
+            syncedAt: new Date(),
           };
           
+          // Upsert (create or update)
           const existing = await db.query.garminWellnessMetrics.findFirst({
             where: and(
               eq(garminWellnessMetrics.userId, device.userId),
@@ -3249,17 +3829,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           if (existing) {
             await db.update(garminWellnessMetrics)
-              .set({ ...hrvFields, syncedAt: new Date() })
+              .set(hrvFields)
               .where(eq(garminWellnessMetrics.id, existing.id));
+            console.log(`[Garmin Webhook] Updated HRV for ${date}: avg=${hrv.lastNightAvg}, status=${statusQualifier}`);
           } else {
             await db.insert(garminWellnessMetrics).values({
               userId: device.userId,
               date,
               ...hrvFields,
             });
+            console.log(`[Garmin Webhook] Created HRV for ${date}: avg=${hrv.lastNightAvg}, status=${statusQualifier}`);
           }
+          
+        } catch (hrvError: any) {
+          console.error(`❌ [Garmin Webhook] Error processing HRV:`, hrvError.message);
+          // Queue for retry
+          await db.insert(webhookFailureQueue).values({
+            webhookType: 'hrv',
+            payload: hrv,
+            error: hrvError.message,
+            nextRetryAt: new Date(Date.now() + 30 * 60 * 1000),
+          }).catch(queueError => {
+            console.error(`❌ Failed to queue HRV for retry:`, queueError);
+          });
         }
       }
+      
+      console.log(`[Garmin Webhook] Finished processing ${hrvArray.length} HRV records`);
+      
+    } catch (error: any) {
+      console.error('[Garmin Webhook] HRV handler error:', error);
+      // HTTP 200 already sent to Garmin
+    }
+  });
       
       res.status(200).json({ success: true });
     } catch (error) {
@@ -3269,40 +3871,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // HEALTH - Dailies (daily activity summary with Body Battery, steps, etc.)
+  // HEALTH - Dailies (daily wellness summary data)
+  // Enhanced to handle complete daily wellness data including goals and stress breakdown
   garminWebhook("dailies", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received dailies push:', JSON.stringify(req.body).slice(0, 1000));
       
+      // IMPORTANT: Return 200 immediately to Garmin before processing
+      res.status(200).json({ success: true });
+      
+      // Process dailies asynchronously (non-blocking)
       const dailies = req.body.dailies || [];
+      
+      if (!Array.isArray(dailies) || dailies.length === 0) {
+        console.log('[Garmin Webhook] No dailies data in payload');
+        return;
+      }
+      
+      console.log(`[Garmin Webhook] Processing ${dailies.length} daily records`);
+      
       for (const daily of dailies) {
-        const userAccessToken = daily.userAccessToken;
-        const device = await findUserByGarminToken(userAccessToken);
-        
-        if (device) {
+        try {
+          const userAccessToken = daily.userAccessToken;
+          const device = await findUserByGarminToken(userAccessToken);
+          
+          if (!device) {
+            console.warn(`⚠️ [Garmin Webhook] Could not map dailies to user (no access token)`);
+            continue;
+          }
+          
           const date = daily.calendarDate || new Date((daily.startTimeInSeconds || 0) * 1000).toISOString().split('T')[0];
           console.log(`[Garmin Webhook] Processing daily for user ${device.userId}, date: ${date}`);
           
+          // Comprehensive daily fields from your sample payload
           const dailyFields = {
-            // Heart rate
+            // Metadata
+            summaryId: daily.summaryId,
+            activityType: daily.activityType,
+            startTimeInSeconds: daily.startTimeInSeconds,
+            startTimeOffsetInSeconds: daily.startTimeOffsetInSeconds,
+            
+            // Heart rate data
             restingHeartRate: daily.restingHeartRateInBeatsPerMinute,
             minHeartRate: daily.minHeartRateInBeatsPerMinute,
             maxHeartRate: daily.maxHeartRateInBeatsPerMinute,
             averageHeartRate: daily.averageHeartRateInBeatsPerMinute,
-            heartRateTimeOffsetValues: daily.timeOffsetHeartRateSamples,
-            // Activity
+            heartRateTimeOffsetValues: daily.timeOffsetHeartRateSamples, // Time series HR
+            
+            // Activity metrics
             steps: daily.steps,
+            pushes: daily.pushes, // Wheelchair metric
             distanceMeters: daily.distanceInMeters,
+            pushDistanceInMeters: daily.pushDistanceInMeters, // Wheelchair metric
             activeKilocalories: daily.activeKilocalories,
             bmrKilocalories: daily.bmrKilocalories,
             floorsClimbed: daily.floorsClimbed,
             floorsDescended: daily.floorsDescended,
-            // Intensity
+            
+            // Duration breakdown
+            durationInSeconds: daily.durationInSeconds, // Total time awake
+            activeTimeInSeconds: daily.activeTimeInSeconds, // Time in activity
             moderateIntensityDuration: daily.moderateIntensityDurationInSeconds,
             vigorousIntensityDuration: daily.vigorousIntensityDurationInSeconds,
             intensityDuration: daily.intensityDurationGoalInSeconds,
             sedentaryDuration: daily.sedentaryDurationInSeconds,
             sleepingDuration: daily.sleepingDurationInSeconds,
             activeDuration: daily.activeDurationInSeconds,
+            
+            // Daily goals
+            stepsGoal: daily.stepsGoal,
+            pushesGoal: daily.pushesGoal,
+            floorsClimbedGoal: daily.floorsClimbedGoal,
+            intensityGoal: daily.intensityDurationGoalInSeconds,
+            
             // Body Battery
             bodyBatteryHigh: daily.bodyBatteryHighValue || daily.bodyBatteryHighestValue,
             bodyBatteryLow: daily.bodyBatteryLowestValue,
@@ -3310,11 +3951,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             bodyBatteryCharged: daily.bodyBatteryChargedValue,
             bodyBatteryDrained: daily.bodyBatteryDrainedValue,
             bodyBatteryVersion: daily.bodyBatteryVersion,
-            // Stress
+            
+            // Stress data (comprehensive breakdown)
             averageStressLevel: daily.averageStressLevel,
             maxStressLevel: daily.maxStressLevel,
-            stressDuration: daily.stressDuration,
-            restDuration: daily.restStressDuration,
+            stressDurationInSeconds: daily.stressDurationInSeconds, // Total stress time
+            restStressDurationInSeconds: daily.restStressDurationInSeconds, // Rest stress
+            activityStressDurationInSeconds: daily.activityStressDurationInSeconds, // Activity stress
+            lowStressDurationInSeconds: daily.lowStressDurationInSeconds,
+            mediumStressDurationInSeconds: daily.mediumStressDurationInSeconds,
+            highStressDurationInSeconds: daily.highStressDurationInSeconds,
+            
+            // Raw payload
+            rawData: daily,
+            syncedAt: new Date(),
           };
           
           const existing = await db.query.garminWellnessMetrics.findFirst({
@@ -3326,21 +3976,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           if (existing) {
             await db.update(garminWellnessMetrics)
-              .set({ ...dailyFields, syncedAt: new Date() })
+              .set(dailyFields)
               .where(eq(garminWellnessMetrics.id, existing.id));
+            console.log(`[Garmin Webhook] Updated daily summary for ${date}`);
           } else {
             await db.insert(garminWellnessMetrics).values({
               userId: device.userId,
               date,
               ...dailyFields,
             });
+            console.log(`[Garmin Webhook] Created daily summary for ${date}`);
           }
+          
+        } catch (dailyError: any) {
+          console.error(`❌ [Garmin Webhook] Error processing daily:`, dailyError.message);
+          // Queue for retry
+          await db.insert(webhookFailureQueue).values({
+            webhookType: 'daily',
+            userId: device?.userId,
+            payload: daily,
+            error: dailyError.message,
+            nextRetryAt: new Date(Date.now() + 30 * 60 * 1000),
+          }).catch(queueError => {
+            console.error(`❌ Failed to queue daily for retry:`, queueError);
+          });
         }
       }
       
-      res.status(200).json({ success: true });
-    } catch (error) {
-      console.error('[Garmin Webhook] Dailies error:', error);
+      console.log(`[Garmin Webhook] Finished processing ${dailies.length} daily records`);
+      
+    } catch (error: any) {
+      console.error('[Garmin Webhook] Dailies handler error:', error);
       res.status(200).json({ success: true });
     }
   });
@@ -3386,101 +4052,254 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // HEALTH - Pulse Ox
+  // HEALTH - Pulse Ox (SpO2 - Oxygen Saturation measurements)
+  // Enhanced to handle both on-demand and sleep SpO2 readings with time-series data
   garminWebhook("pulse-ox", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received pulse ox push:', JSON.stringify(req.body).slice(0, 1000));
       
-      const pulseOxData = req.body.pulseOx || [];
+      // IMPORTANT: Return 200 immediately to Garmin before processing
+      res.status(200).json({ success: true });
+      
+      // Process pulse ox data asynchronously (non-blocking)
+      const pulseOxData = Array.isArray(req.body) ? req.body : (req.body.pulseOx || []);
+      
+      if (pulseOxData.length === 0) {
+        console.log('[Garmin Webhook] No pulse ox data in payload');
+        return;
+      }
+      
+      console.log(`[Garmin Webhook] Processing ${pulseOxData.length} pulse ox records`);
+      
+      // Find users
+      const devices = await db.query.connectedDevices.findMany({
+        where: eq(connectedDevices.deviceType, 'garmin'),
+      });
+      
+      if (devices.length === 0) {
+        console.warn('[Garmin Webhook] No active Garmin devices found for pulse ox');
+        return;
+      }
+      
       for (const pox of pulseOxData) {
-        const userAccessToken = pox.userAccessToken;
-        const device = await findUserByGarminToken(userAccessToken);
-        
-        if (device) {
+        try {
           const date = pox.calendarDate || new Date((pox.startTimeInSeconds || 0) * 1000).toISOString().split('T')[0];
-          console.log(`[Garmin Webhook] Processing pulse ox for user ${device.userId}, date: ${date}`);
           
+          // Find user by recent activity matching date
+          let userId: string | undefined;
+          for (const device of devices) {
+            const recentRun = await db.query.runs.findFirst({
+              where: and(
+                eq(runs.userId, device.userId),
+                gte(runs.completedAt, new Date(`${date}T00:00:00`)),
+                lte(runs.completedAt, new Date(`${date}T23:59:59`))
+              ),
+              limit: 1,
+            });
+            
+            if (recentRun) {
+              userId = device.userId;
+              break;
+            }
+          }
+          
+          if (!userId) {
+            console.warn(`⚠️ [Garmin Webhook] Could not map pulse ox to user for date ${date}`);
+            continue;
+          }
+          
+          console.log(`[Garmin Webhook] Processing pulse ox for user ${userId}, date: ${date}`);
+          
+          // Calculate metrics from time-series data
+          const spo2Values = Object.values(pox.timeOffsetSpo2Values || {}) as number[];
+          
+          let minSpO2 = 100;
+          let maxSpO2 = 0;
+          let avgSpO2 = 0;
+          
+          if (spo2Values.length > 0) {
+            minSpO2 = Math.min(...spo2Values);
+            maxSpO2 = Math.max(...spo2Values);
+            avgSpO2 = spo2Values.reduce((a, b) => a + b, 0) / spo2Values.length;
+          }
+          
+          // Map to wellness metrics
           const poxFields = {
-            avgSpO2: pox.avgSpO2,
-            minSpO2: pox.minSpO2,
-            avgAltitude: pox.avgAltitude,
-            onDemandReadings: pox.onDemandReadings,
-            sleepSpO2Readings: pox.sleepPulseOxReadings,
+            avgSpO2: avgSpO2,
+            minSpO2: minSpO2,
+            onDemandReadings: pox.onDemand ? pox.timeOffsetSpo2Values : null,
+            sleepSpO2Readings: !pox.onDemand ? pox.timeOffsetSpo2Values : null,
+            syncedAt: new Date(),
           };
           
           const existing = await db.query.garminWellnessMetrics.findFirst({
             where: and(
-              eq(garminWellnessMetrics.userId, device.userId),
+              eq(garminWellnessMetrics.userId, userId),
               eq(garminWellnessMetrics.date, date)
             )
           });
           
           if (existing) {
             await db.update(garminWellnessMetrics)
-              .set({ ...poxFields, syncedAt: new Date() })
+              .set(poxFields)
               .where(eq(garminWellnessMetrics.id, existing.id));
+            console.log(`[Garmin Webhook] Updated pulse ox for ${date}: avg=${avgSpO2.toFixed(1)}%, min=${minSpO2}%, type=${pox.onDemand ? 'on-demand' : 'sleep'}`);
           } else {
             await db.insert(garminWellnessMetrics).values({
-              userId: device.userId,
+              userId,
               date,
               ...poxFields,
             });
+            console.log(`[Garmin Webhook] Created pulse ox for ${date}: avg=${avgSpO2.toFixed(1)}%, min=${minSpO2}%, type=${pox.onDemand ? 'on-demand' : 'sleep'}`);
           }
+          
+        } catch (poxError: any) {
+          console.error(`❌ [Garmin Webhook] Error processing pulse ox:`, poxError.message);
+          // Queue for retry
+          await db.insert(webhookFailureQueue).values({
+            webhookType: 'pulse-ox',
+            payload: pox,
+            error: poxError.message,
+            nextRetryAt: new Date(Date.now() + 30 * 60 * 1000),
+          }).catch(queueError => {
+            console.error(`❌ Failed to queue pulse ox for retry:`, queueError);
+          });
         }
       }
       
-      res.status(200).json({ success: true });
-    } catch (error) {
-      console.error('[Garmin Webhook] Pulse ox error:', error);
-      res.status(200).json({ success: true });
+      console.log(`[Garmin Webhook] Finished processing ${pulseOxData.length} pulse ox records`);
+      
+    } catch (error: any) {
+      console.error('[Garmin Webhook] Pulse ox handler error:', error);
+      // HTTP 200 already sent to Garmin
     }
   });
 
-  // HEALTH - Respiration
+  // HEALTH - Respiration (breathing rate monitoring)
+  // Enhanced to handle time-series respiration data without userAccessToken
   garminWebhook("respiration", async (req: Request, res: Response) => {
     try {
       console.log('[Garmin Webhook] Received respiration push:', JSON.stringify(req.body).slice(0, 1000));
       
-      const respirations = req.body.allDayRespiration || [];
+      // IMPORTANT: Return 200 immediately to Garmin before processing
+      res.status(200).json({ success: true });
+      
+      // Process respiration data asynchronously (non-blocking)
+      const respirations = Array.isArray(req.body) ? req.body : (req.body.allDayRespiration || []);
+      
+      if (respirations.length === 0) {
+        console.log('[Garmin Webhook] No respiration data in payload');
+        return;
+      }
+      
+      console.log(`[Garmin Webhook] Processing ${respirations.length} respiration records`);
+      
+      // Find users
+      const devices = await db.query.connectedDevices.findMany({
+        where: eq(connectedDevices.deviceType, 'garmin'),
+      });
+      
+      if (devices.length === 0) {
+        console.warn('[Garmin Webhook] No active Garmin devices found for respiration');
+        return;
+      }
+      
       for (const resp of respirations) {
-        const userAccessToken = resp.userAccessToken;
-        const device = await findUserByGarminToken(userAccessToken);
-        
-        if (device) {
+        try {
           const date = resp.calendarDate || new Date((resp.startTimeInSeconds || 0) * 1000).toISOString().split('T')[0];
-          console.log(`[Garmin Webhook] Processing respiration for user ${device.userId}, date: ${date}`);
           
+          // Find user by recent activity matching date
+          let userId: string | undefined;
+          for (const device of devices) {
+            const recentRun = await db.query.runs.findFirst({
+              where: and(
+                eq(runs.userId, device.userId),
+                gte(runs.completedAt, new Date(`${date}T00:00:00`)),
+                lte(runs.completedAt, new Date(`${date}T23:59:59`))
+              ),
+              limit: 1,
+            });
+            
+            if (recentRun) {
+              userId = device.userId;
+              break;
+            }
+          }
+          
+          if (!userId) {
+            console.warn(`⚠️ [Garmin Webhook] Could not map respiration to user for date ${date}`);
+            continue;
+          }
+          
+          console.log(`[Garmin Webhook] Processing respiration for user ${userId}, date: ${date}`);
+          
+          // Calculate metrics from time-series data
+          // Note: Garmin sends timeOffsetEpochToBreaths (breaths per minute at each epoch)
+          const respirationValues = Object.values(resp.timeOffsetEpochToBreaths || {}) as number[];
+          
+          let minResp = 50;
+          let maxResp = 0;
+          let avgResp = 0;
+          
+          if (respirationValues.length > 0) {
+            minResp = Math.min(...respirationValues);
+            maxResp = Math.max(...respirationValues);
+            avgResp = respirationValues.reduce((a, b) => a + b, 0) / respirationValues.length;
+          }
+          
+          // Determine if this is sleep or waking respiration
+          // Sleep respiration is typically lower (12-16 bpm) vs waking (12-20 bpm)
+          const isDuringSleep = avgResp < 13; // Conservative estimate
+          
+          // Map to wellness metrics
           const respFields = {
-            avgWakingRespirationValue: resp.avgWakingRespirationValue,
-            highestRespirationValue: resp.highestRespirationValue,
-            lowestRespirationValue: resp.lowestRespirationValue,
-            avgSleepRespirationValue: resp.avgSleepRespirationValue,
+            avgWakingRespirationValue: !isDuringSleep ? avgResp : undefined,
+            avgSleepRespirationValue: isDuringSleep ? avgResp : undefined,
+            highestRespirationValue: maxResp,
+            lowestRespirationValue: minResp,
+            syncedAt: new Date(),
           };
           
           const existing = await db.query.garminWellnessMetrics.findFirst({
             where: and(
-              eq(garminWellnessMetrics.userId, device.userId),
+              eq(garminWellnessMetrics.userId, userId),
               eq(garminWellnessMetrics.date, date)
             )
           });
           
           if (existing) {
             await db.update(garminWellnessMetrics)
-              .set({ ...respFields, syncedAt: new Date() })
+              .set(respFields)
               .where(eq(garminWellnessMetrics.id, existing.id));
+            console.log(`[Garmin Webhook] Updated respiration for ${date}: avg=${avgResp.toFixed(1)} bpm, range=${minResp}-${maxResp}`);
           } else {
             await db.insert(garminWellnessMetrics).values({
-              userId: device.userId,
+              userId,
               date,
               ...respFields,
             });
+            console.log(`[Garmin Webhook] Created respiration for ${date}: avg=${avgResp.toFixed(1)} bpm, range=${minResp}-${maxResp}`);
           }
+          
+        } catch (respError: any) {
+          console.error(`❌ [Garmin Webhook] Error processing respiration:`, respError.message);
+          // Queue for retry
+          await db.insert(webhookFailureQueue).values({
+            webhookType: 'respiration',
+            payload: resp,
+            error: respError.message,
+            nextRetryAt: new Date(Date.now() + 30 * 60 * 1000),
+          }).catch(queueError => {
+            console.error(`❌ Failed to queue respiration for retry:`, queueError);
+          });
         }
       }
       
-      res.status(200).json({ success: true });
-    } catch (error) {
-      console.error('[Garmin Webhook] Respiration error:', error);
-      res.status(200).json({ success: true });
+      console.log(`[Garmin Webhook] Finished processing ${respirations.length} respiration records`);
+      
+    } catch (error: any) {
+      console.error('[Garmin Webhook] Respiration handler error:', error);
+      // HTTP 200 already sent to Garmin
     }
   });
 
@@ -3518,13 +4337,158 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==========================================
+  // WEBHOOK FAILURE QUEUE MANAGEMENT ENDPOINTS
+  // These endpoints allow monitoring and managing failed webhook processing
+  // ==========================================
+
+  /**
+   * Get webhook failure queue statistics
+   * Admin endpoint to monitor webhook processing health
+   */
+  app.get("/api/garmin/webhooks/queue/stats", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      // Check if user is admin
+      const user = await db.query.users.findFirst({
+        where: eq(users.id, req.user!.userId),
+      });
+
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const { getWebhookQueueStats } = await import("./webhook-processor");
+      const stats = await getWebhookQueueStats();
+
+      res.json({
+        success: true,
+        data: stats,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error: any) {
+      console.error("Error getting webhook queue stats:", error);
+      res.status(500).json({ error: "Failed to get queue stats" });
+    }
+  });
+
+  /**
+   * Get webhook failure queue items
+   * Admin endpoint to view failed webhooks
+   */
+  app.get("/api/garmin/webhooks/queue/items", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      // Check if user is admin
+      const user = await db.query.users.findFirst({
+        where: eq(users.id, req.user!.userId),
+      });
+
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const { webhookFailureQueue } = await import("@shared/schema");
+      const items = await db.query.webhookFailureQueue.findMany({
+        limit: 100,
+        orderBy: (t, { desc }) => [desc(t.createdAt)],
+      });
+
+      res.json({
+        success: true,
+        data: items,
+        count: items.length,
+      });
+    } catch (error: any) {
+      console.error("Error getting webhook queue items:", error);
+      res.status(500).json({ error: "Failed to get queue items" });
+    }
+  });
+
+  /**
+   * Retry a specific webhook
+   * Admin endpoint to manually retry a failed webhook
+   */
+  app.post("/api/garmin/webhooks/queue/retry/:webhookId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      // Check if user is admin
+      const user = await db.query.users.findFirst({
+        where: eq(users.id, req.user!.userId),
+      });
+
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const { webhookId } = req.params;
+      const { retryWebhook } = await import("./webhook-processor");
+      const success = await retryWebhook(webhookId);
+
+      if (!success) {
+        return res.status(404).json({ error: "Webhook not found" });
+      }
+
+      res.json({
+        success: true,
+        message: `Webhook ${webhookId} queued for retry`,
+      });
+    } catch (error: any) {
+      console.error("Error retrying webhook:", error);
+      res.status(500).json({ error: "Failed to retry webhook" });
+    }
+  });
+
+  /**
+   * Process webhook failure queue now
+   * Admin endpoint to trigger immediate queue processing
+   */
+  app.post("/api/garmin/webhooks/queue/process", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      // Check if user is admin
+      const user = await db.query.users.findFirst({
+        where: eq(users.id, req.user!.userId),
+      });
+
+      if (!user?.isAdmin) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const { processWebhookFailureQueue } = await import("./webhook-processor");
+      const result = await processWebhookFailureQueue();
+
+      res.json({
+        success: true,
+        data: result,
+        message: `Processed webhook queue: ${result.retried} retried, ${result.failed} failed`,
+      });
+    } catch (error: any) {
+      console.error("Error processing webhook queue:", error);
+      res.status(500).json({ error: "Failed to process queue" });
+    }
+  });
+
   // COMMON - User Permissions Change
   garminWebhook("permissions", async (req: Request, res: Response) => {
     try {
-      console.log('[Garmin Webhook] Received permissions change:', JSON.stringify(req.body).slice(0, 500));
+      const { handlePermissionChange } = await import('./garmin-permissions-service');
+      
+      const payload = req.body;
+      console.log('[Garmin Webhook] Permissions change received:', {
+        timestamp: new Date().toISOString(),
+        granted: payload.permissionsGranted?.length || 0,
+        revoked: payload.permissionsRevoked?.length || 0,
+      });
+
+      // Process permission changes
+      await handlePermissionChange({
+        userAccessToken: payload.userAccessToken,
+        permissionsGranted: payload.permissionsGranted || [],
+        permissionsRevoked: payload.permissionsRevoked || [],
+      });
+
+      // Always return 200 to Garmin
       res.status(200).json({ success: true });
-    } catch (error) {
+    } catch (error: any) {
       console.error('[Garmin Webhook] Permissions error:', error);
+      // Still return 200 so Garmin doesn't retry
       res.status(200).json({ success: true });
     }
   });
@@ -3534,15 +4498,1135 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.status(200).json({ success: true });
   };
 
-  garminWebhook("epochs", garminAckHandler);
-  garminWebhook("health-snapshot", garminAckHandler);
-  garminWebhook("user-metrics", garminAckHandler);
-  garminWebhook("blood-pressure", garminAckHandler);
-  garminWebhook("skin-temperature", garminAckHandler);
+  // MOVEIQ - Activity Classification (AI-powered activity type detection)
+  // Enhanced to handle detailed MoveIQ activity classifications
+  garminWebhook("moveiq", async (req: Request, res: Response) => {
+    try {
+      console.log('[Garmin Webhook] Received MoveIQ push:', JSON.stringify(req.body).slice(0, 1000));
+      
+      // IMPORTANT: Return 200 immediately to Garmin before processing
+      res.status(200).json({ success: true });
+      
+      // Process MoveIQ data asynchronously (non-blocking)
+      const moveiqData = req.body || [];
+      
+      if (!Array.isArray(moveiqData) || moveiqData.length === 0) {
+        console.log('[Garmin Webhook] No MoveIQ data in payload');
+        return;
+      }
+      
+      console.log(`[Garmin Webhook] Processing ${moveiqData.length} MoveIQ records`);
+      
+      for (const moveiq of moveiqData) {
+        try {
+          const summaryId = moveiq.summaryId;
+          const activityType = moveiq.activityType || 'Unknown';
+          const activitySubType = moveiq.activitySubType || 'Unknown';
+          
+          if (!summaryId) {
+            console.warn('[Garmin Webhook] MoveIQ data missing summaryId');
+            continue;
+          }
+          
+          console.log(`[Garmin Webhook] Processing MoveIQ classification: ${activityType} - ${activitySubType}`);
+          
+          // Extract user info - MoveIQ doesn't always have user token, so lookup by date/time
+          // Try to find matching activity
+          const startTime = new Date((moveiq.startTimeInSeconds || 0) * 1000);
+          const calendarDate = moveiq.calendarDate || startTime.toISOString().split('T')[0];
+          
+          // Find all active Garmin users (would need access token in real implementation)
+          const devices = await db.query.connectedDevices.findMany({
+            where: eq(connectedDevices.deviceType, 'garmin'),
+          });
+          
+          if (devices.length === 0) {
+            console.warn('[Garmin Webhook] No active Garmin devices found for MoveIQ');
+            continue;
+          }
+          
+          // For each device, check if there's a matching activity on that date
+          for (const device of devices) {
+            const matchingActivity = await db.query.garminActivities.findFirst({
+              where: and(
+                eq(garminActivities.userId, device.userId),
+                eq(sql`DATE(to_timestamp(${garminActivities.startTimeInSeconds}))`, sql`${calendarDate}::date`)
+              ),
+            });
+            
+            if (!matchingActivity) continue;
+            
+            // Found matching activity - store MoveIQ classification
+            const existingMoveiq = await db.query.garminMoveIQ.findFirst({
+              where: eq(garminMoveIQ.summaryId, summaryId),
+            });
+            
+            if (existingMoveiq) {
+              // Update existing
+              await db
+                .update(garminMoveIQ)
+                .set({
+                  activityType,
+                  activitySubType,
+                  detectedAt: new Date(),
+                  rawData: moveiq,
+                })
+                .where(eq(garminMoveIQ.id, existingMoveiq.id));
+              
+              console.log(`[Garmin Webhook] Updated MoveIQ classification: ${activityType} - ${activitySubType}`);
+            } else {
+              // Create new
+              await db.insert(garminMoveIQ).values({
+                userId: device.userId,
+                runId: matchingActivity.runId || undefined,
+                garminActivityId: matchingActivity.garminActivityId,
+                summaryId,
+                activityType,
+                activitySubType,
+                calendarDate,
+                startTimeInSeconds: moveiq.startTimeInSeconds,
+                durationInSeconds: moveiq.durationInSeconds,
+                offsetInSeconds: moveiq.offsetInSeconds,
+                rawData: moveiq,
+              });
+              
+              console.log(`[Garmin Webhook] Created MoveIQ classification: ${activityType} - ${activitySubType}`);
+            }
+            
+            // Update the garmin_activities record with sub-type
+            await db
+              .update(garminActivities)
+              .set({
+                activitySubType,
+              })
+              .where(eq(garminActivities.id, matchingActivity.id));
+            
+            // If there's a linked runs record, optionally update it
+            if (matchingActivity.runId) {
+              // Could add a runs.activitySubType field if desired
+              console.log(`[Garmin Webhook] Linked MoveIQ to run ${matchingActivity.runId}`);
+            }
+            
+            // Only process once per date
+            break;
+          }
+          
+        } catch (moveiqError: any) {
+          console.error(`❌ [Garmin Webhook] Error processing MoveIQ:`, moveiqError.message);
+          // Queue for retry
+          await db.insert(webhookFailureQueue).values({
+            webhookType: 'moveiq',
+            payload: moveiq,
+            error: moveiqError.message,
+            nextRetryAt: new Date(Date.now() + 10 * 60 * 1000),
+          }).catch(queueError => {
+            console.error(`❌ Failed to queue MoveIQ for retry:`, queueError);
+          });
+        }
+      }
+      
+      console.log(`[Garmin Webhook] Finished processing ${moveiqData.length} MoveIQ records`);
+      
+    } catch (error: any) {
+      console.error('[Garmin Webhook] MoveIQ handler error:', error);
+      // HTTP 200 already sent to Garmin
+    }
+  });
+
+  // HEALTH - Blood Pressure measurements
+  // Enhanced to handle blood pressure readings with classification
+  garminWebhook("blood-pressure", async (req: Request, res: Response) => {
+    try {
+      console.log('[Garmin Webhook] Received blood pressure push:', JSON.stringify(req.body).slice(0, 1000));
+      
+      // IMPORTANT: Return 200 immediately to Garmin before processing
+      res.status(200).json({ success: true });
+      
+      // Process blood pressure data asynchronously (non-blocking)
+      const bloodPressures = req.body || [];
+      
+      if (!Array.isArray(bloodPressures) || bloodPressures.length === 0) {
+        console.log('[Garmin Webhook] No blood pressure data in payload');
+        return;
+      }
+      
+      console.log(`[Garmin Webhook] Processing ${bloodPressures.length} blood pressure readings`);
+      
+      for (const bp of bloodPressures) {
+        try {
+          const summaryId = bp.summaryId;
+          
+          if (!summaryId) {
+            console.warn('[Garmin Webhook] Blood pressure missing summaryId');
+            continue;
+          }
+          
+          // Try to find user by measurement time (similar to MoveIQ approach)
+          const measurementTime = new Date((bp.measurementTimeInSeconds || 0) * 1000);
+          
+          // For blood pressure, we need to match to a user somehow
+          // Option 1: If Garmin eventually sends userAccessToken, use that
+          // Option 2: Find all users with activities around this time
+          const devices = await db.query.connectedDevices.findMany({
+            where: eq(connectedDevices.deviceType, 'garmin'),
+          });
+          
+          let userId: string | undefined;
+          
+          // Try to match by finding recent activity for this user on this date
+          for (const device of devices) {
+            const recentActivity = await db.query.runs.findFirst({
+              where: and(
+                eq(runs.userId, device.userId),
+                gte(runs.completedAt, new Date(measurementTime.getTime() - 24 * 60 * 60 * 1000)), // Within 24 hours
+                lte(runs.completedAt, new Date(measurementTime.getTime() + 24 * 60 * 60 * 1000))
+              ),
+              orderBy: desc(runs.completedAt),
+              limit: 1,
+            });
+            
+            if (recentActivity) {
+              userId = device.userId;
+              break;
+            }
+          }
+          
+          if (!userId) {
+            console.warn(`⚠️ [Garmin Webhook] Could not map blood pressure to user, queueing for retry`);
+            // Queue for retry - user might connect later
+            await db.insert(webhookFailureQueue).values({
+              webhookType: 'blood-pressure',
+              payload: bp,
+              error: 'User not found - no recent activities',
+              nextRetryAt: new Date(Date.now() + 30 * 60 * 1000), // Retry in 30 min
+            });
+            continue;
+          }
+          
+          // Classify blood pressure reading
+          const classification = classifyBloodPressure(bp.systolic, bp.diastolic);
+          
+          console.log(`[Garmin Webhook] Processing blood pressure for user ${userId}: ${bp.systolic}/${bp.diastolic} (${classification})`);
+          
+          // Check if already exists
+          const existing = await db.query.garminBloodPressure.findFirst({
+            where: eq(garminBloodPressure.summaryId, summaryId),
+          });
+          
+          if (existing) {
+            // Update existing
+            await db
+              .update(garminBloodPressure)
+              .set({
+                systolic: bp.systolic,
+                diastolic: bp.diastolic,
+                pulse: bp.pulse,
+                classification,
+                rawData: bp,
+              })
+              .where(eq(garminBloodPressure.id, existing.id));
+            
+            console.log(`[Garmin Webhook] Updated blood pressure reading: ${bp.systolic}/${bp.diastolic}`);
+          } else {
+            // Create new
+            await db.insert(garminBloodPressure).values({
+              userId,
+              systolic: bp.systolic,
+              diastolic: bp.diastolic,
+              pulse: bp.pulse,
+              summaryId,
+              sourceType: bp.sourceType || 'MANUAL',
+              measurementTimeInSeconds: bp.measurementTimeInSeconds,
+              measurementTimeOffsetInSeconds: bp.measurementTimeOffsetInSeconds,
+              classification,
+              rawData: bp,
+            });
+            
+            console.log(`[Garmin Webhook] Created blood pressure reading: ${bp.systolic}/${bp.diastolic} (${classification})`);
+          }
+          
+        } catch (bpError: any) {
+          console.error(`❌ [Garmin Webhook] Error processing blood pressure:`, bpError.message);
+          // Queue for retry
+          await db.insert(webhookFailureQueue).values({
+            webhookType: 'blood-pressure',
+            payload: bp,
+            error: bpError.message,
+            nextRetryAt: new Date(Date.now() + 30 * 60 * 1000),
+          }).catch(queueError => {
+            console.error(`❌ Failed to queue blood pressure for retry:`, queueError);
+          });
+        }
+      }
+      
+      console.log(`[Garmin Webhook] Finished processing ${bloodPressures.length} blood pressure readings`);
+      
+    } catch (error: any) {
+      console.error('[Garmin Webhook] Blood pressure handler error:', error);
+      // HTTP 200 already sent to Garmin
+    }
+  });
+
+  // Helper: Classify blood pressure reading based on AHA guidelines
+  function classifyBloodPressure(systolic: number, diastolic: number): string {
+    // AHA/ACC Blood Pressure Classification
+    if (systolic < 120 && diastolic < 80) return 'OPTIMAL';
+    if (systolic >= 120 && systolic <= 129 && diastolic < 80) return 'ELEVATED';
+    if (systolic >= 130 && systolic <= 139 || (diastolic >= 80 && diastolic <= 89)) return 'STAGE_1_HYPERTENSION';
+    if (systolic >= 140 || diastolic >= 90) return 'STAGE_2_HYPERTENSION';
+    if (systolic > 180 || diastolic > 120) return 'CRISIS';
+    return 'NORMAL';
+  }
+
+  // HEALTH - Epochs (minute-by-minute activity classification)
+  // Hybrid approach: Keep raw data for 7 days, compress daily aggregates for long-term storage
+  garminWebhook("epochs", async (req: Request, res: Response) => {
+    try {
+      console.log('[Garmin Webhook] Received epochs push:', JSON.stringify(req.body).slice(0, 500));
+      
+      // IMPORTANT: Return 200 immediately to Garmin before processing
+      res.status(200).json({ success: true });
+      
+      // Process epochs asynchronously (non-blocking)
+      const epochs = req.body.epochs || [];
+      
+      if (!Array.isArray(epochs) || epochs.length === 0) {
+        console.log('[Garmin Webhook] No epochs data in payload');
+        return;
+      }
+      
+      console.log(`[Garmin Webhook] Processing ${epochs.length} epochs`);
+      
+      // Find user by matching recent activity
+      const devices = await db.query.connectedDevices.findMany({
+        where: eq(connectedDevices.deviceType, 'garmin'),
+      });
+      
+      if (devices.length === 0) {
+        console.warn('[Garmin Webhook] No active Garmin devices found for epochs');
+        return;
+      }
+      
+      // Get date from first epoch
+      const firstEpochDate = new Date((epochs[0].startTimeInSeconds || 0) * 1000)
+        .toISOString()
+        .split('T')[0];
+      
+      // Process each device
+      for (const device of devices) {
+        try {
+          // Check if we already have epochs for this date
+          const existingAggregate = await db.query.garminEpochsAggregate.findFirst({
+            where: and(
+              eq(garminEpochsAggregate.userId, device.userId),
+              eq(garminEpochsAggregate.epochDate, firstEpochDate)
+            ),
+          });
+          
+          if (existingAggregate?.compressedAt) {
+            console.log(`[Garmin Webhook] Epochs already compressed for ${device.userId} on ${firstEpochDate}, skipping`);
+            continue;
+          }
+          
+          // Calculate aggregates
+          let sedentarySeconds = 0;
+          let activeSeconds = 0;
+          let highlyActiveSeconds = 0;
+          
+          let walkingSeconds = 0;
+          let runningSeconds = 0;
+          let wheelchairSeconds = 0;
+          
+          let totalMet = 0;
+          let peakMet = 0;
+          let totalMotionIntensity = 0;
+          
+          let totalCalories = 0;
+          let totalSteps = 0;
+          let totalPushes = 0;
+          let totalDistance = 0;
+          let totalPushDistance = 0;
+          
+          // Insert raw epochs (keep for 7 days)
+          const epochsToInsert = epochs.map(epoch => ({
+            userId: device.userId,
+            epochDate: firstEpochDate,
+            startTimeInSeconds: epoch.startTimeInSeconds,
+            activityType: epoch.activityType,
+            intensity: epoch.intensity,
+            met: epoch.met,
+            meanMotionIntensity: epoch.meanMotionIntensity,
+            maxMotionIntensity: epoch.maxMotionIntensity,
+            activeKilocalories: epoch.activeKilocalories,
+            durationInSeconds: epoch.durationInSeconds,
+            activeTimeInSeconds: epoch.activeTimeInSeconds,
+            steps: epoch.steps,
+            pushes: epoch.pushes,
+            distanceInMeters: epoch.distanceInMeters,
+            pushDistanceInMeters: epoch.pushDistanceInMeters,
+            summaryId: epoch.summaryId,
+            startTimeOffsetInSeconds: epoch.startTimeOffsetInSeconds,
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Delete after 7 days
+          }));
+          
+          // Batch insert raw epochs
+          if (epochsToInsert.length > 0) {
+            await db.insert(garminEpochsRaw).values(epochsToInsert);
+          }
+          
+          // Calculate aggregates from epochs
+          for (const epoch of epochs) {
+            // Intensity breakdown
+            if (epoch.intensity === 'SEDENTARY') sedentarySeconds += epoch.activeTimeInSeconds || 0;
+            if (epoch.intensity === 'ACTIVE') activeSeconds += epoch.activeTimeInSeconds || 0;
+            if (epoch.intensity === 'HIGHLY_ACTIVE') highlyActiveSeconds += epoch.activeTimeInSeconds || 0;
+            
+            // Activity type breakdown
+            if (epoch.activityType === 'WALKING') walkingSeconds += epoch.durationInSeconds || 0;
+            if (epoch.activityType === 'RUNNING') runningSeconds += epoch.durationInSeconds || 0;
+            if (epoch.activityType === 'WHEELCHAIR_PUSHING') wheelchairSeconds += epoch.durationInSeconds || 0;
+            
+            // Metrics
+            totalMet += epoch.met || 0;
+            peakMet = Math.max(peakMet, epoch.met || 0);
+            totalMotionIntensity += epoch.meanMotionIntensity || 0;
+            
+            // Totals
+            totalCalories += epoch.activeKilocalories || 0;
+            totalSteps += epoch.steps || 0;
+            totalPushes += epoch.pushes || 0;
+            totalDistance += epoch.distanceInMeters || 0;
+            totalPushDistance += epoch.pushDistanceInMeters || 0;
+          }
+          
+          const averageMet = epochs.length > 0 ? totalMet / epochs.length : 0;
+          const maxMotionIntensity = Math.max(...epochs.map(e => e.maxMotionIntensity || 0));
+          const averageMotionIntensity = epochs.length > 0 ? totalMotionIntensity / epochs.length : 0;
+          
+          // Create or update aggregate
+          if (existingAggregate) {
+            await db
+              .update(garminEpochsAggregate)
+              .set({
+                sedentaryDurationSeconds: sedentarySeconds,
+                activeDurationSeconds: activeSeconds,
+                highlyActiveDurationSeconds: highlyActiveSeconds,
+                walkingSeconds,
+                runningSeconds,
+                wheelchairPushingSeconds: wheelchairSeconds,
+                totalMet,
+                averageMet,
+                peakMet,
+                averageMotionIntensity,
+                maxMotionIntensity,
+                totalActiveKilocalories: totalCalories,
+                totalSteps,
+                totalPushes,
+                totalDistance,
+                totalPushDistance,
+                totalEpochs: epochs.length,
+              })
+              .where(eq(garminEpochsAggregate.id, existingAggregate.id));
+            
+            console.log(`[Garmin Webhook] Updated epochs aggregate for ${device.userId}, date: ${firstEpochDate}`);
+          } else {
+            await db.insert(garminEpochsAggregate).values({
+              userId: device.userId,
+              epochDate: firstEpochDate,
+              sedentaryDurationSeconds: sedentarySeconds,
+              activeDurationSeconds: activeSeconds,
+              highlyActiveDurationSeconds: highlyActiveSeconds,
+              walkingSeconds,
+              runningSeconds,
+              wheelchairPushingSeconds: wheelchairSeconds,
+              totalMet,
+              averageMet,
+              peakMet,
+              averageMotionIntensity,
+              maxMotionIntensity,
+              totalActiveKilocalories: totalCalories,
+              totalSteps,
+              totalPushes,
+              totalDistance,
+              totalPushDistance,
+              totalEpochs: epochs.length,
+            });
+            
+            console.log(`[Garmin Webhook] Created epochs aggregate for ${device.userId}, date: ${firstEpochDate} (${epochs.length} epochs)`);
+          }
+          
+        } catch (epochError: any) {
+          console.error(`❌ [Garmin Webhook] Error processing epochs:`, epochError.message);
+          // Queue for retry
+          await db.insert(webhookFailureQueue).values({
+            webhookType: 'epochs',
+            userId: device.userId,
+            payload: { epochs },
+            error: epochError.message,
+            nextRetryAt: new Date(Date.now() + 30 * 60 * 1000),
+          }).catch(queueError => {
+            console.error(`❌ Failed to queue epochs for retry:`, queueError);
+          });
+        }
+      }
+      
+      console.log(`[Garmin Webhook] Finished processing ${epochs.length} epochs`);
+      
+    } catch (error: any) {
+      console.error('[Garmin Webhook] Epochs handler error:', error);
+      // HTTP 200 already sent to Garmin
+    }
+  });
+  // HEALTH - Health Snapshots (real-time multi-metric health data)
+  // 5-second interval snapshots of HR, stress, SpO2, respiration during activities
+  garminWebhook("health-snapshot", async (req: Request, res: Response) => {
+    try {
+      console.log('[Garmin Webhook] Received health-snapshot push:', JSON.stringify(req.body).slice(0, 500));
+      
+      // IMPORTANT: Return 200 immediately to Garmin before processing
+      res.status(200).json({ success: true });
+      
+      // Process health snapshots asynchronously (non-blocking)
+      const snapshots = Array.isArray(req.body) ? req.body : [req.body];
+      
+      if (snapshots.length === 0 || !Array.isArray(snapshots)) {
+        console.log('[Garmin Webhook] No health snapshot data in payload');
+        return;
+      }
+      
+      console.log(`[Garmin Webhook] Processing ${snapshots.length} health snapshots`);
+      
+      // Find user by recent activity
+      const devices = await db.query.connectedDevices.findMany({
+        where: eq(connectedDevices.deviceType, 'garmin'),
+      });
+      
+      if (devices.length === 0) {
+        console.warn('[Garmin Webhook] No active Garmin devices found for health snapshots');
+        return;
+      }
+      
+      // Process each snapshot
+      for (const snapshot of snapshots) {
+        try {
+          // Get date from snapshot
+          const snapshotDate = snapshot.calendarDate || 
+            new Date((snapshot.startTimeInSeconds || 0) * 1000).toISOString().split('T')[0];
+          
+          // Find user (match to device)
+          let userId: string | undefined;
+          for (const device of devices) {
+            const recentRun = await db.query.runs.findFirst({
+              where: and(
+                eq(runs.userId, device.userId),
+                gte(runs.completedAt, new Date((snapshot.startTimeInSeconds || 0) * 1000 - 24 * 60 * 60 * 1000)),
+                lte(runs.completedAt, new Date((snapshot.startTimeInSeconds || 0) * 1000 + 24 * 60 * 60 * 1000))
+              ),
+              limit: 1,
+            });
+            
+            if (recentRun) {
+              userId = device.userId;
+              break;
+            }
+          }
+          
+          if (!userId) {
+            console.warn(`⚠️ [Garmin Webhook] Could not map health snapshot to user`);
+            continue;
+          }
+          
+          console.log(`[Garmin Webhook] Processing health snapshot for user ${userId}, date: ${snapshotDate}`);
+          
+          // Extract metrics from summaries
+          let hrData = { min: 0, max: 0, avg: 0, epochs: {} };
+          let stressData = { min: 0, max: 0, avg: 0, epochs: {} };
+          let spo2Data = { min: 0, max: 0, avg: 0, epochs: {} };
+          let respData = { min: 0, max: 0, avg: 0, epochs: {} };
+          
+          if (snapshot.summaries && Array.isArray(snapshot.summaries)) {
+            for (const summary of snapshot.summaries) {
+              switch (summary.summaryType?.toLowerCase()) {
+                case 'heart_rate':
+                  hrData = {
+                    min: summary.minValue || 0,
+                    max: summary.maxValue || 0,
+                    avg: summary.avgValue || 0,
+                    epochs: summary.epochSummaries || {},
+                  };
+                  break;
+                case 'stress':
+                  stressData = {
+                    min: summary.minValue || 0,
+                    max: summary.maxValue || 0,
+                    avg: summary.avgValue || 0,
+                    epochs: summary.epochSummaries || {},
+                  };
+                  break;
+                case 'spo2':
+                  spo2Data = {
+                    min: summary.minValue || 0,
+                    max: summary.maxValue || 0,
+                    avg: summary.avgValue || 0,
+                    epochs: summary.epochSummaries || {},
+                  };
+                  break;
+                case 'respiration':
+                  respData = {
+                    min: summary.minValue || 0,
+                    max: summary.maxValue || 0,
+                    avg: summary.avgValue || 0,
+                    epochs: summary.epochSummaries || {},
+                  };
+                  break;
+              }
+            }
+          }
+          
+          // Insert or update health snapshot
+          const existing = await db.query.garminHealthSnapshots.findFirst({
+            where: eq(garminHealthSnapshots.summaryId, snapshot.summaryId),
+          });
+          
+          if (existing) {
+            await db
+              .update(garminHealthSnapshots)
+              .set({
+                hrMinValue: hrData.min,
+                hrMaxValue: hrData.max,
+                hrAvgValue: hrData.avg,
+                hrEpochs: hrData.epochs,
+                stressMinValue: stressData.min,
+                stressMaxValue: stressData.max,
+                stressAvgValue: stressData.avg,
+                stressEpochs: stressData.epochs,
+                spo2MinValue: spo2Data.min,
+                spo2MaxValue: spo2Data.max,
+                spo2AvgValue: spo2Data.avg,
+                spo2Epochs: spo2Data.epochs,
+                respMinValue: respData.min,
+                respMaxValue: respData.max,
+                respAvgValue: respData.avg,
+                respEpochs: respData.epochs,
+                rawData: snapshot,
+              })
+              .where(eq(garminHealthSnapshots.id, existing.id));
+            
+            console.log(`[Garmin Webhook] Updated health snapshot ${snapshot.summaryId}`);
+          } else {
+            await db.insert(garminHealthSnapshots).values({
+              userId,
+              summaryId: snapshot.summaryId,
+              snapshotDate,
+              startTimeInSeconds: snapshot.startTimeInSeconds,
+              durationInSeconds: snapshot.durationInSeconds,
+              startTimeOffsetInSeconds: snapshot.startTimeOffsetInSeconds,
+              
+              hrMinValue: hrData.min,
+              hrMaxValue: hrData.max,
+              hrAvgValue: hrData.avg,
+              hrEpochs: hrData.epochs,
+              
+              stressMinValue: stressData.min,
+              stressMaxValue: stressData.max,
+              stressAvgValue: stressData.avg,
+              stressEpochs: stressData.epochs,
+              
+              spo2MinValue: spo2Data.min,
+              spo2MaxValue: spo2Data.max,
+              spo2AvgValue: spo2Data.avg,
+              spo2Epochs: spo2Data.epochs,
+              
+              respMinValue: respData.min,
+              respMaxValue: respData.max,
+              respAvgValue: respData.avg,
+              respEpochs: respData.epochs,
+              
+              rawData: snapshot,
+              expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Keep 30 days
+            });
+            
+            console.log(`[Garmin Webhook] Created health snapshot ${snapshot.summaryId} (HR: ${hrData.avg.toFixed(1)}, SpO2: ${spo2Data.avg.toFixed(1)}%)`);
+          }
+          
+        } catch (snapshotError: any) {
+          console.error(`❌ [Garmin Webhook] Error processing health snapshot:`, snapshotError.message);
+          // Queue for retry
+          await db.insert(webhookFailureQueue).values({
+            webhookType: 'health-snapshot',
+            payload: snapshot,
+            error: snapshotError.message,
+            nextRetryAt: new Date(Date.now() + 30 * 60 * 1000),
+          }).catch(queueError => {
+            console.error(`❌ Failed to queue health snapshot for retry:`, queueError);
+          });
+        }
+      }
+      
+      console.log(`[Garmin Webhook] Finished processing ${snapshots.length} health snapshots`);
+      
+    } catch (error: any) {
+      console.error('[Garmin Webhook] Health snapshot handler error:', error);
+      // HTTP 200 already sent to Garmin
+    }
+  });
+  // HEALTH - User Metrics (VO2 Max, Fitness Age)
+  // Key fitness indicators tracked by Garmin's algorithms
+  garminWebhook("user-metrics", async (req: Request, res: Response) => {
+    try {
+      console.log('[Garmin Webhook] Received user-metrics push:', JSON.stringify(req.body).slice(0, 1000));
+      
+      // IMPORTANT: Return 200 immediately to Garmin before processing
+      res.status(200).json({ success: true });
+      
+      // Process user metrics data asynchronously (non-blocking)
+      const metricsData = Array.isArray(req.body) ? req.body : (req.body.userMetrics || []);
+      
+      if (metricsData.length === 0) {
+        console.log('[Garmin Webhook] No user metrics data in payload');
+        return;
+      }
+      
+      console.log(`[Garmin Webhook] Processing ${metricsData.length} user metrics records`);
+      
+      // Find users
+      const devices = await db.query.connectedDevices.findMany({
+        where: eq(connectedDevices.deviceType, 'garmin'),
+      });
+      
+      if (devices.length === 0) {
+        console.warn('[Garmin Webhook] No active Garmin devices found for user metrics');
+        return;
+      }
+      
+      for (const metrics of metricsData) {
+        try {
+          const date = metrics.calendarDate || new Date().toISOString().split('T')[0];
+          
+          // Find user by recent activity matching date
+          let userId: string | undefined;
+          for (const device of devices) {
+            const recentRun = await db.query.runs.findFirst({
+              where: and(
+                eq(runs.userId, device.userId),
+                gte(runs.completedAt, new Date(`${date}T00:00:00`)),
+                lte(runs.completedAt, new Date(`${date}T23:59:59`))
+              ),
+              limit: 1,
+            });
+            
+            if (recentRun) {
+              userId = device.userId;
+              break;
+            }
+          }
+          
+          if (!userId) {
+            console.warn(`⚠️ [Garmin Webhook] Could not map user metrics to user for date ${date}`);
+            continue;
+          }
+          
+          console.log(`[Garmin Webhook] Processing user metrics for user ${userId}, date: ${date}`);
+          
+          // Determine VO2 Max category
+          let vo2MaxCategory = 'AVERAGE';
+          const vo2 = metrics.vo2Max || 0;
+          
+          // Categories based on age/gender (using general adult categories)
+          // Excellent: > 40, Good: 30-40, Average: 20-30, Below Average: < 20
+          if (vo2 > 40) {
+            vo2MaxCategory = 'EXCELLENT';
+          } else if (vo2 > 30) {
+            vo2MaxCategory = 'GOOD';
+          } else if (vo2 > 20) {
+            vo2MaxCategory = 'AVERAGE';
+          } else {
+            vo2MaxCategory = 'BELOW_AVERAGE';
+          }
+          
+          // Determine fitness age category
+          let fitnessAgeCategory = 'NORMAL';
+          const fitnessAge = metrics.fitnessAge || 0;
+          const chronologicalAge = 30; // Default assumption if not available
+          const ageDifference = fitnessAge - chronologicalAge;
+          
+          if (ageDifference < -10) {
+            fitnessAgeCategory = 'EXCELLENT'; // 10+ years younger
+          } else if (ageDifference < -5) {
+            fitnessAgeCategory = 'GOOD'; // 5-10 years younger
+          } else if (ageDifference <= 5) {
+            fitnessAgeCategory = 'NORMAL'; // ±5 years
+          } else {
+            fitnessAgeCategory = 'BELOW_AVERAGE'; // 5+ years older
+          }
+          
+          // Store user metrics
+          const metricsFields = {
+            userId,
+            date,
+            vo2Max: metrics.vo2Max,
+            vo2MaxCategory,
+            fitnessAge: metrics.fitnessAge,
+            fitnessAgeCategory,
+            isEnhanced: metrics.enhanced || false,
+            summaryId: metrics.summaryId,
+            rawData: metrics,
+            syncedAt: new Date(),
+          };
+          
+          // Try upsert - if conflict, update existing
+          const existing = await db.query.garminWellnessMetrics.findFirst({
+            where: and(
+              eq(garminWellnessMetrics.userId, userId),
+              eq(garminWellnessMetrics.date, date)
+            )
+          });
+          
+          if (existing) {
+            await db.update(garminWellnessMetrics)
+              .set(metricsFields)
+              .where(eq(garminWellnessMetrics.id, existing.id));
+            console.log(`[Garmin Webhook] Updated user metrics for ${date}: VO2Max=${metrics.vo2Max} (${vo2MaxCategory}), FitnessAge=${metrics.fitnessAge} (${fitnessAgeCategory})`);
+          } else {
+            await db.insert(garminWellnessMetrics).values(metricsFields);
+            console.log(`[Garmin Webhook] Created user metrics for ${date}: VO2Max=${metrics.vo2Max} (${vo2MaxCategory}), FitnessAge=${metrics.fitnessAge} (${fitnessAgeCategory})`);
+          }
+          
+        } catch (metricsError: any) {
+          console.error(`❌ [Garmin Webhook] Error processing user metrics:`, metricsError.message);
+          // Queue for retry
+          await db.insert(webhookFailureQueue).values({
+            webhookType: 'user-metrics',
+            payload: metrics,
+            error: metricsError.message,
+            nextRetryAt: new Date(Date.now() + 30 * 60 * 1000),
+          }).catch(queueError => {
+            console.error(`❌ Failed to queue user metrics for retry:`, queueError);
+          });
+        }
+      }
+      
+      console.log(`[Garmin Webhook] Finished processing ${metricsData.length} user metrics records`);
+      
+    } catch (error: any) {
+      console.error('[Garmin Webhook] User metrics handler error:', error);
+      // HTTP 200 already sent to Garmin
+    }
+  });
+  // HEALTH - Skin Temperature (body temperature monitoring)
+  // 5-minute interval readings throughout the day
+  garminWebhook("skin-temperature", async (req: Request, res: Response) => {
+    try {
+      console.log('[Garmin Webhook] Received skin temperature push:', JSON.stringify(req.body).slice(0, 1000));
+      
+      // IMPORTANT: Return 200 immediately to Garmin before processing
+      res.status(200).json({ success: true });
+      
+      // Process skin temperature data asynchronously (non-blocking)
+      const temperatureData = Array.isArray(req.body) ? req.body : (req.body.skinTemperature || []);
+      
+      if (temperatureData.length === 0) {
+        console.log('[Garmin Webhook] No skin temperature data in payload');
+        return;
+      }
+      
+      console.log(`[Garmin Webhook] Processing ${temperatureData.length} skin temperature records`);
+      
+      // Find users
+      const devices = await db.query.connectedDevices.findMany({
+        where: eq(connectedDevices.deviceType, 'garmin'),
+      });
+      
+      if (devices.length === 0) {
+        console.warn('[Garmin Webhook] No active Garmin devices found for skin temperature');
+        return;
+      }
+      
+      for (const temp of temperatureData) {
+        try {
+          const date = temp.calendarDate || new Date((temp.startTimeInSeconds || 0) * 1000).toISOString().split('T')[0];
+          
+          // Find user by recent activity matching date
+          let userId: string | undefined;
+          for (const device of devices) {
+            const recentRun = await db.query.runs.findFirst({
+              where: and(
+                eq(runs.userId, device.userId),
+                gte(runs.completedAt, new Date(`${date}T00:00:00`)),
+                lte(runs.completedAt, new Date(`${date}T23:59:59`))
+              ),
+              limit: 1,
+            });
+            
+            if (recentRun) {
+              userId = device.userId;
+              break;
+            }
+          }
+          
+          if (!userId) {
+            console.warn(`⚠️ [Garmin Webhook] Could not map skin temperature to user for date ${date}`);
+            continue;
+          }
+          
+          console.log(`[Garmin Webhook] Processing skin temperature for user ${userId}, date: ${date}`);
+          
+          // Garmin sends avgDeviationCelsius (deviation from baseline)
+          // Baseline human skin temp is ~33-34°C
+          const baselineTemp = 33.5;
+          const deviationValue = temp.avgDeviationCelsius || 0;
+          const calculatedTemp = baselineTemp + deviationValue;
+          
+          // Determine trend: deviation shows if trending warmer or cooler
+          let trendType = 'STABLE';
+          if (deviationValue > 0.3) {
+            trendType = 'WARMING'; // Skin warming up
+          } else if (deviationValue < -0.3) {
+            trendType = 'COOLING'; // Skin cooling down
+          }
+          
+          // Insert skin temperature record
+          const existing = await db.query.garminSkinTemperature.findFirst({
+            where: and(
+              eq(garminSkinTemperature.userId, userId),
+              eq(garminSkinTemperature.date, date)
+            )
+          });
+          
+          const tempFields = {
+            userId,
+            date,
+            avgTemperature: calculatedTemp,
+            minTemperature: Math.min(calculatedTemp, baselineTemp - 1),
+            maxTemperature: Math.max(calculatedTemp, baselineTemp + 1),
+            temperatureTrendType: trendType,
+            temperatureReadings: { avgDeviation: deviationValue, baselineTemp },
+            summaryId: temp.summaryId,
+            startTimeInSeconds: temp.startTimeInSeconds,
+            startTimeOffsetInSeconds: temp.startTimeOffsetInSeconds,
+            rawData: temp,
+            syncedAt: new Date(),
+          };
+          
+          if (existing) {
+            await db.update(garminSkinTemperature)
+              .set(tempFields)
+              .where(eq(garminSkinTemperature.id, existing.id));
+            console.log(`[Garmin Webhook] Updated skin temperature for ${date}: deviation=${deviationValue.toFixed(2)}°C (calculated=${calculatedTemp.toFixed(1)}°C), trend=${trendType}`);
+          } else {
+            await db.insert(garminSkinTemperature).values(tempFields);
+            console.log(`[Garmin Webhook] Created skin temperature for ${date}: deviation=${deviationValue.toFixed(2)}°C (calculated=${calculatedTemp.toFixed(1)}°C), trend=${trendType}`);
+          }
+          
+        } catch (tempError: any) {
+          console.error(`❌ [Garmin Webhook] Error processing skin temperature:`, tempError.message);
+          // Queue for retry
+          await db.insert(webhookFailureQueue).values({
+            webhookType: 'skin-temperature',
+            payload: temp,
+            error: tempError.message,
+            nextRetryAt: new Date(Date.now() + 30 * 60 * 1000),
+          }).catch(queueError => {
+            console.error(`❌ Failed to queue skin temperature for retry:`, queueError);
+          });
+        }
+      }
+      
+      console.log(`[Garmin Webhook] Finished processing ${temperatureData.length} skin temperature records`);
+      
+    } catch (error: any) {
+      console.error('[Garmin Webhook] Skin temperature handler error:', error);
+      // HTTP 200 already sent to Garmin
+    }
+  });
   garminWebhook("moveiq", garminAckHandler);
   garminWebhook("manually-updated-activities", garminAckHandler);
   garminWebhook("activity-files", garminAckHandler);
-  garminWebhook("menstrual-cycle", garminAckHandler);
+  // HEALTH - Menstrual Cycle & Pregnancy Tracking
+  // Sensitive women's health data: menstrual cycle phases and pregnancy tracking
+  garminWebhook("menstrual-cycle", async (req: Request, res: Response) => {
+    try {
+      console.log('[Garmin Webhook] Received menstrual-cycle push:', JSON.stringify(req.body).slice(0, 500));
+      
+      // IMPORTANT: Return 200 immediately to Garmin before processing
+      res.status(200).json({ success: true });
+      
+      // Process cycle data asynchronously (non-blocking)
+      const cycleData = Array.isArray(req.body) ? req.body : (req.body.menstrualCycles || []);
+      
+      if (cycleData.length === 0) {
+        console.log('[Garmin Webhook] No menstrual cycle data in payload');
+        return;
+      }
+      
+      console.log(`[Garmin Webhook] Processing ${cycleData.length} menstrual cycle records`);
+      
+      // Find users
+      const devices = await db.query.connectedDevices.findMany({
+        where: eq(connectedDevices.deviceType, 'garmin'),
+      });
+      
+      if (devices.length === 0) {
+        console.warn('[Garmin Webhook] No active Garmin devices found for menstrual cycle');
+        return;
+      }
+      
+      for (const cycle of cycleData) {
+        try {
+          const date = cycle.periodStartDate || new Date().toISOString().split('T')[0];
+          
+          // Find user by recent activity matching period start date
+          let userId: string | undefined;
+          for (const device of devices) {
+            const recentRun = await db.query.runs.findFirst({
+              where: and(
+                eq(runs.userId, device.userId),
+                gte(runs.completedAt, new Date(`${date}T00:00:00`)),
+                lte(runs.completedAt, new Date(new Date(`${date}T00:00:00`).getTime() + 30 * 24 * 60 * 60 * 1000)) // 30 days after
+              ),
+              limit: 1,
+            });
+            
+            if (recentRun) {
+              userId = device.userId;
+              break;
+            }
+          }
+          
+          if (!userId) {
+            console.warn(`⚠️ [Garmin Webhook] Could not map menstrual cycle to user for date ${date}`);
+            continue;
+          }
+          
+          console.log(`[Garmin Webhook] Processing menstrual cycle for user ${userId}, period start: ${date}`);
+          
+          // Map phase type to human-readable name
+          const phaseTypeMap: { [key: string]: string } = {
+            'FIRST_TRIMESTER': 'First Trimester',
+            'SECOND_TRIMESTER': 'Second Trimester',
+            'THIRD_TRIMESTER': 'Third Trimester',
+            'MENSTRUATION': 'Menstruation',
+            'FOLLICULAR': 'Follicular Phase',
+            'OVULATION': 'Ovulation',
+            'LUTEAL': 'Luteal Phase',
+            'POSTPARTUM': 'Postpartum Recovery',
+          };
+          
+          const phaseTypeName = phaseTypeMap[cycle.currentPhaseType] || cycle.currentPhaseType;
+          
+          // Determine cycle status
+          let cycleStatus = 'ACTIVE';
+          if (cycle.pregnancySnapshot) {
+            if (cycle.pregnancySnapshot.stopTracking) {
+              cycleStatus = 'STOPPED';
+            } else if (cycle.currentPhaseType?.includes('TRIMESTER')) {
+              cycleStatus = 'PREGNANT';
+            } else if (cycle.currentPhaseType === 'POSTPARTUM') {
+              cycleStatus = 'POSTPARTUM';
+            }
+          }
+          
+          // Store menstrual cycle data
+          const cycleFields = {
+            userId,
+            cycleStartDate: cycle.periodStartDate,
+            dayInCycle: cycle.dayInCycle,
+            periodLength: cycle.periodLength,
+            currentPhase: cycle.currentPhase,
+            currentPhaseType: phaseTypeName,
+            lengthOfCurrentPhase: cycle.lengthOfCurrentPhase,
+            daysUntilNextPhase: cycle.daysUntilNextPhase,
+            predictedCycleLength: cycle.predictedCycleLength,
+            cycleLength: cycle.cycleLength,
+            isPredictedCycle: cycle.isPredictedCycle,
+            cycleStatus,
+            summaryId: cycle.summaryId,
+            lastUpdatedAt: new Date(Math.min(cycle.lastUpdatedTimeInSeconds * 1000, Date.now())),
+            rawData: cycle,
+            syncedAt: new Date(),
+          };
+          
+          // If pregnancy data exists, add pregnancy-specific fields
+          if (cycle.pregnancySnapshot) {
+            const pregnancy = cycle.pregnancySnapshot;
+            
+            // Calculate current weeks of pregnancy
+            const pregnancyStartDate = new Date(cycle.pregnancySnapshot.pregnancyCycleStartDate);
+            const now = new Date();
+            const weeksOfPregnancy = Math.floor((now.getTime() - pregnancyStartDate.getTime()) / (7 * 24 * 60 * 60 * 1000));
+            
+            Object.assign(cycleFields, {
+              pregnancyStatus: 'ACTIVE',
+              pregnancyTitle: pregnancy.title,
+              originalDueDate: pregnancy.originalDueDate,
+              pregnancyDueDate: pregnancy.dueDate,
+              pregnancyStartDate: pregnancy.pregnancyCycleStartDate,
+              weeksOfPregnancy,
+              expectedDeliveryDate: pregnancy.dueDate,
+              deliveryDate: pregnancy.deliveryDate,
+              numberOfBabies: pregnancy.numOfBabies, // SINGLE, TWIN, etc.
+              hasExperiencedLoss: pregnancy.hasExperiencedLoss,
+              heightInCentimeters: pregnancy.weightGoalUserInput?.heightInCentimeters,
+              weightInGrams: pregnancy.weightGoalUserInput?.weightInGrams,
+              bloodGlucoseReadings: pregnancy.bloodGlucoseList || [],
+            });
+          }
+          
+          // Use a upsert pattern - update if exists for same cycle, create if new
+          // Key: user + cycle start date
+          const existingCycle = await db.query.garminWellnessMetrics.findFirst({
+            where: and(
+              eq(garminWellnessMetrics.userId, userId)
+            ),
+            orderBy: (table) => desc(table.createdAt),
+            limit: 1,
+          });
+          
+          if (existingCycle && existingCycle.cycleStartDate === cycle.periodStartDate) {
+            // Update existing cycle
+            await db.update(garminWellnessMetrics)
+              .set(cycleFields)
+              .where(eq(garminWellnessMetrics.id, existingCycle.id));
+            
+            if (cycle.pregnancySnapshot) {
+              console.log(`[Garmin Webhook] Updated pregnancy for user ${userId}: ${pregnancy.title}, ${weeksOfPregnancy} weeks, due ${pregnancy.dueDate}`);
+            } else {
+              console.log(`[Garmin Webhook] Updated cycle for user ${userId}: day ${cycle.dayInCycle} of ${cycle.cycleLength}, phase: ${phaseTypeName}`);
+            }
+          } else {
+            // Create new cycle record
+            await db.insert(garminWellnessMetrics).values(cycleFields);
+            
+            if (cycle.pregnancySnapshot) {
+              const pregnancy = cycle.pregnancySnapshot;
+              const weeksOfPregnancy = Math.floor((Date.now() - new Date(pregnancy.pregnancyCycleStartDate).getTime()) / (7 * 24 * 60 * 60 * 1000));
+              console.log(`[Garmin Webhook] Created pregnancy tracking for user ${userId}: ${pregnancy.title}, ${weeksOfPregnancy} weeks, due ${pregnancy.dueDate}`);
+            } else {
+              console.log(`[Garmin Webhook] Created cycle for user ${userId}: day ${cycle.dayInCycle} of ${cycle.cycleLength}, phase: ${phaseTypeName}`);
+            }
+          }
+          
+        } catch (cycleError: any) {
+          console.error(`❌ [Garmin Webhook] Error processing menstrual cycle:`, cycleError.message);
+          // Queue for retry
+          await db.insert(webhookFailureQueue).values({
+            webhookType: 'menstrual-cycle',
+            payload: cycle,
+            error: cycleError.message,
+            nextRetryAt: new Date(Date.now() + 30 * 60 * 1000),
+          }).catch(queueError => {
+            console.error(`❌ Failed to queue menstrual cycle for retry:`, queueError);
+          });
+        }
+      }
+      
+      console.log(`[Garmin Webhook] Finished processing ${cycleData.length} menstrual cycle records`);
+      
+    } catch (error: any) {
+      console.error('[Garmin Webhook] Menstrual cycle handler error:', error);
+      // HTTP 200 already sent to Garmin
+    }
+  });
 
   // ==========================================
   // END GARMIN WEBHOOK ENDPOINTS
@@ -6981,6 +9065,101 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Generate preview error:", error);
       res.status(500).json({ error: "Failed to generate preview" });
+    }
+  });
+
+  // ==================== HEALTH INSIGHTS ENDPOINTS ====================
+  
+  // HEALTH - Get today's health snapshot
+  app.get("/api/health/today", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { getTodaySnapshot } = await import('./health-insights-service');
+      const snapshot = await getTodaySnapshot(req.user.id);
+      res.json(snapshot);
+    } catch (error: any) {
+      console.error("Get today snapshot error:", error);
+      res.status(500).json({ error: "Failed to get health snapshot" });
+    }
+  });
+
+  // HEALTH - Get sleep details
+  app.get("/api/health/sleep", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { getSleepDetails } = await import('./health-insights-service');
+      const date = (req.query.date as string) || new Date().toISOString().split('T')[0];
+      const details = await getSleepDetails(req.user.id, date);
+      if (!details) {
+        return res.status(404).json({ error: "No sleep data for this date" });
+      }
+      res.json(details);
+    } catch (error: any) {
+      console.error("Get sleep details error:", error);
+      res.status(500).json({ error: "Failed to get sleep details" });
+    }
+  });
+
+  // HEALTH - Get recovery status
+  app.get("/api/health/recovery", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { getRecoveryStatus } = await import('./health-insights-service');
+      const status = await getRecoveryStatus(req.user.id);
+      res.json(status);
+    } catch (error: any) {
+      console.error("Get recovery status error:", error);
+      res.status(500).json({ error: "Failed to get recovery status" });
+    }
+  });
+
+  // HEALTH - Get daily wellness metrics
+  app.get("/api/health/daily", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { getDailyWellness } = await import('./health-insights-service');
+      const date = (req.query.date as string) || new Date().toISOString().split('T')[0];
+      const wellness = await getDailyWellness(req.user.id, date);
+      if (!wellness) {
+        return res.status(404).json({ error: "No wellness data for this date" });
+      }
+      res.json(wellness);
+    } catch (error: any) {
+      console.error("Get daily wellness error:", error);
+      res.status(500).json({ error: "Failed to get daily wellness" });
+    }
+  });
+
+  // HEALTH - Get health metrics
+  app.get("/api/health/metrics", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { getHealthMetrics } = await import('./health-insights-service');
+      const metrics = await getHealthMetrics(req.user.id);
+      res.json(metrics);
+    } catch (error: any) {
+      console.error("Get health metrics error:", error);
+      res.status(500).json({ error: "Failed to get health metrics" });
+    }
+  });
+
+  // HEALTH - Get health insights
+  app.get("/api/health/insights", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { getHealthInsights } = await import('./health-insights-service');
+      const insights = await getHealthInsights(req.user.id);
+      res.json(insights);
+    } catch (error: any) {
+      console.error("Get health insights error:", error);
+      res.status(500).json({ error: "Failed to get health insights" });
+    }
+  });
+
+  // HEALTH - Get trend data
+  app.get("/api/health/trends", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { getTrendData } = await import('./health-insights-service');
+      const days = parseInt((req.query.days as string) || '7', 10);
+      const trends = await getTrendData(req.user.id, days);
+      res.json(trends);
+    } catch (error: any) {
+      console.error("Get trend data error:", error);
+      res.status(500).json({ error: "Failed to get trend data" });
     }
   });
 

@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { storage, ConnectedDevice } from './storage';
 import { getGarminComprehensiveWellness } from './garmin-service';
+import { processWebhookFailureQueue } from './webhook-processor';
 
 const SYNC_INTERVAL_MINUTES = 60;
 
@@ -120,16 +121,37 @@ async function runGarminSync(): Promise<void> {
 export function startScheduler(): void {
   console.log(`[Scheduler] Starting background scheduler (sync every ${SYNC_INTERVAL_MINUTES} minutes)`);
   
+  // Garmin wellness data sync (every 60 minutes)
   cron.schedule(`*/${SYNC_INTERVAL_MINUTES} * * * *`, () => {
     runGarminSync();
   });
+  console.log('[Scheduler] Garmin wellness sync scheduled');
   
-  console.log('[Scheduler] Garmin sync scheduled');
+  // Webhook failure queue processor (every 5 minutes)
+  cron.schedule('*/5 * * * *', () => {
+    console.log('[Scheduler] Running webhook failure queue processor...');
+    processWebhookFailureQueue().then(result => {
+      if (result.retried > 0 || result.failed > 0) {
+        console.log(`[Scheduler] Webhook queue: ${result.retried} retried, ${result.failed} failed`);
+      }
+    }).catch(error => {
+      console.error('[Scheduler] Webhook queue processor error:', error);
+    });
+  });
+  console.log('[Scheduler] Webhook failure queue processor scheduled (every 5 minutes)');
   
+  // Run initial syncs after delay
   setTimeout(() => {
     console.log('[Scheduler] Running initial Garmin sync in 30 seconds...');
     runGarminSync();
   }, 30000);
+  
+  setTimeout(() => {
+    console.log('[Scheduler] Running initial webhook queue check in 60 seconds...');
+    processWebhookFailureQueue().catch(error => {
+      console.error('[Scheduler] Initial webhook queue check failed:', error);
+    });
+  }, 60000);
 }
 
 export async function triggerManualSync(userId: string): Promise<SyncResult | null> {
