@@ -3158,7 +3158,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 averageSpeedInMetersPerSecond: activity.averageSpeedInMetersPerSecond,
                 maxSpeedInMetersPerSecond: activity.maxSpeedInMetersPerSecond,
                 averagePaceInMinutesPerKilometer: activity.averagePaceInMinutesPerKilometer,
-                distanceInMeters: activity.distanceInMeters,
                 totalElevationGainInMeters: activity.totalElevationGainInMeters,
                 totalElevationLossInMeters: activity.totalElevationLossInMeters,
                 activeKilocalories: activity.activeKilocalories,
@@ -3860,13 +3859,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('[Garmin Webhook] HRV handler error:', error);
       // HTTP 200 already sent to Garmin
-    }
-  });
-      
-      res.status(200).json({ success: true });
-    } catch (error) {
-      console.error('[Garmin Webhook] HRV error:', error);
-      res.status(200).json({ success: true });
     }
   });
 

@@ -191,6 +191,20 @@ export const runs = pgTable("runs", {
   updatedAt: timestamp("updated_at").defaultNow(), // When record was last updated
 });
 
+// Activity Merge Log table - tracks merged runs from different sources
+export const activityMergeLog = pgTable("activity_merge_log", {
+  id: text("id").primaryKey().default(sql`gen_random_uuid()::text`),
+  aiRunCoachRunId: varchar("ai_run_coach_run_id").notNull().references(() => runs.id),
+  garminActivityId: varchar("garmin_activity_id").notNull(),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  mergeScore: real("merge_score").notNull(), // 0-100 confidence score
+  matchedByTimeDistance: boolean("matched_by_time_distance").default(true),
+  matchedByActivityType: boolean("matched_by_activity_type").default(true),
+  matchedByDuration: boolean("matched_by_duration").default(true),
+  mergedAt: timestamp("merged_at").notNull().defaultNow(),
+  mergeDetails: jsonb("merge_details"), // Store detailed match criteria
+});
+
 // Goals table
 export const goals = pgTable("goals", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1255,6 +1269,7 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type Run = typeof runs.$inferSelect;
 export type InsertRun = z.infer<typeof insertRunSchema>;
+export type ActivityMergeLog = typeof activityMergeLog.$inferSelect;
 export type Route = typeof routes.$inferSelect;
 export type InsertRoute = z.infer<typeof insertRouteSchema>;
 export type Goal = typeof goals.$inferSelect;

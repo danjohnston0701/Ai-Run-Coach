@@ -4,7 +4,7 @@
  * Handles Garmin OAuth scopes, permission management, and re-authorization flows
  */
 
-import { db } from './storage';
+import { db } from './db';
 import { connectedDevices } from '../shared/schema';
 import { eq } from 'drizzle-orm';
 import axios from 'axios';

@@ -5,7 +5,7 @@
  * for the Health Insights tab in the mobile app.
  */
 
-import { db } from './storage';
+import { db } from './db';
 import { garminWellnessMetrics, runs } from '../shared/schema';
 import { eq, and, gte, desc } from 'drizzle-orm';
 
