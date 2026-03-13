@@ -27,7 +27,7 @@ import live.airuncoach.airuncoach.viewmodel.GarminPermissionsViewModel
 
 data class PermissionCategory(
     val title: String,
-    val icon: androidx.compose.material.icons.Icons,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
     val description: String,
     val permissions: List<PermissionItem>
 )
