@@ -234,7 +234,46 @@ class RunTrackingService : Service(), SensorEventListener {
         // ACTIVE RECOVERY / SHAKE-OUT
         "recovery_arm_shakeout",     // Drop arms and shake them out for 10 seconds
         "recovery_shoulder_roll",    // Roll shoulders backward 5 times to release tension
-        "recovery_hand_flex"         // Open and close fists, wiggle fingers to release tension
+        "recovery_hand_flex",        // Open and close fists, wiggle fingers to release tension
+        
+        // PACING & EFFORT MANAGEMENT
+        "pacing_negative_split",     // Run second half faster than first half
+        "pacing_even_distribution",  // Maintain steady effort throughout, avoid front-loading
+        "pacing_surge_control",      // Control surges, hold back 5-10% energy for the end
+        "pacing_heart_rate",         // Keep HR consistent, avoid spiking above threshold
+        "pacing_perceived_effort",   // Rate effort 1-10, aim for 7-8 not maxing out early
+        
+        // HYDRATION & FUELING
+        "hydration_early_sipping",   // Sip water early and often, don't wait until thirsty
+        "hydration_swallow_frequency", // Swallow small amounts every 5-10 minutes
+        "hydration_mouth_rinse",     // Rinse mouth to simulate fluid intake, reduces dry mouth feeling
+        "fueling_energy_timing",     // Take energy gels/carbs at 45-60 minute mark
+        "fueling_stomach_settling",  // Slow pace for 3-5 minutes after fueling to aid digestion
+        
+        // STRIDE & EFFICIENCY
+        "stride_length_control",     // Don't overstride, maintain natural stride length
+        "stride_frequency_consistency", // Keep cadence steady, avoid erratic step patterns
+        "stride_push_off_power",      // Push hard off ground, don't shuffle or shuffle
+        
+        // HEART RATE & INTENSITY ZONES
+        "hr_zone_awareness",         // Monitor which zone you're in, adjust intensity
+        "hr_recovery_focus",         // Deliberately slow down to recover between efforts
+        "hr_threshold_push",         // Build lactate threshold by running at zone 4 intensity
+        
+        // TERRAIN ADAPTABILITY
+        "terrain_road_impact",       // Road running: lighter foot strike, more bounce
+        "terrain_trail_focus",       // Trail running: short steps, look 3-5 feet ahead
+        "terrain_grass_power",       // Grass: use more power in push-off, less impact
+        
+        // WEATHER ADAPTATION
+        "weather_heat_management",   // Hot day: ease pace, focus on hydration and cooling
+        "weather_cold_preparation",  // Cold: warm up longer, protect extremities
+        "weather_wind_strategy",     // Run into wind first, use tailwind for finishing
+        
+        // BODY AWARENESS & SIGNALS
+        "body_scan_check",           // Quick scan: any niggles, tight areas, asymmetries
+        "body_injury_prevention",    // Feel pain signals early, adjust technique or slow down
+        "body_feedback_integration"  // What worked today? Remember successful strategies
     )
     private var techniqueRotationIndex = 0
     private val usedTechniqueCategories = mutableSetOf<String>()
