@@ -45,15 +45,15 @@ The system will automatically:
 
 Your AI Coach now supports **7 authentic English accents** via AWS Polly Neural:
 
-| Accent | Language | Male Voice | Female Voice |
-|--------|----------|-----------|--------------|
-| **British** | en-GB | Brian | Amy |
-| **American** | en-US | Matthew | Joanna |
-| **Australian** | en-AU | Russell | Olivia |
-| **Irish** | en-IE | Seán | Niamh |
-| **South African** | en-ZA | - | Ayanda |
-| **Indian** | en-IN | - | Kajal |
-| **New Zealand** | en-NZ | Russell | Aria |
+| Accent | Language | Male Voice | Female Voice | Notes |
+|--------|----------|-----------|--------------|-------|
+| **British** | en-GB | Brian | Amy | |
+| **American** | en-US | Matthew | Joanna | |
+| **Australian** | en-AU | Stephen | Olivia | Russell is Standard-only (not Neural) |
+| **Irish** | en-IE | Sean | Niamh | |
+| **South African** | en-ZA | Ayanda | Ayanda | Only one Neural voice available |
+| **Indian** | en-IN | Kajal | Kajal | Only one Neural voice available |
+| **New Zealand** | en-NZ | Aria | Aria | No male Neural NZ voice exists |
 
 ## Features
 

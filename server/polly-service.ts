@@ -8,16 +8,22 @@
 
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 
-// NOTE: Not all Neural voices are available in all regions.
-// Irish (Sean, Niamh), South African (Ayanda), Indian (Kajal), NZ (Aria)
-// are only available in eu-west-1 and us-east-1.
-// Default to eu-west-1 for broadest Neural voice coverage.
+// Regional availability of Neural voices (as of 2024):
+//   us-east-1     — ALL neural voices supported (safest default)
+//   eu-west-1     — British, Irish, South African, Indian (NOT Aria/Olivia)
+//   ap-southeast-2 — Australian (Olivia), New Zealand (Aria) — NOT Irish/SA/Indian
+//
+// We use us-east-1 as the default to cover all accents in one region.
+// If AWS_REGION is explicitly set in env, that overrides (useful for latency tuning).
+const credentials = {
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
+};
+
+// Primary client — us-east-1 covers every neural voice we use
 const pollyClient = new PollyClient({
-  region: process.env.AWS_REGION || "eu-west-1",
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
-  },
+  region: process.env.AWS_REGION || "us-east-1",
+  credentials,
 });
 
 /**
@@ -32,32 +38,32 @@ export function mapAccentToPollyVoice(
 
   const voiceMap: Record<string, Record<string, string>> = {
     british: {
-      male: "Brian",      // British male
-      female: "Amy",      // British female
+      male: "Brian",      // en-GB Neural male
+      female: "Amy",      // en-GB Neural female
     },
     american: {
-      male: "Matthew",    // American male (neural)
-      female: "Joanna",   // American female (neural)
+      male: "Matthew",    // en-US Neural male
+      female: "Joanna",   // en-US Neural female
     },
     australian: {
-      male: "Russell",    // Australian male
-      female: "Olivia",   // Australian female
+      male: "Stephen",    // en-AU Neural male (Russell is Standard-only, not Neural)
+      female: "Olivia",   // en-AU Neural female
     },
     irish: {
-      male: "Sean",       // Irish male
-      female: "Niamh",    // Irish female
+      male: "Sean",       // en-IE Neural male
+      female: "Niamh",    // en-IE Neural female
     },
     south_african: {
-      male: "Ayanda",     // South African (female voice, use for both)
-      female: "Ayanda",   // South African female
+      male: "Ayanda",     // en-ZA Neural (only one SA Neural voice)
+      female: "Ayanda",   // en-ZA Neural female
     },
     indian: {
-      male: "Kajal",      // Indian (female voice, use for both)
-      female: "Kajal",    // Indian female
+      male: "Kajal",      // en-IN Neural (only one IN Neural voice)
+      female: "Kajal",    // en-IN Neural female
     },
     new_zealand: {
-      male: "Russell",    // Use Australian male for NZ male
-      female: "Aria",     // New Zealand female
+      male: "Aria",       // en-NZ — no male Neural voice exists, Aria is gender-neutral enough
+      female: "Aria",     // en-NZ Neural female
     },
   };
 
@@ -224,11 +230,11 @@ export function getAvailableVoices(accent: string): {
   const voiceMap: Record<string, Record<string, string>> = {
     british: { male: "Brian", female: "Amy" },
     american: { male: "Matthew", female: "Joanna" },
-    australian: { male: "Russell", female: "Olivia" },
+    australian: { male: "Stephen", female: "Olivia" },
     irish: { male: "Sean", female: "Niamh" },
     south_african: { male: "Ayanda", female: "Ayanda" },
     indian: { male: "Kajal", female: "Kajal" },
-    new_zealand: { male: "Russell", female: "Aria" },
+    new_zealand: { male: "Aria", female: "Aria" },
   };
 
   return voiceMap[accent.toLowerCase()] || voiceMap.british;
