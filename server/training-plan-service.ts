@@ -266,6 +266,9 @@ export async function generateTrainingPlan(
       }) : undefined,
     };
 
+    // hasRunHistory must be declared before runnerProfileSection uses it
+    const hasRunHistory = recentRuns.length > 0;
+
     // Build personalized runner profile section  
     const runnerProfileSection = `
 Runner Profile (Personal Details):
@@ -298,7 +301,6 @@ Then adjust subsequent weeks based on performance.`}
 `;
 
     // Generate plan with OpenAI
-    const hasRunHistory = recentRuns.length > 0;
     const prompt = `You are an expert running coach. Generate a tailored ${weeksUntilTarget}-week training plan for a ${experienceLevel} runner preparing for a ${goalType} (${targetDistance}km).
 
 ${runnerProfileSection}
