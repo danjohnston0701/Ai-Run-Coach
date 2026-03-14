@@ -7717,6 +7717,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const coachName = body.coachName || user?.coachName || "AI Coach";
       const coachTone = body.coachTone || user?.coachTone || "energetic";
+      
+      // Calculate weather impact if weather data is available
+      let weatherImpactAnalysis: string | null = null;
+      if (body.weather) {
+        try {
+          const recentRuns = await db.query.runs.findMany({
+            where: eq(runs.userId, run.userId),
+            orderBy: desc(runs.completedAt),
+            limit: 30,
+          });
+          
+          if (recentRuns.length >= 3) {
+            const weatherImpactData = await calculateWeatherImpact(run.userId, recentRuns);
+            if (weatherImpactData && weatherImpactData.insights) {
+              const temp = body.weather.temp || body.weather.temperature;
+              const condition = body.weather.condition || 'clear';
+              const wind = body.weather.windSpeed || 0;
+              
+              let impact = '';
+              
+              // Analyze temperature impact
+              if (weatherImpactData.temperatureAnalysis) {
+                for (const bucket of weatherImpactData.temperatureAnalysis) {
+                  if (temp >= bucket.minTemp && temp <= bucket.maxTemp) {
+                    const improvement = bucket.improvement || 0;
+                    const slowdown = bucket.slowdown || 0;
+                    if (improvement > slowdown) {
+                      impact += `Temperature was favorable (+${improvement.toFixed(1)}% improvement likely). `;
+                    } else if (slowdown > improvement) {
+                      impact += `Temperature was challenging (-${slowdown.toFixed(1)}% slowdown observed). `;
+                    }
+                    break;
+                  }
+                }
+              }
+              
+              // Analyze weather condition impact
+              if (weatherImpactData.conditionAnalysis) {
+                for (const cond of weatherImpactData.conditionAnalysis) {
+                  if (cond.type.toLowerCase() === condition.toLowerCase()) {
+                    const improvement = cond.improvement || 0;
+                    const slowdown = cond.slowdown || 0;
+                    if (improvement > slowdown) {
+                      impact += `${condition} conditions were favorable (+${improvement.toFixed(1)}% improvement). `;
+                    } else if (slowdown > improvement) {
+                      impact += `${condition} conditions slowed you down (-${slowdown.toFixed(1)}% slower). `;
+                    }
+                    break;
+                  }
+                }
+              }
+              
+              // Analyze time of day impact
+              const hour = new Date().getHours();
+              if (weatherImpactData.timeOfDayAnalysis) {
+                for (const bucket of weatherImpactData.timeOfDayAnalysis) {
+                  if (hour >= bucket.hour && hour < bucket.hour + 1) {
+                    const improvement = bucket.improvement || 0;
+                    const slowdown = bucket.slowdown || 0;
+                    if (improvement > slowdown) {
+                      impact += `This time of day is your sweet spot (+${improvement.toFixed(1)}%). `;
+                    } else if (slowdown > improvement) {
+                      impact += `This time of day typically impacts your pace (-${slowdown.toFixed(1)}%). `;
+                    }
+                    break;
+                  }
+                }
+              }
+              
+              if (impact) {
+                weatherImpactAnalysis = impact.trim();
+              } else if (weatherImpactData.insights?.bestCondition) {
+                weatherImpactAnalysis = `Your best running conditions are: ${weatherImpactData.insights.bestCondition}. Today's weather was different, but you still performed well.`;
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Error calculating weather impact analysis:", err);
+          // Continue without weather impact - not critical
+        }
+      }
 
       // Build runData for the AI service (merge DB + request so we capture everything Android provides)
       // All struggle points from DB (includes isRelevant + userComment on each)
@@ -7833,7 +7914,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         nextRunSuggestion: String(ai.nextRunSuggestion || ""),
         goalsProgress: [],
         targetAchievementAnalysis: null,
-        weatherImpactAnalysis: null,
+        weatherImpactAnalysis,
         terrainAnalysis: String(ai.technicalAnalysis?.elevationPerformance || ai.technicalAnalysis?.paceAnalysis || ""),
         strugglePointsInsight: String(ai.strugglePointsInsight || (
           Array.isArray(body.relevantStrugglePoints) && body.relevantStrugglePoints.length
