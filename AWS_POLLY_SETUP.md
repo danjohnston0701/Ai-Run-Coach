@@ -23,14 +23,15 @@ Add these to your **Replit Secrets** (or `.env` file for local development):
 ```
 AWS_ACCESS_KEY_ID=your_access_key_id_here
 AWS_SECRET_ACCESS_KEY=your_secret_access_key_here
-AWS_REGION=ap-southeast-2
+AWS_REGION=eu-west-1
 ```
 
 **Region Options:**
-- `ap-southeast-2` (Australia - Sydney) ← Default, recommended for latency
-- `us-east-1` (US East)
-- `eu-west-1` (EU - Ireland)
-- `ap-south-1` (Asia Pacific - Mumbai)
+- `eu-west-1` (EU - Ireland) ← **Default, required for Irish/NZ/Indian/South African neural voices**
+- `us-east-1` (US East) — also supports all neural voices
+- `ap-southeast-2` (Australia - Sydney) — **does NOT support Irish, NZ, Indian, South African neural voices**
+
+> ⚠️ **Important:** The Irish (Sean, Niamh), New Zealand (Aria), South African (Ayanda), and Indian (Kajal) Neural voices are only available in `eu-west-1` and `us-east-1`. Using `ap-southeast-2` will cause these voices to fail and fall back to OpenAI.
 
 ### 3. Verify Setup
 

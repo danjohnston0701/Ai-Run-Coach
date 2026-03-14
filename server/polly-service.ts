@@ -8,9 +8,12 @@
 
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 
-// Initialize Polly client with ap-southeast-2 region
+// NOTE: Not all Neural voices are available in all regions.
+// Irish (Sean, Niamh), South African (Ayanda), Indian (Kajal), NZ (Aria)
+// are only available in eu-west-1 and us-east-1.
+// Default to eu-west-1 for broadest Neural voice coverage.
 const pollyClient = new PollyClient({
-  region: process.env.AWS_REGION || "ap-southeast-2",
+  region: process.env.AWS_REGION || "eu-west-1",
   credentials: {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",

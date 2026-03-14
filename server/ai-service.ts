@@ -1206,11 +1206,13 @@ export async function generateTTS(
   coachGender?: string
 ): Promise<Buffer> {
   // Try Polly first if configured
-  const { isPollyConfigured, synthesizeSpeech } = await import('./polly-service');
+  const { isPollyConfigured, synthesizeSpeech, mapAccentToPollyVoice } = await import('./polly-service');
   
   if (isPollyConfigured()) {
     try {
-      console.log(`[TTS] Using Polly Neural for accent: ${coachAccent}, gender: ${coachGender}`);
+      const pollyVoice = mapAccentToPollyVoice(coachAccent, coachGender);
+      const awsRegion = process.env.AWS_REGION || "ap-southeast-2";
+      console.log(`[TTS] Using Polly Neural — accent: ${coachAccent}, gender: ${coachGender}, voice: ${pollyVoice}, region: ${awsRegion}`);
       const buffer = await synthesizeSpeech(
         text,
         coachAccent,
@@ -1219,9 +1221,11 @@ export async function generateTTS(
       );
       return buffer;
     } catch (pollyError: any) {
-      console.warn(`[TTS] Polly synthesis failed, falling back to OpenAI:`, pollyError.message);
+      console.warn(`[TTS] Polly synthesis failed, falling back to OpenAI. accent: ${coachAccent}, voice: ${mapAccentToPollyVoice(coachAccent, coachGender)}, region: ${process.env.AWS_REGION || "ap-southeast-2"}, error:`, pollyError.message);
       // Fall through to OpenAI fallback
     }
+  } else {
+    console.warn(`[TTS] Polly not configured (missing AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY) — using OpenAI TTS`);
   }
 
   // Fallback to OpenAI gpt-4o-mini-tts
