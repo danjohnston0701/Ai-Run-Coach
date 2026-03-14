@@ -21,7 +21,7 @@ import kotlin.math.roundToInt
 @Composable
 fun RouteGeneratingLoadingScreen(
     distanceKm: Double,
-    coachName: String
+    coachName: String = "AI Coach"
 ) {
     var subtitleIndex by remember { mutableIntStateOf(0) }
     val subtitles = listOf(

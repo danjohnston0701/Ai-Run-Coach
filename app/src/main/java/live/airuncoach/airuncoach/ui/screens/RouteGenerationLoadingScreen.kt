@@ -26,7 +26,7 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RouteGenerationLoadingScreen(
-    coachName: String = "Coach Carter",
+    coachName: String = "AI Coach",
     targetDistance: Float = 5f
 ) {
     // Pulsing animation for the AI brain icon

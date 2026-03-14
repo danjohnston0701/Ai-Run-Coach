@@ -3,6 +3,7 @@
 package live.airuncoach.airuncoach.ui.screens
 
 import android.Manifest
+import android.content.Context
 import android.os.Build
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -24,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -34,9 +36,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.google.gson.Gson
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
 import live.airuncoach.airuncoach.domain.model.RunSetupConfig
+import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.util.RunConfigHolder
@@ -312,7 +316,16 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             
             // NEW: Route Generating Loading Screen
             composable("route_generating/{distanceKm}") { backStackEntry ->
+                val context = LocalContext.current
                 val distanceKm = backStackEntry.arguments?.getString("distanceKm")?.toDoubleOrNull() ?: 5.0
+                
+                // Get user's coach name from SharedPreferences
+                val sharedPrefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+                val gson = Gson()
+                val userJson = sharedPrefs.getString("user", null)
+                val user = if (userJson != null) gson.fromJson(userJson, User::class.java) else null
+                val coachName = user?.coachName ?: "AI Coach"
+                
                 // Get activity-scoped ViewModel (SAME instance as setup screen!)
                 val parentEntry = remember(backStackEntry) {
                     navController.getBackStackEntry(navController.graph.id)
@@ -325,7 +338,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 // Always show the loading screen content
                 RouteGeneratingLoadingScreen(
                     distanceKm = distanceKm,
-                    coachName = "Coach Carter"
+                    coachName = coachName
                 )
                 
                 // Auto-navigate when routes are ready OR if there's an error
