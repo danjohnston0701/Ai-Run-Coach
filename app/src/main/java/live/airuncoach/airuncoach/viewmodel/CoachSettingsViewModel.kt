@@ -71,8 +71,8 @@ class CoachSettingsViewModel(private val context: Context) : ViewModel() {
     val availableKmSplitIntervals = listOf(1, 2, 3, 5, 10)
 
     val availableAccents = listOf(
-        "British", "American", "Australian", "Irish", "Scottish", "New Zealand",
-        "South African", "Canadian", "Welsh", "Indian", "Caribbean", "Scandinavian"
+        "British", "American", "Australian", "Irish",
+        "New Zealand", "South African", "Indian"
     )
     val availableTones = listOf(
         CoachingTone("Energetic", "High energy, upbeat encouragement"),
