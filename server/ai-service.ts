@@ -2155,6 +2155,7 @@ export interface ComprehensiveRunAnalysis {
   recoveryAdvice: string;
   nextRunSuggestion: string;
   wellnessImpact: string;
+  weatherImpactAnalysis?: string; // Weather impact analysis based on historical data
   coachMotivationalMessage?: string;
   strugglePointsInsight?: string | null;
   technicalAnalysis: {
@@ -2175,13 +2176,14 @@ export async function generateComprehensiveRunAnalysis(params: {
   runData: any;
   garminActivity?: GarminActivityData;
   wellness?: GarminWellnessData;
+  weatherImpactAnalysis?: string; // Weather impact analysis from historical data
   previousRuns?: any[];
   userProfile?: { fitnessLevel?: string; age?: number; weight?: number };
   coachName: string;
   coachTone: string;
   coachAccent?: string;
 }): Promise<ComprehensiveRunAnalysis> {
-  const { runData, garminActivity, wellness, previousRuns, userProfile, coachName, coachTone, coachAccent } = params;
+  const { runData, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent } = params;
   
   // Build comprehensive prompt with all available data
   let prompt = `You are ${coachName}, an expert AI running coach with a ${coachTone} style. 
@@ -2317,6 +2319,17 @@ Analyze this run comprehensively using all available data from the runner's Garm
     }
   }
 
+  // Add weather impact analysis if available
+  if (weatherImpactAnalysis) {
+    prompt += `
+## WEATHER IMPACT ON THIS RUN:
+Based on the runner's historical data from ${previousRuns?.length || 'recent'} runs, here's how weather affected this run:
+${weatherImpactAnalysis}
+
+Acknowledge how weather conditions impacted performance in your analysis.
+`;
+  }
+
   // Add historical context if available
   if (previousRuns && previousRuns.length > 0) {
     prompt += `
@@ -2416,6 +2429,7 @@ Be specific, use the actual numbers from the data, and provide actionable insigh
       recoveryAdvice: parsed.recoveryAdvice || "Get adequate rest and hydration.",
       nextRunSuggestion: parsed.nextRunSuggestion || "An easy recovery run in 24-48 hours.",
       wellnessImpact: parsed.wellnessImpact || "Your wellness state supported this effort.",
+      weatherImpactAnalysis: weatherImpactAnalysis || parsed.weatherImpactAnalysis || undefined,
       technicalAnalysis: {
         paceAnalysis: parsed.technicalAnalysis?.paceAnalysis || "Pace data not available.",
         heartRateAnalysis: parsed.technicalAnalysis?.heartRateAnalysis || "Heart rate data not available.",
@@ -2442,6 +2456,7 @@ Be specific, use the actual numbers from the data, and provide actionable insigh
       recoveryAdvice: "Rest well and stay hydrated.",
       nextRunSuggestion: "Take a rest day or do an easy run.",
       wellnessImpact: "Unable to assess wellness impact.",
+      weatherImpactAnalysis: weatherImpactAnalysis || undefined,
       technicalAnalysis: {
         paceAnalysis: "Analysis unavailable.",
         heartRateAnalysis: "Analysis unavailable.",

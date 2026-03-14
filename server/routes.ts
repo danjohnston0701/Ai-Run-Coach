@@ -5684,6 +5684,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     // Group runs by temperature range
     const tempBuckets: Record<string, { totalPace: number; count: number }> = {};
+    
+    // Group runs by humidity range
+    const humidityBuckets: Record<string, { totalPace: number; count: number }> = {};
 
     runs.forEach(run => {
       const pace = parsePace(run.avgPace);
@@ -5730,6 +5733,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         tempBuckets[tempLabel].totalPace += pace;
         tempBuckets[tempLabel].count++;
       }
+      
+      // Humidity from weatherData
+      const humidity = run.weatherData?.humidity;
+      if (humidity !== undefined && humidity !== null) {
+        let humidityLabel = '';
+        if (humidity < 30) humidityLabel = 'Dry (<30%)';
+        else if (humidity < 50) humidityLabel = 'Low (30-50%)';
+        else if (humidity < 70) humidityLabel = 'Moderate (50-70%)';
+        else humidityLabel = 'High (>70%)';
+        
+        if (!humidityBuckets[humidityLabel]) {
+          humidityBuckets[humidityLabel] = { totalPace: 0, count: 0 };
+        }
+        humidityBuckets[humidityLabel].totalPace += pace;
+        humidityBuckets[humidityLabel].count++;
+      }
     });
 
     // Calculate pace vs average for each bucket
@@ -5773,15 +5792,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         paceVsAvg: calculatePaceVsAvg(bucket),
       }))
       .sort((a, b) => (b.paceVsAvg || 0) - (a.paceVsAvg || 0));
+    
+    // Build humidity analysis
+    const humidityAnalysis = Object.entries(humidityBuckets)
+      .filter(([_, b]) => b.count > 0)
+      .map(([label, bucket]) => ({
+        range: label,
+        label,
+        avgPace: Math.round(bucket.totalPace / bucket.count),
+        runCount: bucket.count,
+        paceVsAvg: calculatePaceVsAvg(bucket),
+      }))
+      .sort((a, b) => (b.paceVsAvg || 0) - (a.paceVsAvg || 0));
 
     // Find best and worst conditions
     const validTimeAnalysis = timeOfDayAnalysis.filter(t => t.paceVsAvg !== null);
     const validConditionAnalysis = conditionAnalysis.filter(c => c.paceVsAvg !== null);
+    const validHumidityAnalysis = humidityAnalysis.filter(h => h.paceVsAvg !== null);
     
     const bestTime = validTimeAnalysis.find(t => t.paceVsAvg! < 0);
     const worstTime = validTimeAnalysis.find(t => t.paceVsAvg! > 0);
     const bestCondition = validConditionAnalysis.find(c => c.paceVsAvg < 0);
     const worstCondition = validConditionAnalysis.find(c => c.paceVsAvg > 0);
+    const bestHumidity = validHumidityAnalysis.find(h => h.paceVsAvg! < 0);
+    const worstHumidity = validHumidityAnalysis.find(h => h.paceVsAvg! > 0);
 
     return {
       hasEnoughData: true,
@@ -5789,6 +5823,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       overallAvgPace: avgPaceSeconds,
       temperatureAnalysis,
       conditionAnalysis,
+      humidityAnalysis,
       timeOfDayAnalysis,
       insights: {
         bestCondition: bestCondition ? {
@@ -5800,6 +5835,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           label: worstCondition.condition,
           type: 'condition',
           slowdown: Math.abs(worstCondition.paceVsAvg).toFixed(0),
+        } : undefined,
+        bestHumidity: bestHumidity ? {
+          label: bestHumidity.label,
+          type: 'humidity',
+          improvement: Math.abs(bestHumidity.paceVsAvg).toFixed(1),
+        } : undefined,
+        worstHumidity: worstHumidity ? {
+          label: worstHumidity.label,
+          type: 'humidity',
+          slowdown: Math.abs(worstHumidity.paceVsAvg).toFixed(1),
         } : undefined,
       },
     };
@@ -7732,6 +7777,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const weatherImpactData = await calculateWeatherImpact(run.userId, recentRuns);
             if (weatherImpactData && weatherImpactData.insights) {
               const temp = body.weather.temp || body.weather.temperature;
+              const humidity = body.weather.humidity;
               const condition = body.weather.condition || 'clear';
               const wind = body.weather.windSpeed || 0;
               
@@ -7740,13 +7786,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
               // Analyze temperature impact
               if (weatherImpactData.temperatureAnalysis) {
                 for (const bucket of weatherImpactData.temperatureAnalysis) {
-                  if (temp >= bucket.minTemp && temp <= bucket.maxTemp) {
-                    const improvement = bucket.improvement || 0;
-                    const slowdown = bucket.slowdown || 0;
-                    if (improvement > slowdown) {
-                      impact += `Temperature was favorable (+${improvement.toFixed(1)}% improvement likely). `;
-                    } else if (slowdown > improvement) {
-                      impact += `Temperature was challenging (-${slowdown.toFixed(1)}% slowdown observed). `;
+                  if (temp && bucket.label) {
+                    if (bucket.label.includes('Cold') && temp < 5) {
+                      const improvement = bucket.paceVsAvg || 0;
+                      if (improvement < 0) {
+                        impact += `Cold temperature (+${Math.abs(improvement).toFixed(1)}% improvement for you). `;
+                      } else if (improvement > 0) {
+                        impact += `Cold temperature (-${improvement.toFixed(1)}% slower for you). `;
+                      }
+                      break;
+                    } else if (bucket.label.includes('Cool') && temp >= 5 && temp < 10) {
+                      const improvement = bucket.paceVsAvg || 0;
+                      if (improvement < 0) {
+                        impact += `Cool temperature (+${Math.abs(improvement).toFixed(1)}% improvement for you). `;
+                      } else if (improvement > 0) {
+                        impact += `Cool temperature (-${improvement.toFixed(1)}% slower for you). `;
+                      }
+                      break;
+                    } else if (bucket.label.includes('Mild') && temp >= 10 && temp < 15) {
+                      const improvement = bucket.paceVsAvg || 0;
+                      if (improvement < 0) {
+                        impact += `Mild temperature (+${Math.abs(improvement).toFixed(1)}% improvement for you). `;
+                      } else if (improvement > 0) {
+                        impact += `Mild temperature (-${improvement.toFixed(1)}% slower for you). `;
+                      }
+                      break;
+                    } else if (bucket.label.includes('Warm') && temp >= 15 && temp < 20) {
+                      const improvement = bucket.paceVsAvg || 0;
+                      if (improvement < 0) {
+                        impact += `Warm temperature (+${Math.abs(improvement).toFixed(1)}% improvement for you). `;
+                      } else if (improvement > 0) {
+                        impact += `Warm temperature (-${improvement.toFixed(1)}% slower for you). `;
+                      }
+                      break;
+                    } else if (bucket.label.includes('Hot') && temp >= 20) {
+                      const improvement = bucket.paceVsAvg || 0;
+                      if (improvement < 0) {
+                        impact += `Hot temperature (+${Math.abs(improvement).toFixed(1)}% improvement for you). `;
+                      } else if (improvement > 0) {
+                        impact += `Hot temperature (-${improvement.toFixed(1)}% slower for you). `;
+                      }
+                      break;
+                    }
+                  }
+                }
+              }
+              
+              // Analyze humidity impact
+              if (humidity !== undefined && weatherImpactData.humidityAnalysis) {
+                for (const bucket of weatherImpactData.humidityAnalysis) {
+                  let isMatch = false;
+                  if (bucket.label.includes('Dry') && humidity < 30) isMatch = true;
+                  else if (bucket.label.includes('Low') && humidity >= 30 && humidity < 50) isMatch = true;
+                  else if (bucket.label.includes('Moderate') && humidity >= 50 && humidity < 70) isMatch = true;
+                  else if (bucket.label.includes('High') && humidity >= 70) isMatch = true;
+                  
+                  if (isMatch) {
+                    const improvement = bucket.paceVsAvg || 0;
+                    if (improvement < 0) {
+                      impact += `${bucket.label} humidity (+${Math.abs(improvement).toFixed(1)}% improvement for you). `;
+                    } else if (improvement > 0) {
+                      impact += `${bucket.label} humidity (-${improvement.toFixed(1)}% slower for you). `;
                     }
                     break;
                   }
@@ -7756,30 +7856,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
               // Analyze weather condition impact
               if (weatherImpactData.conditionAnalysis) {
                 for (const cond of weatherImpactData.conditionAnalysis) {
-                  if (cond.type.toLowerCase() === condition.toLowerCase()) {
-                    const improvement = cond.improvement || 0;
-                    const slowdown = cond.slowdown || 0;
-                    if (improvement > slowdown) {
-                      impact += `${condition} conditions were favorable (+${improvement.toFixed(1)}% improvement). `;
-                    } else if (slowdown > improvement) {
-                      impact += `${condition} conditions slowed you down (-${slowdown.toFixed(1)}% slower). `;
-                    }
-                    break;
-                  }
-                }
-              }
-              
-              // Analyze time of day impact
-              const hour = new Date().getHours();
-              if (weatherImpactData.timeOfDayAnalysis) {
-                for (const bucket of weatherImpactData.timeOfDayAnalysis) {
-                  if (hour >= bucket.hour && hour < bucket.hour + 1) {
-                    const improvement = bucket.improvement || 0;
-                    const slowdown = bucket.slowdown || 0;
-                    if (improvement > slowdown) {
-                      impact += `This time of day is your sweet spot (+${improvement.toFixed(1)}%). `;
-                    } else if (slowdown > improvement) {
-                      impact += `This time of day typically impacts your pace (-${slowdown.toFixed(1)}%). `;
+                  if (cond.condition.toLowerCase().includes(condition.toLowerCase())) {
+                    const improvement = cond.paceVsAvg || 0;
+                    if (improvement < 0) {
+                      impact += `${condition} conditions (+${Math.abs(improvement).toFixed(1)}% improvement). `;
+                    } else if (improvement > 0) {
+                      impact += `${condition} conditions (-${improvement.toFixed(1)}% slower). `;
                     }
                     break;
                   }
@@ -7788,8 +7870,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
               
               if (impact) {
                 weatherImpactAnalysis = impact.trim();
+              } else if (weatherImpactData.insights?.bestHumidity) {
+                weatherImpactAnalysis = `Your best humidity is ${weatherImpactData.insights.bestHumidity.label.toLowerCase()}. Today's conditions were slightly different, but you still performed well.`;
               } else if (weatherImpactData.insights?.bestCondition) {
-                weatherImpactAnalysis = `Your best running conditions are: ${weatherImpactData.insights.bestCondition}. Today's weather was different, but you still performed well.`;
+                weatherImpactAnalysis = `Your best running conditions are: ${weatherImpactData.insights.bestCondition.label}. Today's weather was different, but you still performed well.`;
               }
             }
           }
@@ -7831,6 +7915,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ai = await aiService.generateComprehensiveRunAnalysis({
           runData: runDataForAi,
           previousRuns: previousRuns.filter(r => r.id !== runId).slice(0, 5),
+          weatherImpactAnalysis: weatherImpactAnalysis || undefined,
           userProfile: body.userProfile || (user ? {
             fitnessLevel: user.fitnessLevel || undefined,
             age: user.dob ? Math.floor((Date.now() - new Date(user.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : undefined,
