@@ -1,5 +1,5 @@
 export type CoachGender = 'male' | 'female';
-export type CoachAccent = 'british' | 'australian' | 'american' | 'irish' | 'south_african' | 'indian';
+export type CoachAccent = 'british' | 'australian' | 'american' | 'irish' | 'south_african' | 'indian' | 'new_zealand';
 export type CoachTone = 'energetic' | 'motivational' | 'instructive' | 'factual' | 'abrupt';
 
 export interface AiCoachSettings {
@@ -104,6 +104,7 @@ export const accentLabels: Record<CoachAccent, string> = {
   irish: 'Irish',
   south_african: 'South African',
   indian: 'Indian',
+  new_zealand: 'New Zealand',
 };
 
 export const toneLabels: Record<CoachTone, string> = {
@@ -134,6 +135,7 @@ export function getTTSVoice(settings: AiCoachSettings): TTSVoice {
     irish: { male: 'ash', female: 'coral' },
     south_african: { male: 'echo', female: 'shimmer' },
     indian: { male: 'onyx', female: 'alloy' },
+    new_zealand: { male: 'echo', female: 'shimmer' },
   };
   
   return voiceMap[accent][gender];
@@ -154,6 +156,7 @@ export function getVoicePreferences(settings: AiCoachSettings): {
     irish: ['Daniel', 'James', 'Google UK English Male'],
     south_african: ['Ayanda', 'Google African English Male'],
     indian: ['Kajal', 'Google Indian English Male'],
+    new_zealand: ['Lee', 'Google NZ English Male'],
   };
   
   const femaleVoices: Record<CoachAccent, string[]> = {
@@ -163,6 +166,7 @@ export function getVoicePreferences(settings: AiCoachSettings): {
     irish: ['Moira', 'Kate', 'Google UK English Female'],
     south_african: ['Ayanda', 'Google African English Female'],
     indian: ['Kajal', 'Google Indian English Female'],
+    new_zealand: ['Aria', 'Google NZ English Female'],
   };
   
   const langMap: Record<CoachAccent, string> = {
@@ -172,6 +176,7 @@ export function getVoicePreferences(settings: AiCoachSettings): {
     irish: 'en-IE',
     south_african: 'en-ZA',
     indian: 'en-IN',
+    new_zealand: 'en-NZ',
   };
   
   const toneSettings: Record<CoachTone, { rate: number; pitch: number }> = {
