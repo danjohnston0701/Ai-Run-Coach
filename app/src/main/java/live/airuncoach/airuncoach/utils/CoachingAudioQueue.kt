@@ -34,6 +34,7 @@ object CoachingAudioQueue {
         val fallbackText: String?,
         val context: Context,
         val isNavigation: Boolean = false,  // Navigation requests get priority
+        val accent: String? = null,  // Voice accent/locale for TTS (e.g., "scottish", "australian")
         val onComplete: (() -> Unit)? = null
     )
 
@@ -74,10 +75,11 @@ object CoachingAudioQueue {
         base64Audio: String?,
         format: String?,
         fallbackText: String?,
+        accent: String? = null,
         onComplete: (() -> Unit)? = null
     ) {
         init(context)
-        val request = AudioRequest(base64Audio, format, fallbackText, context, isNavigation = true, onComplete = onComplete)
+        val request = AudioRequest(base64Audio, format, fallbackText, context, isNavigation = true, accent = accent, onComplete = onComplete)
         
         // If coaching audio is currently playing, interrupt it for navigation
         if (isPlaying.get()) {
@@ -119,9 +121,10 @@ object CoachingAudioQueue {
         base64Audio: String?,
         format: String?,
         fallbackText: String?,
+        accent: String? = null,
         onComplete: (() -> Unit)? = null
     ) {
-        enqueue(AudioRequest(base64Audio, format, fallbackText, context, isNavigation = false, onComplete = onComplete))
+        enqueue(AudioRequest(base64Audio, format, fallbackText, context, isNavigation = false, accent = accent, onComplete = onComplete))
     }
 
     /**
@@ -222,7 +225,7 @@ object CoachingAudioQueue {
             } else if (!next.fallbackText.isNullOrEmpty()) {
                 val tts = ttsHelper
                 if (tts != null) {
-                    tts.speak(next.fallbackText, onComplete = onDone)
+                    tts.speak(next.fallbackText, accent = next.accent, onComplete = onDone)
                 } else {
                     Log.e(TAG, "TextToSpeechHelper not initialized")
                     onDone()

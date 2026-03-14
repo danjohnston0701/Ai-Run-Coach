@@ -14,19 +14,20 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
     private var isReady = false
     private var pendingText: String? = null
     private var pendingUtteranceId: String? = null
+    private var pendingAccent: String? = null
     
     @Volatile
     private var onCompleteCallback: (() -> Unit)? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    
+    // Current accent - updates TTS voice when set
+    private var currentAccent: String = "british"
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            val result = tts.setLanguage(Locale.US)
-            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                Log.e("TTS", "The Language specified is not supported!")
-            }
+            setAccentLocale(currentAccent)
             isReady = true
-            Log.d("TTS", "TextToSpeech engine initialized successfully")
+            Log.d("TTS", "TextToSpeech engine initialized successfully with accent: $currentAccent")
 
             // Set up the listener once during init (not every speak call)
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -54,6 +55,12 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
             // If there was text queued before init, speak it now
             pendingText?.let { text ->
                 Log.d("TTS", "Speaking queued text after init: ${text.take(50)}...")
+                // Set pending accent if one was queued
+                pendingAccent?.let { accent ->
+                    setAccentLocale(accent)
+                    currentAccent = accent
+                    pendingAccent = null
+                }
                 speakInternal(text, pendingUtteranceId ?: "tts_pending")
                 pendingText = null
                 pendingUtteranceId = null
@@ -62,6 +69,44 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
             Log.e("TTS", "Initialization Failed!")
             // TTS init failed — invoke any pending callback so the queue doesn't get stuck
             invokeComplete()
+        }
+    }
+    
+    /**
+     * Set the TTS voice based on accent/locale
+     */
+    private fun setAccentLocale(accent: String) {
+        val locale = when (accent.lowercase()) {
+            "scottish" -> Locale("en", "GB")  // Scottish English
+            "south_african", "south african" -> Locale("en", "ZA")  // South African English
+            "australian", "aussie" -> Locale("en", "AU")  // Australian English
+            "irish" -> Locale("en", "IE")  // Irish English
+            "american", "american english" -> Locale.US  // American English
+            "british", "english", "standard" -> Locale.UK  // British English
+            else -> Locale.UK  // Default to British
+        }
+        
+        val result = tts.setLanguage(locale)
+        if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+            Log.w("TTS", "Accent '$accent' (${locale.displayName}) not fully supported, using available voice")
+            // Fallback to US English
+            tts.setLanguage(Locale.US)
+        } else {
+            Log.d("TTS", "TTS locale set to: $accent (${locale.displayName})")
+        }
+    }
+    
+    /**
+     * Set accent before speaking (can be called before or after TTS initialization)
+     */
+    fun setAccent(accent: String) {
+        currentAccent = accent
+        if (isReady) {
+            setAccentLocale(accent)
+            Log.d("TTS", "Accent changed to: $accent")
+        } else {
+            Log.d("TTS", "Accent queued for when TTS initializes: $accent")
+            pendingAccent = accent
         }
     }
     
@@ -74,10 +119,20 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
     }
 
     /**
-     * Speak text. If engine isn't ready yet, queues the text for when it initializes.
+     * Speak text with optional accent override. If engine isn't ready yet, queues the text for when it initializes.
      */
-    fun speak(text: String, utteranceId: String = "tts_utterance_${System.currentTimeMillis()}", onComplete: (() -> Unit)? = null) {
+    fun speak(
+        text: String,
+        utteranceId: String = "tts_utterance_${System.currentTimeMillis()}",
+        accent: String? = null,
+        onComplete: (() -> Unit)? = null
+    ) {
         onCompleteCallback = onComplete
+        
+        // Update accent if provided
+        if (accent != null && accent != currentAccent) {
+            setAccent(accent)
+        }
 
         if (isReady) {
             speakInternal(text, utteranceId)
@@ -85,6 +140,9 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
             Log.d("TTS", "TTS not ready yet, queueing text: ${text.take(50)}...")
             pendingText = text
             pendingUtteranceId = utteranceId
+            if (accent != null) {
+                pendingAccent = accent
+            }
         }
     }
 
