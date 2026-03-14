@@ -1191,15 +1191,41 @@ CRITICAL RULES:
 }
 
 /**
- * Generate TTS audio using OpenAI's gpt-4o-mini-tts model.
- * The `instructions` parameter steers the voice's accent, tone, pacing, and style.
- * This is far more expressive than the old tts-1 model.
+ * Generate TTS audio using AWS Polly Neural TTS (primary) with OpenAI fallback.
+ * 
+ * Polly provides authentic regional English accents with native speakers:
+ * - British, American, Australian, Irish, South African, Indian, New Zealand
+ * 
+ * Falls back to OpenAI gpt-4o-mini-tts if Polly is not configured or fails.
  */
 export async function generateTTS(
   text: string, 
   voice: string = "alloy",
-  instructions?: string
+  instructions?: string,
+  coachAccent?: string,
+  coachGender?: string
 ): Promise<Buffer> {
+  // Try Polly first if configured
+  const { isPollyConfigured, synthesizeSpeech } = await import('./polly-service');
+  
+  if (isPollyConfigured()) {
+    try {
+      console.log(`[TTS] Using Polly Neural for accent: ${coachAccent}, gender: ${coachGender}`);
+      const buffer = await synthesizeSpeech(
+        text,
+        coachAccent,
+        coachGender,
+        instructions
+      );
+      return buffer;
+    } catch (pollyError: any) {
+      console.warn(`[TTS] Polly synthesis failed, falling back to OpenAI:`, pollyError.message);
+      // Fall through to OpenAI fallback
+    }
+  }
+
+  // Fallback to OpenAI gpt-4o-mini-tts
+  console.log(`[TTS] Using OpenAI gpt-4o-mini-tts with voice: ${voice}`);
   const response = await openai.audio.speech.create({
     model: "gpt-4o-mini-tts",
     voice: voice as any,
