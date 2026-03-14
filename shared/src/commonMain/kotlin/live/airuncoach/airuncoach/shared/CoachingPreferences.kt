@@ -23,7 +23,7 @@ enum class CoachGender {
 
 @Serializable
 enum class CoachAccent {
-    AMERICAN, BRITISH, AUSTRALIAN, IRISH
+    AMERICAN, BRITISH, AUSTRALIAN, IRISH, SOUTH_AFRICAN, INDIAN
 }
 
 @Serializable
