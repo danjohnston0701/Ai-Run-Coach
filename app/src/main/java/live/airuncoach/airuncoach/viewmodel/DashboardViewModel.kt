@@ -309,7 +309,8 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun onDistanceChanged(distance: Float) {
-        _targetDistance.value = distance
+        // Snap to whole kilometres to avoid floating point drift (e.g. 9.9999 → 9)
+        _targetDistance.value = Math.round(distance).toFloat()
     }
 
     fun onTargetTimeToggled(enabled: Boolean) {

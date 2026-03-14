@@ -38,6 +38,7 @@ import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.RunSessionViewModel
 import kotlin.coroutines.resume
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -220,7 +221,7 @@ fun MapMyRunSetupScreen(
             item {
                 TargetDistanceCard(
                     distance = targetDistance,
-                    onDistanceChanged = { targetDistance = it }
+                    onDistanceChanged = { targetDistance = it.roundToInt().toFloat() }
                 )
             }
 
@@ -361,7 +362,7 @@ fun MapMyRunSetupScreen(
                 }
 
                 Text(
-                    text = "Target: ${targetDistance.toInt()} km",
+                    text = "Target: ${targetDistance.roundToInt()} km",
                     style = AppTextStyles.caption,
                     color = Colors.textMuted,
                     modifier = Modifier
