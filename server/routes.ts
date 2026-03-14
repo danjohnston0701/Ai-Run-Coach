@@ -794,18 +794,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const coachTone = user?.coachTone || "energetic";
       
       // Get linked Garmin activity if exists
-      const garminActivity = await db.query.garminActivities.findFirst({
-        where: eq(garminActivities.runId, runId),
-      });
+      // Wrapped in try/catch - missing DB columns should not block AI analysis
+      let garminActivity: any = null;
+      try {
+        garminActivity = await db.query.garminActivities.findFirst({
+          where: eq(garminActivities.runId, runId),
+        });
+      } catch (garminErr: any) {
+        console.warn(`[comprehensive-analysis] Could not fetch Garmin activity (DB column missing?): ${garminErr?.message}`);
+        // Proceed without Garmin data - analysis still works with just run data
+      }
       
       // Get latest wellness metrics for the run date
+      // Wrapped in try/catch - missing DB columns should not block AI analysis
       const runDate = run.runDate || (run.completedAt ? (typeof run.completedAt === 'number' ? new Date(run.completedAt) : run.completedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
-      const wellness = await db.query.garminWellnessMetrics.findFirst({
-        where: and(
-          eq(garminWellnessMetrics.userId, userId),
-          eq(garminWellnessMetrics.date, runDate)
-        ),
-      });
+      let wellness: any = null;
+      try {
+        wellness = await db.query.garminWellnessMetrics.findFirst({
+          where: and(
+            eq(garminWellnessMetrics.userId, userId),
+            eq(garminWellnessMetrics.date, runDate)
+          ),
+        });
+      } catch (wellnessErr: any) {
+        console.warn(`[comprehensive-analysis] Could not fetch wellness metrics (DB column missing?): ${wellnessErr?.message}`);
+        // Proceed without wellness data
+      }
       
       // Get previous runs for context
       const previousRuns = await db.query.runs.findMany({
