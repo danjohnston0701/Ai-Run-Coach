@@ -1055,6 +1055,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     base64Audio = response.audio,
                     format = response.format,
                     fallbackText = response.message,
+                    accent = currentUser?.coachAccent,
                     onComplete = {
                         _latestCoachingText.value = null
                     }
@@ -1068,6 +1069,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     base64Audio = null,
                     format = null,
                     fallbackText = navigationText,
+                    accent = currentUser?.coachAccent,
                     onComplete = {
                         _latestCoachingText.value = null
                     }
@@ -1767,9 +1769,19 @@ class RunTrackingService : Service(), SensorEventListener {
             // Phase changes use the global gate internally
             checkPhaseChange(phase)
 
-            // Check for 500m milestones (skipped if phase change just fired OR global cooldown active)
-            if (!hasCoachingFiredThisTick && canFireCoaching()) {
-                check500mMilestones()
+            // Check for 500m milestones — initial 500m check-in is special (only requires time gate, not distance)
+            // This ensures runners get their initial assessment right at 500m, not delayed until 650m
+            if (!hasCoachingFiredThisTick) {
+                val now = System.currentTimeMillis()
+                val isInitial500m = last500mMilestone == 0
+                val timeSinceLastCoaching = now - lastGlobalCoachingTime
+                val hasTimeElapsed = timeSinceLastCoaching >= GLOBAL_COACHING_MIN_GAP_MS
+                
+                // Initial 500m check-in: only requires time gap (lenient gate for early assessment)
+                // Subsequent milestones: require full coaching gate (time + distance)
+                if ((isInitial500m && hasTimeElapsed) || (!isInitial500m && canFireCoaching())) {
+                    check500mMilestones()
+                }
             }
 
             // Check for heart rate coaching (respects global cooldown)
@@ -2283,6 +2295,7 @@ class RunTrackingService : Service(), SensorEventListener {
             base64Audio = base64Audio,
             format = format,
             fallbackText = fallbackText,
+            accent = currentUser?.coachAccent,
             onComplete = {
                 // Clear coaching text when audio finishes
                 _latestCoachingText.value = null

@@ -302,6 +302,7 @@ class RunSessionViewModel @Inject constructor(
                             base64Audio = briefing.audio,
                             format = briefing.format,
                             fallbackText = speechText,
+                            accent = user?.coachAccent,
                             onComplete = {
                                 isBriefingAudioPlaying = false
                                 _runState.update { it.copy(coachText = "") }
@@ -579,7 +580,7 @@ class RunSessionViewModel @Inject constructor(
                             _runState.update { it.copy(coachText = "") }
                         }
                     } else {
-                        textToSpeechHelper.speak(response.message)
+                        textToSpeechHelper.speak(response.message, accent = user?.coachAccent)
                         isBriefingAudioPlaying = false
                         // Clear coach text after TTS completes
                         _runState.update { it.copy(coachText = "") }
