@@ -671,6 +671,484 @@ interface EmotionalCoachingMetric {
 
 ---
 
+## Structured Mental & Emotional Prompts (ChatGPT Framework)
+
+### 1. Positive Self-Talk Prompts
+
+**AI Instruction**: Encourage runners to replace negative thoughts with supportive internal dialogue. Keep tone calm, empowering, and simple.
+
+**Trigger Moments**:
+- Runner slowing down (pace drop)
+- Elevated heart rate (HR >90% of max)
+- Long intervals (>3 minutes continuous)
+- Late-stage fatigue (LATE/FINAL phase)
+
+**Prompt Variants by Coach Tone**:
+
+```
+MOTIVATIONAL (Default):
+- "Check in with your thoughts. What are you telling yourself right now? Try switching it to: I'm strong enough to finish this mile."
+- "You don't have to run fast—just keep moving forward."
+- "Every step is progress. Let the rhythm carry you."
+- "You've handled tough runs before. This is just another step in your story."
+- "Relax your shoulders. Trust your body."
+
+ENERGETIC:
+- "YES! Your mind is STRONGER than the discomfort! Own this moment!"
+- "Don't just think positive—FEEL powerful right now!"
+- "You're CRUSHING this! Every step proves your strength!"
+- "This is what champions do—they PUSH through doubt!"
+
+INSTRUCTIVE:
+- "Mental technique: Replace 'I'm tired' with 'I'm working hard.' Thought matters."
+- "Psychology hack: Focus on what your body CAN do, not what it can't."
+- "Neuroscience tip: Your brain believes what you tell it. Choose empowering thoughts."
+- "Strategy: When doubt enters, redirect to one specific thing you're doing well right now."
+
+FACTUAL:
+- "You've completed X% of this run. Your legs will hold. Keep going."
+- "Your pacing is sustainable at this HR. Mental fatigue isn't physical limit."
+- "Data shows: runners who use positive self-talk improve by 3-5% on hard efforts."
+
+ABRUPT:
+- "Mind over body. Go."
+- "Stop doubting. Move."
+- "You got this. Push."
+```
+
+**Implementation**:
+```typescript
+function generateSelfTalkPrompt(
+  coachTone: CoachTone,
+  trigger: "pace_drop" | "elevated_hr" | "long_interval" | "fatigue"
+): string {
+  const promptBank = selfTalkPromptsByTone[coachTone][trigger];
+  return promptBank[Math.floor(Math.random() * promptBank.length)];
+}
+```
+
+---
+
+### 2. Motivation & Resilience Prompts
+
+**AI Instruction**: Reframe discomfort as part of growth. Reinforce resilience and purpose.
+
+**Trigger Moments**:
+- Hill climbs (elevation gain detected)
+- Pace drop (>10% slower than target)
+- Hard workout intervals (tempo, speed work)
+- Breakthrough moments (pace stabilizes after drop)
+
+**Prompt Variants by Coach Tone**:
+
+```
+MOTIVATIONAL (Default):
+- "This is the part where runners get stronger."
+- "Discomfort is temporary. Progress lasts."
+- "Stay curious about the effort instead of resisting it."
+- "Focus on the next 30 seconds. You can do anything for 30 seconds."
+- "Strong runners stay present, not perfect."
+
+ENERGETIC:
+- "THIS is where CHAMPIONS are MADE! Embrace the challenge!"
+- "Discomfort = GROWTH! You're building strength RIGHT NOW!"
+- "Every hard step = 10 steps of progress! LET'S GO!"
+- "You're not just running—you're transforming!"
+
+INSTRUCTIVE:
+- "Resilience is built during difficulty. This moment matters for your future fitness."
+- "Breakdown before breakthrough: what you're feeling now is adaptation happening."
+- "Progressive overload principle: this discomfort is your fitness improving in real-time."
+- "Mental resilience training: embrace 3 more minutes of this, and you're 30% stronger mentally."
+
+FACTUAL:
+- "Your VO2 max is improving right now. This effort directly builds aerobic capacity."
+- "Research shows: runners who push through this phase improve performance by 5-8%."
+- "You're accumulating TSS (training stress score). Future runs will feel easier."
+
+ABRUPT:
+- "Build strength. Now."
+- "This makes you tougher."
+- "Discomfort = growth. Go."
+```
+
+**Implementation**:
+```typescript
+function generateResiliencePrompt(
+  coachTone: CoachTone,
+  trigger: "hill" | "pace_drop" | "hard_interval" | "breakthrough"
+): string {
+  const promptBank = resiliencePromptsByTone[coachTone][trigger];
+  return promptBank[Math.floor(Math.random() * promptBank.length)];
+}
+```
+
+---
+
+### 3. Focus & Mindfulness Prompts
+
+**AI Instruction**: Guide runners into a flow state by focusing attention on breathing, cadence, or surroundings.
+
+**Trigger Moments**:
+- When runner pace stabilizes (after previous drop)
+- During long steady runs (MID phase, no struggle)
+- After a stressful segment (immediate recovery)
+- Distraction detected (external factors)
+
+**Prompt Variants by Coach Tone**:
+
+```
+MOTIVATIONAL (Default):
+- "Notice your breathing. In for three steps, out for three."
+- "Feel the rhythm of your feet on the ground."
+- "Relax your jaw and shoulders."
+- "Look ahead, not down."
+- "Run the mile you're in."
+
+ENERGETIC:
+- "LOCK IN! Feel every powerful step you're taking RIGHT NOW!"
+- "ZONE ACTIVATED! Notice how smooth and strong you're moving!"
+- "RHYTHM CHECK! Feel that beautiful cadence? You're FLOWING!"
+
+INSTRUCTIVE:
+- "Breathing technique: Nasal inhale (4 steps), mouth exhale (4 steps). Master this pattern."
+- "Cadence focus: Land softly at 180+ steps per minute. Count your feet for 30 seconds."
+- "Proprioceptive awareness: Feel your hips driving forward—that's where power comes from."
+
+FACTUAL:
+- "Your cadence is currently X spm. Staying at this rhythm optimizes efficiency."
+- "Research: runners who maintain focus on breathing run 2-3% more efficiently."
+- "Your heart rate is stable here. This pace is sustainable."
+
+ABRUPT:
+- "Focus. Now."
+- "One step at a time."
+- "Feel it."
+```
+
+**Implementation**:
+```typescript
+function generateMindfulnessPrompt(
+  coachTone: CoachTone,
+  focusArea: "breathing" | "cadence" | "surroundings" | "present_moment"
+): string {
+  const promptBank = mindfulnessPromptsByTone[coachTone][focusArea];
+  return promptBank[Math.floor(Math.random() * promptBank.length)];
+}
+```
+
+---
+
+### 4. 🌟 Smiling Coaching Prompts (CRITICAL SECTION)
+
+**⚠️ IMPORTANT**: Smiling while running actually reduces perceived effort and improves running economy. This is backed by biomechanics research.
+
+**AI Instruction**: Encourage the runner to smile gently (not forcefully). Connect smiling to relaxation and efficiency.
+
+**Why It Works**:
+- Smiling activates relaxation response
+- Reduces perceived effort by 5-10%
+- Improves running economy (efficiency)
+- Triggers endorphin release
+- Reframes mental state from "suffering" to "capable"
+
+**Trigger Moments**:
+- During fatigue (LATE phase)
+- After pace drop stabilizes
+- Pre-hill climbs (set mental state)
+- Final stretch (endorphin boost)
+- Whenever HR/effort seems high
+
+**Prompt Variants by Coach Tone**:
+
+```
+MOTIVATIONAL (Default) - Light Cue:
+- "Try a small smile—it helps relax your body."
+- "Can you smile right now? It's a form of relaxation."
+
+MOTIVATIONAL - Fatigue Moment:
+- "Give me a quick smile. It tells your brain this effort is okay."
+- "Notice your face. Soften it. That smile matters more than you think."
+
+MOTIVATIONAL - Motivation Cue:
+- "Smile for a few steps. Strong runners run relaxed."
+- "See if smiling changes how this effort feels."
+
+MOTIVATIONAL - Mindset Reset:
+- "Smile and shake out the tension in your arms."
+- "Try smiling for the next 30 seconds. Notice the difference."
+
+MOTIVATIONAL - Endorphin Cue:
+- "Smiling tricks your brain into feeling better—try it for the next 10 steps."
+- "Your smile is fuel. Activate it now."
+
+ENERGETIC:
+- "SMILE BIG! You're CRUSHING this and you KNOW it!"
+- "That smile = CONFIDENCE! Show yourself you're STRONG!"
+- "GRIN and GRIND! Let your smile fuel the next mile!"
+
+INSTRUCTIVE:
+- "Biomechanics fact: smiling reduces perceived effort by activating the parasympathetic nervous system."
+- "Technique: gentle smile (no grimace). Hold for 30 seconds. Feel the difference in perceived effort."
+- "Psychology: smiling signals to your brain 'I'm okay with this effort.' It's a powerful mental hack."
+
+FACTUAL:
+- "Research: runners who smile report 5-10% lower perceived exertion at same intensity."
+- "Running economy improves with facial relaxation. Smiling is part of that relaxation pattern."
+- "Endorphins increase with positive facial expressions. Smile triggers better feelings."
+
+ABRUPT:
+- "Smile. Now."
+- "Relax your face."
+- "Smile for 10 steps."
+```
+
+**Smile Challenges** (Gamification):
+
+```
+Examples:
+- "Smile challenge: hold a smile for the next 20 steps."
+- "Let's see a runner's smile for this next hill."
+- "Quick check—are you smiling?"
+- "Smile race: can you hold it all the way to the next km?"
+- "Smile test: does smiling make this feel easier? Check it out."
+
+Implementation:
+function generateSmileChallenge(intensity: "easy" | "moderate" | "hard"): string {
+  const challenges = {
+    easy: "Can you smile for these next 30 seconds?",
+    moderate: "Smile challenge: hold it through this hill.",
+    hard: "Final smile challenge: grin all the way to the finish."
+  };
+  return challenges[intensity];
+}
+```
+
+---
+
+### 5. Relaxation Prompts
+
+**AI Instruction**: Encourage relaxation to improve running efficiency. Use these when tension is detected.
+
+**Trigger Moments**:
+- Elevated HR without pace increase (tension indicator)
+- User shoulders rising (detected via form cues)
+- Late phase with high tension (LATE phase)
+- Post-hard-effort recovery
+
+**Prompt Variants by Coach Tone**:
+
+```
+MOTIVATIONAL (Default):
+- "Drop your shoulders."
+- "Loosen your hands."
+- "Run tall and relaxed."
+- "Smooth and easy."
+- "Unclench your jaw."
+- "Let your face go soft."
+
+ENERGETIC:
+- "RELAX! Tension is the enemy! Let it GO!"
+- "Shake it out! Loose and POWERFUL!"
+- "Drop those shoulders! You're too strong to be tight!"
+
+INSTRUCTIVE:
+- "Tension check: are your shoulders near your ears? Drop them 2 inches."
+- "Hand position: pretend you're holding an egg. Don't crack it."
+- "Jaw release: unclench your teeth. Let your mouth relax."
+
+FACTUAL:
+- "Tension increases energy expenditure by 3-5%. Relax and run more efficiently."
+- "Relaxed muscles use less oxygen. This simple release improves your pace."
+
+ABRUPT:
+- "Relax."
+- "Drop tension."
+- "Go loose."
+```
+
+---
+
+### 6. End-of-Run Emotional Reinforcement
+
+**AI Instruction**: Finish with reflection and emotional reward. Use immediately after run completion.
+
+**Prompt Variants by Coach Tone**:
+
+```
+MOTIVATIONAL (Default):
+- "Take a second to appreciate what your body just did."
+- "You showed up today—that's what matters."
+- "Strong finish. That effort counts."
+- "How do you feel compared to when you started?"
+
+ENERGETIC:
+- "INCREDIBLE! You LEFT IT ALL OUT THERE! YOU CRUSHED IT!"
+- "What a LEGEND! That was AMAZING! You should be PROUD!"
+- "That's what a CHAMPION looks like! FANTASTIC effort!"
+
+INSTRUCTIVE:
+- "Reflection moment: what did your body teach you today?"
+- "Analysis: your pacing in km 4-5 showed growth from last week."
+- "Mental toughness log: you pushed through mental fatigue twice today."
+
+FACTUAL:
+- "Metrics: TSS +42, Distance 10.5km, Avg HR 152bpm. Strong session."
+- "Performance data: you beat your average pace by 5 seconds per km today."
+- "Progress tracking: this is your 3rd run at this intensity this week. Adaptation happening."
+
+ABRUPT:
+- "Well done."
+- "You finished."
+- "Strong work."
+```
+
+**Special End-of-Run Prompts**:
+
+```
+Achievement Recognition:
+- "New personal best for this route! 10.5km in 54:12!"
+- "That's your 5th run this week. Your consistency is building fitness."
+- "You ran 23 seconds faster than last week's attempt. Progress!"
+
+Growth Reflection:
+- "Start: I wasn't sure I could do this. Finish: I proved I could."
+- "You wanted to quit at km 5. You finished strong at km 10. That's growth."
+- "You showed mental resilience today. That matters as much as the pace."
+
+Gratitude Cue:
+- "Thank your legs, your lungs, your heart—they just did something amazing."
+- "Your body is stronger than it was this morning. Appreciate that."
+- "You invested 54 minutes in yourself today. That's powerful."
+```
+
+---
+
+## Integration: Prompt Selection During Run
+
+```
+Run Session Flow:
+
+┌─ Phase Coaching Called (Every 60-120s)
+│
+├─ Assess Current State:
+│  ├─ Phase (EARLY, MID, LATE, FINAL)
+│  ├─ Pace change (stable, improving, dropping)
+│  ├─ HR status (normal, elevated)
+│  ├─ Form signals (good, tense, fatigued)
+│  └─ Terrain (flat, hilly, technical)
+│
+├─ Select Prompt Category:
+│  ├─ IF pace dropping >15% → Positive Self-Talk
+│  ├─ IF hill/hard effort → Motivation & Resilience
+│  ├─ IF pace stabilizing → Focus & Mindfulness
+│  ├─ IF tension detected → Relaxation
+│  ├─ IF fatigue high → Smiling Challenge
+│  └─ IF final phase → End-of-Run Reinforcement
+│
+├─ Generate Prompt:
+│  ├─ Get coach tone from user preferences
+│  ├─ Get emotional context
+│  ├─ Select random prompt variant
+│  └─ Avoid repetition (check recent 3 prompts)
+│
+├─ Add Voice Layer:
+│  ├─ Generate TTS with user's:
+│  │  - Accent (Irish, British, American, etc.)
+│  │  - Gender preference (male/female)
+│  │  - Configured voice
+│  └─ Play to runner
+│
+└─ Track Response:
+   ├─ Did pace improve after prompt?
+   ├─ Did HR drop?
+   ├─ Did runner continue/complete?
+   └─ Learn for future: which prompts work best?
+```
+
+---
+
+## Prompt Database Schema
+
+```typescript
+interface EmotionalPrompt {
+  id: string;
+  category: "self_talk" | "resilience" | "mindfulness" | "smiling" | "relaxation" | "end_of_run";
+  coachTone: CoachTone;
+  trigger: string;  // e.g., "pace_drop", "hill", "fatigue"
+  text: string;
+  durationSeconds?: number;  // How long should this run
+  effectiveness?: number;    // Score based on outcomes
+  lastUsedAt?: Date;
+  useCount: number;  // Track repetition
+}
+
+interface PromptResponse {
+  promptId: string;
+  userId: string;
+  runId: string;
+  paceBeforePrompt: string;
+  paceAfterPrompt: string;  // 60 seconds later
+  hrBeforePrompt: number;
+  hrAfterPrompt: number;
+  userFeedback?: "helpful" | "neutral" | "unhelpful";  // Optional in-app rating
+}
+```
+
+---
+
+## Anti-Repetition & Learning Algorithm
+
+```typescript
+function selectNextPrompt(
+  currentPhase: CoachingPhase,
+  userState: RunningState,
+  recentPrompts: EmotionalPrompt[]  // Last 3 prompts from this run
+): EmotionalPrompt {
+  
+  // Get all prompts matching current context
+  const candidatePrompts = promptDatabase.filter(p => 
+    p.category === getRecommendedCategory(userState) &&
+    p.coachTone === user.coachTone &&
+    !recentPrompts.some(rp => rp.id === p.id)  // Avoid repetition
+  );
+  
+  // Sort by effectiveness (learned from past runs)
+  const sortedByEffectiveness = candidatePrompts.sort(
+    (a, b) => b.effectiveness - a.effectiveness
+  );
+  
+  // Select with weighted randomness (80% best, 20% exploration)
+  if (Math.random() < 0.8) {
+    return sortedByEffectiveness[0];  // Pick most effective
+  } else {
+    return sortedByEffectiveness[
+      Math.floor(Math.random() * sortedByEffectiveness.length)
+    ];  // Explore others
+  }
+}
+
+// Track effectiveness
+function recordPromptOutcome(
+  promptId: string,
+  userId: string,
+  paceImproved: boolean,
+  runCompleted: boolean
+): void {
+  const prompt = promptDatabase.find(p => p.id === promptId);
+  
+  let effectivenessBoost = 0;
+  if (paceImproved) effectivenessBoost += 2;
+  if (runCompleted) effectivenessBoost += 1;
+  
+  prompt.effectiveness = (prompt.effectiveness || 0) + effectivenessBoost;
+  prompt.useCount++;
+  prompt.lastUsedAt = new Date();
+}
+```
+
+---
+
 ## Text-to-Speech (TTS) Implementation
 
 ### Polly Neural Voices (Primary)
