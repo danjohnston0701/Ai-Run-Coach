@@ -1240,6 +1240,19 @@ export const garminMoveIQ = pgTable("garmin_move_iq", {
 
 // ==================== WEBHOOK PROCESSING TABLES ====================
 
+// OAuth State Store for secure OAuth flow (temporary, expires after 10 min)
+export const oauthStateStore = pgTable("oauth_state_store", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  state: varchar("state").notNull().unique(), // The state parameter sent to OAuth provider
+  userId: varchar("user_id").notNull(), // User who initiated the OAuth flow
+  provider: varchar("provider").notNull(), // 'garmin', 'strava', etc.
+  appRedirect: text("app_redirect"), // Deep link URL to redirect back to mobile app
+  historyDays: integer("history_days").default(30), // Days of history to sync
+  nonce: varchar("nonce"), // PKCE nonce for verifier lookup
+  expiresAt: timestamp("expires_at").notNull(), // State expiration (10 minutes)
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Garmin Webhook Failure Queue for retry logic
 export const webhookFailureQueue = pgTable("webhook_failure_queue", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1314,6 +1327,7 @@ export type ChallengeParticipant = typeof challengeParticipants.$inferSelect;
 export type Achievement = typeof achievements.$inferSelect;
 export type UserAchievement = typeof userAchievements.$inferSelect;
 export type SharedRun = typeof sharedRuns.$inferSelect;
+export type OauthStateStore = typeof oauthStateStore.$inferSelect;
 export type WebhookFailureQueue = typeof webhookFailureQueue.$inferSelect;
 export type GarminMoveIQ = typeof garminMoveIQ.$inferSelect;
 export type GarminBloodPressure = typeof garminBloodPressure.$inferSelect;

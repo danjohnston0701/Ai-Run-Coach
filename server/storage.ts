@@ -1,14 +1,15 @@
-import { 
-  users, friends, friendRequests, runs, routes, goals, 
+import {
+  users, friends, friendRequests, runs, routes, goals,
   notifications, notificationPreferences, liveRunSessions,
   groupRuns, groupRunParticipants, events, routeRatings, runAnalyses,
   connectedDevices, deviceData, garminWellnessMetrics, activityMergeLog,
+  oauthStateStore,
   type User, type InsertUser, type Run, type InsertRun,
   type Route, type InsertRoute, type Goal, type InsertGoal,
   type Friend, type FriendRequest, type Notification, type NotificationPreference,
   type LiveRunSession, type GroupRun, type GroupRunParticipant, type Event,
   type RouteRating, type RunAnalysis, type ConnectedDevice, type DeviceData,
-  type GarminWellnessMetric
+  type GarminWellnessMetric, type OauthStateStore
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, or, and, desc, ilike, sql, inArray } from "drizzle-orm";
@@ -95,6 +96,12 @@ export interface IStorage {
   createConnectedDevice(data: any): Promise<ConnectedDevice>;
   updateConnectedDevice(id: string, data: Partial<ConnectedDevice>): Promise<ConnectedDevice | undefined>;
   deleteConnectedDevice(id: string): Promise<void>;
+
+  // OAuth State Store
+  createOauthState(data: { state: string; userId: string; provider: string; appRedirect?: string; historyDays?: number; nonce?: string; expiresAt: Date }): Promise<OauthStateStore>;
+  getOauthState(state: string): Promise<OauthStateStore | undefined>;
+  deleteOauthState(state: string): Promise<void>;
+  cleanupExpiredOauthStates(): Promise<number>;
   
   // Device Data
   getDeviceDataByRun(runId: string): Promise<DeviceData[]>;
@@ -610,6 +617,29 @@ export class DatabaseStorage implements IStorage {
         eq(connectedDevices.deviceType, 'garmin'),
         eq(connectedDevices.isActive, true)
       ));
+  }
+
+  // OAuth State Store
+  async createOauthState(data: { state: string; userId: string; provider: string; appRedirect?: string; historyDays?: number; nonce?: string; expiresAt: Date }): Promise<OauthStateStore> {
+    const [oauthState] = await db.insert(oauthStateStore).values(data).returning();
+    return oauthState;
+  }
+
+  async getOauthState(state: string): Promise<OauthStateStore | undefined> {
+    const [result] = await db.select().from(oauthStateStore)
+      .where(eq(oauthStateStore.state, state));
+    return result || undefined;
+  }
+
+  async deleteOauthState(state: string): Promise<void> {
+    await db.delete(oauthStateStore).where(eq(oauthStateStore.state, state));
+  }
+
+  async cleanupExpiredOauthStates(): Promise<number> {
+    const result = await db.delete(oauthStateStore)
+      .where(sql`${oauthStateStore.expiresAt} < NOW()`)
+      .returning({ id: oauthStateStore.id });
+    return result.length;
   }
 }
 

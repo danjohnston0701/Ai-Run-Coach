@@ -2171,11 +2171,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Get app_redirect and history_days from query params (sent by mobile app)
       const appRedirect = req.query.app_redirect as string || 'airuncoach://connected-devices';
       const historyDays = parseInt(req.query.history_days as string || '30', 10);
+      
+      // Generate a secure random state (UUID-like) for server-side storage
+      const state = `${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 15)}_${Math.random().toString(36).substring(2, 15)}`;
       // Generate a simple nonce for PKCE verifier lookup (avoids URL encoding issues)
       const nonce = Date.now().toString() + Math.random().toString(36).substring(2, 10);
-      // Encode userId, appRedirect, historyDays, and nonce in state (base64 encoded JSON)
-      const stateData = { userId: req.user!.userId, appRedirect, historyDays, nonce };
-      const state = Buffer.from(JSON.stringify(stateData)).toString('base64');
+      
+      // Store state server-side with 10-minute expiration
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+      await storage.createOauthState({
+        state,
+        userId: req.user!.userId,
+        provider: 'garmin',
+        appRedirect,
+        historyDays,
+        nonce,
+        expiresAt,
+      });
+      
       // Use dynamic redirect URI based on request host
       let host = req.get('host') || '';
       
@@ -2194,9 +2207,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log("Base URL:", baseUrl);
       console.log("Redirect URI being sent:", redirectUri);
       console.log("App redirect (after auth):", appRedirect);
+      console.log("State (server-side stored):", state);
       console.log("Nonce for PKCE:", nonce);
-      console.log("State data:", stateData);
-      
+      console.log("State expires at:", expiresAt.toISOString());
+      console.log("=========================");
+
       const authUrl = await garminService.getGarminAuthUrl(redirectUri, state, nonce);
       console.log("Full auth URL:", authUrl);
       console.log("=========================");
@@ -2217,30 +2232,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { code, state, error } = req.query;
       
-      // Decode state to get userId, appRedirect, historyDays, and nonce
-      let stateData: { userId: string; appRedirect: string; historyDays?: number; nonce: string } | null = null;
       let appRedirectUrl = 'airuncoach://connected-devices';
       let userId = '';
       let historyDays = 30;
       let nonce = '';
+      let oauthStateRecord = null;
       
-      try {
-        stateData = JSON.parse(Buffer.from(state as string, 'base64').toString('utf-8'));
-        appRedirectUrl = stateData?.appRedirect || appRedirectUrl;
-        userId = stateData?.userId || '';
-        historyDays = stateData?.historyDays || 30;
-        nonce = stateData?.nonce || '';
-        console.log("Garmin callback - decoded state:", { userId, appRedirect: appRedirectUrl, historyDays, nonce });
-      } catch (e) {
-        console.error("Garmin callback - failed to decode state:", e);
+      // Validate state parameter by looking it up server-side
+      if (state) {
+        try {
+          oauthStateRecord = await storage.getOauthState(state as string);
+          
+          if (!oauthStateRecord) {
+            console.error("[SECURITY] Garmin callback - state not found or expired:", state);
+            const errorUrl = appRedirectUrl.includes('?') 
+              ? `${appRedirectUrl}&garmin=error&message=invalid_or_expired_state`
+              : `${appRedirectUrl}?garmin=error&message=invalid_or_expired_state`;
+            return res.redirect(errorUrl);
+          }
+          
+          // Check if state has expired
+          if (new Date() > new Date(oauthStateRecord.expiresAt)) {
+            console.error("[SECURITY] Garmin callback - state expired:", { state, expiredAt: oauthStateRecord.expiresAt });
+            await storage.deleteOauthState(state as string);
+            const errorUrl = appRedirectUrl.includes('?') 
+              ? `${appRedirectUrl}&garmin=error&message=state_expired`
+              : `${appRedirectUrl}?garmin=error&message=state_expired`;
+            return res.redirect(errorUrl);
+          }
+          
+          // Verify this is a Garmin OAuth state
+          if (oauthStateRecord.provider !== 'garmin') {
+            console.error("[SECURITY] Garmin callback - provider mismatch:", { state, provider: oauthStateRecord.provider });
+            await storage.deleteOauthState(state as string);
+            const errorUrl = appRedirectUrl.includes('?') 
+              ? `${appRedirectUrl}&garmin=error&message=invalid_provider`
+              : `${appRedirectUrl}?garmin=error&message=invalid_provider`;
+            return res.redirect(errorUrl);
+          }
+          
+          // Extract data from server-side state
+          userId = oauthStateRecord.userId;
+          appRedirectUrl = oauthStateRecord.appRedirect || appRedirectUrl;
+          historyDays = oauthStateRecord.historyDays || 30;
+          nonce = oauthStateRecord.nonce || '';
+          
+          console.log("[SECURITY] Garmin callback - state validated server-side:", { 
+            userId, 
+            provider: oauthStateRecord.provider,
+            appRedirect: appRedirectUrl, 
+            historyDays, 
+            nonce,
+            stateCreatedAt: oauthStateRecord.createdAt 
+          });
+        } catch (stateError) {
+          console.error("[SECURITY] Garmin callback - error validating state:", stateError);
+          const errorUrl = appRedirectUrl.includes('?') 
+            ? `${appRedirectUrl}&garmin=error&message=state_validation_error`
+            : `${appRedirectUrl}?garmin=error&message=state_validation_error`;
+          return res.redirect(errorUrl);
+        }
+      } else {
+        console.error("[SECURITY] Garmin callback - missing state parameter");
         const errorUrl = appRedirectUrl.includes('?') 
-          ? `${appRedirectUrl}&garmin=error&message=invalid_state`
-          : `${appRedirectUrl}?garmin=error&message=invalid_state`;
+          ? `${appRedirectUrl}&garmin=error&message=missing_state`
+          : `${appRedirectUrl}?garmin=error&message=missing_state`;
         return res.redirect(errorUrl);
       }
       
       if (error) {
         console.error("Garmin OAuth error:", error);
+        await storage.deleteOauthState(state as string);
         const errorUrl = appRedirectUrl.includes('?') 
           ? `${appRedirectUrl}&garmin=error&message=${encodeURIComponent(error as string)}`
           : `${appRedirectUrl}?garmin=error&message=${encodeURIComponent(error as string)}`;
@@ -2249,6 +2311,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (!code || !state || !nonce) {
         console.error("Garmin callback - missing params:", { code: !!code, state: !!state, nonce: !!nonce });
+        await storage.deleteOauthState(state as string);
         const errorUrl = appRedirectUrl.includes('?') 
           ? `${appRedirectUrl}&garmin=error&message=missing_params`
           : `${appRedirectUrl}?garmin=error&message=missing_params`;
@@ -2328,6 +2391,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log("⏭️ Skipping historical activity sync (historyDays = 0)");
       }
       
+      // Clean up OAuth state after successful connection
+      if (state) {
+        try {
+          await storage.deleteOauthState(state as string);
+          console.log("[SECURITY] Cleaned up OAuth state after successful Garmin connection");
+        } catch (cleanupError) {
+          console.error("[SECURITY] Failed to cleanup OAuth state:", cleanupError);
+          // Non-critical error, don't fail the connection
+        }
+      }
+
       // Redirect back to mobile app with success using HTML page
       const successUrl = appRedirectUrl.includes('?') 
         ? `${appRedirectUrl}&garmin=success` 
@@ -2408,13 +2482,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       `);
     } catch (error: any) {
       console.error("Garmin callback error:", error);
-      // Fallback redirect - decode state if possible to get appRedirect
+      // Fallback redirect - lookup state server-side if possible to get appRedirect
       let fallbackRedirect = 'airuncoach://connected-devices';
       try {
         const { state } = req.query;
         if (state) {
-          const stateData = JSON.parse(Buffer.from(state as string, 'base64').toString('utf-8'));
-          fallbackRedirect = stateData?.appRedirect || fallbackRedirect;
+          const stateRecord = await storage.getOauthState(state as string);
+          if (stateRecord) {
+            fallbackRedirect = stateRecord.appRedirect || fallbackRedirect;
+            // Clean up the failed state
+            await storage.deleteOauthState(state as string);
+          }
         }
       } catch (e) { /* ignore */ }
       const errorUrl = fallbackRedirect.includes('?') 
