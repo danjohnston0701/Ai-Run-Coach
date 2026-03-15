@@ -1268,6 +1268,30 @@ export const webhookFailureQueue = pgTable("webhook_failure_queue", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Garmin Webhook Events Log - comprehensive tracking of all webhook events
+export const garminWebhookEvents = pgTable("garmin_webhook_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  webhookType: text("webhook_type").notNull().default('activities'), // 'activities', 'activity-details', etc.
+  activityId: varchar("activity_id"), // Garmin activity ID
+  userId: varchar("user_id"), // User ID if known
+  deviceId: varchar("device_id"), // Garmin device ID
+  status: text("status").notNull(), // 'received', 'created_run', 'merged_run', 'failed', 'skipped'
+  matchScore: real("match_score"), // Fuzzy match score (0-100) if merged
+  matchedRunId: varchar("matched_run_id"), // ID of existing run if merged
+  newRunId: varchar("new_run_id"), // ID of new run if created
+  activityType: text("activity_type"), // 'RUNNING', 'WALKING', etc.
+  distanceInMeters: real("distance_in_meters"),
+  durationInSeconds: integer("duration_in_seconds"),
+  errorMessage: text("error_message"), // Error details if failed
+  notificationSent: boolean("notification_sent").default(false), // Whether push notification was sent
+  notificationType: text("notification_type"), // 'new_activity', 'run_enriched'
+  isProcessed: boolean("is_processed").default(false), // Whether processing is complete
+  processedAt: timestamp("processed_at"), // When processing completed
+  rawPayload: jsonb("raw_payload"), // Full webhook payload for debugging
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 export const insertRunSchema = createInsertSchema(runs).omit({ id: true, completedAt: true });
@@ -1329,6 +1353,7 @@ export type UserAchievement = typeof userAchievements.$inferSelect;
 export type SharedRun = typeof sharedRuns.$inferSelect;
 export type OauthStateStore = typeof oauthStateStore.$inferSelect;
 export type WebhookFailureQueue = typeof webhookFailureQueue.$inferSelect;
+export type GarminWebhookEvent = typeof garminWebhookEvents.$inferSelect;
 export type GarminMoveIQ = typeof garminMoveIQ.$inferSelect;
 export type GarminBloodPressure = typeof garminBloodPressure.$inferSelect;
 export type GarminEpochRaw = typeof garminEpochsRaw.$inferSelect;

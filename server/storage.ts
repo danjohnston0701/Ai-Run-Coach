@@ -3,13 +3,13 @@ import {
   notifications, notificationPreferences, liveRunSessions,
   groupRuns, groupRunParticipants, events, routeRatings, runAnalyses,
   connectedDevices, deviceData, garminWellnessMetrics, activityMergeLog,
-  oauthStateStore,
+  oauthStateStore, webhookFailureQueue, garminWebhookEvents,
   type User, type InsertUser, type Run, type InsertRun,
   type Route, type InsertRoute, type Goal, type InsertGoal,
   type Friend, type FriendRequest, type Notification, type NotificationPreference,
   type LiveRunSession, type GroupRun, type GroupRunParticipant, type Event,
   type RouteRating, type RunAnalysis, type ConnectedDevice, type DeviceData,
-  type GarminWellnessMetric, type OauthStateStore
+  type GarminWellnessMetric, type OauthStateStore, type GarminWebhookEvent
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, or, and, desc, ilike, sql, inArray } from "drizzle-orm";
@@ -102,6 +102,19 @@ export interface IStorage {
   getOauthState(state: string): Promise<OauthStateStore | undefined>;
   deleteOauthState(state: string): Promise<void>;
   cleanupExpiredOauthStates(): Promise<number>;
+
+  // Garmin Webhook Events
+  createGarminWebhookEvent(data: Partial<GarminWebhookEvent>): Promise<GarminWebhookEvent>;
+  updateGarminWebhookEvent(id: string, data: Partial<GarminWebhookEvent>): Promise<GarminWebhookEvent | undefined>;
+  getGarminWebhookStats(userId: string, days: number): Promise<{
+    totalReceived: number;
+    totalCreated: number;
+    totalMerged: number;
+    totalFailed: number;
+    totalSkipped: number;
+    averageMatchScore: number;
+  }>;
+  getRecentGarminWebhookEvents(userId: string, limit: number): Promise<GarminWebhookEvent[]>;
   
   // Device Data
   getDeviceDataByRun(runId: string): Promise<DeviceData[]>;
@@ -640,6 +653,53 @@ export class DatabaseStorage implements IStorage {
       .where(sql`${oauthStateStore.expiresAt} < NOW()`)
       .returning({ id: oauthStateStore.id });
     return result.length;
+  }
+
+  // Garmin Webhook Events
+  async createGarminWebhookEvent(data: Partial<GarminWebhookEvent>): Promise<GarminWebhookEvent> {
+    const [event] = await db.insert(garminWebhookEvents).values(data).returning();
+    return event;
+  }
+
+  async updateGarminWebhookEvent(id: string, data: Partial<GarminWebhookEvent>): Promise<GarminWebhookEvent | undefined> {
+    const [event] = await db.update(garminWebhookEvents).set({ ...data, updatedAt: new Date() }).where(eq(garminWebhookEvents.id, id)).returning();
+    return event || undefined;
+  }
+
+  async getGarminWebhookStats(userId: string, days: number): Promise<{
+    totalReceived: number;
+    totalCreated: number;
+    totalMerged: number;
+    totalFailed: number;
+    totalSkipped: number;
+    averageMatchScore: number;
+  }> {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+
+    const events = await db.select().from(garminWebhookEvents)
+      .where(and(
+        eq(garminWebhookEvents.userId, userId),
+        sql`${garminWebhookEvents.createdAt} >= ${since}`
+      ));
+
+    const totalReceived = events.length;
+    const totalCreated = events.filter(e => e.status === 'created_run').length;
+    const totalMerged = events.filter(e => e.status === 'merged_run').length;
+    const totalFailed = events.filter(e => e.status === 'failed').length;
+    const totalSkipped = events.filter(e => e.status === 'skipped').length;
+
+    const scores = events.filter(e => e.matchScore !== null).map(e => e.matchScore || 0);
+    const averageMatchScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+
+    return { totalReceived, totalCreated, totalMerged, totalFailed, totalSkipped, averageMatchScore };
+  }
+
+  async getRecentGarminWebhookEvents(userId: string, limit: number): Promise<GarminWebhookEvent[]> {
+    return db.select().from(garminWebhookEvents)
+      .where(eq(garminWebhookEvents.userId, userId))
+      .orderBy(desc(garminWebhookEvents.createdAt))
+      .limit(limit);
   }
 }
 

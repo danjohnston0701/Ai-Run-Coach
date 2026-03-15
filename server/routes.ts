@@ -48,6 +48,10 @@ import {
   reassessTrainingPlansWithRunData
 } from "./training-plan-service";
 import {
+  sendActivityNotification,
+  getUnreadNotificationCount
+} from "./notification-service";
+import {
   checkAchievementsAfterRun,
   getUserAchievements,
   initializeAchievements
@@ -3309,8 +3313,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
 
   // ACTIVITY - Activities (when user completes a run/walk)
-  // Enhanced with better error handling, field mapping, and retry logic
+  // Enhanced with comprehensive logging, notifications, and webhook event tracking
   garminWebhook("activities", async (req: Request, res: Response) => {
+    const eventIds: string[] = [];
+    
     try {
       console.log('[Garmin Webhook] Received activities push:', JSON.stringify(req.body).slice(0, 1000));
       
@@ -3328,6 +3334,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`[Garmin Webhook] Processing ${activities.length} activities`);
       
       for (const activity of activities) {
+        let webhookEventId: string | null = null;
+        
         try {
           // Determine user - handle both access token and direct user ID lookup
           const userAccessToken = activity.userAccessToken;
@@ -3345,8 +3353,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
             });
           }
           
+          // Create initial webhook event log entry
+          const activityType = (activity.activityType || 'RUNNING').toUpperCase();
+          const isRunOrWalk = [
+            'RUNNING', 'WALKING', 'TRAIL_RUNNING', 'TREADMILL_RUNNING', 
+            'INDOOR_WALKING', 'WHEELCHAIR_PUSH_WALK', 'WHEELCHAIR_PUSH_RUN',
+            'INDOOR_RUNNING', 'TRAIL_WALK', 'OUTDOOR_WALK'
+          ].includes(activityType);
+          
+          const webhookEvent = await storage.createGarminWebhookEvent({
+            webhookType: 'activities',
+            activityId: String(activity.activityId),
+            userId: device?.userId,
+            deviceId: activity.userId,
+            status: 'received',
+            activityType: activityType,
+            distanceInMeters: activity.distanceInMeters,
+            durationInSeconds: activity.durationInSeconds,
+            rawPayload: activity,
+            isProcessed: false,
+          });
+          webhookEventId = webhookEvent.id;
+          eventIds.push(webhookEventId);
+          
           if (!device) {
             console.warn(`⚠️ [Garmin Webhook] Could not map activity ${activity.activityId} to user (userId: ${activity.userId}, hasToken: ${!!userAccessToken})`);
+            
+            // Update webhook event with failure
+            await storage.updateGarminWebhookEvent(webhookEventId, {
+              status: 'failed',
+              errorMessage: 'User not found for activity',
+              isProcessed: true,
+              processedAt: new Date(),
+            });
+            
             // Queue for retry if user not found
             await db.insert(webhookFailureQueue).values({
               webhookType: 'activities',
@@ -3357,14 +3397,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             continue;
           }
           
-          const activityType = (activity.activityType || 'RUNNING').toUpperCase();
-          const isRunOrWalk = [
-            'RUNNING', 'WALKING', 'TRAIL_RUNNING', 'TREADMILL_RUNNING', 
-            'INDOOR_WALKING', 'WHEELCHAIR_PUSH_WALK', 'WHEELCHAIR_PUSH_RUN',
-            'INDOOR_RUNNING', 'TRAIL_WALK', 'OUTDOOR_WALK'
-          ].includes(activityType);
-          
           console.log(`[Garmin Webhook] Processing activity for user ${device.userId}: ${activity.activityName || activityType} (type: ${activityType})`);
+          
+          // Update webhook event with user info
+          await storage.updateGarminWebhookEvent(webhookEventId, {
+            userId: device.userId,
+          });
           
           // Store full activity in garmin_activities table with all available fields
           const [garminActivity] = await db.insert(garminActivities).values({
@@ -3446,6 +3484,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             );
 
             let runId: string;
+            let notificationType: 'new_activity' | 'run_enriched' | null = null;
+            let matchScore: number | undefined;
 
             if (mergeCandidate && mergeCandidate.matchScore > 50) {
               // MERGE: Enhance existing run with Garmin data
@@ -3478,6 +3518,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
               );
 
               runId = mergeCandidate.aiRunCoachRunId;
+              matchScore = mergeCandidate.matchScore;
+              notificationType = 'run_enriched';
+              
+              // Update webhook event
+              await storage.updateGarminWebhookEvent(webhookEventId, {
+                status: 'merged_run',
+                matchScore: mergeCandidate.matchScore,
+                matchedRunId: mergeCandidate.aiRunCoachRunId,
+                newRunId: null,
+                isProcessed: true,
+                processedAt: new Date(),
+              });
+              
               console.log(`✅ [Garmin Webhook] Merged Garmin activity with existing run`);
 
             } else {
@@ -3513,6 +3566,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
               }).returning();
 
               runId = newRun.id;
+              notificationType = 'new_activity';
+              
+              // Update webhook event
+              await storage.updateGarminWebhookEvent(webhookEventId, {
+                status: 'created_run',
+                matchScore: mergeCandidate?.matchScore || 0,
+                newRunId: newRun.id,
+                isProcessed: true,
+                processedAt: new Date(),
+              });
+              
               console.log(`[Garmin Webhook] Created new run record ${newRun.id} from Garmin activity ${activity.activityId}`);
             }
             
@@ -3521,14 +3585,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
               .set({ runId, isProcessed: true })
               .where(eq(garminActivities.id, garminActivity.id));
             
+            // Send notification to user
+            if (notificationType) {
+              try {
+                const notificationResult = await sendActivityNotification(
+                  device.userId,
+                  activity,
+                  notificationType,
+                  runId,
+                  matchScore
+                );
+                
+                // Update webhook event with notification status
+                await storage.updateGarminWebhookEvent(webhookEventId, {
+                  notificationSent: notificationResult.inAppSent || notificationResult.pushSent,
+                  notificationType: notificationType,
+                });
+                
+                console.log(`[Garmin Webhook] Notification sent: ${notificationType} (inApp: ${notificationResult.inAppSent}, push: ${notificationResult.pushSent})`);
+              } catch (notifyError) {
+                console.error(`[Garmin Webhook] Failed to send notification:`, notifyError);
+              }
+            }
+            
+            // Trigger plan reassessment asynchronously
+            setImmediate(() => {
+              (async () => {
+                try {
+                  console.log(`[Garmin Webhook] Triggering plan reassessment for run ${runId}`);
+                  await reassessTrainingPlansWithRunData(device.userId, runId);
+                } catch (err) {
+                  console.error("[Garmin Webhook] Plan reassessment failed:", err);
+                }
+              })();
+            });
+            
           } else if (!isRunOrWalk) {
             console.log(`⏭️ [Garmin Webhook] Skipping non-running activity: ${activityType}`);
+            
+            await storage.updateGarminWebhookEvent(webhookEventId, {
+              status: 'skipped',
+              errorMessage: `Non-running activity type: ${activityType}`,
+              isProcessed: true,
+              processedAt: new Date(),
+            });
+            
           } else if (activity.distanceInMeters <= 0) {
             console.log(`⏭️ [Garmin Webhook] Skipping activity with no distance: ${activity.activityId}`);
+            
+            await storage.updateGarminWebhookEvent(webhookEventId, {
+              status: 'skipped',
+              errorMessage: 'Activity has no distance',
+              isProcessed: true,
+              processedAt: new Date(),
+            });
           }
           
         } catch (activityError: any) {
           console.error(`❌ [Garmin Webhook] Error processing activity ${activity.activityId}:`, activityError.message);
+          
+          // Update webhook event with failure
+          if (webhookEventId) {
+            await storage.updateGarminWebhookEvent(webhookEventId, {
+              status: 'failed',
+              errorMessage: activityError.message,
+              isProcessed: true,
+              processedAt: new Date(),
+            }).catch(() => {}); // Ignore update errors
+          }
+          
           // Queue failed activity for retry
           await db.insert(webhookFailureQueue).values({
             webhookType: 'activities',
@@ -4732,6 +4857,179 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error processing webhook queue:", error);
       res.status(500).json({ error: "Failed to process queue" });
+    }
+  });
+
+  // Webhook Testing Endpoint - Simulate incoming Garmin activities webhook
+  app.post("/api/garmin/webhook-test", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { activities } = req.body;
+      
+      if (!activities || !Array.isArray(activities) || activities.length === 0) {
+        return res.status(400).json({ error: "activities array required" });
+      }
+      
+      console.log(`[Webhook Test] Simulating ${activities.length} activities for user ${req.user!.userId}`);
+      
+      // Add user info to each activity for testing
+      const testActivities = activities.map((activity: any, index: number) => ({
+        ...activity,
+        userAccessToken: `test_token_${req.user!.userId}_${index}`,
+        activityId: activity.activityId || `test_${Date.now()}_${index}`,
+      }));
+      
+      // Import the activities handler
+      const { garminWebhook } = await import("./garmin-webhook-handler");
+      
+      // Create a mock request
+      const mockReq = {
+        body: { activities: testActivities },
+        headers: {},
+        query: {},
+        params: {},
+      } as any;
+      
+      const mockRes = {
+        status: (code: number) => ({ json: () => {} }),
+        json: () => {},
+      } as any;
+      
+      // Process the activities
+      await garminWebhook("activities", mockReq, mockRes);
+      
+      // Return the event IDs for tracking
+      const eventIds = await Promise.all(
+        testActivities.map(async (activity: any) => {
+          const events = await storage.getRecentGarminWebhookEvents(req.user!.userId, 1);
+          return events[0]?.id;
+        })
+      );
+      
+      res.json({
+        success: true,
+        message: `Processed ${activities.length} test activities`,
+        eventIds,
+      });
+    } catch (error: any) {
+      console.error("[Webhook Test] Error:", error);
+      res.status(500).json({ error: "Failed to process test activities" });
+    }
+  });
+
+  // Webhook Stats Endpoint - Get comprehensive webhook statistics
+  app.get("/api/garmin/webhook-stats", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const days = parseInt(req.query.days as string || '7', 10);
+      const limit = Math.min(parseInt(req.query.limit as string || '10', 10), 50);
+      
+      // Get stats for different time periods
+      const stats24h = await storage.getGarminWebhookStats(req.user!.userId, 1);
+      const stats7d = await storage.getGarminWebhookStats(req.user!.userId, 7);
+      const stats30d = await storage.getGarminWebhookStats(req.user!.userId, 30);
+      
+      // Get recent events
+      const recentEvents = await storage.getRecentGarminWebhookEvents(req.user!.userId, limit);
+      
+      // Calculate match rate
+      const matchRate7d = stats7d.totalReceived > 0 
+        ? ((stats7d.totalMerged / stats7d.totalReceived) * 100).toFixed(1)
+        : '0.0';
+      
+      res.json({
+        success: true,
+        stats: {
+          last24h: stats24h,
+          last7d: stats7d,
+          last30d: stats30d,
+          matchRate: `${matchRate7d}%`,
+        },
+        recentEvents: recentEvents.map(event => ({
+          id: event.id,
+          activityId: event.activityId,
+          status: event.status,
+          matchScore: event.matchScore,
+          matchedRunId: event.matchedRunId,
+          newRunId: event.newRunId,
+          activityType: event.activityType,
+          distanceInMeters: event.distanceInMeters,
+          durationInSeconds: event.durationInSeconds,
+          notificationSent: event.notificationSent,
+          notificationType: event.notificationType,
+          errorMessage: event.errorMessage,
+          createdAt: event.createdAt,
+          processedAt: event.processedAt,
+        })),
+      });
+    } catch (error: any) {
+      console.error("[Webhook Stats] Error:", error);
+      res.status(500).json({ error: "Failed to get webhook stats" });
+    }
+  });
+
+  // New Activities Polling Endpoint - For mobile apps to pull recent Garmin activities
+  app.get("/api/garmin/new-activities", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const since = req.query.since as string;
+      const limit = Math.min(parseInt(req.query.limit as string || '20', 10), 50);
+      
+      // Get recent webhook events for this user
+      const events = await storage.getRecentGarminWebhookEvents(req.user!.userId, limit * 2);
+      
+      // Filter to only created/merged activities since the given timestamp
+      let filteredEvents = events.filter(e => 
+        e.status === 'created_run' || e.status === 'merged_run'
+      );
+      
+      if (since) {
+        const sinceDate = new Date(since);
+        filteredEvents = filteredEvents.filter(e => 
+          e.createdAt && new Date(e.createdAt) > sinceDate
+        );
+      }
+      
+      // Get the full run details for each event
+      const activitiesWithRuns = await Promise.all(
+        filteredEvents.slice(0, limit).map(async (event) => {
+          const runId = event.newRunId || event.matchedRunId;
+          if (!runId) return null;
+          
+          const run = await storage.getRun(runId);
+          if (!run) return null;
+          
+          return {
+            webhookEvent: {
+              id: event.id,
+              activityId: event.activityId,
+              status: event.status,
+              matchScore: event.matchScore,
+              createdAt: event.createdAt,
+            },
+            run: {
+              id: run.id,
+              distance: run.distance,
+              duration: run.duration,
+              avgPace: run.avgPace,
+              avgHeartRate: run.avgHeartRate,
+              completedAt: run.completedAt,
+              hasGarminData: run.hasGarminData,
+              garminActivityId: run.garminActivityId,
+            },
+          };
+        })
+      );
+      
+      // Filter out nulls
+      const validActivities = activitiesWithRuns.filter(a => a !== null);
+      
+      res.json({
+        success: true,
+        activities: validActivities,
+        count: validActivities.length,
+        hasMore: filteredEvents.length > limit,
+      });
+    } catch (error: any) {
+      console.error("[New Activities] Error:", error);
+      res.status(500).json({ error: "Failed to get new activities" });
     }
   });
 
