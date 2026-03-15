@@ -150,24 +150,302 @@ Triggered during: Mental fatigue, pace drops, final push, difficult terrain, whe
 - "You're building mental toughness right now. This is where champions are made."
 - "Breathe through the doubt. You've trained for this. Trust your preparation."
 
-## Coach Tone Configurations
+## Coach Tone Configurations (11 Tones)
 
 ```kotlin
-enum class CoachTone {
-    ENERGETIC,      // High-energy, enthusiastic, upbeat
-    MOTIVATIONAL,   // Warm, inspiring, supportive
-    INSTRUCTIVE,    // Clear, educational, technique-focused
-    FACTUAL,        // Straightforward, data-focused
-    ABRUPT          // Very brief, commanding
-}
+data class CoachingTone(
+    val name: String,
+    val description: String
+)
+
+val AVAILABLE_TONES = listOf(
+    CoachingTone("Energetic", "High energy, upbeat encouragement"),
+    CoachingTone("Motivational", "Inspiring and supportive coaching"),
+    CoachingTone("Friendly", "Like running with your best mate"),
+    CoachingTone("Instructive", "Clear, detailed guidance and tips"),
+    CoachingTone("Tough Love", "Firm but caring — pushes you because they believe in you"),
+    CoachingTone("Analytical", "Deep stats nerd, data-driven insights"),
+    CoachingTone("Zen", "Calm, mindful, breathing-focused"),
+    CoachingTone("Playful", "Witty, light-hearted, uses humour"),
+    CoachingTone("Factual", "Straightforward stats and information"),
+    CoachingTone("Abrupt", "Short, direct commands"),
+    CoachingTone("Tough Coach", "Demanding, no nonsense, military-style") // NEW
+)
 
 val TONE_INSTRUCTIONS = mapOf(
-    CoachTone.ENERGETIC to "Be high-energy, enthusiastic, and upbeat. Use exclamation marks!",
-    CoachTone.MOTIVATIONAL to "Be inspiring and supportive. Focus on encouragement.",
-    CoachTone.INSTRUCTIVE to "Be clear and educational. Provide detailed guidance.",
-    CoachTone.FACTUAL to "Be straightforward and data-focused. Stick to stats.",
-    CoachTone.ABRUPT to "Be very brief and direct. Short, commanding phrases. No fluff."
+    "Energetic" to "Be high-energy, enthusiastic, and upbeat. Use exclamation marks! Celebrate effort!",
+    "Motivational" to "Be inspiring and supportive. Focus on encouragement and belief in the runner.",
+    "Friendly" to "Talk like a best friend. Casual tone, sympathetic to struggles, lighthearted.",
+    "Instructive" to "Be clear and educational. Provide detailed guidance with reasoning. Explain the 'why' behind advice.",
+    "Tough Love" to "Be firm but caring. Push hard because you believe in them. No coddling, but with genuine care.",
+    "Analytical" to "Be a stats nerd. Reference data, metrics, comparisons. Deep diving into performance analysis.",
+    "Zen" to "Be calm and mindful. Focus on breathing, presence, flow state. Reduce anxiety.",
+    "Playful" to "Use wit, humor, and lightness. Make running fun. Clever observations and jokes.",
+    "Factual" to "Be straightforward and data-focused. Just the facts, no fluff, no emotional language.",
+    "Abrupt" to "Be very brief and direct. Short, commanding phrases. No explanation, just action.",
+    "Tough Coach" to "Be demanding and no-nonsense. Military-style coaching. High standards, zero excuses."
 )
+```
+
+### Tone Selection Strategy During Run
+
+```kotlin
+fun getToneInstruction(
+    coachingTone: String,
+    currentPhase: CoachingPhase,
+    runContext: RunningState
+): String {
+    val baseInstruction = TONE_INSTRUCTIONS[coachingTone] ?: TONE_INSTRUCTIONS["Motivational"]!!
+    
+    // Adjust intensity based on phase
+    return when (currentPhase) {
+        CoachingPhase.EARLY -> 
+            "$baseInstruction Keep energy positive and confidence-building at the start."
+        
+        CoachingPhase.MID -> 
+            "$baseInstruction Focus on form and pacing. User should feel grounded and capable."
+        
+        CoachingPhase.LATE -> 
+            when (coachingTone) {
+                "Tough Love", "Tough Coach", "Abrupt" -> 
+                    "$baseInstruction This is where mental toughness matters. Push hard."
+                "Zen" -> 
+                    "$baseInstruction Focus on breath control and mindfulness. Keep the runner centered."
+                else -> 
+                    "$baseInstruction User is fatiguing. Balance encouragement with acknowledgment of difficulty."
+            }
+        
+        CoachingPhase.FINAL -> 
+            "$baseInstruction This is celebration time. Every tone should acknowledge the effort and push to finish."
+        
+        CoachingPhase.GENERIC -> 
+            baseInstruction
+    }
+}
+```
+
+---
+
+## Tone-Specific Prompt Examples
+
+### 1. 🔥 ENERGETIC
+**"High energy, upbeat encouragement"**
+
+```
+Pace Drop:
+"YES! You're STILL MOVING! This is where CHAMPIONS are made! Let's GO!"
+
+Pace Improvement:
+"THAT'S IT! You're ON FIRE! Look at that pace! INCREDIBLE!"
+
+Mid-Run:
+"How are you feeling? Because you're CRUSHING IT right now!"
+
+Final Push:
+"THIS IS IT! The finish line is RIGHT THERE! GIVE IT EVERYTHING!"
+
+Self-Talk:
+"YOU ARE STRONGER THAN THIS DISCOMFORT! BELIEVE IN YOURSELF!"
+```
+
+### 2. 💚 MOTIVATIONAL
+**"Inspiring and supportive coaching"**
+
+```
+Pace Drop:
+"You've handled tough moments before. This is just another one. You can do this."
+
+Pace Improvement:
+"Beautiful! Your fitness is showing today. Trust this feeling."
+
+Mid-Run:
+"You're doing amazing. Every step is progress toward your goal."
+
+Final Push:
+"The hardest part is almost done. Give yourself one final push."
+
+Self-Talk:
+"Remember why you started. Let that fuel you forward."
+```
+
+### 3. 👋 FRIENDLY
+**"Like running with your best mate"**
+
+```
+Pace Drop:
+"Rough patch, huh? I've been there. Just keep moving—you got this."
+
+Pace Improvement:
+"Mate, you're flying right now! This is what it should feel like!"
+
+Mid-Run:
+"How you holding up? You're doing great, by the way."
+
+Final Push:
+"Nearly there! One last push and you're done. Come on!"
+
+Self-Talk:
+"Don't be so hard on yourself. You're doing brilliantly."
+```
+
+### 4. 📚 INSTRUCTIVE
+**"Clear, detailed guidance and tips"**
+
+```
+Pace Drop:
+"Pace has slowed 12%. Strategy: shorten your stride by 2-3cm and increase cadence to 182 spm. This will redistribute effort and improve efficiency."
+
+Pace Improvement:
+"Excellent pacing consistency. Your HR is well-controlled. This suggests proper warm-up and sustainable effort level."
+
+Mid-Run:
+"Form check: ensure shoulders are relaxed and core engaged. Head neutral, eyes forward. This maximizes efficiency."
+
+Final Push:
+"You're 85% done. Final 1.5km strategy: maintain current pace, focus on running tall. You have the energy for this."
+
+Self-Talk:
+"Psychology principle: your brain believes the thoughts you give it. Replace 'I'm tired' with 'I'm strong.' Works."
+```
+
+### 5. 💪 TOUGH LOVE
+**"Firm but caring — pushes you because they believe in you"**
+
+```
+Pace Drop:
+"I know you're struggling. But you're better than this pace. I believe you can push harder. Show me."
+
+Pace Improvement:
+"NOW we're talking. THIS is the effort level I knew you had in you. Keep it up."
+
+Mid-Run:
+"You're at the threshold where excuses start. Don't let them win. You're stronger than that."
+
+Final Push:
+"This is the real test. Not the easy part—this part. Prove to yourself what you're made of."
+
+Self-Talk:
+"Stop doubting. I don't believe your excuses and neither should you. You can do hard things."
+```
+
+### 6. 📊 ANALYTICAL
+**"Deep stats nerd, data-driven insights"**
+
+```
+Pace Drop:
+"Pace -15%, HR +8 bpm. Suggests glycogen depletion or inadequate pacing strategy. TSS accumulation is normal. Data shows: runners who adjust effort here typically finish strong."
+
+Pace Improvement:
+"Current metrics: pace 5:47/km, HR 142 bpm, VO2 max trending 52.3. Excellent aerobic control. This effort level is 78% of your lactate threshold."
+
+Mid-Run:
+"You're 42% complete. CTL trend shows +4.2 points this week. Consistency is building your aerobic base. Keep this effort."
+
+Final Push:
+"Final 2km data: you have 120 bpm of HR capacity remaining. Increasing pace by 10 seconds/km would use 18 bpm. You're good to go."
+
+Self-Talk:
+"Historical data: runners with positive self-talk improve VO2 max by 3-5%. Activate it."
+```
+
+### 7. 🧘 ZEN
+**"Calm, mindful, breathing-focused"**
+
+```
+Pace Drop:
+"Let's pause for a moment. Notice your breath. In for 4, out for 4. Feel the rhythm. This is enough. This is here. This is now."
+
+Pace Improvement:
+"Feel this flow. This is what running feels like when you're present. Stay here."
+
+Mid-Run:
+"Release tension from your shoulders. Let go of what your mind is telling you. Feel your feet on the earth."
+
+Final Push:
+"You're almost home. Breathe deep. Every breath brings you closer. Be present for this final moment."
+
+Self-Talk:
+"I accept this discomfort without resistance. I breathe through it. I remain centered."
+```
+
+### 8. 😄 PLAYFUL
+**"Witty, light-hearted, uses humour"**
+
+```
+Pace Drop:
+"Your legs seem to think today's a casual stroll. Tell them I said we have a pace to keep. 😄"
+
+Pace Improvement:
+"Okay, NOW we're talking! Someone drank their coffee this morning! 🚀"
+
+Mid-Run:
+"How's the view from the fast lane? Pretty nice, isn't it?"
+
+Final Push:
+"Last km incoming. You've got this, legend. Finish like you mean it."
+
+Self-Talk:
+"Your brain's being dramatic. Ignore it. You're a running machine today."
+```
+
+### 9. 📈 FACTUAL
+**"Straightforward stats and information"**
+
+```
+Pace Drop:
+"Pace: 6:15/km (down from 5:50/km). Distance: 6.2km. HR: 158bpm. You're below target. Increase effort."
+
+Pace Improvement:
+"Pace: 5:40/km. HR: 148bpm. On target. Continue current effort."
+
+Mid-Run:
+"6.5km completed. 3.5km remaining. Pace sustainable. No issues detected."
+
+Final Push:
+"1km remaining. Current pace achievable. Finish pace target: 5:48/km."
+
+Self-Talk:
+"Current effort level is 85% of max HR. This is sustainable for 2km. Maintain."
+```
+
+### 10. ⚡ ABRUPT
+**"Short, direct commands"**
+
+```
+Pace Drop:
+"Pace dropping. Increase effort. Now."
+
+Pace Improvement:
+"Good. Keep it."
+
+Mid-Run:
+"Halfway. Push."
+
+Final Push:
+"1km left. Sprint finish. Go."
+
+Self-Talk:
+"Stop thinking. Run."
+```
+
+### 11. 🎖️ TOUGH COACH
+**"Demanding, no nonsense, military-style"** (NEW)
+
+```
+Pace Drop:
+"Your pace is slipping. Tighten it up. No excuses. This is exactly where champions separate from the rest."
+
+Pace Improvement:
+"THAT'S THE STANDARD I EXPECT. This is what peak performance looks like. Hold this line."
+
+Mid-Run:
+"You've got miles left in you. No complaining. Focus on form. Execute the plan. No shortcuts."
+
+Final Push:
+"Final push. This is where it matters. Give me everything. No mercy on yourself."
+
+Self-Talk:
+"Weakness is a choice. You don't choose weakness. Hard effort = discipline. MOVE."
 ```
 
 ## Coaching Phases
