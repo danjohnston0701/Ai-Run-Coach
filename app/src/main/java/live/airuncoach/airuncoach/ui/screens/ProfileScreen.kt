@@ -71,6 +71,7 @@ fun ProfileScreen(
     val viewModel: ProfileViewModel = hiltViewModel()
     val user by viewModel.user.collectAsState()
     val friendCount by viewModel.friendCount.collectAsState()
+    val profilePicCacheBuster by viewModel.profilePicCacheBuster.collectAsState()
     
     var showImagePickerDialog by remember { mutableStateOf(false) }
     
@@ -188,7 +189,13 @@ fun ProfileScreen(
             .padding(vertical = Spacing.lg),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        item { user?.let { ProfileHeader(user = it, onImageClick = { showImagePickerDialog = true }) } }
+        item { user?.let { 
+            ProfileHeader(
+                user = it, 
+                cacheBuster = profilePicCacheBuster,
+                onImageClick = { showImagePickerDialog = true }
+            ) 
+        }}
         item { Spacer(modifier = Modifier.height(Spacing.xl)) }
 
         item { SectionTitle(title = "Social") }
@@ -275,7 +282,7 @@ fun ProfileScreen(
 }
 
 @Composable
-fun ProfileHeader(user: User, onImageClick: () -> Unit) {
+fun ProfileHeader(user: User, cacheBuster: Long, onImageClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
@@ -291,9 +298,16 @@ fun ProfileHeader(user: User, onImageClick: () -> Unit) {
                 contentAlignment = Alignment.Center
             ) {
                 if (!user.profilePic.isNullOrBlank()) {
+                    // Reconstruct data URL from base64 (backend now stores just base64)
+                    // Add cache buster query parameter to force Coil to reload
+                    val imageUrl = remember(user.profilePic, cacheBuster) {
+                        "data:image/jpeg;base64,${user.profilePic}?t=$cacheBuster"
+                    }
+                    
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
-                            .data(user.profilePic)
+                            .data(imageUrl)
+                            .memoryCacheKey("${user.id}_profile_$cacheBuster") // Unique cache key per upload
                             .crossfade(true)
                             .build(),
                         contentDescription = "User Profile Picture",

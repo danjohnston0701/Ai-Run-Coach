@@ -6,6 +6,8 @@ import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import coil.Coil
+import coil.annotation.ExperimentalCoilApi
 import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -18,9 +20,6 @@ import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.model.UploadProfilePictureRequest
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.toRequestBody
 import javax.inject.Inject
 
 @HiltViewModel
@@ -41,6 +40,10 @@ class ProfileViewModel @Inject constructor(
 
     private val _isGarminConnected = MutableStateFlow(false)
     val isGarminConnected: StateFlow<Boolean> = _isGarminConnected.asStateFlow()
+
+    // Cache buster timestamp to force image reload
+    private val _profilePicCacheBuster = MutableStateFlow(System.currentTimeMillis())
+    val profilePicCacheBuster: StateFlow<Long> = _profilePicCacheBuster.asStateFlow()
 
     init {
         loadUser()
@@ -83,6 +86,7 @@ class ProfileViewModel @Inject constructor(
         }
     }
 
+    @OptIn(ExperimentalCoilApi::class)
     fun uploadProfilePicture(imageUri: Uri) {
         viewModelScope.launch {
             try {
@@ -92,17 +96,30 @@ class ProfileViewModel @Inject constructor(
                 inputStream?.close()
 
                 if (imageBytes != null) {
-                    // Convert to base64
-                    val base64Image = android.util.Base64.encodeToString(imageBytes, android.util.Base64.NO_WRAP)
-                    val imageData = "data:image/jpeg;base64,$base64Image"
+                    // Check image size (2MB limit before base64 encoding)
+                    if (imageBytes.size > 2 * 1024 * 1024) {
+                        Log.e("ProfileViewModel", "❌ Image too large: ${imageBytes.size} bytes (max 2MB)")
+                        return@launch
+                    }
 
-                    val request = UploadProfilePictureRequest(imageData)
+                    // Convert to base64 (without data URL prefix - backend handles that)
+                    val base64Image = android.util.Base64.encodeToString(imageBytes, android.util.Base64.NO_WRAP)
+                    
+                    // Backend now expects just the base64 without prefix
+                    val request = UploadProfilePictureRequest(base64Image)
                     val updatedUser = apiService.uploadProfilePicture(user.id, request)
 
-                    val userJson = gson.toJson(updatedUser)
-                    sharedPrefs.edit().putString("user", userJson).apply()
-                    _user.value = updatedUser
-                    
+                    // 1. Clear Coil image cache to force fresh load
+                    Coil.imageLoader(context).memoryCache?.clear()
+                    Coil.imageLoader(context).diskCache?.clear()
+                    Log.d("ProfileViewModel", "🧹 Coil cache cleared")
+
+                    // 2. Update cache buster to force image reload
+                    _profilePicCacheBuster.value = System.currentTimeMillis()
+
+                    // 3. Refresh user from API to get fresh data (don't trust response alone)
+                    refreshUserFromApi()
+
                     Log.d("ProfileViewModel", "✅ Profile picture uploaded successfully")
                 }
             } catch (e: JsonSyntaxException) {
@@ -110,6 +127,35 @@ class ProfileViewModel @Inject constructor(
                 Log.e("ProfileViewModel", "💡 The profile picture upload endpoint needs to be deployed to the backend server")
             } catch (e: Exception) {
                 Log.e("ProfileViewModel", "❌ Failed to upload profile picture: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * Refresh user data from API instead of relying on upload response
+     * This ensures we get the latest profilePic with proper cache busting
+     */
+    private fun refreshUserFromApi() {
+        viewModelScope.launch {
+            try {
+                val freshUser = apiService.getCurrentUser()
+                
+                // Get short user ID
+                val shortUserId = sessionManager.getShortUserId()
+                val userWithShortId = freshUser.copy(shortUserId = shortUserId)
+                
+                // Save to SharedPreferences
+                val userJson = gson.toJson(userWithShortId)
+                sharedPrefs.edit().putString("user", userJson).apply()
+                
+                // Update UI state
+                _user.value = userWithShortId
+                
+                Log.d("ProfileViewModel", "🔄 User refreshed from API: ${freshUser.name}")
+            } catch (e: Exception) {
+                Log.e("ProfileViewModel", "❌ Failed to refresh user from API: ${e.message}")
+                // Fallback: at least try to reload from SharedPreferences
+                loadUser()
             }
         }
     }

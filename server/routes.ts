@@ -186,6 +186,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get current authenticated user
+  app.get("/api/users/me", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      const { password: _, ...userWithoutPassword } = user;
+      res.json(userWithoutPassword);
+    } catch (error: any) {
+      console.error("Get current user error:", error);
+      res.status(500).json({ error: "Failed to get current user" });
+    }
+  });
+
   app.put("/api/users/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       if (req.user?.userId !== req.params.id) {
@@ -212,13 +228,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: "Not authorized" });
       }
 
-      const { imageData } = req.body; // base64 encoded image or data URL
+      let { imageData } = req.body; // base64 encoded image or data URL
       
       if (!imageData) {
         return res.status(400).json({ error: "No image data provided" });
       }
 
-      // Update user's profile picture
+      // Strip data URL prefix if present (e.g., "data:image/jpeg;base64,")
+      if (imageData.includes(',')) {
+        imageData = imageData.split(',')[1];
+      }
+
+      // Validate base64 format
+      const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+      if (!base64Regex.test(imageData)) {
+        return res.status(400).json({ error: "Invalid base64 image data" });
+      }
+
+      // Check image size (2MB limit for base64)
+      // Base64 is ~4/3 the size of binary, so 2MB = ~2.67MB base64 = ~2.8M chars
+      const MAX_BASE64_SIZE = 2.8 * 1024 * 1024; // ~2.8M characters
+      if (imageData.length > MAX_BASE64_SIZE) {
+        return res.status(400).json({ error: "Image too large. Max size is 2MB" });
+      }
+
+      // Update user's profile picture (store clean base64 without prefix)
       const updated = await storage.updateUser(req.params.id, {
         profilePic: imageData
       });

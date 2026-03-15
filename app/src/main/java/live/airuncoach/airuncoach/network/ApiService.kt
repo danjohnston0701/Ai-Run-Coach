@@ -31,6 +31,9 @@ interface ApiService {
     @GET("/api/users/{id}")
     suspend fun getUser(@Path("id") userId: String): User
 
+    @GET("/api/users/me")
+    suspend fun getCurrentUser(): User
+
     @PUT("/api/users/{id}")
     suspend fun updateUser(@Path("id") userId: String, @Body request: UpdateUserRequest): User
 
