@@ -1,7 +1,5 @@
 package live.airuncoach.airuncoach.ui.screens
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -198,38 +196,50 @@ fun GarminPermissionsScreenWrapper(
                 }
             }
 
-            // Re-authorize Button
+            // How to Update Permissions Info Card
             item {
-                Button(
-                    onClick = {
-                        // In production, this would call viewModel.reauthorize()
-                        // which would open Garmin's OAuth page
-                        val authUrl =
-                            "https://connect.garmin.com/auth/authorize"
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(authUrl))
-                        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                        context.startActivity(intent)
-                    },
+                Spacer(modifier = Modifier.height(16.dp))
+                Card(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF00D4FF),
-                        contentColor = Color.Black
+                        .fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Colors.backgroundSecondary
                     ),
                     shape = RoundedCornerShape(BorderRadius.md)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.VpnKey,
-                        contentDescription = "Update",
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        "Update Permissions",
-                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium)
-                    )
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "Info",
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .padding(end = 12.dp),
+                                tint = Colors.primary
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Update Permissions",
+                                    style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                                    color = Colors.textPrimary
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    "You can manage and update your permissions using the Garmin Connect app. Under your profile, go to Settings, click on Connected Apps, then click AI Run Coach. You can update permissions there.",
+                                    style = AppTextStyles.caption,
+                                    color = Colors.textSecondary,
+                                    lineHeight = 16.sp
+                                )
+                            }
+                        }
+                    }
                 }
+                Spacer(modifier = Modifier.height(16.dp))
             }
 
             // Permissions by Category
