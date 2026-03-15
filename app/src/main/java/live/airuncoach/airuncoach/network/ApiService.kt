@@ -174,6 +174,9 @@ interface ApiService {
     @POST("/api/runs/{id}/comprehensive-analysis")
     suspend fun getComprehensiveRunAnalysis(@Path("id") runId: String): ComprehensiveAnalysisResponse
 
+    @POST("/api/runs/{runId}/enrich-with-garmin-data")
+    suspend fun enrichRunWithGarminData(@Path("runId") runId: String): RunSession
+
     @POST("/api/runs/{id}/ai-insights")
     suspend fun getBasicRunInsights(
         @Path("id") runId: String,

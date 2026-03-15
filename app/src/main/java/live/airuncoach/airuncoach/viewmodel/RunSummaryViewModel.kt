@@ -61,6 +61,12 @@ class RunSummaryViewModel @Inject constructor(
 
     private val _isGarminConnected = MutableStateFlow(false)
     val isGarminConnected: StateFlow<Boolean> = _isGarminConnected.asStateFlow()
+
+    private val _isEnrichingWithGarmin = MutableStateFlow(false)
+    val isEnrichingWithGarmin: StateFlow<Boolean> = _isEnrichingWithGarmin.asStateFlow()
+
+    private val _garminEnrichmentError = MutableStateFlow<String?>(null)
+    val garminEnrichmentError: StateFlow<String?> = _garminEnrichmentError.asStateFlow()
     
     // Target info from run setup
     private var targetDistance: Double? = null
@@ -300,6 +306,31 @@ class RunSummaryViewModel @Inject constructor(
     fun retryAIAnalysis() {
         _analysisState.value = AiAnalysisState.Idle
         generateAIAnalysis()
+    }
+
+    /**
+     * Enrich the run with Garmin data by matching the run's start time
+     * to a Garmin activity and pulling in all the detailed metrics.
+     */
+    fun enrichRunWithGarminData() {
+        val session = _runSession.value ?: return
+        
+        viewModelScope.launch {
+            _isEnrichingWithGarmin.value = true
+            _garminEnrichmentError.value = null
+            try {
+                Log.d("RunSummaryViewModel", "Enriching run ${session.id} with Garmin data...")
+                val enrichedRun = apiService.enrichRunWithGarminData(session.id)
+                Log.d("RunSummaryViewModel", "Run enriched successfully with Garmin data")
+                // Update the run session with enriched data
+                _runSession.value = enrichedRun
+                _isEnrichingWithGarmin.value = false
+            } catch (e: Exception) {
+                Log.w("RunSummaryViewModel", "Failed to enrich run with Garmin data: ${e.message}", e)
+                _garminEnrichmentError.value = e.message ?: "Failed to enrich run with Garmin data"
+                _isEnrichingWithGarmin.value = false
+            }
+        }
     }
 
     /**

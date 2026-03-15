@@ -233,6 +233,8 @@ fun RunSummaryScreenFlagship(
                             onGenerateAi = { viewModel.generateAIAnalysis() },
                             onRetryAi = { viewModel.retryAIAnalysis() },
                             isGarminConnected = isGarminConnected,
+                            onEnrichWithGarmin = { viewModel.enrichRunWithGarminData() },
+                            isEnrichingWithGarmin = viewModel.isEnrichingWithGarmin.collectAsState().value,
                             coachingNotes = runSession!!.aiCoachingNotes,
                             onShareCard = {
                                 // share a “summary card” (text now; optional bitmap helper included below)
@@ -461,6 +463,8 @@ private fun AiInsightsTabContent(
     onGenerateAi: () -> Unit,
     onRetryAi: () -> Unit = {},
     isGarminConnected: Boolean = false,
+    onEnrichWithGarmin: () -> Unit = {},
+    isEnrichingWithGarmin: Boolean = false,
     coachingNotes: List<AiCoachingNote> = emptyList(),
     onShareCard: () -> Unit,
     onDelete: () -> Unit,
@@ -1304,6 +1308,32 @@ private fun AiSectionFlagship(
                         loading = false,
                         onClick = onGenerateAi
                     )
+
+                    // Show Garmin enrichment button if Garmin is connected and run doesn't have Garmin data yet
+                    if (isGarminConnected && run.hasGarminData != true) {
+                        Spacer(modifier = Modifier.height(Spacing.sm))
+                        ElevatedButton(
+                            onClick = onEnrichWithGarmin,
+                            enabled = !isEnrichingWithGarmin,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.elevatedButtonColors(
+                                containerColor = Colors.backgroundSecondary,
+                                contentColor = Colors.textPrimary
+                            )
+                        ) {
+                            if (isEnrichingWithGarmin) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Colors.primary
+                                )
+                                Spacer(modifier = Modifier.width(Spacing.sm))
+                                Text("Updating with Garmin Data...")
+                            } else {
+                                Text("Update Run With Garmin Data")
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -2546,6 +2546,146 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+        // Enrich an existing AI Run Coach run record with Garmin data
+  app.post("/api/runs/:runId/enrich-with-garmin-data", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { runId } = req.params;
+
+      // 1. Validate that Garmin is connected
+      const devices = await storage.getConnectedDevices(req.user!.userId);
+      const garminDevice = devices.find(d => d.deviceType === 'garmin' && d.isActive);
+
+      if (!garminDevice || !garminDevice.accessToken) {
+        return res.status(400).json({ error: "Garmin not connected" });
+      }
+
+      // 2. Get the run from the database
+      const run = await storage.getRun(runId);
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+
+      // Verify the run belongs to the authenticated user
+      if (run.userId !== req.user!.userId) {
+        return res.status(403).json({ error: "Not authorized to modify this run" });
+      }
+
+      // Check if already enriched with Garmin data
+      if (run.hasGarminData) {
+        return res.status(400).json({ error: "Run already enriched with Garmin data" });
+      }
+
+      // 3. Call getGarminActivities to get recent activities
+      const garminService = await import("./garmin-service");
+
+      // Get activities from 7 days before the run to cover potential sync delays
+      const runStartTime = new Date(run.completedAt || run.createdAt || new Date());
+      const searchStartTime = new Date(runStartTime);
+      searchStartTime.setDate(searchStartTime.getDate() - 7);
+
+      const activities = await garminService.getGarminActivities(garminDevice.accessToken, searchStartTime);
+      const garminActivities = Array.isArray(activities) ? activities : [];
+
+      // 4. Find an activity with a start time matching the run's start time (within ±5 minutes)
+      const FIVE_MINUTES_MS = 5 * 60 * 1000; // 5 minutes in milliseconds
+
+      let matchingActivity = null;
+      let matchingActivityId = null;
+
+      for (const activity of garminActivities) {
+        const activityStartTime = new Date(activity.startTime);
+        const timeDiff = Math.abs(activityStartTime.getTime() - runStartTime.getTime());
+
+        if (timeDiff <= FIVE_MINUTES_MS) {
+          matchingActivity = activity;
+          matchingActivityId = activity.activityId;
+          break;
+        }
+      }
+
+      if (!matchingActivity || !matchingActivityId) {
+        return res.status(404).json({
+          error: "No matching Garmin activity found",
+          message: "No Garmin activity found within ±5 minutes of the run start time"
+        });
+      }
+
+      // 5. Call getGarminActivityDetail to get full activity data
+      const activityDetail = await garminService.getGarminActivityDetail(garminDevice.accessToken, matchingActivityId);
+
+      // 6. Parse the activity with parseGarminActivity
+      const parsed = garminService.parseGarminActivity(activityDetail);
+
+      // Extract extended metrics from raw activity data if available
+      const raw = activityDetail;
+
+      // 7. Update the run record with the enriched data
+      const updateData = {
+        // Core metrics
+        distance: parsed.distance,
+        duration: parsed.duration,
+        avgPace: parsed.averagePace ? `${Math.floor(parsed.averagePace)}:${Math.round((parsed.averagePace % 1) * 60).toString().padStart(2, '0')}` : run.avgPace,
+        avgHeartRate: parsed.averageHeartRate,
+        maxHeartRate: parsed.maxHeartRate,
+        calories: parsed.calories,
+        cadence: parsed.averageCadence,
+        elevationGain: parsed.elevationGain,
+
+        // Extended metrics from raw Garmin data (if available)
+        avgSpeed: raw.averageSpeedInMetersPerSecond,
+        maxSpeed: raw.maxSpeedInMetersPerSecond,
+        movingTime: raw.movingDurationInSeconds,
+        elapsedTime: raw.durationInSeconds,
+        maxCadence: raw.maxRunCadenceInStepsPerMinute,
+        avgStrideLength: parsed.runningDynamics?.strideLength,
+        minElevation: raw.minElevationInMeters,
+        maxElevation: raw.maxElevationInMeters,
+
+        // GPS track
+        gpsTrack: activityDetail.polyline ? { polyline: activityDetail.polyline } : run.gpsTrack,
+
+        // Garmin tracking fields
+        hasGarminData: true,
+        garminActivityId: matchingActivityId,
+        externalId: matchingActivityId,
+        externalSource: 'garmin',
+
+        // Update timestamp
+        updatedAt: new Date(),
+      };
+
+      const updatedRun = await storage.updateRun(runId, updateData);
+
+      // Store device data with the run
+      await storage.createDeviceData({
+        userId: req.user!.userId,
+        runId: runId,
+        deviceType: 'garmin',
+        activityId: matchingActivityId,
+        vo2Max: parsed.vo2Max,
+        trainingEffect: parsed.trainingEffect,
+        recoveryTime: parsed.recoveryTime ? parsed.recoveryTime * 60 : undefined,
+        caloriesBurned: parsed.calories,
+        rawData: activityDetail,
+      });
+
+      // 8. Return success status and the enriched run
+      res.json({
+        success: true,
+        message: "Run enriched with Garmin data successfully",
+        run: updatedRun,
+        garminActivity: {
+          activityId: matchingActivityId,
+          activityName: matchingActivity.activityName,
+          startTime: matchingActivity.startTime,
+        }
+      });
+    } catch (error: any) {
+      console.error("Garmin enrich run error:", error);
+      res.status(500).json({ error: "Failed to enrich run with Garmin data" });
+    }
+  });
+
   // Garmin Wellness Data - Sync comprehensive wellness metrics
   app.post("/api/garmin/wellness/sync", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
