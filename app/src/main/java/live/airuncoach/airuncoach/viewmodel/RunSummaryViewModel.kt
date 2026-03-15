@@ -322,6 +322,7 @@ class RunSummaryViewModel @Inject constructor(
                 Log.d("RunSummaryViewModel", "Enriching run ${session.id} with Garmin data...")
                 val enrichedRun = apiService.enrichRunWithGarminData(session.id)
                 Log.d("RunSummaryViewModel", "Run enriched successfully with Garmin data")
+                Log.d("RunSummaryViewModel", "AI Coach is reassessing your training plan with this run data...")
                 // Update the run session with enriched data
                 _runSession.value = enrichedRun
                 _isEnrichingWithGarmin.value = false

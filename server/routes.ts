@@ -44,7 +44,8 @@ import {
 import {
   generateTrainingPlan,
   adaptTrainingPlan,
-  completeWorkout
+  completeWorkout,
+  reassessTrainingPlansWithRunData
 } from "./training-plan-service";
 import {
   checkAchievementsAfterRun,
@@ -709,7 +710,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       checkAchievementsAfterRun(run.id, userId).catch(err => {
         console.error("Failed to check achievements:", err);
       });
-      
+
+      // Reassess training plans asynchronously (don't block response)
+      setImmediate(() => {
+        (async () => {
+          try {
+            console.log(`[Run] Triggering plan reassessment for run ${run.id}`);
+            await reassessTrainingPlansWithRunData(userId, run.id);
+          } catch (err) {
+            console.error("[Run] Plan reassessment failed:", err);
+          }
+        })();
+      });
+
       res.status(201).json(run);
     } catch (error: any) {
       console.error("Create run error:", error);
@@ -906,6 +919,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         analysis,
         hasGarminData: !!garminActivity,
         hasWellnessData: !!wellness,
+      });
+
+      // Reassess training plans asynchronously (don't block response)
+      setImmediate(() => {
+        (async () => {
+          try {
+            console.log(`[Run] Triggering plan reassessment for run ${runId}`);
+            await reassessTrainingPlansWithRunData(userId, runId);
+          } catch (err) {
+            console.error("[Run] Plan reassessment failed:", err);
+          }
+        })();
       });
     } catch (error: any) {
       console.error("Comprehensive run analysis error:", {
@@ -2679,6 +2704,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           activityName: matchingActivity.activityName,
           startTime: matchingActivity.startTime,
         }
+      });
+
+      // Reassess training plans asynchronously (don't block response)
+      setImmediate(() => {
+        (async () => {
+          try {
+            console.log(`[Run] Triggering plan reassessment for run ${runId}`);
+            await reassessTrainingPlansWithRunData(req.user!.userId, runId);
+          } catch (err) {
+            console.error("[Run] Plan reassessment failed:", err);
+          }
+        })();
       });
     } catch (error: any) {
       console.error("Garmin enrich run error:", error);

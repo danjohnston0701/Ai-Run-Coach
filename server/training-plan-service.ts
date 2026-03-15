@@ -6,7 +6,7 @@
  */
 
 import { db } from "./db";
-import { trainingPlans, weeklyPlans, plannedWorkouts, users, runs, goals, connectedDevices } from "@shared/schema";
+import { trainingPlans, weeklyPlans, plannedWorkouts, users, runs, goals, connectedDevices, planAdaptations } from "@shared/schema";
 import { eq, and, desc, gte } from "drizzle-orm";
 import { getCurrentFitness } from "./fitness-service";
 import { HeartRateZones } from "./heart-rate-zones"; // Assuming we create this utility
@@ -674,4 +674,189 @@ export async function completeWorkout(
       completedRunId: runId,
     })
     .where(eq(plannedWorkouts.id, workoutId));
+}
+
+/**
+ * Reassess all active training plans for a user based on a completed/updated run.
+ * This allows the AI Coach to adapt the plan based on actual progress.
+ */
+export async function reassessTrainingPlansWithRunData(
+  userId: string,
+  runId: string
+): Promise<void> {
+  try {
+    // Get the completed run
+    const runData = await db
+      .select()
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1);
+
+    if (!runData[0]) {
+      console.warn(`[Plan Reassessment] Run ${runId} not found`);
+      return;
+    }
+
+    const run = runData[0];
+
+    // Get all active training plans for this user
+    const activePlans = await db
+      .select()
+      .from(trainingPlans)
+      .where(
+        and(
+          eq(trainingPlans.userId, userId),
+          eq(trainingPlans.status, "active")
+        )
+      );
+
+    if (activePlans.length === 0) {
+      console.log(`[Plan Reassessment] No active plans for user ${userId}`);
+      return;
+    }
+
+    // Get user profile for context
+    const user = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    const userProfile = user[0];
+
+    // Get current fitness metrics
+    const fitness = await getCurrentFitness(userId);
+
+    // Process each active plan
+    for (const plan of activePlans) {
+      try {
+        console.log(`[Plan Reassessment] Reassessing plan ${plan.id} with run data`);
+
+        // Get recent runs (last 10) to show progress
+        const recentRuns = await db
+          .select()
+          .from(runs)
+          .where(eq(runs.userId, userId))
+          .orderBy(desc(runs.completedAt))
+          .limit(10);
+
+        // Get completed workouts for this plan
+        const completedWorkouts = await db
+          .select()
+          .from(plannedWorkouts)
+          .where(
+            and(
+              eq(plannedWorkouts.trainingPlanId, plan.id),
+              eq(plannedWorkouts.isCompleted, true)
+            )
+          );
+
+        // Build AI prompt for plan reassessment
+        const prompt = `As an expert running coach, reassess this training plan based on recent run data.
+
+TRAINING PLAN DETAILS:
+- Goal: ${plan.goalType}
+- Current Week: ${plan.currentWeek}/${plan.totalWeeks}
+- Experience Level: ${plan.experienceLevel}
+- Days Per Week: ${plan.daysPerWeek}
+- Target Distance: ${plan.targetDistance} km
+- Target Date: ${plan.targetDate || 'Flexible'}
+
+RUNNER PROFILE:
+- Age: ${userProfile?.dob ? Math.floor((Date.now() - new Date(userProfile.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : 'Unknown'}
+- Fitness Level: ${userProfile?.fitnessLevel || 'Not specified'}
+- Current CTL (Fitness): ${fitness?.ctl || 'N/A'}
+- Training Status: ${fitness?.status || 'N/A'}
+
+RECENT RUN (Just Completed):
+- Distance: ${(run.distance / 1000).toFixed(2)} km
+- Duration: ${(run.duration / 60).toFixed(0)} minutes
+- Pace: ${run.avgPace || 'N/A'}
+- Calories: ${run.calories || 'N/A'}
+- Avg Heart Rate: ${run.avgHeartRate || 'N/A'} bpm
+- Max Heart Rate: ${run.maxHeartRate || 'N/A'} bpm
+- Elevation Gain: ${run.elevationGain || 0} m
+
+PROGRESS:
+- Completed Workouts in Plan: ${completedWorkouts.length}
+- Recent Run Count (last 10): ${recentRuns.length}
+
+Based on this runner's progress and the recent run, assess if the plan needs adjustment. Consider:
+1. Is the runner progressing well or struggling?
+2. Should we adjust weekly mileage or intensity?
+3. Are there any red flags (overtraining, undertraining)?
+4. Is the runner on pace to achieve their goal?
+
+Provide your assessment in JSON format:
+{
+  "needsAdjustment": true/false,
+  "reason": "Brief explanation of why plan needs/doesn't need adjustment",
+  "adjustmentType": "none" | "volume_reduction" | "volume_increase" | "intensity_adjustment" | "recovery_addition",
+  "recommendation": "Specific coaching recommendation",
+  "adjustments": [
+    "List of specific changes to implement"
+  ]
+}`;
+
+        const response = await openai.chat.completions.create({
+          model: "gpt-4-turbo-preview",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are an expert running coach providing training plan reassessments based on run data. Respond with JSON only. Be balanced - not every run requires plan changes.",
+            },
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.7,
+          max_tokens: 600,
+        });
+
+        const assessment = JSON.parse(
+          response.choices[0].message.content || "{}"
+        );
+
+        console.log(
+          `[Plan Reassessment] Assessment for plan ${plan.id}:`,
+          JSON.stringify(assessment, null, 2)
+        );
+
+        // If adjustments are needed, trigger plan adaptation
+        if (assessment.needsAdjustment) {
+          console.log(
+            `[Plan Reassessment] Triggering adaptation for plan ${plan.id}: ${assessment.reason}`
+          );
+          await adaptTrainingPlan(
+            plan.id,
+            `run_data_feedback: ${assessment.reason}`,
+            userId
+          );
+        } else {
+          console.log(
+            `[Plan Reassessment] Plan ${plan.id} performing well, no adjustments needed`
+          );
+        }
+      } catch (planError: any) {
+        console.error(
+          `[Plan Reassessment] Error reassessing plan ${plan.id}:`,
+          planError.message
+        );
+        // Continue processing other plans if one fails
+      }
+    }
+
+    console.log(
+      `✅ Plan reassessment completed for user ${userId} with run ${runId}`
+    );
+  } catch (error) {
+    console.error(
+      "[Plan Reassessment] Error in reassessTrainingPlansWithRunData:",
+      error
+    );
+    // Don't throw - this is a background process
+  }
 }
