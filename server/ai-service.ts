@@ -1191,6 +1191,158 @@ CRITICAL RULES:
 }
 
 /**
+ * Generate Emotional & Mental Coaching
+ * 
+ * 6 subcategories of emotional coaching:
+ * 1. Positive Self-Talk - Replace negative thoughts with empowerment
+ * 2. Motivation & Resilience - Reframe discomfort as growth
+ * 3. Focus & Mindfulness - Guide into flow state
+ * 4. Smiling Coaching - Scientifically proven 5-10% effort reduction
+ * 5. Relaxation & Tension Release - Reduce unnecessary tension
+ * 6. End-of-Run Reinforcement - Celebration and growth recognition
+ */
+export async function generateEmotionalCoaching(params: {
+  category: 'positive_self_talk' | 'motivation_resilience' | 'focus_mindfulness' | 'smiling_coaching' | 'relaxation' | 'end_of_run';
+  distance: number;
+  targetDistance?: number;
+  elapsedTime: number;
+  phase: string;
+  currentPace?: string;
+  targetPace?: string;
+  heartRate?: number;
+  effort?: 'low' | 'moderate' | 'high' | 'very_high';
+  coachName: string;
+  coachTone: string;
+  coachAccent?: string;
+  coachGender?: string;
+  runnerName?: string;
+  runHistory?: any;
+}): Promise<string> {
+  const {
+    category,
+    distance,
+    targetDistance,
+    elapsedTime,
+    phase,
+    currentPace,
+    targetPace,
+    heartRate,
+    effort = 'moderate',
+    coachName,
+    coachTone,
+    coachAccent,
+    coachGender,
+    runnerName,
+    runHistory
+  } = params;
+
+  const timeMin = Math.floor(elapsedTime / 60);
+  const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
+  const runnerFirstName = runnerName ? runnerName.split(' ')[0] : null;
+
+  // Build emotional coaching prompts by category
+  const emotionalPrompts: Record<string, string> = {
+    positive_self_talk: `You are ${coachName}, an AI running coach with a ${coachTone} style.
+
+The runner is struggling with negative self-talk. They are ${progress}% through their run at ${distance.toFixed(1)}km.
+They need help replacing doubt with empowerment.
+
+Generate 2-3 sentences of positive self-talk coaching that:
+1. Acknowledges their struggle without judgment
+2. Reframes the moment as an opportunity for mental strength
+3. Provides an empowering perspective shift
+4. Is delivered in your natural ${coachTone} coach voice
+
+Focus on: "You CAN do this", "You're stronger than this moment", "Every difficult moment builds your resilience"
+Do NOT be generic — reference their actual data (pace: ${currentPace}, distance: ${distance.toFixed(1)}km).
+Make it personal and genuine.`,
+
+    motivation_resilience: `You are ${coachName}, an AI running coach with a ${coachTone} style.
+
+The runner is facing a challenge — they're ${progress}% through their run, ${distance.toFixed(1)}km in, in the ${phase} phase.
+This is where mental toughness separates champions from others.
+
+Generate 2-3 sentences that:
+1. Acknowledge this IS difficult
+2. Reframe the discomfort as strength-building
+3. Inspire them to push through
+4. Reference their actual effort level
+
+Key themes: "This is the part where runners get stronger", "Discomfort is temporary, progress is permanent", "You're built for this"
+Make it feel like a challenge you BELIEVE they can overcome, not doubt.`,
+
+    focus_mindfulness: `You are ${coachName}, an AI running coach with a ${coachTone} style.
+
+The runner is getting lost in negative thoughts. Help them find their flow state.
+
+Generate 2-3 sentences that:
+1. Ground them in the present moment
+2. Focus on physical sensations (breathing, feet, rhythm)
+3. Simplify their focus to just the next kilometer or segment
+4. Create a sense of calm control
+
+Key approaches: "Breathe in 4, out 4", "Feel the rhythm of your feet", "One step at a time", "Be present for this moment"
+Use a calm, measured tone even if the coach is normally energetic.`,
+
+    smiling_coaching: `You are ${coachName}, an AI running coach with a ${coachTone} style.
+
+Scientific research shows that smiling reduces perceived effort by 5-10%. The runner is fatigued and needs this boost.
+
+Generate 2-3 sentences that:
+1. Suggest they smile (even a small one)
+2. Explain why it helps (scientifically)
+3. Make it feel achievable and fun
+4. Be encouraging about the result
+
+Key phrases: "Try a smile", "Give me a quick grin", "Smiling relaxes your body", "It tells your brain you've got this"
+Make it feel like a game or challenge, not an order.`,
+
+    relaxation: `You are ${coachName}, an AI running coach with a ${coachTone} style.
+
+The runner is tense — their muscles are tight, they're fighting the pace instead of flowing.
+
+Generate 2-3 sentences that:
+1. Give specific relaxation cues (shoulders, hands, jaw)
+2. Explain how tension wastes energy
+3. Help them feel more efficient immediately
+4. Be direct and actionable
+
+Key cues: "Drop your shoulders", "Loosen your hands", "Relax your jaw", "Smooth and easy", "Let it flow"
+Reference their current effort level to show you understand.`,
+
+    end_of_run: `You are ${coachName}, an AI running coach with a ${coachTone} style.
+
+The runner has just finished. This is about celebration, gratitude, and growth recognition.
+
+Generate 2-3 sentences that:
+1. Acknowledge what they just accomplished
+2. Help them feel proud of their effort
+3. Recognize their growth or strength
+4. End on an inspiring note
+
+Key themes: "You DID that", "Look what you just accomplished", "Be proud of yourself", "This is how champions are built"
+Make it feel personal and genuine — reference something specific about their run.`
+  };
+
+  const prompt = emotionalPrompts[category] || emotionalPrompts.positive_self_talk;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      {
+        role: "system",
+        content: `You are ${coachName}, a ${coachTone} running coach delivering emotional coaching. Keep it brief (2-3 sentences max), genuine, and impactful. NEVER start with greetings. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}`
+      },
+      { role: "user", content: prompt }
+    ],
+    max_tokens: 100,
+    temperature: 0.8
+  });
+
+  return completion.choices[0].message.content || "You're doing great. Keep going!";
+}
+
+/**
  * Generate TTS audio using AWS Polly Neural TTS (primary) with OpenAI fallback.
  * 
  * Polly provides authentic regional English accents with native speakers:
