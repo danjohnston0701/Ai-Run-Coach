@@ -111,6 +111,9 @@ class RunSessionViewModel @Inject constructor(
                     // Keep isStopping = true so the navigation guard knows this is from the CURRENT run
                     // isStopping will be cleared after navigation happens
                     _runState.update { state -> state.copy(backendRunId = it) }
+                    
+                    // Automatically generate AI analysis for the completed run
+                    generateRunAnalysis(it)
                 }
             }
         }
@@ -591,6 +594,26 @@ class RunSessionViewModel @Inject constructor(
                 _runState.update { 
                     it.copy(coachText = "Sorry, I couldn't process that. Keep going!") 
                 }
+            }
+        }
+    }
+
+    /**
+     * Automatically generate AI analysis for a completed run.
+     * Called right after the run is uploaded to the backend.
+     * Runs in the background without blocking the UI.
+     */
+    private fun generateRunAnalysis(runId: String) {
+        viewModelScope.launch {
+            try {
+                Log.d("RunSessionViewModel", "Auto-generating AI analysis for run $runId")
+                // Call the comprehensive analysis endpoint
+                // This will generate the summary and store it in the database
+                apiService.getComprehensiveRunAnalysis(runId)
+                Log.d("RunSessionViewModel", "AI analysis generated successfully for run $runId")
+            } catch (e: Exception) {
+                Log.w("RunSessionViewModel", "Failed to auto-generate analysis for run $runId: ${e.message}")
+                // Fail gracefully - user can still manually generate it from RunSummaryScreen
             }
         }
     }
