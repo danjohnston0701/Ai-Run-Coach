@@ -95,7 +95,7 @@ data class CoachingResponse(
 )
 ```
 
-## Elite Coaching Tips (5 Categories)
+## Elite Coaching Tips (6 Categories)
 
 ### 1. Posture & Alignment
 - "Keep your posture tall and proud; imagine a string gently lifting the top of your head."
@@ -127,7 +127,7 @@ data class CoachingResponse(
 - "Think 'quick and elastic,' lifting the foot up and through instead of pushing long and hard."
 - "Focus on gliding forward — avoid bounding or overstriding."
 - "Use the ground to push you forward, not upward; channel your force into forward motion."
-- "Aim for around 180 steps per minute — quicker turnover reduces impact and improves efficiency."
+- "Focus on your steps per minute — quicker turnover reduces impact and improves efficiency."
 
 ### 5. Core, Hips & Mindset
 - "Lightly engage your core to keep your torso stable as your legs and arms move."
@@ -136,6 +136,19 @@ data class CoachingResponse(
 - "Stay present in this section of the run — one controlled stride at a time."
 - "Run with quiet confidence; efficient, relaxed form is your biggest advantage today."
 - "Visualize strong, controlled strides — your mind guides your body through the tough moments."
+
+### 6. Emotional & Mental (NEW - March 2026)
+Triggered during: Mental fatigue, pace drops, final push, difficult terrain, when user struggles
+- "You've got this. Break this into smaller segments and conquer them one at a time."
+- "Your mind is stronger than any discomfort. Channel that strength into your stride."
+- "This is temporary. Remember why you started — let that fuel you forward."
+- "Discomfort is part of the process. Embrace it, then move past it with confidence."
+- "You're tougher than you think. Every difficult moment builds mental resilience."
+- "Focus on the present moment. Don't think about the finish line — just the next kilometer."
+- "Your body wants to slow down, but your mind is stronger. Prove it to yourself."
+- "This difficulty won't last. You'll feel proud when you finish. Keep pushing."
+- "You're building mental toughness right now. This is where champions are made."
+- "Breathe through the doubt. You've trained for this. Trust your preparation."
 
 ## Coach Tone Configurations
 
@@ -459,26 +472,202 @@ Authorization: Bearer {token}
 
 Request:
 {
-  "category": "posture_alignment",  // or arms, breathing, stride, core
+  "category": "emotional_mental",  // or posture_alignment, arms, breathing, stride, core
   "currentPhase": "LATE",
-  "coachTone": "instructive",
+  "coachTone": "motivational",
   "paceChange": { "direction": "slower", "percentChange": 12 }
 }
 
 Response:
 {
-  "tip": "When you tire, come back to basics: tall posture, relaxed shoulders, smooth steps.",
+  "tip": "You've got this. Break this into smaller segments and conquer them one at a time.",
   "audio": "data:audio/mpeg;base64,...",
-  "category": "posture_alignment"
+  "category": "emotional_mental"
 }
 
-Five Coaching Categories:
+Six Coaching Categories:
 1. Posture & Alignment - Head, shoulders, hips alignment
 2. Arms & Upper Body - Arm swing, tension, drive
 3. Breathing & Relaxation - Breathing patterns, stress release
 4. Stride & Foot Strike - Landing, turnover, efficiency
 5. Core, Hips & Mindset - Stability, confidence, mental strength
+6. Emotional & Mental - Mental resilience, motivation, overcoming doubt
 ```
+
+---
+
+## Emotional & Mental Coaching Category (NEW)
+
+### When to Trigger This Category
+
+The "Emotional & Mental" category is activated during run session coaching when:
+
+1. **Pace Drop Detected** (>15% slower than target)
+   - User struggling with intensity
+   - Mental fatigue setting in
+   - Confidence wavering
+
+2. **Late/Final Phase** (last 25% of run)
+   - User physically tiring
+   - Mental strength most needed
+   - Final push motivation critical
+
+3. **Difficult Terrain** (hills, elevation gain)
+   - Psychological challenge
+   - Discouragement risk
+   - Need to rebuild confidence
+
+4. **User Struggles Signal**
+   - Heavy breathing pattern change
+   - HR spike without pace increase
+   - Form degradation indicators
+
+5. **Recovery Phase After Hard Effort**
+   - After tempo/interval work
+   - Rebuilding mental resilience
+   - Preparing for next challenge
+
+### Implementation in Phase Coaching
+
+```typescript
+// server/ai-service.ts - Enhanced phase coaching request
+
+interface CoachingRequest {
+  // ... existing fields ...
+  
+  // Mental state indicators
+  paceChange?: {
+    direction: "faster" | "slower";
+    percentChange: number;  // If >15%, consider emotional support
+  };
+  
+  mentalFatigueIndicators?: {
+    phaseReached: "LATE" | "FINAL";  // Mental load increases
+    paceDrop: boolean;               // Struggling signal
+    isHardestPhase: boolean;         // Last 25% of run
+  };
+}
+
+// Category selection logic
+function selectCoachingCategory(
+  currentPhase: CoachingPhase,
+  paceChangePercent: number,
+  isFinalStretch: boolean
+): "posture" | "arms" | "breathing" | "stride" | "core" | "emotional_mental" {
+  
+  // Prioritize emotional support in final phases during struggles
+  if (isFinalStretch && paceChangePercent > 15) {
+    return "emotional_mental";  // User needs motivation, not technique
+  }
+  
+  if (currentPhase === "FINAL" && Math.random() > 0.7) {
+    return "emotional_mental";  // 30% chance in final phase
+  }
+  
+  if (currentPhase === "LATE" && paceChangePercent > 10) {
+    return "emotional_mental";  // Mental support when pace drops in late phase
+  }
+  
+  // Otherwise cycle through technical categories
+  return selectTechnicalCategory();
+}
+```
+
+### Integration in Run Session Flow
+
+```
+During Run Session:
+  │
+  ├─ Phase Coaching Called (every 60-120s)
+  │
+  ├─ Check Mental State
+  │  ├─ Is user in LATE/FINAL phase? 
+  │  ├─ Has pace dropped >15%?
+  │  ├─ Is HR elevated without pace increase?
+  │  └─ Is terrain challenging?
+  │
+  └─► If Mental Support Needed:
+      │
+      ├─ Request: POST /api/ai/elite-coaching
+      │  {
+      │    "category": "emotional_mental",
+      │    "currentPhase": "LATE",
+      │    "paceChange": { "direction": "slower", "percentChange": 18 },
+      │    "coachTone": "motivational",
+      │    "terrain": "hilly"
+      │  }
+      │
+      └─ Response: Motivational tip + TTS audio
+         "You've got this. Break this into smaller segments..."
+         
+         → Played to user with their configured:
+           - Accent (Irish, British, American, etc.)
+           - Gender (male/female)
+           - Voice (Sean, Brian, Matthew, etc.)
+```
+
+### Tone Adaptation for Emotional & Mental
+
+Different coach tones adjust the emotional message:
+
+```typescript
+const emotionalMessagesByTone: Record<CoachTone, string[]> = {
+  "energetic": [
+    "YES! This is where you show your power! Push through!",
+    "Champions embrace the challenge! You're one of them!",
+    "Let's GO! This is your moment to shine!"
+  ],
+  
+  "motivational": [
+    "You've got this. Break this into smaller segments.",
+    "Your mind is stronger than any discomfort.",
+    "Remember why you started — let that fuel you forward."
+  ],
+  
+  "instructive": [
+    "Mental fatigue is normal. Redirect focus to next 500m only.",
+    "Break the run into manageable chunks. Conquer one at a time.",
+    "Tactical shift: focus on steady breathing, one step at a time."
+  ],
+  
+  "factual": [
+    "You're 75% complete. 25% remaining. You can do this.",
+    "Your HR is elevated but sustainable. Maintain current effort.",
+    "Data shows: runners who push here see best outcomes."
+  ],
+  
+  "abrupt": [
+    "Push. Now.",
+    "Mind over matter. Move.",
+    "Finish strong. Do it."
+  ]
+};
+```
+
+### Tracking & Learning
+
+```typescript
+// Track which emotional tips work best
+interface EmotionalCoachingMetric {
+  tipDelivered: string;
+  userPhase: CoachingPhase;
+  paceBeforeTip: string;
+  paceAfterTip: string;  // 60 seconds later
+  userResponded: boolean;  // Did pace/HR improve?
+  runCompleted: boolean;   // Did user finish?
+}
+
+// AI learns: Which emotional tips are most effective for different users?
+// Personalizes future emotional support based on historical data
+```
+
+### Special Cases: When NOT to Use Emotional & Mental
+
+- ✅ **DO USE**: User struggling, pace dropping, final push needed
+- ❌ **DON'T USE**: Early phase, easy run, user cruising comfortably
+- ❌ **DON'T USE**: If used in last 3 coaching prompts (anti-repetition)
+- ✅ **DO USE**: After user completes a very hard effort
+- ✅ **DO USE**: When HR/effort suggests mental barriers not physical
 
 ---
 
