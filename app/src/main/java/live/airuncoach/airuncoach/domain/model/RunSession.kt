@@ -46,6 +46,9 @@ data class RunSession(
     // Garmin upload tracking (for AI Run Coach runs uploaded TO Garmin)
     val uploadedToGarmin: Boolean? = null,
     val garminActivityId: String? = null,
+    
+    // TRUE if run was enriched with Garmin data (HR, cadence, elevation, etc.)
+    val hasGarminData: Boolean = false,
 
     val isActive: Boolean = false,
 

@@ -543,7 +543,11 @@ private fun AiInsightsTabContent(
                 coachingNotes = coachingNotes,
                 onCommentsChange = onCommentsChange,
                 onGenerateAi = onGenerateAi,
-                onRetryAi = onRetryAi
+                onRetryAi = onRetryAi,
+                run = run,
+                isGarminConnected = isGarminConnected,
+                onEnrichWithGarmin = onEnrichWithGarmin,
+                isEnrichingWithGarmin = isEnrichingWithGarmin
             )
         }
 
@@ -1195,7 +1199,11 @@ private fun AiSectionFlagship(
     coachingNotes: List<AiCoachingNote> = emptyList(),
     onCommentsChange: (String) -> Unit,
     onGenerateAi: () -> Unit,
-    onRetryAi: () -> Unit = {}
+    onRetryAi: () -> Unit = {},
+    run: RunSession,
+    isGarminConnected: Boolean = false,
+    onEnrichWithGarmin: () -> Unit = {},
+    isEnrichingWithGarmin: Boolean = false
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
