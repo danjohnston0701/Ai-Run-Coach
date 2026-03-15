@@ -630,6 +630,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Weather impact analysis - how weather conditions affect performance
+  app.get("/api/users/:userId/weather-impact", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.params.userId;
+      console.log(`[Weather Impact] Fetching analysis for user: ${userId}`);
+
+      // Get all completed runs for this user from the last 30 days
+      const allRuns = await storage.getUserRuns(userId);
+      console.log(`[Weather Impact] Total runs found: ${allRuns.length}`);
+      
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      
+      const recentRuns = allRuns
+        .filter(r => {
+          // Must be completed with valid distance (distance is in km, need > 0.5 km)
+          const isCompleted = r.completedAt && r.distance && r.distance > 0.5;
+          // Must be within last 30 days
+          const isWithinWindow = r.completedAt && new Date(r.completedAt) > thirtyDaysAgo;
+          // Must have weather data recorded
+          const hasWeatherData = !!r.weatherData;
+          return isCompleted && isWithinWindow && hasWeatherData;
+        })
+        .sort((a, b) => new Date(b.completedAt!).getTime() - new Date(a.completedAt!).getTime());
+
+      console.log(`[Weather Impact] Runs in last 30 days with weather data: ${recentRuns.length}`);
+      if (recentRuns.length > 0) {
+        console.log(`[Weather Impact] Sample run 0: pace=${recentRuns[0].avgPace || recentRuns[0].averagePace}, weather=${JSON.stringify(recentRuns[0].weatherData).substring(0, 100)}`);
+      }
+      
+      // Normalize the data structure to ensure weatherData is properly set
+      const normalizedRuns = recentRuns.map(run => ({
+        ...run,
+        avgPace: run.averagePace || run.avgPace,
+        weatherData: run.weatherData,
+      }));
+
+      // Use the existing calculateWeatherImpact function
+      const weatherImpact = await calculateWeatherImpact(userId, normalizedRuns);
+      console.log(`[Weather Impact] Analysis result: hasEnoughData=${weatherImpact.hasEnoughData}, runsAnalyzed=${weatherImpact.runsAnalyzed}`);
+      
+      res.json(weatherImpact);
+    } catch (error: any) {
+      console.error("Weather impact analysis error:", error);
+      res.status(500).json({ error: "Failed to compute weather impact analysis", details: error.message });
+    }
+  });
+
   app.get("/api/runs/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       console.log(`[GET /api/runs/${req.params.id}] Fetching run for user: ${req.user?.userId}`);
