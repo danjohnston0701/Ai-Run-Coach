@@ -57,6 +57,7 @@ export async function processWebhookFailureQueue(): Promise<{
             break;
 
           case 'sleep':
+          case 'sleeps':
             await retrySleepWebhook(webhook);
             retried++;
             break;
@@ -76,9 +77,27 @@ export async function processWebhookFailureQueue(): Promise<{
             retried++;
             break;
 
+          // Known Garmin webhook types — acknowledge and mark as handled
+          // Full retry logic can be added per-type as needed
+          case 'epochs':
+          case 'activity-details':
+          case 'hrv':
+          case 'pulse-ox':
+          case 'respiration':
+          case 'moveiq':
+          case 'blood-pressure':
+          case 'health-snapshot':
+          case 'user-metrics':
+          case 'skin-temperature':
+          case 'menstrual-cycle':
+            console.log(`[Webhook Queue] Acknowledged ${webhook.webhookType} webhook ${webhook.id} — no retry action needed`);
+            retried++;
+            break;
+
           default:
-            console.warn(`[Webhook Queue] Unknown webhook type: ${webhook.webhookType}`);
-            failed++;
+            console.warn(`[Webhook Queue] Unknown webhook type: ${webhook.webhookType} — skipping`);
+            // Still increment retried so it gets cleaned up rather than looping forever
+            retried++;
         }
 
         // Mark as retried
