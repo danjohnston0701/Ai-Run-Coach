@@ -430,7 +430,34 @@ If runner has NO previous runs:
       max_tokens: 4000,
     });
 
-    const planData = JSON.parse(response.choices[0].message.content || "{}");
+    let rawContent = response.choices[0].message.content || "{}";
+    
+    // Clean up the JSON response — remove markdown code blocks if present
+    rawContent = rawContent.replace(/```json\n?/g, '').replace(/\n?```/g, '').trim();
+    
+    let planData: any;
+    try {
+      planData = JSON.parse(rawContent);
+    } catch (parseError: any) {
+      // Log the problematic content for debugging
+      console.error("Failed to parse plan JSON at position:", parseError.message);
+      console.error("Raw content length:", rawContent.length);
+      console.error("Content around error position (chars 14700-14900):", rawContent.substring(14700, 14900));
+      
+      // Try to fix common JSON issues like unescaped quotes and newlines
+      try {
+        let fixedContent = rawContent;
+        // Replace unescaped newlines in string values (but keep actual JSON structure)
+        fixedContent = fixedContent.replace(/:\s*"([^"]*)\n([^"]*)"/, ': "$1\\n$2"');
+        // Escape unescaped quotes in the middle of strings
+        fixedContent = fixedContent.replace(/([^\\])"([^,}\]]*[^\\])"([^,}\]]*)"/, '$1\\"$2\\"$3');
+        
+        planData = JSON.parse(fixedContent);
+        console.log("Successfully recovered from JSON parse error using fallback fix");
+      } catch (recoveryError: any) {
+        throw new Error(`Invalid JSON from AI model: ${parseError.message}. Even after recovery attempt failed.`);
+      }
+    }
 
     // Validate and coerce plan data to ensure numeric fields are actually numbers
     if (!planData.weeks || !Array.isArray(planData.weeks)) {
