@@ -14,9 +14,7 @@ object RunConfigHolder {
     }
     
     fun getConfig(): RunSetupConfig? {
-        val currentConfig = config
-        config = null // Clear after reading
-        return currentConfig
+        return config
     }
     
     fun clearConfig() {
