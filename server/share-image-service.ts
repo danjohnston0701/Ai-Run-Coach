@@ -274,11 +274,7 @@ function metricRing(
   gradId: string, progress: number,
   trackColorHex: string
 ): string {
-  const circumference = 2 * Math.PI * r;
   const strokeW = Math.round(r * 0.18);
-  const clampedProgress = Math.min(Math.max(progress, 0.08), 0.97);
-  const dashLen = circumference * clampedProgress;
-  const gapLen = circumference - dashLen;
 
   const labelFontSize = Math.min(Math.round(r * 0.2), 22);
   const valueFontSize = Math.min(Math.round(r * 0.52), 60);
@@ -289,8 +285,7 @@ function metricRing(
   const unitY = valueY + unitFontSize + 5;
 
   return `
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#CBD5E1" stroke-width="${strokeW}"/>
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="url(#${gradId})" stroke-width="${strokeW}" stroke-linecap="round" stroke-dasharray="${dashLen} ${gapLen}" transform="rotate(-90 ${cx} ${cy})" filter="url(#ringGlow)"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="url(#${gradId})" stroke-width="${strokeW}" filter="url(#ringGlow)"/>
     <text x="${cx}" y="${labelY}" font-family="${FONT}" font-size="${labelFontSize}" font-weight="600" fill="${C.textLight}" text-anchor="middle" letter-spacing="0.5">${esc(label)}</text>
     <text x="${cx}" y="${valueY}" font-family="${FONT}" font-size="${valueFontSize}" font-weight="800" fill="${C.textDark}" text-anchor="middle">${esc(value)}</text>
     ${unit ? `<text x="${cx}" y="${unitY}" font-family="${FONT}" font-size="${unitFontSize}" font-weight="500" fill="${C.textMuted}" text-anchor="middle">${esc(unit)}</text>` : ""}
@@ -1016,7 +1011,7 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
         bgBase64 = bgBase64.split(",")[1] || bgBase64;
       }
       const bgRaw = Buffer.from(bgBase64, "base64");
-      let bgPipeline = sharp(bgRaw).resize(w, h, { fit: "cover", position: "center" });
+      let bgPipeline = sharp(bgRaw).rotate().resize(w, h, { fit: "cover", position: "center" });
 
       const blurAmount = req.backgroundBlur || 0;
       if (blurAmount > 0) {
@@ -1077,11 +1072,10 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
     const logoY = h - LOGO_ZONE_H + 24;
     const textX = logoX + 100;
 
-    const isDarkTemplate = template.id === "run-metrics" || template.id === "minimal-dark";
-    const logoBg = isDarkTemplate ? "#0A0A1A" : C.bg;
-    const logoTextColor = isDarkTemplate ? "#FFFFFF" : C.textDark;
-    const logoSubColor = isDarkTemplate ? "rgba(255,255,255,0.5)" : C.textMuted;
-    const logoLineColor = isDarkTemplate ? "rgba(255,255,255,0.15)" : C.border;
+    const logoBg = "#0A0A1A";
+    const logoTextColor = "#FFFFFF";
+    const logoSubColor = "rgba(255,255,255,0.5)";
+    const logoLineColor = "rgba(255,255,255,0.15)";
 
     const brandSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
       <rect x="0" y="${h - LOGO_ZONE_H}" width="${w}" height="${LOGO_ZONE_H}" fill="${logoBg}"/>

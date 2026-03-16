@@ -1038,6 +1038,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Freeform AI analysis of a run (conversational, lightweight)
+  app.post("/api/runs/:id/freeform-analysis", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const runId = req.params.id;
+      const userId = req.user!.userId;
+      const { question } = req.body;
+
+      const run = await storage.getRun(runId);
+      if (!run || run.userId !== userId) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+
+      // Strip heavy arrays to keep payload small for OpenAI
+      const { gpsData, heartRateData, routePoints, splitData, ...runSummary } = run as any;
+
+      const user = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+      const coachName = (user[0] as any)?.coachName || "Coach";
+      const coachPersonality = (user[0] as any)?.coachPersonality || "motivating";
+
+      const contextJson = JSON.stringify(runSummary, null, 2);
+
+      const prompt = question
+        ? `The user asks: "${question}"\n\nRun data:\n${contextJson}`
+        : `Provide a brief, insightful analysis of this run. Highlight what went well and one area to improve.\n\nRun data:\n${contextJson}`;
+
+      const OpenAI = (await import("openai")).default;
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are ${coachName}, a ${coachPersonality} running coach. Write in markdown format. Be concise but insightful. Keep response under 300 words.`
+          },
+          { role: "user", content: prompt }
+        ],
+        max_tokens: 1000,
+        temperature: 0.7,
+      });
+
+      const analysis = completion.choices[0].message.content || "";
+      res.json({ success: true, analysis });
+    } catch (error: any) {
+      console.error("[freeform-analysis] Error:", error);
+      res.status(500).json({ error: "Failed to generate analysis" });
+    }
+  });
+
   // ==================== ROUTES ENDPOINTS ====================
   
   app.get("/api/routes/user/:userId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
@@ -8948,6 +8997,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         daysPerWeek,
         firstSessionStart = "flexible", // "today" | "tomorrow" | "flexible"
         regularSessions = [],  // recurring runs the user already does each week
+        injuries = [],  // [{ bodyPart, status, notes }]
         goalId = null  // optional: goal ID to link this plan to
       } = req.body;
 
@@ -8965,7 +9015,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         daysPerWeek || 4,
         regularSessions,
         firstSessionStart,
-        durationWeeks  // pass duration weeks to the function
+        durationWeeks,
+        Array.isArray(injuries) ? injuries : []
       );
       
       // Link plan to goal if goalId was provided
@@ -9148,6 +9199,162 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
+  // Regenerate remaining workouts in a training plan (e.g. after injury update)
+  app.put("/api/training-plans/:planId/regenerate", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { planId } = req.params;
+      const userId = req.user!.userId;
+      const { injuries = [] } = req.body;
+
+      const plan = await db
+        .select()
+        .from(trainingPlans)
+        .where(and(eq(trainingPlans.id, planId), eq(trainingPlans.userId, userId)))
+        .limit(1);
+
+      if (!plan[0]) {
+        return res.status(404).json({ error: "Plan not found or not authorized" });
+      }
+
+      const allWeeks = await db
+        .select()
+        .from(weeklyPlans)
+        .where(eq(weeklyPlans.trainingPlanId, planId))
+        .orderBy(weeklyPlans.weekNumber);
+
+      const completedWorkoutsList = await db
+        .select()
+        .from(plannedWorkouts)
+        .where(and(eq(plannedWorkouts.trainingPlanId, planId), eq(plannedWorkouts.isCompleted, true)));
+
+      const completedWorkoutIds = new Set(completedWorkoutsList.map(w => w.id));
+
+      // Anchor dates to plan creation week
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const planCreatedAt = plan[0].createdAt ? new Date(plan[0].createdAt) : today;
+      planCreatedAt.setHours(0, 0, 0, 0);
+      const planDaysSinceMonday = planCreatedAt.getDay() === 0 ? 6 : planCreatedAt.getDay() - 1;
+      const planWeekStart = new Date(planCreatedAt);
+      planWeekStart.setDate(planCreatedAt.getDate() - planDaysSinceMonday);
+
+      const weeksSincePlanStart = Math.floor((today.getTime() - planWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000));
+      const currentWeekNum = Math.max(1, weeksSincePlanStart + 1);
+      const totalWeeks = plan[0].totalWeeks || allWeeks.length;
+      const remainingWeekCount = Math.max(1, totalWeeks - currentWeekNum + 1);
+
+      const validInjuries = (Array.isArray(injuries) ? injuries : []).filter(
+        (i: any) => i && typeof i.bodyPart === 'string' && typeof i.status === 'string'
+      );
+
+      const injuryContext = validInjuries.length > 0 ? `
+INJURIES & LIMITATIONS (user updated mid-plan):
+${validInjuries.map((i: any) => `- ${i.bodyPart}: ${i.status}${i.notes ? ` — ${i.notes}` : ''}`).join("\n")}
+- For "active" injuries: AVOID all exercises that stress the affected area.
+- For "recovering" injuries: REDUCE intensity and impact. No speed work, hill repeats, or long runs.
+- For "healed" injuries: Gradually reintroduce normal training.
+` : '';
+
+      const fitness = await getCurrentFitness(userId);
+      const OpenAI = (await import("openai")).default;
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+      const prompt = `You are an expert running coach. Regenerate the remaining ${remainingWeekCount} weeks of a training plan.
+
+Original Plan: ${plan[0].goalType?.toUpperCase()} (${plan[0].targetDistance}km)
+Experience Level: ${plan[0].experienceLevel}
+Days Per Week: ${plan[0].daysPerWeek}
+Total Weeks: ${totalWeeks} | Current Week: ${currentWeekNum}
+Completed Workouts: ${completedWorkoutsList.length}
+CTL: ${fitness?.ctl || 'N/A'} | Status: ${fitness?.status || 'N/A'}
+${plan[0].targetDate ? `Race Date: ${new Date(plan[0].targetDate).toDateString()}` : ''}
+${injuryContext}
+
+Generate weeks ${currentWeekNum} to ${totalWeeks}. Return JSON:
+{"weeks":[{"weekNumber":${currentWeekNum},"weekDescription":"...","totalDistance":25,"focusArea":"endurance","intensityLevel":"easy","workouts":[{"dayOfWeek":1,"workoutType":"easy","distance":6,"targetPace":"6:00/km","intensity":"z2","description":"...","instructions":"..."}]}]}
+
+Include ${plan[0].daysPerWeek} workouts per week.`;
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4-turbo-preview",
+        messages: [
+          { role: "system", content: "You are an expert running coach. Always respond with valid JSON only." },
+          { role: "user", content: prompt }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.7,
+        max_tokens: 4000,
+      });
+
+      const regeneratedData = JSON.parse(response.choices[0].message.content || "{}");
+
+      if (!regeneratedData.weeks || !Array.isArray(regeneratedData.weeks) || regeneratedData.weeks.length === 0) {
+        return res.status(500).json({ error: "AI failed to generate valid workout data" });
+      }
+
+      // Delete incomplete future workouts AFTER successful AI generation
+      const allWorkouts = await db.select().from(plannedWorkouts).where(eq(plannedWorkouts.trainingPlanId, planId));
+      for (const w of allWorkouts) {
+        if (!completedWorkoutIds.has(w.id) && (!w.scheduledDate || new Date(w.scheduledDate) >= today)) {
+          await db.delete(plannedWorkouts).where(eq(plannedWorkouts.id, w.id));
+        }
+      }
+
+      let newWorkoutCount = 0;
+      for (const week of regeneratedData.weeks) {
+        if (!week.workouts || !Array.isArray(week.workouts)) continue;
+        let weeklyPlan = allWeeks.find(w => w.weekNumber === week.weekNumber);
+        if (!weeklyPlan) {
+          const inserted = await db.insert(weeklyPlans).values({
+            trainingPlanId: planId, weekNumber: week.weekNumber,
+            weekDescription: week.weekDescription || '', totalDistance: week.totalDistance,
+            focusArea: week.focusArea, intensityLevel: week.intensityLevel,
+          }).returning();
+          weeklyPlan = inserted[0];
+        } else {
+          await db.update(weeklyPlans).set({
+            weekDescription: week.weekDescription || '', totalDistance: week.totalDistance,
+            focusArea: week.focusArea, intensityLevel: week.intensityLevel,
+          }).where(eq(weeklyPlans.id, weeklyPlan.id));
+        }
+        for (const workout of week.workouts) {
+          if (!workout.workoutType) continue;
+          const dayOffsetFromMonday = ((workout.dayOfWeek || 1) + 6) % 7;
+          const scheduledDate = new Date(planWeekStart);
+          scheduledDate.setDate(planWeekStart.getDate() + ((week.weekNumber - 1) * 7) + dayOffsetFromMonday);
+          if (scheduledDate < today) continue;
+          await db.insert(plannedWorkouts).values({
+            weeklyPlanId: weeklyPlan.id, trainingPlanId: planId,
+            dayOfWeek: workout.dayOfWeek || 1, scheduledDate,
+            workoutType: workout.workoutType, distance: workout.distance,
+            targetPace: workout.targetPace, intensity: workout.intensity,
+            description: workout.description, instructions: workout.instructions,
+            isCompleted: false,
+          });
+          newWorkoutCount++;
+        }
+      }
+
+      await db.insert(planAdaptations).values({
+        trainingPlanId: planId, reason: "injury",
+        changes: { injuries: validInjuries, regeneratedWeeks: remainingWeekCount, newWorkouts: newWorkoutCount },
+        aiSuggestion: `Regenerated ${newWorkoutCount} workouts across ${remainingWeekCount} weeks due to injury update`,
+        userAccepted: true,
+      });
+
+      res.json({
+        success: true,
+        message: `Regenerated ${newWorkoutCount} workouts across ${remainingWeekCount} remaining weeks`,
+        workoutsRegenerated: newWorkoutCount,
+        weeksAffected: remainingWeekCount,
+        completedWorkoutsPreserved: completedWorkoutsList.length
+      });
+    } catch (error: any) {
+      console.error("Regenerate training plan error:", error);
+      res.status(500).json({ error: error.message || "Failed to regenerate training plan" });
+    }
+  });
+
   // Adapt training plan
   app.post("/api/training-plans/:planId/adapt", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {

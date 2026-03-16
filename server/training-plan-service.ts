@@ -37,6 +37,12 @@ interface RegularSessionInput {
   countsTowardWeeklyTotal: boolean;
 }
 
+export interface InjuryInput {
+  bodyPart: string;
+  status: string; // "active" | "recovering" | "healed"
+  notes?: string;
+}
+
 export async function generateTrainingPlan(
   userId: string,
   goalType: string, // 5k, 10k, half_marathon, marathon, ultra
@@ -47,7 +53,8 @@ export async function generateTrainingPlan(
   daysPerWeek: number = 4,
   regularSessions: RegularSessionInput[] = [],
   firstSessionStart: string = "flexible",  // "today" | "tomorrow" | "flexible"
-  durationWeeks?: number  // user-selected plan duration (takes priority over targetDate)
+  durationWeeks?: number,  // user-selected plan duration (takes priority over targetDate)
+  injuries: InjuryInput[] = []
 ): Promise<string> {
   try {
     // Get user profile
@@ -345,6 +352,16 @@ ${regularSessions.map(s => {
 
 IMPORTANT: Place these sessions on the correct days in the plan. Sessions marked "EXTRA" should be treated as additional workload on top of the ${daysPerWeek} AI-generated sessions per week — do not replace an AI session with them. Sessions that count towards the total should be included in the ${daysPerWeek} sessions for that week.
 ` : ""}
+${injuries.length > 0 ? `
+INJURIES & LIMITATIONS:
+${injuries.map(i => `- ${i.bodyPart}: ${i.status}${i.notes ? ` — ${i.notes}` : ''}`).join("\n")}
+
+CRITICAL INJURY GUIDELINES:
+- For "active" injuries: AVOID all exercises that stress the affected area. Replace with cross-training or rest days.
+- For "recovering" injuries: REDUCE intensity and impact. No speed work, hill repeats, or long runs that stress the affected body part. Favor easy runs on flat terrain.
+- For "healed" injuries: Gradually reintroduce normal training but note the history — avoid sudden volume increases.
+- Always err on the side of caution. A conservative plan that keeps the runner healthy is better than an aggressive plan that causes re-injury.
+` : ''}
 Schedule:
 - Today is ${new Date().toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })} (day ${new Date().getDay()} of the week, 0=Sun)
 - First session: ${
