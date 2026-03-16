@@ -9162,9 +9162,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message: "You don't have any run history yet. Let's get started and see what you've got!"
         };
       } else {
-        // runs.distance is in km directly
+        // runs.distance is stored in meters — convert to km
         const totalDistance = recentRuns.reduce((sum, r) => sum + (Number(r.distance) || 0), 0);
-        const avgDistance = totalDistance / recentRuns.length;
+        const avgDistance = (totalDistance / recentRuns.length) / 1000;
         const runsPerWeek = recentRuns.length / Math.ceil(
           (new Date().getTime() - new Date(recentRuns[recentRuns.length - 1].completedAt || Date.now()).getTime()) / (7 * 24 * 60 * 60 * 1000)
         );
@@ -9186,7 +9186,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ? paceValues.reduce((a, b) => a + b, 0) / paceValues.length 
           : null;
         
-        const longestRun = Math.max(...recentRuns.map(r => Number(r.distance) || 0));
+        const longestRun = Math.max(...recentRuns.map(r => Number(r.distance) || 0)) / 1000;
 
         performanceBaseline = {
           hasHistory: true,
