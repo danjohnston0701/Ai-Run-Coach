@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
-import { eq, and, gte, desc, lte } from "drizzle-orm";
+import { eq, and, gte, desc, lte, count } from "drizzle-orm";
 import { storage } from "./storage";
 import { db } from "./db";
 import { 
@@ -9010,22 +9010,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // For each plan, count total workouts and completed workouts
       const plansWithCounts = await Promise.all(plans.map(async (plan) => {
-        // Get total workouts for this plan
         const totalWorkouts = await db
           .select({ count: count() })
           .from(plannedWorkouts)
-          .innerJoin(weeklyPlanTable, eq(plannedWorkouts.weeklyPlanId, weeklyPlanTable.id))
-          .where(eq(weeklyPlanTable.trainingPlanId, plan.id));
+          .where(eq(plannedWorkouts.trainingPlanId, plan.id));
 
-        // Get completed workouts for this plan
         const completedWorkouts = await db
           .select({ count: count() })
           .from(plannedWorkouts)
-          .innerJoin(weeklyPlanTable, eq(plannedWorkouts.weeklyPlanId, weeklyPlanTable.id))
           .where(
             and(
-              eq(weeklyPlanTable.trainingPlanId, plan.id),
-              eq(plannedWorkouts.completed, true)
+              eq(plannedWorkouts.trainingPlanId, plan.id),
+              eq(plannedWorkouts.isCompleted, true)
             )
           );
 
@@ -9520,20 +9516,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Plan not found or not authorized" });
       }
 
-      // Delete all weekly plans and workouts cascading from this training plan
-      // First get all weekly plan IDs for this training plan
-      const weeklyPlans = await db
-        .select({ id: weeklyPlanTable.id })
-        .from(weeklyPlanTable)
-        .where(eq(weeklyPlanTable.trainingPlanId, planId));
+      // Delete all planned workouts for this training plan's weekly plans
+      const planWeeks = await db
+        .select({ id: weeklyPlans.id })
+        .from(weeklyPlans)
+        .where(eq(weeklyPlans.trainingPlanId, planId));
 
-      // Delete all planned workouts for these weekly plans
-      for (const week of weeklyPlans) {
+      for (const week of planWeeks) {
         await db.delete(plannedWorkouts).where(eq(plannedWorkouts.weeklyPlanId, week.id));
       }
 
       // Delete all weekly plans
-      await db.delete(weeklyPlanTable).where(eq(weeklyPlanTable.trainingPlanId, planId));
+      await db.delete(weeklyPlans).where(eq(weeklyPlans.trainingPlanId, planId));
 
       // Finally delete the training plan itself
       await db.delete(trainingPlans).where(eq(trainingPlans.id, planId));
