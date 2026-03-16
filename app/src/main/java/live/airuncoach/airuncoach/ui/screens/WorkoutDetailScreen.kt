@@ -137,6 +137,13 @@ fun WorkoutDetailScreen(
                             Text("Pace guidance:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
                             Text(zoneInfo.paceGuidance, style = AppTextStyles.small, color = Colors.textSecondary)
                             
+                            // Heart rate range (estimated for ~35 year old, max HR ~185)
+                            Spacer(modifier = Modifier.height(Spacing.sm))
+                            Text("Target heart rate:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
+                            val estimatedMaxHR = 185 // Standard estimate for ~35 year old
+                            val hrRange = HeartRateZones.getTargetHRRange(zoneNumber, estimatedMaxHR)
+                            Text("Keep your HR between ${hrRange.first} and ${hrRange.last} beats per minute", style = AppTextStyles.small, color = Colors.textSecondary)
+                            
                             Spacer(modifier = Modifier.height(Spacing.sm))
                             Text("Benefits:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
                             Text(zoneInfo.benefits, style = AppTextStyles.small, color = Colors.textSecondary)
