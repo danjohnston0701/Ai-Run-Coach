@@ -987,9 +987,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         coachName,
         coachTone,
         coachAccent: user?.coachAccent || undefined,
-        // Training plan context for personalized coaching
+        // Training plan context for personalized post-run analysis
+        // Note: planGoalType is not stored on runs — derive it from the linked plan if needed,
+        // or pass a descriptive workoutType instead.
         linkedPlanId: run.linkedPlanId || undefined,
-        planGoalType: run.planGoalType || undefined,
         planProgressWeek: run.planProgressWeek || undefined,
         planProgressWeeks: run.planProgressWeeks || undefined,
         workoutType: run.workoutType || undefined,

@@ -2478,18 +2478,17 @@ Analyze this run comprehensively using all available data from the runner's Garm
   }
 
   // Add training plan context if available
-  if (linkedPlanId && workoutType) {
+  if (linkedPlanId || workoutType) {
     prompt += `
 ## TRAINING PLAN CONTEXT:
-- Plan Goal: ${planGoalType || 'N/A'}
-- Week ${planProgressWeek}/${planProgressWeeks} of the training plan
-- Workout Type: ${workoutType} (${workoutDescription || 'see intensity below'})
+${planProgressWeek && planProgressWeeks ? `- Week ${planProgressWeek} of ${planProgressWeeks} in the training plan` : ''}
+- Workout Type: ${workoutType || 'general run'} (${workoutDescription || 'no specific description'})
 - Heart Rate Zone Target: ${workoutIntensity || 'not specified'}
 
-**CRITICAL**: This run is part of a structured ${planProgressWeeks}-week ${planGoalType} training plan. 
+**CRITICAL**: This run is part of a structured training plan.
 - Tailor your feedback to whether this run achieved its specific goal (e.g., "Zone 2 aerobic building" or "tempo pace maintenance").
-- Reference the week number and progression ("Week ${planProgressWeek} of ${planProgressWeeks}").
-- If it's an easy week, praise consistency and recovery focus. If it's a build week, emphasize progression.
+${planProgressWeek && planProgressWeeks ? `- Reference the week number and progression ("Week ${planProgressWeek} of ${planProgressWeeks}").` : ''}
+- If it's an easy/recovery workout, praise consistency and recovery focus. If it's a tempo or interval session, emphasize quality and progression.
 - Highlight how this specific run contributed to the overall plan progression.
 `;
   }

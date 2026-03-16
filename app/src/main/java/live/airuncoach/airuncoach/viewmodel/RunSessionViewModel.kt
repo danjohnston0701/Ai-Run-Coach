@@ -464,6 +464,7 @@ class RunSessionViewModel @Inject constructor(
                     it.trainingPlanId?.let { id -> putExtra(RunTrackingService.EXTRA_TRAINING_PLAN_ID, id) }
                     it.workoutId?.let { id -> putExtra(RunTrackingService.EXTRA_WORKOUT_ID, id) }
                     it.workoutType?.let { t -> putExtra(RunTrackingService.EXTRA_WORKOUT_TYPE, t) }
+                    it.workoutIntensity?.let { i -> putExtra(RunTrackingService.EXTRA_WORKOUT_INTENSITY, i) }
                     it.workoutDescription?.let { d -> putExtra(RunTrackingService.EXTRA_WORKOUT_DESCRIPTION, d) }
                     it.planGoalType?.let { g -> putExtra(RunTrackingService.EXTRA_PLAN_GOAL_TYPE, g) }
                     it.planWeekNumber?.let { w -> putExtra(RunTrackingService.EXTRA_PLAN_WEEK_NUMBER, w) }

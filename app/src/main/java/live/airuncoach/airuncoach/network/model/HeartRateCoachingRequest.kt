@@ -15,5 +15,8 @@ data class HeartRateCoachingRequest(
     // User profile for personalised zone calculation
     @SerializedName("runnerAge") val runnerAge: Int? = null,
     @SerializedName("fitnessLevel") val fitnessLevel: String? = null,
-    @SerializedName("runnerName") val runnerName: String? = null
+    @SerializedName("runnerName") val runnerName: String? = null,
+    // Coaching plan context — allows HR coaching to know if runner is in target zone
+    @SerializedName("workoutIntensity") val workoutIntensity: String? = null,  // "z1"–"z5" from plan
+    @SerializedName("workoutType") val workoutType: String? = null             // easy/tempo/intervals/etc.
 )

@@ -47,5 +47,13 @@ data class UploadRunRequest(
     val avgSpeed: Float? = null,
     val movingTime: Long? = null,
     val elapsedTime: Long? = null,
-    val avgStrideLength: Float? = null
+    val avgStrideLength: Float? = null,
+    // Training plan coaching context (if this run is part of a coached programme)
+    val linkedWorkoutId: String? = null,
+    val linkedPlanId: String? = null,
+    val planProgressWeek: Int? = null,
+    val planProgressWeeks: Int? = null,
+    val workoutType: String? = null,
+    val workoutIntensity: String? = null,
+    val workoutDescription: String? = null
 )

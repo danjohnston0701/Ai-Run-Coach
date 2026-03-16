@@ -394,6 +394,7 @@ class RunTrackingService : Service(), SensorEventListener {
         const val EXTRA_TRAINING_PLAN_ID = "EXTRA_TRAINING_PLAN_ID"
         const val EXTRA_WORKOUT_ID = "EXTRA_WORKOUT_ID"
         const val EXTRA_WORKOUT_TYPE = "EXTRA_WORKOUT_TYPE"
+        const val EXTRA_WORKOUT_INTENSITY = "EXTRA_WORKOUT_INTENSITY"
         const val EXTRA_WORKOUT_DESCRIPTION = "EXTRA_WORKOUT_DESCRIPTION"
         const val EXTRA_PLAN_GOAL_TYPE = "EXTRA_PLAN_GOAL_TYPE"
         const val EXTRA_PLAN_WEEK_NUMBER = "EXTRA_PLAN_WEEK_NUMBER"
@@ -498,6 +499,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private var planTrainingPlanId: String? = null
     private var planWorkoutId: String? = null
     private var planWorkoutType: String? = null
+    private var planWorkoutIntensity: String? = null
     private var planWorkoutDescription: String? = null
     private var planGoalType: String? = null
     private var planWeekNumber: Int? = null
@@ -519,6 +521,7 @@ class RunTrackingService : Service(), SensorEventListener {
         planTrainingPlanId = intent?.getStringExtra(EXTRA_TRAINING_PLAN_ID)
         planWorkoutId = intent?.getStringExtra(EXTRA_WORKOUT_ID)
         planWorkoutType = intent?.getStringExtra(EXTRA_WORKOUT_TYPE)
+        planWorkoutIntensity = intent?.getStringExtra(EXTRA_WORKOUT_INTENSITY)
         planWorkoutDescription = intent?.getStringExtra(EXTRA_WORKOUT_DESCRIPTION)
         planGoalType = intent?.getStringExtra(EXTRA_PLAN_GOAL_TYPE)
         planWeekNumber = intent?.getIntExtra(EXTRA_PLAN_WEEK_NUMBER, 0)?.takeIf { it > 0 }
@@ -1840,7 +1843,15 @@ class RunTrackingService : Service(), SensorEventListener {
             steepestDecline = if (hasMovedEnough) calculateSteepestDecline() else null,
             minElevation = if (hasMovedEnough) calculateMinElevation() else null,
             maxElevation = if (hasMovedEnough) calculateMaxElevation() else null,
-            totalSteps = totalStepsDuringRun.takeIf { it > 0 }
+            totalSteps = totalStepsDuringRun.takeIf { it > 0 },
+            // Training plan coaching context (preserved from session start)
+            linkedWorkoutId = planWorkoutId,
+            linkedPlanId = planTrainingPlanId,
+            planProgressWeek = planWeekNumber,
+            planProgressWeeks = planTotalWeeks,
+            workoutType = planWorkoutType,
+            workoutIntensity = planWorkoutIntensity,
+            workoutDescription = planWorkoutDescription
         )
 
         // ── Broadcast to Garmin watch (Scenario 2) ────────────────────────
@@ -2143,7 +2154,15 @@ class RunTrackingService : Service(), SensorEventListener {
             avgSpeed = runSession.avgSpeed,
             movingTime = runSession.movingTime,
             elapsedTime = runSession.elapsedTime,
-            avgStrideLength = runSession.avgStrideLength
+            avgStrideLength = runSession.avgStrideLength,
+            // Training plan coaching context — persisted so post-run AI analysis is plan-aware
+            linkedWorkoutId = runSession.linkedWorkoutId,
+            linkedPlanId = runSession.linkedPlanId,
+            planProgressWeek = runSession.planProgressWeek,
+            planProgressWeeks = runSession.planProgressWeeks,
+            workoutType = runSession.workoutType,
+            workoutIntensity = runSession.workoutIntensity,
+            workoutDescription = runSession.workoutDescription
         )
 
         // Retry up to 3 times with exponential backoff for server errors
@@ -2643,11 +2662,14 @@ class RunTrackingService : Service(), SensorEventListener {
 
         serviceScope.launch {
             try {
+                // Derive target zone number from plan intensity label (z1=1, z2=2, etc.)
+                val derivedTargetZone = planWorkoutIntensity
+                    ?.removePrefix("z")?.toIntOrNull() ?: 0
                 val request = HeartRateCoachingRequest(
                     currentHR = currentHeartRate,
                     avgHR = avgHr,
                     maxHR = maxHrValue,
-                    targetZone = 0, // Unknown; backend should avoid assumptions
+                    targetZone = derivedTargetZone,
                     elapsedMinutes = elapsedMinutes,
                     coachName = currentUser?.coachName,
                     coachTone = currentUser?.coachTone,
@@ -2656,7 +2678,10 @@ class RunTrackingService : Service(), SensorEventListener {
                     // User profile for age-adjusted HR zones
                     runnerAge = currentUser?.age,
                     fitnessLevel = currentUser?.fitnessLevel,
-                    runnerName = currentUser?.name
+                    runnerName = currentUser?.name,
+                    // Plan context so HR coaching can tell runner if they're in target zone
+                    workoutIntensity = planWorkoutIntensity,
+                    workoutType = planWorkoutType
                 )
                 val response = apiService.getHeartRateCoaching(request)
                 coachingHistory.add(AiCoachingNote(
