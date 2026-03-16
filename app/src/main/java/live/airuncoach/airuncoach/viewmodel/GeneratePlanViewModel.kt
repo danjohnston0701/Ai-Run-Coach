@@ -264,6 +264,7 @@ class GeneratePlanViewModel @Inject constructor(
                     targetDistance = distKm,
                     targetTime = targetTimeSecs,
                     targetDate = null,
+                    durationWeeks = _durationWeeks.value,
                     experienceLevel = _experienceLevel.value,
                     daysPerWeek = _daysPerWeek.value,
                     goalId = _linkedGoal.value?.id,

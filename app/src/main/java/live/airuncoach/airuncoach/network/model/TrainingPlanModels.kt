@@ -30,6 +30,7 @@ data class GeneratePlanRequest(
     @SerializedName("targetDistance") val targetDistance: Double, // km
     @SerializedName("targetTime") val targetTime: Int?,     // seconds
     @SerializedName("targetDate") val targetDate: String?,  // ISO
+    @SerializedName("durationWeeks") val durationWeeks: Int? = null, // user-selected plan duration in weeks (takes priority over targetDate)
     @SerializedName("experienceLevel") val experienceLevel: String, // beginner/intermediate/advanced
     @SerializedName("daysPerWeek") val daysPerWeek: Int = 4,
     @SerializedName("goalId") val goalId: String? = null,   // optionally link to a Goal

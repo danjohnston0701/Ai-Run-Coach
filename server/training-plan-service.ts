@@ -46,7 +46,8 @@ export async function generateTrainingPlan(
   experienceLevel: string = "intermediate", // beginner, intermediate, advanced
   daysPerWeek: number = 4,
   regularSessions: RegularSessionInput[] = [],
-  firstSessionStart: string = "flexible"  // "today" | "tomorrow" | "flexible"
+  firstSessionStart: string = "flexible",  // "today" | "tomorrow" | "flexible"
+  durationWeeks?: number  // user-selected plan duration (takes priority over targetDate)
 ): Promise<string> {
   try {
     // Get user profile
@@ -193,9 +194,10 @@ export async function generateTrainingPlan(
     }
 
     // Calculate plan duration
-    const weeksUntilTarget = targetDate ? 
+    // Priority: durationWeeks (user-selected) > targetDate > default based on goal/experience
+    const weeksUntilTarget = durationWeeks || (targetDate ? 
       Math.ceil((targetDate.getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000)) : 
-      getPlanDuration(goalType, experienceLevel);
+      getPlanDuration(goalType, experienceLevel));
 
     // Calculate user age for HR zone calculations
     const userAge = user[0]?.dob ? Math.floor((Date.now() - new Date(user[0].dob).getTime()) / 31557600000) : 30;

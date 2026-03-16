@@ -8943,6 +8943,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         targetDistance,
         targetTime,
         targetDate,
+        durationWeeks,  // user-selected duration (takes priority over targetDate)
         experienceLevel,
         daysPerWeek,
         firstSessionStart = "flexible", // "today" | "tomorrow" | "flexible"
@@ -8963,7 +8964,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         experienceLevel || "intermediate",
         daysPerWeek || 4,
         regularSessions,
-        firstSessionStart
+        firstSessionStart,
+        durationWeeks  // pass duration weeks to the function
       );
       
       // Link plan to goal if goalId was provided
