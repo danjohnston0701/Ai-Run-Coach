@@ -6553,7 +6553,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Wellness-aware pre-run briefing with Garmin data
   app.post("/api/coaching/pre-run-briefing", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, hasRoute, activityType, targetTime, targetPace, weather } = req.body;
+      const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, hasRoute, activityType, targetTime, targetPace, weather, trainingPlanId, planGoalType, planWeekNumber, planTotalWeeks, workoutType, workoutIntensity, workoutDescription } = req.body;
 
       console.log(`[Pre-run briefing] Request data - distance: ${distance}, targetTime: ${targetTime}, targetPace: ${targetPace}, hasRoute: ${hasRoute}, weather: ${JSON.stringify(weather)}`);
 
@@ -6631,6 +6631,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         weatherImpact: weatherImpactData,
         runnerName: req.body.runnerName || user?.name || undefined,
         fitnessLevel: user?.fitnessLevel || undefined,
+        // Training plan context for personalized coaching
+        trainingPlanId: trainingPlanId,
+        planGoalType: planGoalType,
+        planWeekNumber: planWeekNumber,
+        planTotalWeeks: planTotalWeeks,
+        workoutType: workoutType,
+        workoutIntensity: workoutIntensity,
+        workoutDescription: workoutDescription,
       });
 
       // Map the briefing text to 'text' field for client compatibility

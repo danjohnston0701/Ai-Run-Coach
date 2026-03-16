@@ -23,6 +23,7 @@ data class RunSetupConfig(
     val trainingPlanId: String? = null,
     val workoutId: String? = null,
     val workoutType: String? = null,      // "easy" | "tempo" | "intervals" | "long_run" | etc.
+    val workoutIntensity: String? = null, // "z1" | "z2" | "z3" | "z4" | "z5" (heart rate zone)
     val workoutDescription: String? = null,
     val planGoalType: String? = null,     // "5k" | "10k" | "half_marathon" | "marathon"
     val planWeekNumber: Int? = null,

@@ -20,7 +20,15 @@ data class PreRunBriefingRequest(
     @SerializedName("coachName") val coachName: String? = null,
     @SerializedName("coachGender") val coachGender: String? = null,
     @SerializedName("coachAccent") val coachAccent: String? = null,
-    @SerializedName("coachTone") val coachTone: String? = null
+    @SerializedName("coachTone") val coachTone: String? = null,
+    // Training plan context (if this run is part of a coached plan)
+    @SerializedName("trainingPlanId") val trainingPlanId: String? = null,
+    @SerializedName("planGoalType") val planGoalType: String? = null,
+    @SerializedName("planWeekNumber") val planWeekNumber: Int? = null,
+    @SerializedName("planTotalWeeks") val planTotalWeeks: Int? = null,
+    @SerializedName("workoutType") val workoutType: String? = null,  // "easy", "tempo", "intervals", "long_run"
+    @SerializedName("workoutIntensity") val workoutIntensity: String? = null,  // "z1", "z2", "z3", "z4", "z5"
+    @SerializedName("workoutDescription") val workoutDescription: String? = null  // Zone focus or description
 )
 
 data class StartLocation(

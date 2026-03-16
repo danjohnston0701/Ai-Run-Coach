@@ -70,6 +70,15 @@ data class RunSession(
     val targetDistance: Double? = null, // kilometers
     val targetTime: Long? = null, // milliseconds
     val wasTargetAchieved: Boolean? = null,
+    
+    // Training plan context (if this run is part of a coached plan)
+    val linkedWorkoutId: String? = null, // ID of the planned workout this run executes
+    val linkedPlanId: String? = null, // ID of the training plan this run belongs to
+    val planProgressWeek: Int? = null, // Which week of the plan (1-12)
+    val planProgressWeeks: Int? = null, // Total weeks in the plan
+    val workoutType: String? = null, // "easy", "tempo", "intervals", "long_run", etc.
+    val workoutIntensity: String? = null, // "z1", "z2", "z3", "z4", "z5"
+    val workoutDescription: String? = null, // e.g., "Zone 2 aerobic building session"
 
     // Extended metrics (from server)
     val avgSpeed: Float? = null, // m/s - override for avg moving speed

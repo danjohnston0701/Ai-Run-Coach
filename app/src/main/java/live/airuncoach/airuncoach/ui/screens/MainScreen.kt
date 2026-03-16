@@ -583,6 +583,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                                 trainingPlanId      = planCtx?.planId,
                                 workoutId           = w.id,
                                 workoutType         = w.workoutType,
+                                workoutIntensity    = w.intensity,
                                 workoutDescription  = w.description,
                                 planGoalType        = planCtx?.goalType,
                                 planWeekNumber      = planCtx?.weekNumber,

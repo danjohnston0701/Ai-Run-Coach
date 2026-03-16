@@ -276,7 +276,15 @@ class RunSessionViewModel @Inject constructor(
                         coachName = user?.coachName,
                         coachGender = user?.coachGender,
                         coachAccent = user?.coachAccent,
-                        coachTone = user?.coachTone
+                        coachTone = user?.coachTone,
+                        // Training plan context
+                        trainingPlanId = runConfig?.trainingPlanId,
+                        planGoalType = runConfig?.planGoalType,
+                        planWeekNumber = runConfig?.planWeekNumber,
+                        planTotalWeeks = runConfig?.planTotalWeeks,
+                        workoutType = runConfig?.workoutType,
+                        workoutIntensity = runConfig?.workoutIntensity,
+                        workoutDescription = runConfig?.workoutDescription
                     )
                     
                     val briefing = apiService.getPreRunBriefing(request)
