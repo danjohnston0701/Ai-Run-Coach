@@ -1,0 +1,96 @@
+026-03-17 10:01:18.21
+8b90bbf9
+User
+❌ [Garmin Webhook] Error processing epochs: column "epoch_date" of relation "garmin_epochs_raw" does not exist
+2026-03-17 10:01:25.13
+8b90bbf9
+User
+❌ [Garmin Webhook] Error processing epochs: column "epoch_date" of relation "garmin_epochs_raw" does not exist
+2026-03-17 10:01:28.24
+8b90bbf9
+User
+⚠️ [Garmin Webhook] Could not map respiration to user for date 2026-03-16
+2026-03-17 10:01:32.64
+8b90bbf9
+User
+❌ [Garmin Webhook] Error processing epochs: column "epoch_date" of relation "garmin_epochs_raw" does not exist
+2026-03-17 10:01:33.74
+8b90bbf9
+User
+⚠️ [Garmin Webhook] Could not map respiration to user for date 2026-03-16
+2026-03-17 10:01:42.74
+8b90bbf9
+User
+⚠️ [Garmin Webhook] Could not map respiration to user for date 2026-03-16
+2026-03-17 10:01:56.94
+8b90bbf9
+User
+❌ [Garmin Webhook] Error processing epochs: column "epoch_date" of relation "garmin_epochs_raw" does not exist
+2026-03-17 10:02:00.44
+8b90bbf9
+User
+⚠️ [Garmin Webhook] Could not map respiration to user for date 2026-03-16
+2026-03-17 10:02:06.64
+8b90bbf9
+User
+⚠️ [Garmin Webhook] Could not map respiration to user for date 2026-03-16
+2026-03-17 10:02:11.14
+8b90bbf9
+User
+❌ [Garmin Webhook] Error processing epochs: column "epoch_date" of relation "garmin_epochs_raw" does not exist
+2026-03-17 10:02:14.34
+8b90bbf9
+User
+⚠️ [Garmin Webhook] Could not map respiration to user for date 2026-03-16
+2026-03-17 10:02:19.94
+8b90bbf9
+User
+❌ [Garmin Webhook] Error processing epochs: column "epoch_date" of relation "garmin_epochs_raw" does not exist
+2026-03-17 10:02:20.34
+8b90bbf9
+User
+⚠️ [Garmin Webhook] Could not map respiration to user for date 2026-03-16
+2026-03-17 10:02:28.14
+8b90bbf9
+User
+⚠️ [Garmin Webhook] Could not map respiration to user for date 2026-03-16
+2026-03-17 10:02:34.24
+8b90bbf9
+User
+❌ [Garmin Webhook] Error processing epochs: column "epoch_date" of relation "garmin_epochs_raw" does not exist
+2026-03-17 10:02:35.84
+8b90bbf9
+User
+⚠️ [Garmin Webhook] Could not map respiration to user for date 2026-03-16
+2026-03-17 10:02:39.94
+8b90bbf9
+User
+⚠️ [Garmin Webhook] Could not map respiration to user for date 2026-03-16
+2026-03-17 10:02:41.14
+8b90bbf9
+User
+❌ [Garmin Webhook] Error processing epochs: column "epoch_date" of relation "garmin_epochs_raw" does not exist
+2026-03-17 10:02:48.64
+8b90bbf9
+User
+⚠️ [Garmin Webhook] Could not map respiration to user for date 2026-03-16
+2026-03-17 10:02:55.64
+8b90bbf9
+User
+⚠️ [Garmin Webhook] Could not map respiration to user for date 2026-03-16
+2026-03-17 10:02:57.24
+8b90bbf9
+User
+❌ [Garmin Webhook] Error processing epochs: column "epoch_date" of relation "garmin_epochs_raw" does not exist
+2026-03-17 10:02:59.94
+8b90bbf9
+User
+⚠️ [Garmin Webhook] Could not map respiration to user for date 2026-03-16
+2026-03-17 10:03:03.34
+8b90bbf9
+User
+[Garmin Webhook] Finished processing 31 epochs
+2026-03-17 10:03:04.74
+8b90bbf9
+User
+⚠️ [Garmin Webhook] Could not map respiration to user for date 2026-03-16

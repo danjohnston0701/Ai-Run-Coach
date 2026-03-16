@@ -4740,22 +4740,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const date = resp.calendarDate || new Date((resp.startTimeInSeconds || 0) * 1000).toISOString().split('T')[0];
           
-          // Find user by recent activity matching date
+          // Find user: first try matching by Garmin userId in webhook payload, then fall back to date+run matching
           let userId: string | undefined;
-          for (const device of devices) {
-            const recentRun = await db.query.runs.findFirst({
-              where: and(
-                eq(runs.userId, device.userId),
-                gte(runs.completedAt, new Date(`${date}T00:00:00`)),
-                lte(runs.completedAt, new Date(`${date}T23:59:59`))
-              ),
-              limit: 1,
-            });
-            
-            if (recentRun) {
-              userId = device.userId;
-              break;
+
+          if (resp.userId) {
+            const garminId = String(resp.userId);
+            const deviceByGarminId = devices.find(d => d.deviceId === garminId);
+            if (deviceByGarminId) userId = deviceByGarminId.userId;
+          }
+
+          if (!userId) {
+            for (const device of devices) {
+              const recentRun = await db.query.runs.findFirst({
+                where: and(
+                  eq(runs.userId, device.userId),
+                  gte(runs.completedAt, new Date(`${date}T00:00:00`)),
+                  lte(runs.completedAt, new Date(`${date}T23:59:59`))
+                ),
+                limit: 1,
+              });
+              if (recentRun) { userId = device.userId; break; }
             }
+          }
+
+          // Last resort: if only one Garmin device is connected, use that user
+          if (!userId && devices.length === 1) {
+            userId = devices[0].userId;
           }
           
           if (!userId) {
