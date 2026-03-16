@@ -9129,11 +9129,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ? paceValues.reduce((a, b) => a + b, 0) / paceValues.length 
           : null;
         
+        const longestRun = Math.max(...recentRuns.map(r => Number(r.distance) || 0));
+
         performanceBaseline = {
           hasHistory: true,
           runsRecorded: recentRuns.length,
           runsPerWeek: runsPerWeek.toFixed(1),
           avgDistance: avgDistance.toFixed(2),
+          longestRun: longestRun.toFixed(1),
           avgPace: avgPaceSecs ? `${Math.floor(avgPaceSecs / 60)}:${String(Math.round(avgPaceSecs % 60)).padStart(2, '0')}` : null
         };
       }

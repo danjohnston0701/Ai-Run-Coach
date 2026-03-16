@@ -83,6 +83,7 @@ data class PerformanceBaseline(
     @SerializedName("runsRecorded") val runsRecorded: Int? = null,
     @SerializedName("runsPerWeek") val runsPerWeek: String? = null,
     @SerializedName("avgDistance") val avgDistance: String? = null,
+    @SerializedName("longestRun") val longestRun: String? = null,
     @SerializedName("avgPace") val avgPace: String? = null
 )
 

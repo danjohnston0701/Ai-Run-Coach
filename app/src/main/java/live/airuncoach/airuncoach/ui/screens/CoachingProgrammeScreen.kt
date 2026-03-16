@@ -1,5 +1,6 @@
 package live.airuncoach.airuncoach.ui.screens
 
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -1009,50 +1010,43 @@ fun AiPlanSummary(details: TrainingPlanDetails) {
             
             Spacer(modifier = Modifier.height(Spacing.md))
             
-            // What we know about you
-            Text("About You", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
-            Spacer(modifier = Modifier.height(Spacing.sm))
-            
             val baseline = details.performanceBaseline
-            if (baseline != null && !baseline.hasHistory) {
-                // No run history
-                Text(
-                    baseline.message ?: "You don't have any run history yet. Let's get started and see what you've got!",
-                    style = AppTextStyles.small,
-                    color = Colors.textSecondary,
-                    lineHeight = 18.sp
-                )
-            } else if (baseline != null && baseline.hasHistory) {
-                // Has run history - show actual performance data
-                Text(
-                    buildString {
-                        append("Based on your recent runs:\n")
-                        append("• ${baseline.runsRecorded} runs recorded (last 30 days)\n")
-                        append("• Running ~${baseline.runsPerWeek}x per week\n")
-                        append("• Average distance: ${baseline.avgDistance}km\n")
-                        if (!baseline.avgPace.isNullOrBlank()) {
-                            append("• Your current average pace: ${baseline.avgPace} per km\n")
-                        }
-                        append("• Goal: ${details.plan.goalType.replace("_", " ").replaceFirstChar { it.uppercase() }} (${details.plan.targetDistance}km)\n")
-                        append("• Plan: ${details.plan.daysPerWeek}x per week over ${details.plan.totalWeeks} weeks")
-                    },
-                    style = AppTextStyles.small,
-                    color = Colors.textSecondary,
-                    lineHeight = 18.sp
-                )
-            } else {
-                // No baseline data provided — show basic plan info
-                Text(
-                    buildString {
-                        append("Your Training Plan:\n")
-                        append("• Goal: ${details.plan.goalType.replace("_", " ").replaceFirstChar { it.uppercase() }} (${details.plan.targetDistance}km)\n")
-                        append("• Duration: ${details.plan.daysPerWeek}x per week over ${details.plan.totalWeeks} weeks\n")
-                        append("• Fitness Level: ${details.plan.experienceLevel.replaceFirstChar { it.uppercase() }}")
-                    },
-                    style = AppTextStyles.small,
-                    color = Colors.textSecondary,
-                    lineHeight = 18.sp
-                )
+
+            // ── Your Baseline (only when run history exists) ────────────────────
+            if (baseline != null && baseline.hasHistory == true) {
+                Text("Your Baseline", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+                Spacer(modifier = Modifier.height(Spacing.sm))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (!baseline.avgPace.isNullOrBlank()) {
+                        BaselineRow(icon = R.drawable.icon_clock_vector, text = "Current avg pace: ${baseline.avgPace} /km")
+                    }
+                    if (!baseline.runsPerWeek.isNullOrBlank()) {
+                        BaselineRow(icon = R.drawable.icon_chart_vector, text = "You run on average ${baseline.runsPerWeek}x per week")
+                    }
+                    if (!baseline.avgDistance.isNullOrBlank()) {
+                        BaselineRow(icon = R.drawable.icon_map_pin_vector, text = "Average distance: ${baseline.avgDistance} km")
+                    }
+                    if (!baseline.longestRun.isNullOrBlank()) {
+                        BaselineRow(icon = R.drawable.icon_trophy_vector, text = "Longest run: ${baseline.longestRun} km")
+                    }
+                    if (baseline.runsRecorded != null) {
+                        BaselineRow(icon = R.drawable.icon_chart_vector, text = "Based on your last ${baseline.runsRecorded} runs")
+                    }
+                }
+                Spacer(modifier = Modifier.height(Spacing.md))
+                HorizontalDivider(color = Colors.backgroundTertiary)
+                Spacer(modifier = Modifier.height(Spacing.md))
+            }
+
+            // ── Plan Setup (always visible) ──────────────────────────────────────
+            Text("Plan Setup", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+            Spacer(modifier = Modifier.height(Spacing.sm))
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                BaselineRow(icon = R.drawable.icon_person, text = "${details.plan.experienceLevel.replaceFirstChar { it.uppercase() }} runner")
+                BaselineRow(icon = R.drawable.icon_calendar_vector, text = "${details.plan.daysPerWeek} sessions per week")
+                BaselineRow(icon = R.drawable.icon_clock_vector, text = "${details.plan.totalWeeks}-week programme")
+                BaselineRow(icon = R.drawable.icon_target_vector, text = "Target: ${formatGoalType(details.plan.goalType)}")
+                BaselineRow(icon = R.drawable.icon_map_pin_vector, text = "Distance goal: ${details.plan.targetDistance} km")
             }
             
             Spacer(modifier = Modifier.height(Spacing.md))
@@ -1076,6 +1070,22 @@ fun AiPlanSummary(details: TrainingPlanDetails) {
                 color = Colors.primary
             )
         }
+    }
+}
+
+@Composable
+private fun BaselineRow(@DrawableRes icon: Int, text: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Icon(
+            painter = painterResource(id = icon),
+            contentDescription = null,
+            tint = Colors.primary,
+            modifier = Modifier.size(16.dp)
+        )
+        Text(text, style = AppTextStyles.small, color = Colors.textSecondary)
     }
 }
 
