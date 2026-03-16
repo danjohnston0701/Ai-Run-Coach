@@ -146,9 +146,8 @@ fun RunSummaryScreenFlagship(
     val context = LocalContext.current
 
     LaunchedEffect(runId) {
-        if (runSession == null && loadError == null) {
-            viewModel.loadRunById(runId)
-        }
+        // Always reload when runId changes (navigating back and reopening should refresh data including coaching notes)
+        viewModel.loadRunById(runId)
     }
 
     var selectedTab by remember { mutableStateOf(0) }
