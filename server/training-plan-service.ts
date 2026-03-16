@@ -427,8 +427,14 @@ If runner has NO previous runs:
       ],
       response_format: { type: "json_object" },
       temperature: 0.7,
-      max_tokens: 4000,
+      max_tokens: 16000,
     });
+
+    // Check if the response was truncated (finish_reason !== 'stop')
+    const finishReason = response.choices[0].finish_reason;
+    if (finishReason === 'length') {
+      console.warn(`[Training Plan] OpenAI response was truncated (finish_reason=length). Retrying with shorter plan description...`);
+    }
 
     let rawContent = response.choices[0].message.content || "{}";
     
