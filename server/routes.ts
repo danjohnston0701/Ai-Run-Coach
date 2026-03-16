@@ -8946,7 +8946,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         experienceLevel,
         daysPerWeek,
         firstSessionStart = "flexible", // "today" | "tomorrow" | "flexible"
-        regularSessions = []  // recurring runs the user already does each week
+        regularSessions = [],  // recurring runs the user already does each week
+        goalId = null  // optional: goal ID to link this plan to
       } = req.body;
 
       if (!goalType || !targetDistance) {
@@ -8964,6 +8965,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         regularSessions,
         firstSessionStart
       );
+      
+      // Link plan to goal if goalId was provided
+      if (goalId) {
+        try {
+          await db
+            .update(goals)
+            .set({ linkedTrainingPlanId: planId })
+            .where(eq(goals.id, goalId));
+        } catch (linkErr) {
+          console.warn(`[Training Plan] Could not link plan ${planId} to goal ${goalId}:`, linkErr);
+          // Don't fail the entire request if linking fails
+        }
+      }
       
       res.status(201).json({
         planId,
@@ -9031,6 +9045,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/training-plans/details/:planId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { planId } = req.params;
+      const userId = req.user!.userId;
       
       // Get plan
       const plan = await db
@@ -9066,9 +9081,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
       );
       
+      // Get user's baseline performance data (last 10 runs or 30 days)
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const recentRuns = await db
+        .select()
+        .from(runs)
+        .where(
+          and(
+            eq(runs.userId, userId),
+            eq(runs.isCompleted, true),
+            gte(runs.completedAt, thirtyDaysAgo)
+          )
+        )
+        .orderBy(desc(runs.completedAt))
+        .limit(10);
+      
+      // Calculate baseline metrics
+      let performanceBaseline: any = null;
+      if (recentRuns.length === 0) {
+        performanceBaseline = {
+          hasHistory: false,
+          message: "You don't have any run history yet. Let's get started and see what you've got!"
+        };
+      } else {
+        const totalDistance = recentRuns.reduce((sum, r) => sum + ((r.distanceInMeters || 0) / 1000), 0);
+        const avgDistance = totalDistance / recentRuns.length;
+        const runsPerWeek = recentRuns.length / Math.ceil(
+          (new Date().getTime() - new Date(recentRuns[recentRuns.length - 1].completedAt || Date.now()).getTime()) / (7 * 24 * 60 * 60 * 1000)
+        );
+        
+        // Parse pace data
+        const paceValues = recentRuns
+          .map(r => {
+            if (!r.avgPace) return null;
+            const paceStr = String(r.avgPace);
+            const parts = paceStr.split(':');
+            if (parts.length === 2) {
+              return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+            }
+            return null;
+          })
+          .filter((v): v is number => v !== null);
+        
+        const avgPaceSecs = paceValues.length > 0 
+          ? paceValues.reduce((a, b) => a + b, 0) / paceValues.length 
+          : null;
+        
+        performanceBaseline = {
+          hasHistory: true,
+          runsRecorded: recentRuns.length,
+          runsPerWeek: runsPerWeek.toFixed(1),
+          avgDistance: avgDistance.toFixed(2),
+          avgPace: avgPaceSecs ? `${Math.floor(avgPaceSecs / 60)}:${String(Math.round(avgPaceSecs % 60)).padStart(2, '0')}` : null
+        };
+      }
+      
       res.json({
         plan: plan[0],
-        weeks: weeksWithWorkouts
+        weeks: weeksWithWorkouts,
+        performanceBaseline
       });
     } catch (error: any) {
       console.error("Get training plan details error:", error);

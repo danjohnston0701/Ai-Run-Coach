@@ -72,7 +72,17 @@ data class TrainingPlanSummary(
 /** Full plan returned from GET /api/training-plans/details/:planId */
 data class TrainingPlanDetails(
     @SerializedName("plan") val plan: TrainingPlanSummary,
-    @SerializedName("weeks") val weeks: List<WeekDetails>
+    @SerializedName("weeks") val weeks: List<WeekDetails>,
+    @SerializedName("performanceBaseline") val performanceBaseline: PerformanceBaseline? = null
+)
+
+data class PerformanceBaseline(
+    @SerializedName("hasHistory") val hasHistory: Boolean,
+    @SerializedName("message") val message: String? = null,
+    @SerializedName("runsRecorded") val runsRecorded: Int? = null,
+    @SerializedName("runsPerWeek") val runsPerWeek: String? = null,
+    @SerializedName("avgDistance") val avgDistance: String? = null,
+    @SerializedName("avgPace") val avgPace: String? = null
 )
 
 data class WeekDetails(

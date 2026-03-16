@@ -951,7 +951,31 @@ The runner needs to SHORTEN their stride and INCREASE their cadence. Provide eli
 2. Think "quick, light steps" — aim for ${optimalCadenceMin}-${optimalCadenceMax} spm
 3. Lean slightly forward from ankles (not waist)
 4. Imagine running on hot coals — minimize ground contact time
-5. Arms drive the cadence — quicker arms = quicker feet`;
+5. Arms drive the cadence — quicker arms = quicker feet
+6. Keep your landing tight beneath your center of mass
+7. Let the ground come to your foot—don’t chase it
+8. Shorten the step and land softly beneath your body
+9. Imagine placing your foot straight down under your hips
+10. Reduce the reach—quick feet underneath you
+11. Your stride should land under you, not in front of you
+12. Let your feet move faster with smaller steps.
+13. Increase step rhythm—shorter steps, faster turnover.
+14. Run like you're tapping the ground quickly.
+15. Quick cadence keeps your stride compact.
+16. Let the rhythm of your feet speed up slightly.
+17. Faster cadence, lighter steps.
+18. Think quick feet beneath you.
+19. Compact steps will protect your legs and increase efficiency.
+20. Arms drive cadence—quicker arms mean quicker feet.
+21. Speed up your arm swing slightly.
+22.Compact arm swings will increase cadence.
+23. Let your arms set the rhythm for your legs.
+24. Faster arm turnover shortens the stride.
+25. Keep arms relaxed but quick.
+26. Drive elbows back faster.
+27. Quick arm rhythm = quick foot rhythm.
+28. Let your arms guide the cadence.
+29.Smooth, quick arm drive will tighten your stride.`;
   } else if (strideZone === 'UNDERSTRIDING') {
     zoneAnalysis = `UNDERSTRIDING DETECTED: Cadence ${cadence} spm with stride length ${strideCm}cm — their cadence is too low for their pace of ${formatPaceForTTS(currentPace)}.
 
@@ -965,7 +989,22 @@ The runner needs to find a more efficient cadence. Provide coaching on HOW to in
 2. Push off more powerfully from the balls of their feet
 3. Drive knees forward (not up) with each stride
 4. Keep arms pumping actively — they set the rhythm
-5. Think "smooth and powerful" not "short and choppy"`;
+5. Think "smooth and powerful" not "short and choppy"
+6. Run like you're tapping the ground quickly.
+7. Quick cadence keeps your stride compact.
+8. Let the rhythm of your feet speed up slightly.
+9. Faster cadence, lighter steps.
+10. Think quick feet beneath you.
+11. Compact steps will protect your legs and increase efficiency.
+12. Arms drive cadence—quicker arms mean quicker feet.
+13. Speed up your arm swing slightly.
+14.Compact arm swings will increase cadence.
+15. Let your arms set the rhythm for your legs.
+16. Faster arm turnover shortens the stride.
+17. Keep arms relaxed but quick.
+18. Drive elbows back faster.
+19. Quick arm rhythm = quick foot rhythm.
+20. Let your arms guide the cadence.`;
   } else {
     zoneAnalysis = `Cadence ${cadence} spm with stride ${strideCm}cm is in the optimal zone. Brief positive reinforcement.`;
   }

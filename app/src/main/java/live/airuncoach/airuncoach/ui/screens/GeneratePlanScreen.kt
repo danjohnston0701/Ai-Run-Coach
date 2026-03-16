@@ -69,9 +69,17 @@ fun GeneratePlanScreen(
     var showAddInjuryDialog by remember { mutableStateOf(false) }
     var editingInjury by remember { mutableStateOf<Injury?>(null) }
 
-    // Pre-fill from linked goal
+    // Check if goal already has a linked plan
     LaunchedEffect(prefilledGoal) {
-        prefilledGoal?.let { viewModel.prefillFromGoal(it) }
+        prefilledGoal?.let { goal ->
+            if (!goal.linkedTrainingPlanId.isNullOrBlank()) {
+                // Plan already exists for this goal, navigate directly to it
+                onPlanCreated(goal.linkedTrainingPlanId!!)
+                return@let
+            }
+            // No existing plan, pre-fill the form
+            viewModel.prefillFromGoal(goal)
+        }
     }
 
     // Navigate on success
@@ -301,8 +309,9 @@ fun GeneratePlanScreen(
                     val maxWeeks = when (goalType) {
                         "marathon" -> 20
                         "half_marathon" -> 14
-                        "10k" -> 10
-                        else -> 8
+                        "10k" -> 12
+                        "5k" -> 12
+                        else -> 12
                     }
                     Slider(
                         value = durationWeeks.toFloat(),

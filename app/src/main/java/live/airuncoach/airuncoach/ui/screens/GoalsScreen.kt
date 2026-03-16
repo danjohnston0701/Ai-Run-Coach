@@ -18,10 +18,12 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import java.util.Locale
 
 import androidx.lifecycle.viewmodel.compose.viewModel
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.Goal
+import live.airuncoach.airuncoach.domain.model.RunSession
 import live.airuncoach.airuncoach.ui.theme.*
 import live.airuncoach.airuncoach.viewmodel.GoalsUiState
 import live.airuncoach.airuncoach.viewmodel.GoalsViewModel
@@ -33,10 +35,13 @@ fun GoalsScreen(
     onCreateGoal: () -> Unit = {},
     onNavigateBack: (() -> Unit)? = null,
     onGeneratePlanForGoal: ((Goal) -> Unit)? = null,
+    onNavigateToRunSummary: ((String) -> Unit)? = null,
     viewModel: GoalsViewModel = viewModel(factory = GoalsViewModelFactory(LocalContext.current))
 ) {
     val goalsState by viewModel.goalsState.collectAsState()
     val selectedTab by viewModel.selectedTab.collectAsState()
+    val linkedRunSession by viewModel.linkedRunSession.collectAsState()
+    val isLoadingLinkedRun by viewModel.isLoadingLinkedRun.collectAsState()
     var goalToDelete by remember { mutableStateOf<Goal?>(null) }
     var showGoalDetails by remember { mutableStateOf<Goal?>(null) }
     var goalToEdit by remember { mutableStateOf<Goal?>(null) }
@@ -54,6 +59,15 @@ fun GoalsScreen(
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(showGoalDetails?.id) {
+        val linkedRunId = showGoalDetails?.relatedRunSessionIds?.lastOrNull()
+        if (showGoalDetails != null && linkedRunId != null) {
+            viewModel.loadLinkedRunSession(linkedRunId)
+        } else {
+            viewModel.clearLinkedRunSession()
+        }
     }
 
     Scaffold(
@@ -206,7 +220,8 @@ fun GoalsScreen(
                             onDeleteClick = { goal -> goalToDelete = goal },
                             onEditClick = { goal -> goalToEdit = goal },
                             onMarkCompleteClick = { goal -> goalToMarkComplete = goal },
-                            onGeneratePlan = onGeneratePlanForGoal
+                            onGeneratePlan = onGeneratePlanForGoal,
+                            onNavigateToRunSummary = onNavigateToRunSummary
                         )
                     }
                 }
@@ -303,7 +318,12 @@ fun GoalsScreen(
     showGoalDetails?.let { goal ->
         GoalDetailsBottomSheet(
             goal = goal,
-            onDismiss = { showGoalDetails = null },
+            linkedRun = linkedRunSession,
+            isLoadingLinkedRun = isLoadingLinkedRun,
+            onDismiss = {
+                viewModel.clearLinkedRunSession()
+                showGoalDetails = null
+            },
             onEdit = {
                 goalToEdit = goal
                 showGoalDetails = null
@@ -402,7 +422,8 @@ fun GoalsListContent(
     onDeleteClick: (Goal) -> Unit,
     onEditClick: (Goal) -> Unit,
     onMarkCompleteClick: (Goal) -> Unit,
-    onGeneratePlan: ((Goal) -> Unit)? = null
+    onGeneratePlan: ((Goal) -> Unit)? = null,
+    onNavigateToRunSummary: ((String) -> Unit)? = null
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -416,6 +437,7 @@ fun GoalsListContent(
                 onDeleteClick = { onDeleteClick(goal) },
                 onEditClick = { onEditClick(goal) },
                 onMarkCompleteClick = { onMarkCompleteClick(goal) },
+                onNavigateToRunSummary = onNavigateToRunSummary,
                 onGeneratePlan = if (onGeneratePlan != null && goal.isActive && !goal.isCompleted) {
                     { onGeneratePlan(goal) }
                 } else null
@@ -431,9 +453,11 @@ fun GoalCard(
     onDeleteClick: () -> Unit,
     onEditClick: () -> Unit,
     onMarkCompleteClick: () -> Unit,
+    onNavigateToRunSummary: ((String) -> Unit)? = null,
     onGeneratePlan: (() -> Unit)? = null
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    val linkedRunId = goal.relatedRunSessionIds.lastOrNull()
     
     Card(
         modifier = Modifier
@@ -583,6 +607,22 @@ fun GoalCard(
         }
 
         // "Get Training Plan" CTA — shown for active distance/time goals
+        if (goal.isCompleted && linkedRunId != null && onNavigateToRunSummary != null) {
+            HorizontalDivider(color = Colors.backgroundRoot, thickness = 1.dp, modifier = Modifier.padding(horizontal = Spacing.lg))
+            TextButton(
+                onClick = { onNavigateToRunSummary(linkedRunId) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.md, vertical = 4.dp)
+            ) {
+                Text(
+                    "See Run Session",
+                    style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.primary
+                )
+            }
+        }
+
         if (onGeneratePlan != null && (goal.type == "DISTANCE_TIME" || goal.type == "EVENT" || goal.type == "HEALTH_WELLBEING")) {
             HorizontalDivider(color = Colors.backgroundRoot, thickness = 1.dp, modifier = Modifier.padding(horizontal = Spacing.lg))
             TextButton(
@@ -638,6 +678,8 @@ fun Chip(text: String, icon: Int) {
 @Composable
 fun GoalDetailsBottomSheet(
     goal: Goal,
+    linkedRun: RunSession?,
+    isLoadingLinkedRun: Boolean,
     onDismiss: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
@@ -739,7 +781,7 @@ fun GoalDetailsBottomSheet(
             }
             
             // Show related run sessions count
-            if (!goal.relatedRunSessionIds.isNullOrEmpty()) {
+            if (goal.relatedRunSessionIds.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(Spacing.md))
                 Row(
                     modifier = Modifier
@@ -756,9 +798,56 @@ fun GoalDetailsBottomSheet(
                         modifier = Modifier.size(20.dp)
                     )
                     Text(
-                        text = "${goal.relatedRunSessionIds?.size ?: 0} run${if ((goal.relatedRunSessionIds?.size ?: 0) > 1) "s" else ""} linked to this goal",
+                        text = "${goal.relatedRunSessionIds.size} run${if (goal.relatedRunSessionIds.size > 1) "s" else ""} linked to this goal",
                         style = AppTextStyles.body,
                         color = Colors.textPrimary
+                    )
+                }
+            }
+
+            if (goal.isCompleted && goal.relatedRunSessionIds.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(Spacing.lg))
+                HorizontalDivider(color = Colors.backgroundTertiary)
+                Spacer(modifier = Modifier.height(Spacing.lg))
+
+                Text(
+                    text = "Goal vs Achieved Result",
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.textPrimary
+                )
+                Spacer(modifier = Modifier.height(Spacing.md))
+
+                ComparisonRow(
+                    label = "Distance",
+                    targetValue = goal.distanceTarget ?: "—",
+                    actualValue = linkedRun?.let { String.format(Locale.US, "%.2f km", it.getDistanceInKm()) } ?: if (isLoadingLinkedRun) "Loading..." else "—"
+                )
+
+                goal.timeTargetSeconds?.let {
+                    val hours = it / 3600
+                    val minutes = (it % 3600) / 60
+                    val seconds = it % 60
+                    val targetTime = if (hours > 0) String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds) else String.format(Locale.US, "%02d:%02d", minutes, seconds)
+                    ComparisonRow(
+                        label = "Time",
+                        targetValue = targetTime,
+                        actualValue = linkedRun?.getFormattedDuration() ?: if (isLoadingLinkedRun) "Loading..." else "—"
+                    )
+                }
+
+                if (goal.timeTargetSeconds != null || linkedRun?.averagePace != null) {
+                    ComparisonRow(
+                        label = "Pace",
+                        targetValue = goal.timeTargetSeconds?.let { "Time-based goal" } ?: "—",
+                        actualValue = linkedRun?.averagePace ?: if (isLoadingLinkedRun) "Loading..." else "—"
+                    )
+                }
+
+                if (goal.type == "EVENT") {
+                    ComparisonRow(
+                        label = "Event",
+                        targetValue = goal.eventName ?: "—",
+                        actualValue = linkedRun?.routeName ?: linkedRun?.name ?: if (isLoadingLinkedRun) "Loading..." else "Completed run"
                     )
                 }
             }
@@ -801,6 +890,47 @@ fun GoalDetailsBottomSheet(
             }
             
             Spacer(modifier = Modifier.height(Spacing.lg))
+        }
+    }
+}
+
+@Composable
+private fun ComparisonRow(
+    label: String,
+    targetValue: String,
+    actualValue: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "$label Goal",
+                style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                color = Colors.textMuted
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = targetValue,
+                style = AppTextStyles.body,
+                color = Colors.textPrimary
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Actual",
+                style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                color = Colors.success
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = actualValue,
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                color = Colors.textPrimary
+            )
         }
     }
 }

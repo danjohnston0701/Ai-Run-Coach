@@ -227,6 +227,7 @@ export const goals = pgTable("goals", {
   notes: text("notes"),
   progressPercent: integer("progress_percent").default(0),
   relatedRunSessionIds: jsonb("related_run_session_ids").default([]),
+  linkedTrainingPlanId: varchar("linked_training_plan_id"),
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

@@ -229,6 +229,9 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         // Store goal for wizard prefill then navigate
                         live.airuncoach.airuncoach.util.GoalPlanHolder.prefilledGoal = goal
                         navController.navigate("generate_plan")
+                    },
+                    onNavigateToRunSummary = { runId ->
+                        navController.navigate("run_summary/$runId")
                     }
                 )
             }

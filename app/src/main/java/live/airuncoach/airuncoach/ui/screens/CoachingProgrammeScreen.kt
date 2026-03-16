@@ -1012,15 +1012,48 @@ fun AiPlanSummary(details: TrainingPlanDetails) {
             // What we know about you
             Text("About You", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
             Spacer(modifier = Modifier.height(Spacing.sm))
-            Text(
-                "Based on your profile:\n" +
-                "• ${details.plan.experienceLevel.replaceFirstChar { it.uppercase() }} runner\n" +
-                "• ${details.plan.daysPerWeek}x per week commitment\n" +
-                "• ${details.plan.totalWeeks}-week programme",
-                style = AppTextStyles.small,
-                color = Colors.textSecondary,
-                lineHeight = 18.sp
-            )
+            
+            if (details.performanceBaseline != null) {
+                if (!details.performanceBaseline.hasHistory) {
+                    // No run history
+                    Text(
+                        details.performanceBaseline.message ?: "You don't have any run history yet. Let's get started!",
+                        style = AppTextStyles.small,
+                        color = Colors.textSecondary,
+                        lineHeight = 18.sp
+                    )
+                } else {
+                    // Has run history
+                    val baseline = details.performanceBaseline
+                    Text(
+                        buildString {
+                            append("Based on your recent runs:\n")
+                            append("• ${baseline.runsRecorded} runs recorded (last 30 days)\n")
+                            append("• Running ~${baseline.runsPerWeek}x per week\n")
+                            append("• Average distance: ${baseline.avgDistance}km\n")
+                            if (!baseline.avgPace.isNullOrBlank()) {
+                                append("• Your current average pace: ${baseline.avgPace} per km\n")
+                            }
+                            append("• Goal: ${details.plan.goalType.replace("_", " ").replaceFirstChar { it.uppercase() }} (${details.plan.targetDistance}km)\n")
+                            append("• Plan: ${details.plan.daysPerWeek}x per week over ${details.plan.totalWeeks} weeks")
+                        },
+                        style = AppTextStyles.small,
+                        color = Colors.textSecondary,
+                        lineHeight = 18.sp
+                    )
+                }
+            } else {
+                // Fallback if no baseline data
+                Text(
+                    "Based on your profile:\n" +
+                    "• ${details.plan.experienceLevel.replaceFirstChar { it.uppercase() }} runner\n" +
+                    "• ${details.plan.daysPerWeek}x per week commitment\n" +
+                    "• ${details.plan.totalWeeks}-week programme",
+                    style = AppTextStyles.small,
+                    color = Colors.textSecondary,
+                    lineHeight = 18.sp
+                )
+            }
             
             Spacer(modifier = Modifier.height(Spacing.md))
             

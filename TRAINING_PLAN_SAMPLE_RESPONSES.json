@@ -1,0 +1,173 @@
+{
+  "generatePlanResponse": {
+    "planId": "plan_12345678-abcd-4321-efgh-1234567890ab",
+    "message": "Training plan generated successfully"
+  },
+  "trainingPlanSummaryListResponse": [
+    {
+      "id": "plan_12345678-abcd-4321-efgh-1234567890ab",
+      "goalType": "10k",
+      "targetDistance": 10,
+      "targetTime": 3000,
+      "targetDate": "2026-06-14T09:00:00.000Z",
+      "currentWeek": 1,
+      "totalWeeks": 12,
+      "experienceLevel": "intermediate",
+      "daysPerWeek": 4,
+      "status": "active",
+      "aiGenerated": true,
+      "createdAt": "2026-03-16T14:05:00.000Z",
+      "weeklyMileageBase": 24.5,
+      "completedWorkouts": 1,
+      "totalWorkouts": 48
+    }
+  ],
+  "trainingPlanDetailsResponse": {
+    "plan": {
+      "id": "plan_12345678-abcd-4321-efgh-1234567890ab",
+      "goalType": "10k",
+      "targetDistance": 10,
+      "targetTime": 3000,
+      "targetDate": "2026-06-14T09:00:00.000Z",
+      "currentWeek": 1,
+      "totalWeeks": 12,
+      "experienceLevel": "intermediate",
+      "daysPerWeek": 4,
+      "status": "active",
+      "aiGenerated": true,
+      "createdAt": "2026-03-16T14:05:00.000Z",
+      "weeklyMileageBase": 24.5,
+      "completedWorkouts": 1,
+      "totalWorkouts": 48
+    },
+    "weeks": [
+      {
+        "id": "week_1_abc123",
+        "weekNumber": 1,
+        "weekDescription": "Build consistency and establish aerobic rhythm.",
+        "totalDistance": 22,
+        "focusArea": "endurance",
+        "intensityLevel": "easy",
+        "workouts": [
+          {
+            "id": "workout_mon_easy_001",
+            "dayOfWeek": 1,
+            "scheduledDate": "2026-03-17T07:00:00.000Z",
+            "workoutType": "easy",
+            "distance": 5,
+            "duration": 1800,
+            "targetPace": "6:00/km",
+            "intensity": "z2",
+            "description": "Easy aerobic run to build your base.",
+            "instructions": "Keep effort conversational. Relax shoulders and run smoothly.",
+            "isCompleted": false,
+            "completedRunId": null
+          },
+          {
+            "id": "workout_wed_tempo_002",
+            "dayOfWeek": 3,
+            "scheduledDate": "2026-03-19T07:00:00.000Z",
+            "workoutType": "tempo",
+            "distance": 6,
+            "duration": 2100,
+            "targetPace": "5:15/km",
+            "intensity": "z3",
+            "description": "Steady tempo run to improve threshold pace.",
+            "instructions": "Start easy for 10 minutes, settle into tempo, then cool down.",
+            "isCompleted": false,
+            "completedRunId": null
+          },
+          {
+            "id": "workout_sat_long_003",
+            "dayOfWeek": 6,
+            "scheduledDate": "2026-03-22T08:00:00.000Z",
+            "workoutType": "long_run",
+            "distance": 11,
+            "duration": 4200,
+            "targetPace": "6:20/km",
+            "intensity": "z2",
+            "description": "Long run to build endurance and resilience.",
+            "instructions": "Stay comfortable throughout. Fuel and hydrate if needed.",
+            "isCompleted": false,
+            "completedRunId": null
+          }
+        ]
+      },
+      {
+        "id": "week_2_def456",
+        "weekNumber": 2,
+        "weekDescription": "Introduce a little more quality while keeping recovery strong.",
+        "totalDistance": 25,
+        "focusArea": "speed",
+        "intensityLevel": "moderate",
+        "workouts": [
+          {
+            "id": "workout_tue_intervals_004",
+            "dayOfWeek": 2,
+            "scheduledDate": "2026-03-24T07:00:00.000Z",
+            "workoutType": "intervals",
+            "distance": 7,
+            "duration": 2400,
+            "targetPace": "4:50/km",
+            "intensity": "z4",
+            "description": "Interval session to improve speed and economy.",
+            "instructions": "Warm up well. Run controlled reps and recover fully between efforts.",
+            "isCompleted": false,
+            "completedRunId": null
+          }
+        ]
+      }
+    ]
+  },
+  "todayWorkoutResponse": {
+    "workout": {
+      "id": "workout_mon_easy_001",
+      "dayOfWeek": 1,
+      "scheduledDate": "2026-03-17T07:00:00.000Z",
+      "workoutType": "easy",
+      "distance": 5,
+      "duration": 1800,
+      "targetPace": "6:00/km",
+      "intensity": "z2",
+      "description": "Easy aerobic run to build your base.",
+      "instructions": "Keep effort conversational. Relax shoulders and run smoothly.",
+      "isCompleted": false,
+      "completedRunId": null
+    },
+    "isToday": true
+  },
+  "trainingPlanProgressResponse": {
+    "planId": "plan_12345678-abcd-4321-efgh-1234567890ab",
+    "currentWeek": 1,
+    "totalWeeks": 12,
+    "goalType": "10k",
+    "targetDistance": 10,
+    "targetTime": 3000,
+    "status": "active",
+    "completedWorkouts": 1,
+    "totalWorkouts": 48,
+    "overallCompletion": 2.1,
+    "weeks": [
+      {
+        "weekNumber": 1,
+        "weekDescription": "Build consistency and establish aerobic rhythm.",
+        "totalDistance": 22,
+        "focusArea": "endurance",
+        "intensityLevel": "easy",
+        "totalWorkouts": 3,
+        "completedWorkouts": 1,
+        "completionRate": 33.3
+      },
+      {
+        "weekNumber": 2,
+        "weekDescription": "Introduce a little more quality while keeping recovery strong.",
+        "totalDistance": 25,
+        "focusArea": "speed",
+        "intensityLevel": "moderate",
+        "totalWorkouts": 4,
+        "completedWorkouts": 0,
+        "completionRate": 0
+      }
+    ]
+  }
+}

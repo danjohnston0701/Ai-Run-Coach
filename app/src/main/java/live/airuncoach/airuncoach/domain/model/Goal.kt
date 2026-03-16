@@ -33,6 +33,9 @@ data class Goal(
     // Related run sessions (multiple runs can be linked to a goal)
     val relatedRunSessionIds: List<String> = emptyList(),
     
+    // Related training plan (if a plan was generated for this goal)
+    val linkedTrainingPlanId: String? = null,
+    
     // Badge awarded when goal is completed
     val badge: String? = null,
     

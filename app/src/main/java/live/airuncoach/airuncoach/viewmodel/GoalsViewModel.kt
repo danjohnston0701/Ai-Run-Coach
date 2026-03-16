@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.Goal
+import live.airuncoach.airuncoach.domain.model.RunSession
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.network.model.CreateGoalRequest
@@ -54,6 +55,10 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
     val createGoalState: StateFlow<CreateGoalState> = _createGoalState.asStateFlow()
 
     private val _user = MutableStateFlow<User?>(null)
+    private val _linkedRunSession = MutableStateFlow<RunSession?>(null)
+    val linkedRunSession: StateFlow<RunSession?> = _linkedRunSession.asStateFlow()
+    private val _isLoadingLinkedRun = MutableStateFlow(false)
+    val isLoadingLinkedRun: StateFlow<Boolean> = _isLoadingLinkedRun.asStateFlow()
 
     init {
         loadUser()
@@ -120,6 +125,31 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
                 android.util.Log.e("GoalsViewModel", "❌ Failed to load goals: ${e.javaClass.simpleName} - ${e.message}", e)
             }
         }
+    }
+
+    fun loadLinkedRunSession(runId: String?) {
+        if (runId.isNullOrBlank()) {
+            _linkedRunSession.value = null
+            _isLoadingLinkedRun.value = false
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                _isLoadingLinkedRun.value = true
+                _linkedRunSession.value = apiService.getRunById(runId)
+            } catch (e: Exception) {
+                android.util.Log.e("GoalsViewModel", "Failed to load linked run $runId: ${e.message}", e)
+                _linkedRunSession.value = null
+            } finally {
+                _isLoadingLinkedRun.value = false
+            }
+        }
+    }
+
+    fun clearLinkedRunSession() {
+        _linkedRunSession.value = null
+        _isLoadingLinkedRun.value = false
     }
 
     fun selectTab(index: Int) {
