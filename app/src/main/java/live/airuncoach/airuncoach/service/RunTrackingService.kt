@@ -2155,6 +2155,8 @@ class RunTrackingService : Service(), SensorEventListener {
             movingTime = runSession.movingTime,
             elapsedTime = runSession.elapsedTime,
             avgStrideLength = runSession.avgStrideLength,
+            // Weather at start — persisted for weather impact analysis
+            weatherData = runSession.weatherAtStart,
             // Training plan coaching context — persisted so post-run AI analysis is plan-aware
             linkedWorkoutId = runSession.linkedWorkoutId,
             linkedPlanId = runSession.linkedPlanId,

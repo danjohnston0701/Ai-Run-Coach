@@ -4,6 +4,8 @@ import live.airuncoach.airuncoach.domain.model.AiCoachingNote
 import live.airuncoach.airuncoach.domain.model.KmSplit
 import live.airuncoach.airuncoach.domain.model.LocationPoint
 import live.airuncoach.airuncoach.domain.model.StrugglePoint
+import live.airuncoach.airuncoach.domain.model.WeatherData
+import com.google.gson.annotations.SerializedName
 
 data class UploadRunRequest(
     val routeId: String?,
@@ -48,6 +50,9 @@ data class UploadRunRequest(
     val movingTime: Long? = null,
     val elapsedTime: Long? = null,
     val avgStrideLength: Float? = null,
+    // Weather conditions at start of run (for weather impact analysis)
+    @SerializedName("weatherData")
+    val weatherData: WeatherData? = null,
     // Training plan coaching context (if this run is part of a coached programme)
     val linkedWorkoutId: String? = null,
     val linkedPlanId: String? = null,
