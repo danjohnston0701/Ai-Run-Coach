@@ -859,9 +859,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const runId = req.params.id;
       const userId = req.user!.userId;
+      console.log(`[comprehensive-analysis] Starting analysis for run ${runId}, user ${userId}`);
       
       // Check for existing analysis first — return cached if available
       const existingAnalysis = await storage.getRunAnalysis(runId);
+      console.log(`[comprehensive-analysis] Checked cache, found: ${!!existingAnalysis?.analysis}`);
       if (existingAnalysis?.analysis) {
         // Unwrap the analysis — handle both direct and nested formats
         let cachedAnalysis = existingAnalysis.analysis as any;
@@ -927,7 +929,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
       // Import and call the comprehensive analysis function
+      console.log(`[comprehensive-analysis] About to call generateComprehensiveRunAnalysis for run ${runId}`);
       const aiService = await import("./ai-service");
+      const analysisStartTime = Date.now();
       const analysis = await aiService.generateComprehensiveRunAnalysis({
         runData: run,
         garminActivity: garminActivity ? {
@@ -984,6 +988,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         coachTone,
         coachAccent: user?.coachAccent || undefined,
       });
+      const analysisEndTime = Date.now();
+      console.log(`[comprehensive-analysis] AI analysis generated in ${analysisEndTime - analysisStartTime}ms for run ${runId}`);
       
       // Store the analysis (save the analysis object directly, not wrapped)
       await storage.upsertRunAnalysis(runId, analysis);
@@ -999,6 +1005,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         aiCoachingNotes: analysis as any,
       } as any);
       
+      console.log(`[comprehensive-analysis] Successfully returning analysis for run ${runId}`);
       res.json({
         success: true,
         analysis,
