@@ -430,6 +430,23 @@ If runner has NO previous runs:
 
     const planData = JSON.parse(response.choices[0].message.content || "{}");
 
+    // Validate and coerce plan data to ensure numeric fields are actually numbers
+    if (!planData.weeks || !Array.isArray(planData.weeks)) {
+      throw new Error("Invalid plan data: missing or invalid weeks array");
+    }
+
+    // Coerce weeks data to correct types
+    planData.weeks = planData.weeks.map((week: any) => ({
+      ...week,
+      weekNumber: parseInt(String(week.weekNumber), 10) || 1,
+      totalDistance: parseFloat(String(week.totalDistance).replace(/[^\d.]/g, '')) || 0,
+      workouts: Array.isArray(week.workouts) ? week.workouts.map((wo: any) => ({
+        ...wo,
+        dayOfWeek: parseInt(String(wo.dayOfWeek), 10) || 1,
+        distance: parseFloat(String(wo.distance).replace(/[^\d.]/g, '')) || 0,
+      })) : []
+    }));
+
     // Create training plan in database
     const plan = await db
       .insert(trainingPlans)
