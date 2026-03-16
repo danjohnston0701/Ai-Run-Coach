@@ -9091,7 +9091,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .where(
           and(
             eq(runs.userId, userId),
-            eq(runs.isCompleted, true),
             gte(runs.completedAt, thirtyDaysAgo)
           )
         )
@@ -9106,7 +9105,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message: "You don't have any run history yet. Let's get started and see what you've got!"
         };
       } else {
-        const totalDistance = recentRuns.reduce((sum, r) => sum + ((r.distanceInMeters || 0) / 1000), 0);
+        // runs.distance is in km directly
+        const totalDistance = recentRuns.reduce((sum, r) => sum + (Number(r.distance) || 0), 0);
         const avgDistance = totalDistance / recentRuns.length;
         const runsPerWeek = recentRuns.length / Math.ceil(
           (new Date().getTime() - new Date(recentRuns[recentRuns.length - 1].completedAt || Date.now()).getTime()) / (7 * 24 * 60 * 60 * 1000)

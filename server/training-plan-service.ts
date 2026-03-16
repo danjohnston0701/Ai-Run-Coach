@@ -195,9 +195,10 @@ export async function generateTrainingPlan(
 
     // Calculate plan duration
     // Priority: durationWeeks (user-selected) > targetDate > default based on goal/experience
-    const weeksUntilTarget = durationWeeks || (targetDate ? 
+    const weeksUntilTarget = (durationWeeks && durationWeeks > 0) ? durationWeeks : (targetDate ? 
       Math.ceil((targetDate.getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000)) : 
       getPlanDuration(goalType, experienceLevel));
+    console.log(`[Training Plan] Duration: durationWeeks=${durationWeeks}, weeksUntilTarget=${weeksUntilTarget}`);
 
     // Calculate user age for HR zone calculations
     const userAge = user[0]?.dob ? Math.floor((Date.now() - new Date(user[0].dob).getTime()) / 31557600000) : 30;
@@ -397,7 +398,12 @@ Return JSON with this exact structure:
   ]
 }
 
-Include all ${weeksUntilTarget} weeks with ${daysPerWeek} workouts per week.
+CRITICAL REQUIREMENTS:
+- You MUST generate EXACTLY ${weeksUntilTarget} weeks. No more, no less.
+- Each week MUST have EXACTLY ${daysPerWeek} workouts.
+- The "totalWeeks" field in your JSON MUST be ${weeksUntilTarget}.
+- Do not add extra weeks, do not skip weeks, do not summarize weeks.
+- Every single week from 1 to ${weeksUntilTarget} must be fully listed.
 
 COACHING PROGRAMME SUMMARY REQUIREMENTS:
 - aiDeterminedFitnessLevel: Your assessment of the runner's ACTUAL fitness level based on the data provided (may differ from their stated level)
@@ -470,6 +476,8 @@ If runner has NO previous runs:
       throw new Error("Invalid plan data: missing or invalid weeks array");
     }
 
+    console.log(`[Training Plan] AI returned ${planData.weeks.length} weeks, expected ${weeksUntilTarget}`);
+
     // Coerce weeks data to correct types
     planData.weeks = planData.weeks.map((week: any) => ({
       ...week,
@@ -481,6 +489,24 @@ If runner has NO previous runs:
         distance: parseFloat(String(wo.distance).replace(/[^\d.]/g, '')) || 0,
       })) : []
     }));
+
+    // Enforce exact week count — AI sometimes returns wrong number of weeks
+    if (planData.weeks.length < weeksUntilTarget) {
+      console.warn(`[Training Plan] AI returned fewer weeks (${planData.weeks.length}) than requested (${weeksUntilTarget}). Filling missing weeks.`);
+      const lastWeek = planData.weeks[planData.weeks.length - 1];
+      while (planData.weeks.length < weeksUntilTarget) {
+        const newWeekNum = planData.weeks.length + 1;
+        planData.weeks.push({
+          ...lastWeek,
+          weekNumber: newWeekNum,
+          weekDescription: `Week ${newWeekNum} — Continue building fitness`,
+          workouts: (lastWeek?.workouts || []).map((w: any) => ({ ...w }))
+        });
+      }
+    } else if (planData.weeks.length > weeksUntilTarget) {
+      console.warn(`[Training Plan] AI returned more weeks (${planData.weeks.length}) than requested (${weeksUntilTarget}). Trimming.`);
+      planData.weeks = planData.weeks.slice(0, weeksUntilTarget);
+    }
 
     // Create training plan in database
     const plan = await db
@@ -614,14 +640,28 @@ If runner has NO previous runs:
  */
 function getPlanDuration(goalType: string, experienceLevel: string): number {
   const durations: Record<string, Record<string, number>> = {
-    "5k": { beginner: 8, intermediate: 6, advanced: 4 },
-    "10k": { beginner: 10, intermediate: 8, advanced: 6 },
+    "5k": { beginner: 8, intermediate: 8, advanced: 6 },
+    "10k": { beginner: 10, intermediate: 8, advanced: 8 },
     "half_marathon": { beginner: 14, intermediate: 12, advanced: 10 },
     "marathon": { beginner: 20, intermediate: 18, advanced: 16 },
     "ultra": { beginner: 24, intermediate: 20, advanced: 18 },
   };
 
-  return durations[goalType]?.[experienceLevel] || 12;
+  // Normalize fitness level to beginner/intermediate/advanced
+  // The app sends values like "Regular", "Casual", "Committed", etc.
+  const level = experienceLevel.toLowerCase();
+  let normalizedLevel: string;
+  if (['newcomer', 'beginner', 'casual'].includes(level)) {
+    normalizedLevel = 'beginner';
+  } else if (['regular', 'committed', 'intermediate'].includes(level)) {
+    normalizedLevel = 'intermediate';
+  } else if (['competitive', 'advanced', 'elite', 'professional'].includes(level)) {
+    normalizedLevel = 'advanced';
+  } else {
+    normalizedLevel = 'intermediate'; // safe default
+  }
+
+  return durations[goalType]?.[normalizedLevel] ?? 8;
 }
 
 /**
