@@ -4,7 +4,7 @@ import com.google.gson.annotations.SerializedName
 
 data class PreRunBriefingRequest(
     @SerializedName("startLocation") val startLocation: StartLocation,
-    @SerializedName("distance") val distance: Double,
+    @SerializedName("distance") val distance: Double?,
     @SerializedName("elevationGain") val elevationGain: Int,
     @SerializedName("elevationLoss") val elevationLoss: Int,
     @SerializedName("maxGradientDegrees") val maxGradientDegrees: Double,

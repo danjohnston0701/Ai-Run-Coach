@@ -199,7 +199,7 @@ class RunSessionViewModel @Inject constructor(
                     val route = runConfig?.route
                     // Explicitly determine hasRoute - must be false if no route
                     val hasRoute = route != null && route.distance > 0
-                    val distance = route?.distance ?: runConfig?.targetDistance?.toDouble() ?: 5.0
+                    val distance = route?.distance ?: runConfig?.targetDistance?.toDouble()
                     val elevationGain = route?.elevationGain?.toInt() ?: 0
                     val elevationLoss = route?.elevationLoss?.toInt() ?: 0
                     val maxGradientDegrees = route?.maxGradientDegrees ?: 0.0
@@ -226,14 +226,14 @@ class RunSessionViewModel @Inject constructor(
                     val targetTimeSeconds = if (runConfig?.hasTargetTime == true) {
                         runConfig?.getTotalTargetSeconds()
                     } else null
-                    val targetPace = if (targetTimeSeconds != null && distance > 0) {
+                    val targetPace = if (targetTimeSeconds != null && distance != null && distance > 0) {
                         val paceSeconds = (targetTimeSeconds / distance).toInt()
                         val minutes = paceSeconds / 60
                         val seconds = paceSeconds % 60
                         String.format(Locale.getDefault(), "%d:%02d", minutes, seconds)
                     } else null
                     
-                    Log.d("RunSessionViewModel", "Preparing briefing: distance=$distance km, elevation=$elevationGain m, maxGradient=$maxGradientDegrees°")
+                    Log.d("RunSessionViewModel", "Preparing briefing: distance=${distance ?: "not set"} km, elevation=$elevationGain m, maxGradient=$maxGradientDegrees°")
                     
                     val weather = weatherRepository.getCurrentWeather()
                     val weatherPayload = weather?.let {

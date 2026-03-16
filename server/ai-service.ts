@@ -2104,14 +2104,14 @@ ${readinessGuidance}` : `NO WELLNESS DATA AVAILABLE — The runner does not have
 
 Based on this data, provide:
 1. "briefing": A personalized pre-run briefing (4-5 sentences). You MUST include these specific details:
-   - The planned distance: "${formatDistanceForTTS(distance)}"
+   ${distance ? `- The planned distance: "${formatDistanceForTTS(distance)}"` : '- No distance target set for this run. Focus on effort and duration instead.'}
    ${weather && weather.temp !== undefined ? `- The weather: "${weather.temp || weather.temperature}°C and ${weather.condition || 'clear'}"` : '- Weather data is not available, do not mention weather'}
    ${targetPace ? `- Their target pace: "${formatPaceForTTS(targetPace)}"` : '- No target pace set, suggest they run at a comfortable effort'}
    ${targetTime ? `- Their target time: "${formatDurationForTTS(targetTime || 0)}"` : ''}
    ${wellnessContext ? '- Their wellness/recovery state from the Garmin data above' : '- Do NOT mention wellness, readiness, recovery, fatigue, or body data — none is available'}
    ${weatherAdvantage ? '- The weather advantage noted above' : ''}
    ${coachingPlanContext ? '- How this workout fits into their larger training progression' : ''}
-   Include the actual numbers - do NOT give a vague or generic briefing. ${PACE_FORMAT_RULE}
+   Include the actual numbers where available - do NOT give a vague or generic briefing. ${PACE_FORMAT_RULE}
 2. "intensityAdvice": Specific intensity advice. ${workoutIntensity ? `This is a ${workoutIntensity} zone session (${workoutDescription || 'see details above'}). ` : ''}${targetPace ? `They are targeting ${formatPaceForTTS(targetPace)}${wellnessContext ? ' - say whether to stick to it, go easier, or push harder based on their wellness.' : ' - give pacing advice based on the distance and conditions, without referencing wellness data.'}` : `${wellnessContext ? 'Suggest an appropriate effort level based on their wellness.' : 'Suggest an appropriate effort level based on the distance, weather, and conditions.'}`}${coachingPlanContext ? ' Remember this is week ' + planWeekNumber + ' of a ' + planTotalWeeks + '-week ' + planGoalType + ' plan.' : ''}
 3. "warnings": Array of any warnings ${wellnessContext ? 'if their wellness indicators suggest caution' : 'based on weather or route conditions'}. Empty array if none.
 ${hasRoute === true ? `4. "routeInsight": A brief commentary (2-3 sentences) describing what to expect from the route terrain. Use the ROUTE data above — mention whether it's flat, rolling, hilly, has steep sections, etc. Give practical advice like "pace yourself on the climbs" or "use the downhills to recover" or "great flat route to maintain consistent splits". Be specific about the elevation numbers. Do NOT repeat the distance or weather — just focus on the terrain and what to expect from the route.` : `4. "readinessInsight": ${wellnessContext ? 'How their body data affects today\'s run.' : 'A brief motivational note about the run ahead (do NOT mention wellness, readiness, fatigue, or body data since none is available).'}`}
