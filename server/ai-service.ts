@@ -2424,8 +2424,16 @@ export async function generateComprehensiveRunAnalysis(params: {
   coachName: string;
   coachTone: string;
   coachAccent?: string;
+  // Training plan context (if this run is part of a coached plan)
+  linkedPlanId?: string;
+  planGoalType?: string;
+  planProgressWeek?: number;
+  planProgressWeeks?: number;
+  workoutType?: string;
+  workoutIntensity?: string;
+  workoutDescription?: string;
 }): Promise<ComprehensiveRunAnalysis> {
-  const { runData, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent } = params;
+  const { runData, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent, linkedPlanId, planGoalType, planProgressWeek, planProgressWeeks, workoutType, workoutIntensity, workoutDescription } = params;
   
   // Build comprehensive prompt with all available data
   let prompt = `You are ${coachName}, an expert AI running coach with a ${coachTone} style. 
@@ -2467,6 +2475,23 @@ Analyze this run comprehensively using all available data from the runner's Garm
     }
     prompt += `Tailor your analysis depth, pacing expectations, and recommendations to this runner's fitness level. `;
     prompt += `For example, a "Newcomer" needs simple encouragement and basic form tips, while a "Competitive" or "Elite" runner expects detailed training load analysis and race-specific insights.\n`;
+  }
+
+  // Add training plan context if available
+  if (linkedPlanId && workoutType) {
+    prompt += `
+## TRAINING PLAN CONTEXT:
+- Plan Goal: ${planGoalType || 'N/A'}
+- Week ${planProgressWeek}/${planProgressWeeks} of the training plan
+- Workout Type: ${workoutType} (${workoutDescription || 'see intensity below'})
+- Heart Rate Zone Target: ${workoutIntensity || 'not specified'}
+
+**CRITICAL**: This run is part of a structured ${planProgressWeeks}-week ${planGoalType} training plan. 
+- Tailor your feedback to whether this run achieved its specific goal (e.g., "Zone 2 aerobic building" or "tempo pace maintenance").
+- Reference the week number and progression ("Week ${planProgressWeek} of ${planProgressWeeks}").
+- If it's an easy week, praise consistency and recovery focus. If it's a build week, emphasize progression.
+- Highlight how this specific run contributed to the overall plan progression.
+`;
   }
 
   // Add Garmin activity metrics if available

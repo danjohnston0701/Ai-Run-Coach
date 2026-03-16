@@ -987,6 +987,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         coachName,
         coachTone,
         coachAccent: user?.coachAccent || undefined,
+        // Training plan context for personalized coaching
+        linkedPlanId: run.linkedPlanId || undefined,
+        planGoalType: run.planGoalType || undefined,
+        planProgressWeek: run.planProgressWeek || undefined,
+        planProgressWeeks: run.planProgressWeeks || undefined,
+        workoutType: run.workoutType || undefined,
+        workoutIntensity: run.workoutIntensity || undefined,
+        workoutDescription: run.workoutDescription || undefined,
       });
       const analysisEndTime = Date.now();
       console.log(`[comprehensive-analysis] AI analysis generated in ${analysisEndTime - analysisStartTime}ms for run ${runId}`);

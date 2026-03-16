@@ -187,6 +187,16 @@ export const runs = pgTable("runs", {
   activeCalories: integer("active_calories"), // kcal
   restingCalories: integer("resting_calories"), // kcal
   estSweatLoss: real("est_sweat_loss"), // liters
+  
+  // Training plan context (if this run is part of a coached plan)
+  linkedWorkoutId: varchar("linked_workout_id"), // ID of the planned workout this run executes
+  linkedPlanId: varchar("linked_plan_id"), // ID of the training plan this run belongs to
+  planProgressWeek: integer("plan_progress_week"), // Which week of the plan (1-12)
+  planProgressWeeks: integer("plan_progress_weeks"), // Total weeks in the plan
+  workoutType: varchar("workout_type"), // "easy", "tempo", "intervals", "long_run", etc.
+  workoutIntensity: varchar("workout_intensity"), // "z1", "z2", "z3", "z4", "z5"
+  workoutDescription: text("workout_description"), // Human-readable workout description
+  
   createdAt: timestamp("created_at").defaultNow(), // When record was created in database
   updatedAt: timestamp("updated_at").defaultNow(), // When record was last updated
 });
