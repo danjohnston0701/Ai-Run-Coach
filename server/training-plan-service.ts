@@ -437,7 +437,7 @@ If runner has NO previous runs:
 - focusAreas: should include "establish baseline", "build aerobic foundation", "injury prevention"`;
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4-turbo-preview",
+      model: "gpt-4o",
       messages: [
         {
           role: "system",
@@ -735,7 +735,7 @@ Recommend adaptations in JSON format:
 }`;
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4-turbo-preview",
+      model: "gpt-4o",
       messages: [
         {
           role: "system",
@@ -908,7 +908,7 @@ Provide your assessment in JSON format:
 }`;
 
         const response = await openai.chat.completions.create({
-          model: "gpt-4-turbo-preview",
+          model: "gpt-4o",
           messages: [
             {
               role: "system",

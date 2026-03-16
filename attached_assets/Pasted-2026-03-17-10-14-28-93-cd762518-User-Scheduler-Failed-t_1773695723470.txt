@@ -1,0 +1,120 @@
+2026-03-17 10:14:28.93
+cd762518
+User
+[Scheduler] Failed to sync Garmin for user 42968066-d4a9-4f28-a3ad-58a91e97a1e6: column "activity_type" does not exist
+2026-03-17 10:14:29.00
+cd762518
+User
+[Scheduler] Failed to sync Garmin for user 8d898742-dd4e-4b3b-b612-6f34e11778a8: column "activity_type" does not exist
+2026-03-17 10:14:29.00
+cd762518
+User
+[Scheduler] Garmin sync completed: 0 successful, 2 failed
+2026-03-17 10:14:29.03
+cd762518
+User
+[GET /api/goals/:userId] Found 2 goals for user 8d898742-dd4e-4b3b-b612-6f34e11778a8
+2026-03-17 10:14:29.03
+cd762518
+User
+[GET /api/goals/:userId] Returning 2 formatted goals
+2026-03-17 10:14:29.03
+cd762518
+User
+GET /api/goals/8d898742-dd4e-4b3b-b612-6f34e11778a8 200 in 240ms :: [{"id":"7e2…
+2026-03-17 10:14:53.84
+cd762518
+User
+[Training Plan] Duration: durationWeeks=8, weeksUntilTarget=8
+2026-03-17 10:14:54.38
+cd762518
+User
+'openai-organization': 'user-rxappsdp8askv5l7bkwwwqu4',
+2026-03-17 10:14:54.38
+cd762518
+User
+'cf-cache-status': 'DYNAMIC',
+2026-03-17 10:14:54.38
+cd762518
+User
+at async generateTrainingPlan (file:///home/runner/workspace/server_dist/index.js:9275:22)
+2026-03-17 10:14:54.38
+cd762518
+User
+'x-content-type-options': 'nosniff',
+2026-03-17 10:14:54.38
+cd762518
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2026-03-17 10:14:54.38
+cd762518
+User
+date: 'Mon, 16 Mar 2026 21:14:54 GMT',
+2026-03-17 10:14:54.38
+cd762518
+User
+at OpenAI.makeStatusError (file:///home/runner/workspace/node_modules/openai/client.mjs:164:32)
+2026-03-17 10:14:54.38
+cd762518
+User
+at APIError.generate (file:///home/runner/workspace/node_modules/openai/core/error.mjs:41:20)
+2026-03-17 10:14:54.38
+cd762518
+User
+'content-length': '242',
+2026-03-17 10:14:54.38
+cd762518
+User
+'access-control-expose-headers': 'X-Request-ID',
+2026-03-17 10:14:54.38
+cd762518
+User
+'content-type': 'application/json',
+2026-03-17 10:14:54.38
+cd762518
+User
+'strict-transport-security': 'max-age=31536000; includeSubDomains; preload',
+2026-03-17 10:14:54.38
+cd762518
+User
+server: 'cloudflare',
+2026-03-17 10:14:54.38
+cd762518
+User
+at async file:///home/runner/workspace/server_dist/index.js:17990:22 {
+2026-03-17 10:14:54.38
+cd762518
+User
+status: 400,
+2026-03-17 10:14:54.38
+cd762518
+User
+connection: 'keep-alive',
+2026-03-17 10:14:54.38
+cd762518
+User
+headers: Headers {
+2026-03-17 10:14:54.38
+cd762518
+User
+'cf-ray': '9dd6c526df0de100-ORD',
+2026-03-17 10:14:54.38
+cd762518
+User
+at OpenAI.makeRequest (file:///home/runner/workspace/node_modules/openai/client.mjs:332:30)
+2026-03-17 10:14:54.38
+cd762518
+User
+at OpenAI.makeRequest (file:///home/runner/workspace/node_modules/openai/client.mjs:332:30)
+2026-03-17 10:14:54.38
+cd762518
+User
+'cf-ray': '9dd6c526df0de100-ORD',
+2026-03-17 10:14:54.38
+cd762518
+User
+headers: Headers {
+2026-03-17 10:14:54.38
+cd762518
+User
+connection: 'keep-alive',
