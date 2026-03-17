@@ -352,15 +352,27 @@ fun RunSummaryScreenFlagship(
                     )
                 }
                 
-                // Garmin enrichment loading modal
-                val isEnrichingWithGarmin = viewModel.isEnrichingWithGarmin.collectAsState().value
-                val garminEnrichmentError = viewModel.garminEnrichmentError.collectAsState().value
-                val garminNeedsReconnect = viewModel.garminNeedsReconnect.collectAsState().value
-                
+                // Garmin enrichment modals
+                val isEnrichingWithGarmin       = viewModel.isEnrichingWithGarmin.collectAsState().value
+                val isWaitingForGarminSync      = viewModel.isWaitingForGarminSync.collectAsState().value
+                val showGarminSyncPendingDialog = viewModel.showGarminSyncPendingDialog.collectAsState().value
+                val garminEnrichmentError       = viewModel.garminEnrichmentError.collectAsState().value
+                val garminNeedsReconnect        = viewModel.garminNeedsReconnect.collectAsState().value
+
                 if (isEnrichingWithGarmin) {
                     GarminEnrichmentLoadingModal()
                 }
-                
+
+                if (isWaitingForGarminSync) {
+                    GarminWaitingForSyncModal()
+                }
+
+                if (showGarminSyncPendingDialog) {
+                    GarminSyncPendingDialog(
+                        onDismiss = { viewModel.dismissGarminSyncPendingDialog() }
+                    )
+                }
+
                 if (garminEnrichmentError != null) {
                     GarminEnrichmentErrorDialog(
                         errorMessage = garminEnrichmentError,
@@ -517,8 +529,10 @@ private fun AiInsightsTabContent(
         // Garmin enrich CTA — prominent banner when Garmin is connected but run not yet enriched
         if (isGarminConnected && run.hasGarminData != true) {
             item {
+                val isWaitingForSync = viewModel.isWaitingForGarminSync.collectAsState().value
                 GarminEnrichCTACard(
                     isEnriching = isEnrichingWithGarmin,
+                    isWaitingForSync = isWaitingForSync,
                     onEnrich = onEnrichWithGarmin
                 )
             }
@@ -5932,8 +5946,14 @@ private fun ErrorViewFlagship(
 @Composable
 private fun GarminEnrichCTACard(
     isEnriching: Boolean,
+    isWaitingForSync: Boolean = false,
     onEnrich: () -> Unit
 ) {
+    val subtitle = when {
+        isWaitingForSync -> "Waiting for your Garmin to sync… (up to 30s)"
+        else -> "Enrich this run with HR, HRV, sleep & recovery data"
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -5962,13 +5982,15 @@ private fun GarminEnrichCTACard(
                     )
                 )
                 Text(
-                    text = "Enrich this run with HR, HRV, sleep & recovery data",
-                    style = AppTextStyles.caption.copy(color = Color(0xFF8E9BAE))
+                    text = subtitle,
+                    style = AppTextStyles.caption.copy(
+                        color = if (isWaitingForSync) Color(0xFF4FC3F7) else Color(0xFF8E9BAE)
+                    )
                 )
             }
             Button(
                 onClick = onEnrich,
-                enabled = !isEnriching,
+                enabled = !isEnriching && !isWaitingForSync,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFF1679C2),
                     disabledContainerColor = Color(0xFF1679C2).copy(alpha = 0.5f)
@@ -5976,7 +5998,7 @@ private fun GarminEnrichCTACard(
                 shape = RoundedCornerShape(10.dp),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
             ) {
-                if (isEnriching) {
+                if (isEnriching || isWaitingForSync) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(16.dp),
                         strokeWidth = 2.dp,
@@ -5994,6 +6016,64 @@ private fun GarminEnrichCTACard(
             }
         }
     }
+}
+
+@Composable
+private fun GarminWaitingForSyncModal() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.55f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1B2A)),
+            modifier = Modifier.padding(horizontal = 32.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(Spacing.xl),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(Spacing.md)
+            ) {
+                CircularProgressIndicator(color = Color(0xFF1679C2))
+                Text(
+                    text = "Waiting for Garmin sync…",
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                )
+                Text(
+                    text = "Checking every 5 seconds for up to 30 seconds",
+                    style = AppTextStyles.caption.copy(color = Color(0xFF8E9BAE)),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GarminSyncPendingDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF0D1B2A),
+        title = {
+            Text(
+                text = "Garmin sync pending",
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold, color = Color.White)
+            )
+        },
+        text = {
+            Text(
+                text = "It doesn't look like Garmin has sent us the data for this run yet.\n\nOnce we receive the data from this session we'll send you a notification that your run has been enriched with Garmin data — including your heart rate, HRV, cadence, elevation, and recovery metrics.",
+                style = AppTextStyles.body.copy(color = Color(0xFF8E9BAE))
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Got it", color = Color(0xFF1679C2))
+            }
+        }
+    )
 }
 
 @Composable

@@ -34,6 +34,9 @@ interface ApiService {
     @GET("/api/users/me")
     suspend fun getCurrentUser(): User
 
+    @POST("/api/users/me/fcm-token")
+    suspend fun saveFcmToken(@Body body: Map<String, String>): retrofit2.Response<Unit>
+
     @PUT("/api/users/{id}")
     suspend fun updateUser(@Path("id") userId: String, @Body request: UpdateUserRequest): User
 
@@ -179,6 +182,10 @@ interface ApiService {
 
     @POST("/api/runs/{runId}/enrich-with-garmin-data")
     suspend fun enrichRunWithGarminData(@Path("runId") runId: String): RunSession
+
+    /** Raw version — returns the full HTTP response so callers can inspect 202 Pending. */
+    @POST("/api/runs/{runId}/enrich-with-garmin-data")
+    suspend fun enrichRunWithGarminDataRaw(@Path("runId") runId: String): retrofit2.Response<RunSession>
 
     @POST("/api/runs/{id}/ai-insights")
     suspend fun getBasicRunInsights(

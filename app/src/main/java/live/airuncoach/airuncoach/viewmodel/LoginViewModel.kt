@@ -147,6 +147,9 @@ class LoginViewModel @Inject constructor(
                 
                 _loginState.update { it.copy(isLoading = false, error = null, isLoginSuccessful = true) }
                 android.util.Log.d("LoginViewModel", "🎉 Login state updated to successful!")
+
+                // Upload FCM token now that we're authenticated
+                uploadFcmToken()
             } catch (e: retrofit2.HttpException) {
                 val errorBody = e.response()?.errorBody()?.string()
                 android.util.Log.e("LoginViewModel", "❌ HTTP Error ${e.code()}: $errorBody", e)
@@ -321,6 +324,32 @@ class LoginViewModel @Inject constructor(
             } catch (e: Exception) {
                 android.util.Log.e("LoginViewModel", "Registration failed: ${e.message}", e)
                 _loginState.update { it.copy(isLoading = false, error = e.message ?: "Registration failed") }
+            }
+        }
+    }
+
+    /**
+     * Fetch the current FCM token and save it to the server.
+     * Called after every successful login so the server always has a fresh token.
+     * Silently skips if Firebase isn't configured yet (google-services.json missing).
+     */
+    private fun uploadFcmToken() {
+        viewModelScope.launch {
+            try {
+                val messaging = com.google.firebase.messaging.FirebaseMessaging.getInstance()
+                messaging.token.addOnSuccessListener { token: String ->
+                    viewModelScope.launch {
+                        try {
+                            apiService.saveFcmToken(mapOf("fcmToken" to token))
+                            Log.d("LoginViewModel", "FCM token uploaded to server ✅")
+                        } catch (e: Exception) {
+                            Log.w("LoginViewModel", "FCM token upload failed: ${e.message}")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Firebase not configured yet (google-services.json missing) — silently skip
+                Log.d("LoginViewModel", "FCM not configured, skipping token upload")
             }
         }
     }

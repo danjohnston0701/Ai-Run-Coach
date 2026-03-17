@@ -5,6 +5,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.dagger.hilt.android")
     id("org.jetbrains.kotlin.plugin.serialization")
+    // NOTE: Uncomment after adding app/google-services.json from your Firebase project
+    // id("com.google.gms.google-services")
 }
 
 android {
@@ -141,6 +143,10 @@ dependencies {
     // Available on Maven Central — no AAR download needed.
     // Requires Garmin Connect app installed on the user's phone to communicate with the watch.
     implementation("com.garmin.connectiq:ciq-companion-app-sdk:2.3.0@aar")
+
+    // --- Firebase: Cloud Messaging for push notifications ---
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-messaging-ktx")
 
     // --- Testing Libraries ---
     testImplementation("junit:junit:4.13.2")

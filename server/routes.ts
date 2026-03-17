@@ -202,6 +202,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Save/update FCM push token for the current user
+  app.post("/api/users/me/fcm-token", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { fcmToken } = req.body;
+      if (!fcmToken || typeof fcmToken !== "string") {
+        return res.status(400).json({ error: "fcmToken is required" });
+      }
+      await storage.updateUser(req.user!.userId, { fcmToken });
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Save FCM token error:", error);
+      res.status(500).json({ error: "Failed to save FCM token" });
+    }
+  });
+
   app.put("/api/users/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       if (req.user?.userId !== req.params.id) {
@@ -2985,9 +3000,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (!matchingActivity || !matchingActivityId || !activityDetail) {
-        return res.status(404).json({
-          error: "No matching Garmin activity found",
-          message: "Your Garmin device hasn't synced this activity yet. Please sync your Garmin device and try again."
+        // Data not yet received from Garmin — return 202 Accepted so the
+        // client knows to poll again rather than treating this as an error.
+        return res.status(202).json({
+          status: "pending",
+          message: "Waiting for Garmin to sync. Your watch data usually arrives within 1–2 minutes of syncing the Garmin Connect app."
         });
       }
 

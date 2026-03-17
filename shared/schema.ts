@@ -44,6 +44,7 @@ export const users = pgTable("users", {
   coachMotivationalEnabled: boolean("coach_motivational_enabled").default(true),
   coachHalfKmCheckInEnabled: boolean("coach_half_km_check_in_enabled").default(true),
   coachKmSplitIntervalKm: integer("coach_km_split_interval_km").default(1),
+  fcmToken: text("fcm_token"), // Firebase Cloud Messaging token for push notifications
 });
 
 // Friends table

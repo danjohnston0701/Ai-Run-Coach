@@ -10,6 +10,9 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import live.airuncoach.airuncoach.domain.model.*
@@ -70,7 +73,20 @@ class RunSummaryViewModel @Inject constructor(
 
     private val _garminNeedsReconnect = MutableStateFlow(false)
     val garminNeedsReconnect: StateFlow<Boolean> = _garminNeedsReconnect.asStateFlow()
-    
+
+    /** True while we are actively polling (show "Waiting for Garmin sync..." state). */
+    private val _isWaitingForGarminSync = MutableStateFlow(false)
+    val isWaitingForGarminSync: StateFlow<Boolean> = _isWaitingForGarminSync.asStateFlow()
+
+    /**
+     * True after 30 s of polling with no data — prompt user that we'll notify them.
+     * Resets to false when the user dismisses the dialog.
+     */
+    private val _showGarminSyncPendingDialog = MutableStateFlow(false)
+    val showGarminSyncPendingDialog: StateFlow<Boolean> = _showGarminSyncPendingDialog.asStateFlow()
+
+    private var garminPollJob: Job? = null
+
     // Target info from run setup
     private var targetDistance: Double? = null
     private var targetTime: Long? = null
@@ -339,44 +355,95 @@ class RunSummaryViewModel @Inject constructor(
     }
 
     /**
-     * Enrich the run with Garmin data by matching the run's start time
-     * to a Garmin activity and pulling in all the detailed metrics.
+     * Attempt to enrich the run with Garmin data.
+     * If Garmin hasn't pushed the activity yet the server returns 202 (pending) —
+     * we then poll every 5 seconds for up to 30 seconds. If still pending after
+     * 30 s we show a "we'll notify you" dialog and stop polling.
+     *
+     * The server fires a push notification automatically once the activity arrives
+     * via the Garmin webhook.
      */
     fun enrichRunWithGarminData() {
         val session = _runSession.value ?: return
-        
-        viewModelScope.launch {
+
+        // Cancel any in-flight poll
+        garminPollJob?.cancel()
+
+        garminPollJob = viewModelScope.launch {
             _isEnrichingWithGarmin.value = true
+            _isWaitingForGarminSync.value = false
             _garminEnrichmentError.value = null
-            try {
-                Log.d("RunSummaryViewModel", "Enriching run ${session.id} with Garmin data...")
-                val enrichedRun = apiService.enrichRunWithGarminData(session.id)
-                Log.d("RunSummaryViewModel", "Run enriched successfully with Garmin data")
-                Log.d("RunSummaryViewModel", "AI Coach is reassessing your training plan with this run data...")
-                // Update the run session with enriched data
-                _runSession.value = enrichedRun
-                _isEnrichingWithGarmin.value = false
-            } catch (e: Exception) {
-                Log.w("RunSummaryViewModel", "Failed to enrich run with Garmin data: ${e.message}", e)
-                // Detect when Garmin token is fully expired and needs reconnecting
-                val needsReconnect = e.message?.contains("401") == true ||
-                        e.message?.contains("garmin_reconnect_required") == true ||
-                        e.message?.contains("Token is not active") == true
-                if (needsReconnect) {
-                    _garminNeedsReconnect.value = true
-                    _isGarminConnected.value = false // Remove the Garmin sync CTA
-                } else {
-                    _garminEnrichmentError.value = e.message ?: "Failed to enrich run with Garmin data"
+
+            val pollIntervalMs = 5_000L
+            val maxPollMs     = 30_000L
+            var elapsedMs     = 0L
+
+            while (isActive) {
+                try {
+                    Log.d("RunSummaryViewModel", "Garmin enrich attempt (elapsed ${elapsedMs}ms)…")
+                    val response = apiService.enrichRunWithGarminDataRaw(session.id)
+
+                    when {
+                        response.isSuccessful && response.code() == 200 -> {
+                            // ✅ Data arrived
+                            val enrichedRun = response.body()!!
+                            _runSession.value = enrichedRun
+                            _isEnrichingWithGarmin.value = false
+                            _isWaitingForGarminSync.value = false
+                            Log.d("RunSummaryViewModel", "Run enriched with Garmin data ✅")
+                            return@launch
+                        }
+                        response.code() == 202 -> {
+                            // ⏳ Garmin hasn't pushed the data yet — wait and retry
+                            if (elapsedMs == 0L) {
+                                // First pending response — switch to "waiting" state
+                                _isEnrichingWithGarmin.value = false
+                                _isWaitingForGarminSync.value = true
+                            }
+                            if (elapsedMs >= maxPollMs) {
+                                // Timed out — tell user we'll notify them
+                                _isWaitingForGarminSync.value = false
+                                _showGarminSyncPendingDialog.value = true
+                                Log.d("RunSummaryViewModel", "Garmin sync timed out — showing notify-me dialog")
+                                return@launch
+                            }
+                            delay(pollIntervalMs)
+                            elapsedMs += pollIntervalMs
+                        }
+                        response.code() == 401 -> {
+                            // Token expired — prompt reconnect
+                            _garminNeedsReconnect.value = true
+                            _isGarminConnected.value = false
+                            _isEnrichingWithGarmin.value = false
+                            _isWaitingForGarminSync.value = false
+                            return@launch
+                        }
+                        else -> {
+                            _garminEnrichmentError.value = "Failed to sync Garmin data (${response.code()})"
+                            _isEnrichingWithGarmin.value = false
+                            _isWaitingForGarminSync.value = false
+                            return@launch
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w("RunSummaryViewModel", "Garmin enrich error: ${e.message}", e)
+                    _garminEnrichmentError.value = e.message ?: "Failed to sync Garmin data"
+                    _isEnrichingWithGarmin.value = false
+                    _isWaitingForGarminSync.value = false
+                    return@launch
                 }
-                _isEnrichingWithGarmin.value = false
             }
         }
+    }
+
+    fun dismissGarminSyncPendingDialog() {
+        _showGarminSyncPendingDialog.value = false
     }
 
     fun clearGarminEnrichmentError() {
         _garminEnrichmentError.value = null
     }
-    
+
     fun dismissGarminReconnect() {
         _garminNeedsReconnect.value = false
     }
