@@ -2888,12 +2888,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Get activities from 7 days before the run to cover potential sync delays
+      // Garmin API max time range is 86400 seconds (exactly 24 hours).
+      // Search from 2 hours before the run to 22 hours after — catches same-day
+      // sync delays while staying within the 24-hour limit.
       const runStartTime = new Date(run.completedAt || run.createdAt || new Date());
-      const searchStartTime = new Date(runStartTime);
-      searchStartTime.setDate(searchStartTime.getDate() - 7);
-      const searchEndTime = new Date(runStartTime);
-      searchEndTime.setDate(searchEndTime.getDate() + 1); // Next day to cover sync delays
+      const searchStartTime = new Date(runStartTime.getTime() - 2 * 60 * 60 * 1000);   // -2 hours
+      const searchEndTime   = new Date(runStartTime.getTime() + 22 * 60 * 60 * 1000);  // +22 hours
 
       const activities = await garminService.getGarminActivities(accessToken, searchStartTime, searchEndTime);
       const garminActivities = Array.isArray(activities) ? activities : [];
