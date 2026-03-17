@@ -1,24 +1,38 @@
 package live.airuncoach.airuncoach.ui.screens
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.pm.PackageManager
+import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.graphics.Color
+import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.HeartRateZones
 import live.airuncoach.airuncoach.network.model.WorkoutDetails
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
+import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 
@@ -30,7 +44,87 @@ fun WorkoutDetailScreen(
     onStartWorkout: (WorkoutDetails) -> Unit,
     onMarkComplete: (WorkoutDetails) -> Unit
 ) {
+    val context = LocalContext.current
     val color = workoutTypeColor(workout.workoutType)
+
+    // ── GPS / permission state ─────────────────────────────────────────────
+    var hasLocationPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    var isGettingLocation by remember { mutableStateOf(false) }
+    var gpsReady by remember { mutableStateOf(false) }
+    var gpsError by remember { mutableStateOf<String?>(null) }
+
+    // Permission launcher
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        hasLocationPermission = granted
+        if (!granted) gpsError = "Location permission denied"
+    }
+
+    // Request permission immediately on first load if not already granted
+    LaunchedEffect(Unit) {
+        if (!hasLocationPermission) {
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
+
+    // Acquire GPS fix once we have permission
+    LaunchedEffect(hasLocationPermission) {
+        if (!hasLocationPermission) return@LaunchedEffect
+        if (gpsReady) return@LaunchedEffect
+
+        isGettingLocation = true
+        gpsError = null
+        Log.d("WorkoutDetail", "📡 Acquiring GPS fix...")
+
+        try {
+            val fusedClient = LocationServices.getFusedLocationProviderClient(context)
+
+            @SuppressLint("MissingPermission")
+            val location = suspendCancellableCoroutine { cont ->
+                fusedClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                    .addOnSuccessListener { loc -> cont.resume(loc) }
+                    .addOnFailureListener { e ->
+                        Log.w("WorkoutDetail", "High-accuracy failed, falling back to lastLocation", e)
+                        fusedClient.lastLocation
+                            .addOnSuccessListener { last -> cont.resume(last) }
+                            .addOnFailureListener { cont.resume(null) }
+                    }
+            }
+
+            if (location != null) {
+                gpsReady = true
+                Log.d("WorkoutDetail", "✅ GPS ready: ${location.latitude}, ${location.longitude}")
+            } else {
+                gpsError = "Unable to acquire GPS signal"
+                Log.e("WorkoutDetail", "❌ GPS location returned null")
+            }
+        } catch (e: Exception) {
+            gpsError = "GPS error: ${e.message}"
+            Log.e("WorkoutDetail", "❌ Exception acquiring GPS", e)
+        } finally {
+            isGettingLocation = false
+        }
+    }
+
+    // "Start This Workout" is only enabled once GPS is confirmed
+    val canStart = hasLocationPermission && gpsReady && !isGettingLocation
 
     Scaffold(
         topBar = {
@@ -59,6 +153,37 @@ fun WorkoutDetailScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(Spacing.lg)
         ) {
+
+            // ── GPS status banner ──────────────────────────────────────────────
+            if (workout.workoutType != "rest") {
+                WorkoutGpsBanner(
+                    hasPermission = hasLocationPermission,
+                    isAcquiring = isGettingLocation,
+                    isReady = gpsReady,
+                    error = gpsError,
+                    onGrantPermission = {
+                        locationPermissionLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION
+                            )
+                        )
+                    },
+                    onRetry = {
+                        gpsError = null
+                        gpsReady = false
+                        // Re-trigger the LaunchedEffect by toggling permission state
+                        hasLocationPermission = ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.ACCESS_FINE_LOCATION
+                        ) == PackageManager.PERMISSION_GRANTED ||
+                        ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.ACCESS_COARSE_LOCATION
+                        ) == PackageManager.PERMISSION_GRANTED
+                    }
+                )
+                Spacer(modifier = Modifier.height(Spacing.md))
+            }
+
             // ── Hero section ───────────────────────────────────────────────────
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -206,13 +331,31 @@ fun WorkoutDetailScreen(
             } else if (workout.workoutType != "rest") {
                 Button(
                     onClick = { onStartWorkout(workout) },
+                    enabled = canStart,
                     modifier = Modifier.fillMaxWidth().height(56.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Colors.primary,
+                        disabledContainerColor = Colors.primary.copy(alpha = 0.35f)
+                    ),
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    Icon(painterResource(R.drawable.icon_play_vector), null, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(Spacing.sm))
-                    Text("Start This Workout", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
+                    if (isGettingLocation) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = Colors.buttonText
+                        )
+                        Spacer(modifier = Modifier.width(Spacing.sm))
+                        Text("Acquiring GPS…", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
+                    } else if (!hasLocationPermission) {
+                        Icon(Icons.Default.LocationOn, null, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(Spacing.sm))
+                        Text("Location Required", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
+                    } else {
+                        Icon(painterResource(R.drawable.icon_play_vector), null, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(Spacing.sm))
+                        Text("Start This Workout", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
+                    }
                 }
                 Spacer(modifier = Modifier.height(Spacing.sm))
                 OutlinedButton(
@@ -243,6 +386,97 @@ fun WorkoutDetailScreen(
     }
 }
 
+// ── GPS status banner ─────────────────────────────────────────────────────────
+
+@Composable
+private fun WorkoutGpsBanner(
+    hasPermission: Boolean,
+    isAcquiring: Boolean,
+    isReady: Boolean,
+    error: String?,
+    onGrantPermission: () -> Unit,
+    onRetry: () -> Unit
+) {
+    // Once GPS is locked, hide the banner entirely — no need to celebrate, just unblock the button
+    if (isReady) return
+
+    val title = when {
+        !hasPermission -> "Location permission required"
+        isAcquiring    -> "Acquiring GPS signal…"
+        error != null  -> "GPS signal unavailable"
+        else           -> "Waiting for GPS…"
+    }
+    val subtitle = when {
+        !hasPermission -> "Tap Grant below to enable location access"
+        isAcquiring    -> "Please wait — this usually takes a few seconds"
+        error != null  -> error
+        else           -> "Please wait…"
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(BorderRadius.md),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isAcquiring) Colors.primary.copy(alpha = 0.08f)
+                             else Colors.error.copy(alpha = 0.12f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (isAcquiring) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = Colors.primary
+                )
+            } else {
+                Icon(
+                    Icons.Default.LocationOn,
+                    contentDescription = null,
+                    tint = Colors.error,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(Spacing.sm))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                    color = if (isAcquiring) Colors.primary else Colors.error
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    style = AppTextStyles.caption,
+                    color = Colors.textSecondary
+                )
+            }
+
+            when {
+                !hasPermission -> Button(
+                    onClick = onGrantPermission,
+                    shape = RoundedCornerShape(BorderRadius.full),
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Text("Grant", color = Colors.buttonText, style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold))
+                }
+                error != null -> TextButton(onClick = onRetry) {
+                    Text("Retry", color = Colors.primary, style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold))
+                }
+            }
+        }
+    }
+}
+
+// ── Shared helpers (unchanged) ────────────────────────────────────────────────
+
 @Composable
 fun WorkoutStatCard(label: String, value: String, icon: Int, modifier: Modifier = Modifier) {
     Card(
@@ -267,7 +501,7 @@ fun WorkoutStructureSection(workout: WorkoutDetails) {
     Text("Workout Structure", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
     Spacer(modifier = Modifier.height(Spacing.sm))
 
-    val structure: List<Triple<String, String, androidx.compose.ui.graphics.Color>> = when (workout.workoutType) {
+    val structure: List<Triple<String, String, Color>> = when (workout.workoutType) {
         "intervals" -> listOf(
             Triple("Warm-up", "10 min easy (Zone 2)", Colors.success),
             Triple("Work intervals", workout.instructions ?: "Repeat as prescribed", Colors.error),
