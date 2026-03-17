@@ -4475,11 +4475,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       for (const daily of dailies) {
         try {
+          // Resolve user by Garmin userId or userAccessToken
+          let device;
           const userAccessToken = daily.userAccessToken;
-          const device = await findUserByGarminToken(userAccessToken);
+          
+          if (userAccessToken) {
+            device = await findUserByGarminToken(userAccessToken);
+          } else {
+            // Use resolveGarminUserId helper for user ID based lookup
+            const garminDevices = await db.query.connectedDevices.findMany({
+              where: (d, { eq }) => eq(d.deviceType, 'garmin'),
+              columns: { userId: true, deviceId: true },
+            });
+            const appUserId = resolveGarminUserId(garminDevices, daily);
+            if (appUserId) {
+              device = await db.query.connectedDevices.findFirst({
+                where: (d, { eq }) => eq(d.userId, appUserId),
+              });
+            }
+          }
           
           if (!device) {
-            console.warn(`⚠️ [Garmin Webhook] Could not map dailies to user (no access token)`);
+            console.warn(`⚠️ [Garmin Webhook] Could not map dailies to user (userId: ${daily.userId || 'unknown'})`);
             continue;
           }
           
