@@ -2103,10 +2103,13 @@ ${wellnessContext ? `CURRENT WELLNESS STATUS (from Garmin):${wellnessContext}
 ${readinessGuidance}` : `NO WELLNESS DATA AVAILABLE — The runner does not have a Garmin device connected or no wellness data has been synced today. Do NOT mention body readiness, recovery status, fatigue, body battery, sleep quality, HRV, stress levels, or any wellness/biometric data. Simply skip wellness entirely in your response.`}
 
 Based on this data, provide:
-1. "briefing": A punchy, spoken pre-run briefing — MAX 2 SHORT SENTENCES (≤25 words). Hit the single most important detail: distance${targetPace ? ', target pace' : ''}${coachingPlanContext ? ', workout type' : ''}${wellnessContext ? ', or readiness' : ''}. Be direct. ${PACE_FORMAT_RULE}
-2. "intensityAdvice": ONE short sentence (≤12 words) on effort/pace. ${workoutIntensity ? `This is a ${workoutIntensity} zone session.` : ''}${coachingPlanContext ? ` Week ${planWeekNumber} of ${planTotalWeeks}-week ${planGoalType} plan.` : ''}
+${coachingPlanContext ? `1. "briefing": MAX 2 SHORT SENTENCES (≤25 words). This is a COACHED WORKOUT — lead with the workout type and its purpose in the plan (week ${planWeekNumber} of ${planTotalWeeks}). Do NOT lead with distance or weather. ${PACE_FORMAT_RULE}
+2. "intensityAdvice": ONE sentence (≤12 words). Focus entirely on the ${workoutIntensity || 'prescribed'} zone effort for this ${workoutType} session.
+3. "warnings": Warnings array — empty if none.
+4. "${hasRoute === true ? 'routeInsight' : 'readinessInsight'}": ONE sentence (≤12 words). ${wellnessContext ? 'How their readiness affects this specific workout.' : 'One motivational line tied to this coached session.'}` : `1. "briefing": A punchy, spoken pre-run briefing — MAX 2 SHORT SENTENCES (≤25 words). Lead with distance${targetPace ? ' and target pace' : ''}${wellnessContext ? ', then readiness' : ''}. Be direct. ${PACE_FORMAT_RULE}
+2. "intensityAdvice": ONE short sentence (≤12 words) on effort/pace.
 3. "warnings": Array of any warnings ${wellnessContext ? 'if their wellness indicators suggest caution' : 'based on weather or route conditions'}. Empty array if none.
-${hasRoute === true ? `4. "routeInsight": ONE sentence (≤12 words) on the key terrain feature only.` : `4. "readinessInsight": ONE sentence (≤12 words). ${wellnessContext ? 'Key readiness point only.' : 'One motivational line — no wellness mention.'}`}
+${hasRoute === true ? `4. "routeInsight": ONE sentence (≤12 words) on the key terrain feature only.` : `4. "readinessInsight": ONE sentence (≤12 words). ${wellnessContext ? 'Key readiness point only.' : 'One motivational line — no wellness mention.'}`}`}
 
 CRITICAL RULES:
 - TOTAL word count across ALL fields combined MUST NOT exceed 50 words. Count carefully.
