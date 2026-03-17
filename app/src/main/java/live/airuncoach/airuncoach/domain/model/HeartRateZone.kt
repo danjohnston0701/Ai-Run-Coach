@@ -38,9 +38,9 @@ object HeartRateZones {
                 name = "Zone 2: Endurance/Aerobic",
                 hrPercentMin = 60,
                 hrPercentMax = 70,
-                description = "Comfortable, sustainable pace. The \"talk test\" zone - you can hold a conversation.",
-                paceGuidance = "Gentle jog - easy conversational pace. Could hold a full conversation without gasping.",
-                benefits = "Builds aerobic base, improves fat burning, increases capillary density, foundation for all running",
+                description = "Comfortable, sustainable pace. The \"talk test\" zone - you can hold a conversation. This is a normal or brisk walk, or an easy jog. You should feel like this is a 3 or 4 out of 10 effort.",
+                paceGuidance = "Normal to brisk walk, or easy jog — approximately 9-13 minutes per km. Easy conversational pace. Could hold a full conversation without gasping.",
+                benefits = "Builds aerobic base, improves fat burning, increases capillary density, foundation for all running, conditions the heart",
                 effort = "Easy"
             )
             3 -> HeartRateZoneInfo(

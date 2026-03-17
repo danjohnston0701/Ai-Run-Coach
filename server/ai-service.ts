@@ -826,8 +826,15 @@ export async function generateStruggleCoaching(params: {
   runnerAge?: number;
   // Historical context
   runHistory?: RunHistoryStats;
+  // Coaching plan context
+  targetHeartRateZone?: number; // 1-5; if Zone 1-2, struggle coaching is not relevant
 }): Promise<string> {
-  const { distance, elapsedTime, currentPace, baselinePace, paceDropPercent, currentGrade, totalElevationGain, coachName, coachTone, coachAccent, hasRoute, fitnessLevel, runnerName, runHistory } = params;
+  const { distance, elapsedTime, currentPace, baselinePace, paceDropPercent, currentGrade, totalElevationGain, coachName, coachTone, coachAccent, hasRoute, fitnessLevel, runnerName, runHistory, targetHeartRateZone } = params;
+  
+  // For Zone 1-2 runs (aerobic/recovery focus), pace drops are intentional to stay in HR zone — skip struggle coaching
+  if (targetHeartRateZone && targetHeartRateZone <= 2) {
+    return `Heart rate is the goal here, not pace. Slow down as needed to stay in Zone ${targetHeartRateZone}. You're doing great!`;
+  }
   
   const timeMin = Math.floor(elapsedTime / 60);
   
@@ -901,6 +908,44 @@ Give a brief (1-2 sentences) supportive message tailored to this runner's fitnes
 // Cadence/Stride Coaching - analyzes overstriding/understriding
 type StrideZone = 'OVERSTRIDING' | 'UNDERSTRIDING' | 'OPTIMAL';
 
+/**
+ * Calculate optimal cadence range based on target pace
+ * Slower paces (easy Zone 2) typically need lower cadence (110-130 spm)
+ * Faster paces typically need higher cadence (170-180 spm)
+ */
+function getOptimalCadenceForPace(paceMinPerKm: string, paceMaxPerKm?: string): { min: number; max: number } {
+  const parsePace = (paceStr: string): number => {
+    const parts = paceStr.split(':');
+    if (parts.length !== 2) return 180; // default to fast cadence
+    const minutes = parseInt(parts[0]) || 0;
+    const seconds = parseInt(parts[1]) || 0;
+    return minutes * 60 + seconds;
+  };
+
+  const paceSeconds = parsePace(paceMinPerKm);
+  
+  // Zone 2 (9-13 min/km, ~540-780 sec/km): 110-130 cadence
+  // Zone 3 (7-10 min/km, ~420-600 sec/km): 130-150 cadence
+  // Zone 4+ (< 6 min/km, < 360 sec/km): 160-180+ cadence
+  
+  if (paceSeconds >= 720) {
+    // Very slow (12+ min/km): 100-120 spm
+    return { min: 100, max: 120 };
+  } else if (paceSeconds >= 600) {
+    // Slow Zone 2 (10-12 min/km): 110-130 spm
+    return { min: 110, max: 130 };
+  } else if (paceSeconds >= 480) {
+    // Zone 2/3 boundary (8-10 min/km): 130-150 spm
+    return { min: 130, max: 150 };
+  } else if (paceSeconds >= 360) {
+    // Zone 3/4 boundary (6-8 min/km): 150-170 spm
+    return { min: 150, max: 170 };
+  } else {
+    // Zone 4+ (< 6 min/km): 170-185 spm
+    return { min: 170, max: 185 };
+  }
+}
+
 export async function generateCadenceCoaching(params: {
   cadence: number;
   strideLength: number;
@@ -927,6 +972,11 @@ export async function generateCadenceCoaching(params: {
     coachName = 'Coach', coachTone = 'energetic' } = params;
   const cadenceAccentRule = accentDirective((params as any).coachAccent);
   
+  // Use dynamic cadence calculation based on current pace, not fixed values
+  const paceBasedCadence = getOptimalCadenceForPace(currentPace);
+  const dynOptimalCadenceMin = paceBasedCadence.min;
+  const dynOptimalCadenceMax = paceBasedCadence.max;
+  
   const strideCm = Math.round(strideLength * 100);
   const optMinCm = Math.round(optimalStrideLengthMin * 100);
   const optMaxCm = Math.round(optimalStrideLengthMax * 100);
@@ -948,7 +998,7 @@ Overstriding means their foot is landing too far ahead of their center of mass, 
 
 The runner needs to SHORTEN their stride and INCREASE their cadence. Provide elite-level coaching on HOW to do this:
 1. Focus on landing with foot beneath hips, not out front
-2. Think "quick, light steps" — aim for ${optimalCadenceMin}-${optimalCadenceMax} spm
+2. Think "quick, light steps" — aim for ${dynOptimalCadenceMin}-${dynOptimalCadenceMax} spm
 3. Lean slightly forward from ankles (not waist)
 4. Imagine running on hot coals — minimize ground contact time
 5. Arms drive the cadence — quicker arms = quicker feet
@@ -985,7 +1035,7 @@ Understriding means they're shuffling with too-short steps at a low turnover rat
 - Can cause calf and Achilles fatigue
 
 The runner needs to find a more efficient cadence. Provide coaching on HOW to increase cadence:
-1. Use a mental metronome — aim for ${optimalCadenceMin}-${optimalCadenceMax} steps per minute
+1. Use a mental metronome — aim for ${dynOptimalCadenceMin}-${dynOptimalCadenceMax} steps per minute
 2. Push off more powerfully from the balls of their feet
 3. Drive knees forward (not up) with each stride
 4. Keep arms pumping actively — they set the rhythm
@@ -2747,6 +2797,7 @@ export type EliteCoachingType =
   | 'target_eta'            // Projected finish time vs target
   | 'pace_trend'            // Gradual pace drift detection (not sudden drop like struggle)
   | 'elevation_insight'     // How elevation is affecting their pace right now
+  | 'heart_rate_check'      // HR-focused coaching for zone 2 sessions (with HR device)
   | 'final_500m'            // Last 500m motivational push
   | 'final_100m';           // Last 100m — maximum intensity finish line push
 
@@ -2769,6 +2820,7 @@ export interface EliteCoachingParams {
   totalElevationLoss?: number;
   targetTime?: number; // seconds
   targetPace?: string;
+  targetHeartRateZone?: number; // 1-5; for Zone 1-2, skip speed-focused coaching
 
   // Type-specific context
   milestonePercent?: number;              // for 'milestone'
@@ -2799,13 +2851,19 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
     coachingType, distance, targetDistance, currentPace, averagePace, elapsedTime,
     coachName, coachTone, hasRoute,
     heartRate, cadence, currentGrade, totalElevationGain, totalElevationLoss,
-    targetTime, targetPace, milestonePercent, kmSplits,
+    targetTime, targetPace, targetHeartRateZone, milestonePercent, kmSplits,
     paceTrendDirection, paceTrendDeltaPerKm,
     projectedFinishTime, consecutiveConsistentSplits, isNegativeSplitting,
     fastestSplitKm, fastestSplitPace,
     targetTimeCategory, etaOverTargetPercent, remainingMeters,
     trainingPlanId, workoutType, workoutDescription, planGoalType, planWeekNumber, planTotalWeeks
   } = params;
+
+  // For Zone 1-2 aerobic/recovery runs, skip speed-focused coaching (final pushes, sprint finishes)
+  // These zones are about heart rate control, not speed
+  if ((coachingType === 'final_500m' || coachingType === 'final_100m') && targetHeartRateZone && targetHeartRateZone <= 2) {
+    return `Great work maintaining Zone ${targetHeartRateZone}! Keep the effort steady to the finish. Focus on your breathing and heart rate, not the pace.`;
+  }
 
   const timeMin = Math.floor(elapsedTime / 60);
   const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
@@ -2851,7 +2909,10 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
 
   switch (coachingType) {
 
-    case 'technique_form':
+    case 'technique_form': {
+      // For Zone 1-2 aerobic runs, focus on breathing/comfort, NOT posture/form correction
+      const isAerobicZone = targetHeartRateZone && targetHeartRateZone <= 2;
+      
       typePrompt = `COACHING TYPE: Running technique & form check.
 
 ${status}
@@ -2859,6 +2920,13 @@ ${noTerrainRule}
 
 Give a focused technique coaching cue (2-3 sentences). Pick ONE technique area and coach it with specific, actionable cues the runner can apply RIGHT NOW:
 
+${isAerobicZone ? `
+For this Zone 2 aerobic session, focus on COMFORT and SUSTAINABILITY:
+- Check your breathing: steady, rhythmic, sustainable at current effort
+- Arms should feel relaxed and loose — not tense
+- Let your natural pace settle in — you're building aerobic fitness, not speed
+- Listen to your body and stay relaxed
+` : `
 Choose the most relevant for this moment in the run:
 ${progress < 30 ? `- EARLY RUN: Focus on establishing good form — relaxed shoulders, arms at 90 degrees, slight forward lean from ankles, landing under hips.` :
   progress < 70 ? `- MID RUN: Focus on efficiency — are they bouncing too much? Arms crossing midline? Tension creeping into shoulders or jaw? Quick feet.` :
@@ -2867,10 +2935,14 @@ ${cadence && cadence < 165 ? `- Their cadence is ${cadence} spm — below optima
 ${heartRate && heartRate > 170 ? `- HR is high (${heartRate}bpm) — cue breathing technique: "Breathe from your belly. Try a 2-in, 2-out pattern matched to your footstrike."` : ''}
 ${hasRoute && currentGrade && currentGrade > 3 ? `- On uphill: "Shorten your stride, lean into the hill from your ankles, pump your arms, and maintain effort — not pace."` : ''}
 ${hasRoute && currentGrade && currentGrade < -3 ? `- On downhill: "Lean slightly forward, increase turnover, stay light on your feet. Don't brake with your heels."` : ''}
+`}
 
 Reference at least one data point. Keep it conversational — this is spoken aloud while running.`;
-      systemExtra = 'You specialize in running biomechanics and form coaching. Give one specific, actionable technique cue — not a generic reminder.';
+      systemExtra = isAerobicZone 
+        ? 'For this Zone 2 session, emphasize comfort and sustainability. Coach breathing rhythm, relaxation, and how to stay comfortable at effort.' 
+        : 'You specialize in running biomechanics and form coaching. Give one specific, actionable technique cue — not a generic reminder.';
       break;
+    }
 
     case 'milestone':
       typePrompt = `COACHING TYPE: Milestone celebration — runner just hit ${milestonePercent}% of their target distance!
@@ -3031,6 +3103,31 @@ YOUR COACHING MUST:
 
 Give 2-3 sentences that sound like you've analyzed every metre of this route. Reference SPECIFIC data points.`;
       systemExtra = 'You are an elite running coach specializing in terrain analysis. You can see the full elevation profile, every split, and every metric. Sound like you KNOW this route. Correlate terrain with pace/HR/cadence changes. Be specific, not generic.';
+      break;
+    }
+
+    case 'heart_rate_check': {
+      // Zone 2 aerobic focus: check HR, encourage steady breathing, reinforce it's about conditioning
+      const targetHRMin = targetHeartRateZone === 2 ? Math.round(heartRate ? heartRate * 0.85 : 120) : 0;
+      const targetHRMax = targetHeartRateZone === 2 ? Math.round(heartRate ? heartRate * 1.05 : 150) : 0;
+      
+      typePrompt = `COACHING TYPE: Heart rate focus check for Zone 2 aerobic session.
+
+${status}
+${noTerrainRule}
+
+This is a Zone 2 conditioning session. The goal is HEART RATE CONTROL, not pace.
+
+${heartRate ? `Current HR: ${heartRate} bpm. Target Zone 2 range: roughly ${targetHRMin}-${targetHRMax} bpm.
+${heartRate > targetHRMax ? `Your HR is above the Zone 2 target. Slow down slightly to bring it back into range. Remember, this isn't about speed — it's about training your heart at a sustainable effort.` : heartRate < targetHRMin ? `Your HR is below the Zone 2 target. You can pick up the pace slightly if you feel good. Stay comfortable and conversational.` : `Your HR is right where it should be! Keep this steady effort. This is optimal for aerobic training.`}` : `Keep checking your heart rate if you have a device. Zone 2 is about maintaining a conversational pace where your heart rate stays in the aerobic zone — not too easy, not too hard.`}
+
+Give a brief (1-2 sentences) HR-focused coaching message:
+1. Acknowledge their heart rate and where it sits relative to Zone 2
+2. Reinforce that TODAY'S GOAL is heart rate, not pace — slower is fine if that's what keeps HR steady
+3. Encourage steady, sustainable breathing
+
+${PACE_FORMAT_RULE}`;
+      systemExtra = 'For Zone 2 aerobic sessions, coaching is ONLY about heart rate. Pace is secondary. Remind the runner that slowing down to control HR is exactly right. Emphasize conditioning the heart, not chasing speed.';
       break;
     }
 

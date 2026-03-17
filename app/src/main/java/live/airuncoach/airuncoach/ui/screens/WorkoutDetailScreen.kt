@@ -278,6 +278,65 @@ fun WorkoutDetailScreen(
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
 
+            // ── Zone comparison chart (for Zone 2 focus) ──────────────────────
+            workout.intensity?.let { intensity ->
+                val zoneNumber = intensity.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 2
+                if (zoneNumber == 2) {
+                    Text("How Zone 2 Compares", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                    
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(Spacing.lg)) {
+                            // Zone 1
+                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Zone 1", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.success)
+                                    Text("Recovery", style = AppTextStyles.small, color = Colors.textMuted)
+                                }
+                                Text("Resting walk", style = AppTextStyles.small, color = Colors.textSecondary)
+                            }
+                            
+                            Spacer(modifier = Modifier.height(Spacing.md))
+                            HorizontalDivider(color = Colors.backgroundSecondary, thickness = 0.5.dp)
+                            Spacer(modifier = Modifier.height(Spacing.md))
+                            
+                            // Zone 2 (highlighted)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Colors.primary.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+                                    .padding(Spacing.md),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Zone 2 (YOUR SESSION)", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.primary)
+                                    Text("Aerobic/Endurance", style = AppTextStyles.small, color = Colors.textMuted)
+                                }
+                                Text("9–13 min/km", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.primary)
+                            }
+                            
+                            Spacer(modifier = Modifier.height(Spacing.md))
+                            HorizontalDivider(color = Colors.backgroundSecondary, thickness = 0.5.dp)
+                            Spacer(modifier = Modifier.height(Spacing.md))
+                            
+                            // Zone 3
+                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Zone 3", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.warning)
+                                    Text("Tempo", style = AppTextStyles.small, color = Colors.textMuted)
+                                }
+                                Text("Light jog", style = AppTextStyles.small, color = Colors.textSecondary)
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(Spacing.lg))
+                }
+            }
+
             // ── Instructions ──────────────────────────────────────────────────
             if (!workout.instructions.isNullOrEmpty()) {
                 Text("Workout Instructions", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
