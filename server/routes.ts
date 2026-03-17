@@ -5681,7 +5681,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Get date from first epoch (or use today if no valid timestamp)
       const epochTimestamp = epochs[0]?.startTimeInSeconds;
-      const firstEpochDate = epochTimestamp
+      const epochDate = epochTimestamp
         ? new Date(epochTimestamp * 1000).toISOString().split('T')[0]
         : new Date().toISOString().split('T')[0]; // Fallback to today
       
@@ -5692,12 +5692,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const existingAggregate = await db.query.garminEpochsAggregate.findFirst({
             where: and(
               eq(garminEpochsAggregate.userId, device.userId),
-              eq(garminEpochsAggregate.epochDate, firstEpochDate)
+              eq(garminEpochsAggregate.epochDate, epochDate)
             ),
           });
           
           if (existingAggregate?.compressedAt) {
-            console.log(`[Garmin Webhook] Epochs already compressed for ${device.userId} on ${firstEpochDate}, skipping`);
+            console.log(`[Garmin Webhook] Epochs already compressed for ${device.userId} on ${epochDate}, skipping`);
             continue;
           }
           
@@ -5802,7 +5802,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               })
               .where(eq(garminEpochsAggregate.id, existingAggregate.id));
             
-            console.log(`[Garmin Webhook] Updated epochs aggregate for ${device.userId}, date: ${firstEpochDate}`);
+            console.log(`[Garmin Webhook] Updated epochs aggregate for ${device.userId}, date: ${epochDate}`);
           } else {
             await db.insert(garminEpochsAggregate).values({
               userId: device.userId,
@@ -5826,7 +5826,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               totalEpochs: epochs.length,
             });
             
-            console.log(`[Garmin Webhook] Created epochs aggregate for ${device.userId}, date: ${firstEpochDate} (${epochs.length} epochs)`);
+            console.log(`[Garmin Webhook] Created epochs aggregate for ${device.userId}, date: ${epochDate} (${epochs.length} epochs)`);
           }
           
         } catch (epochError: any) {
