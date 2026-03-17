@@ -1,22 +1,24 @@
 # AI Coaching Plan Feature - Complete Summary for iOS Implementation
 
 **Status**: ✅ Fully implemented and production-ready on Android  
-**Last Updated**: March 15, 2026  
+**Last Updated**: March 17, 2026  
 **For**: iOS Development Team
 
 ---
 
 ## Executive Summary
 
-The **AI Coaching Plan** feature generates personalized, adaptive training plans using GPT-4 AI. Plans automatically adjust based on actual run performance, creating a dynamic coaching experience that learns and improves over time.
+The **AI Coaching Plan** feature generates personalized, adaptive training plans using GPT-4 AI. Plans automatically adjust based on actual run performance, creating a dynamic coaching experience that learns and improves over time. The AI Coach is deeply integrated — it knows which week of which plan the runner is on, and tailors all coaching (pre-run briefings, in-run guidance, post-run analysis) accordingly.
 
 ### Key Differentiators
-- 🤖 **AI-Powered**: OpenAI GPT-4 generates plans tailored to each runner
+- 🤖 **AI-Powered**: OpenAI GPT-4 generates plans tailored to each runner's actual run history
 - 📊 **Adaptive**: Plans automatically adjust based on performance
 - 💪 **Intelligent**: Detects over-training, under-training, and progress
-- 📱 **Device-Aware**: Integrates with Garmin/connected devices
+- 📱 **Device-Aware**: Integrates with Garmin/connected devices for personalized HR zones
 - 🎯 **Goal-Oriented**: Supports 5K, 10K, half-marathon, marathon, ultra
 - 📈 **Progressive**: Gradually increases volume and intensity
+- 🌍 **Timezone-Aware**: Scheduled dates and "today" detection use the user's local timezone
+- 🌤 **Weather-Aware**: Pre-run briefings and post-run analysis incorporate current weather conditions
 
 ---
 
@@ -26,29 +28,49 @@ The **AI Coaching Plan** feature generates personalized, adaptive training plans
 
 1. **Generate Plans**
    - Select goal (5K, 10K, half-marathon, marathon, ultra)
-   - Set target date and experience level
-   - Choose training frequency (3-7 days/week)
+   - Set target date and experience level (see fitness levels below)
+   - Choose training frequency (3-7 days/week) and duration (up to 12 weeks)
    - Customize regular sessions (commute runs, etc.)
-   - Get instant AI-generated 8-16 week plan
+   - Get instant AI-generated plan tailored to their actual run history
 
 2. **Follow Plans**
    - View weekly breakdown with focus areas
-   - See daily workouts with target pace/HR zones
+   - See daily workouts with target pace/HR zones (personalised BPM ranges)
    - Get coaching hints for each session
-   - Log completed runs to link with plan
+   - Start a coached workout directly from the plan
+   - Log completed runs to link with plan workouts
 
 3. **Monitor Progress**
    - Track plan completion rate
-   - See fitness progression (CTL/TSS)
-   - View plan adherence metrics
-   - Get AI insights on performance
+   - See planned vs actual metrics
+   - View "About You" section with real performance baseline
+   - Get AI insights on performance in plan context
 
 4. **Experience Adaptation**
    - Plan automatically adjusts when user falls behind
    - Intensity reduced if over-training detected
    - Increased challenge if ahead of schedule
    - Recovery weeks added proactively
-   - All changes tracked in audit trail
+
+---
+
+## Fitness / Experience Levels
+
+The app uses detailed fitness levels (not just beginner/intermediate/advanced). These are sent **raw** to the AI so it understands the runner's specific profile:
+
+| App Label | Mapped Category | Description |
+|-----------|----------------|-------------|
+| Newcomer | beginner | Just starting out |
+| Beginner | beginner | Some running experience |
+| Casual | beginner | Irregular running |
+| Regular | intermediate | Consistent runner |
+| Committed | intermediate | Training regularly |
+| Competitive | advanced | Race-focused |
+| Advanced | advanced | High training load |
+| Elite | advanced | Near-professional |
+| Professional | advanced | Full-time athlete |
+
+> **iOS Note**: Send the exact label string (e.g. `"Regular"`) — the backend normalises it internally for duration calculations while passing it raw to the AI prompt for richer context.
 
 ---
 
@@ -64,16 +86,16 @@ goalType: TEXT ('5k' | '10k' | 'half_marathon' | 'marathon' | 'ultra')
 targetDistance: REAL (km)
 targetTime: INTEGER (seconds) — Optional, for time-based goals
 targetDate: TIMESTAMP
-currentWeek: INTEGER (1-16, tracks progress)
-totalWeeks: INTEGER (8-16 weeks depending on plan)
-experienceLevel: TEXT ('beginner' | 'intermediate' | 'advanced')
+currentWeek: INTEGER (1-12, tracks progress)
+totalWeeks: INTEGER (user-selected, up to 12 weeks)
+experienceLevel: TEXT (raw label from app, e.g. "Regular", "Competitive")
 weeklyMileageBase: REAL (km) — Baseline from recent runs
 daysPerWeek: INTEGER (3-7)
 includeSpeedWork: BOOLEAN
 includeHillWork: BOOLEAN
 includeLongRuns: BOOLEAN
 status: TEXT ('active' | 'completed' | 'paused')
-aiGenerated: BOOLEAN (always true for now)
+aiGenerated: BOOLEAN (always true)
 createdAt: TIMESTAMP
 completedAt: TIMESTAMP (when plan finishes or is abandoned)
 ```
@@ -82,10 +104,9 @@ completedAt: TIMESTAMP (when plan finishes or is abandoned)
 ```sql
 id: UUID
 trainingPlanId: UUID (Foreign Key)
-weekNumber: INTEGER (1-16)
+weekNumber: INTEGER (1-12)
 weekDescription: TEXT (e.g., "Base Building - Aerobic Foundation")
 totalDistance: REAL (km for entire week)
-totalDuration: INTEGER (seconds for entire week)
 focusArea: TEXT ('endurance' | 'speed' | 'recovery' | 'race_prep')
 intensityLevel: TEXT ('easy' | 'moderate' | 'hard')
 createdAt: TIMESTAMP
@@ -97,7 +118,7 @@ id: UUID
 weeklyPlanId: UUID (Foreign Key)
 trainingPlanId: UUID (Foreign Key)
 dayOfWeek: INTEGER (0=Sunday, 6=Saturday)
-scheduledDate: TIMESTAMP (when this workout is due)
+scheduledDate: TIMESTAMP (user's local date when this workout is due)
 workoutType: TEXT (see enum below)
 distance: REAL (km target)
 duration: INTEGER (seconds target)
@@ -115,21 +136,21 @@ completedRunId: UUID (Foreign Key → runs, when user links a run)
 createdAt: TIMESTAMP
 ```
 
-#### 4. **planAdaptations** (Audit Trail of Changes)
+#### 4. **runs** — Coaching Context Fields (new as of March 17, 2026)
 ```sql
-id: UUID
-trainingPlanId: UUID (Foreign Key)
-adaptationDate: TIMESTAMP
-reason: TEXT ('missed_workout' | 'injury' | 'over_training' | 'ahead_of_schedule' | 'user_request')
-changes: JSONB (what was changed: {"week_3": "reduced_volume_20%", "added_recovery_day": true})
-aiSuggestion: TEXT (why the change was made)
-userAccepted: BOOLEAN (did user approve?)
-createdAt: TIMESTAMP
+-- These fields are now saved on runs that are started from a coaching plan:
+linkedWorkoutId: TEXT        -- which planned workout this run executes
+linkedPlanId: TEXT           -- which training plan
+planProgressWeek: INTEGER    -- e.g., 3
+planProgressWeeks: INTEGER   -- total plan weeks, e.g., 8
+workoutType: TEXT            -- "easy", "tempo", "intervals", "long_run"
+workoutIntensity: TEXT       -- "z1", "z2", "z3", "z4", "z5"
+workoutDescription: TEXT     -- AI workout description
 ```
 
-### Workout Types
+> **Migration Required**: Run `ADD_COACHING_CONTEXT_TO_RUNS.sql` in Neon.
 
-Plans use 7 core workout types:
+### Workout Types
 
 | Type | Purpose | HR Zone | Effort |
 |------|---------|---------|--------|
@@ -145,6 +166,13 @@ Plans use 7 core workout types:
 
 ## API Endpoints
 
+### ⚠️ Critical: Two-Step Generation Flow
+
+`POST /api/training-plans/generate` returns **only** `planId` + `message`.  
+You **must** then call `GET /api/training-plans/details/:planId` to get the full plan.
+
+---
+
 ### 1. Generate Training Plan
 ```
 POST /api/training-plans/generate
@@ -152,167 +180,178 @@ Content-Type: application/json
 Authorization: Bearer {token}
 
 {
-  "goalType": "marathon",                          // Required: 5k, 10k, half_marathon, marathon, ultra
-  "targetDistance": 42.195,                        // Required: km
-  "targetTime": 10800,                             // Optional: seconds (e.g., 3 hours)
-  "targetDate": "2026-06-15",                      // Required: ISO date
-  "experienceLevel": "intermediate",               // Required: beginner, intermediate, advanced
-  "daysPerWeek": 5,                                // Optional, default: 4
-  "includeSpeedWork": true,                        // Optional, default: true
-  "includeHillWork": true,                         // Optional, default: true
-  "includeLongRuns": true,                         // Optional, default: true
-  "regularSessions": [                             // Optional: recurring training
+  "goalType": "10k",                            // Required: 5k, 10k, half_marathon, marathon, ultra
+  "targetDistance": 10.0,                       // Required: km
+  "targetTime": 3600,                           // Optional: seconds
+  "targetDate": "2026-06-15",                   // Required: ISO date
+  "experienceLevel": "Regular",                 // Required: use exact app label (see Fitness Levels above)
+  "daysPerWeek": 4,                             // Optional, default: 4
+  "durationWeeks": 8,                           // IMPORTANT: user-selected plan duration (takes priority over targetDate)
+  "userTimezone": "Pacific/Auckland",           // IMPORTANT: IANA timezone string for correct date scheduling
+  "includeSpeedWork": true,
+  "includeHillWork": false,
+  "includeLongRuns": true,
+  "regularSessions": [                          // Optional: recurring training
     {
       "name": "Commute Run",
-      "dayOfWeek": 2,                              // Tuesday
+      "dayOfWeek": 2,                           // Tuesday
       "timeHour": 7,
       "timeMinute": 0,
       "distanceKm": 5.5,
       "countsTowardWeeklyTotal": true
     }
   ],
-  "firstSessionStart": "tomorrow"                  // Optional: today, tomorrow, flexible
+  "firstSessionStart": "tomorrow",              // Optional: today | tomorrow | flexible
+  "goalId": "goal-uuid"                         // Optional: links plan to a goal
 }
 
-Response: {
+// ⚠️ Response returns ONLY planId + message — not the full plan:
+Response (201): {
   "planId": "plan-uuid",
-  "goalType": "marathon",
-  "targetDate": "2026-06-15",
-  "totalWeeks": 16,
-  "weeklyPlans": [
+  "message": "Training plan generated successfully"
+}
+```
+
+> After receiving `planId`, immediately call `GET /api/training-plans/details/:planId`.
+
+---
+
+### 2. Get Full Plan Details (use after generate)
+```
+GET /api/training-plans/details/:planId
+Authorization: Bearer {token}
+
+Response: {
+  "plan": {
+    "id": "plan-uuid",
+    "goalType": "10k",
+    "targetDistance": 10.0,
+    "targetDate": "2026-06-15T00:00:00.000Z",
+    "currentWeek": 1,
+    "totalWeeks": 8,         // reflects user-selected durationWeeks
+    "experienceLevel": "Regular",
+    "daysPerWeek": 4,
+    "status": "active",
+    "weeklyMileageBase": 24.5,
+    "completedWorkouts": 0,
+    "totalWorkouts": 32,
+    "createdAt": "2026-03-17T09:00:00.000Z"
+  },
+  "weeks": [
     {
+      "id": "week-uuid",
       "weekNumber": 1,
       "weekDescription": "Base Building - Aerobic Foundation",
+      "totalDistance": 22.0,
       "focusArea": "endurance",
-      "totalDistance": 32.5,
+      "intensityLevel": "easy",
       "workouts": [
         {
           "id": "workout-uuid",
-          "dayOfWeek": 0,
+          "dayOfWeek": 1,                        // 0=Sun, 1=Mon, … 6=Sat
+          "scheduledDate": "2026-03-18T07:00:00.000Z",   // in user's local timezone
           "workoutType": "easy",
-          "distance": 6.5,
+          "distance": 5.0,
+          "duration": 1800,
           "targetPace": "6:00/km",
-          "instructions": "Focus on aerobic base..."
-        },
-        ...
+          "intensity": "z2",
+          "hrZoneNumber": 2,
+          "hrZoneMinBpm": 120,
+          "hrZoneMaxBpm": 140,
+          "hrZoneScenario": "history",
+          "effortDescription": "Comfortable, conversational pace",
+          "description": "Easy aerobic run to build your base.",
+          "instructions": "Keep effort conversational. Relax shoulders.",
+          "isCompleted": false,
+          "completedRunId": null
+        }
       ]
-    },
-    ...
-  ],
-  "createdAt": "2026-03-15T19:30:00Z"
-}
-```
-
-**Response Codes**:
-- `201 Created` - Plan generated successfully
-- `400 Bad Request` - Invalid parameters
-- `401 Unauthorized` - User not authenticated
-- `500 Server Error` - AI generation failed
-
----
-
-### 2. Get Active Plans
-```
-GET /api/training-plans?status=active
-Authorization: Bearer {token}
-
-Response: {
-  "plans": [
-    {
-      "id": "plan-uuid",
-      "goalType": "marathon",
-      "targetDate": "2026-06-15",
-      "currentWeek": 3,
-      "totalWeeks": 16,
-      "status": "active",
-      "weeklyPlans": [ ... ],
-      "createdAt": "2026-03-01T10:00:00Z"
     }
-  ]
-}
-```
-
----
-
-### 3. Get Weekly Workouts
-```
-GET /api/training-plans/{planId}/weeks/{weekNumber}
-Authorization: Bearer {token}
-
-Response: {
-  "weekNumber": 3,
-  "weekDescription": "Building Volume - Endurance Focus",
-  "totalDistance": 38.2,
-  "focusArea": "endurance",
-  "intensityLevel": "moderate",
-  "workouts": [
-    {
-      "id": "workout-uuid",
-      "dayOfWeek": 0,
-      "scheduledDate": "2026-03-16",
-      "workoutType": "easy",
-      "distance": 6.0,
-      "duration": 2160,
-      "targetPace": "6:00/km",
-      "intensity": "z2",
-      "hrZoneMinBpm": 120,
-      "hrZoneMaxBpm": 140,
-      "description": "Easy recovery run...",
-      "instructions": "Keep effort conversational...",
-      "isCompleted": false,
-      "completedRunId": null
-    },
-    ...
-  ]
-}
-```
-
----
-
-### 4. Link Completed Run to Workout
-```
-POST /api/training-plans/{planId}/workouts/{workoutId}/link-run
-Content-Type: application/json
-Authorization: Bearer {token}
-
-{
-  "runId": "run-uuid"
-}
-
-Response: {
-  "workoutId": "workout-uuid",
-  "isCompleted": true,
-  "completedRunId": "run-uuid",
-  "actualDistance": 6.2,
-  "actualDuration": 2145,
-  "actualPace": "5:47/km",
-  "performance": {
-    "versus_target": "100%+",
-    "feedback": "Great job! You ran faster and farther than planned."
+  ],
+  "performanceBaseline": {            // User's actual run history (from last 30 days)
+    "hasHistory": true,
+    "runsRecorded": 9,
+    "runsPerWeek": "3 runs/week",
+    "avgDistance": "5.73 km",
+    "avgPace": "5:45/km",
+    "longestRun": 11.2,
+    "weeklyFrequency": 2.5
   }
 }
 ```
 
+> **performanceBaseline** — Use this to populate the "About You" section in the plan summary UI. If `hasHistory: false` the user has no run history yet — show a first-run encouragement message instead.
+
 ---
 
-### 5. Get Plan Adaptations
+### 3. Get User's Plan List
 ```
-GET /api/training-plans/{planId}/adaptations
+GET /api/training-plans/:userId
+Authorization: Bearer {token}
+
+Response: [
+  {
+    "id": "plan-uuid",
+    "goalType": "10k",
+    "currentWeek": 3,
+    "totalWeeks": 8,
+    "status": "active",
+    "completedWorkouts": 11,
+    "totalWorkouts": 32,
+    ...
+  }
+]
+```
+
+---
+
+### 4. Get Today's Workout
+```
+GET /api/training-plans/:planId/today?timezone=Pacific%2FAuckland
+Authorization: Bearer {token}
+
+// ⚠️ Always pass timezone query param so isToday is evaluated in user's local time
+
+Response: {
+  "workout": { ... PlannedWorkout object ... },
+  "isToday": true     // ← Check this before displaying! If false = no workout today (rest day)
+}
+
+// When no workout is scheduled today:
+Response: {
+  "workout": null,    // next upcoming workout
+  "isToday": false    // ← This is a rest/recovery day, not a completed day
+}
+```
+
+> **isToday Logic**: A `null` workout or `isToday: false` means today is a **rest day**. Do not show "Today's workout is done!" — show a rest/recovery message instead.
+
+---
+
+### 5. Get Plan Progress
+```
+GET /api/training-plans/:planId/progress
 Authorization: Bearer {token}
 
 Response: {
-  "adaptations": [
+  "planId": "plan-uuid",
+  "currentWeek": 3,
+  "totalWeeks": 8,
+  "goalType": "10k",
+  "status": "active",
+  "completedWorkouts": 11,
+  "totalWorkouts": 32,
+  "overallCompletion": 34.4,   // percentage
+  "weeks": [
     {
-      "id": "adaptation-uuid",
-      "adaptationDate": "2026-03-14T18:00:00Z",
-      "reason": "over_training",
-      "changes": {
-        "week_4": "reduced_volume_20%",
-        "added_recovery_day": true,
-        "reduced_intensity": "z3 → z2"
-      },
-      "aiSuggestion": "Your heart rate has been elevated and recovery is slow. I've reduced this week's volume by 20% and added a recovery day.",
-      "userAccepted": true
+      "weekNumber": 1,
+      "weekDescription": "...",
+      "totalDistance": 22,
+      "focusArea": "endurance",
+      "intensityLevel": "easy",
+      "totalWorkouts": 4,
+      "completedWorkouts": 4,
+      "completionRate": 100
     }
   ]
 }
@@ -320,424 +359,353 @@ Response: {
 
 ---
 
-### 6. Accept/Reject Adaptation
+### 6. Mark Workout Complete
 ```
-POST /api/training-plans/{planId}/adaptations/{adaptationId}/accept
-Authorization: Bearer {token}
-
-{
-  "accepted": true
-}
-
-Response: {
-  "adaptationId": "adaptation-uuid",
-  "userAccepted": true,
-  "appliedAt": "2026-03-14T18:05:00Z"
-}
-```
-
----
-
-### 7. Pause/Resume/Complete Plan
-```
-POST /api/training-plans/{planId}/status
+POST /api/training-plans/complete-workout
 Content-Type: application/json
 Authorization: Bearer {token}
 
 {
-  "status": "paused"  // "active", "paused", "completed"
+  "workoutId": "workout-uuid",
+  "runId": "run-uuid"         // The run session that completed this workout
+}
+
+Response: {
+  "success": true,
+  "workout": { ... updated PlannedWorkout with isCompleted: true ... }
+}
+```
+
+> After completing a coached run, call this endpoint to mark the planned workout as done and trigger automatic plan reassessment.
+
+---
+
+### 7. Adapt / Reassess Plan
+```
+POST /api/training-plans/:planId/adapt
+Content-Type: application/json
+Authorization: Bearer {token}
+
+{
+  "reason": "missed_workout"   // missed_workout | injury | over_training | ahead_of_schedule | user_request
 }
 
 Response: {
   "planId": "plan-uuid",
-  "status": "paused",
-  "statusChangedAt": "2026-03-15T20:00:00Z"
+  "adaptationsMade": true,
+  "changes": { ... }
 }
 ```
 
 ---
 
-## Implementation Guide for iOS
+### 8. Delete Plan
+```
+DELETE /api/training-plans/:planId
+Authorization: Bearer {token}
 
-### Phase 1: UI Screens (Week 1)
+Response: { "success": true }
+```
 
-#### 1.1 Training Plan List Screen
-- Shows all active/completed plans
-- Displays goal, target date, progress (X of Y weeks)
-- Shows current week's mileage vs plan
-- CTA: "Generate New Plan" button
+---
 
-#### 1.2 Plan Generation Sheet
-- Goal selection (5K → Ultra)
-- Target date picker
-- Experience level selector
-- Training frequency slider (3-7 days/week)
-- Optional: Regular sessions configuration
-- CTA: "Generate My Plan" button
+## "About You" Section — Performance Baseline
 
-#### 1.3 Weekly Overview Screen
-- Week number and focus area
-- Total distance and duration for week
-- List of 7 workout types with descriptions
-- Visual intensity graph (easy → hard → easy progression)
-- Toggle: "Expand all workouts"
+The plan summary screen has an "About You" section. Display it from `performanceBaseline` in the plan details response:
 
-#### 1.4 Daily Workout Detail Screen
-- Workout type badge (easy, tempo, intervals, etc.)
-- Target metrics:
-  - Distance (km)
-  - Duration (time)
-  - Pace (min/km)
-  - HR Zone (Z1-Z5 with BPM range)
-- Coaching instructions from AI
-- "Mark as Completed" button or "Link Completed Run"
-- Status indicator (not started, in progress, completed, skipped)
+**If `hasHistory: true`:**
+```
+"Your Baseline"
+• [runs icon]  X runs recorded in the last 30 days
+• [clock icon] Running Y days/week on average
+• [distance icon] Average distance: Z km per run
+• [pace icon]  Current average pace: P min/km
+• [medal icon] Longest recent run: L km
 
-#### 1.5 Completed Workout Screen
-- Comparison: Planned vs Actual
-  - Distance: 6.0 km → 6.2 km ✅
-  - Pace: 6:00/km → 5:47/km ✅
-  - Duration: 36:00 → 34:50 ✅
-- AI feedback: "Great effort! You ran faster than planned."
-- Option to view full run details
-- Option to edit/unlink run
+"Plan Setup"
+• Goal: 10K in 8 weeks
+• X days/week training
+• Fitness level: Regular
+```
 
-#### 1.6 Adaptations Screen
-- Timeline of all plan adjustments
-- Each card shows:
-  - Reason (over-training, ahead of schedule, etc.)
-  - What changed (volume -20%, added recovery day, etc.)
-  - AI explanation
-  - User acceptance status
-  - "Accept" / "Reject" buttons (if pending)
+**If `hasHistory: false`:**
+```
+"You don't have any run history yet. This plan will be your starting point.
+Let's get started and see what you've got!"
 
-### Phase 2: Data Model (Week 1)
+"Plan Setup"
+• [same as above]
+```
+
+---
+
+## Starting a Coached Workout — Full Flow
+
+This is the complete flow from "Start Workout" button to post-run analysis:
+
+### Step 1: Capture Workout Context
+When user taps "Start This Workout", capture from the `PlannedWorkout`:
+```swift
+struct WorkoutRunContext {
+    let linkedWorkoutId: String
+    let linkedPlanId: String
+    let planProgressWeek: Int      // e.g., 3
+    let planProgressWeeks: Int     // total weeks, e.g., 8
+    let workoutType: String        // "easy", "tempo", "intervals", etc.
+    let workoutIntensity: String   // "z1", "z2", "z3", "z4", "z5"
+    let workoutDescription: String
+    let targetDistance: Double?    // km — nil if no specific distance
+    let targetPace: String?        // "6:00/km"
+}
+```
+
+### Step 2: Pre-Run Briefing (with coaching context)
+```
+POST /api/coaching/pre-run-briefing
+{
+  "startLocation": "...",
+  "distance": 5.0,             // from workout.distance — DO NOT default to 5.0 if null
+  "weather": { ... },
+  "wellnessData": { ... },
+  
+  // ── Coaching Plan Context ────────────────────────────────
+  "trainingPlanGoalType": "10k",
+  "trainingPlanWeek": 3,
+  "trainingPlanTotalWeeks": 8,
+  "workoutType": "tempo",
+  "workoutIntensity": "z3",
+  "workoutDescription": "Steady tempo run to build threshold pace",
+  "planGoalDescription": "Week 3 of 8 - 10K Plan"
+}
+```
+
+> **Distance note**: Only send `distance` if `workout.distance != null`. Do not default to 5.0km — it causes incorrect briefings.
+
+### Step 3: Store Coaching Context with Run
+All 7 coaching context fields must be saved with the uploaded run:
+```swift
+// In your run upload request:
+uploadRunRequest.linkedWorkoutId = workoutContext.linkedWorkoutId
+uploadRunRequest.linkedPlanId = workoutContext.linkedPlanId
+uploadRunRequest.planProgressWeek = workoutContext.planProgressWeek
+uploadRunRequest.planProgressWeeks = workoutContext.planProgressWeeks
+uploadRunRequest.workoutType = workoutContext.workoutType
+uploadRunRequest.workoutIntensity = workoutContext.workoutIntensity
+uploadRunRequest.workoutDescription = workoutContext.workoutDescription
+```
+
+### Step 4: Upload Run (POST /api/runs)
+Weather data must also be uploaded:
+```swift
+// IMPORTANT: Include weather in the upload
+uploadRunRequest.weatherData = currentWeatherData  // captured at run start
+```
+
+### Step 5: Mark Workout Complete (POST /api/training-plans/complete-workout)
+After run is uploaded and you have the `runId`:
+```swift
+POST /api/training-plans/complete-workout
+{ "workoutId": workoutContext.linkedWorkoutId, "runId": uploadedRunId }
+```
+
+### Step 6: Post-Run Analysis (with coaching context)
+```
+POST /api/runs/:runId/comprehensive-analysis
+```
+The backend automatically uses the stored `workoutType`, `workoutIntensity`, and plan week to provide coaching-context-aware analysis:
+- "You hit your Zone 2 target for 87% of this run — great aerobic base work"
+- "This tempo session aligns perfectly with Week 3's threshold-building focus"
+
+---
+
+## In-Run Coaching — All Routes Pass Plan Context
+
+All in-run coaching endpoints now receive coaching plan context so the AI can give zone-specific guidance.
+
+### HR Zone Coaching
+```
+POST /api/coaching/heart-rate
+{
+  "currentHR": 155,
+  "targetZone": 2,              // derived from workoutIntensity: z2 → 2
+  "workoutType": "easy",
+  "workoutIntensity": "z2",
+  "trainingPlanGoalType": "10k",
+  "trainingPlanWeek": 3,
+  "trainingPlanTotalWeeks": 8,
+  ...
+}
+```
+
+### Elite Coaching
+```
+POST /api/coaching/elite-coaching
+{
+  "trainingPlanGoalType": "10k",
+  "trainingPlanWeek": 3,
+  "trainingPlanTotalWeeks": 8,
+  "workoutType": "tempo",
+  "workoutIntensity": "z3",
+  "workoutDescription": "...",
+  ...
+}
+```
+
+> **Target zone derivation**: Parse the last character of `workoutIntensity` as integer: `"z2"` → `2`, `"z4"` → `4`. Use this as `targetZone` in HR coaching requests.
+
+---
+
+## HR Zone Display in Workouts
+
+Each planned workout includes `hrZoneNumber`, `hrZoneMinBpm`, `hrZoneMaxBpm`. Display them prominently:
+
+```
+Zone 2 • Aerobic Base
+Keep your heart rate between 120 and 140 beats per minute
+```
+
+If BPM values are null (no connected device / no history), calculate them from age using the 220−age Karvonen formula or show effort-level description from `effortDescription`.
+
+---
+
+## Data Models (Swift)
 
 ```swift
 // MARK: - Training Plan Models
 
-struct TrainingPlan: Codable, Identifiable {
-    let id: String
-    let userId: String
-    let goalType: GoalType
-    let targetDistance: Double // km
-    let targetTime: Int? // seconds
-    let targetDate: Date
-    let currentWeek: Int
-    let totalWeeks: Int
-    let experienceLevel: ExperienceLevel
-    let weeklyMileageBase: Double
+struct GeneratePlanRequest: Encodable {
+    let goalType: String
+    let targetDistance: Double
+    let targetDate: String           // ISO date "2026-06-15"
+    let experienceLevel: String      // raw app label, e.g. "Regular"
+    let targetTime: Int?
     let daysPerWeek: Int
+    let durationWeeks: Int?          // user-selected duration (IMPORTANT)
+    let userTimezone: String         // IANA timezone, e.g. "Pacific/Auckland"
     let includeSpeedWork: Bool
     let includeHillWork: Bool
     let includeLongRuns: Bool
-    let status: PlanStatus
-    let weeklyPlans: [WeeklyPlan]
-    let createdAt: Date
-    let completedAt: Date?
+    let regularSessions: [RegularSession]?
+    let firstSessionStart: String?   // "today" | "tomorrow" | "flexible"
+    let goalId: String?
+    let userInjuries: String?
+    
+    // Fetch user's timezone: TimeZone.current.identifier
 }
 
-enum GoalType: String, Codable {
-    case fiveK = "5k"
-    case tenK = "10k"
-    case halfMarathon = "half_marathon"
-    case marathon = "marathon"
-    case ultra = "ultra"
+struct TrainingPlanSummary: Codable, Identifiable {
+    let id: String
+    let goalType: String
+    let targetDistance: Double?
+    let targetTime: Int?
+    let targetDate: String?
+    let currentWeek: Int
+    let totalWeeks: Int
+    let experienceLevel: String?
+    let daysPerWeek: Int?
+    let status: String              // "active" | "completed" | "paused"
+    let aiGenerated: Bool?
+    let createdAt: String
+    let weeklyMileageBase: Double?
+    let completedWorkouts: Int?
+    let totalWorkouts: Int?
 }
 
-enum ExperienceLevel: String, Codable {
-    case beginner, intermediate, advanced
+struct TrainingPlanDetails: Codable {
+    let plan: TrainingPlanSummary
+    let weeks: [WeeklyPlan]
+    let performanceBaseline: PerformanceBaseline?
 }
 
-enum PlanStatus: String, Codable {
-    case active, completed, paused
+struct PerformanceBaseline: Codable {
+    let hasHistory: Bool
+    let runsRecorded: Int?
+    let runsPerWeek: String?
+    let avgDistance: String?
+    let avgPace: String?
+    let longestRun: Double?     // km
+    let weeklyFrequency: Double?
 }
 
 struct WeeklyPlan: Codable, Identifiable {
     let id: String
-    let trainingPlanId: String
     let weekNumber: Int
     let weekDescription: String
     let totalDistance: Double
-    let totalDuration: Int // seconds
-    let focusArea: FocusArea
-    let intensityLevel: IntensityLevel
-    let workouts: [PlannedWorkout]
+    let focusArea: String
+    let intensityLevel: String
+    let workouts: [WorkoutDetails]
 }
 
-enum FocusArea: String, Codable {
-    case endurance, speed, recovery, racePreperty
-}
-
-enum IntensityLevel: String, Codable {
-    case easy, moderate, hard
-}
-
-struct PlannedWorkout: Codable, Identifiable {
+struct WorkoutDetails: Codable, Identifiable {
     let id: String
-    let weeklyPlanId: String
-    let trainingPlanId: String
-    let dayOfWeek: Int // 0=Sunday
-    let scheduledDate: Date
-    let workoutType: WorkoutType
-    let distance: Double? // km
-    let duration: Int? // seconds
-    let targetPace: String? // "5:30/km"
-    let intensity: HeartRateZone? // z1-z5
+    let dayOfWeek: Int           // 0=Sun … 6=Sat — always validate with % 7
+    let scheduledDate: String    // ISO timestamp in user's local timezone
+    let workoutType: String      // "easy", "tempo", "intervals", "long_run", "hill_repeats", "recovery", "rest"
+    let distance: Double?        // km — may be nil for time-based workouts
+    let duration: Int?           // seconds
+    let targetPace: String?
+    let intensity: String?       // "z1" … "z5"
     let hrZoneNumber: Int?
     let hrZoneMinBpm: Int?
     let hrZoneMaxBpm: Int?
-    let hrZoneScenario: HRZoneScenario?
+    let hrZoneScenario: String?
     let effortDescription: String?
     let description: String
     let instructions: String
     let isCompleted: Bool
     let completedRunId: String?
-    let createdAt: Date
 }
 
-enum WorkoutType: String, Codable {
-    case easy, tempo, intervals
-    case longRun = "long_run"
-    case hillRepeats = "hill_repeats"
-    case recovery, rest
+struct TodayWorkoutResponse: Codable {
+    let workout: WorkoutDetails?
+    let isToday: Bool            // ← Always check this. false = rest day
 }
 
-enum HeartRateZone: String, Codable {
-    case z1, z2, z3, z4, z5
+struct TrainingPlanProgress: Codable {
+    let planId: String
+    let currentWeek: Int
+    let totalWeeks: Int
+    let goalType: String
+    let status: String
+    let completedWorkouts: Int
+    let totalWorkouts: Int
+    let overallCompletion: Double
+    let weeks: [WeekProgressSummary]
 }
 
-enum HRZoneScenario: String, Codable {
-    case device, history, effort
-}
-
-struct PlanAdaptation: Codable, Identifiable {
-    let id: String
-    let trainingPlanId: String
-    let adaptationDate: Date
-    let reason: AdaptationReason
-    let changes: [String: String]
-    let aiSuggestion: String
-    let userAccepted: Bool
-}
-
-enum AdaptationReason: String, Codable {
-    case missedWorkout = "missed_workout"
-    case injury
-    case overTraining = "over_training"
-    case aheadOfSchedule = "ahead_of_schedule"
-    case userRequest = "user_request"
+struct WeekProgressSummary: Codable {
+    let weekNumber: Int
+    let weekDescription: String
+    let totalDistance: Double
+    let focusArea: String
+    let intensityLevel: String
+    let totalWorkouts: Int
+    let completedWorkouts: Int
+    let completionRate: Double
 }
 ```
 
-### Phase 3: API Client Methods (Week 1-2)
+---
+
+## Today Tile — Correct Display Logic
 
 ```swift
-// MARK: - Training Plan API
+func todayTileContent(response: TodayWorkoutResponse?) -> TodayTileState {
+    guard let response = response else {
+        return .loading
+    }
 
-class TrainingPlanAPIClient {
-    private let apiService: APIService
-    
-    // Generate new training plan
-    func generateTrainingPlan(
-        goalType: GoalType,
-        targetDistance: Double,
-        targetDate: Date,
-        experienceLevel: ExperienceLevel,
-        targetTime: Int? = nil,
-        daysPerWeek: Int = 4,
-        includeSpeedWork: Bool = true,
-        includeHillWork: Bool = true,
-        includeLongRuns: Bool = true
-    ) async throws -> TrainingPlan {
-        let request = GeneratePlanRequest(
-            goalType: goalType.rawValue,
-            targetDistance: targetDistance,
-            targetDate: ISO8601DateFormatter().string(from: targetDate),
-            experienceLevel: experienceLevel.rawValue,
-            targetTime: targetTime,
-            daysPerWeek: daysPerWeek,
-            includeSpeedWork: includeSpeedWork,
-            includeHillWork: includeHillWork,
-            includeLongRuns: includeLongRuns
-        )
-        
-        return try await apiService.post(
-            "/training-plans/generate",
-            body: request,
-            responseType: TrainingPlan.self
-        )
+    // isToday = false means no workout scheduled today → rest day
+    guard response.isToday == true, let workout = response.workout else {
+        return .restDay   // "Today is a rest & recovery day 🌙"
     }
-    
-    // Get active plans
-    func getActivePlans() async throws -> [TrainingPlan] {
-        let response = try await apiService.get(
-            "/training-plans?status=active",
-            responseType: [String: [TrainingPlan]].self
-        )
-        return response["plans"] ?? []
-    }
-    
-    // Get weekly workouts
-    func getWeeklyWorkouts(
-        planId: String,
-        weekNumber: Int
-    ) async throws -> WeeklyPlan {
-        return try await apiService.get(
-            "/training-plans/\(planId)/weeks/\(weekNumber)",
-            responseType: WeeklyPlan.self
-        )
-    }
-    
-    // Link completed run to workout
-    func linkRunToWorkout(
-        planId: String,
-        workoutId: String,
-        runId: String
-    ) async throws {
-        let request = ["runId": runId]
-        try await apiService.post(
-            "/training-plans/\(planId)/workouts/\(workoutId)/link-run",
-            body: request
-        )
-    }
-    
-    // Get plan adaptations
-    func getAdaptations(planId: String) async throws -> [PlanAdaptation] {
-        let response = try await apiService.get(
-            "/training-plans/\(planId)/adaptations",
-            responseType: [String: [PlanAdaptation]].self
-        )
-        return response["adaptations"] ?? []
-    }
-    
-    // Accept/reject adaptation
-    func respondToAdaptation(
-        planId: String,
-        adaptationId: String,
-        accepted: Bool
-    ) async throws {
-        let request = ["accepted": accepted]
-        try await apiService.post(
-            "/training-plans/\(planId)/adaptations/\(adaptationId)/accept",
-            body: request
-        )
-    }
-    
-    // Update plan status
-    func updatePlanStatus(
-        planId: String,
-        status: PlanStatus
-    ) async throws {
-        let request = ["status": status.rawValue]
-        try await apiService.post(
-            "/training-plans/\(planId)/status",
-            body: request
-        )
-    }
-}
-```
 
-### Phase 4: ViewModel Implementation (Week 2)
+    if workout.isCompleted {
+        return .completed(workout)  // "Great work! Today's workout is done ✅"
+    }
 
-```swift
-@MainActor
-class TrainingPlanViewModel: ObservableObject {
-    @Published var activePlans: [TrainingPlan] = []
-    @Published var currentPlan: TrainingPlan?
-    @Published var currentWeek: WeeklyPlan?
-    @Published var adaptations: [PlanAdaptation] = []
-    @Published var isLoading = false
-    @Published var error: String?
-    
-    private let apiClient: TrainingPlanAPIClient
-    
-    init(apiClient: TrainingPlanAPIClient) {
-        self.apiClient = apiClient
-    }
-    
-    func loadActivePlans() async {
-        isLoading = true
-        do {
-            activePlans = try await apiClient.getActivePlans()
-            if let firstPlan = activePlans.first {
-                currentPlan = firstPlan
-                await loadWeek(firstPlan.currentWeek)
-                await loadAdaptations()
-            }
-            error = nil
-        } catch {
-            self.error = error.localizedDescription
-        }
-        isLoading = false
-    }
-    
-    func generatePlan(
-        goalType: GoalType,
-        targetDistance: Double,
-        targetDate: Date,
-        experienceLevel: ExperienceLevel
-    ) async {
-        isLoading = true
-        do {
-            let newPlan = try await apiClient.generateTrainingPlan(
-                goalType: goalType,
-                targetDistance: targetDistance,
-                targetDate: targetDate,
-                experienceLevel: experienceLevel
-            )
-            currentPlan = newPlan
-            activePlans.append(newPlan)
-            await loadWeek(1)
-            error = nil
-        } catch {
-            self.error = error.localizedDescription
-        }
-        isLoading = false
-    }
-    
-    func loadWeek(_ weekNumber: Int) async {
-        guard let planId = currentPlan?.id else { return }
-        isLoading = true
-        do {
-            currentWeek = try await apiClient.getWeeklyWorkouts(
-                planId: planId,
-                weekNumber: weekNumber
-            )
-            error = nil
-        } catch {
-            self.error = error.localizedDescription
-        }
-        isLoading = false
-    }
-    
-    func loadAdaptations() async {
-        guard let planId = currentPlan?.id else { return }
-        do {
-            adaptations = try await apiClient.getAdaptations(planId: planId)
-            error = nil
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-    
-    func linkRunToWorkout(workoutId: String, runId: String) async {
-        guard let planId = currentPlan?.id else { return }
-        isLoading = true
-        do {
-            try await apiClient.linkRunToWorkout(
-                planId: planId,
-                workoutId: workoutId,
-                runId: runId
-            )
-            // Reload week data to show updated workout
-            await loadWeek(currentPlan?.currentWeek ?? 1)
-            error = nil
-        } catch {
-            self.error = error.localizedDescription
-        }
-        isLoading = false
-    }
+    return .scheduled(workout)     // Show workout card with Start button
 }
 ```
 
@@ -747,278 +715,106 @@ class TrainingPlanViewModel: ObservableObject {
 
 ### The Reassessment Process
 
-After every completed run, the backend automatically:
+After every completed run that is linked to a plan workout, the backend automatically:
 
-1. **Collects Data**
-   - User profile (age, fitness level, current CTL)
-   - Plan details (goal, progress, weeks remaining)
-   - Recent runs (last 10 completions)
-   - New completed run data (distance, pace, HR, elevation)
-
-2. **Evaluates Performance**
-   - Is user ahead/behind schedule?
-   - Over-training signals? (elevated HR, slow recovery, low compliance)
-   - Under-training signals? (easy runs feeling too easy, consistently beating targets)
-   - Injury indicators? (sudden pace drop, increased perceived effort)
-
-3. **AI Decision** (GPT-4)
-   - Analyzes user performance against plan
-   - Determines if adjustments needed
-   - Generates specific changes with reasoning
-   - Suggests when/how to adapt
-
-4. **User Experience**
-   - If changes needed: Push notification alerts user
-   - User reviews proposed changes
-   - Can accept automatically or review details
-   - Changes appear in next workout or current week
+1. **Collects Data** — User profile, plan details, recent runs, new completed run data
+2. **Evaluates Performance** — Ahead/behind schedule, over-training signals, under-training signals
+3. **AI Decision (GPT-4)** — Analyses performance, determines if adjustments needed, generates changes
+4. **Updates Plan** — Upcoming workout weeks are modified accordingly
 
 ### Example Adaptation Scenarios
 
-**Scenario 1: Over-Training Detection**
-```
-AI Analysis:
-- User completed 5 of 5 workouts this week
-- Average HR elevated 10 bpm above target
-- Recovery runs completed at faster pace than planned
-- Resting HR 5 bpm higher than baseline
+**Over-Training Detection:**
+- Elevated HR, slow recovery → reduce next week volume 20%, add recovery day
 
-Action:
-- Reduce week 4 volume by 20%
-- Convert 2 tempo workouts to easy
-- Add extra recovery day
-- Reduce intensity from Z3→Z2
+**Ahead of Schedule:**
+- Consistently faster than planned → increase volume 15%, progress intensity
 
-User Notification:
-"Your HR data suggests you're training hard. I've reduced this week 
-to help with recovery. Trust the process!"
-```
-
-**Scenario 2: Ahead of Schedule**
-```
-AI Analysis:
-- Completed 4 of 4 workouts, all faster than planned
-- Paces consistently 30-60 sec/km faster
-- HR zones lower than expected for workload
-- User consistently exceeds targets
-
-Action:
-- Increase week 5-6 volume by 15%
-- Add speed work intervals
-- Increase intensity from Z2→Z3
-- Progress race pace efforts
-
-User Notification:
-"Great fitness gains! You're ready for more challenge.
-Let's push your limits this week."
-```
-
-**Scenario 3: Missed Workouts**
-```
-AI Analysis:
-- Completed 2 of 5 planned workouts
-- Skipped 3 consecutive days
-- No runs in last week
-
-Action:
-- Extend plan by 1 week
-- Reduce intensity back to base building
-- Focus on consistency over performance
-- Add motivational coaching
-
-User Notification:
-"I noticed you missed some workouts. That's okay! 
-Let's focus on getting back into routine this week."
-```
+**Missed Workouts:**
+- Multiple skipped sessions → extend plan 1 week, refocus on consistency
 
 ---
 
-## Key Metrics & Monitoring
+## Common Issues & Fixes
 
-### Performance Indicators Users See
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| Plan shows wrong number of weeks | `durationWeeks` not sent or ignored | Send `durationWeeks` in generate request |
+| Workout dates off by 1+ days | Missing `userTimezone` | Always send `userTimezone` (IANA string) |
+| "Today's done" shown on rest days | `isToday` flag not checked | Always check `isToday` before displaying workout |
+| Day name shows "Day" | `dayOfWeek` out of range from AI | Apply `% 7` before using as list index |
+| Plan generate returns blank | Decoding generate response as full plan | Two-step: generate → details endpoint |
+| "About You" shows generic text | `performanceBaseline` is null | Check `hasHistory` field before rendering |
+| Distance says 5.0km when not set | iOS defaulting to 5km fallback | Use `workout.distance` — send `null` if absent |
+| Blank screen on Start Workout | View lifecycle issue | Don't clear run config on first read — clear only on cancel |
 
-1. **Plan Adherence**
-   - % of workouts completed
-   - Distance vs plan (actual/target km)
-   - Consistency score (0-100%)
+---
 
-2. **Fitness Progress**
-   - CTL (Chronic Training Load) graph
-   - TSS (Training Stress Score) per week
-   - Recovery time trends
+## Key Neon Migrations Required
 
-3. **Pace Progression**
-   - Easy run pace trend
-   - Long run pace trend
-   - Threshold pace trend
+Run these SQL files in Neon (in any order, each is idempotent):
 
-4. **Completion Status**
-   - Weeks completed: 3/16
-   - Days to race: 87 days
-   - Workouts completed: 12/68
-   - On track / Behind schedule
+| File | Purpose |
+|------|---------|
+| `ADD_COACHING_CONTEXT_TO_RUNS.sql` | Adds 7 coaching plan context columns to runs table |
+| `FIX_PLANNED_WORKOUT_HR_ZONE_COLUMNS.sql` | Adds HR zone columns to planned_workouts |
+| `ADD_LINKED_TRAINING_PLAN_TO_GOALS.sql` | Adds `linked_training_plan_id` to goals table |
 
 ---
 
 ## Integration Points with Other Features
 
-### 1. Runs Integration
-- Users link completed runs to plan workouts
-- Run metrics compared against plan targets
+### Runs Integration
+- Users link completed runs to plan workouts via `complete-workout` endpoint
+- Run metrics compared against plan targets in post-run analysis
 - Run data used for automatic plan reassessment
-- PR/achievement tracking within plan context
+- All 7 coaching context fields stored on the run record
 
-### 2. Garmin Integration
-- Garmin data enriches completed workout details
-- HR zones automatically calculated from Garmin device
-- Real-time performance metrics available
-- Better reassessment accuracy with device data
+### Weather Integration
+- Pre-run briefing uses current weather + coaching plan context together
+- Weather data saved with each run (`weatherData` in upload request)
+- Weather impact analysis uses coached runs alongside free runs
 
-### 3. AI Coaching
-- AI Coach provides real-time guidance during workouts
-- Pre-run briefing references plan goal
-- Post-run analysis includes plan context
-- Coaching advice tailored to week's focus
+### AI Coaching — Full Context Chain
+- **Pre-run**: AI knows your goal, week, and workout type → personalised briefing
+- **During run**: HR and elite coaching is zone-aware (z2 vs z4 guidance differs significantly)
+- **Post-run**: Analysis evaluates whether you hit your zone targets, references plan progression
 
-### 4. Push Notifications
-- Plan generated notification
-- Workout reminders (opt-in)
-- Adaptation alerts
-- Milestone achievements
-- Week/month completion congratulations
-
----
-
-## Testing Scenarios
-
-### Test 1: Generate Marathon Plan
-```
-Input:
-- Goal: Marathon (42.195 km)
-- Target Date: June 15, 2026
-- Experience: Intermediate
-- Days/Week: 5
-
-Expected Output:
-- 16-week plan generated
-- Progressively increasing mileage (30→60 km/week)
-- Mix of easy, tempo, intervals, long runs
-- AI-generated coaching tips for each session
-```
-
-### Test 2: Link Run to Workout
-```
-Input:
-- Planned: 6.0 km easy run at 6:00/km pace
-- Completed: 6.2 km run at 5:47/km pace
-
-Expected Output:
-- Workout marked complete
-- Performance feedback: "Great job! 3% faster than planned"
-- Linked run appears in history
-- Plan week progress updated
-```
-
-### Test 3: Trigger Plan Adaptation
-```
-Input:
-- Complete all 5 workouts of week 2
-- All paces 30+ sec/km faster than planned
-- Heart rates consistently lower than target
-
-Expected Output:
-- Plan adaptation triggered
-- Suggested changes: +15% volume, increase intensity
-- Push notification: "You're performing great!"
-- User can accept/review changes
-```
+### Garmin Integration
+- HR zones automatically calculated from Garmin device data when available
+- `hrZoneScenario: "device"` indicates personalised zones from connected device
+- Training effect score enriches post-workout analysis
 
 ---
 
 ## Error Handling
 
-### Common Errors & Resolutions
-
 | Error | Cause | Resolution |
 |-------|-------|-----------|
 | `400 Bad Goal Date` | Target date is in past | Show date picker validation |
-| `400 Invalid Experience` | Unknown experience level | Validate enum values |
-| `429 Rate Limited` | Too many plan generations | Show retry UI, wait 60s |
-| `500 AI Generation Failed` | GPT-4 API error | Show error + retry button |
+| `400 Invalid Experience` | Unknown experience level | Validate against accepted label list |
+| `500 AI Generation Failed` | GPT-4 API error or JSON parse issue | Show error + retry button |
 | `404 Plan Not Found` | Plan ID invalid/deleted | Show error, reload plans list |
 
 ---
 
 ## Performance Considerations
 
-### Optimization Tips
-
-1. **Cache Weekly Plans**
-   - Store downloaded weekly plans locally
-   - Only refresh when user advances week
-   - Implement pagination for large plans
-
-2. **Background Tasks**
-   - Check for adaptations on app launch
-   - Refresh active plans every 6 hours
-   - Batch adaptation notifications
-
-3. **Data Fetching**
-   - Load full plan only once on generation
-   - Fetch one week at a time when viewing
-   - Lazy load adaptations on demand
-
-4. **Image/Resource Optimization**
-   - Cache HR zone icons
-   - Preload workout type badges
-   - Compress plan detail images
+1. **Two-step generate** — Call generate, store `planId`, then immediately fetch details
+2. **Cache weekly plans** — Store downloaded weekly plans locally, refresh on week advance
+3. **Today endpoint is cheap** — Safe to call on every app foreground
+4. **Progress endpoint** — Cache for 5 minutes, refresh after completing a workout
+5. **Timezone param** — Always send on today and generate endpoints
 
 ---
 
-## Privacy & Security
+## All Related Documentation in Repo
 
-- ✅ Plans stored per-user with role-based access
-- ✅ No plan data shared without permission
-- ✅ User can export/delete plans anytime
-- ✅ AI insights never stored with PII
-- ✅ Adaptation history retained for user reference
-
----
-
-## Future Enhancements
-
-1. **Social Features**
-   - Share plans with friends
-   - Group training plans
-   - Coach-created plans
-
-2. **Advanced AI**
-   - Injury risk prediction
-   - Weather-aware adjustments
-   - Real-time coaching during runs
-
-3. **Integration**
-   - Apple Health integration
-   - Apple Watch app with live metrics
-   - Siri shortcuts for workout logging
-
-4. **Analytics**
-   - Plan success rates by goal type
-   - Trainer leaderboards
-   - Performance benchmarking
-
----
-
-## Questions?
-
-Reach out to the backend team for:
-- API clarifications
-- Data model questions
-- Adaptation algorithm details
-- Testing scenarios
-
-All documentation files available in repository:
-- `AI_COACHING_PLAN_SUMMARY.md` (this file)
-- `GARMIN_INTEGRATION_SUMMARY.md`
-- `GARMIN_API_REFERENCE.md`
-- Code examples in `server/training-plan-service.ts`
+| File | Contents |
+|------|---------|
+| `AI_COACHING_PLAN_SUMMARY.md` | This file — full feature overview |
+| `IOS_COACHING_CONTEXT_IMPLEMENTATION_GUIDE.md` | Deep-dive on coaching context in run sessions |
+| `COACHING_PLAN_RUN_COMPLETION_FLOW.md` | Run completion flow and data enrichment |
+| `TRAINING_PLAN_SAMPLE_RESPONSES.json` | Sample JSON for all endpoints |
+| `GARMIN_INTEGRATION_SUMMARY.md` | Garmin device integration |
+| `server/training-plan-service.ts` | Backend plan generation service |
