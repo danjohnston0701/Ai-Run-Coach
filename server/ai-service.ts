@@ -807,6 +807,107 @@ function getHeartRateZone(hr: number, age?: number): string {
   return 'Zone 5 (Maximum)';
 }
 
+/**
+ * Generate interval-specific coaching for work and recovery phases
+ */
+export async function generateIntervalCoaching(params: {
+  intervalNumber: number;
+  isWorkPhase: boolean;
+  distanceInPhaseKm: number;
+  phaseDurationTargetKm: number;
+  currentPace?: string;
+  targetPace?: string;
+  currentHeartRate?: number;
+  targetHeartRateMin?: number;
+  targetHeartRateMax?: number;
+  coachName: string;
+  coachTone: string;
+  coachAccent?: string;
+  coachGender?: string;
+  fitnessLevel?: string;
+  runnerName?: string;
+}): Promise<string> {
+  const {
+    intervalNumber,
+    isWorkPhase,
+    distanceInPhaseKm,
+    phaseDurationTargetKm,
+    currentPace,
+    targetPace,
+    currentHeartRate,
+    targetHeartRateMin,
+    targetHeartRateMax,
+    coachName,
+    coachTone,
+    fitnessLevel,
+    runnerName
+  } = params;
+
+  const phaseProgress = Math.round((distanceInPhaseKm / phaseDurationTargetKm) * 100);
+  const phaseName = isWorkPhase ? 'work interval' : 'recovery jog';
+  const phaseVerb = isWorkPhase ? 'push' : 'recover';
+  const phaseEmphasis = isWorkPhase 
+    ? 'This is your work interval — focus on the target pace and effort zone.'
+    : 'This is your recovery interval — bring your heart rate down and get ready for the next effort.';
+
+  // Build HR info if in work phase
+  let hrContext = '';
+  if (isWorkPhase && targetHeartRateMin && targetHeartRateMax) {
+    hrContext = `Your target heart rate for this work interval is ${targetHeartRateMin}–${targetHeartRateMax} bpm.`;
+    if (currentHeartRate) {
+      if (currentHeartRate < targetHeartRateMin) {
+        hrContext += ` You're currently ${currentHeartRate} bpm — below target. Pick up the effort.`;
+      } else if (currentHeartRate > targetHeartRateMax) {
+        hrContext += ` You're currently ${currentHeartRate} bpm — above target. Dial it back slightly to stay in zone.`;
+      } else {
+        hrContext += ` You're currently ${currentHeartRate} bpm — right in zone. Keep it steady!`;
+      }
+    }
+  }
+
+  // Build pace context
+  let paceContext = '';
+  if (currentPace && targetPace) {
+    paceContext = `Target pace for this ${phaseName}: ${targetPace}/km. Current pace: ${currentPace}/km.`;
+  }
+
+  const prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
+
+INTERVAL COACHING — ${intervalNumber > 1 ? `Rep ${intervalNumber}` : 'Rep 1 (Establish pace)'} ${isWorkPhase ? 'WORK' : 'RECOVERY'}
+${phaseProgress}% through the ${phaseName}.
+${phaseEmphasis}
+
+${paceContext}
+${hrContext}
+
+Give 1–2 punchy, direct sentences. ${isWorkPhase ? 'Push them hard but safely.' : 'Help them recover and prepare for the next effort.'}`;
+
+  const systemMsg = buildCoachingSystemPrompt({
+    coachName,
+    coachTone,
+    activityType: 'interval running'
+  });
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemMsg },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 80,
+      temperature: 0.7,
+    });
+
+    return completion.choices[0].message.content || `${isWorkPhase ? 'Nail this interval!' : 'Recover and breathe.'}`;
+  } catch (error) {
+    console.error("Error generating interval coaching:", error);
+    return isWorkPhase 
+      ? `You're on rep ${intervalNumber} — push steady!`
+      : `You're in recovery — bring your HR down.`;
+  }
+}
+
 export async function generateStruggleCoaching(params: {
   distance: number;
   elapsedTime: number;

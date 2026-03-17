@@ -7348,6 +7348,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Interval-specific coaching (work and recovery phases)
+  app.post("/api/coaching/interval-coaching", async (req: Request, res: Response) => {
+    try {
+      const { coachGender, coachAccent, coachTone: baseTone } = req.body;
+      
+      const aiService = await import("./ai-service");
+      const message = await aiService.generateIntervalCoaching(req.body);
+      
+      // Generate TTS audio
+      let base64Audio: string | null = null;
+      try {
+        const voice = mapCoachVoice(coachGender, coachAccent, baseTone);
+        const intervalTTSInstructions = await getCoachTTSInstructions(coachAccent, baseTone, coachGender, req.body.coachName);
+        const audioBuffer = await aiService.generateTTS(message, voice, intervalTTSInstructions, coachAccent, coachGender);
+        base64Audio = audioBuffer.toString('base64');
+      } catch (ttsError) {
+        console.warn("Interval coaching TTS failed, returning text only:", ttsError);
+      }
+      
+      res.json({
+        message,
+        audio: base64Audio,
+        format: base64Audio ? 'mp3' : null
+      });
+    } catch (error: any) {
+      console.error("Interval coaching error:", error);
+      res.status(500).json({ error: "Failed to get interval coaching" });
+    }
+  });
+
   // Wellness-aware coaching response during run (Talk to Coach) - Updated with TTS
   app.post("/api/coaching/talk-to-coach", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
