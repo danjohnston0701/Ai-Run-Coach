@@ -4006,13 +4006,13 @@ private fun KmSplitsVisualChart(kmSplits: List<KmSplit>) {
             )
 
             splitData.forEachIndexed { idx, (split, pace) ->
-                // Bar length: all splits get a meaningful bar. Use avg ± 20% as the
-                // "full range" so consistent pacing gives similar-length bars.
-                val axisMin = avgPace * 0.85   // 15% faster than avg = longest bar
-                val axisMax = avgPace * 1.25   // 25% slower than avg = shortest bar
+                // Bar length: slower pace = longer bar (more time = longer distance on chart).
+                // Use avg ± range as axis so consistent pacing gives similar-length bars.
+                val axisMin = avgPace * 0.85   // fastest (15% quicker) = shortest bar
+                val axisMax = avgPace * 1.25   // slowest (25% slower) = longest bar
                 val barFraction = if (pace > 0) {
                     val norm = ((pace - axisMin) / (axisMax - axisMin)).coerceIn(0.0, 1.0)
-                    (1.0 - norm).toFloat().coerceIn(0.15f, 1f)
+                    norm.toFloat().coerceIn(0.15f, 1f)
                 } else 0.15f
 
                 // Color relative to average: within ±5% = green, 5-12% slow = yellow,
@@ -4663,8 +4663,8 @@ private fun FatigueCurveCard(run: RunSession) {
                 val axisRange = (axisMax - axisMin).coerceAtLeast(1.0)
 
                 paces.forEachIndexed { _, pace ->
-                    // Height: shorter bar = slower pace (more fatigued)
-                    val heightFraction = (1.0 - ((pace - axisMin) / axisRange).coerceIn(0.0, 1.0))
+                    // Height: taller bar = slower pace (more time = more fatigue visible)
+                    val heightFraction = ((pace - axisMin) / axisRange).coerceIn(0.0, 1.0)
                         .toFloat().coerceIn(0.15f, 1f)
 
                     // Color relative to average (not fastest→slowest)
