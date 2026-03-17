@@ -5576,24 +5576,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
           let totalPushDistance = 0;
           
           // Insert raw epochs (keep for 7 days)
+          // CRITICAL: Convert any decimal values to integers for integer fields
           const epochsToInsert = epochs.map(epoch => ({
             userId: device.userId,
             epochDate: firstEpochDate,
-            startTimeInSeconds: epoch.startTimeInSeconds,
+            startTimeInSeconds: Math.floor(Number(epoch.startTimeInSeconds) || 0),
             activityType: epoch.activityType,
             intensity: epoch.intensity,
-            met: epoch.met,
-            meanMotionIntensity: epoch.meanMotionIntensity,
-            maxMotionIntensity: epoch.maxMotionIntensity,
-            activeKilocalories: epoch.activeKilocalories,
-            durationInSeconds: epoch.durationInSeconds,
-            activeTimeInSeconds: epoch.activeTimeInSeconds,
-            steps: epoch.steps,
-            pushes: epoch.pushes,
-            distanceInMeters: epoch.distanceInMeters,
-            pushDistanceInMeters: epoch.pushDistanceInMeters,
+            met: Number(epoch.met) || 0,
+            meanMotionIntensity: Number(epoch.meanMotionIntensity) || 0,
+            maxMotionIntensity: Number(epoch.maxMotionIntensity) || 0,
+            activeKilocalories: Number(epoch.activeKilocalories) || 0,
+            durationInSeconds: Math.floor(Number(epoch.durationInSeconds) || 0),
+            activeTimeInSeconds: Math.floor(Number(epoch.activeTimeInSeconds) || 0),
+            steps: Math.floor(Number(epoch.steps) || 0),
+            pushes: Math.floor(Number(epoch.pushes) || 0),
+            distanceInMeters: Number(epoch.distanceInMeters) || 0,
+            pushDistanceInMeters: Number(epoch.pushDistanceInMeters) || 0,
             summaryId: epoch.summaryId,
-            startTimeOffsetInSeconds: epoch.startTimeOffsetInSeconds,
+            startTimeOffsetInSeconds: Math.floor(Number(epoch.startTimeOffsetInSeconds) || 0),
             expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Delete after 7 days
           }));
           
@@ -5602,33 +5603,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
             await db.insert(garminEpochsRaw).values(epochsToInsert);
           }
           
-          // Calculate aggregates from epochs
-          for (const epoch of epochs) {
+          // Calculate aggregates from converted epochs (using values that will be stored)
+          for (const converted of epochsToInsert) {
             // Intensity breakdown
-            if (epoch.intensity === 'SEDENTARY') sedentarySeconds += epoch.activeTimeInSeconds || 0;
-            if (epoch.intensity === 'ACTIVE') activeSeconds += epoch.activeTimeInSeconds || 0;
-            if (epoch.intensity === 'HIGHLY_ACTIVE') highlyActiveSeconds += epoch.activeTimeInSeconds || 0;
+            if (converted.intensity === 'SEDENTARY') sedentarySeconds += converted.activeTimeInSeconds;
+            if (converted.intensity === 'ACTIVE') activeSeconds += converted.activeTimeInSeconds;
+            if (converted.intensity === 'HIGHLY_ACTIVE') highlyActiveSeconds += converted.activeTimeInSeconds;
             
             // Activity type breakdown
-            if (epoch.activityType === 'WALKING') walkingSeconds += epoch.durationInSeconds || 0;
-            if (epoch.activityType === 'RUNNING') runningSeconds += epoch.durationInSeconds || 0;
-            if (epoch.activityType === 'WHEELCHAIR_PUSHING') wheelchairSeconds += epoch.durationInSeconds || 0;
+            if (converted.activityType === 'WALKING') walkingSeconds += converted.durationInSeconds;
+            if (converted.activityType === 'RUNNING') runningSeconds += converted.durationInSeconds;
+            if (converted.activityType === 'WHEELCHAIR_PUSHING') wheelchairSeconds += converted.durationInSeconds;
             
             // Metrics
-            totalMet += epoch.met || 0;
-            peakMet = Math.max(peakMet, epoch.met || 0);
-            totalMotionIntensity += epoch.meanMotionIntensity || 0;
+            totalMet += converted.met;
+            peakMet = Math.max(peakMet, converted.met);
+            totalMotionIntensity += converted.meanMotionIntensity;
             
             // Totals
-            totalCalories += epoch.activeKilocalories || 0;
-            totalSteps += epoch.steps || 0;
-            totalPushes += epoch.pushes || 0;
-            totalDistance += epoch.distanceInMeters || 0;
-            totalPushDistance += epoch.pushDistanceInMeters || 0;
+            totalCalories += converted.activeKilocalories;
+            totalSteps += converted.steps;
+            totalPushes += converted.pushes;
+            totalDistance += converted.distanceInMeters;
+            totalPushDistance += converted.pushDistanceInMeters;
           }
           
-          const averageMet = epochs.length > 0 ? totalMet / epochs.length : 0;
-          const maxMotionIntensity = Math.max(...epochs.map(e => e.maxMotionIntensity || 0));
+          const averageMet = epochsToInsert.length > 0 ? totalMet / epochsToInsert.length : 0;
+          const maxMotionIntensity = Math.max(...epochsToInsert.map(e => e.maxMotionIntensity));
           const averageMotionIntensity = epochs.length > 0 ? totalMotionIntensity / epochs.length : 0;
           
           // Create or update aggregate
