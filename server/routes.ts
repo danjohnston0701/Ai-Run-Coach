@@ -5724,7 +5724,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // CRITICAL: Convert any decimal values to integers for integer fields
           const epochsToInsert = epochs.map(epoch => ({
             userId: device.userId,
-            epochDate: firstEpochDate,
+            date: epochDate,
             startTimeInSeconds: Math.floor(Number(epoch.startTimeInSeconds) || 0),
             activityType: epoch.activityType,
             intensity: epoch.intensity,
@@ -5806,7 +5806,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } else {
             await db.insert(garminEpochsAggregate).values({
               userId: device.userId,
-              epochDate: firstEpochDate,
+              date: epochDate,
               sedentaryDurationSeconds: sedentarySeconds,
               activeDurationSeconds: activeSeconds,
               highlyActiveDurationSeconds: highlyActiveSeconds,

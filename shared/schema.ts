@@ -745,7 +745,7 @@ export const garminEpochsRaw = pgTable("garmin_epochs_raw", {
   userId: varchar("user_id").notNull().references(() => users.id),
   
   // Epoch Date Tracking
-  epochDate: text("epoch_date").notNull(), // YYYY-MM-DD
+  date: text("date").notNull(), // YYYY-MM-DD
   startTimeInSeconds: integer("start_time_in_seconds").notNull(), // Epoch timestamp
   
   // Activity Classification
