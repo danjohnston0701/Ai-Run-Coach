@@ -780,7 +780,7 @@ export const garminEpochsRaw = pgTable("garmin_epochs_raw", {
 export const garminEpochsAggregate = pgTable("garmin_epochs_aggregate", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
-  epochDate: text("epoch_date").notNull(), // YYYY-MM-DD
+  epochDate: text("date").notNull(), // YYYY-MM-DD
   
   // Activity Type Distribution (seconds per type)
   sedentaryDurationSeconds: integer("sedentary_duration_seconds").default(0),
