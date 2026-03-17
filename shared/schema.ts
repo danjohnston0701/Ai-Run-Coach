@@ -1065,6 +1065,17 @@ export const plannedWorkouts = pgTable("planned_workouts", {
   effortDescription: text("effort_description"), // For non-device scenarios: "gentle jog", "comfortably hold conversation", etc.
   description: text("description"),
   instructions: text("instructions"), // Detailed workout instructions
+  // Interval/repeat workout metadata (for workoutType = "intervals" or "hill_repeats")
+  intervalCount: integer("interval_count"), // Number of repetitions (e.g., 6 for 6x400m)
+  intervalDistanceMeters: integer("interval_distance_meters"), // Distance of each interval (e.g., 400 for 400m)
+  intervalDurationSeconds: integer("interval_duration_seconds"), // Duration if time-based (e.g., 120 for 2min)
+  restDistanceMeters: integer("rest_distance_meters"), // Rest/recovery distance between intervals
+  restDurationSeconds: integer("rest_duration_seconds"), // Rest/recovery duration between intervals
+  intervalTargetPace: text("interval_target_pace"), // Target pace for work phase (mm:ss/km)
+  restTargetPace: text("rest_target_pace"), // Target pace for recovery phase (mm:ss/km)
+  intervalHeartRateMin: integer("interval_heart_rate_min"), // Min HR for work phase
+  intervalHeartRateMax: integer("interval_heart_rate_max"), // Max HR for work phase
+  restHeartRateMax: integer("rest_heart_rate_max"), // Max HR for recovery phase
   isCompleted: boolean("is_completed").default(false),
   completedRunId: varchar("completed_run_id").references(() => runs.id),
   createdAt: timestamp("created_at").defaultNow(),

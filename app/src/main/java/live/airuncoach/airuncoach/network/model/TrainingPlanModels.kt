@@ -110,6 +110,17 @@ data class WorkoutDetails(
     @SerializedName("intensity") val intensity: String?,    // z1-z5
     @SerializedName("description") val description: String?,
     @SerializedName("instructions") val instructions: String?,
+    // Interval/repeat workout metadata
+    @SerializedName("intervalCount") val intervalCount: Int? = null,                   // Number of reps
+    @SerializedName("intervalDistanceMeters") val intervalDistanceMeters: Int? = null, // Distance per rep
+    @SerializedName("intervalDurationSeconds") val intervalDurationSeconds: Int? = null, // Duration if time-based
+    @SerializedName("restDistanceMeters") val restDistanceMeters: Int? = null,         // Recovery distance
+    @SerializedName("restDurationSeconds") val restDurationSeconds: Int? = null,       // Recovery duration
+    @SerializedName("intervalTargetPace") val intervalTargetPace: String? = null,      // Target pace for work
+    @SerializedName("restTargetPace") val restTargetPace: String? = null,              // Target pace for recovery
+    @SerializedName("intervalHeartRateMin") val intervalHeartRateMin: Int? = null,     // Min HR for work
+    @SerializedName("intervalHeartRateMax") val intervalHeartRateMax: Int? = null,     // Max HR for work
+    @SerializedName("restHeartRateMax") val restHeartRateMax: Int? = null,             // Max HR for recovery
     @SerializedName("isCompleted") val isCompleted: Boolean = false,
     @SerializedName("completedRunId") val completedRunId: String? = null
 )

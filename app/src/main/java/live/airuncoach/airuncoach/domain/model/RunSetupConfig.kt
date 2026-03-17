@@ -27,7 +27,21 @@ data class RunSetupConfig(
     val workoutDescription: String? = null,
     val planGoalType: String? = null,     // "5k" | "10k" | "half_marathon" | "marathon"
     val planWeekNumber: Int? = null,
-    val planTotalWeeks: Int? = null
+    val planTotalWeeks: Int? = null,
+
+    // ── Interval training metadata ─────────────────────────────────────────────
+    // Populated for interval/repeat workouts (e.g., "6x400m" or "5x2min hard / 2min easy")
+    val isIntervalWorkout: Boolean = false,
+    val intervalCount: Int? = null,        // Number of repetitions (e.g., 6 for 6x400m)
+    val intervalDistanceKm: Float? = null, // Distance of each interval (e.g., 0.4 for 400m)
+    val intervalDurationSecs: Int? = null, // Duration if time-based (e.g., 120 for 2min intervals)
+    val restDistanceKm: Float? = null,     // Rest/recovery distance between intervals
+    val restDurationSecs: Int? = null,     // Rest/recovery duration between intervals
+    val intervalTargetPace: String? = null,// Target pace for work phase (mm:ss/km)
+    val restTargetPace: String? = null,    // Target pace for recovery phase (mm:ss/km)
+    val intervalHeartRateMin: Int? = null, // Min HR for work phase
+    val intervalHeartRateMax: Int? = null, // Max HR for work phase
+    val restHeartRateMax: Int? = null      // Max HR for recovery phase
 ) {
     /**
      * Get formatted target time string
