@@ -6716,7 +6716,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, hasRoute, activityType, 
               weather: clientWeather, targetPace, targetTime, wellness: clientWellness, 
-              turnInstructions, startLocation } = req.body;
+              turnInstructions, startLocation,
+              // Training plan / coached-workout context
+              trainingPlanId, planGoalType, planWeekNumber, planTotalWeeks,
+              workoutType, workoutIntensity, workoutDescription } = req.body;
       
       // Get user's coach settings
       const user = await storage.getUser(req.user!.userId);
@@ -6806,6 +6809,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         weatherImpact,
         runnerName: req.body.runnerName || user?.name || undefined,
         fitnessLevel: user?.fitnessLevel || undefined,
+        // Training plan context — enables workout-specific coaching briefings
+        trainingPlanId,
+        planGoalType,
+        planWeekNumber,
+        planTotalWeeks,
+        workoutType,
+        workoutIntensity,
+        workoutDescription,
       });
       
       // Build natural speech text from ALL AI response fields
