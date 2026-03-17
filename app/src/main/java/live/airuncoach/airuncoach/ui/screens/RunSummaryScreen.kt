@@ -234,6 +234,7 @@ fun RunSummaryScreenFlagship(
                             isGarminConnected = isGarminConnected,
                             onEnrichWithGarmin = { viewModel.enrichRunWithGarminData() },
                             isEnrichingWithGarmin = viewModel.isEnrichingWithGarmin.collectAsState().value,
+                            isWaitingForGarminSync = viewModel.isWaitingForGarminSync.collectAsState().value,
                             coachingNotes = runSession!!.aiCoachingNotes,
                             onShareCard = {
                                 // share a “summary card” (text now; optional bitmap helper included below)
@@ -498,6 +499,7 @@ private fun AiInsightsTabContent(
     isGarminConnected: Boolean = false,
     onEnrichWithGarmin: () -> Unit = {},
     isEnrichingWithGarmin: Boolean = false,
+    isWaitingForGarminSync: Boolean = false,
     coachingNotes: List<AiCoachingNote> = emptyList(),
     onShareCard: () -> Unit,
     onDelete: () -> Unit,
@@ -528,11 +530,10 @@ private fun AiInsightsTabContent(
 
         // Garmin enrich CTA — prominent banner when Garmin is connected but run not yet enriched
         if (isGarminConnected && run.hasGarminData != true) {
-            val isWaitingForSync = viewModel.isWaitingForGarminSync.collectAsState().value
             item {
                 GarminEnrichCTACard(
                     isEnriching = isEnrichingWithGarmin,
-                    isWaitingForSync = isWaitingForSync,
+                    isWaitingForSync = isWaitingForGarminSync,
                     onEnrich = onEnrichWithGarmin
                 )
             }
