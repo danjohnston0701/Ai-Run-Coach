@@ -2558,20 +2558,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           startDate.setDate(startDate.getDate() - historyDays);
           const endDate = new Date();
           
-          // Trigger background sync (don't wait for it)
-          garminService.syncGarminActivities(
-            userId,
-            tokens.accessToken,
-            startDate.toISOString(),
-            endDate.toISOString()
-          ).then(() => {
-            console.log(`✅ Historical Garmin activities synced for user ${userId}`);
-          }).catch((err: any) => {
-            console.error(`❌ Failed to sync historical Garmin activities: ${err.message}`);
-          });
+          // NOTE: Historical sync via pull API disabled — Garmin will push recent activities
+          // via webhook automatically after OAuth completes. The pull API requires a different
+          // token type than what we get from OAuth (which is push-only).
+          // Activities will appear via the /api/garmin/webhook/activities endpoint instead.
+          console.log(`✅ Garmin OAuth complete — activities will be pushed via webhook`);
         } catch (error: any) {
-          console.error("Error initiating historical sync:", error);
-          // Don't fail the connection if historical sync fails
+          console.error("Error in Garmin OAuth flow:", error);
+          // Don't fail the connection on other errors
         }
       } else {
         console.log("⏭️ Skipping historical activity sync (historyDays = 0)");
