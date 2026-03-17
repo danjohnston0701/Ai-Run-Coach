@@ -285,7 +285,9 @@ class GeneratePlanViewModel @Inject constructor(
                     height = demographics.height,
                     weight = demographics.weight,
                     // User injuries for AI to design appropriate training
-                    injuries = injuriesList
+                    injuries = injuriesList,
+                    // User's local timezone so the server assigns session dates correctly
+                    userTimezone = java.util.TimeZone.getDefault().id
                 )
                 val response = apiService.generateTrainingPlan(request)
                 _generateState.value = GeneratePlanState.Success(response.planId)

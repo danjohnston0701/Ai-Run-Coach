@@ -42,7 +42,9 @@ data class GeneratePlanRequest(
     @SerializedName("height") val height: Double? = null,   // cm
     @SerializedName("weight") val weight: Double? = null,   // kg
     // User injuries for AI to design appropriate training (avoid aggravating recovering injuries)
-    @SerializedName("injuries") val injuries: List<InjuryRequest> = emptyList()
+    @SerializedName("injuries") val injuries: List<InjuryRequest> = emptyList(),
+    // User's IANA timezone name (e.g. "Pacific/Auckland") so the server anchors week 1 to the correct calendar day
+    @SerializedName("userTimezone") val userTimezone: String? = null
 )
 
 /** Response from generate */

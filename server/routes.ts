@@ -9031,7 +9031,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         firstSessionStart = "flexible", // "today" | "tomorrow" | "flexible"
         regularSessions = [],  // recurring runs the user already does each week
         injuries = [],  // [{ bodyPart, status, notes }]
-        goalId = null  // optional: goal ID to link this plan to
+        goalId = null,  // optional: goal ID to link this plan to
+        userTimezone = null  // IANA timezone name, e.g. "Pacific/Auckland"
       } = req.body;
 
       if (!goalType || !targetDistance) {
@@ -9049,7 +9050,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         regularSessions,
         firstSessionStart,
         durationWeeks,
-        Array.isArray(injuries) ? injuries : []
+        Array.isArray(injuries) ? injuries : [],
+        userTimezone || null
       );
       
       // Link plan to goal if goalId was provided
@@ -9596,8 +9598,13 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   app.get("/api/training-plans/:planId/today", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { planId } = req.params;
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      const { timezone } = req.query as { timezone?: string };
+
+      // Use user's local timezone so "today" matches their calendar day, not server UTC
+      const today = timezone
+        ? new Date(new Date().toLocaleDateString('en-CA', { timeZone: timezone }) + 'T00:00:00')
+        : (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
+
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
 

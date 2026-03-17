@@ -281,7 +281,10 @@ interface ApiService {
     suspend fun getTrainingPlanDetails(@Path("planId") planId: String): TrainingPlanDetails
 
     @GET("/api/training-plans/{planId}/today")
-    suspend fun getTodayWorkout(@Path("planId") planId: String): TodayWorkoutResponse
+    suspend fun getTodayWorkout(
+        @Path("planId") planId: String,
+        @Query("timezone") timezone: String? = null
+    ): TodayWorkoutResponse
 
     @GET("/api/training-plans/{planId}/progress")
     suspend fun getTrainingPlanProgress(@Path("planId") planId: String): TrainingPlanProgress

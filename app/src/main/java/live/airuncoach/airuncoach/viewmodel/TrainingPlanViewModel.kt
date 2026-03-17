@@ -103,7 +103,8 @@ class TrainingPlanViewModel @Inject constructor(
 
                 val details = detailsDeferred.await()
                 val progress = progressDeferred.await() ?: synthesizeProgress(details)
-                val today = try { apiService.getTodayWorkout(planId) } catch (_: Exception) { null }
+                val userTimezone = java.util.TimeZone.getDefault().id
+                val today = try { apiService.getTodayWorkout(planId, userTimezone) } catch (_: Exception) { null }
                 _planDetailState.value = PlanDetailState.Success(details, progress, today)
             } catch (e: Exception) {
                 Log.e("TrainingPlanVM", "Error loading plan detail: ${e.message}", e)

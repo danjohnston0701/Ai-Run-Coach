@@ -54,7 +54,8 @@ export async function generateTrainingPlan(
   regularSessions: RegularSessionInput[] = [],
   firstSessionStart: string = "flexible",  // "today" | "tomorrow" | "flexible"
   durationWeeks?: number,  // user-selected plan duration (takes priority over targetDate)
-  injuries: InjuryInput[] = []
+  injuries: InjuryInput[] = [],
+  userTimezone: string | null = null  // IANA timezone e.g. "Pacific/Auckland"
 ): Promise<string> {
   try {
     // Get user profile
@@ -580,10 +581,16 @@ If runner has NO previous runs:
         //   week 1 Fri (dayOfWeek=5): weekStart + 4 = Fri  ← future, KEEP
         //   week 2 Mon (dayOfWeek=1): weekStart + 7 = next Mon ← KEEP
 
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        // Use user's local timezone if provided, otherwise fall back to server UTC.
+        // This prevents NZST (UTC+13) users getting last-week sessions when generating
+        // at e.g. 10am Tuesday NZ time (which is still Monday UTC).
+        const todayInUserTz = userTimezone
+          ? new Date(new Date().toLocaleDateString('en-CA', { timeZone: userTimezone }) + 'T00:00:00')
+          : new Date();
+        if (!userTimezone) todayInUserTz.setHours(0, 0, 0, 0);
+        const today = todayInUserTz;
 
-        // Monday of the current week
+        // Monday of the current week (in user's timezone)
         const daysSinceMonday = today.getDay() === 0 ? 6 : today.getDay() - 1;
         const weekStart = new Date(today);
         weekStart.setDate(today.getDate() - daysSinceMonday);
