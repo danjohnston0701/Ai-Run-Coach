@@ -110,6 +110,11 @@ class RunSummaryViewModel @Inject constructor(
                 // Load any saved AI analysis for this run (if present)
                 loadSavedAnalysis(runId)
                 
+                // Auto-complete workout if this run was linked to a planned workout
+                if (session.linkedWorkoutId != null && session.linkedPlanId != null) {
+                    completeLinkedWorkout(session.linkedWorkoutId!!, runId, session.linkedPlanId!!)
+                }
+                
                 _isLoadingRun.value = false
             } catch (e: Exception) {
                 Log.w("RunSummaryViewModel", "Backend fetch failed for run $runId, trying local data", e)
@@ -122,6 +127,12 @@ class RunSummaryViewModel @Inject constructor(
                     _strugglePoints.value = localSession.strugglePoints.ifEmpty { inferStrugglePointsFromSplits(localSession) }
                     _userPostRunComments.value = localSession.userComments.orEmpty()
                     _analysisState.value = AiAnalysisState.Idle
+                    
+                    // Auto-complete workout for local session too
+                    if (localSession.linkedWorkoutId != null && localSession.linkedPlanId != null) {
+                        completeLinkedWorkout(localSession.linkedWorkoutId!!, runId, localSession.linkedPlanId!!)
+                    }
+                    
                     _isLoadingRun.value = false
                 } else {
                     // No local data available either - show error
@@ -135,6 +146,22 @@ class RunSummaryViewModel @Inject constructor(
                     _isLoadingRun.value = false
                     Log.e("RunSummaryViewModel", "Error loading run (no local fallback): $errorMsg", e)
                 }
+            }
+        }
+    }
+
+    /**
+     * Auto-complete the linked workout after the run is saved.
+     * This happens silently in the background - no UI interaction needed.
+     */
+    private fun completeLinkedWorkout(workoutId: String, runId: String, planId: String) {
+        viewModelScope.launch {
+            try {
+                apiService.completeWorkout(workoutId, CompleteWorkoutRequest(runId))
+                Log.d("RunSummaryViewModel", "✅ Workout $workoutId auto-completed with run $runId (plan: $planId)")
+            } catch (e: Exception) {
+                // Silently log failures - the run is already saved, this is just for plan tracking
+                Log.w("RunSummaryViewModel", "Failed to auto-complete workout $workoutId: ${e.message}")
             }
         }
     }
