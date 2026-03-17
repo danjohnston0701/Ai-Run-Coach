@@ -2888,52 +2888,113 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Search window: ±20 minutes around the actual run.
-      // This avoids matching other activities done on the same day and stays
-      // well within Garmin's 86400-second (24-hour) API limit.
-      const TWENTY_MINS_MS = 20 * 60 * 1000;
+      // ── Match strategy ─────────────────────────────────────────────────────
+      // PRIMARY: Query our own garmin_activities table (populated by Garmin's
+      //   push webhooks). No outbound API call needed — no pull-token issues.
+      // FALLBACK: If nothing is in DB yet (webhook hasn't arrived), try the
+      //   pull API with a ±20 min window.
+      // ───────────────────────────────────────────────────────────────────────
+      const TWENTY_MINS_S = 20 * 60;
       const runStartTime = new Date(run.createdAt || new Date());
-      // Derive run end time from completedAt, or fall back to start + duration
       const runEndTime = run.completedAt
         ? new Date(run.completedAt)
         : new Date(runStartTime.getTime() + (run.duration || 0));
-      const searchStartTime = new Date(runStartTime.getTime() - TWENTY_MINS_MS);
-      const searchEndTime   = new Date(runEndTime.getTime()   + TWENTY_MINS_MS);
 
-      const activities = await garminService.getGarminActivities(accessToken, searchStartTime, searchEndTime);
-      const garminActivities = Array.isArray(activities) ? activities : [];
+      const searchStartSec = Math.floor(runStartTime.getTime() / 1000) - TWENTY_MINS_S;
+      const searchEndSec   = Math.floor(runEndTime.getTime()   / 1000) + TWENTY_MINS_S;
 
-      // 4. Find an activity with a start time matching the run's start time (within ±5 minutes)
-      const FIVE_MINUTES_MS = 5 * 60 * 1000; // 5 minutes in milliseconds
+      console.log(`[Garmin Enrich] Searching DB for activities between ${new Date(searchStartSec * 1000).toISOString()} and ${new Date(searchEndSec * 1000).toISOString()}`);
 
-      let matchingActivity = null;
-      let matchingActivityId = null;
+      // 4a. Look in our local DB first (activities pushed by Garmin webhook)
+      let localActivity = await db.query.garminActivities.findFirst({
+        where: (a, { and, eq, gte, lte }) => and(
+          eq(a.userId, req.user!.userId),
+          gte(a.startTimeInSeconds, searchStartSec),
+          lte(a.startTimeInSeconds, searchEndSec)
+        ),
+      });
 
-      for (const activity of garminActivities) {
-        const activityStartTime = new Date(activity.startTime);
-        const timeDiff = Math.abs(activityStartTime.getTime() - runStartTime.getTime());
+      let matchingActivity: any = null;
+      let matchingActivityId: string | null = null;
+      let activityDetail: any = null;
 
-        if (timeDiff <= FIVE_MINUTES_MS) {
-          matchingActivity = activity;
-          matchingActivityId = activity.activityId;
-          break;
+      if (localActivity) {
+        console.log(`[Garmin Enrich] ✅ Found activity in local DB: ${localActivity.garminActivityId}`);
+        matchingActivityId = localActivity.garminActivityId;
+        matchingActivity = localActivity;
+        // Use stored data directly as the "detail" — map field names
+        activityDetail = {
+          activityId: localActivity.garminActivityId,
+          activityName: localActivity.activityName,
+          startTimeInSeconds: localActivity.startTimeInSeconds,
+          durationInSeconds: localActivity.durationInSeconds,
+          distanceInMeters: localActivity.distanceInMeters,
+          averageHeartRateInBeatsPerMinute: localActivity.averageHeartRateInBeatsPerMinute,
+          maxHeartRateInBeatsPerMinute: localActivity.maxHeartRateInBeatsPerMinute,
+          averageSpeedInMetersPerSecond: localActivity.averageSpeedInMetersPerSecond,
+          maxSpeedInMetersPerSecond: localActivity.maxSpeedInMetersPerSecond,
+          averageRunCadenceInStepsPerMinute: localActivity.averageRunCadenceInStepsPerMinute,
+          maxRunCadenceInStepsPerMinute: localActivity.maxRunCadenceInStepsPerMinute,
+          averageStrideLength: localActivity.averageStrideLength,
+          totalElevationGainInMeters: localActivity.totalElevationGainInMeters,
+          totalElevationLossInMeters: localActivity.totalElevationLossInMeters,
+          minElevationInMeters: localActivity.minElevationInMeters,
+          maxElevationInMeters: localActivity.maxElevationInMeters,
+          activeKilocalories: localActivity.activeKilocalories,
+          aerobicTrainingEffect: localActivity.aerobicTrainingEffect,
+          anaerobicTrainingEffect: localActivity.anaerobicTrainingEffect,
+          trainingEffectLabel: localActivity.trainingEffectLabel,
+          vo2Max: localActivity.vo2Max,
+          recoveryTimeInMinutes: localActivity.recoveryTimeInMinutes,
+          heartRateZones: localActivity.heartRateZones,
+          laps: localActivity.laps,
+          splits: localActivity.splits,
+          samples: localActivity.samples,
+          groundContactTime: localActivity.groundContactTime,
+          groundContactBalance: localActivity.groundContactBalance,
+          verticalOscillation: localActivity.verticalOscillation,
+          verticalRatio: localActivity.verticalRatio,
+          averagePowerInWatts: localActivity.averagePowerInWatts,
+          maxPowerInWatts: localActivity.maxPowerInWatts,
+        };
+      } else {
+        // 4b. Fallback: try Garmin pull API (may fail if token lacks pull scope)
+        console.log(`[Garmin Enrich] No local activity found, attempting Garmin pull API...`);
+        try {
+          const searchStartTime = new Date(searchStartSec * 1000);
+          const searchEndTime   = new Date(searchEndSec * 1000);
+          const pulledActivities = await garminService.getGarminActivities(accessToken, searchStartTime, searchEndTime);
+          const candidates = Array.isArray(pulledActivities) ? pulledActivities : [];
+
+          const FIVE_MINS_MS = 5 * 60 * 1000;
+          for (const a of candidates) {
+            const diff = Math.abs(new Date(a.startTime).getTime() - runStartTime.getTime());
+            if (diff <= FIVE_MINS_MS) {
+              matchingActivity = a;
+              matchingActivityId = a.activityId;
+              break;
+            }
+          }
+
+          if (matchingActivityId) {
+            activityDetail = await garminService.getGarminActivityDetail(accessToken, matchingActivityId);
+          }
+        } catch (pullErr: any) {
+          console.warn(`[Garmin Enrich] Pull API failed (${pullErr.message}) — no activity available yet`);
         }
       }
 
-      if (!matchingActivity || !matchingActivityId) {
+      if (!matchingActivity || !matchingActivityId || !activityDetail) {
         return res.status(404).json({
           error: "No matching Garmin activity found",
-          message: "No Garmin activity found within ±5 minutes of the run start time"
+          message: "Your Garmin device hasn't synced this activity yet. Please sync your Garmin device and try again."
         });
       }
 
-      // 5. Call getGarminActivityDetail to get full activity data
-      const activityDetail = await garminService.getGarminActivityDetail(garminDevice.accessToken, matchingActivityId);
-
-      // 6. Parse the activity with parseGarminActivity
+      // 5. Parse the activity
       const parsed = garminService.parseGarminActivity(activityDetail);
 
-      // Extract extended metrics from raw activity data if available
+      // Extended metrics from raw data
       const raw = activityDetail;
 
       // 7. Update the run record with the enriched data
@@ -2993,8 +3054,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         run: updatedRun,
         garminActivity: {
           activityId: matchingActivityId,
-          activityName: matchingActivity.activityName,
-          startTime: matchingActivity.startTime,
+          activityName: matchingActivity.activityName || activityDetail.activityName,
+          startTime: matchingActivity.startTime || (matchingActivity.startTimeInSeconds
+            ? new Date(matchingActivity.startTimeInSeconds * 1000).toISOString()
+            : null),
         }
       });
 
