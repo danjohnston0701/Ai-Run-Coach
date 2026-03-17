@@ -528,8 +528,8 @@ private fun AiInsightsTabContent(
 
         // Garmin enrich CTA — prominent banner when Garmin is connected but run not yet enriched
         if (isGarminConnected && run.hasGarminData != true) {
+            val isWaitingForSync = viewModel.isWaitingForGarminSync.collectAsState().value
             item {
-                val isWaitingForSync = viewModel.isWaitingForGarminSync.collectAsState().value
                 GarminEnrichCTACard(
                     isEnriching = isEnrichingWithGarmin,
                     isWaitingForSync = isWaitingForSync,
