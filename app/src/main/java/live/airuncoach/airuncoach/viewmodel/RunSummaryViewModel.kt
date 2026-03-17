@@ -334,6 +334,10 @@ class RunSummaryViewModel @Inject constructor(
         }
     }
 
+    fun clearGarminEnrichmentError() {
+        _garminEnrichmentError.value = null
+    }
+
     /**
      * Build the FreeformAnalysisRequest with every piece of context we have.
      */

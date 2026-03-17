@@ -351,6 +351,21 @@ fun RunSummaryScreenFlagship(
                         onCancel = { showRenameDialog = false }
                     )
                 }
+                
+                // Garmin enrichment loading modal
+                val isEnrichingWithGarmin = viewModel.isEnrichingWithGarmin.collectAsState().value
+                val garminEnrichmentError = viewModel.garminEnrichmentError.collectAsState().value
+                
+                if (isEnrichingWithGarmin) {
+                    GarminEnrichmentLoadingModal()
+                }
+                
+                if (garminEnrichmentError != null) {
+                    GarminEnrichmentErrorDialog(
+                        errorMessage = garminEnrichmentError,
+                        onDismiss = { viewModel.clearGarminEnrichmentError() }
+                    )
+                }
             }
         }
     }
@@ -5760,6 +5775,85 @@ private fun RenameDialogFlagship(
         },
         confirmButton = { TextButton(onClick = onSave) { Text("Save", color = Colors.primary) } },
         dismissButton = { TextButton(onClick = onCancel) { Text("Cancel", color = Colors.textSecondary) } },
+        containerColor = Colors.backgroundSecondary
+    )
+}
+
+@Composable
+private fun GarminEnrichmentLoadingModal() {
+    Dialog(
+        onDismissRequest = { /* Do not allow dismissal while loading */ },
+        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.85f)
+                .background(Colors.backgroundSecondary, RoundedCornerShape(16.dp)),
+            colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(32.dp)
+                    .align(Alignment.CenterHorizontally),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(48.dp),
+                    strokeWidth = 4.dp,
+                    color = Colors.primary
+                )
+                
+                Spacer(modifier = Modifier.height(Spacing.lg))
+                
+                Text(
+                    "Enriching Run with Garmin Data",
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.textPrimary,
+                    textAlign = TextAlign.Center
+                )
+                
+                Spacer(modifier = Modifier.height(Spacing.sm))
+                
+                Text(
+                    "Syncing heart rate, cadence, elevation and other metrics from your Garmin device…",
+                    style = AppTextStyles.body,
+                    color = Colors.textSecondary,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GarminEnrichmentErrorDialog(
+    errorMessage: String,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                painter = painterResource(id = R.drawable.icon_alert_vector),
+                contentDescription = "Error",
+                tint = Colors.error,
+                modifier = Modifier.size(24.dp)
+            )
+        },
+        title = { Text("Garmin Sync Failed", color = Colors.textPrimary) },
+        text = {
+            Text(
+                text = errorMessage,
+                style = AppTextStyles.body,
+                color = Colors.textSecondary
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("OK", color = Colors.primary)
+            }
+        },
         containerColor = Colors.backgroundSecondary
     )
 }

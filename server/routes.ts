@@ -2701,8 +2701,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Fetch recent activities (last 30 days)
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const now = new Date();
       
-      const activities = await garminService.getGarminActivities(accessToken, thirtyDaysAgo);
+      const activities = await garminService.getGarminActivities(accessToken, thirtyDaysAgo, now);
       
       // Update last sync time
       await storage.updateConnectedDevice(garminDevice.id, { lastSyncAt: new Date() });
@@ -2856,8 +2857,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const runStartTime = new Date(run.completedAt || run.createdAt || new Date());
       const searchStartTime = new Date(runStartTime);
       searchStartTime.setDate(searchStartTime.getDate() - 7);
+      const searchEndTime = new Date(runStartTime);
+      searchEndTime.setDate(searchEndTime.getDate() + 1); // Next day to cover sync delays
 
-      const activities = await garminService.getGarminActivities(garminDevice.accessToken, searchStartTime);
+      const activities = await garminService.getGarminActivities(garminDevice.accessToken, searchStartTime, searchEndTime);
       const garminActivities = Array.isArray(activities) ? activities : [];
 
       // 4. Find an activity with a start time matching the run's start time (within ±5 minutes)
