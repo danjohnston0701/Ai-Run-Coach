@@ -507,8 +507,18 @@ private fun AiInsightsTabContent(
             RunCompletedBannerWithDifficulty(difficultyLabel = difficultyLabel)
         }
 
-        // Garmin recognition badge — shown just below the Run Completed banner
-        if (isGarminConnected || run.externalSource == "garmin") {
+        // Garmin enrich CTA — prominent banner when Garmin is connected but run not yet enriched
+        if (isGarminConnected && run.hasGarminData != true) {
+            item {
+                GarminEnrichCTACard(
+                    isEnriching = isEnrichingWithGarmin,
+                    onEnrich = onEnrichWithGarmin
+                )
+            }
+        }
+
+        // Garmin recognition badge — shown just below the Run Completed banner (after enrichment)
+        if (run.externalSource == "garmin" || (isGarminConnected && run.hasGarminData == true)) {
             item {
                 GarminPoweredByBadge(text = "Run data Powered by Garmin")
             }
@@ -1330,32 +1340,6 @@ private fun AiSectionFlagship(
                         loading = false,
                         onClick = onGenerateAi
                     )
-
-                    // Show Garmin enrichment button if Garmin is connected and run doesn't have Garmin data yet
-                    if (isGarminConnected && run.hasGarminData != true) {
-                        Spacer(modifier = Modifier.height(Spacing.sm))
-                        ElevatedButton(
-                            onClick = onEnrichWithGarmin,
-                            enabled = !isEnrichingWithGarmin,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.elevatedButtonColors(
-                                containerColor = Colors.backgroundSecondary,
-                                contentColor = Colors.textPrimary
-                            )
-                        ) {
-                            if (isEnrichingWithGarmin) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    strokeWidth = 2.dp,
-                                    color = Colors.primary
-                                )
-                                Spacer(modifier = Modifier.width(Spacing.sm))
-                                Text("Updating with Garmin Data...")
-                            } else {
-                                Text("Update Run With Garmin Data")
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -5906,6 +5890,73 @@ private fun ErrorViewFlagship(
 }
 
 /* -------------------------------- GARMIN RECOGNITION --------------------------------- */
+
+@Composable
+private fun GarminEnrichCTACard(
+    isEnriching: Boolean,
+    onEnrich: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1B2A)),
+        border = BorderStroke(1.dp, Color(0xFF1679C2).copy(alpha = 0.6f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.md, vertical = Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.ic_garmin_connect_logo),
+                contentDescription = "Garmin Connect",
+                modifier = Modifier.size(28.dp),
+                contentScale = ContentScale.Fit
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Garmin data available",
+                    style = AppTextStyles.body.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                )
+                Text(
+                    text = "Enrich this run with HR, HRV, sleep & recovery data",
+                    style = AppTextStyles.caption.copy(color = Color(0xFF8E9BAE))
+                )
+            }
+            Button(
+                onClick = onEnrich,
+                enabled = !isEnriching,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF1679C2),
+                    disabledContainerColor = Color(0xFF1679C2).copy(alpha = 0.5f)
+                ),
+                shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+            ) {
+                if (isEnriching) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                } else {
+                    Text(
+                        text = "Sync",
+                        style = AppTextStyles.body.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun GarminPoweredByBadge(text: String) {
