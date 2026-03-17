@@ -5345,13 +5345,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const payload = req.body;
       console.log('[Garmin Webhook] Permissions change received:', {
         timestamp: new Date().toISOString(),
+        userAccessToken: payload.userAccessToken ? payload.userAccessToken.slice(0, 20) + '...' : 'missing',
+        userId: payload.userId || 'missing',
         granted: payload.permissionsGranted?.length || 0,
         revoked: payload.permissionsRevoked?.length || 0,
       });
 
+      // If token provided but not userId, look up userId from the token
+      let userId = payload.userId;
+      if (!userId && payload.userAccessToken) {
+        const device = await db.query.connectedDevices.findFirst({
+          where: eq(connectedDevices.accessToken, payload.userAccessToken),
+        });
+        userId = device?.deviceId; // Use Garmin numeric ID for matching
+      }
+
       // Process permission changes
       await handlePermissionChange({
         userAccessToken: payload.userAccessToken,
+        userId: userId,
         permissionsGranted: payload.permissionsGranted || [],
         permissionsRevoked: payload.permissionsRevoked || [],
       });
@@ -5806,7 +5818,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } else {
             await db.insert(garminEpochsAggregate).values({
               userId: device.userId,
-              date: epochDate,
+              epochDate: epochDate,
               sedentaryDurationSeconds: sedentarySeconds,
               activeDurationSeconds: activeSeconds,
               highlyActiveDurationSeconds: highlyActiveSeconds,
