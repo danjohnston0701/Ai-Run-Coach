@@ -5679,10 +5679,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
       
-      // Get date from first epoch
-      const firstEpochDate = new Date((epochs[0].startTimeInSeconds || 0) * 1000)
-        .toISOString()
-        .split('T')[0];
+      // Get date from first epoch (or use today if no valid timestamp)
+      const epochTimestamp = epochs[0]?.startTimeInSeconds;
+      const firstEpochDate = epochTimestamp
+        ? new Date(epochTimestamp * 1000).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0]; // Fallback to today
       
       // Process each device
       for (const device of devices) {
