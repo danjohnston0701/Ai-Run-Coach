@@ -98,6 +98,10 @@ import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.util.RunConfigHolder
+import live.airuncoach.airuncoach.viewmodel.IntervalPhase
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import live.airuncoach.airuncoach.viewmodel.RunSessionViewModel
 import kotlin.math.PI
 import kotlin.math.max
@@ -281,6 +285,15 @@ fun RunSessionScreen(
                             isLoading = runState.isLoadingBriefing,
                             modifier = Modifier.padding(horizontal = Spacing.md)
                         )
+
+                        // 1B️⃣ Interval Phase Display (if interval training)
+                        if (runState.isIntervalWorkout && runState.intervalPhase != null) {
+                            Spacer(modifier = Modifier.height(Spacing.md))
+                            IntervalPhaseDisplay(
+                                intervalPhase = runState.intervalPhase,
+                                modifier = Modifier
+                            )
+                        }
 
                         // 2️⃣ Elite Rings Dashboard (timer + stats)
                         FreeRunEliteDashboard(
@@ -2684,6 +2697,106 @@ private fun RunSavingOverlay() {
                 style = MaterialTheme.typography.bodyLarge,
                 color = Colors.textSecondary
             )
+        }
+    }
+}
+
+/**
+ * Interval phase display showing current rep, phase (work/recovery), and progress
+ */
+@Composable
+fun IntervalPhaseDisplay(
+    intervalPhase: IntervalPhase?,
+    modifier: Modifier = Modifier
+) {
+    if (intervalPhase == null) return
+
+    val phaseLabel = if (intervalPhase.isWorkPhase) "WORK" else "RECOVERY"
+    val phaseColor = if (intervalPhase.isWorkPhase) Colors.error else Color(0xFF4CAF50)
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.md),
+        shape = RoundedCornerShape(Spacing.md),
+        colors = CardDefaults.cardColors(containerColor = phaseColor.copy(alpha = 0.12f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.md),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Rep counter
+            Text(
+                text = "Rep ${intervalPhase.currentInterval}",
+                style = AppTextStyles.body,
+                color = phaseColor,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
+            )
+
+            Spacer(modifier = Modifier.height(Spacing.sm))
+
+            // Phase label
+            Text(
+                text = phaseLabel,
+                style = AppTextStyles.caption,
+                color = Colors.textSecondary,
+                fontSize = 12.sp
+            )
+
+            Spacer(modifier = Modifier.height(Spacing.md))
+
+            // Progress bar
+            val distanceValue = intervalPhase.distanceInCurrentPhase.toFloatOrNull() ?: 0f
+            val targetValue = intervalPhase.phaseDurationTarget ?: 1f
+            val progress = (distanceValue / targetValue).coerceIn(0f, 1f)
+
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp)),
+                color = phaseColor,
+                trackColor = Colors.textMuted.copy(alpha = 0.2f)
+            )
+
+            Spacer(modifier = Modifier.height(Spacing.sm))
+
+            // Distance / Target display
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${intervalPhase.distanceInCurrentPhase}km",
+                    style = AppTextStyles.body,
+                    color = Colors.textPrimary,
+                    fontSize = 14.sp
+                )
+
+                val targetDisplay = String.format(java.util.Locale.US, "%.2f", intervalPhase.phaseDurationTarget ?: 0f)
+                Text(
+                    text = "/ ${targetDisplay}km",
+                    style = AppTextStyles.caption,
+                    color = Colors.textSecondary,
+                    fontSize = 12.sp
+                )
+            }
+
+            // Target pace if available
+            if (intervalPhase.targetPace != null) {
+                Spacer(modifier = Modifier.height(Spacing.sm))
+                Text(
+                    text = "Target: ${intervalPhase.targetPace}/km",
+                    style = AppTextStyles.caption,
+                    color = Colors.textSecondary,
+                    fontSize = 11.sp
+                )
+            }
         }
     }
 }
