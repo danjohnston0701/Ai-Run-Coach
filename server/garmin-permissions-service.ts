@@ -319,20 +319,40 @@ export async function getReauthorizationUrl(userId: string, baseUrl: string): Pr
  * Handle permission change webhook from Garmin
  */
 export async function handlePermissionChange(data: {
-  userAccessToken: string;
+  userAccessToken?: string;
+  userId?: string | number;
   permissionsGranted?: string[];
   permissionsRevoked?: string[];
 }) {
-  const { userAccessToken, permissionsGranted = [], permissionsRevoked = [] } = data;
+  const { userAccessToken, userId: garminUserId, permissionsGranted = [], permissionsRevoked = [] } = data;
 
-  // Find user by access token
-  const device = await db.query.connectedDevices.findFirst({
-    where: eq(connectedDevices.accessToken, userAccessToken),
-  });
+  // Try to find device by Garmin userId first (more reliable), then fall back to access token
+  let device = null;
+
+  if (garminUserId) {
+    device = await db.query.connectedDevices.findFirst({
+      where: eq(connectedDevices.deviceId, String(garminUserId)),
+    });
+  }
+
+  if (!device && userAccessToken) {
+    device = await db.query.connectedDevices.findFirst({
+      where: eq(connectedDevices.accessToken, userAccessToken),
+    });
+  }
 
   if (!device) {
-    console.warn('[Garmin] Permission change received for unknown token');
-    return;
+    // Only one Garmin account connected? Use it as fallback
+    const allDevices = await db.query.connectedDevices.findMany({
+      where: eq(connectedDevices.deviceType, 'garmin'),
+    });
+    if (allDevices.length === 1) {
+      device = allDevices[0];
+      console.log('[Garmin] Permission change: matched single connected Garmin account');
+    } else {
+      console.warn('[Garmin] Permission change received but could not match to a user — no userId or token provided');
+      return;
+    }
   }
 
   // Get current granted scopes
