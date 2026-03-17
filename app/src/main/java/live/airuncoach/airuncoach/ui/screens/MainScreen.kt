@@ -559,9 +559,12 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 )
             }
             composable("workout_detail") {
-                val workout = WorkoutHolder.currentWorkout
+                // Capture workout in remembered state so that WorkoutHolder.clear()
+                // called during "Start This Workout" doesn't cause this composable to
+                // recompose with a null workout and accidentally pop run_session off the stack.
+                val workout = remember { WorkoutHolder.currentWorkout }
                 if (workout == null) {
-                    navController.popBackStack()
+                    LaunchedEffect(Unit) { navController.popBackStack() }
                 } else {
                     WorkoutDetailScreen(
                         workout = workout,
@@ -570,7 +573,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                             // Build a RunSetupConfig pre-loaded with coaching plan context
                             // so the in-run AI coach knows which plan workout is being executed.
                             val planCtx = WorkoutHolder.planContext
-                            val targetDistanceKm = (w.distance ?: 5.0).toFloat()
+                            val targetDistanceKm = w.distance?.toFloat()
                             val config = RunSetupConfig(
                                 activityType = PhysicalActivityType.RUN,
                                 targetDistance = targetDistanceKm,
@@ -590,11 +593,13 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                                 planTotalWeeks      = planCtx?.totalWeeks
                             )
                             RunConfigHolder.setConfig(config)
+                            // Clear AFTER setting config so recomposition of this composable
+                            // sees a null workout but can no longer trigger popBackStack during
+                            // the same frame (LaunchedEffect defers it to next frame).
                             WorkoutHolder.clear()
                             navController.navigate("run_session")
                         },
                         onMarkComplete = { _ ->
-                            // TODO: call completeWorkout on ViewModel
                             WorkoutHolder.clear()
                             navController.popBackStack()
                         }
