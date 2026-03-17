@@ -26,6 +26,8 @@ import live.airuncoach.airuncoach.network.model.StartLocation
 import live.airuncoach.airuncoach.network.model.TalkToCoachRequest
 import live.airuncoach.airuncoach.network.model.WellnessPayload
 import live.airuncoach.airuncoach.network.model.WeatherPayload
+import live.airuncoach.airuncoach.network.model.IntervalCoachingRequest
+import live.airuncoach.airuncoach.network.model.IntervalCoachingResponse
 import live.airuncoach.airuncoach.service.RunTrackingService
 import live.airuncoach.airuncoach.utils.AudioPlayerHelper
 import live.airuncoach.airuncoach.utils.CoachingAudioQueue
@@ -498,9 +500,88 @@ class RunSessionViewModel @Inject constructor(
         isWorkPhase: Boolean,
         eventType: String
     ) {
-        // This would call the coaching API with interval-specific context
-        // For now, just log it
-        Log.d("RunSessionViewModel", "Interval $intervalNumber - Trigger $eventType coaching (work=$isWorkPhase)")
+        viewModelScope.launch {
+            try {
+                val session = runSession.value ?: return@launch
+                val config = runConfig ?: return@launch
+                val currentRunState = _runState.value
+                
+                // Build interval coaching request
+                val coachingRequest = IntervalCoachingRequest(
+                    runId = currentRunState.backendRunId ?: "local",
+                    currentInterval = intervalNumber,
+                    totalIntervals = config.intervalCount ?: 1,
+                    isWorkPhase = isWorkPhase,
+                    currentPace = currentRunState.currentPace,
+                    targetPace = if (isWorkPhase) config.intervalTargetPace else config.restTargetPace,
+                    distanceInPhase = session.getDistanceInKm(),
+                    phaseDurationTarget = if (isWorkPhase) config.intervalDistanceKm?.toDouble() else config.restDistanceKm?.toDouble(),
+                    heartRate = currentRunState.heartRate.toIntOrNull(),
+                    targetHRMin = if (isWorkPhase) config.intervalHeartRateMin else null,
+                    targetHRMax = if (isWorkPhase) config.intervalHeartRateMax else config.restHeartRateMax,
+                    cadence = currentRunState.cadence.toIntOrNull(),
+                    fatigueLevel = determineFatigueLevel(currentRunState),
+                    trainingPlanId = config.trainingPlanId,
+                    workoutType = config.workoutType,
+                    elevationGain = null,
+                    wellnessContext = currentRunState.wellnessContext?.let {
+                        WellnessPayload(
+                            sleepHours = null,
+                            sleepQuality = it.sleepQuality,
+                            sleepScore = it.sleepScore,
+                            bodyBattery = it.bodyBattery,
+                            stressLevel = it.stressLevel,
+                            stressQualifier = it.stressQualifier,
+                            hrvStatus = it.hrvStatus,
+                            hrvFeedback = it.hrvFeedback,
+                            restingHeartRate = it.restingHeartRate,
+                            readinessScore = it.readinessScore,
+                            readinessRecommendation = it.readinessRecommendation
+                        )
+                    }
+                )
+                
+                // Call the API
+                val response = apiService.getIntervalCoaching(coachingRequest)
+                
+                // Update UI with coaching message
+                _runState.update { state ->
+                    state.copy(
+                        latestCoachMessage = response.message,
+                        coachText = response.message
+                    )
+                }
+                
+                // Play audio if available
+                if (response.audioUrl != null && !_runState.value.isMuted) {
+                    audioPlayerHelper.playAudio(response.audioUrl)
+                }
+                
+                Log.d("RunSessionViewModel", "Interval $intervalNumber ($eventType): ${response.message}")
+                
+            } catch (e: Exception) {
+                Log.e("RunSessionViewModel", "Error triggering interval coaching", e)
+            }
+        }
+    }
+    
+    /**
+     * Determine fatigue level based on current pace vs target
+     */
+    private fun determineFatigueLevel(runState: RunState): String {
+        // Parse pace strings (mm:ss/km) and compare
+        val currentPaceSeconds = runState.currentPace.split(":").let {
+            if (it.size >= 2) (it[0].toIntOrNull() ?: 0) * 60 + (it[1].toIntOrNull() ?: 0) else 0
+        }
+        val targetPaceSeconds = runState.pace.split(":").let {
+            if (it.size >= 2) (it[0].toIntOrNull() ?: 0) * 60 + (it[1].toIntOrNull() ?: 0) else 0
+        }
+        
+        return when {
+            currentPaceSeconds > (targetPaceSeconds * 1.15) -> "high"  // >15% slower
+            currentPaceSeconds > (targetPaceSeconds * 1.05) -> "moderate"  // 5-15% slower
+            else -> "fresh"
+        }
     }
 
     /**
