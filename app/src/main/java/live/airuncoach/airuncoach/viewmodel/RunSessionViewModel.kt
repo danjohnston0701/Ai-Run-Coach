@@ -37,6 +37,20 @@ import live.airuncoach.airuncoach.utils.TextToSpeechHelper
 import java.util.Locale
 import javax.inject.Inject
 
+/**
+ * Tracks position within an interval (work phase vs recovery phase)
+ */
+data class IntervalPhase(
+    val currentInterval: Int = 1,           // Which rep are we on (1-indexed)
+    val isWorkPhase: Boolean = true,        // true = interval work, false = recovery
+    val distanceInCurrentPhase: String = "0.00", // km
+    val timeInCurrentPhase: String = "00:00",    // mm:ss
+    val phaseDurationTarget: Float? = null, // km or seconds depending on phase
+    val targetPace: String? = null,         // mm:ss/km for this phase
+    val targetHeartRateMin: Int? = null,
+    val targetHeartRateMax: Int? = null
+)
+
 data class RunState(
     val time: String = "00:00",
     val distance: String = "0.00",
@@ -54,7 +68,10 @@ data class RunState(
     val isLoadingBriefing: Boolean = false,
     val latestCoachMessage: String? = null,
     val isStopping: Boolean = false,
-    val backendRunId: String? = null
+    val backendRunId: String? = null,
+    // Interval training state
+    val isIntervalWorkout: Boolean = false,
+    val intervalPhase: IntervalPhase? = null
 )
 
 @HiltViewModel
@@ -82,23 +99,33 @@ class RunSessionViewModel @Inject constructor(
     private var runConfig: RunSetupConfig? = null
     private var isBriefingAudioPlaying = false // Guard against duplicate audio playback
 
+    // ── Interval Training State ──────────────────────────────────────────────
+    // Tracks the current interval phase (work vs recovery) and position within it
+    private var intervalDataLoaded = false
+
     init {
         loadUser()
         loadAiCoachPreference()
         viewModelScope.launch {
             runSession.collect { session ->
                 session?.let { 
-                    _runState.update {
-                        it.copy(
-                            time = session.getFormattedDuration(),
-                            distance = String.format("%.2f", session.getDistanceInKm()),
-                            pace = session.averagePace ?: "0:00",
-                            currentPace = session.currentPace ?: "0:00",
-                            cadence = session.cadence.toString(),
-                            heartRate = session.heartRate.toString(),
-                            isRunning = session.isActive && !it.isPaused
-                        )
-                    }
+                    // Update interval tracking if this is an interval workout
+                    val updatedIntervalPhase = if (_runState.value.isIntervalWorkout) {
+                        updateIntervalTracking(session)
+                    } else null
+                    
+                    val updatedState = _runState.value.copy(
+                        time = session.getFormattedDuration(),
+                        distance = String.format("%.2f", session.getDistanceInKm()),
+                        pace = session.averagePace ?: "0:00",
+                        currentPace = session.currentPace ?: "0:00",
+                        cadence = session.cadence.toString(),
+                        heartRate = session.heartRate.toString(),
+                        intervalPhase = updatedIntervalPhase ?: _runState.value.intervalPhase,
+                        isRunning = session.isActive && !_runState.value.isPaused
+                    )
+                    
+                    _runState.update { updatedState }
                 }
             }
         }
@@ -375,6 +402,105 @@ class RunSessionViewModel @Inject constructor(
                 )}
             }
         }
+
+        // Initialize interval tracking if this is an interval workout
+        if (config.isIntervalWorkout && config.intervalCount != null) {
+            initializeIntervalTracking(config)
+        }
+    }
+
+    /**
+     * Initialize interval tracking for interval/repeat workouts.
+     * Sets up the initial interval phase and prepares coaching event tracking.
+     */
+    private fun initializeIntervalTracking(config: RunSetupConfig) {
+        if (!config.isIntervalWorkout || config.intervalCount == null) return
+
+        intervalDataLoaded = true
+        
+        // Initialize with first interval's work phase
+        val initialPhase = IntervalPhase(
+            currentInterval = 1,
+            isWorkPhase = true,
+            targetPace = config.intervalTargetPace,
+            targetHeartRateMin = config.intervalHeartRateMin,
+            targetHeartRateMax = config.intervalHeartRateMax,
+            phaseDurationTarget = config.intervalDistanceKm
+        )
+        
+        _runState.update { it.copy(
+            isIntervalWorkout = true,
+            intervalPhase = initialPhase
+        )}
+
+        Log.d("RunSessionViewModel", "Initialized interval tracking: ${config.intervalCount}x ${config.intervalDistanceKm}km")
+    }
+
+    /**
+     * Update interval tracking based on current run session distance.
+     * Detects transitions between work and recovery phases, and triggers coaching events.
+     */
+    private fun updateIntervalTracking(session: RunSession): IntervalPhase? {
+        val config = runConfig ?: return null
+        if (!config.isIntervalWorkout || config.intervalCount == null) return null
+        
+        // Distance-based intervals only (simpler implementation)
+        val intervalDistanceKm = config.intervalDistanceKm ?: return null
+        val restDistanceKm = config.restDistanceKm ?: (intervalDistanceKm * 0.5f)  // Default: rest = 50% of interval
+        
+        val currentDistanceKm = session.getDistanceInKm()
+        val cycleDistanceKm = intervalDistanceKm + restDistanceKm
+        
+        // Position within the current cycle (work + rest)
+        val positionInCycleKm = currentDistanceKm % cycleDistanceKm
+        val isWorkPhase = positionInCycleKm < intervalDistanceKm
+        
+        // Which interval are we on? (1-indexed)
+        val cyclesCompleted = (currentDistanceKm / cycleDistanceKm).toInt()
+        val currentInterval = cyclesCompleted + 1
+        
+        // Distance into current phase
+        val distanceInPhaseKm = if (isWorkPhase) {
+            positionInCycleKm
+        } else {
+            positionInCycleKm - intervalDistanceKm
+        }
+        
+        // Determine target paces and HR zones
+        val targetPace = if (isWorkPhase) config.intervalTargetPace else config.restTargetPace
+        val hrMin = if (isWorkPhase) config.intervalHeartRateMin else null
+        val hrMax = if (isWorkPhase) config.intervalHeartRateMax else config.restHeartRateMax
+        
+        // Trigger coaching events at phase boundaries
+        if (isWorkPhase && distanceInPhaseKm < 0.05f) {
+            triggerIntervalCoachingEvent(currentInterval, true, "start")
+        } else if (!isWorkPhase && distanceInPhaseKm < 0.05f) {
+            triggerIntervalCoachingEvent(currentInterval, false, "recovery_start")
+        }
+        
+        return IntervalPhase(
+            currentInterval = minOf(currentInterval, config.intervalCount ?: 1),
+            isWorkPhase = isWorkPhase,
+            distanceInCurrentPhase = String.format("%.2f", distanceInPhaseKm),
+            timeInCurrentPhase = "00:00",  // Can be populated if time data is available
+            phaseDurationTarget = if (isWorkPhase) intervalDistanceKm else restDistanceKm,
+            targetPace = targetPace,
+            targetHeartRateMin = hrMin,
+            targetHeartRateMax = hrMax
+        )
+    }
+
+    /**
+     * Trigger coaching message for interval event (start, recovery start, etc.)
+     */
+    private fun triggerIntervalCoachingEvent(
+        intervalNumber: Int,
+        isWorkPhase: Boolean,
+        eventType: String
+    ) {
+        // This would call the coaching API with interval-specific context
+        // For now, just log it
+        Log.d("RunSessionViewModel", "Interval $intervalNumber - Trigger $eventType coaching (work=$isWorkPhase)")
     }
 
     /**
