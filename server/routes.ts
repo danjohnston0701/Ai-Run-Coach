@@ -2871,8 +2871,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
           console.log("✅ Garmin token refreshed successfully");
         } catch (refreshError: any) {
+          // Check if refresh token itself is invalid — user must reconnect Garmin
+          const isInvalidGrant = refreshError.message?.includes('invalid_grant') ||
+                                  refreshError.message?.includes('Invalid refresh token') ||
+                                  refreshError.message?.includes('400');
+          if (isInvalidGrant) {
+            console.error("❌ Garmin refresh token is invalid — marking device as inactive, user must reconnect");
+            await storage.updateConnectedDevice(garminDevice.id, { isActive: false });
+            return res.status(401).json({
+              error: "garmin_reconnect_required",
+              message: "Your Garmin connection has expired. Please reconnect Garmin in Settings to sync your data."
+            });
+          }
           console.warn("⚠️ Failed to refresh Garmin token, attempting with current token:", refreshError.message);
-          // Continue with current token - API will fail with 401 if truly expired
+          // Continue with current token — may still work if it hasn't expired yet
         }
       }
 
@@ -2994,6 +3006,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       console.error("Garmin enrich run error:", error);
+      // Detect expired/invalid token — tell client to reconnect rather than generic 500
+      if (error.message?.includes('401') || error.message?.includes('Token is not active')) {
+        return res.status(401).json({
+          error: "garmin_reconnect_required",
+          message: "Your Garmin connection has expired. Please reconnect Garmin in Settings to sync your data."
+        });
+      }
       res.status(500).json({ error: "Failed to enrich run with Garmin data" });
     }
   });

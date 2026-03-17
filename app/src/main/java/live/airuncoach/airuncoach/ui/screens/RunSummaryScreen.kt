@@ -355,6 +355,7 @@ fun RunSummaryScreenFlagship(
                 // Garmin enrichment loading modal
                 val isEnrichingWithGarmin = viewModel.isEnrichingWithGarmin.collectAsState().value
                 val garminEnrichmentError = viewModel.garminEnrichmentError.collectAsState().value
+                val garminNeedsReconnect = viewModel.garminNeedsReconnect.collectAsState().value
                 
                 if (isEnrichingWithGarmin) {
                     GarminEnrichmentLoadingModal()
@@ -364,6 +365,12 @@ fun RunSummaryScreenFlagship(
                     GarminEnrichmentErrorDialog(
                         errorMessage = garminEnrichmentError,
                         onDismiss = { viewModel.clearGarminEnrichmentError() }
+                    )
+                }
+
+                if (garminNeedsReconnect) {
+                    GarminReconnectDialog(
+                        onDismiss = { viewModel.dismissGarminReconnect() }
                     )
                 }
             }
@@ -5830,6 +5837,37 @@ private fun GarminEnrichmentErrorDialog(
         confirmButton = {
             TextButton(onClick = onDismiss) {
                 Text("OK", color = Colors.primary)
+            }
+        },
+        containerColor = Colors.backgroundSecondary
+    )
+}
+
+@Composable
+private fun GarminReconnectDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Image(
+                    painter = painterResource(id = R.drawable.ic_garmin_connect_logo),
+                    contentDescription = "Garmin",
+                    modifier = Modifier.size(22.dp),
+                    contentScale = ContentScale.Fit
+                )
+                Text("Garmin Reconnection Required", color = Colors.textPrimary)
+            }
+        },
+        text = {
+            Text(
+                text = "Your Garmin connection has expired. To sync run data from your Garmin device, please reconnect Garmin in your Settings page.",
+                style = AppTextStyles.body,
+                color = Colors.textSecondary
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("OK, I'll reconnect in Settings", color = Colors.primary)
             }
         },
         containerColor = Colors.backgroundSecondary

@@ -67,6 +67,9 @@ class RunSummaryViewModel @Inject constructor(
 
     private val _garminEnrichmentError = MutableStateFlow<String?>(null)
     val garminEnrichmentError: StateFlow<String?> = _garminEnrichmentError.asStateFlow()
+
+    private val _garminNeedsReconnect = MutableStateFlow(false)
+    val garminNeedsReconnect: StateFlow<Boolean> = _garminNeedsReconnect.asStateFlow()
     
     // Target info from run setup
     private var targetDistance: Double? = null
@@ -355,7 +358,16 @@ class RunSummaryViewModel @Inject constructor(
                 _isEnrichingWithGarmin.value = false
             } catch (e: Exception) {
                 Log.w("RunSummaryViewModel", "Failed to enrich run with Garmin data: ${e.message}", e)
-                _garminEnrichmentError.value = e.message ?: "Failed to enrich run with Garmin data"
+                // Detect when Garmin token is fully expired and needs reconnecting
+                val needsReconnect = e.message?.contains("401") == true ||
+                        e.message?.contains("garmin_reconnect_required") == true ||
+                        e.message?.contains("Token is not active") == true
+                if (needsReconnect) {
+                    _garminNeedsReconnect.value = true
+                    _isGarminConnected.value = false // Remove the Garmin sync CTA
+                } else {
+                    _garminEnrichmentError.value = e.message ?: "Failed to enrich run with Garmin data"
+                }
                 _isEnrichingWithGarmin.value = false
             }
         }
@@ -363,6 +375,10 @@ class RunSummaryViewModel @Inject constructor(
 
     fun clearGarminEnrichmentError() {
         _garminEnrichmentError.value = null
+    }
+    
+    fun dismissGarminReconnect() {
+        _garminNeedsReconnect.value = false
     }
 
     /**
