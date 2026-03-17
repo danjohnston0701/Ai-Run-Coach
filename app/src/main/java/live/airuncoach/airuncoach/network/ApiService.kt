@@ -110,6 +110,9 @@ interface ApiService {
     @POST("/api/coaching/elite-coaching")
     suspend fun getEliteCoaching(@Body request: EliteCoachingRequest): EliteCoachingResponse
 
+    @POST("/api/coaching/interval-coaching")
+    suspend fun getIntervalCoaching(@Body request: IntervalCoachingRequest): IntervalCoachingResponse
+
     @GET("/api/group-runs")
     suspend fun getGroupRuns(@Query("my_groups") myGroups: Boolean? = null): GroupRunsResponse
 
