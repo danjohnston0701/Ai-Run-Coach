@@ -909,11 +909,22 @@ Give a brief (1-2 sentences) supportive message tailored to this runner's fitnes
 type StrideZone = 'OVERSTRIDING' | 'UNDERSTRIDING' | 'OPTIMAL';
 
 /**
- * Calculate optimal cadence range based on target pace
- * Slower paces (easy Zone 2) typically need lower cadence (110-130 spm)
- * Faster paces typically need higher cadence (170-180 spm)
+ * Calculate optimal cadence range based on pace + user profile
+ * Pace is the primary driver, but user height/fitness affects efficiency
+ * 
+ * Taller runners naturally have longer strides → slightly lower cadence at same pace
+ * Shorter runners have shorter strides → slightly higher cadence at same pace
+ * More fit runners have better economy → can sustain higher cadence
+ * 
+ * Formula: base cadence (from pace) ± adjustments (height, fitness level)
  */
-function getOptimalCadenceForPace(paceMinPerKm: string, paceMaxPerKm?: string): { min: number; max: number } {
+function getOptimalCadenceForPace(
+  paceMinPerKm: string,
+  paceMaxPerKm?: string,
+  userHeight?: number,      // in cm
+  userAge?: number,
+  fitnessLevel?: string     // 'beginner' | 'intermediate' | 'advanced'
+): { min: number; max: number } {
   const parsePace = (paceStr: string): number => {
     const parts = paceStr.split(':');
     if (parts.length !== 2) return 180; // default to fast cadence
@@ -924,26 +935,74 @@ function getOptimalCadenceForPace(paceMinPerKm: string, paceMaxPerKm?: string): 
 
   const paceSeconds = parsePace(paceMinPerKm);
   
-  // Zone 2 (9-13 min/km, ~540-780 sec/km): 110-130 cadence
-  // Zone 3 (7-10 min/km, ~420-600 sec/km): 130-150 cadence
-  // Zone 4+ (< 6 min/km, < 360 sec/km): 160-180+ cadence
+  // Base cadence ranges from pace alone
+  let baseCadenceMin = 180;
+  let baseCadenceMax = 180;
   
   if (paceSeconds >= 720) {
     // Very slow (12+ min/km): 100-120 spm
-    return { min: 100, max: 120 };
+    baseCadenceMin = 100;
+    baseCadenceMax = 120;
   } else if (paceSeconds >= 600) {
     // Slow Zone 2 (10-12 min/km): 110-130 spm
-    return { min: 110, max: 130 };
+    baseCadenceMin = 110;
+    baseCadenceMax = 130;
   } else if (paceSeconds >= 480) {
     // Zone 2/3 boundary (8-10 min/km): 130-150 spm
-    return { min: 130, max: 150 };
+    baseCadenceMin = 130;
+    baseCadenceMax = 150;
   } else if (paceSeconds >= 360) {
     // Zone 3/4 boundary (6-8 min/km): 150-170 spm
-    return { min: 150, max: 170 };
+    baseCadenceMin = 150;
+    baseCadenceMax = 170;
   } else {
     // Zone 4+ (< 6 min/km): 170-185 spm
-    return { min: 170, max: 185 };
+    baseCadenceMin = 170;
+    baseCadenceMax = 185;
   }
+
+  // Height adjustment: taller runners naturally have lower cadence at same pace
+  // Standard height: 175cm. For every 5cm difference, adjust by ±2 spm
+  let heightAdjustment = 0;
+  if (userHeight && userHeight > 0) {
+    const standardHeight = 175;
+    const heightDiff = userHeight - standardHeight;
+    heightAdjustment = Math.round((heightDiff / 5) * -2); // Negative because taller = lower cadence
+  }
+
+  // Fitness level adjustment: more fit runners have better economy
+  // Beginners run less efficiently → slightly higher cadence to compensate
+  // Advanced runners run more efficiently → can use lower cadence at same effort
+  let fitnessAdjustment = 0;
+  if (fitnessLevel) {
+    switch (fitnessLevel.toLowerCase()) {
+      case 'beginner':
+        fitnessAdjustment = 2; // Add 2 spm for less economy
+        break;
+      case 'intermediate':
+        fitnessAdjustment = 0; // Neutral
+        break;
+      case 'advanced':
+        fitnessAdjustment = -3; // Subtract 3 spm (more economical)
+        break;
+    }
+  }
+
+  // Age adjustment: younger runners often have slightly higher cadence
+  // Older runners benefit from lower cadence (easier on joints)
+  let ageAdjustment = 0;
+  if (userAge && userAge > 0) {
+    const standardAge = 30;
+    const ageDiff = userAge - standardAge;
+    ageAdjustment = Math.round((ageDiff / 10) * -1); // For every 10 years older, reduce by 1 spm
+  }
+
+  const totalAdjustment = heightAdjustment + fitnessAdjustment + ageAdjustment;
+
+  return {
+    min: Math.max(90, baseCadenceMin + totalAdjustment), // Floor at 90 spm (safety)
+    max: Math.min(190, baseCadenceMax + totalAdjustment), // Ceiling at 190 spm
+  };
 }
 
 export async function generateCadenceCoaching(params: {
@@ -972,8 +1031,14 @@ export async function generateCadenceCoaching(params: {
     coachName = 'Coach', coachTone = 'energetic' } = params;
   const cadenceAccentRule = accentDirective((params as any).coachAccent);
   
-  // Use dynamic cadence calculation based on current pace, not fixed values
-  const paceBasedCadence = getOptimalCadenceForPace(currentPace);
+  // Use dynamic cadence calculation based on pace + user profile (height, age, fitness)
+  const paceBasedCadence = getOptimalCadenceForPace(
+    currentPace,
+    undefined,
+    userHeight,    // passed in from params
+    userAge,       // passed in from params
+    fitnessLevel   // passed in from params
+  );
   const dynOptimalCadenceMin = paceBasedCadence.min;
   const dynOptimalCadenceMax = paceBasedCadence.max;
   
