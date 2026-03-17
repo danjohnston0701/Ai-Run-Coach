@@ -5,8 +5,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.dagger.hilt.android")
     id("org.jetbrains.kotlin.plugin.serialization")
-    // NOTE: Uncomment after adding app/google-services.json from your Firebase project
-    // id("com.google.gms.google-services")
+    id("com.google.gms.google-services")
 }
 
 android {
