@@ -361,12 +361,17 @@ class RunSessionViewModel @Inject constructor(
             _runState.value.coachText.contains("Ready to run")) {
             if (config.hasTargetTime) {
                 val targetTimeStr = config.getFormattedTargetTime()
+                val distStr = config.targetDistance?.let { "${it} km" } ?: "your workout"
                 _runState.update { it.copy(
-                    coachText = "Target: ${config.targetDistance} km in $targetTimeStr. Ready to start!"
+                    coachText = "Target: $distStr in $targetTimeStr. Ready to start!"
+                )}
+            } else if (config.targetDistance != null) {
+                _runState.update { it.copy(
+                    coachText = "Target: ${config.targetDistance} km. Ready to start!"
                 )}
             } else {
                 _runState.update { it.copy(
-                    coachText = "Target: ${config.targetDistance} km. Ready to start!"
+                    coachText = "Ready to start your ${config.workoutType?.replace("_", " ") ?: "run"}!"
                 )}
             }
         }
@@ -459,7 +464,7 @@ class RunSessionViewModel @Inject constructor(
                 action = RunTrackingService.ACTION_START_TRACKING
                 // Pass target distance and time to service if configured
                 runConfig?.let {
-                    putExtra(RunTrackingService.EXTRA_TARGET_DISTANCE, it.targetDistance.toDouble())
+                    it.targetDistance?.let { dist -> putExtra(RunTrackingService.EXTRA_TARGET_DISTANCE, dist.toDouble()) }
                     // Calculate target time in milliseconds if set
                     if (it.hasTargetTime) {
                         val targetTimeMs = (it.targetHours * 3600000L) + (it.targetMinutes * 60000L) + (it.targetSeconds * 1000L)

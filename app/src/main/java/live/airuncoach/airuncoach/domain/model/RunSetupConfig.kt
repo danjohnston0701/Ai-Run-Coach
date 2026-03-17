@@ -6,7 +6,7 @@ package live.airuncoach.airuncoach.domain.model
  */
 data class RunSetupConfig(
     val activityType: PhysicalActivityType = PhysicalActivityType.RUN,
-    val targetDistance: Float,          // In kilometers
+    val targetDistance: Float? = null,  // In kilometers (null = no fixed distance target)
     val hasTargetTime: Boolean = false,
     val targetHours: Int = 0,
     val targetMinutes: Int = 0,
