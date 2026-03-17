@@ -831,9 +831,13 @@ export async function generateStruggleCoaching(params: {
 }): Promise<string> {
   const { distance, elapsedTime, currentPace, baselinePace, paceDropPercent, currentGrade, totalElevationGain, coachName, coachTone, coachAccent, hasRoute, fitnessLevel, runnerName, runHistory, targetHeartRateZone } = params;
   
-  // For Zone 1-2 runs (aerobic/recovery focus), pace drops are intentional to stay in HR zone — skip struggle coaching
+  // For Zone 1-2 runs (aerobic/recovery focus), pace drops are intentional to build aerobic base
   if (targetHeartRateZone && targetHeartRateZone <= 2) {
-    return `Heart rate is the goal here, not pace. Slow down as needed to stay in Zone ${targetHeartRateZone}. You're doing great!`;
+    const aerobicContext = targetHeartRateZone === 2 
+      ? `This aerobic work is building your base. Every Zone 2 session improves your capillary density and fat-burning efficiency. That's why elite runners spend 80% of their time at easy paces — you're conditioning your heart to sustain faster paces later.`
+      : `You're in recovery mode. Let your body adapt. These easy sessions are where real fitness is built.`;
+    
+    return `${aerobicContext} Heart rate is the goal here, not pace. Slow down as needed to stay in Zone ${targetHeartRateZone} — that's exactly right.`;
   }
   
   const timeMin = Math.floor(elapsedTime / 60);
@@ -2986,11 +2990,11 @@ ${noTerrainRule}
 Give a focused technique coaching cue (2-3 sentences). Pick ONE technique area and coach it with specific, actionable cues the runner can apply RIGHT NOW:
 
 ${isAerobicZone ? `
-For this Zone 2 aerobic session, focus on COMFORT and SUSTAINABILITY:
-- Check your breathing: steady, rhythmic, sustainable at current effort
-- Arms should feel relaxed and loose — not tense
-- Let your natural pace settle in — you're building aerobic fitness, not speed
-- Listen to your body and stay relaxed
+For this Zone 2 AEROBIC BASE BUILD session, focus on COMFORT and RELAXATION:
+- Breathing should be steady and conversational — if you can't speak in full sentences, ease up
+- Relax your jaw, shoulders, and arms — tension here wastes energy
+- Let your natural rhythm settle in — your body is adapting right now, building capillaries and mitochondria
+- Stay comfortable and patient. This "easy" pace is exactly where the adaptation happens. Elite runners built their speed HERE.
 ` : `
 Choose the most relevant for this moment in the run:
 ${progress < 30 ? `- EARLY RUN: Focus on establishing good form — relaxed shoulders, arms at 90 degrees, slight forward lean from ankles, landing under hips.` :
@@ -3009,11 +3013,18 @@ Reference at least one data point. Keep it conversational — this is spoken alo
       break;
     }
 
-    case 'milestone':
+    case 'milestone': {
+      // For Zone 2 runs, emphasize aerobic adaptation happening in real-time
+      const isAerobicMilestone = targetHeartRateZone && targetHeartRateZone <= 2;
+      const aerobicMilestoneContext = isAerobicMilestone 
+        ? `\nZONE 2 AEROBIC MILESTONE: Every kilometer at this steady effort is building your aerobic base. You're accumulating time in the mitochondrial adaptation zone. This sustainable effort is where real endurance is built.`
+        : '';
+      
       typePrompt = `COACHING TYPE: Milestone celebration — runner just hit ${milestonePercent}% of their target distance!
 
 ${status}
 ${noTerrainRule}
+${aerobicMilestoneContext}
 
 Give a celebratory, motivating message (2-3 sentences):
 1. Acknowledge the milestone (${milestonePercent}% done, ${distance.toFixed(1)}km covered)
@@ -3021,12 +3032,16 @@ Give a celebratory, motivating message (2-3 sentences):
 3. Set the tone for the next phase:
 ${milestonePercent && milestonePercent <= 25 ? '   - Quarter way: "Great start, settle into your rhythm, lots of running ahead"' :
   milestonePercent && milestonePercent <= 50 ? '   - Halfway: "You\'re at the turnaround point — everything from here is the home stretch"' :
-  '   - Three quarters: "The hard work is almost done — time to dig in and finish strong"'}
+  '   - Three quarters: "The hard work is almost done — finish strong"'}
+${isAerobicMilestone && milestonePercent && milestonePercent <= 50 ? '\nRemind them: the second half of this aerobic run is where they build the most adaptation. Sustain this effort.' : ''}
 ${targetTime ? `\nProjected finish: ${projectedFinishTime ? Math.floor(projectedFinishTime / 60) + ' minutes' : 'unknown'} (target: ${Math.floor(targetTime / 60)} minutes)${projectedFinishTime && projectedFinishTime < targetTime ? ' — AHEAD OF TARGET, let them know!' : projectedFinishTime && projectedFinishTime > targetTime ? ' — behind target, encourage them to push' : ''}` : ''}
 
-Make them feel like they've accomplished something. Reference their actual numbers.`;
-      systemExtra = 'Celebrate the milestone with genuine enthusiasm while weaving in their real data. Make them feel proud of what they\'ve achieved so far.';
+Make them feel like they've accomplished something meaningful. Reference their actual numbers.`;
+      systemExtra = isAerobicMilestone
+        ? 'For Zone 2 milestones, celebrate the aerobic adaptation work happening right now. Reinforce that consistent, steady effort at aerobic pace is exactly how elite runners build their foundation.'
+        : 'Celebrate the milestone with genuine enthusiasm while weaving in their real data. Make them feel proud of what they\'ve achieved so far.';
       break;
+    }
 
     case 'positive_reinforcement':
       typePrompt = `COACHING TYPE: Positive reinforcement — the runner is executing well!
@@ -3172,27 +3187,41 @@ Give 2-3 sentences that sound like you've analyzed every metre of this route. Re
     }
 
     case 'heart_rate_check': {
-      // Zone 2 aerobic focus: check HR, encourage steady breathing, reinforce it's about conditioning
+      // Zone 2 aerobic focus: check HR, encourage steady breathing, reinforce aerobic base building
       const targetHRMin = targetHeartRateZone === 2 ? Math.round(heartRate ? heartRate * 0.85 : 120) : 0;
       const targetHRMax = targetHeartRateZone === 2 ? Math.round(heartRate ? heartRate * 1.05 : 150) : 0;
+      
+      // Aerobic base building context
+      const aerobicBaseContext = `
+AEROBIC BASE BUILDING:
+This steady-state Zone 2 work is building the foundation for all your faster running. Here's why it matters:
+- Increases mitochondrial density in your muscles (more aerobic power)
+- Improves capillary density (better oxygen delivery)
+- Trains your body to burn fat efficiently (sustainable energy source)
+- Increases stroke volume (your heart pumps more blood per beat)
+- Allows faster paces to feel easier later (your "easy" pace will speed up naturally)
+
+Elite runners spend 80% of their training time at easy/aerobic paces for exactly this reason. You're not wasting time here — you're building the engine that makes speed possible.`;
       
       typePrompt = `COACHING TYPE: Heart rate focus check for Zone 2 aerobic session.
 
 ${status}
 ${noTerrainRule}
 
-This is a Zone 2 conditioning session. The goal is HEART RATE CONTROL, not pace.
+This is a Zone 2 AEROBIC BASE BUILDING session. The goal is HEART RATE CONTROL, not pace.
+
+${aerobicBaseContext}
 
 ${heartRate ? `Current HR: ${heartRate} bpm. Target Zone 2 range: roughly ${targetHRMin}-${targetHRMax} bpm.
-${heartRate > targetHRMax ? `Your HR is above the Zone 2 target. Slow down slightly to bring it back into range. Remember, this isn't about speed — it's about training your heart at a sustainable effort.` : heartRate < targetHRMin ? `Your HR is below the Zone 2 target. You can pick up the pace slightly if you feel good. Stay comfortable and conversational.` : `Your HR is right where it should be! Keep this steady effort. This is optimal for aerobic training.`}` : `Keep checking your heart rate if you have a device. Zone 2 is about maintaining a conversational pace where your heart rate stays in the aerobic zone — not too easy, not too hard.`}
+${heartRate > targetHRMax ? `Your HR is above the Zone 2 target. Slow down slightly to bring it back into range. This is exactly the work — controlling your heart rate is how you build aerobic capacity. Stay patient.` : heartRate < targetHRMin ? `Your HR is below the Zone 2 target. You can pick up the pace slightly if you feel good. You want to work at that sustainable effort level where adaptation happens.` : `Your HR is right where it should be! This is the sweet spot for aerobic training. You're building your cardiovascular engine right now.`}` : `Keep checking your heart rate if you have a device. Zone 2 is about maintaining that sustainable effort where your heart is working, but you could hold a conversation.`}
 
 Give a brief (1-2 sentences) HR-focused coaching message:
 1. Acknowledge their heart rate and where it sits relative to Zone 2
-2. Reinforce that TODAY'S GOAL is heart rate, not pace — slower is fine if that's what keeps HR steady
-3. Encourage steady, sustainable breathing
+2. Reinforce the LONG-TERM BENEFIT: steady aerobic work builds your base so faster paces become sustainable
+3. Remind them: patience at easy paces = confidence and speed later
 
 ${PACE_FORMAT_RULE}`;
-      systemExtra = 'For Zone 2 aerobic sessions, coaching is ONLY about heart rate. Pace is secondary. Remind the runner that slowing down to control HR is exactly right. Emphasize conditioning the heart, not chasing speed.';
+      systemExtra = 'For Zone 2 aerobic sessions, emphasize the long-term payoff. This isn\'t just about today — it\'s about building the aerobic foundation that makes all future running stronger. Coaching should reinforce: steady HR control = developing running economy and endurance capacity.';
       break;
     }
 
