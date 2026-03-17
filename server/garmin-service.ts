@@ -246,12 +246,12 @@ export async function getGarminActivities(
   const start = 0;
   const limit = 100; // Max activities per request
   
-  // Try the Garmin Health API activities endpoint (OAuth 2.0 compatible)
-  // Convert dates to Unix timestamps (seconds)
+  // Garmin Health API activities endpoint (OAuth 2.0 compatible)
+  // Correct path is /wellness-api/rest/activities (with hyphen, not /wellnessapi/)
   const startTimeSeconds = Math.floor(startTime.getTime() / 1000);
   const endTimeSeconds = Math.floor(endTime.getTime() / 1000);
   
-  const url = `${GARMIN_API_BASE}/wellnessapi/rest/activities?uploadStartTimeInSeconds=${startTimeSeconds}&uploadEndTimeInSeconds=${endTimeSeconds}`;
+  const url = `${GARMIN_API_BASE}/wellness-api/rest/activities?uploadStartTimeInSeconds=${startTimeSeconds}&uploadEndTimeInSeconds=${endTimeSeconds}`;
   console.log(`🔍 Fetching from URL: ${url}`);
   
   const response = await fetch(url, {
