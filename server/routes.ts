@@ -5009,24 +5009,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       console.log('[Garmin Webhook] Received deregistration:', JSON.stringify(req.body).slice(0, 500));
       
+      // IMPORTANT: Return 200 immediately to Garmin
+      res.status(200).json({ success: true });
+      
       const deregistrations = req.body.deregistrations || [];
+      
       for (const dereg of deregistrations) {
-        const userAccessToken = dereg.userAccessToken;
-        const device = await findUserByGarminToken(userAccessToken);
-        
-        if (device) {
-          console.log(`[Garmin Webhook] User ${device.userId} deregistered from Garmin`);
-          // Mark device as inactive
+        try {
+          const userAccessToken = dereg.userAccessToken;
+          const device = await findUserByGarminToken(userAccessToken);
+          
+          if (!device) {
+            console.warn('[Garmin Webhook] Could not find device for deregistration token');
+            continue;
+          }
+          
+          const userId = device.userId;
+          const deviceName = device.deviceName || 'Garmin Device';
+          
+          console.log(`[Garmin Webhook] Processing deregistration for user ${userId}, device: ${deviceName}`);
+          
+          // 1. Delete all Garmin data for this user
+          console.log(`[Garmin] Deleting Garmin data for user ${userId}...`);
+          
+          await db.delete(garminActivities).where(eq(garminActivities.userId, userId));
+          await db.delete(garminEpochsRaw).where(eq(garminEpochsRaw.userId, userId));
+          await db.delete(garminEpochsAggregate).where(eq(garminEpochsAggregate.userId, userId));
+          await db.delete(garminHealthSnapshots).where(eq(garminHealthSnapshots.userId, userId));
+          await db.delete(garminWellnessMetrics).where(eq(garminWellnessMetrics.userId, userId));
+          
+          console.log(`[Garmin] Deleted all Garmin data for user ${userId}`);
+          
+          // 2. Mark device as inactive and clear tokens
           await db.update(connectedDevices)
-            .set({ isActive: false, accessToken: null, refreshToken: null })
+            .set({ 
+              isActive: false, 
+              accessToken: null, 
+              refreshToken: null,
+              tokenExpiresAt: null,
+              grantedScopes: null,
+              updatedAt: new Date()
+            })
             .where(eq(connectedDevices.id, device.id));
+          
+          console.log(`[Garmin Webhook] Marked device as inactive for user ${userId}`);
+          
+          // 3. Send push notification to user
+          const { sendNotification } = await import('./notification-service');
+          try {
+            await sendNotification({
+              userId,
+              title: '🔌 Garmin Connection Removed',
+              body: `Your connection to ${deviceName} has been removed. You can reconnect anytime in Settings.`,
+              data: {
+                action: 'garmin_deregistered',
+                deviceName: deviceName,
+              }
+            });
+            console.log(`[Garmin] Sent deregistration notification to user ${userId}`);
+          } catch (notificationError: any) {
+            console.warn(`[Garmin] Failed to send deregistration notification: ${notificationError.message}`);
+            // Don't fail the whole deregistration if notification fails
+          }
+          
+          console.log(`[Garmin Webhook] ✅ Deregistration complete for user ${userId}`);
+        } catch (deregError: any) {
+          console.error(`[Garmin Webhook] Error processing single deregistration:`, deregError.message);
+          // Queue for retry
+          await db.insert(webhookFailureQueue).values({
+            webhookType: 'deregistrations',
+            userId: dereg.userAccessToken ? 'unknown' : undefined,
+            payload: dereg,
+            error: deregError.message,
+            nextRetryAt: new Date(Date.now() + 30 * 60 * 1000),
+          }).catch(queueError => {
+            console.error(`[Garmin] Failed to queue deregistration for retry:`, queueError);
+          });
         }
       }
-      
-      res.status(200).json({ success: true });
-    } catch (error) {
+    } catch (error: any) {
       console.error('[Garmin Webhook] Deregistrations error:', error);
-      res.status(200).json({ success: true });
+      // Still return 200 since we already did
     }
   });
 
