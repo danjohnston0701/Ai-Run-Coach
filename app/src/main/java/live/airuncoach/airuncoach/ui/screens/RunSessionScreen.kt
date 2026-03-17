@@ -5,6 +5,7 @@ package live.airuncoach.airuncoach.ui.screens
 import android.Manifest
 import android.content.pm.PackageManager
 import android.util.Log
+import kotlinx.coroutines.delay
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -166,19 +167,29 @@ fun RunSessionScreen(
     )
 
     LaunchedEffect(Unit) {
-        RunConfigHolder.getConfig()?.let { config ->
-            viewModel.setRunConfig(config)
-            routePolyline = config.route?.polyline
+        val config = RunConfigHolder.getConfig()
+        val isCoachedWorkout = config?.trainingPlanId != null
+
+        config?.let {
+            viewModel.setRunConfig(it)
+            routePolyline = it.route?.polyline
         } ?: run {
             // Config was not available - this shouldn't happen if navigation was correct
             Log.e("RunSessionScreen", "RunConfigHolder is null - screen should not have been shown")
             // Don't pop back - let user see what's happening
         }
-        
+
         // Only prepare run (show pre-run briefing) if NOT resuming an active run
         // This prevents the briefing from playing again when resuming from Dashboard
         if (!runState.isRunning && !runState.isPaused) {
             viewModel.prepareRun()
+
+            // For coached workouts, auto-start GPS tracking so the pre-run briefing
+            // plays while the run is already in progress — no manual "Start Run" tap needed.
+            if (isCoachedWorkout) {
+                delay(800) // Allow prepareRun() to initiate the API call first
+                viewModel.startRun()
+            }
         }
     }
 
