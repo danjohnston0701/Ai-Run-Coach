@@ -5781,9 +5781,13 @@ private fun RenameDialogFlagship(
 
 @Composable
 private fun GarminEnrichmentLoadingModal() {
-    Dialog(
-        onDismissRequest = { /* Do not allow dismissal while loading */ },
-        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
+    // Semi-transparent overlay + centered loading card
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.5f))
+            .clickable(enabled = false) { }, // Prevent dismissal
+        contentAlignment = Alignment.Center
     ) {
         Card(
             modifier = Modifier
@@ -5793,9 +5797,7 @@ private fun GarminEnrichmentLoadingModal() {
             shape = RoundedCornerShape(16.dp)
         ) {
             Column(
-                modifier = Modifier
-                    .padding(32.dp)
-                    .align(Alignment.CenterHorizontally),
+                modifier = Modifier.padding(32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 CircularProgressIndicator(
@@ -5833,14 +5835,6 @@ private fun GarminEnrichmentErrorDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        icon = {
-            Icon(
-                painter = painterResource(id = R.drawable.icon_alert_vector),
-                contentDescription = "Error",
-                tint = Colors.error,
-                modifier = Modifier.size(24.dp)
-            )
-        },
         title = { Text("Garmin Sync Failed", color = Colors.textPrimary) },
         text = {
             Text(
