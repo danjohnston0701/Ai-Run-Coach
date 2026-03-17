@@ -644,17 +644,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const recentRuns = allRuns
         .filter(r => {
-          // Must be completed with valid distance (distance is in km, need > 0.5 km)
-          const isCompleted = r.completedAt && r.distance && r.distance > 0.5;
+          // Must be completed with valid distance
+          // distance is stored in meters for native runs (> 1000 = meters), so 500m minimum
+          const distanceMeters = Number(r.distance) || 0;
+          const isValidDistance = distanceMeters > 500 || (distanceMeters > 0 && distanceMeters <= 1000 && distanceMeters > 0.5);
+          const isCompleted = r.completedAt && isValidDistance;
           // Must be within last 30 days
           const isWithinWindow = r.completedAt && new Date(r.completedAt) > thirtyDaysAgo;
-          // Must have weather data recorded
-          const hasWeatherData = !!r.weatherData;
-          return isCompleted && isWithinWindow && hasWeatherData;
+          // Note: weather data is optional — runs without it still contribute to time-of-day analysis
+          return isCompleted && isWithinWindow;
         })
         .sort((a, b) => new Date(b.completedAt!).getTime() - new Date(a.completedAt!).getTime());
 
-      console.log(`[Weather Impact] Runs in last 30 days with weather data: ${recentRuns.length}`);
+      const runsWithWeather = recentRuns.filter(r => !!r.weatherData).length;
+      console.log(`[Weather Impact] Runs in last 30 days: ${recentRuns.length} total, ${runsWithWeather} with weather data`);
       if (recentRuns.length > 0) {
         console.log(`[Weather Impact] Sample run 0: pace=${recentRuns[0].avgPace || recentRuns[0].averagePace}, weather=${JSON.stringify(recentRuns[0].weatherData).substring(0, 100)}`);
       }
@@ -6419,12 +6422,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Weather condition from weatherData
-      const condition = run.weatherData?.condition || run.weatherData?.description || 'Clear';
-      if (!conditionBuckets[condition]) {
-        conditionBuckets[condition] = { totalPace: 0, count: 0 };
+      // Only bucket condition/temperature/humidity if we actually have weather data
+      const condition = run.weatherData?.condition || run.weatherData?.description;
+      if (condition) {
+        if (!conditionBuckets[condition]) {
+          conditionBuckets[condition] = { totalPace: 0, count: 0 };
+        }
+        conditionBuckets[condition].totalPace += pace;
+        conditionBuckets[condition].count++;
       }
-      conditionBuckets[condition].totalPace += pace;
-      conditionBuckets[condition].count++;
 
       // Temperature from weatherData
       const temp = run.weatherData?.temperature;
