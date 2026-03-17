@@ -2850,8 +2850,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Run already enriched with Garmin data" });
       }
 
-      // 3. Call getGarminActivities to get recent activities
+      // 3. Refresh Garmin token if needed before calling API
       const garminService = await import("./garmin-service");
+      
+      let accessToken = garminDevice.accessToken;
+      let refreshToken = garminDevice.refreshToken;
+      
+      // Check if token needs refresh (try refresh preemptively to avoid 401 errors)
+      if (refreshToken) {
+        try {
+          console.log("🔄 Refreshing Garmin access token before enrichment...");
+          const refreshedTokens = await garminService.refreshGarminToken(refreshToken);
+          accessToken = refreshedTokens.accessToken;
+          refreshToken = refreshedTokens.refreshToken;
+          
+          // Update the device with new tokens
+          await storage.updateConnectedDevice(garminDevice.id, {
+            accessToken: refreshedTokens.accessToken,
+            refreshToken: refreshedTokens.refreshToken,
+          });
+          console.log("✅ Garmin token refreshed successfully");
+        } catch (refreshError: any) {
+          console.warn("⚠️ Failed to refresh Garmin token, attempting with current token:", refreshError.message);
+          // Continue with current token - API will fail with 401 if truly expired
+        }
+      }
 
       // Get activities from 7 days before the run to cover potential sync delays
       const runStartTime = new Date(run.completedAt || run.createdAt || new Date());
@@ -2860,7 +2883,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const searchEndTime = new Date(runStartTime);
       searchEndTime.setDate(searchEndTime.getDate() + 1); // Next day to cover sync delays
 
-      const activities = await garminService.getGarminActivities(garminDevice.accessToken, searchStartTime, searchEndTime);
+      const activities = await garminService.getGarminActivities(accessToken, searchStartTime, searchEndTime);
       const garminActivities = Array.isArray(activities) ? activities : [];
 
       // 4. Find an activity with a start time matching the run's start time (within ±5 minutes)
