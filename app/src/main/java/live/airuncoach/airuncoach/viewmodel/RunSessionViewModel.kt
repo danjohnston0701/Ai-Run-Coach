@@ -333,6 +333,12 @@ class RunSessionViewModel @Inject constructor(
                         isLoadingBriefing = false
                     )
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Screen was popped or ViewModel was cleared - don't log as error
+                Log.d("RunSessionViewModel", "Pre-run briefing was cancelled (screen navigation)")
+                isBriefingAudioPlaying = false
+                isPrepareRunInProgress = false
+                // Don't update UI state - screen is already gone
             } catch (e: Exception) {
                 Log.e("RunSessionViewModel", "Failed to get pre-run briefing", e)
                 isBriefingAudioPlaying = false

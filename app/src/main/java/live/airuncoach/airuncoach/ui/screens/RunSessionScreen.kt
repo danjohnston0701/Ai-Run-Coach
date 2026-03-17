@@ -169,12 +169,24 @@ fun RunSessionScreen(
         RunConfigHolder.getConfig()?.let { config ->
             viewModel.setRunConfig(config)
             routePolyline = config.route?.polyline
+        } ?: run {
+            // Config was not available - this shouldn't happen if navigation was correct
+            Log.e("RunSessionScreen", "RunConfigHolder is null - screen should not have been shown")
+            // Don't pop back - let user see what's happening
         }
         
         // Only prepare run (show pre-run briefing) if NOT resuming an active run
         // This prevents the briefing from playing again when resuming from Dashboard
         if (!runState.isRunning && !runState.isPaused) {
             viewModel.prepareRun()
+        }
+    }
+
+    // Cleanup when screen is removed from composition
+    DisposableEffect(Unit) {
+        onDispose {
+            Log.d("RunSessionScreen", "Screen disposed - stopping any ongoing briefing")
+            viewModel.cancelRunSetup()
         }
     }
 
