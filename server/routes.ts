@@ -2490,6 +2490,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         nonce
       );
       
+      // Resolve the Garmin numeric user ID — needed to match wellness webhook pushes.
+      // The token exchange often includes it as `user_id`; if not, fetch it from the
+      // Garmin user-profile endpoint so we always store a valid deviceId.
+      let garminUserId: string | undefined = tokens.athleteId ? String(tokens.athleteId) : undefined;
+      if (!garminUserId) {
+        try {
+          const profile = await garminService.getGarminUserProfile(tokens.accessToken);
+          garminUserId = profile?.userId ? String(profile.userId) : undefined;
+          if (garminUserId) {
+            console.log(`[Garmin OAuth] Resolved Garmin userId from profile API: ${garminUserId}`);
+          } else {
+            console.warn('[Garmin OAuth] Could not resolve Garmin userId from token or profile — webhook matching will use single-device fallback');
+          }
+        } catch (profileErr: any) {
+          console.warn('[Garmin OAuth] Profile API call failed, proceeding without Garmin userId:', profileErr.message);
+        }
+      }
+
       // Check if device already connected
       const existingDevices = await storage.getConnectedDevices(userId);
       const existingGarmin = existingDevices.find(d => d.deviceType === 'garmin' && d.isActive);
@@ -2500,7 +2518,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           accessToken: tokens.accessToken,
           refreshToken: tokens.refreshToken,
           tokenExpiresAt: new Date(Date.now() + tokens.expiresIn * 1000),
-          deviceId: tokens.athleteId,
+          deviceId: garminUserId ?? existingGarmin.deviceId, // preserve existing if we can't resolve
           lastSyncAt: new Date(),
         });
       } else {
@@ -2509,7 +2527,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userId,
           deviceType: 'garmin',
           deviceName: 'Garmin Watch',
-          deviceId: tokens.athleteId,
+          deviceId: garminUserId,
           accessToken: tokens.accessToken,
           refreshToken: tokens.refreshToken,
           tokenExpiresAt: new Date(Date.now() + tokens.expiresIn * 1000),
@@ -3461,6 +3479,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return device;
   };
 
+  /**
+   * Resolve which app user a Garmin wellness webhook belongs to.
+   *
+   * Priority order:
+   *  1. payload.userId  → numeric Garmin user ID stored in connected_devices.device_id
+   *  2. Single-device fallback — if only one Garmin account is connected it must be theirs
+   *
+   * The old date+run matching is intentionally removed: it silently fails on rest
+   * days (the most common case that triggered the "Cannot map to user" warning).
+   */
+  const resolveGarminUserId = (
+    devices: { userId: string; deviceId: string | null }[],
+    payload: { userId?: string | number; [key: string]: any }
+  ): string | undefined => {
+    // 1. Match numeric Garmin userId from payload against stored deviceId
+    if (payload.userId != null) {
+      const garminId = String(payload.userId);
+      const match = devices.find(d => d.deviceId != null && String(d.deviceId) === garminId);
+      if (match) return match.userId;
+    }
+    // 2. Single connected Garmin account — it must be this user
+    if (devices.length === 1) return devices[0].userId;
+    return undefined;
+  };
+
   // ACTIVITY - Activities (when user completes a run/walk)
   // Enhanced with comprehensive logging, notifications, and webhook event tracking
   garminWebhook("activities", async (req: Request, res: Response) => {
@@ -4006,26 +4049,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const date = sleep.calendarDate || new Date((sleep.startTimeInSeconds || 0) * 1000).toISOString().split('T')[0];
           
-          // Find user by recent activity matching date
-          let userId: string | undefined;
-          for (const device of devices) {
-            const recentRun = await db.query.runs.findFirst({
-              where: and(
-                eq(runs.userId, device.userId),
-                gte(runs.completedAt, new Date(`${date}T00:00:00`)),
-                lte(runs.completedAt, new Date(`${date}T23:59:59`))
-              ),
-              limit: 1,
-            });
-            
-            if (recentRun) {
-              userId = device.userId;
-              break;
-            }
-          }
+          // Resolve user: match Garmin numeric userId → deviceId, then single-device fallback
+          const userId = resolveGarminUserId(devices, sleep);
           
           if (!userId) {
-            console.warn(`⚠️ [Garmin Webhook] Could not map sleep to user for date ${date}`);
+            console.warn(`⚠️ [Garmin Webhook] Could not map sleep to user for date ${date} (garminUserId=${sleep.userId ?? 'none'})`);
             continue;
           }
           
@@ -4153,26 +4181,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const date = stress.calendarDate || new Date((stress.startTimeInSeconds || 0) * 1000).toISOString().split('T')[0];
           
-          // Find user by recent activity matching date
-          let userId: string | undefined;
-          for (const device of devices) {
-            const recentRun = await db.query.runs.findFirst({
-              where: and(
-                eq(runs.userId, device.userId),
-                gte(runs.completedAt, new Date(`${date}T00:00:00`)),
-                lte(runs.completedAt, new Date(`${date}T23:59:59`))
-              ),
-              limit: 1,
-            });
-            
-            if (recentRun) {
-              userId = device.userId;
-              break;
-            }
-          }
+          // Resolve user: match Garmin numeric userId → deviceId, then single-device fallback
+          const userId = resolveGarminUserId(devices, stress);
           
           if (!userId) {
-            console.warn(`⚠️ [Garmin Webhook] Could not map stress to user for date ${date}`);
+            console.warn(`⚠️ [Garmin Webhook] Could not map stress to user for date ${date} (garminUserId=${stress.userId ?? 'none'})`);
             continue;
           }
           
@@ -4629,26 +4642,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const date = pox.calendarDate || new Date((pox.startTimeInSeconds || 0) * 1000).toISOString().split('T')[0];
           
-          // Find user by recent activity matching date
-          let userId: string | undefined;
-          for (const device of devices) {
-            const recentRun = await db.query.runs.findFirst({
-              where: and(
-                eq(runs.userId, device.userId),
-                gte(runs.completedAt, new Date(`${date}T00:00:00`)),
-                lte(runs.completedAt, new Date(`${date}T23:59:59`))
-              ),
-              limit: 1,
-            });
-            
-            if (recentRun) {
-              userId = device.userId;
-              break;
-            }
-          }
+          // Resolve user: match Garmin numeric userId → deviceId, then single-device fallback
+          const userId = resolveGarminUserId(devices, pox);
           
           if (!userId) {
-            console.warn(`⚠️ [Garmin Webhook] Could not map pulse ox to user for date ${date}`);
+            console.warn(`⚠️ [Garmin Webhook] Could not map pulse ox to user for date ${date} (garminUserId=${pox.userId ?? 'none'})`);
             continue;
           }
           
