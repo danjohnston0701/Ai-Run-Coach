@@ -529,7 +529,8 @@ private fun AiInsightsTabContent(
         }
 
         // Garmin enrich CTA — prominent banner when Garmin is connected but run not yet enriched
-        if (isGarminConnected && run.hasGarminData != true) {
+        // Hide if: run is already enriched, or run originated from Garmin (externalSource == 'garmin')
+        if (isGarminConnected && run.hasGarminData != true && run.externalSource != "garmin") {
             item {
                 GarminEnrichCTACard(
                     isEnriching = isEnrichingWithGarmin,
