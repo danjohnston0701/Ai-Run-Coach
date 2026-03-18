@@ -6,7 +6,7 @@
 
 import { db } from './db';
 import { connectedDevices } from '../shared/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import axios from 'axios';
 
 // ============================================================================
@@ -342,13 +342,16 @@ export async function handlePermissionChange(data: {
   }
 
   if (!device) {
-    // Only one Garmin account connected? Use it as fallback
+    // Fallback: find the single active Garmin connection (ignores old disconnected records)
     const allDevices = await db.query.connectedDevices.findMany({
-      where: eq(connectedDevices.deviceType, 'garmin'),
+      where: and(
+        eq(connectedDevices.deviceType, 'garmin'),
+        eq(connectedDevices.isActive, true)
+      ),
     });
     if (allDevices.length === 1) {
       device = allDevices[0];
-      console.log('[Garmin] Permission change: matched single connected Garmin account');
+      console.log('[Garmin] Permission change: matched single active Garmin account');
     } else {
       console.warn('[Garmin] Permission change received but could not match to a user — no userId or token provided');
       return;
