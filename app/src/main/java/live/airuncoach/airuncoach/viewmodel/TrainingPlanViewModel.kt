@@ -152,10 +152,20 @@ class TrainingPlanViewModel @Inject constructor(
         viewModelScope.launch {
             _actionLoading.value = true
             try {
-                apiService.completeWorkout(workoutId, CompleteWorkoutRequest(runId))
+                Log.d("TrainingPlanVM", "Marking workout $workoutId as complete...")
+                val response = apiService.completeWorkout(workoutId, CompleteWorkoutRequest(runId))
+                
+                if (!response.isSuccessful) {
+                    Log.e("TrainingPlanVM", "Completion failed: ${response.code()} ${response.message()}")
+                    _actionError.value = "Failed to complete: HTTP ${response.code()}"
+                    return@launch
+                }
+                
+                Log.d("TrainingPlanVM", "✅ Workout marked complete, reloading plan details...")
                 // Reload plan detail to reflect updated state
                 loadPlanDetail(planId)
             } catch (e: Exception) {
+                Log.e("TrainingPlanVM", "Error completing workout: ${e.message}", e)
                 _actionError.value = "Could not mark workout complete: ${e.message}"
             } finally {
                 _actionLoading.value = false

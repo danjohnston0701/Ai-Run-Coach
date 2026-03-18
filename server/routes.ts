@@ -9928,15 +9928,26 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const { workoutId } = req.params;
       const { runId } = req.body;
 
+      console.log(`✅ Completing workout ${workoutId}...`);
+
       // Update the workout
-      await db.update(plannedWorkouts)
+      const updateResult = await db.update(plannedWorkouts)
         .set({ isCompleted: true, completedRunId: runId || null })
         .where(eq(plannedWorkouts.id, workoutId));
 
-      // Fetch the updated workout
+      console.log(`✅ Workout updated: ${workoutId}`);
+
+      // Fetch the UPDATED workout to confirm
       const [workout] = await db.select().from(plannedWorkouts).where(eq(plannedWorkouts.id, workoutId));
       
-      if (workout && workout.weeklyPlanId && workout.trainingPlanId) {
+      if (!workout) {
+        console.error(`❌ Workout not found after update: ${workoutId}`);
+        return res.status(404).json({ error: "Workout not found after update" });
+      }
+
+      console.log(`✅ Confirmed: workout ${workoutId} isCompleted=${workout.isCompleted}`);
+      
+      if (workout.weeklyPlanId && workout.trainingPlanId) {
         // Check if all workouts in this week are complete
         const weekWorkouts = await db.select().from(plannedWorkouts)
           .where(eq(plannedWorkouts.weeklyPlanId, workout.weeklyPlanId));
@@ -9960,9 +9971,12 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
           const completedCount = allWorkouts.filter(w => w.isCompleted).length;
           const totalCount = allWorkouts.length;
           
+          console.log(`✅ Plan ${plan.id}: ${completedCount}/${totalCount} completed (${((completedCount/totalCount)*100).toFixed(0)}%)`);
+          
           res.json({ 
             success: true, 
             workoutId,
+            isCompleted: workout.isCompleted,
             planProgress: {
               completedWorkouts: completedCount,
               totalWorkouts: totalCount,
@@ -9970,13 +9984,13 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
             }
           });
         } else {
-          res.json({ success: true, workoutId });
+          res.json({ success: true, workoutId, isCompleted: workout.isCompleted });
         }
       } else {
-        res.json({ success: true, workoutId });
+        res.json({ success: true, workoutId, isCompleted: workout.isCompleted });
       }
     } catch (error: any) {
-      console.error("Complete workout error:", error);
+      console.error("❌ Complete workout error:", error);
       res.status(500).json({ error: "Failed to complete workout" });
     }
   });
