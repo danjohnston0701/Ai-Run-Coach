@@ -25,17 +25,17 @@ export default function PrivacyPolicy() {
         <section className="space-y-6 text-muted-foreground leading-relaxed">
           <div className="p-6 bg-card/50 border border-white/10 rounded-2xl">
             <h2 className="text-foreground font-bold uppercase tracking-wider mb-2">Privacy Policy for AI Run Coach</h2>
-            <p className="text-sm italic">Last updated: 9 January 2026</p>
+            <p className="text-sm italic">Last updated: 19 March 2026</p>
           </div>
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">1. Who We Are</h3>
             <p>
-              This Privacy Policy explains how airuncoach.live, trading as AI Run Coach ("we", "us", "our"), collects, uses, stores, and protects your personal information when you use the AI Run Coach application ("the App").
+              This Privacy Policy explains how <strong>airuncoach.live</strong>, trading as <strong>AI Run Coach</strong> ("we", "us", "our"), collects, uses, stores, and protects your personal information when you use the AI Run Coach application, website, and associated services, including the Garmin companion app (the "App").
             </p>
-            <p>
-              We act as the data controller for your personal information. If you have questions or wish to exercise your rights, contact us at:
-            </p>
+            <p>We act as the <strong>data controller</strong> for the personal data processed through AI Run Coach.</p>
+            <p>Third-party services (such as Garmin Connect, Apple Health, Strava, and similar providers) act as <strong>independent data controllers</strong> for the data they collect and share with us.</p>
+            <p>If you have questions or wish to exercise your rights, contact us at:</p>
             <ul className="list-none pl-0 space-y-1">
               <li><strong>Email:</strong> <span className="text-primary font-medium">support@airuncoach.live</span></li>
               <li><strong>Website:</strong> <span className="text-primary font-medium">https://airuncoach.live</span></li>
@@ -44,8 +44,8 @@ export default function PrivacyPolicy() {
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">2. What Data We Collect</h3>
-            <p>We collect the following categories of personal data.</p>
-            
+            <p>We collect only the data necessary to provide AI Run Coach functionality.</p>
+
             <h4 className="font-bold text-foreground mt-4">Account Information</h4>
             <ul className="list-disc pl-5 space-y-2">
               <li>Email address and password (encrypted)</li>
@@ -57,233 +57,257 @@ export default function PrivacyPolicy() {
 
             <h4 className="font-bold text-foreground mt-4">Health and Fitness Data (Special Category Data)</h4>
             <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Activity data:</strong> workout type, start time, duration, distance, pace, cadence, lap and split information</li>
+              <li><strong>Activity data:</strong> workout type, duration, distance, pace, cadence, laps</li>
               <li><strong>Location data:</strong> GPS route points, elevation</li>
               <li><strong>Physiological data:</strong> heart rate, heart-rate zones, calories burned</li>
-              <li><strong>Weather conditions:</strong> temperature, humidity, wind speed during runs</li>
+              <li><strong>Environmental data:</strong> temperature, humidity, wind speed</li>
             </ul>
 
             <h4 className="font-bold text-foreground mt-4">Connected Services Data</h4>
-            <p>When you connect third-party fitness accounts (such as Garmin Connect, Apple Health, Samsung Health, Strava), we may receive:</p>
+            <p>When you connect third-party fitness services (such as Garmin Connect, Apple Health, Samsung Health, or Strava), we may receive:</p>
             <ul className="list-disc pl-5 space-y-2">
-              <li>Historical workout data</li>
-              <li>Device identifiers and activity IDs</li>
-              <li>Real-time workout metrics (if supported)</li>
+              <li>Historical and real-time activity data</li>
+              <li>Device-generated metrics and activity identifiers</li>
             </ul>
             <p className="text-sm italic">We do not receive your third-party account passwords or payment information.</p>
 
-            <h4 className="font-bold text-foreground mt-4">Fitness Account Data</h4>
-            <p>When you connect your fitness account, we receive activity details such as distance, duration, pace, elevation, route information, and heart rate where available, as provided by your connected device or service.</p>
-
-            <h4 className="font-bold text-foreground mt-4">Third-Party Data Attribution and Branding</h4>
-            <p>When data is received from connected third-party devices and services:</p>
+            <h4 className="font-bold text-foreground mt-4">Garmin Device and Companion App Data</h4>
+            <p>When you use the AI Run Coach Garmin companion app or connect a Garmin device:</p>
             <ul className="list-disc pl-5 space-y-2">
-              <li>The data source will be clearly attributed to the respective third-party provider (e.g., "Data from Garmin", "Synced via Apple Health")</li>
-              <li>Third-party branding and logos will be displayed within the App where applicable to indicate the data source</li>
-              <li>Social media images generated by the App (for sharing to platforms such as Facebook and Instagram) will include appropriate third-party branding when the run data originated from a connected device</li>
-              <li>All use of third-party names, logos, and branding is compliant with each provider's Developer Terms and Conditions and Brand Guidelines Policy</li>
+              <li>Data is transmitted from your Garmin device via Garmin APIs and/or device communication</li>
+              <li>This includes real-time and historical workout metrics such as pace, heart rate, cadence, and distance</li>
+              <li>The companion app acts as a secure bridge between your Garmin device and our services</li>
             </ul>
-            <p className="text-sm italic mt-2">Third-party trademarks and logos remain the property of their respective owners. Our use of these marks is solely to indicate the source of data and does not imply endorsement or affiliation beyond the integration relationship.</p>
+            <p>We process only the <strong>minimum data necessary</strong> to provide coaching functionality.</p>
 
             <h4 className="font-bold text-foreground mt-4">Technical Data</h4>
             <ul className="list-disc pl-5 space-y-2">
-              <li>Device type and browser information</li>
-              <li>IP address (anonymized for analytics)</li>
-              <li>App usage patterns and error logs</li>
+              <li>Device type, operating system, and app version</li>
+              <li>Usage patterns and performance data</li>
+              <li>Error logs (no personal data retained)</li>
+              <li>IP address (anonymised where possible)</li>
             </ul>
           </div>
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">3. Legal Basis for Processing (GDPR)</h3>
-            <p>We process your personal data under the following legal bases:</p>
-            
-            <h4 className="font-bold text-foreground mt-4">For General Personal Data (Article 6 GDPR):</h4>
-            <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Contract performance:</strong> To provide the AI Run Coach service you signed up for</li>
-              <li><strong>Consent:</strong> For optional features like push notifications and connected services</li>
-              <li><strong>Legitimate interests:</strong> To improve our service and ensure security</li>
-            </ul>
 
-            <h4 className="font-bold text-foreground mt-4">For Health and Fitness Data (Article 9 GDPR):</h4>
+            <h4 className="font-bold text-foreground mt-4">General Personal Data (Article 6)</h4>
+            <p>We process personal data based on:</p>
             <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Explicit consent:</strong> You provide explicit consent when creating your account and enabling fitness tracking features</li>
+              <li><strong>Contract performance:</strong> To deliver the services you have requested</li>
+              <li><strong>Consent:</strong> For optional features such as connected services and notifications</li>
+              <li><strong>Legitimate interests:</strong> To improve coaching accuracy, maintain system security, and prevent misuse</li>
             </ul>
-            <p className="text-sm italic mt-2">
-              Health data is classified as "special category data" under GDPR and UK data protection law. We only process this data with your explicit consent, which you can withdraw at any time.
-            </p>
+            <p>We ensure these interests do not override your fundamental rights and freedoms.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Health and Fitness Data (Article 9)</h4>
+            <p>Health and fitness data is processed only with <strong>explicit consent</strong>, obtained through a clear affirmative action (such as selecting a checkbox or confirming within the app during account setup or feature activation).</p>
+            <p>You may withdraw your consent at any time.</p>
           </div>
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">4. How We Use Your Data</h3>
-            <p>We use your data only to provide and improve the AI Run Coach service:</p>
+            <p>We use your data only for specific, defined purposes:</p>
             <ul className="list-disc pl-5 space-y-2">
-              <li>Generating real-time AI coaching feedback during runs (pace, heart rate, terrain guidance)</li>
-              <li>Creating personalized training suggestions based on your fitness level and goals</li>
-              <li>Displaying run summaries, progress reports, and performance insights</li>
-              <li>Generating running routes tailored to your preferences</li>
-              <li>Enabling social features like live run sharing with friends</li>
-              <li>Sending push notifications about your runs (with your consent)</li>
-              <li>Maintaining app performance and fixing technical issues</li>
+              <li>Analysing real-time workout data (such as pace, heart rate, and distance) to generate AI-driven coaching during active sessions</li>
+              <li>Analysing historical activity data and profile information to generate personalised training recommendations</li>
+              <li>Providing performance insights, summaries, and progress tracking</li>
+              <li>Generating routes and navigation guidance</li>
+              <li>Enabling optional sharing features</li>
+              <li>Sending notifications (with your consent)</li>
+              <li>Maintaining system performance, reliability, and security</li>
             </ul>
-            <p className="font-bold mt-4">We do NOT:</p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li>Sell your personal data to third parties</li>
-              <li>Use your health data for advertising purposes</li>
-              <li>Share your data with advertisers</li>
-              <li>Create profiles for marketing without your consent</li>
+
+            <h4 className="font-bold text-foreground mt-4">Data Use Breakdown</h4>
+            <div className="overflow-x-auto rounded-xl border border-white/10">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-white/5 text-foreground">
+                    <th className="text-left p-3 font-semibold">Data Type</th>
+                    <th className="text-left p-3 font-semibold">How We Use It</th>
+                    <th className="text-left p-3 font-semibold">Outcome</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  <tr><td className="p-3">Real-time workout data (pace, heart rate, cadence, distance)</td><td className="p-3">Analysed during active sessions and sent (in anonymised form) to AI systems</td><td className="p-3">Real-time coaching prompts and performance feedback</td></tr>
+                  <tr><td className="p-3">Historical activity data</td><td className="p-3">Analysed to identify trends and performance patterns</td><td className="p-3">Personalised training plans and insights</td></tr>
+                  <tr><td className="p-3">GPS location data</td><td className="p-3">Used for route generation and mapping; shared without personal identifiers</td><td className="p-3">Navigation, route planning, and post-run maps</td></tr>
+                  <tr><td className="p-3">User profile data</td><td className="p-3">Combined with activity data to tailor recommendations</td><td className="p-3">Personalised coaching and training</td></tr>
+                  <tr><td className="p-3">Device metrics (e.g. Garmin data)</td><td className="p-3">Integrated into performance analysis systems</td><td className="p-3">More accurate and adaptive coaching</td></tr>
+                  <tr><td className="p-3">AI processing data</td><td className="p-3">Sent as structured, anonymised workout data (no personal identifiers)</td><td className="p-3">AI-generated coaching insights and summaries</td></tr>
+                  <tr><td className="p-3">Audio output data</td><td className="p-3">AI-generated text converted to audio</td><td className="p-3">Real-time voice coaching during runs</td></tr>
+                  <tr><td className="p-3">Technical logs</td><td className="p-3">Used for debugging and system monitoring</td><td className="p-3">Improved stability and performance</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="text-sm">We ensure:</p>
+            <ul className="list-disc pl-5 space-y-1 text-sm">
+              <li>Personal identifiers (name, email, account data) are <strong>never included in AI processing payloads</strong></li>
+              <li>Data shared with third parties is limited to what is strictly necessary</li>
+              <li>Processing is limited to the purpose for which the data was collected</li>
+            </ul>
+
+            <h4 className="font-bold text-foreground mt-4">Automated Processing and Profiling</h4>
+            <p>We use automated processing to analyse your fitness data and generate personalised coaching insights.</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>This constitutes <strong>profiling</strong> under GDPR</li>
+              <li>It does <strong>not produce legal or similarly significant effects</strong></li>
+              <li>You may opt out by discontinuing use of coaching features</li>
+            </ul>
+
+            <h4 className="font-bold text-foreground mt-4">Real-Time Processing</h4>
+            <p>During active sessions, data is processed temporarily to deliver immediate coaching feedback and is not used beyond its intended purpose.</p>
+
+            <h4 className="font-bold text-foreground mt-4">What We Do NOT Do</h4>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Sell personal or health data</li>
+              <li>Use data for advertising or marketing profiling</li>
+              <li>Share data with advertisers</li>
+              <li>Use Garmin or fitness data for unrelated purposes</li>
             </ul>
           </div>
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">5. Data Sharing</h3>
-            <p>We share your information only in these limited situations:</p>
+            <p>We share your data only where necessary:</p>
+
+            <h4 className="font-bold text-foreground mt-4">Service Providers</h4>
             <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Cloud infrastructure:</strong> Your data is stored on secure servers provided by our hosting partners (data processing agreements in place)</li>
-              <li><strong>AI services:</strong> We use OpenAI to generate coaching advice. Only anonymized workout metrics are shared, not personally identifiable information</li>
-              <li><strong>Map services:</strong> We use Google Maps and OpenStreetMap for route generation and display</li>
-              <li><strong>Legal obligations:</strong> When required by law, court order, or to protect rights and safety</li>
-              <li><strong>Business transfers:</strong> In the event of a merger or acquisition (you would be notified)</li>
+              <li>Neon (database hosting)</li>
+              <li>OpenAI (AI processing – anonymised data only)</li>
+              <li>Google Maps Platform (mapping and routing)</li>
+              <li>GraphHopper (route generation)</li>
+              <li>Replit (application hosting and infrastructure)</li>
             </ul>
-            <p className="font-bold mt-4">Service Providers We Use:</p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li>Neon (PostgreSQL database hosting - EU/US regions)</li>
-              <li>OpenAI (AI coaching - US-based, anonymized data only)</li>
-              <li>Google Maps Platform (route generation)</li>
-              <li>Replit (application hosting)</li>
+            <p>All providers are contractually required to protect your data.</p>
+
+            <h4 className="font-bold text-foreground mt-4">AI Processing</h4>
+            <p>Only <strong>anonymised, structured workout data</strong> is shared with AI providers. No personal identifiers (such as name, email, or account details) are transmitted.</p>
+            <p>AI providers operate under strict data processing agreements and zero-retention configurations where applicable.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Garmin Data Restrictions</h4>
+            <p>Data obtained from Garmin devices or Garmin Connect:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Is used solely to provide user-requested functionality</li>
+              <li>Is not sold, rented, or shared for advertising or marketing</li>
+              <li>Is not disclosed beyond what is necessary to deliver the service</li>
+              <li>Is deleted when you disconnect your Garmin account</li>
             </ul>
+
+            <h4 className="font-bold text-foreground mt-4">Mapping and Location Services</h4>
+            <p>When generating routes or maps, only GPS coordinates are shared with mapping providers. No personal identifiers are included.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Legal Obligations</h4>
+            <p>We may disclose data when required by law or to protect rights, safety, or security.</p>
           </div>
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">6. International Data Transfers</h3>
-            <p>Your data may be transferred to and processed in countries outside the UK and European Economic Area (EEA), including the United States.</p>
-            <p>When we transfer data internationally, we ensure appropriate safeguards are in place:</p>
+            <p>Your data may be processed outside the UK/EEA, including in the United States.</p>
+            <p>We ensure appropriate safeguards including:</p>
             <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Standard Contractual Clauses (SCCs):</strong> We use EU-approved contract terms with service providers</li>
-              <li><strong>Data Processing Agreements:</strong> All third-party processors are contractually bound to protect your data</li>
-              <li><strong>Encryption:</strong> All data transfers use TLS encryption</li>
+              <li>Standard Contractual Clauses (SCCs)</li>
+              <li>Data Processing Agreements</li>
+              <li>Encryption and secure transmission</li>
             </ul>
           </div>
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">7. Data Retention</h3>
-            <p>We retain your data for the following periods:</p>
+            <p>We retain data only as long as necessary:</p>
             <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Account data:</strong> Retained while your account is active, deleted within 30 days of account deletion</li>
-              <li><strong>Run history:</strong> Retained while your account is active, deleted within 30 days of account deletion</li>
-              <li><strong>Technical logs:</strong> Retained for up to 90 days for debugging and security purposes</li>
-              <li><strong>Anonymized analytics:</strong> May be retained indefinitely in aggregate form</li>
+              <li><strong>Account and activity data:</strong> while your account is active</li>
+              <li><strong>Deleted within 30 days</strong> of account deletion</li>
+              <li><strong>Technical logs:</strong> up to 90 days</li>
+              <li><strong>Aggregated data:</strong> retained indefinitely in anonymised form</li>
             </ul>
-            <p className="mt-2">When you disconnect a third-party service or delete your account, we stop receiving new data and delete stored data within 30 days.</p>
+            <p>Retention periods are based on service delivery, legal obligations, and dispute resolution needs.</p>
           </div>
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">8. Your Rights</h3>
-            <p>Under GDPR and UK data protection law, you have the following rights:</p>
+            <p>You have the right to:</p>
             <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Right of Access:</strong> Request a copy of all personal data we hold about you</li>
-              <li><strong>Right to Rectification:</strong> Correct any inaccurate or incomplete data</li>
-              <li><strong>Right to Erasure:</strong> Request deletion of your data ("right to be forgotten")</li>
-              <li><strong>Right to Portability:</strong> Receive your data in a machine-readable format (JSON/CSV)</li>
-              <li><strong>Right to Object:</strong> Object to processing based on legitimate interests</li>
-              <li><strong>Right to Restrict Processing:</strong> Temporarily limit how we use your data</li>
-              <li><strong>Right to Withdraw Consent:</strong> Withdraw consent at any time for consent-based processing</li>
+              <li>Access your personal data</li>
+              <li>Correct inaccuracies</li>
+              <li>Delete your data</li>
+              <li>Export your data</li>
+              <li>Object to processing</li>
+              <li>Restrict processing</li>
+              <li>Withdraw consent</li>
             </ul>
-            <p className="mt-4"><strong>How to Exercise Your Rights:</strong></p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li>Email us at support@airuncoach.live with your request</li>
-              <li>Use the "Delete Account" feature in the app settings</li>
-              <li>Disconnect third-party services via the Connected Services page</li>
+            <p className="mt-2">To exercise your rights:</p>
+            <ul className="list-none pl-0 space-y-1">
+              <li><strong>Email:</strong> <span className="text-primary font-medium">support@airuncoach.live</span></li>
+              <li>Use in-app controls</li>
             </ul>
-            <p className="mt-2">We will respond to your request within <strong>30 days</strong> (extendable to 60 days for complex requests, with notification).</p>
-            <p className="mt-2">If you are unsatisfied with our response, you have the right to lodge a complaint with your local data protection authority:</p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li><strong>UK:</strong> Information Commissioner's Office (ICO) - ico.org.uk</li>
-              <li><strong>EU:</strong> Your national Data Protection Authority</li>
-            </ul>
+            <p className="mt-2">You may also lodge a complaint with your local supervisory authority.</p>
           </div>
 
           <div className="space-y-4">
-            <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">9. California Privacy Rights (CCPA/CPRA)</h3>
-            <p>If you are a California resident, you have additional rights under the California Consumer Privacy Act (CCPA) and California Privacy Rights Act (CPRA):</p>
+            <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">9. US State Privacy Rights</h3>
+            <p>If you are a resident of certain U.S. states (including California, Virginia, Colorado, Connecticut, and Utah), you may have rights to:</p>
             <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Right to Know:</strong> Request disclosure of personal information collected in the past 12 months</li>
-              <li><strong>Right to Delete:</strong> Request deletion of your personal information</li>
-              <li><strong>Right to Opt-Out:</strong> Opt out of the sale or sharing of personal information</li>
-              <li><strong>Right to Non-Discrimination:</strong> We will not discriminate against you for exercising your rights</li>
+              <li>Access, correct, or delete your data</li>
+              <li>Obtain a copy of your data</li>
+              <li>Opt out of certain processing</li>
             </ul>
-            <p className="mt-4 font-bold">We Do Not Sell Your Personal Information</p>
-            <p>AI Run Coach does not sell personal information to third parties for monetary or other valuable consideration. We do not share personal information for cross-context behavioral advertising.</p>
-            <p className="mt-4"><strong>How to Submit Requests:</strong></p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li>Email us at support@airuncoach.live with your request</li>
-              <li>Use the in-app account settings to delete your account</li>
-              <li>You may designate an authorized agent to submit requests on your behalf by providing written authorization</li>
+            <p>Health and fitness data may be considered <strong>sensitive personal data</strong>, and we process it only with your consent.</p>
+            <p className="font-bold mt-2">We do not:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Sell personal data</li>
+              <li>Share data for targeted advertising</li>
             </ul>
-            <p className="mt-2"><strong>Verification:</strong> To protect your privacy, we will verify your identity before processing requests by confirming information associated with your account (such as your email address). For authorized agents, we require proof of authorization and may contact you directly to confirm.</p>
+            <p className="mt-2">You may appeal decisions regarding your privacy requests by contacting us.</p>
           </div>
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">10. Security</h3>
-            <p>We implement appropriate technical and organizational measures to protect your personal data:</p>
+            <p>We implement:</p>
             <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Encryption:</strong> All data is encrypted in transit (TLS 1.2+) and at rest</li>
-              <li><strong>Password security:</strong> Passwords are hashed using bcrypt (never stored in plain text)</li>
-              <li><strong>Access controls:</strong> Database access is restricted to authorized personnel only</li>
-              <li><strong>Regular updates:</strong> We keep our systems and dependencies up to date</li>
-              <li><strong>Secure hosting:</strong> Our infrastructure uses enterprise-grade security</li>
+              <li>Encryption (in transit and at rest)</li>
+              <li>Secure password hashing</li>
+              <li>Access controls</li>
+              <li>System monitoring and updates</li>
             </ul>
-            <p className="mt-2">No method of transmission or storage is 100% secure. If you discover a security vulnerability, please report it to security@airuncoach.live.</p>
           </div>
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">11. Data Breach Notification</h3>
-            <p>In the event of a personal data breach that poses a risk to your rights and freedoms:</p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li>We will notify the relevant supervisory authority within <strong>72 hours</strong> of becoming aware</li>
-              <li>We will notify affected users without undue delay if the breach is likely to result in high risk</li>
-              <li>Notification will include the nature of the breach, likely consequences, and measures taken</li>
-            </ul>
+            <p>We will notify authorities and affected users where required by law.</p>
           </div>
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">12. Children's Privacy</h3>
-            <p>AI Run Coach is not directed at children under 16 years of age. We do not knowingly collect personal data from children under 16.</p>
-            <p>If you believe a child under 16 has provided us with personal data, please contact us immediately at support@airuncoach.live and we will delete the data within 30 days.</p>
+            <p>AI Run Coach is not intended for users under 16 years of age.</p>
           </div>
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">13. Cookies and Tracking</h3>
-            <p>AI Run Coach uses minimal cookies and local storage for essential functionality:</p>
+            <p>We use minimal tracking for:</p>
             <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Authentication:</strong> Session cookies to keep you logged in</li>
-              <li><strong>Preferences:</strong> Local storage for app settings and cached data</li>
-              <li><strong>Performance:</strong> Basic analytics to understand app usage (anonymized)</li>
+              <li>Authentication</li>
+              <li>Preferences</li>
+              <li>Performance analytics (anonymised)</li>
             </ul>
-            <p>We do not use third-party advertising cookies or cross-site tracking.</p>
+            <p>We do not use advertising cookies or cross-site tracking.</p>
           </div>
 
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">14. Changes to This Policy</h3>
-            <p>We may update this Privacy Policy from time to time. When we make material changes:</p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li>We will update the "Last updated" date at the top of this policy</li>
-              <li>We will notify you via email or in-app notification at least 30 days before changes take effect</li>
-              <li>For significant changes affecting how we use health data, we will request your consent again</li>
-            </ul>
-            <p>Continued use of the App after changes take effect constitutes acceptance of the updated policy.</p>
+            <p>We will notify users of material changes at least 30 days before they take effect.</p>
           </div>
 
           <div className="space-y-4 pb-20">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">15. Contact Us</h3>
-            <p>If you have questions about this Privacy Policy or wish to exercise your rights:</p>
             <ul className="list-none pl-0 space-y-1">
-              <li><strong>Email:</strong> <span className="text-primary font-medium">support@airuncoach.live</span></li>
-              <li><strong>Privacy inquiries:</strong> <span className="text-primary font-medium">privacy@airuncoach.live</span></li>
-              <li><strong>Security issues:</strong> <span className="text-primary font-medium">security@airuncoach.live</span></li>
-              <li><strong>Website:</strong> <span className="text-primary font-medium">https://airuncoach.live</span></li>
+              <li><span className="text-primary font-medium">support@airuncoach.live</span></li>
+              <li><span className="text-primary font-medium">privacy@airuncoach.live</span></li>
+              <li><span className="text-primary font-medium">security@airuncoach.live</span></li>
             </ul>
             <p className="mt-4 text-sm italic">
-              This Privacy Policy is provided in English. If there is any conflict between this English version and a translated version, the English version shall prevail.
+              This Privacy Policy is provided in English and prevails over any translated versions.
             </p>
           </div>
         </section>
