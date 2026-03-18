@@ -303,8 +303,6 @@ export default function PrivacyPolicy() {
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">15. Contact Us</h3>
             <ul className="list-none pl-0 space-y-1">
               <li><span className="text-primary font-medium">support@airuncoach.live</span></li>
-              <li><span className="text-primary font-medium">privacy@airuncoach.live</span></li>
-              <li><span className="text-primary font-medium">security@airuncoach.live</span></li>
             </ul>
             <p className="mt-4 text-sm italic">
               This Privacy Policy is provided in English and prevails over any translated versions.
