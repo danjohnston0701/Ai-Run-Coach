@@ -2323,23 +2323,28 @@ ${wellnessContext ? `CURRENT WELLNESS STATUS (from Garmin):${wellnessContext}
 ${readinessGuidance}` : `NO WELLNESS DATA AVAILABLE — The runner does not have a Garmin device connected or no wellness data has been synced today. Do NOT mention body readiness, recovery status, fatigue, body battery, sleep quality, HRV, stress levels, or any wellness/biometric data. Simply skip wellness entirely in your response.`}
 
 Based on this data, provide:
-${coachingPlanContext ? `1. "briefing": MAX 2 SHORT SENTENCES (≤25 words). This is a COACHED WORKOUT — lead with the workout type and its purpose in the plan (week ${planWeekNumber} of ${planTotalWeeks}). Do NOT lead with distance or weather. ${PACE_FORMAT_RULE}
-2. "intensityAdvice": ONE sentence (≤12 words). Focus entirely on the ${workoutIntensity || 'prescribed'} zone effort for this ${workoutType} session.
-3. "warnings": Warnings array — empty if none.
-4. "${hasRoute === true ? 'routeInsight' : 'readinessInsight'}": ONE sentence (≤12 words). ${wellnessContext ? 'How their readiness affects this specific workout.' : 'One motivational line tied to this coached session.'}` : `1. "briefing": A punchy, spoken pre-run briefing — MAX 2 SHORT SENTENCES (≤25 words). Lead with distance${targetPace ? ' and target pace' : ''}${wellnessContext ? ', then readiness' : ''}. Be direct. ${PACE_FORMAT_RULE}
-2. "intensityAdvice": ONE short sentence (≤12 words) on effort/pace.
-3. "warnings": Array of any warnings ${wellnessContext ? 'if their wellness indicators suggest caution' : 'based on weather or route conditions'}. Empty array if none.
-${hasRoute === true ? `4. "routeInsight": ONE sentence (≤12 words) on the key terrain feature only.` : `4. "readinessInsight": ONE sentence (≤12 words). ${wellnessContext ? 'Key readiness point only.' : 'One motivational line — no wellness mention.'}`}`}
+${coachingPlanContext ? `1. "briefing": 2-3 SHORT SENTENCES (max 35 words). This is a COACHED WORKOUT — lead with the workout type and its purpose in the plan (week ${planWeekNumber} of ${planTotalWeeks}). Include key context like distance, weather, or readiness if relevant. ${PACE_FORMAT_RULE}
+2. "intensityAdvice": ONE clear sentence (≤15 words). How they should feel during the ${workoutIntensity || 'prescribed'} zone efforts in this ${workoutType} session.
+3. "weatherAdvice": ONE sentence (≤15 words) on how weather conditions affect the run. Be specific (wind, temp, rain, etc.). Can be empty if weather is neutral.
+4. "warnings": Array of warnings — empty if none. Include readiness warnings if wellness data suggests caution.
+5. "${hasRoute === true ? 'routeInsight' : 'readinessInsight'}": ONE sentence (≤12 words). ${wellnessContext ? 'Key readiness or terrain challenge affecting this specific workout.' : 'One specific motivational detail tied to this workout.'}`
+: `1. "briefing": 2-3 SENTENCES (max 40 words) for a free-form run. Lead with distance${targetPace ? ' and target pace' : ''}, mention weather and how it might affect you. ${wellnessContext ? 'Include your readiness status.' : ''} Be conversational. ${PACE_FORMAT_RULE}
+2. "intensityAdvice": ONE sentence (≤15 words). About pace, effort, and listening to your body today.
+3. "weatherAdvice": ONE sentence (≤15 words) on how conditions will impact the run. Empty if weather is neutral/favorable.
+4. "warnings": Array of warnings ${wellnessContext ? 'if wellness or weather suggest adjusting intensity' : 'based on weather or route conditions'}. Empty if none.
+${hasRoute === true ? `5. "routeInsight": ONE sentence (≤15 words) on the key challenge — terrain, elevation, or wind.` : `5. "readinessInsight": ONE sentence (≤15 words). ${wellnessContext ? 'How your body is ready (or not) for this effort.' : 'What will make this run rewarding today.'}`}`}
 
 CRITICAL RULES:
-- TOTAL word count across ALL fields combined MUST NOT exceed 50 words. Count carefully.
-- Be punchy, direct, and natural — this is spoken aloud. Short sentences land harder.
+- Briefing should be MOTIVATING and INFORMATIVE — not a generic template. Paint a picture of what this run will be like.
+- Total word count: briefing ≤40 words. Each advice/insight should be ≤15 words. Tight but insightful.
+- Include WEATHER in the briefing or weatherAdvice field EVERY TIME (e.g., "Warm day, hydrate well" or "Headwind on the outbound — practice power on climbs").
 - For runs marked "RUN (No planned route)" - do NOT mention terrain, elevation, hills, or route characteristics.
 ${!wellnessContext ? '- CRITICAL: No Garmin or wellness data is connected. Do NOT mention body readiness, recovery, fatigue, body battery, sleep, stress, HRV, or any biometric data.' : ''}
 - NEVER start with generic greetings like "Hey there!" — jump straight in.
+- Be conversational as if speaking directly to the runner. Use "you" and "your."
 ${coachAccent ? `- Write using natural ${coachAccent} English phrasing. The text will be spoken aloud by a ${coachAccent} voice.` : ''}
 
-Respond as JSON with fields: briefing, intensityAdvice, warnings (array), ${hasRoute === true ? 'routeInsight' : 'readinessInsight'}`;
+Respond as JSON with fields: briefing, intensityAdvice, weatherAdvice, warnings (array), ${hasRoute === true ? 'routeInsight' : 'readinessInsight'}`;
 
   try {
     const completion = await openai.chat.completions.create({
@@ -2358,6 +2363,7 @@ Respond as JSON with fields: briefing, intensityAdvice, warnings (array), ${hasR
     return {
       briefing: parsed.briefing || "Ready for your run! Let's get started.",
       intensityAdvice: parsed.intensityAdvice || "Listen to your body today.",
+      weatherAdvice: parsed.weatherAdvice || undefined,
       warnings: parsed.warnings || [],
       readinessInsight: parsed.readinessInsight || (hasRoute ? undefined : "Your body is ready for this run."),
       routeInsight: parsed.routeInsight || (hasRoute ? terrainDescription : undefined),
@@ -2368,6 +2374,7 @@ Respond as JSON with fields: briefing, intensityAdvice, warnings (array), ${hasR
     return {
       briefing: "Ready for your run! Take it easy at the start and find your rhythm.",
       intensityAdvice: "Start conservatively and adjust based on how you feel.",
+      weatherAdvice: undefined,
       warnings: [],
       readinessInsight: hasRoute ? undefined : "Listen to your body and adjust intensity as needed.",
       routeInsight: hasRoute ? terrainDescription : undefined,
