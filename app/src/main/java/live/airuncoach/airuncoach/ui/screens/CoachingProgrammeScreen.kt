@@ -284,8 +284,8 @@ fun PlanSummaryCard(
 }
 
 @Composable
-fun PlanStatChip(icon: Int, label: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+fun PlanStatChip(icon: Int, label: String, modifier: Modifier = Modifier) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = modifier) {
         Icon(painterResource(icon), null, tint = Colors.textMuted, modifier = Modifier.size(14.dp))
         Spacer(modifier = Modifier.width(4.dp))
         Text(label, style = AppTextStyles.small, color = Colors.textMuted)
@@ -673,8 +673,66 @@ fun PlanDashboardContent(
                     Spacer(modifier = Modifier.height(Spacing.lg))
                 }
             }
-            workout != null && !isActuallyToday -> {
-                // No workout today — show rest day and preview next session
+            workout != null && !isActuallyToday && workout.isCompleted -> {
+                // Completed workout that isn't today — show completion status
+                item {
+                    Card(colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary), modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(Spacing.lg)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(painterResource(R.drawable.icon_check_vector), null, tint = Colors.success, modifier = Modifier.size(24.dp))
+                                Spacer(modifier = Modifier.width(Spacing.md))
+                                Text("Completed", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+                            }
+                            Spacer(modifier = Modifier.height(Spacing.sm))
+                            Text("${workout.description ?: workoutTypeLabel(workout.workoutType)} — already done!", style = AppTextStyles.small, color = Colors.textSecondary)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(Spacing.lg))
+                }
+            }
+            workout != null && !isActuallyToday && !workout.isCompleted -> {
+                // Upcoming workout (not today, not yet done) — show preview with quick start
+                item {
+                    Card(colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary), modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                        Column(modifier = Modifier.padding(Spacing.lg)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Icon(painterResource(R.drawable.icon_calendar_vector), null, tint = Colors.primary, modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(Spacing.sm))
+                                Text("Next Up", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+                                Spacer(modifier = Modifier.weight(1f))
+                                Icon(painterResource(R.drawable.icon_chevron_right_vector), null, tint = Colors.textMuted, modifier = Modifier.size(16.dp))
+                            }
+                            Spacer(modifier = Modifier.height(Spacing.sm))
+                            WorkoutTypeBadge(workout.workoutType)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(workout.description ?: workoutTypeLabel(workout.workoutType), style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary, maxLines = 2)
+                            
+                            if (!workout.instructions.isNullOrEmpty()) {
+                                Spacer(modifier = Modifier.height(Spacing.sm))
+                                Text(workout.instructions, style = AppTextStyles.small, color = Colors.textSecondary, maxLines = 2)
+                            }
+                            
+                            Spacer(modifier = Modifier.height(Spacing.md))
+                            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm), modifier = Modifier.fillMaxWidth()) {
+                                workout.distance?.let { 
+                                    PlanStatChip(R.drawable.icon_target_vector, "${it}km", modifier = Modifier.weight(1f))
+                                }
+                                workout.targetPace?.let { raw ->
+                                    val paceValue = raw.replace("/km", "").trim()
+                                    PlanStatChip(R.drawable.icon_timer_vector, "$paceValue min/km", modifier = Modifier.weight(1f))
+                                }
+                                workout.intensity?.let { 
+                                    val zoneLabel = it.replace(Regex("^z([1-5])$")) { match -> "Zone ${match.groupValues[1].uppercase()}" }
+                                    PlanStatChip(R.drawable.icon_heart_vector, zoneLabel, modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(Spacing.lg))
+                }
+            }
+            else -> {
+                // Rest day or no upcoming workouts
                 item {
                     Card(colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary), modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(Spacing.lg)) {
@@ -684,20 +742,7 @@ fun PlanDashboardContent(
                                 Text("Rest Day", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
                             }
                             Spacer(modifier = Modifier.height(Spacing.sm))
-                            Text("No session scheduled today. Your next workout is coming up.", style = AppTextStyles.small, color = Colors.textSecondary)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(Spacing.lg))
-                }
-            }
-            else -> {
-                // No upcoming workouts at all
-                item {
-                    Card(colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary), modifier = Modifier.fillMaxWidth()) {
-                        Row(modifier = Modifier.padding(Spacing.lg), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(painterResource(R.drawable.icon_check_vector), null, tint = Colors.success, modifier = Modifier.size(24.dp))
-                            Spacer(modifier = Modifier.width(Spacing.md))
-                            Text("You're all caught up for this week!", style = AppTextStyles.body, color = Colors.textSecondary)
+                            Text("No session scheduled today. Take time to recover!", style = AppTextStyles.small, color = Colors.textSecondary)
                         }
                     }
                     Spacer(modifier = Modifier.height(Spacing.lg))
