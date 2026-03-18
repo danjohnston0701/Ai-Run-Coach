@@ -6597,10 +6597,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const pace = parsePace(run.avgPace);
       if (!pace) return;
 
-      // Time of day from completedAt
+      // Time of day from completedAt (in user's local time)
+      // TODO: Use user.timezone once we store it; for now use +13 (NZ)
       if (run.completedAt) {
         const date = new Date(run.completedAt);
-        const hour = date.getHours();
+        const utcHour = date.getUTCHours();
+        const userTimezoneOffset = 13; // NZ timezone (UTC+13)
+        const hour = (utcHour + userTimezoneOffset) % 24;
         let timeLabel = '';
         if (hour >= 5 && hour < 9) timeLabel = 'Morning';
         else if (hour >= 9 && hour < 12) timeLabel = 'Late Morning';
