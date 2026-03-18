@@ -32,14 +32,16 @@ class StartView extends Ui.View {
         // Check persisted auth token — valid from a previous phone session
         var token = App.Storage.getValue("authToken");
         _isAuthenticated = (token != null && token.length() > 0);
-        _runnerName = App.Storage.getValue("runnerName") ?: "";
+_runnerName = App.Storage.getValue("runnerName");
+        _runnerName = (_runnerName != null) ? _runnerName : "";
     }
 
     function onShow() {
         // Refresh auth from storage each time screen becomes visible
         var token = App.Storage.getValue("authToken");
         _isAuthenticated = (token != null && token.length() > 0);
-        _runnerName = App.Storage.getValue("runnerName") ?: "";
+_runnerName = App.Storage.getValue("runnerName");
+        _runnerName = (_runnerName != null) ? _runnerName : "";
 
         // Register for messages from phone app
         Comm.registerForPhoneAppMessages(method(:onPhoneMessage));
