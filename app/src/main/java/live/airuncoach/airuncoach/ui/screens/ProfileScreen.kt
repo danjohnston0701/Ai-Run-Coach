@@ -266,6 +266,7 @@ fun ProfileScreen(
                     style = AppTextStyles.caption,
                     color = Colors.textMuted
                 )
+                /*
                // "Powered by Garmin" attribution (required for Garmin brand guidelines)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
@@ -273,6 +274,8 @@ fun ProfileScreen(
                     style = AppTextStyles.caption.copy(fontSize = 11.sp),
                     color = Colors.textMuted.copy(alpha = 0.8f)
                 )
+
+                 */
 
 
             }

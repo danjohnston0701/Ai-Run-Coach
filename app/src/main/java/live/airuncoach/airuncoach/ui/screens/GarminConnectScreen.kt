@@ -45,7 +45,7 @@ fun GarminConnectScreen(
             TopAppBar(
                 title = { 
                     Text(
-                        "Connect Garmin",
+                        "Connect to Garmin",
                         style = AppTextStyles.h2,
                         color = Colors.textPrimary
                     ) 
@@ -94,12 +94,15 @@ fun GarminConnectScreen(
                             modifier = Modifier.size(48.dp)
                         )
                     }
+                    /*
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         "Connect to Garmin",
                         style = AppTextStyles.h1,
                         color = Colors.textPrimary
                     )
+                     */
+
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         "Sync your runs, heart rate data, and training metrics from Garmin Connect",

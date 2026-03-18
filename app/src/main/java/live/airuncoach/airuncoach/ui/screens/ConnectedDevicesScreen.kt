@@ -149,12 +149,14 @@ fun ConnectedDevicesScreen(
             // Header
             item {
                 Column {
+                    /*
                     Text(
                         "Connected Devices",
                         style = AppTextStyles.h1,
                         color = Colors.textPrimary
                     )
                     Spacer(modifier = Modifier.height(8.dp))
+                    */
                     Text(
                         "Connect your fitness watch to track heart rate during runs and sync health metrics",
                         style = AppTextStyles.body,
@@ -181,6 +183,7 @@ fun ConnectedDevicesScreen(
                 )
             }
 
+
             // Garmin settings — shown when connected
             if (garminDevice.isConnected) {
                 item {
@@ -190,11 +193,12 @@ fun ConnectedDevicesScreen(
                     val coroutineScope = rememberCoroutineScope()
 
                     Column {
+                        /*
                         // Auto-sync toggle
                         Card(
                             colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
                             shape = RoundedCornerShape(BorderRadius.lg)
-                        ) {
+                        )  {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -236,6 +240,7 @@ fun ConnectedDevicesScreen(
                                 )
                             }
                         }
+                        */
 
                         // Manage Permissions button
                         Spacer(modifier = Modifier.height(12.dp))
