@@ -9928,28 +9928,53 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const { workoutId } = req.params;
       const { runId } = req.body;
 
+      // Update the workout
       await db.update(plannedWorkouts)
         .set({ isCompleted: true, completedRunId: runId || null })
         .where(eq(plannedWorkouts.id, workoutId));
 
-      // Check if we need to advance currentWeek on the parent plan
+      // Fetch the updated workout
       const [workout] = await db.select().from(plannedWorkouts).where(eq(plannedWorkouts.id, workoutId));
-      if (workout) {
+      
+      if (workout && workout.weeklyPlanId && workout.trainingPlanId) {
+        // Check if all workouts in this week are complete
         const weekWorkouts = await db.select().from(plannedWorkouts)
-          .where(eq(plannedWorkouts.weeklyPlanId, workout.weeklyPlanId!));
+          .where(eq(plannedWorkouts.weeklyPlanId, workout.weeklyPlanId));
+        
         const allComplete = weekWorkouts.every(w => w.isCompleted);
         if (allComplete) {
           // Advance to next week
-          const [week] = await db.select().from(weeklyPlans).where(eq(weeklyPlans.id, workout.weeklyPlanId!));
+          const [week] = await db.select().from(weeklyPlans).where(eq(weeklyPlans.id, workout.weeklyPlanId));
           if (week) {
+            console.log(`📅 Week ${week.weekNumber} complete, advancing to week ${week.weekNumber + 1}`);
             await db.update(trainingPlans)
               .set({ currentWeek: week.weekNumber + 1 })
               .where(eq(trainingPlans.id, workout.trainingPlanId));
           }
         }
+        
+        // Fetch and return updated plan progress
+        const [plan] = await db.select().from(trainingPlans).where(eq(trainingPlans.id, workout.trainingPlanId));
+        if (plan) {
+          const allWorkouts = await db.select().from(plannedWorkouts).where(eq(plannedWorkouts.trainingPlanId, plan.id));
+          const completedCount = allWorkouts.filter(w => w.isCompleted).length;
+          const totalCount = allWorkouts.length;
+          
+          res.json({ 
+            success: true, 
+            workoutId,
+            planProgress: {
+              completedWorkouts: completedCount,
+              totalWorkouts: totalCount,
+              overallCompletion: totalCount > 0 ? completedCount / totalCount : 0,
+            }
+          });
+        } else {
+          res.json({ success: true, workoutId });
+        }
+      } else {
+        res.json({ success: true, workoutId });
       }
-
-      res.json({ success: true, workoutId });
     } catch (error: any) {
       console.error("Complete workout error:", error);
       res.status(500).json({ error: "Failed to complete workout" });
