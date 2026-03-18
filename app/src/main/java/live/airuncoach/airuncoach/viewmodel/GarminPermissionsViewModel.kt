@@ -44,19 +44,19 @@ class GarminPermissionsViewModel @Inject constructor(
             try {
                 _uiState.value = _uiState.value.copy(isLoading = true, error = null)
                 
-                // Call backend to get permissions
-                val permissions = apiService.getGarminPermissions()
+                // Call backend to get permissions and device info
+                val response = apiService.getGarminPermissions()
                 
                 // Extract granted count
-                val grantedCount = permissions.count { it.isGranted }
+                val grantedCount = response.permissions.count { it.isGranted }
                 
                 _uiState.value = GarminPermissionsUiState(
-                    deviceName = "Garmin Device",
-                    connectedSince = "2 weeks ago",
-                    lastSyncAt = "2 hours ago",
+                    deviceName = response.deviceName ?: "Garmin Device",
+                    connectedSince = response.connectedSince ?: "Unknown",
+                    lastSyncAt = response.lastSyncAt ?: "Unknown",
                     grantedCount = grantedCount,
-                    totalCount = permissions.size,
-                    permissions = permissions,
+                    totalCount = response.permissions.size,
+                    permissions = response.permissions,
                     isLoading = false
                 )
             } catch (e: Exception) {

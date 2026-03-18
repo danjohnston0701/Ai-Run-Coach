@@ -2967,30 +2967,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           maxPowerInWatts: localActivity.maxPowerInWatts,
         };
       } else {
-        // 4b. Fallback: try Garmin pull API (may fail if token lacks pull scope)
-        console.log(`[Garmin Enrich] No local activity found, attempting Garmin pull API...`);
-        try {
-          const searchStartTime = new Date(searchStartSec * 1000);
-          const searchEndTime   = new Date(searchEndSec * 1000);
-          const pulledActivities = await garminService.getGarminActivities(accessToken, searchStartTime, searchEndTime);
-          const candidates = Array.isArray(pulledActivities) ? pulledActivities : [];
-
-          const FIVE_MINS_MS = 5 * 60 * 1000;
-          for (const a of candidates) {
-            const diff = Math.abs(new Date(a.startTime).getTime() - runStartTime.getTime());
-            if (diff <= FIVE_MINS_MS) {
-              matchingActivity = a;
-              matchingActivityId = a.activityId;
-              break;
-            }
-          }
-
-          if (matchingActivityId) {
-            activityDetail = await garminService.getGarminActivityDetail(accessToken, matchingActivityId);
-          }
-        } catch (pullErr: any) {
-          console.warn(`[Garmin Enrich] Pull API failed (${pullErr.message}) — no activity available yet`);
-        }
+        // 4b. No local activity found — Garmin does not support direct pull.
+        // The activity will arrive via the /api/garmin/webhooks/activities webhook
+        // once the user syncs the Garmin Connect app. Return 202 to prompt polling.
+        console.log(`[Garmin Enrich] No local activity found — waiting for Garmin webhook push`);
       }
 
       if (!matchingActivity || !matchingActivityId || !activityDetail) {

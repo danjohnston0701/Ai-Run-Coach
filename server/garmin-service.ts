@@ -224,67 +224,66 @@ export async function refreshGarminToken(refreshToken: string): Promise<{
 /**
  * Fetch user's recent activities from Garmin
  */
+/**
+ * Request a historical backfill from Garmin.
+ *
+ * Garmin does NOT support direct pull of user activities — instead you ask
+ * Garmin to re-push historical data to your webhook endpoints.
+ * Garmin will then deliver the activities to POST /api/garmin/webhooks/activities
+ * exactly the same way as real-time activity webhooks.
+ *
+ * Docs: https://developer.garmin.com/gc-developer-program/activity-api/
+ */
+export async function requestGarminBackfill(
+  accessToken: string,
+  startTime: Date,
+  endTime: Date
+): Promise<{ requested: boolean; message: string }> {
+  const startTimeSeconds = Math.floor(startTime.getTime() / 1000);
+  const endTimeSeconds = Math.floor(endTime.getTime() / 1000);
+
+  const startDate = startTime.toISOString().split('T')[0];
+  const endDate = endTime.toISOString().split('T')[0];
+  console.log(`📤 Requesting Garmin backfill for ${startDate} → ${endDate}`);
+
+  const url = `${GARMIN_API_BASE}/wellness-api/rest/backfill/activities`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      summaryStartTimeInSeconds: startTimeSeconds,
+      summaryEndTimeInSeconds: endTimeSeconds,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    console.error('❌ Garmin backfill request failed:', response.status, text.substring(0, 300));
+    throw new Error(`Garmin backfill request failed: ${response.status}`);
+  }
+
+  console.log('✅ Garmin backfill requested — activities will arrive via webhook');
+  return {
+    requested: true,
+    message: `Garmin will push activities from ${startDate} to ${endDate} to your webhooks shortly.`,
+  };
+}
+
+/**
+ * @deprecated — Garmin does not support direct activity pull.
+ * Use requestGarminBackfill() instead; Garmin will push the data to your webhooks.
+ */
 export async function getGarminActivities(
   accessToken: string,
   startTime?: Date,
   endTime?: Date
 ): Promise<any[]> {
-  // Use Garmin Connect API for OAuth 2.0 - Activity List endpoint
-  // This is the correct API for accessing personal Garmin Connect data
-  
-  if (!startTime || !endTime) {
-    throw new Error('Start and end times are required for Garmin activities fetch');
-  }
-  
-  // Format: YYYY-MM-DD
-  const startDate = startTime.toISOString().split('T')[0];
-  const endDate = endTime.toISOString().split('T')[0];
-  
-  console.log(`📅 Fetching Garmin Connect activities from ${startDate} to ${endDate}`);
-  
-  // Garmin Connect activity search endpoint
-  const start = 0;
-  const limit = 100; // Max activities per request
-  
-  // Garmin Health API activities endpoint (OAuth 2.0 compatible)
-  // Correct path is /wellness-api/rest/activities (with hyphen, not /wellnessapi/)
-  const startTimeSeconds = Math.floor(startTime.getTime() / 1000);
-  const endTimeSeconds = Math.floor(endTime.getTime() / 1000);
-  
-  const url = `${GARMIN_API_BASE}/wellness-api/rest/activities?uploadStartTimeInSeconds=${startTimeSeconds}&uploadEndTimeInSeconds=${endTimeSeconds}`;
-  console.log(`🔍 Fetching from URL: ${url}`);
-  
-  const response = await fetch(url, {
-    headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'Accept': 'application/json',
-    },
-  });
-  
-  const responseText = await response.text();
-  
-  if (!response.ok) {
-    console.error('Garmin Connect API error:', response.status);
-    console.error('Response body (first 500 chars):', responseText.substring(0, 500));
-    throw new Error(`Failed to fetch Garmin activities: ${response.status}`);
-  }
-  
-  // Check if response is HTML (error page)
-  if (responseText.trim().startsWith('<')) {
-    console.error('❌ API returned HTML instead of JSON (likely redirect to login)');
-    console.error('Response (first 500 chars):', responseText.substring(0, 500));
-    throw new Error('API returned HTML - endpoint may be incorrect');
-  }
-  
-  try {
-    const data = JSON.parse(responseText);
-    console.log(`📊 Garmin Connect API returned ${data.length || 0} activities`);
-    return Array.isArray(data) ? data : [];
-  } catch (parseError) {
-    console.error('❌ Failed to parse JSON response');
-    console.error('Response (first 500 chars):', responseText.substring(0, 500));
-    throw new Error('Invalid JSON response from API');
-  }
+  console.warn('⚠️  getGarminActivities() is deprecated — Garmin does not support direct pull. Use requestGarminBackfill() instead.');
+  return [];
 }
 
 /**
@@ -886,13 +885,9 @@ export async function syncGarminActivities(
   console.log(`📅 Date range: ${startDateISO} to ${endDateISO}`);
   
   const { db } = await import('./db');
-  const { runs, connectedDevices } = await import('@shared/schema');
-  const { eq, and, gte, lte } = await import('drizzle-orm');
-  
-  let syncedCount = 0;
-  let skippedCount = 0;
-  let errorCount = 0;
-  
+  const { connectedDevices } = await import('@shared/schema');
+  const { eq, and } = await import('drizzle-orm');
+
   try {
     // Check if token is expired and refresh if needed
     const deviceRecords = await db
@@ -940,179 +935,18 @@ export async function syncGarminActivities(
     
     const startDate = new Date(startDateISO);
     const endDate = new Date(endDateISO);
-    
-    // Garmin API limits time range to 24 hours (86400 seconds)
-    // Fetch activities day by day
-    console.log('🔄 Fetching activities from Garmin API (day by day)...');
-    
-    const allActivities: any[] = [];
-    const currentDate = new Date(startDate);
-    
-    while (currentDate <= endDate) {
-      const dayStart = new Date(currentDate);
-      const dayEnd = new Date(currentDate);
-      dayEnd.setHours(23, 59, 59, 999);
-      
-      // Don't fetch future dates
-      if (dayStart > new Date()) break;
-      
-      try {
-        console.log(`📅 Fetching day: ${dayStart.toISOString().split('T')[0]}`);
-        const dailyActivities = await getGarminActivities(currentAccessToken, dayStart, dayEnd);
-        const activities = Array.isArray(dailyActivities) ? dailyActivities : dailyActivities.activities || [];
-        allActivities.push(...activities);
-        console.log(`   Found ${activities.length} activities`);
-        
-        // Small delay to avoid rate limiting (500ms between requests)
-        await new Promise(resolve => setTimeout(resolve, 500));
-      } catch (error: any) {
-        console.error(`⚠️  Failed to fetch activities for ${dayStart.toISOString().split('T')[0]}:`, error.message);
-        // Continue with next day even if one day fails
-      }
-      
-      // Move to next day
-      currentDate.setDate(currentDate.getDate() + 1);
-    }
-    
-    console.log(`📊 Total activities fetched: ${allActivities.length}`);
-    const activities = allActivities;
-    
-    if (activities.length > 0) {
-      console.log('📝 Sample activity structure:', JSON.stringify(activities[0], null, 2).substring(0, 500));
-    }
-    
-    // Filter for running activities only
-    const runningActivities = activities.filter((act: any) => {
-      const typeName = (act.activityType?.activityTypeKey || act.activityType || act.sport || '').toLowerCase();
-      const actName = (act.activityName || '').toLowerCase();
-      return typeName.includes('run') || actName.includes('run');
-    });
-    console.log(`🏃 ${runningActivities.length} running activities to process`);
-    
-    for (const activity of runningActivities) {
-      try {
-        const activityId = activity.activityId || activity.id;
-        const activityDate = new Date(activity.startTimeGMT || activity.beginTimestamp);
-        
-        // Check if this activity already exists in database
-        const existing = await db
-          .select()
-          .from(runs)
-          .where(
-            and(
-              eq(runs.userId, userId),
-              eq(runs.externalId, activityId.toString())
-            )
-          )
-          .limit(1);
-        
-        if (existing.length > 0) {
-          console.log(`⏭️  Activity ${activityId} already exists, skipping`);
-          skippedCount++;
-          continue;
-        }
-        
-        // Fetch detailed activity data (GPS, heart rate, etc.)
-        console.log(`🔍 Fetching details for activity ${activityId}...`);
-        let activityDetail = null;
-        try {
-          activityDetail = await getGarminActivityDetail(currentAccessToken, activityId);
-        } catch (detailError: any) {
-          console.warn(`⚠️  Could not fetch details for ${activityId}: ${detailError.message}`);
-          // Continue with summary data only
-        }
-        
-        // Parse and map Garmin data to our run session format
-        const distance = (activity.distance || 0) / 1000; // Convert meters to km
-        const duration = (activity.duration || activity.movingDuration || 0) * 1000; // Convert seconds to milliseconds
-        const avgPace = distance > 0 && duration > 0 ? formatPace(duration / 1000 / distance) : null;
-        const avgHeartRate = activity.averageHR || activityDetail?.averageHR || null;
-        const maxHeartRate = activity.maxHR || activityDetail?.maxHR || null;
-        const calories = activity.calories || activityDetail?.calories || null;
-        const avgCadence = activity.averageRunCadence || activityDetail?.avgRunCadence || null;
-        const elevationGain = activity.elevationGain || activityDetail?.elevationGain || null;
-        const elevationLoss = activity.elevationLoss || activityDetail?.elevationLoss || null;
-        
-        // Extract GPS track
-        const gpsTrack = activityDetail?.geoPolylineDTO?.polyline || 
-                        activityDetail?.summaryPolyline || 
-                        activity.summaryPolyline || 
-                        null;
-        
-        // Extract heart rate data
-        const heartRateData = activityDetail?.heartRateSamples || 
-                             activityDetail?.timeSeriesData?.heartRate || 
-                             null;
-        
-        // Extract pace/speed data
-        const paceData = activityDetail?.timeSeriesData?.speed || 
-                        activityDetail?.speedSamples || 
-                        null;
-        
-        // Extract splits/laps
-        const kmSplits = activityDetail?.laps?.map((lap: any, index: number) => ({
-          km: index + 1,
-          time: lap.duration,
-          pace: formatPace(lap.duration / (lap.distance / 1000)),
-          avgHeartRate: lap.averageHR,
-          maxHeartRate: lap.maxHR,
-          cadence: lap.avgRunCadence,
-          elevation: lap.elevationGain
-        })) || null;
-        
-        // Starting location
-        const startLat = activity.startLatitude || activityDetail?.startLatitude || null;
-        const startLng = activity.startLongitude || activityDetail?.startLongitude || null;
-        
-        // Activity name/description
-        const activityName = activity.activityName || 
-                            `${activity.activityType || 'Run'} - ${activityDate.toLocaleDateString()}`;
-        
-        // Insert into database
-        console.log(`💾 Saving activity ${activityId} to database...`);
-        await db.insert(runs).values({
-          userId,
-          externalId: activityId.toString(),
-          externalSource: 'garmin',
-          distance,
-          duration: Math.floor(duration),
-          avgPace,
-          avgHeartRate,
-          maxHeartRate,
-          minHeartRate: activityDetail?.minHR || null,
-          calories,
-          cadence: avgCadence,
-          elevation: elevationGain,
-          elevationGain,
-          elevationLoss,
-          difficulty: determineDifficulty(distance, duration, elevationGain),
-          startLat,
-          startLng,
-          gpsTrack: gpsTrack ? { encoded: gpsTrack } : null,
-          heartRateData: heartRateData ? { samples: heartRateData } : null,
-          paceData: paceData ? { samples: paceData } : null,
-          kmSplits,
-          completedAt: activityDate,
-          name: activityName,
-          aiCoachEnabled: false,
-          runDate: activityDate.toISOString().split('T')[0],
-          runTime: activityDate.toTimeString().split(' ')[0],
-          terrainType: activity.activityType || 'road',
-          isPublic: false
-        });
-        
-        syncedCount++;
-        console.log(`✅ Successfully synced activity ${activityId}`);
-        
-      } catch (activityError: any) {
-        console.error(`❌ Error syncing activity: ${activityError.message}`);
-        errorCount++;
-      }
-    }
-    
-    console.log(`\n📊 Sync complete: ${syncedCount} synced, ${skippedCount} skipped, ${errorCount} errors`);
-    return { synced: syncedCount, skipped: skippedCount, errors: errorCount };
-    
+
+    // Garmin does NOT support direct pull of historical activities.
+    // Instead we request a backfill — Garmin will push the data to our
+    // /api/garmin/webhooks/activities endpoint, same as real-time webhooks.
+    console.log(`📤 Requesting Garmin backfill for ${startDate.toISOString().split('T')[0]} → ${endDate.toISOString().split('T')[0]}`);
+
+    await requestGarminBackfill(currentAccessToken, startDate, endDate);
+
+    console.log('✅ Garmin backfill requested — activities will arrive via webhook and be processed automatically');
+    // Return 0 synced/skipped/errors here — the webhook handler will process them asynchronously
+    return { synced: 0, skipped: 0, errors: 0 };
+
   } catch (error: any) {
     console.error('❌ Fatal error during Garmin sync:', error);
     throw error;
@@ -1386,7 +1220,8 @@ export default {
   getGarminAuthUrl,
   exchangeGarminCode,
   refreshGarminToken,
-  getGarminActivities,
+  requestGarminBackfill,
+  getGarminActivities, // deprecated — kept for compatibility, returns []
   getGarminActivityDetail,
   syncGarminActivities,
   getGarminDailySummary,

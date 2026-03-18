@@ -407,7 +407,7 @@ interface ApiService {
     
     // Garmin Permissions Management
     @GET("/api/garmin/permissions")
-    suspend fun getGarminPermissions(): List<GarminPermissionItem>
+    suspend fun getGarminPermissions(): GarminPermissionsResponse
     
     @POST("/api/garmin/reauthorize")
     suspend fun getGarminReauthorizationUrl(): GarminAuthUrlResponse

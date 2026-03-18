@@ -12,9 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -42,14 +40,14 @@ fun GarminPermissionsScreenWrapper(
     onNavigateBack: () -> Unit,
     viewModel: GarminPermissionsViewModel = hiltViewModel()
 ) {
-    val context = LocalContext.current
     var showDisconnectDialog by remember { mutableStateOf(false) }
+    val uiState by viewModel.uiState.collectAsState()
     
     // Placeholder permissions data - in production, this would come from the viewModel
     val permissionCategories = listOf(
         PermissionCategory(
             title = "📊 Activities & Running",
-            icon = Icons.Default.DirectionsRun,
+            icon = Icons.Default.Directions,
             description = "Track your runs and workouts",
             permissions = listOf(
                 PermissionItem("Activity Summaries", "Basic run metrics and data", isGranted = true),
@@ -141,12 +139,12 @@ fun GarminPermissionsScreenWrapper(
                         ) {
                             Column {
                                 Text(
-                                    "✅ Garmin Fenix 7X",
+                                    "✅ ${uiState.deviceName}",
                                     style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
                                     color = Colors.textPrimary
                                 )
                                 Text(
-                                    "Connected 2 weeks ago • Last sync: 2 hours ago",
+                                    "Connected ${uiState.connectedSince} • Last sync: ${uiState.lastSyncAt}",
                                     style = AppTextStyles.caption,
                                     color = Colors.textSecondary,
                                     fontSize = 12.sp
@@ -160,7 +158,7 @@ fun GarminPermissionsScreenWrapper(
                             )
                         }
 
-                        Divider(color = Colors.backgroundRoot, thickness = 1.dp)
+                        HorizontalDivider(color = Colors.backgroundRoot, thickness = 1.dp)
 
                         // Permissions Summary
                         Row(
@@ -169,7 +167,7 @@ fun GarminPermissionsScreenWrapper(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    "8/12",
+                                    "${uiState.grantedCount}/${uiState.totalCount}",
                                     style = AppTextStyles.h3,
                                     color = Color(0xFF00D4FF)
                                 )
@@ -181,7 +179,7 @@ fun GarminPermissionsScreenWrapper(
                             }
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    "4",
+                                    "${uiState.totalCount - uiState.grantedCount}",
                                     style = AppTextStyles.h3,
                                     color = Color(0xFFFFB000)
                                 )
@@ -242,28 +240,65 @@ fun GarminPermissionsScreenWrapper(
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            // Permissions by Category
-            permissionCategories.forEach { category ->
-                item {
-                    Text(
-                        category.title,
-                        style = AppTextStyles.h3,
-                        color = Colors.textPrimary,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                    Text(
-                        category.description,
-                        style = AppTextStyles.caption,
-                        color = Colors.textSecondary
-                    )
-                }
+            // Permissions by Category - from ViewModel data
+            if (uiState.permissions.isNotEmpty()) {
+                // Group permissions by category
+                val groupedByCategory = uiState.permissions.groupBy { it.category }
+                
+                groupedByCategory.forEach { (category, perms) ->
+                    item {
+                        val categoryTitle = when (category) {
+                            "activities" -> "📊 Activities & Running"
+                            "health" -> "❤️ Health & Recovery"
+                            "wellness" -> "😴 Sleep & Wellness"
+                            "advanced" -> "🫀 Advanced Metrics"
+                            else -> category
+                        }
+                        Text(
+                            categoryTitle,
+                            style = AppTextStyles.h3,
+                            color = Colors.textPrimary,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
 
-                items(category.permissions.size) { index ->
-                    val permission = category.permissions[index]
-                    PermissionRow(permission)
-                }
+                    items(perms.size) { index ->
+                        val permission = perms[index]
+                        PermissionRow(
+                            PermissionItem(
+                                permission.name,
+                                permission.description,
+                                permission.isGranted
+                            )
+                        )
+                    }
 
-                item { Spacer(modifier = Modifier.height(4.dp)) }
+                    item { Spacer(modifier = Modifier.height(4.dp)) }
+                }
+            } else {
+                // Fallback to placeholder if no data
+                permissionCategories.forEach { category ->
+                    item {
+                        Text(
+                            category.title,
+                            style = AppTextStyles.h3,
+                            color = Colors.textPrimary,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        Text(
+                            category.description,
+                            style = AppTextStyles.caption,
+                            color = Colors.textSecondary
+                        )
+                    }
+
+                    items(category.permissions.size) { index ->
+                        val permission = category.permissions[index]
+                        PermissionRow(permission)
+                    }
+
+                    item { Spacer(modifier = Modifier.height(4.dp)) }
+                }
             }
 
             // Disconnect Button
