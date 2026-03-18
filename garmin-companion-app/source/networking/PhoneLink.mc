@@ -59,7 +59,7 @@ class PhoneLink {
     }
 
     // Raw message from Comm — forward to registered callback
-    function _onRawMessage(msg) {
+    function _onRawMessage(msg as Comm.PhoneAppMessage) as Void {
         if (msg == null || msg.data == null) { return; }
         if (_onMessage != null) {
             _onMessage.invoke(msg.data);

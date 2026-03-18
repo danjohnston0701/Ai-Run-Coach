@@ -3,21 +3,21 @@
 //
 // Supports two modes:
 //
-//  ┌─────────────────────────────────────────────────────────────────┐
-//  │ SCENARIO 2 — Phone + Watch (phoneControlled = true)            │
-//  │  • All run data (pace, HR, distance, time) comes from the phone │
-//  │    via PhoneLink "runUpdate" messages.                          │
-//  │  • START / PAUSE / RESUME / STOP commands are sent TO the phone.│
-//  │  • Watch does NOT start its own ActivityRecording session —     │
-//  │    Garmin records independently via sensor fusion; phone owns   │
-//  │    the session.                                                 │
-//  └─────────────────────────────────────────────────────────────────┘
-//  ┌─────────────────────────────────────────────────────────────────┐
-//  │ SCENARIO 3 — Standalone (phoneControlled = false)              │
-//  │  • Watch records its own ActivityRecording session.             │
-//  │  • GPS + HR pulled from watch sensors directly.                 │
-//  │  • DataStreamer sends metrics to server every second.           │
-//  └─────────────────────────────────────────────────────────────────┘
+//  
+//   SCENARIO 2  Phone + Watch (phoneControlled = true)            
+//     All run data (pace, HR, distance, time) comes from the phone 
+//      via PhoneLink "runUpdate" messages.                          
+//     START / PAUSE / RESUME / STOP commands are sent TO the phone.
+//     Watch does NOT start its own ActivityRecording session      
+//      Garmin records independently via sensor fusion; phone owns   
+//      the session.                                                 
+//  
+//  
+//   SCENARIO 3  Standalone (phoneControlled = false)              
+//     Watch records its own ActivityRecording session.             
+//     GPS + HR pulled from watch sensors directly.                 
+//     DataStreamer sends metrics to server every second.           
+//  
 
 using Toybox.Attention;
 using Toybox.Math;
@@ -31,7 +31,7 @@ using Toybox.ActivityRecording as Record;
 
 class RunView extends Ui.View {
 
-    // ── Run metrics ───────────────────────────────────────────────────────────
+    //  Run metrics 
     private var _heartRate    = 0;
     private var _heartRateZone = 1;
     private var _distance     = 0.0;   // metres
@@ -39,18 +39,18 @@ class RunView extends Ui.View {
     private var _elapsedTime  = 0;     // seconds
     private var _cadence      = 0;
 
-    // ── State ─────────────────────────────────────────────────────────────────
+    //  State 
     private var _isRunning        = false;
     private var _isPaused         = false;
     private var _phoneControlled  = false;  // Scenario 2 vs 3
 
-    // ── Infrastructure ────────────────────────────────────────────────────────
+    //  Infrastructure 
     private var _timer        = null;
     private var _dataStreamer = null;
     private var _phoneLink    = null;
     private var _session      = null;   // ActivityRecording session (Scenario 3 only)
 
-    // ── UI animation ──────────────────────────────────────────────────────────
+    //  UI animation 
     private var _elapsedMs        = 0;
     private var _tickMs           = 250;
     private var _streamAccumMs    = 0;
@@ -63,7 +63,7 @@ class RunView extends Ui.View {
     private var _ringPhase        = 0.0;
     private var _ringPulseBoost   = 0.0;
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // 
     function initialize() {
         View.initialize();
         _phoneLink    = new PhoneLink();
@@ -79,14 +79,14 @@ class RunView extends Ui.View {
     function isPaused()   { return _isPaused; }
     function isRunning()  { return _isRunning; }
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
+    //  Lifecycle 
 
     function onShow() {
-        // Register for phone messages (both scenarios — harmless in Scenario 3)
+        // Register for phone messages (both scenarios  harmless in Scenario 3)
         _phoneLink.register(method(:onPhoneMessage));
 
         if (!_phoneControlled) {
-            // ── Scenario 3: start watch-owned recording immediately ────────
+            //  Scenario 3: start watch-owned recording immediately 
             _startWatchSession();
             _isRunning = true;
             _isPaused  = false;
@@ -97,9 +97,9 @@ class RunView extends Ui.View {
             Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE]);
             Sensor.enableSensorEvents(method(:onSensor));
         } else {
-            // ── Scenario 2: send "ready" to phone so it knows watch is live ─
+            //  Scenario 2: send "ready" to phone so it knows watch is live 
             _phoneLink.sendCommand("watchReady");
-            // We don't start our own session — phone drives everything
+            // We don`t start our own session  phone drives everything
         }
 
         // UI refresh timer
@@ -120,7 +120,7 @@ class RunView extends Ui.View {
         }
     }
 
-    // ── Phone message handler (Scenario 2) ───────────────────────────────────
+    //  Phone message handler (Scenario 2) 
     function onPhoneMessage(data) {
         if (data == null) { return; }
 
@@ -149,12 +149,12 @@ class RunView extends Ui.View {
             Ui.requestUpdate();
 
         } else if (msgType.equals("sessionEnded")) {
-            // Phone has ended the run — pop back to start
+            // Phone has ended the run  pop back to start
             Ui.popView(Ui.SLIDE_RIGHT);
         }
     }
 
-    // ── Timer tick (250 ms) ───────────────────────────────────────────────────
+    //  Timer tick (250 ms) 
     function onTimer() as Void {
         // Only increment watch-side elapsed time in standalone mode
         if (!_phoneControlled && _isRunning && !_isPaused) {
@@ -162,7 +162,7 @@ class RunView extends Ui.View {
             _elapsedTime = _elapsedMs / 1000;
         }
 
-        // ── Smooth display values ──────────────────────────────────────────
+        //  Smooth display values 
         var ease = 0.18;
 
         if (_pace > 0 && _pace < 1200) {
@@ -175,14 +175,14 @@ class RunView extends Ui.View {
         _dispHeartRate = (_dispHeartRate + ((_heartRate - _dispHeartRate) * 0.25)).toNumber();
         _dispCadence   = (_dispCadence   + ((_cadence   - _dispCadence)   * 0.25)).toNumber();
 
-        // ── Breathing ring animation ───────────────────────────────────────
+        //  Breathing ring animation 
         _ringPhase += 0.18;
         if (_ringPhase > 6.283) { _ringPhase -= 6.283; }
 
         _ringPulseBoost *= 0.85;
         if (_ringPulseBoost < 0.01) { _ringPulseBoost = 0.0; }
 
-        // ── Standalone: stream to backend every 1 s ────────────────────────
+        //  Standalone: stream to backend every 1 s 
         if (!_phoneControlled) {
             _streamAccumMs += _tickMs;
             if (_streamAccumMs >= 1000) {
@@ -203,7 +203,7 @@ class RunView extends Ui.View {
         Ui.requestUpdate();
     }
 
-    // ── GPS (Scenario 3 only) ─────────────────────────────────────────────────
+    //  GPS (Scenario 3 only) 
     function onPosition(info as Pos.Info) as Void {
         if (info.position != null) {
             var lat = info.position.toDegrees()[0];
@@ -221,7 +221,7 @@ class RunView extends Ui.View {
         }
     }
 
-    // ── Sensors (Scenario 3 only) ─────────────────────────────────────────────
+    //  Sensors (Scenario 3 only) 
     function onSensor(info as Sensor.Info) as Void {
         if (info.heartRate != null) {
             _heartRate     = info.heartRate;
@@ -230,7 +230,7 @@ class RunView extends Ui.View {
         if (info.cadence != null) { _cadence = info.cadence; }
     }
 
-    // ── Pause / Resume ────────────────────────────────────────────────────────
+    //  Pause / Resume 
 
     function pauseRun() {
         if (_isPaused || !_isRunning) { return; }
@@ -268,7 +268,7 @@ class RunView extends Ui.View {
         Ui.requestUpdate();
     }
 
-    // ── Finish run ────────────────────────────────────────────────────────────
+    //  Finish run 
 
     function finishRun() {
         _isRunning = false;
@@ -286,7 +286,7 @@ class RunView extends Ui.View {
         Ui.popView(Ui.SLIDE_RIGHT);
     }
 
-    // ── Drawing ──────────────────────────────��────────────────────────────────
+    //  Drawing 
 
     function onUpdate(dc) {
         dc.setColor(Gfx.COLOR_BLACK, Gfx.COLOR_BLACK);
@@ -305,7 +305,7 @@ class RunView extends Ui.View {
         var secondaryY = isSmall ? (height * 0.70).toNumber() : (height * 0.72).toNumber();
         var tertiaryY  = isSmall ? (height * 0.82).toNumber() : (height * 0.84).toNumber();
 
-        // ── Breathing ring ─────────────────────────────────────────────────
+        //  Breathing ring 
         var s          = ((Math.sin(_ringPhase) + 1.0) * 0.5).toFloat();
         var baseRadius = (width / 2) - (isSmall ? 6 : 4);
         var breathe    = s * (isSmall ? 3.0 : 4.0);
@@ -324,16 +324,16 @@ class RunView extends Ui.View {
             dc.drawCircle(centerX, centerY, ringRadius);
         }
 
-        // ── Paused banner ──────────────────────────────────────────────────
+        //  Paused banner 
         if (_isPaused) {
             dc.setColor(Gfx.COLOR_ORANGE, Gfx.COLOR_TRANSPARENT);
             dc.drawText(centerX, height * 0.20, Gfx.FONT_TINY, "PAUSED", Gfx.TEXT_JUSTIFY_CENTER);
         }
 
-        // ── HR Zone bar ───────────────────────────────────────��────────────
+        //  HR Zone bar 
         drawHrZoneBar(dc, centerX, (isSmall ? height * 0.16 : height * 0.18).toNumber(), width, _heartRateZone);
 
-        // ── Primary: PACE ──────────────────────────────────────────────────
+        //  Primary: PACE 
         var paceText = formatPace(_dispPace);
         var paceFonts = [Gfx.FONT_LARGE, Gfx.FONT_MEDIUM];
         var paceFont  = pickLargestFontThatFits(dc, paceText, paceFonts, width - 24);
@@ -344,7 +344,7 @@ class RunView extends Ui.View {
         dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
         dc.drawText(centerX, unitY, Gfx.FONT_TINY, "min/km", Gfx.TEXT_JUSTIFY_CENTER);
 
-        // ── Secondary: Distance & Time ─────────────────────────────────────
+        //  Secondary: Distance & Time 
         var distText = formatDistance(_dispDistance);
         var timeText = formatTime(_elapsedTime);
         var secFont  = isSmall ? Gfx.FONT_TINY : Gfx.FONT_SMALL;
@@ -353,7 +353,7 @@ class RunView extends Ui.View {
         dc.drawText((width * 0.25).toNumber(), secondaryY, secFont, distText, Gfx.TEXT_JUSTIFY_CENTER);
         dc.drawText((width * 0.75).toNumber(), secondaryY, secFont, timeText, Gfx.TEXT_JUSTIFY_CENTER);
 
-        // ── Tertiary: HR + Cadence ─────────────────────────────────────────
+        //  Tertiary: HR + Cadence 
         var hrColor = getHeartRateZoneColor(_heartRateZone);
         dc.setColor(hrColor, Gfx.COLOR_TRANSPARENT);
         dc.drawText((width * 0.25).toNumber(), tertiaryY, Gfx.FONT_TINY,
@@ -364,7 +364,7 @@ class RunView extends Ui.View {
             _dispCadence.format("%d") + " spm", Gfx.TEXT_JUSTIFY_CENTER);
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────────
+    //  Private helpers 
 
     private function _startWatchSession() {
         _session = Record.createSession({
@@ -423,13 +423,13 @@ class RunView extends Ui.View {
     }
 
     private function calculateHeartRateZone(hr) {
-        var maxHR   = App.Storage.getValue("maxHR");
-        if (maxHR == null) { maxHR = 185; }
-        var percent = (hr.toFloat() / maxHR) * 100;
-        if (percent < 60) { return 1; }
-        if (percent < 70) { return 2; }
-        if (percent < 80) { return 3; }
-        if (percent < 90) { return 4; }
+        // Default max HR
+        var maxHR = 185;
+        var percent = (hr.toFloat() / maxHR) * 100.0;
+        if (percent < 60.0) { return 1; }
+        if (percent < 70.0) { return 2; }
+        if (percent < 80.0) { return 3; }
+        if (percent < 90.0) { return 4; }
         return 5;
     }
 
@@ -475,9 +475,9 @@ class RunView extends Ui.View {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// RunDelegate — button handling during an active run
-// ─────────────────────────────────────────────────────────────────────────────
+// 
+// RunDelegate  button handling during an active run
+// 
 class RunDelegate extends Ui.BehaviorDelegate {
 
     private var _view;
@@ -490,7 +490,7 @@ class RunDelegate extends Ui.BehaviorDelegate {
         _view = view;
     }
 
-    // BACK / DOWN button → pause or resume
+    // BACK / DOWN button  pause or resume
     function onBack() {
         if (_view != null) {
             if (_view.isPaused()) {
@@ -506,7 +506,7 @@ class RunDelegate extends Ui.BehaviorDelegate {
         return true;
     }
 
-    // LAP button → show finish menu
+    // LAP button  show finish menu
     function onMenu() {
         Ui.pushView(
             new Rez.Menus.RunMenu(),
@@ -517,9 +517,9 @@ class RunDelegate extends Ui.BehaviorDelegate {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// 
 // Pause confirmation dialog
-// ─────────────────────────────────────────────────────────────────────────────
+// 
 class PauseConfirmDelegate extends Ui.ConfirmationDelegate {
 
     private var _view;
@@ -537,9 +537,9 @@ class PauseConfirmDelegate extends Ui.ConfirmationDelegate {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// 
 // Run menu delegate (LAP button menu)
-// ─────────────────────────────────────────────────────────────────────────────
+// 
 class RunMenuDelegate extends Ui.MenuInputDelegate {
 
     private var _view;
@@ -560,9 +560,9 @@ class RunMenuDelegate extends Ui.MenuInputDelegate {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// 
 // Finish confirmation dialog
-// ─────────────────────────────────────────────────────────────────────────────
+// 
 class FinishConfirmDelegate extends Ui.ConfirmationDelegate {
 
     private var _view;

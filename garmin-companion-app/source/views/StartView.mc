@@ -63,15 +63,17 @@ class StartView extends Ui.View {
     // ── Phone message handler ─────────────────────────────────────────────────
     // The Android app sends an "auth" message with the user's token when the
     // phone app is opened and the watch is connected.
-    function onPhoneMessage(msg) {
-        if (msg == null || msg.data == null) { return; }
+    function onPhoneMessage(msg as Comm.PhoneAppMessage) as Void {
+        if (msg == null) { return; }
+        
         var data = msg.data;
+        if (data == null) { return; }
 
-        var msgType = data.get("type");
+        var msgType = data["type"];
 
         if (msgType != null && msgType.equals("auth")) {
-            var token = data.get("authToken");
-            var name  = data.get("runnerName");
+            var token = data["authToken"];
+            var name  = data["runnerName"];
 
             if (token != null && token.length() > 0) {
                 App.Storage.setValue("authToken", token);
@@ -98,7 +100,7 @@ class StartView extends Ui.View {
     }
 
     // ── Animation tick ────────────────────────────────────────────────────────
-    function onTick() {
+    function onTick() as Void {
         _dotCount   = (_dotCount + 1) % 4;
         _pulseScale = (_pulseScale + 1) % 20;
         _tickCount  = _tickCount + 1;
