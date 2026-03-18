@@ -2406,23 +2406,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let nonce = '';
       let oauthStateRecord = null;
       
-      // Validate state parameter by looking it up server-side
+      // Validate state parameter — atomically claim it so concurrent duplicate callbacks
+      // (a known Garmin behaviour where two requests arrive for the same callback) cannot
+      // both proceed to the token exchange, which would fail the second one with an
+      // "invalid code" error from Garmin since each code is single-use.
       if (state) {
         try {
-          oauthStateRecord = await storage.getOauthState(state as string);
+          // claimOauthState does DELETE ... RETURNING — only ONE concurrent request wins
+          oauthStateRecord = await storage.claimOauthState(state as string);
           
           if (!oauthStateRecord) {
-            console.error("[SECURITY] Garmin callback - state not found or expired:", state);
-            const errorUrl = appRedirectUrl.includes('?') 
-              ? `${appRedirectUrl}&garmin=error&message=invalid_or_expired_state`
-              : `${appRedirectUrl}?garmin=error&message=invalid_or_expired_state`;
-            return res.redirect(errorUrl);
+            console.warn("[SECURITY] Garmin callback - state not found, expired, or already claimed by a concurrent request:", state);
+            // The other concurrent callback already claimed and will complete the flow — silently ignore this one
+            return res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Connecting...</title><script>window.location.href='${appRedirectUrl}?garmin=success';</script></head><body>Garmin connected. Redirecting...</body></html>`);
           }
           
           // Check if state has expired
           if (new Date() > new Date(oauthStateRecord.expiresAt)) {
             console.error("[SECURITY] Garmin callback - state expired:", { state, expiredAt: oauthStateRecord.expiresAt });
-            await storage.deleteOauthState(state as string);
+            // State already deleted by claimOauthState
             const errorUrl = appRedirectUrl.includes('?') 
               ? `${appRedirectUrl}&garmin=error&message=state_expired`
               : `${appRedirectUrl}?garmin=error&message=state_expired`;
@@ -2432,7 +2434,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Verify this is a Garmin OAuth state
           if (oauthStateRecord.provider !== 'garmin') {
             console.error("[SECURITY] Garmin callback - provider mismatch:", { state, provider: oauthStateRecord.provider });
-            await storage.deleteOauthState(state as string);
+            // State already deleted by claimOauthState
             const errorUrl = appRedirectUrl.includes('?') 
               ? `${appRedirectUrl}&garmin=error&message=invalid_provider`
               : `${appRedirectUrl}?garmin=error&message=invalid_provider`;
@@ -2445,7 +2447,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           historyDays = oauthStateRecord.historyDays || 30;
           nonce = oauthStateRecord.nonce || '';
           
-          console.log("[SECURITY] Garmin callback - state validated server-side:", { 
+          console.log("[SECURITY] Garmin callback - state claimed and validated:", { 
             userId, 
             provider: oauthStateRecord.provider,
             appRedirect: appRedirectUrl, 
@@ -2575,16 +2577,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log("⏭️ Skipping historical activity sync (historyDays = 0)");
       }
       
-      // Clean up OAuth state after successful connection
-      if (state) {
-        try {
-          await storage.deleteOauthState(state as string);
-          console.log("[SECURITY] Cleaned up OAuth state after successful Garmin connection");
-        } catch (cleanupError) {
-          console.error("[SECURITY] Failed to cleanup OAuth state:", cleanupError);
-          // Non-critical error, don't fail the connection
-        }
-      }
+      // Note: OAuth state is already deleted by claimOauthState() above — no cleanup needed here
 
       // Redirect back to mobile app with success using HTML page
       const successUrl = appRedirectUrl.includes('?') 

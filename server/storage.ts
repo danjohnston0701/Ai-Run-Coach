@@ -100,6 +100,7 @@ export interface IStorage {
   // OAuth State Store
   createOauthState(data: { state: string; userId: string; provider: string; appRedirect?: string; historyDays?: number; nonce?: string; expiresAt: Date }): Promise<OauthStateStore>;
   getOauthState(state: string): Promise<OauthStateStore | undefined>;
+  claimOauthState(state: string): Promise<OauthStateStore | undefined>; // atomic DELETE ... RETURNING
   deleteOauthState(state: string): Promise<void>;
   cleanupExpiredOauthStates(): Promise<number>;
 
@@ -641,6 +642,16 @@ export class DatabaseStorage implements IStorage {
   async getOauthState(state: string): Promise<OauthStateStore | undefined> {
     const [result] = await db.select().from(oauthStateStore)
       .where(eq(oauthStateStore.state, state));
+    return result || undefined;
+  }
+
+  /** Atomically delete and return the OAuth state record.
+   *  If two concurrent requests race, only ONE will get the record back — the other gets undefined.
+   *  Use this instead of getOauthState + deleteOauthState to prevent double-callback races. */
+  async claimOauthState(state: string): Promise<OauthStateStore | undefined> {
+    const [result] = await db.delete(oauthStateStore)
+      .where(eq(oauthStateStore.state, state))
+      .returning();
     return result || undefined;
   }
 
