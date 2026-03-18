@@ -2558,11 +2558,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           startDate.setDate(startDate.getDate() - historyDays);
           const endDate = new Date();
           
-          // NOTE: Historical sync via pull API disabled — Garmin will push recent activities
-          // via webhook automatically after OAuth completes. The pull API requires a different
-          // token type than what we get from OAuth (which is push-only).
-          // Activities will appear via the /api/garmin/webhook/activities endpoint instead.
-          console.log(`✅ Garmin OAuth complete — activities will be pushed via webhook`);
+          // Request a Garmin backfill — Garmin will push historical activities to our
+          // /api/garmin/webhooks/activities endpoint within a few minutes.
+          await garminService.syncGarminActivities(
+            userId,
+            tokens.accessToken,
+            startDate.toISOString(),
+            endDate.toISOString()
+          );
+          console.log(`✅ Garmin backfill requested — historical activities will arrive via webhook shortly`);
         } catch (error: any) {
           console.error("Error in Garmin OAuth flow:", error);
           // Don't fail the connection on other errors

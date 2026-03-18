@@ -246,27 +246,23 @@ export async function requestGarminBackfill(
   const endDate = endTime.toISOString().split('T')[0];
   console.log(`📤 Requesting Garmin backfill for ${startDate} → ${endDate}`);
 
-  const url = `${GARMIN_API_BASE}/wellness-api/rest/backfill/activities`;
+  // Garmin backfill uses GET with query params (not POST with body)
+  const url = `${GARMIN_API_BASE}/wellness-api/rest/backfill/activities?summaryStartTimeInSeconds=${startTimeSeconds}&summaryEndTimeInSeconds=${endTimeSeconds}`;
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: 'GET',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      summaryStartTimeInSeconds: startTimeSeconds,
-      summaryEndTimeInSeconds: endTimeSeconds,
-    }),
   });
 
+  const responseText = await response.text();
   if (!response.ok) {
-    const text = await response.text();
-    console.error('❌ Garmin backfill request failed:', response.status, text.substring(0, 300));
+    console.error(`❌ Garmin backfill request failed: HTTP ${response.status}`, responseText.substring(0, 300));
     throw new Error(`Garmin backfill request failed: ${response.status}`);
   }
 
-  console.log('✅ Garmin backfill requested — activities will arrive via webhook');
+  console.log(`✅ Garmin backfill requested (HTTP ${response.status}) — activities will arrive via webhook`);
   return {
     requested: true,
     message: `Garmin will push activities from ${startDate} to ${endDate} to your webhooks shortly.`,
