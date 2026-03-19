@@ -128,7 +128,8 @@ data class WorkoutDetails(
 /** GET /api/training-plans/:planId/today */
 data class TodayWorkoutResponse(
     @SerializedName("workout") val workout: WorkoutDetails?,
-    @SerializedName("isToday") val isToday: Boolean
+    @SerializedName("isToday") val isToday: Boolean,
+    @SerializedName("isOverdue") val isOverdue: Boolean = false
 )
 
 /** GET /api/training-plans/:planId/progress */

@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
-import { eq, and, gte, desc, lte, count } from "drizzle-orm";
+import { eq, and, gte, lt, desc, lte, count } from "drizzle-orm";
 import { storage } from "./storage";
 import { db } from "./db";
 import { 
@@ -9851,29 +9851,37 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
 
+      // 1. Look for an incomplete workout scheduled EXACTLY today
       const todaysWorkouts = await db.select().from(plannedWorkouts)
         .where(and(
           eq(plannedWorkouts.trainingPlanId, planId),
           gte(plannedWorkouts.scheduledDate, today),
+          lt(plannedWorkouts.scheduledDate, tomorrow),
+          eq(plannedWorkouts.isCompleted, false)
         ))
         .orderBy(plannedWorkouts.scheduledDate)
         .limit(1);
 
-      if (todaysWorkouts.length === 0) {
-        // Look ahead up to 3 days for next workout
-        const threeDays = new Date(today);
-        threeDays.setDate(threeDays.getDate() + 3);
-        const upcoming = await db.select().from(plannedWorkouts)
-          .where(and(
-            eq(plannedWorkouts.trainingPlanId, planId),
-            eq(plannedWorkouts.isCompleted, false)
-          ))
-          .orderBy(plannedWorkouts.scheduledDate)
-          .limit(1);
-        return res.json({ workout: upcoming[0] || null, isToday: false });
+      if (todaysWorkouts.length > 0) {
+        return res.json({ workout: todaysWorkouts[0], isToday: true, isOverdue: false });
       }
 
-      res.json({ workout: todaysWorkouts[0], isToday: true });
+      // 2. No workout today — look for the most recent overdue (incomplete, scheduled before today)
+      const overdueWorkouts = await db.select().from(plannedWorkouts)
+        .where(and(
+          eq(plannedWorkouts.trainingPlanId, planId),
+          lt(plannedWorkouts.scheduledDate, today),
+          eq(plannedWorkouts.isCompleted, false)
+        ))
+        .orderBy(desc(plannedWorkouts.scheduledDate))
+        .limit(1);
+
+      if (overdueWorkouts.length > 0) {
+        return res.json({ workout: overdueWorkouts[0], isToday: false, isOverdue: true });
+      }
+
+      // 3. Rest day — no workout today and nothing overdue
+      res.json({ workout: null, isToday: false, isOverdue: false });
     } catch (error: any) {
       console.error("Get today workout error:", error);
       res.status(500).json({ error: "Failed to get today's workout" });
