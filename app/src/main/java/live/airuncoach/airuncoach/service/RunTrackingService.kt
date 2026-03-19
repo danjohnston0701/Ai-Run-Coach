@@ -30,6 +30,8 @@ import kotlinx.coroutines.flow.first
 import live.airuncoach.airuncoach.MainActivity
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.data.WeatherRepository
+import live.airuncoach.airuncoach.data.SyncQueue
+import live.airuncoach.airuncoach.data.workers.SyncWorker
 import live.airuncoach.airuncoach.domain.model.*
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.RetrofitClient
@@ -64,6 +66,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private lateinit var notificationManager: NotificationManager
     private lateinit var weatherRepository: WeatherRepository
     private lateinit var sensorManager: SensorManager
+    private lateinit var syncQueue: SyncQueue  // For offline run persistence
     private var stepCounterSensor: Sensor? = null
     private var stepDetectorSensor: Sensor? = null  // Fallback: fires per step
     private var heartRateSensor: Sensor? = null
@@ -440,6 +443,13 @@ class RunTrackingService : Service(), SensorEventListener {
 
         // Initialize the shared audio queue (handles both OpenAI TTS and device TTS fallback)
         CoachingAudioQueue.init(this)
+        
+        // Initialize offline sync queue for run persistence
+        syncQueue = SyncQueue(this)
+        
+        // Start periodic background sync work
+        SyncWorker.schedulePeriodicSync(this)
+        Log.d("RunTrackingService", "✅ Initialized offline sync queue and scheduled periodic sync")
         
         // Load user profile and run history for coach personalisation
         serviceScope.launch {
@@ -2221,8 +2231,19 @@ class RunTrackingService : Service(), SensorEventListener {
             }
         }
 
-        // All retries exhausted - fall back to local ID
-        Log.e("RunTrackingService", "Upload failed after $maxRetries retries, using local ID", lastException)
+        // All retries exhausted - queue for background retry
+        Log.e("RunTrackingService", "Upload failed after $maxRetries retries, queuing for background sync", lastException)
+        
+        // Add to sync queue for persistent retry
+        try {
+            syncQueue.addPendingRun(runSession)
+            Log.d("RunTrackingService", "✅ Run ${runSession.id} queued for background sync")
+            // Trigger immediate sync attempt
+            SyncWorker.triggerImmediateSync(this)
+        } catch (e: Exception) {
+            Log.e("RunTrackingService", "Failed to queue run for sync: ${e.message}")
+        }
+        
         _uploadComplete.value = runSession.id
     }
 
