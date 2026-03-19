@@ -2,7 +2,8 @@ package live.airuncoach.airuncoach.network.model
 
 data class LoginRequest(
     val email: String,
-    val password: String
+    val password: String,
+    val timezone: String? = null
 )
 
 data class RegisterRequest(

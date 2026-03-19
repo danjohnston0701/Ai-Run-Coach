@@ -62,10 +62,14 @@ class LoginViewModel @Inject constructor(
                 android.util.Log.d("LoginViewModel", "📧 Original email: ${_loginState.value.email}")
                 android.util.Log.d("LoginViewModel", "🔑 Password length: ${password.length}")
                 
+                // Get device timezone
+                val deviceTimezone = java.util.TimeZone.getDefault().id
+                
                 val response = apiService.login(
                     LoginRequest(
                         email,
-                        password
+                        password,
+                        timezone = deviceTimezone
                     )
                 )
                 

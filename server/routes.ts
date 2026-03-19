@@ -10,10 +10,11 @@ import {
   trainingPlans, weeklyPlans, plannedWorkouts, planAdaptations,
   feedActivities, reactions, activityComments, commentLikes,
   clubs, clubMemberships, challenges, challengeParticipants, groupRunParticipants, groupRuns,
-  achievements, userAchievements, goals, users,
+  achievements, userAchievements, goals, users, notificationPreferences,
   sharedRuns, webhookFailureQueue, garminMoveIQ, garminBloodPressure,
   garminEpochsRaw, garminEpochsAggregate, garminHealthSnapshots, garminSkinTemperature
 } from "@shared/schema";
+import { DateTime } from "luxon";
 import { sql } from "drizzle-orm";
 import { 
   generateToken, 
@@ -120,24 +121,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
-      const { email, password } = req.body;
-      
+      const { email, password, timezone } = req.body;
+
       if (!email || !password) {
         return res.status(400).json({ error: "Email and password are required" });
       }
-      
+
       const user = await storage.getUserByEmail(email);
       if (!user) {
         return res.status(401).json({ error: "Invalid credentials" });
       }
-      
+
       const isValid = await comparePassword(password, user.password);
       if (!isValid) {
         return res.status(401).json({ error: "Invalid credentials" });
       }
-      
+
+      // Update user's timezone preference if provided (from device)
+      if (timezone) {
+        try {
+          // Validate timezone using Luxon
+          DateTime.now().setZone(timezone);
+          
+          // Ensure notification preferences exist, then update timezone
+          const existingPrefs = await db
+            .select()
+            .from(notificationPreferences)
+            .where(eq(notificationPreferences.userId, user.id))
+            .limit(1);
+          
+          if (existingPrefs.length > 0) {
+            await db
+              .update(notificationPreferences)
+              .set({ 
+                coachingPlanReminderTimezone: timezone,
+                updatedAt: new Date(),
+              })
+              .where(eq(notificationPreferences.userId, user.id));
+          } else {
+            await db.insert(notificationPreferences).values({
+              userId: user.id,
+              coachingPlanReminderTimezone: timezone,
+            });
+          }
+          
+          console.log(`[Login] Updated timezone for user ${user.id}: ${timezone}`);
+        } catch (tzError: any) {
+          console.warn(`Invalid timezone "${timezone}" provided during login for user ${user.id}: ${tzError.message}`);
+        }
+      }
+
       const token = generateToken({ userId: user.id, email: user.email });
-      
+
       const { password: _, ...userWithoutPassword } = user;
       res.json({ user: userWithoutPassword, token });
     } catch (error: any) {
