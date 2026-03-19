@@ -19,8 +19,8 @@ class SyncQueue(private val context: Context) {
     private val gson = Gson()
 
     /**
-     * Add a run to the pending sync queue (when upload fails).
-     * Returns the database ID of the queued item.
+     * Add a run to the pending sync queue (called when upload fails).
+     * Returns the database row ID of the queued item.
      */
     suspend fun addPendingRun(run: RunSession): Long {
         val serialized = gson.toJson(run)
@@ -29,7 +29,6 @@ class SyncQueue(private val context: Context) {
             runData = serialized,
             retryCount = 0
         )
-
         return try {
             val id = dao.insert(pending)
             Log.d("SyncQueue", "✅ Added run ${run.id} to sync queue (db id: $id)")
@@ -41,16 +40,14 @@ class SyncQueue(private val context: Context) {
     }
 
     /**
-     * Mark a pending sync as successfully uploaded and remove it.
+     * Mark a pending sync as successfully uploaded and remove it from the queue.
      */
     suspend fun markSynced(runId: String) {
         try {
-            val pending = dao.getByRunId(runId) ?: return
-            dao.delete(pending)
+            dao.deleteByRunId(runId)
             Log.d("SyncQueue", "✅ Removed run $runId from sync queue")
         } catch (e: Exception) {
             Log.e("SyncQueue", "❌ Failed to mark $runId as synced: ${e.message}")
-            throw e
         }
     }
 
@@ -74,27 +71,26 @@ class SyncQueue(private val context: Context) {
      */
     suspend fun markSyncing(runId: String) {
         try {
-            val pending = dao.getByRunId(runId) ?: return
-            dao.update(pending.copy(isSyncing = true))
+            dao.markSyncing(runId)
         } catch (e: Exception) {
             Log.e("SyncQueue", "❌ Failed to mark $runId as syncing: ${e.message}")
         }
     }
 
     /**
-     * Record a sync failure (increment retry count, store error).
+     * Record a sync failure (increment retry count, store error message).
      */
     suspend fun recordFailure(runId: String, error: String) {
         try {
             val pending = dao.getByRunId(runId) ?: return
-            val updated = pending.copy(
-                isSyncing = false,
+            dao.updateById(
+                id = pending.id,
                 retryCount = pending.retryCount + 1,
                 lastRetryAt = System.currentTimeMillis(),
+                isSyncing = 0,
                 lastError = error
             )
-            dao.update(updated)
-            Log.w("SyncQueue", "⚠️  Run $runId failed (attempt ${updated.retryCount}): $error")
+            Log.w("SyncQueue", "⚠️  Run $runId failed (attempt ${pending.retryCount + 1}): $error")
         } catch (e: Exception) {
             Log.e("SyncQueue", "❌ Failed to record failure for $runId: ${e.message}")
         }
@@ -119,19 +115,13 @@ class SyncQueue(private val context: Context) {
         }
     }
 
-    /**
-     * Observe pending sync count for UI updates.
-     */
+    /** Observe pending sync count as a Flow for live UI updates. */
     fun observePendingSyncCount(): Flow<Int> = dao.observePendingSyncCount()
 
-    /**
-     * Observe all pending syncs for UI updates.
-     */
+    /** Observe all pending syncs as a Flow for live UI updates. */
     fun observePendingSyncs(): Flow<List<PendingSyncEntity>> = dao.observePendingSyncs()
 
-    /**
-     * Get pending sync count (for debugging).
-     */
+    /** Snapshot count of pending syncs. */
     suspend fun getPendingSyncCount(): Int {
         return try {
             dao.getAllPendingSyncs().size
@@ -141,9 +131,7 @@ class SyncQueue(private val context: Context) {
         }
     }
 
-    /**
-     * Clear all pending syncs (use carefully).
-     */
+    /** Clear all pending syncs (use carefully). */
     suspend fun clearAllPendingSyncs() {
         try {
             dao.clear()
