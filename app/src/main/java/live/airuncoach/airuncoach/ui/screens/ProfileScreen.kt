@@ -230,6 +230,7 @@ fun ProfileScreen(
         item {
             SettingsSection {
                 SettingsItem(icon = R.drawable.icon_watch_vector, text = "Connected Devices", onClick = onNavigateToConnectedDevices)
+                SettingsItem(icon = R.drawable.icon_info_vector, text = "Push Notifications", onClick = onNavigateToNotifications)
                 SettingsItem(icon = R.drawable.icon_crown_vector, text = "Subscription", value = user?.subscriptionTier ?: "Free", onClick = onNavigateToSubscription)
             }
         }
