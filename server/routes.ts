@@ -4558,14 +4558,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       for (const daily of dailies) {
         try {
-          // Resolve user by Garmin userId or userAccessToken
+          // Resolve user: try access token first, then fall back to Garmin userId → deviceId lookup.
+          // The token-first path can fail when the token has been refreshed since OAuth, so we
+          // always cascade to the userId-based lookup rather than stopping after a token miss.
           let device;
           const userAccessToken = daily.userAccessToken;
-          
+
           if (userAccessToken) {
             device = await findUserByGarminToken(userAccessToken);
-          } else {
-            // Use resolveGarminUserId helper for user ID based lookup
+          }
+
+          if (!device) {
+            // Use resolveGarminUserId helper for user ID based lookup (handles numeric or UUID Garmin IDs)
             const garminDevices = await db.query.connectedDevices.findMany({
               where: (d, { eq }) => eq(d.deviceType, 'garmin'),
               columns: { userId: true, deviceId: true },
@@ -4577,9 +4581,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
               });
             }
           }
-          
+
           if (!device) {
-            console.warn(`⚠️ [Garmin Webhook] Could not map dailies to user (userId: ${daily.userId || 'unknown'})`);
+            console.warn(`⚠️ [Garmin Webhook] Could not map dailies to user (userId: ${daily.userId || 'unknown'}, hasToken: ${!!userAccessToken})`);
             continue;
           }
           
@@ -4876,36 +4880,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const date = resp.calendarDate || new Date((resp.startTimeInSeconds || 0) * 1000).toISOString().split('T')[0];
           
-          // Find user: first try matching by Garmin userId in webhook payload, then fall back to date+run matching
+          // Find user: try access token → Garmin userId → single-device fallback.
+          // Date+run matching is skipped on rest days so it's not reliable.
           let userId: string | undefined;
 
-          if (resp.userId) {
+          // 1. Match by userAccessToken (most reliable when fresh)
+          if (!userId && resp.userAccessToken) {
+            const deviceByToken = await findUserByGarminToken(resp.userAccessToken);
+            if (deviceByToken) userId = deviceByToken.userId;
+          }
+
+          // 2. Match by Garmin userId stored as deviceId in connected_devices
+          if (!userId && resp.userId) {
             const garminId = String(resp.userId);
             const deviceByGarminId = devices.find(d => d.deviceId === garminId);
             if (deviceByGarminId) userId = deviceByGarminId.userId;
           }
 
-          if (!userId) {
-            for (const device of devices) {
-              const recentRun = await db.query.runs.findFirst({
-                where: and(
-                  eq(runs.userId, device.userId),
-                  gte(runs.completedAt, new Date(`${date}T00:00:00`)),
-                  lte(runs.completedAt, new Date(`${date}T23:59:59`))
-                ),
-                limit: 1,
-              });
-              if (recentRun) { userId = device.userId; break; }
-            }
-          }
-
-          // Last resort: if only one Garmin device is connected, use that user
+          // 3. Last resort: if only one Garmin device is connected, use that user
           if (!userId && devices.length === 1) {
             userId = devices[0].userId;
           }
-          
+
           if (!userId) {
-            console.warn(`⚠️ [Garmin Webhook] Could not map respiration to user for date ${date}`);
+            console.warn(`⚠️ [Garmin Webhook] Could not map respiration to user for date ${date} (userId: ${resp.userId || 'unknown'}, hasToken: ${!!resp.userAccessToken})`);
             continue;
           }
           
