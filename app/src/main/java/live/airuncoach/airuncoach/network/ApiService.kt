@@ -318,6 +318,15 @@ interface ApiService {
     @DELETE("/api/training-plans/{planId}")
     suspend fun deleteTrainingPlan(@Path("planId") planId: String): Response<Unit>
 
+    @POST("/api/training-plans/adaptations/{adaptationId}/accept")
+    suspend fun acceptAdaptation(@Path("adaptationId") adaptationId: String): Response<AdaptationResponse>
+
+    @POST("/api/training-plans/adaptations/{adaptationId}/decline")
+    suspend fun declineAdaptation(@Path("adaptationId") adaptationId: String): Response<AdaptationResponse>
+
+    @GET("/api/training-plans/{planId}/adaptations/pending")
+    suspend fun getPendingAdaptations(@Path("planId") planId: String): PendingAdaptationsResponse
+
     // ========== NOTIFICATION PREFERENCES ==========
 
     @GET("/api/notification-preferences/{userId}")
