@@ -505,7 +505,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       targetDistance: run.targetDistance || null,
       targetTime: run.targetTime || null,
       wasTargetAchieved: typeof run.wasTargetAchieved === "boolean" ? run.wasTargetAchieved : null,
-      isActive: false
+      isActive: false,
+      // Training plan context — required for auto-completing the linked workout on the summary screen
+      linkedWorkoutId: run.linkedWorkoutId || null,
+      linkedPlanId: run.linkedPlanId || null,
+      planProgressWeek: run.planProgressWeek || null,
+      planProgressWeeks: run.planProgressWeeks || null,
+      workoutType: run.workoutType || null,
+      workoutIntensity: run.workoutIntensity || null,
+      workoutDescription: run.workoutDescription || null,
     };
   }
 
