@@ -565,7 +565,15 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 // recompose with a null workout and accidentally pop run_session off the stack.
                 val workout = remember { WorkoutHolder.currentWorkout }
                 val planCtxForComplete = remember { WorkoutHolder.planContext }
-                val trainingPlanViewModel: TrainingPlanViewModel = hiltViewModel()
+                // Scope ViewModel to the training_plan back stack entry so it is the SAME
+                // instance that TrainingPlanDashboardScreen uses — calling completeWorkout here
+                // will update planDetailState and refresh the progress bar immediately on back.
+                val currentEntry = navController.currentBackStackEntry
+                val planBackStackEntry = remember(currentEntry) {
+                    try { navController.getBackStackEntry("training_plan/{planId}") } catch (_: Exception) { null }
+                }
+                val trainingPlanViewModel: TrainingPlanViewModel =
+                    if (planBackStackEntry != null) hiltViewModel(planBackStackEntry) else hiltViewModel()
                 if (workout == null) {
                     LaunchedEffect(Unit) { navController.popBackStack() }
                 } else {
