@@ -94,6 +94,7 @@ import com.google.maps.android.SphericalUtil
 
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.RunSession
+import live.airuncoach.airuncoach.network.model.PreRunBriefingResponse
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
@@ -293,6 +294,7 @@ fun RunSessionScreen(
                         // 1️⃣ AI Coach Panel (navigation + insights) - at TOP, above timer
                         AiCoachLivePanel(
                             message = runState.latestCoachMessage,
+                            briefingResponse = runState.briefingResponse,
                             isLoading = runState.isLoadingBriefing,
                             modifier = Modifier.padding(horizontal = Spacing.md)
                         )
@@ -332,6 +334,7 @@ fun RunSessionScreen(
                         // 1️⃣ AI Coach Panel - at TOP
                         AiCoachLivePanel(
                             message = runState.latestCoachMessage,
+                            briefingResponse = runState.briefingResponse,
                             isLoading = runState.isLoadingBriefing,
                             modifier = Modifier.padding(horizontal = Spacing.md)
                         )
@@ -356,6 +359,7 @@ fun RunSessionScreen(
                         // 1️⃣ AI Coach Panel - at TOP
                         AiCoachLivePanel(
                             message = runState.latestCoachMessage,
+                            briefingResponse = runState.briefingResponse,
                             isLoading = runState.isLoadingBriefing,
                             modifier = Modifier.padding(horizontal = Spacing.md)
                         )
@@ -1321,6 +1325,7 @@ fun MetricRing(
 @Composable
 fun AiCoachLivePanel(
     message: String?,
+    briefingResponse: live.airuncoach.airuncoach.network.model.PreRunBriefingResponse? = null,
     isLoading: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -1334,7 +1339,7 @@ fun AiCoachLivePanel(
         label = "ai_glow"
     )
 
-    Box(
+    Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
@@ -1351,7 +1356,8 @@ fun AiCoachLivePanel(
                 }
             }
             .padding(Spacing.md),
-        contentAlignment = Alignment.Center
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         if (isLoading) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1364,6 +1370,7 @@ fun AiCoachLivePanel(
                 )
             }
         } else {
+            // Display main briefing text
             Text(
                 text = message.orEmpty(),
                 style = AppTextStyles.body,
@@ -1372,6 +1379,41 @@ fun AiCoachLivePanel(
                 fontWeight = FontWeight.Medium,
                 fontSize = 12.sp
             )
+
+            // Display intensity advice if available
+            briefingResponse?.intensityAdvice?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    text = "💪 $it",
+                    style = AppTextStyles.caption,
+                    color = Colors.primary.copy(alpha = 0.8f),
+                    textAlign = TextAlign.Center,
+                    fontSize = 11.sp
+                )
+            }
+
+            // Display warnings if available
+            briefingResponse?.warnings?.takeIf { it.isNotEmpty() }?.let { warnings ->
+                warnings.forEach { warning ->
+                    Text(
+                        text = "⚠️ $warning",
+                        style = AppTextStyles.caption,
+                        color = Colors.warning,
+                        textAlign = TextAlign.Center,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+
+            // Display readiness insight if available
+            briefingResponse?.readinessInsight?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    text = "📊 $it",
+                    style = AppTextStyles.caption,
+                    color = Colors.primary.copy(alpha = 0.7f),
+                    textAlign = TextAlign.Center,
+                    fontSize = 10.sp
+                )
+            }
         }
     }
 }

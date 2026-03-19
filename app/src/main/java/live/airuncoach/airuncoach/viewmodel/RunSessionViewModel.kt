@@ -28,6 +28,7 @@ import live.airuncoach.airuncoach.network.model.WellnessPayload
 import live.airuncoach.airuncoach.network.model.WeatherPayload
 import live.airuncoach.airuncoach.network.model.IntervalCoachingRequest
 import live.airuncoach.airuncoach.network.model.IntervalCoachingResponse
+import live.airuncoach.airuncoach.network.model.PreRunBriefingResponse
 import live.airuncoach.airuncoach.service.RunTrackingService
 import live.airuncoach.airuncoach.utils.AudioPlayerHelper
 import live.airuncoach.airuncoach.utils.CoachingAudioQueue
@@ -70,6 +71,7 @@ data class RunState(
     val wellnessContext: WellnessContext? = null,
     val isLoadingBriefing: Boolean = false,
     val latestCoachMessage: String? = null,
+    val briefingResponse: PreRunBriefingResponse? = null,  // Full structured response
     val isStopping: Boolean = false,
     val backendRunId: String? = null,
     // Interval training state
@@ -337,6 +339,7 @@ class RunSessionViewModel @Inject constructor(
                     _runState.update { it.copy(
                         coachText = displayText,
                         latestCoachMessage = displayText,
+                        briefingResponse = briefing,
                         isLoadingBriefing = false
                     )}
                     
