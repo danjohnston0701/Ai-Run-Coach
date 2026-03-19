@@ -181,6 +181,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==================== TEST ENDPOINTS ====================
+
+  /**
+   * Debug endpoint to send a test coaching plan reminder notification.
+   * Usage: POST /api/test/coaching-plan-reminder
+   * Body: { userEmail: "user@example.com", workoutName: "6x400m Intervals", distance: 5, intensity: "z4" }
+   */
+  app.post("/api/test/coaching-plan-reminder", async (req: Request, res: Response) => {
+    try {
+      const { userEmail, workoutName, distance, intensity } = req.body;
+
+      if (!userEmail || !workoutName) {
+        return res.status(400).json({ error: "userEmail and workoutName are required" });
+      }
+
+      // Find user by email
+      const user = await storage.getUserByEmail(userEmail);
+      if (!user) {
+        return res.status(404).json({ error: `User not found: ${userEmail}` });
+      }
+
+      // Import sendCoachingPlanReminder here (avoids circular imports)
+      const { sendCoachingPlanReminder } = await import("./notification-service");
+
+      // Send the test reminder
+      const result = await sendCoachingPlanReminder(
+        user.id,
+        workoutName,
+        distance ? parseFloat(distance) : undefined,
+        intensity
+      );
+
+      console.log(`[Test] Coaching plan reminder sent to ${userEmail}:`, result);
+      res.json({
+        success: true,
+        message: `Test notification sent to ${userEmail}`,
+        result,
+      });
+    } catch (error: any) {
+      console.error("[Test] Failed to send test notification:", error);
+      res.status(500).json({ error: "Failed to send test notification", details: error.message });
+    }
+  });
+
   // ==================== USER ENDPOINTS ====================
   
   app.get("/api/users/search", async (req: Request, res: Response) => {
