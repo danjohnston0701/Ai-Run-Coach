@@ -556,6 +556,9 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onViewWorkoutDetail = { workout ->
                         WorkoutHolder.currentWorkout = workout
                         navController.navigate("workout_detail")
+                    },
+                    onViewAdaptations = { pid ->
+                        navController.navigate("adaptation_review/$pid")
                     }
                 )
             }

@@ -25,7 +25,7 @@ router.post(
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { adaptationId } = req.params;
-      const userId = req.user!.id;
+      const userId = req.user!.userId;
 
       const result = await acceptAndApplyAdaptation(adaptationId, userId);
 
@@ -55,7 +55,7 @@ router.post(
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { adaptationId } = req.params;
-      const userId = req.user!.id;
+      const userId = req.user!.userId;
 
       const result = await declineAdaptation(adaptationId, userId);
 
@@ -81,7 +81,7 @@ router.get(
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { planId } = req.params;
-      const userId = req.user!.id;
+      const userId = req.user!.userId;
 
       const adaptations = await getPendingAdaptations(planId, userId);
 

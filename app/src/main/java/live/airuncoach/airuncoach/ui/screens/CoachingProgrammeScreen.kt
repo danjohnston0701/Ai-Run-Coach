@@ -302,7 +302,8 @@ fun TrainingPlanDashboardScreen(
     planId: String,
     onNavigateBack: () -> Unit,
     onStartWorkout: (WorkoutDetails) -> Unit,
-    onViewWorkoutDetail: (WorkoutDetails) -> Unit
+    onViewWorkoutDetail: (WorkoutDetails) -> Unit,
+    onViewAdaptations: (planId: String) -> Unit = {}
 ) {
     val viewModel: TrainingPlanViewModel = hiltViewModel()
     val state by viewModel.planDetailState.collectAsState()
@@ -367,7 +368,7 @@ fun TrainingPlanDashboardScreen(
                 onShowAbandonDialog = { showAbandonDialog = true },
                 onShowDeleteDialog = { showDeleteDialog = true },
                 onAddInjury = { showAddInjuryDialog = true },
-                onViewAdaptations = {  /* TODO: navigate to adaptation_review screen */ },
+                onViewAdaptations = { onViewAdaptations(planId) },
                 modifier = Modifier.fillMaxSize().padding(padding)
             )
             }
