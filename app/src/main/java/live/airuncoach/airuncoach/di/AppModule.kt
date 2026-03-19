@@ -9,6 +9,7 @@ import dagger.hilt.components.SingletonComponent
 import live.airuncoach.airuncoach.data.GarminAuthManager
 import live.airuncoach.airuncoach.data.HealthConnectRepository
 import live.airuncoach.airuncoach.data.SessionManager
+import live.airuncoach.airuncoach.data.SyncQueue
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.RetrofitClient
 import javax.inject.Singleton
@@ -39,5 +40,11 @@ object AppModule {
     @Provides
     fun provideGarminAuthManager(@ApplicationContext context: Context): GarminAuthManager {
         return GarminAuthManager(context)
+    }
+
+    @Singleton
+    @Provides
+    fun provideSyncQueue(@ApplicationContext context: Context): SyncQueue {
+        return SyncQueue(context)
     }
 }
