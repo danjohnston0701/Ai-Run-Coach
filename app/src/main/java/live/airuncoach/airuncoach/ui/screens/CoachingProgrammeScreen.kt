@@ -865,12 +865,17 @@ fun TodayWorkoutCard(
     onViewDetail: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth().clickable { onViewDetail() },
+        modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
         shape = RoundedCornerShape(16.dp)
     ) {
         Column(modifier = Modifier.padding(Spacing.lg)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+            // Tapping the header area navigates to detail — buttons below are independent
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { onViewDetail() },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
                 Column(modifier = Modifier.weight(1f)) {
                     WorkoutTypeBadge(workout.workoutType)
                     Spacer(modifier = Modifier.height(4.dp))

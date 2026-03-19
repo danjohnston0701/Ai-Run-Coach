@@ -15,6 +15,7 @@ import live.airuncoach.airuncoach.network.model.TrainingPlanDetails
 import live.airuncoach.airuncoach.network.model.TodayWorkoutResponse
 import live.airuncoach.airuncoach.network.model.TrainingPlanProgress
 import live.airuncoach.airuncoach.network.model.CompleteWorkoutRequest
+import live.airuncoach.airuncoach.network.model.CompleteWorkoutResponse
 import live.airuncoach.airuncoach.domain.model.ConnectedDevice
 import live.airuncoach.airuncoach.domain.model.WellnessSyncResponse
 import okhttp3.MultipartBody
@@ -303,7 +304,7 @@ interface ApiService {
     suspend fun completeWorkout(
         @Path("workoutId") workoutId: String,
         @Body request: CompleteWorkoutRequest
-    ): Response<Unit>
+    ): Response<CompleteWorkoutResponse>
 
     @PUT("/api/training-plans/workouts/{workoutId}/skip")
     suspend fun skipWorkout(@Path("workoutId") workoutId: String): Response<Unit>

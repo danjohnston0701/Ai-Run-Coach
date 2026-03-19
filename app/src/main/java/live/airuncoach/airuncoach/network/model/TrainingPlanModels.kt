@@ -161,3 +161,17 @@ data class WeekProgress(
 data class CompleteWorkoutRequest(
     @SerializedName("runId") val runId: String? = null
 )
+
+/** Response from PUT /api/training-plans/workouts/:id/complete */
+data class CompleteWorkoutResponse(
+    @SerializedName("success") val success: Boolean = false,
+    @SerializedName("workoutId") val workoutId: String? = null,
+    @SerializedName("isCompleted") val isCompleted: Boolean = false,
+    @SerializedName("planProgress") val planProgress: PlanProgressStats? = null
+)
+
+data class PlanProgressStats(
+    @SerializedName("completedWorkouts") val completedWorkouts: Int = 0,
+    @SerializedName("totalWorkouts") val totalWorkouts: Int = 0,
+    @SerializedName("overallCompletion") val overallCompletion: Double = 0.0
+)

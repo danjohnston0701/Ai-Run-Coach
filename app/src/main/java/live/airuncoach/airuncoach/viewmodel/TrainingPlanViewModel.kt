@@ -176,11 +176,11 @@ class TrainingPlanViewModel @Inject constructor(
                     return@launch
                 }
                 
-                Log.d("TrainingPlanVM", "✅ Workout marked complete, response: ${response.body()}")
-                Log.d("TrainingPlanVM", "✅ Reloading plan details for planId=$planId...")
+                val body = response.body()
+                Log.d("TrainingPlanVM", "✅ Workout marked complete — isCompleted=${body?.isCompleted}, progress=${body?.planProgress?.completedWorkouts}/${body?.planProgress?.totalWorkouts}")
                 // Reload plan detail to reflect updated state
+                Log.d("TrainingPlanVM", "✅ Reloading plan details for planId=$planId...")
                 loadPlanDetail(planId)
-                Log.d("TrainingPlanVM", "✅ Plan reload initiated")
             } catch (e: Exception) {
                 Log.e("TrainingPlanVM", "Error completing workout: ${e.message}", e)
                 _actionError.value = "Could not mark workout complete: ${e.message}"
