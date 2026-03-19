@@ -246,7 +246,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onNavigateToFitnessLevel = { navController.navigate("fitness_level") },
                     onNavigateToGoals = { navController.navigate("goals") },
                     onNavigateToDistanceScale = { navController.navigate("distance_scale") },
-                    onNavigateToNotifications = { navController.navigate("notifications") },
+                    onNavigateToNotifications = { navController.navigate("notification_settings") },
                     onNavigateToConnectedDevices = { navController.navigate("connected_devices") },
                     onNavigateToSubscription = { navController.navigate("subscription") },
                     onNavigateToCoachingProgramme = { navController.navigate("coaching_programme") }
@@ -679,6 +679,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             composable("fitness_level") { FitnessLevelScreen(onNavigateBack = { navController.popBackStack() }) }
             composable("distance_scale") { DistanceScaleScreen(onNavigateBack = { navController.popBackStack() }) }
             composable("notifications") { NotificationsScreen(onNavigateBack = { navController.popBackStack() }) }
+            composable("notification_settings") { NotificationSettingsScreen(onNavigateBack = { navController.popBackStack() }) }
             composable("connected_devices") { 
                 ConnectedDevicesScreen(
                     onNavigateBack = { navController.popBackStack() },

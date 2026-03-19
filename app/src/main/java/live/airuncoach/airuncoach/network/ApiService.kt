@@ -318,6 +318,17 @@ interface ApiService {
     @DELETE("/api/training-plans/{planId}")
     suspend fun deleteTrainingPlan(@Path("planId") planId: String): Response<Unit>
 
+    // ========== NOTIFICATION PREFERENCES ==========
+
+    @GET("/api/notification-preferences/{userId}")
+    suspend fun getNotificationPreferences(@Path("userId") userId: String): Map<String, Any>
+
+    @PUT("/api/notification-preferences/{userId}")
+    suspend fun updateNotificationPreferences(
+        @Path("userId") userId: String,
+        @Body updates: Map<String, Boolean>
+    ): Response<Unit>
+
     // ========== SOCIAL FEED ==========
     
     @GET("/api/feed")
