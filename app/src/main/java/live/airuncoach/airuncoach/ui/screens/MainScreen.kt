@@ -47,6 +47,7 @@ import live.airuncoach.airuncoach.util.RunConfigHolder
 import live.airuncoach.airuncoach.util.WorkoutHolder
 import live.airuncoach.airuncoach.viewmodel.DashboardViewModel
 import live.airuncoach.airuncoach.viewmodel.RouteGenerationViewModel
+import live.airuncoach.airuncoach.viewmodel.TrainingPlanViewModel
 
 sealed class Screen(val route: String, val label: String, val resourceId: Int) {
     object Home : Screen("home", "Home", R.drawable.icon_home_vector)
@@ -563,6 +564,8 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 // called during "Start This Workout" doesn't cause this composable to
                 // recompose with a null workout and accidentally pop run_session off the stack.
                 val workout = remember { WorkoutHolder.currentWorkout }
+                val planCtxForComplete = remember { WorkoutHolder.planContext }
+                val trainingPlanViewModel: TrainingPlanViewModel = hiltViewModel()
                 if (workout == null) {
                     LaunchedEffect(Unit) { navController.popBackStack() }
                 } else {
@@ -599,8 +602,13 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                             WorkoutHolder.clear()
                             navController.navigate("run_session")
                         },
-                        onMarkComplete = { _ ->
+                        onMarkComplete = { w ->
+                            // Capture planId before clearing WorkoutHolder
+                            val planId = planCtxForComplete?.planId
                             WorkoutHolder.clear()
+                            if (planId != null) {
+                                trainingPlanViewModel.completeWorkout(w.id, null, planId)
+                            }
                             navController.popBackStack()
                         }
                     )
