@@ -132,6 +132,7 @@ fun RunSessionScreen(
     val context = LocalContext.current
     val runState by viewModel.runState.collectAsState()
     val runSession by viewModel.runSession.collectAsState()
+    val pendingSyncCount by viewModel.pendingSyncCount.collectAsState()
 
     var showMap by remember { mutableStateOf(hasRoute) }
     var routePolyline by remember { mutableStateOf<String?>(null) }
@@ -272,6 +273,16 @@ fun RunSessionScreen(
                     onShareClick = {},
                     onCloseClick = {}
                 )
+            }
+
+            item {
+                // Sync status indicator if there are pending uploads
+                if (pendingSyncCount > 0) {
+                    SyncStatusIndicator(
+                        pendingCount = pendingSyncCount,
+                        isSyncing = runState.isStopping
+                    )
+                }
             }
 
             item {
@@ -1823,6 +1834,58 @@ fun BreathingWave(active: Boolean, glow: Boolean, modifier: Modifier = Modifier)
 /* =====================================================================================
    TOP BAR + CONTROLS + MAP (kept compatible with your existing assets/theme)
 ===================================================================================== */
+
+@Composable
+fun SyncStatusIndicator(
+    pendingCount: Int,
+    isSyncing: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    if (pendingCount == 0 && !isSyncing) return
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.md),
+        colors = CardDefaults.cardColors(
+            containerColor = Colors.warning.copy(alpha = 0.15f),
+            contentColor = Colors.warning
+        ),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            if (isSyncing) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = Colors.warning
+                )
+            } else {
+                Text(
+                    "⬆",
+                    color = Colors.warning,
+                    fontSize = 14.sp
+                )
+            }
+            Text(
+                text = if (isSyncing) {
+                    "Uploading run data..."
+                } else {
+                    "$pendingCount pending run${if (pendingCount > 1) "s" else ""} will sync when online"
+                },
+                style = AppTextStyles.body,
+                fontSize = 12.sp,
+                color = Colors.warning
+            )
+        }
+    }
+}
 
 @Composable
 fun TopBarSection(

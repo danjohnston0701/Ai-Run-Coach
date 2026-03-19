@@ -31,6 +31,7 @@ import live.airuncoach.airuncoach.network.model.IntervalCoachingResponse
 import live.airuncoach.airuncoach.service.RunTrackingService
 import live.airuncoach.airuncoach.utils.AudioPlayerHelper
 import live.airuncoach.airuncoach.utils.CoachingAudioQueue
+import live.airuncoach.airuncoach.data.SyncQueue
 import live.airuncoach.airuncoach.utils.SpeechRecognizerHelper
 import live.airuncoach.airuncoach.utils.SpeechState
 import live.airuncoach.airuncoach.utils.SpeechStatus
@@ -83,12 +84,20 @@ class RunSessionViewModel @Inject constructor(
     private val apiService: ApiService,
     private val sessionManager: SessionManager,
     private val healthConnectRepository: HealthConnectRepository,
+    private val syncQueue: SyncQueue,
 ) : ViewModel() {
 
     private val _runState = MutableStateFlow(RunState())
     val runState: StateFlow<RunState> = _runState.asStateFlow()
 
     val runSession = RunTrackingService.currentRunSession
+    
+    // Observe pending syncs for UI display
+    val pendingSyncCount = syncQueue.observePendingSyncCount().stateIn(
+        viewModelScope, 
+        SharingStarted.Lazily, 
+        0
+    )
 
     private val speechRecognizerHelper = SpeechRecognizerHelper(context)
     private val textToSpeechHelper = TextToSpeechHelper(context)
