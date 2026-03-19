@@ -231,3 +231,55 @@ export async function getUnreadNotificationCount(userId: string): Promise<number
   const userNotifications = await storage.getUserNotifications(userId);
   return userNotifications.filter((n) => !n.read).length;
 }
+
+/**
+ * Send coaching plan session reminder notification at 8am.
+ * Called by scheduler for users who have a workout scheduled for today.
+ *
+ * @param userId        - User ID
+ * @param workoutName   - Workout description (e.g., "6x400m Intervals")
+ * @param distance      - Workout distance in km
+ * @param intensity     - Intensity zone (e.g., "z4")
+ */
+export async function sendCoachingPlanReminder(
+  userId: string,
+  workoutName: string,
+  distance?: number,
+  intensity?: string
+): Promise<{ inAppSent: boolean; pushSent: boolean }> {
+  const results = { inAppSent: false, pushSent: false };
+
+  try {
+    const title = "🏃 Today's Coaching Session";
+    const body = `You have a ${workoutName}${distance ? ` (${distance}km)` : ""} scheduled for today. Ready to go?`;
+
+    const notificationData: Record<string, string> = {
+      type: "coaching_plan_reminder",
+      workoutName,
+      distance: distance?.toString() ?? "",
+      intensity: intensity ?? "",
+      timestamp: new Date().toISOString(),
+    };
+
+    // 1. In-app notification
+    await storage.createNotification({
+      userId,
+      title,
+      body,
+      type: "coaching_plan_reminder",
+      data: notificationData,
+      read: false,
+    });
+    results.inAppSent = true;
+    console.log(`[Notification] In-app coaching plan reminder created for user ${userId}: "${workoutName}"`);
+
+    // 2. Firebase push notification
+    const pushSent = await sendFirebasePush(userId, title, body, notificationData);
+    results.pushSent = pushSent;
+
+    return results;
+  } catch (error) {
+    console.error("[Notification] Failed to send coaching plan reminder:", error);
+    return results;
+  }
+}

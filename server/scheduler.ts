@@ -2,6 +2,10 @@ import cron from 'node-cron';
 import { storage, ConnectedDevice } from './storage';
 import { getGarminComprehensiveWellness } from './garmin-service';
 import { processWebhookFailureQueue } from './webhook-processor';
+import { sendCoachingPlanReminder } from './notification-service';
+import { db } from './db';
+import { trainingPlans, plannedWorkouts, users } from '@shared/schema';
+import { eq, and, gte, lt } from 'drizzle-orm';
 
 const SYNC_INTERVAL_MINUTES = 60;
 
@@ -118,6 +122,98 @@ async function runGarminSync(): Promise<void> {
   }
 }
 
+/**
+ * Send 8am coaching plan reminders for any active training plans with today's workouts.
+ * Runs once per day at 8:00 AM UTC (adjusts per user timezone later if needed).
+ */
+async function sendCoachingPlanReminders(): Promise<void> {
+  console.log(`[Scheduler] Sending coaching plan reminders at ${new Date().toISOString()}`);
+  
+  try {
+    // Get all active users
+    const allUsers = await db.select({ id: users.id }).from(users);
+    
+    if (allUsers.length === 0) {
+      console.log('[Scheduler] No users found');
+      return;
+    }
+
+    let sentCount = 0;
+    let skippedCount = 0;
+
+    for (const user of allUsers) {
+      try {
+        // Get today's date (UTC)
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        // Find any active training plans for this user
+        const activePlans = await db
+          .select({ id: trainingPlans.id })
+          .from(trainingPlans)
+          .where(
+            and(
+              eq(trainingPlans.userId, user.id),
+              eq(trainingPlans.status, 'active')
+            )
+          );
+
+        if (activePlans.length === 0) {
+          continue;
+        }
+
+        // For each active plan, check if there's a workout scheduled for today
+        for (const plan of activePlans) {
+          const todaysWorkouts = await db
+            .select({
+              id: plannedWorkouts.id,
+              description: plannedWorkouts.description,
+              distance: plannedWorkouts.distance,
+              intensity: plannedWorkouts.intensity,
+              isCompleted: plannedWorkouts.isCompleted,
+            })
+            .from(plannedWorkouts)
+            .where(
+              and(
+                eq(plannedWorkouts.trainingPlanId, plan.id),
+                gte(plannedWorkouts.scheduledDate, today),
+                lt(plannedWorkouts.scheduledDate, tomorrow),
+                eq(plannedWorkouts.isCompleted, false)
+              )
+            )
+            .limit(1);
+
+          if (todaysWorkouts.length > 0) {
+            const workout = todaysWorkouts[0];
+            const workoutName = workout.description || 'Workout';
+
+            // Send reminder notification
+            await sendCoachingPlanReminder(
+              user.id,
+              workoutName,
+              workout.distance || undefined,
+              workout.intensity || undefined
+            );
+
+            sentCount++;
+            console.log(`[Scheduler] Coaching plan reminder sent to user ${user.id}: "${workoutName}"`);
+          } else {
+            skippedCount++;
+          }
+        }
+      } catch (userError: any) {
+        console.error(`[Scheduler] Error sending reminder for user ${user.id}:`, userError.message);
+      }
+    }
+
+    console.log(`[Scheduler] Coaching plan reminders completed: ${sentCount} sent, ${skippedCount} skipped`);
+  } catch (error: any) {
+    console.error('[Scheduler] Coaching plan reminder job failed:', error.message);
+  }
+}
+
 export function startScheduler(): void {
   console.log(`[Scheduler] Starting background scheduler (sync every ${SYNC_INTERVAL_MINUTES} minutes)`);
   
@@ -126,6 +222,15 @@ export function startScheduler(): void {
     runGarminSync();
   });
   console.log('[Scheduler] Garmin wellness sync scheduled');
+  
+  // Coaching plan reminders (every day at 8:00 AM UTC)
+  cron.schedule('0 8 * * *', () => {
+    console.log('[Scheduler] Running coaching plan reminders...');
+    sendCoachingPlanReminders().catch(error => {
+      console.error('[Scheduler] Coaching plan reminder error:', error);
+    });
+  });
+  console.log('[Scheduler] Coaching plan reminders scheduled (daily at 8:00 AM UTC)');
   
   // Webhook failure queue processor (every 5 minutes)
   cron.schedule('*/5 * * * *', () => {
