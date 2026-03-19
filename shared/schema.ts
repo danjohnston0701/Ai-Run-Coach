@@ -270,6 +270,8 @@ export const notificationPreferences = pgTable("notification_preferences", {
   updatedAt: timestamp("updated_at").defaultNow(),
   liveRunInvite: boolean("live_run_invite").default(true),
   liveObserverJoined: boolean("live_observer_joined").default(true),
+  coachingPlanReminder: boolean("coaching_plan_reminder").default(true),
+  coachingPlanReminderTimezone: text("coaching_plan_reminder_timezone").default("UTC"), // e.g. "America/New_York", "Europe/London"
 });
 
 // Live Run Sessions table

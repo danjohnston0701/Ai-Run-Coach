@@ -4,10 +4,15 @@ import { getGarminComprehensiveWellness } from './garmin-service';
 import { processWebhookFailureQueue } from './webhook-processor';
 import { sendCoachingPlanReminder } from './notification-service';
 import { db } from './db';
-import { trainingPlans, plannedWorkouts, users } from '@shared/schema';
+import { trainingPlans, plannedWorkouts, users, notificationPreferences } from '@shared/schema';
 import { eq, and, gte, lt } from 'drizzle-orm';
+import { DateTime } from 'luxon';
 
 const SYNC_INTERVAL_MINUTES = 60;
+
+// Track which users have already received a reminder today (user_id -> timestamp of last send)
+// Stores the reminder send timestamp so we don't send twice in the same calendar day for a user
+const coachingPlanRemindersSent = new Map<string, Date>();
 
 interface SyncResult {
   userId: string;
@@ -124,14 +129,21 @@ async function runGarminSync(): Promise<void> {
 
 /**
  * Send 8am coaching plan reminders for any active training plans with today's workouts.
- * Runs once per day at 8:00 AM UTC (adjusts per user timezone later if needed).
+ * Respects each user's local timezone. Runs every hour to check if it's 8 AM in any user's timezone.
  */
 async function sendCoachingPlanReminders(): Promise<void> {
-  console.log(`[Scheduler] Sending coaching plan reminders at ${new Date().toISOString()}`);
+  console.log(`[Scheduler] Checking for coaching plan reminders at ${new Date().toISOString()}`);
   
   try {
-    // Get all active users
-    const allUsers = await db.select({ id: users.id }).from(users);
+    // Get all users with their timezone preferences
+    const allUsers = await db
+      .select({
+        id: users.id,
+        timezone: notificationPreferences.coachingPlanReminderTimezone,
+        enabled: notificationPreferences.coachingPlanReminder,
+      })
+      .from(users)
+      .leftJoin(notificationPreferences, eq(users.id, notificationPreferences.userId));
     
     if (allUsers.length === 0) {
       console.log('[Scheduler] No users found');
@@ -141,13 +153,41 @@ async function sendCoachingPlanReminders(): Promise<void> {
     let sentCount = 0;
     let skippedCount = 0;
 
-    for (const user of allUsers) {
+    for (const userRow of allUsers) {
       try {
-        // Get today's date (UTC)
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
+        // Check if reminders are enabled for this user
+        if (userRow.enabled === false) {
+          continue;
+        }
+
+        const timezone = userRow.timezone || 'UTC';
+        const userId = userRow.id;
+
+        // Get current time in the user's timezone
+        let userTime: DateTime;
+        try {
+          userTime = DateTime.now().setZone(timezone);
+        } catch (tzError) {
+          console.warn(`[Scheduler] Invalid timezone "${timezone}" for user ${userId}, falling back to UTC`);
+          userTime = DateTime.now().setZone('UTC');
+        }
+
+        // Check if it's 8:00 AM in the user's local time (hour = 8, within the hour)
+        if (userTime.hour !== 8) {
+          continue; // Skip if not 8 AM in their timezone
+        }
+
+        // Get today's date in the user's timezone
+        const userToday = userTime.startOf('day').toJSDate();
+        const userTomorrow = userTime.plus({ days: 1 }).startOf('day').toJSDate();
+
+        // Check if we've already sent a reminder today for this user
+        const lastSent = coachingPlanRemindersSent.get(userId);
+        if (lastSent && lastSent > userToday) {
+          // Already sent today in user's timezone
+          skippedCount++;
+          continue;
+        }
 
         // Find any active training plans for this user
         const activePlans = await db
@@ -155,7 +195,7 @@ async function sendCoachingPlanReminders(): Promise<void> {
           .from(trainingPlans)
           .where(
             and(
-              eq(trainingPlans.userId, user.id),
+              eq(trainingPlans.userId, userId),
               eq(trainingPlans.status, 'active')
             )
           );
@@ -165,6 +205,7 @@ async function sendCoachingPlanReminders(): Promise<void> {
         }
 
         // For each active plan, check if there's a workout scheduled for today
+        let sentForUser = false;
         for (const plan of activePlans) {
           const todaysWorkouts = await db
             .select({
@@ -178,8 +219,8 @@ async function sendCoachingPlanReminders(): Promise<void> {
             .where(
               and(
                 eq(plannedWorkouts.trainingPlanId, plan.id),
-                gte(plannedWorkouts.scheduledDate, today),
-                lt(plannedWorkouts.scheduledDate, tomorrow),
+                gte(plannedWorkouts.scheduledDate, userToday),
+                lt(plannedWorkouts.scheduledDate, userTomorrow),
                 eq(plannedWorkouts.isCompleted, false)
               )
             )
@@ -191,24 +232,33 @@ async function sendCoachingPlanReminders(): Promise<void> {
 
             // Send reminder notification
             await sendCoachingPlanReminder(
-              user.id,
+              userId,
               workoutName,
               workout.distance || undefined,
               workout.intensity || undefined
             );
 
+            // Record that we sent a reminder today
+            coachingPlanRemindersSent.set(userId, new Date());
+
             sentCount++;
-            console.log(`[Scheduler] Coaching plan reminder sent to user ${user.id}: "${workoutName}"`);
-          } else {
-            skippedCount++;
+            sentForUser = true;
+            console.log(`[Scheduler] Coaching plan reminder sent to user ${userId} (${timezone}): "${workoutName}"`);
+            break; // Send only one reminder per user per day
           }
         }
+
+        if (!sentForUser) {
+          skippedCount++;
+        }
       } catch (userError: any) {
-        console.error(`[Scheduler] Error sending reminder for user ${user.id}:`, userError.message);
+        console.error(`[Scheduler] Error sending reminder for user ${userRow.id}:`, userError.message);
       }
     }
 
-    console.log(`[Scheduler] Coaching plan reminders completed: ${sentCount} sent, ${skippedCount} skipped`);
+    if (sentCount > 0 || skippedCount > 0) {
+      console.log(`[Scheduler] Coaching plan reminders: ${sentCount} sent, ${skippedCount} skipped`);
+    }
   } catch (error: any) {
     console.error('[Scheduler] Coaching plan reminder job failed:', error.message);
   }
@@ -223,14 +273,13 @@ export function startScheduler(): void {
   });
   console.log('[Scheduler] Garmin wellness sync scheduled');
   
-  // Coaching plan reminders (every day at 8:00 AM UTC)
-  cron.schedule('0 8 * * *', () => {
-    console.log('[Scheduler] Running coaching plan reminders...');
+  // Coaching plan reminders (every hour — checks if it's 8 AM in user's local timezone)
+  cron.schedule('0 * * * *', () => {
     sendCoachingPlanReminders().catch(error => {
       console.error('[Scheduler] Coaching plan reminder error:', error);
     });
   });
-  console.log('[Scheduler] Coaching plan reminders scheduled (daily at 8:00 AM UTC)');
+  console.log('[Scheduler] Coaching plan reminders scheduled (hourly, respects user timezone)');
   
   // Webhook failure queue processor (every 5 minutes)
   cron.schedule('*/5 * * * *', () => {
