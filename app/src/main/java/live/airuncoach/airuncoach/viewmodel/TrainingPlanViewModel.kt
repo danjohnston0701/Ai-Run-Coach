@@ -85,15 +85,24 @@ class TrainingPlanViewModel @Inject constructor(
 
     fun loadPlanDetail(planId: String) {
         viewModelScope.launch {
+            Log.d("TrainingPlanVM", "📋 Loading plan detail for planId=$planId...")
             _planDetailState.value = PlanDetailState.Loading
             try {
                 // Fetch details and progress in parallel to reduce total wait time
-                val detailsDeferred = async { apiService.getTrainingPlanDetails(planId) }
+                val detailsDeferred = async { 
+                    Log.d("TrainingPlanVM", "📋 Fetching plan details...")
+                    apiService.getTrainingPlanDetails(planId) 
+                }
                 val progressDeferred = async {
                     // Give progress a 10s window — it can be slow on new plans.
                     // If it times out or errors we synthesize it from the details.
+                    Log.d("TrainingPlanVM", "📊 Fetching plan progress...")
                     withTimeoutOrNull(10_000L) {
-                        try { apiService.getTrainingPlanProgress(planId) }
+                        try { 
+                            val prog = apiService.getTrainingPlanProgress(planId)
+                            Log.d("TrainingPlanVM", "📊 Progress fetched: ${prog.currentWeek}/${prog.totalWeeks} weeks")
+                            prog
+                        }
                         catch (e: Exception) {
                             Log.w("TrainingPlanVM", "Progress fetch failed (${e.message}), will synthesize")
                             null
@@ -102,10 +111,14 @@ class TrainingPlanViewModel @Inject constructor(
                 }
 
                 val details = detailsDeferred.await()
+                Log.d("TrainingPlanVM", "✅ Details loaded: ${details.weeks.size} weeks, ${details.weeks.sumOf { it.workouts.size }} workouts")
                 val progress = progressDeferred.await() ?: synthesizeProgress(details)
+                Log.d("TrainingPlanVM", "✅ Progress: ${progress.completedWorkouts}/${progress.totalWorkouts} workouts done")
                 val userTimezone = java.util.TimeZone.getDefault().id
                 val today = try { apiService.getTodayWorkout(planId, userTimezone) } catch (_: Exception) { null }
+                Log.d("TrainingPlanVM", "✅ Today workout: ${today?.workout?.description ?: "None"}")
                 _planDetailState.value = PlanDetailState.Success(details, progress, today)
+                Log.d("TrainingPlanVM", "✅ Plan detail state updated")
             } catch (e: Exception) {
                 Log.e("TrainingPlanVM", "Error loading plan detail: ${e.message}", e)
                 _planDetailState.value = PlanDetailState.Error(e.message ?: "Failed to load plan")
@@ -156,14 +169,18 @@ class TrainingPlanViewModel @Inject constructor(
                 val response = apiService.completeWorkout(workoutId, CompleteWorkoutRequest(runId))
                 
                 if (!response.isSuccessful) {
-                    Log.e("TrainingPlanVM", "Completion failed: ${response.code()} ${response.message()}")
+                    Log.e("TrainingPlanVM", "❌ Completion failed: ${response.code()} ${response.message()}")
+                    val errorBody = response.errorBody()?.string()
+                    Log.e("TrainingPlanVM", "Error body: $errorBody")
                     _actionError.value = "Failed to complete: HTTP ${response.code()}"
                     return@launch
                 }
                 
-                Log.d("TrainingPlanVM", "✅ Workout marked complete, reloading plan details...")
+                Log.d("TrainingPlanVM", "✅ Workout marked complete, response: ${response.body()}")
+                Log.d("TrainingPlanVM", "✅ Reloading plan details for planId=$planId...")
                 // Reload plan detail to reflect updated state
                 loadPlanDetail(planId)
+                Log.d("TrainingPlanVM", "✅ Plan reload initiated")
             } catch (e: Exception) {
                 Log.e("TrainingPlanVM", "Error completing workout: ${e.message}", e)
                 _actionError.value = "Could not mark workout complete: ${e.message}"
