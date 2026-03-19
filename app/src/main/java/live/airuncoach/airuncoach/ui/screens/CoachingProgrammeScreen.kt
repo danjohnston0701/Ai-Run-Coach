@@ -367,6 +367,7 @@ fun TrainingPlanDashboardScreen(
                 onShowAbandonDialog = { showAbandonDialog = true },
                 onShowDeleteDialog = { showDeleteDialog = true },
                 onAddInjury = { showAddInjuryDialog = true },
+                onViewAdaptations = {  /* TODO: navigate to adaptation_review screen */ },
                 modifier = Modifier.fillMaxSize().padding(padding)
             )
             }
@@ -592,6 +593,7 @@ fun PlanDashboardContent(
     onShowAbandonDialog: () -> Unit,
     onShowDeleteDialog: () -> Unit,
     onAddInjury: () -> Unit,
+    onViewAdaptations: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Helpers that stamp plan context into WorkoutHolder before delegating to nav callbacks.
@@ -622,6 +624,18 @@ fun PlanDashboardContent(
         // ── Overall progress card ─────────────────────────────────────────────
         item {
             OverallProgressCard(progress)
+            Spacer(modifier = Modifier.height(Spacing.lg))
+        }
+
+        // ── Adaptations Button ─────────────────────────────────────────────────
+        item {
+            OutlinedButton(
+                onClick = onViewAdaptations,
+                modifier = Modifier.fillMaxWidth().height(44.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
+            ) {
+                Text("📊 View Pending Adaptations", fontWeight = FontWeight.Medium, fontSize = 13.sp)
+            }
             Spacer(modifier = Modifier.height(Spacing.lg))
         }
 

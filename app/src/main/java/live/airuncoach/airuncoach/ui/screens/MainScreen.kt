@@ -680,6 +680,14 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             composable("distance_scale") { DistanceScaleScreen(onNavigateBack = { navController.popBackStack() }) }
             composable("notifications") { NotificationsScreen(onNavigateBack = { navController.popBackStack() }) }
             composable("notification_settings") { NotificationSettingsScreen(onNavigateBack = { navController.popBackStack() }) }
+            
+            composable("adaptation_review/{planId}") { backStackEntry ->
+                val planId = backStackEntry.arguments?.getString("planId") ?: return@composable
+                AdaptationReviewScreen(
+                    planId = planId,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
             composable("connected_devices") { 
                 ConnectedDevicesScreen(
                     onNavigateBack = { navController.popBackStack() },
