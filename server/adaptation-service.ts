@@ -11,7 +11,7 @@ import {
   planAdaptations,
   plannedWorkouts,
 } from "@shared/schema";
-import { eq, and, gt } from "drizzle-orm";
+import { eq, and, gt, isNull, or } from "drizzle-orm";
 import { PlanAdaptation, PlannedWorkout } from "@shared/schema";
 
 interface AdaptationChanges {
@@ -206,7 +206,8 @@ export async function getPendingAdaptations(
       and(
         eq(planAdaptations.trainingPlanId, trainingPlanId),
         eq(trainingPlans.userId, userId),
-        eq(planAdaptations.userAccepted, false)
+        // Include rows where userAccepted is NULL (never responded) or explicitly false
+        or(isNull(planAdaptations.userAccepted), eq(planAdaptations.userAccepted, false))
       )
     );
 

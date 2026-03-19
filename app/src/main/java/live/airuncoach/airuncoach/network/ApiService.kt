@@ -330,7 +330,7 @@ interface ApiService {
     // ========== NOTIFICATION PREFERENCES ==========
 
     @GET("/api/notification-preferences/{userId}")
-    suspend fun getNotificationPreferences(@Path("userId") userId: String): Map<String, Any>
+    suspend fun getNotificationPreferences(@Path("userId") userId: String): NotificationPreferencesResponse
 
     @PUT("/api/notification-preferences/{userId}")
     suspend fun updateNotificationPreferences(

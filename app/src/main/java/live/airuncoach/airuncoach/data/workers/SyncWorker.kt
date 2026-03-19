@@ -5,38 +5,39 @@ import android.util.Log
 import androidx.work.BackoffPolicy
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import kotlinx.coroutines.delay
 import live.airuncoach.airuncoach.data.SyncQueue
-import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.data.SessionManager
+import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.network.model.UploadRunRequest
 import live.airuncoach.airuncoach.domain.model.RunSession
-import javax.inject.Inject
-import kotlin.math.pow
-import kotlin.math.roundToLong
 
 /**
  * WorkManager Worker for syncing pending runs in the background.
  * Implements exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, ...
  *
  * Runs periodically and on demand when connectivity changes.
+ *
+ * NOTE: Uses RetrofitClient directly (not Hilt injection) because standard
+ * CoroutineWorker does not support @Inject without @HiltWorker + HiltWorkerFactory setup.
  */
 class SyncWorker(
     appContext: Context,
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
 
-    @Inject
-    lateinit var apiService: ApiService
-
-    private lateinit var syncQueue: SyncQueue
+    private val syncQueue by lazy { SyncQueue(applicationContext) }
+    private val apiService by lazy {
+        val sessionManager = SessionManager(applicationContext)
+        RetrofitClient(applicationContext, sessionManager).instance
+    }
 
     override suspend fun doWork(): Result {
         try {
-            syncQueue = SyncQueue(applicationContext)
-
             Log.d("SyncWorker", "🔄 Starting sync worker")
 
             var successCount = 0
@@ -67,17 +68,16 @@ class SyncWorker(
                     syncQueue.recordFailure(run.id, errorMsg)
                     Log.e("SyncWorker", "❌ Failed to sync run ${run.id}: $errorMsg")
 
-                    // Don't retry individual runs more than 10 times
-                    // Let the next scheduled work attempt (with exponential backoff)
+                    // Stop processing on failure; WorkManager backoff will retry later
                     break
                 }
             }
 
             val pendingCount = syncQueue.getPendingSyncCount()
-            Log.d("SyncWorker", "✅ Sync worker completed: $successCount uploaded, $failureCount failed, $pendingCount pending")
+            Log.d("SyncWorker", "✅ Sync completed: $successCount uploaded, $failureCount failed, $pendingCount pending")
 
             return if (failureCount > 0) {
-                // If there were failures, reschedule and retry
+                // Trigger WorkManager exponential backoff retry
                 Result.retry()
             } else {
                 Result.success()
@@ -91,29 +91,30 @@ class SyncWorker(
 
     companion object {
         private const val SYNC_WORK_TAG = "run_sync"
-        private const val SYNC_WORK_NAME = "AiRunCoachSync"
+        private const val SYNC_WORK_NAME_PERIODIC = "AiRunCoachSyncPeriodic"
+        private const val SYNC_WORK_NAME_IMMEDIATE = "AiRunCoachSyncImmediate"
 
         /**
-         * Schedule periodic sync work (e.g., every 15 minutes).
+         * Schedule periodic sync work (every 15 minutes).
          * Called on app startup to ensure background syncing is active.
          */
         fun schedulePeriodicSync(context: Context) {
             try {
                 val syncRequest = PeriodicWorkRequestBuilder<SyncWorker>(
-                    15, // interval
+                    15,
                     java.util.concurrent.TimeUnit.MINUTES
                 )
                     .setBackoffCriteria(
                         BackoffPolicy.EXPONENTIAL,
-                        1, // initial delay in seconds (1s, 2s, 4s, ...)
-                        java.util.concurrent.TimeUnit.SECONDS
+                        androidx.work.WorkRequest.MIN_BACKOFF_MILLIS,
+                        java.util.concurrent.TimeUnit.MILLISECONDS
                     )
                     .addTag(SYNC_WORK_TAG)
                     .build()
 
                 WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                    SYNC_WORK_NAME,
-                    ExistingPeriodicWorkPolicy.KEEP, // Keep existing work
+                    SYNC_WORK_NAME_PERIODIC,
+                    ExistingPeriodicWorkPolicy.KEEP,
                     syncRequest
                 )
 
@@ -124,32 +125,28 @@ class SyncWorker(
         }
 
         /**
-         * Trigger sync work immediately (e.g., when connectivity returns).
+         * Trigger a one-time immediate sync (e.g., right after queuing a failed run).
          */
         fun triggerImmediateSync(context: Context) {
             try {
-                val syncRequest = PeriodicWorkRequestBuilder<SyncWorker>(
-                    15,
-                    java.util.concurrent.TimeUnit.MINUTES
-                )
+                val syncRequest = OneTimeWorkRequestBuilder<SyncWorker>()
                     .setBackoffCriteria(
                         BackoffPolicy.EXPONENTIAL,
-                        1,
-                        java.util.concurrent.TimeUnit.SECONDS
+                        androidx.work.WorkRequest.MIN_BACKOFF_MILLIS,
+                        java.util.concurrent.TimeUnit.MILLISECONDS
                     )
                     .addTag(SYNC_WORK_TAG)
                     .build()
 
-                // Use the same unique name to replace any pending work
-                WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                    SYNC_WORK_NAME,
-                    ExistingPeriodicWorkPolicy.REPLACE, // Replace to trigger immediately
+                WorkManager.getInstance(context).enqueueUniqueWork(
+                    SYNC_WORK_NAME_IMMEDIATE,
+                    ExistingWorkPolicy.REPLACE,
                     syncRequest
                 )
 
-                Log.d("SyncWorker", "🚀 Triggered immediate sync work")
+                Log.d("SyncWorker", "🚀 Triggered immediate one-time sync")
             } catch (e: Exception) {
-                Log.e("SyncWorker", "❌ Failed to trigger sync: ${e.message}")
+                Log.e("SyncWorker", "❌ Failed to trigger immediate sync: ${e.message}")
             }
         }
 
@@ -168,12 +165,12 @@ class SyncWorker(
         /**
          * Convert a RunSession to UploadRunRequest for API.
          */
-        private fun convertRunToUploadRequest(run: RunSession): UploadRunRequest {
+        fun convertRunToUploadRequest(run: RunSession): UploadRunRequest {
             // Get start location from first route point
             val startLat = run.routePoints.firstOrNull()?.latitude ?: 0.0
             val startLng = run.routePoints.firstOrNull()?.longitude ?: 0.0
-            
-            // Calculate elevation data from route points (simple approach)
+
+            // Calculate elevation data from route points
             var maxElev = run.routePoints.firstOrNull()?.altitude ?: 0.0
             var minElev = maxElev
             for (point in run.routePoints) {
@@ -181,7 +178,7 @@ class SyncWorker(
                 maxElev = maxOf(maxElev, elev)
                 minElev = minOf(minElev, elev)
             }
-            
+
             return UploadRunRequest(
                 routeId = run.routeHash,
                 startTime = run.startTime,
@@ -189,12 +186,12 @@ class SyncWorker(
                 duration = run.duration,
                 avgPace = run.averagePace ?: "0:00",
                 avgHeartRate = if (run.heartRate > 0) run.heartRate else null,
-                maxHeartRate = null, // Not in RunSession yet
+                maxHeartRate = null,
                 minHeartRate = run.minHeartRate,
                 calories = run.calories,
                 cadence = run.cadence,
                 maxCadence = run.maxCadence,
-                elevation = (run.totalElevationGain + run.totalElevationLoss) / 2.0, // Average
+                elevation = (run.totalElevationGain + run.totalElevationLoss) / 2.0,
                 difficulty = run.difficulty ?: "moderate",
                 startLat = startLat,
                 startLng = startLng,
@@ -202,9 +199,9 @@ class SyncWorker(
                 completedAt = run.endTime ?: System.currentTimeMillis(),
                 elevationGain = run.totalElevationGain,
                 elevationLoss = run.totalElevationLoss,
-                tss = 0, // Calculate from HR zones if needed
-                gap = null, // Grade-adjusted pace (not in model)
-                isPublic = false, // Default to private
+                tss = 0,
+                gap = null,
+                isPublic = false,
                 strugglePoints = run.strugglePoints,
                 kmSplits = run.kmSplits,
                 terrainType = run.terrainType?.toString() ?: "unknown",

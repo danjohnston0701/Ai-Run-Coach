@@ -47,15 +47,15 @@ class NotificationSettingsViewModel @Inject constructor(
                 
                 _state.value = NotificationPreferencesState(
                     isLoading = false,
-                    friendRequest = prefs["friendRequest"] as? Boolean ?: true,
-                    friendAccepted = prefs["friendAccepted"] as? Boolean ?: true,
-                    groupRunInvite = prefs["groupRunInvite"] as? Boolean ?: true,
-                    groupRunStarting = prefs["groupRunStarting"] as? Boolean ?: true,
-                    runCompleted = prefs["runCompleted"] as? Boolean ?: false,
-                    weeklyProgress = prefs["weeklyProgress"] as? Boolean ?: false,
-                    liveRunInvite = prefs["liveRunInvite"] as? Boolean ?: true,
-                    liveObserverJoined = prefs["liveObserverJoined"] as? Boolean ?: true,
-                    coachingPlanReminder = prefs["coachingPlanReminder"] as? Boolean ?: true,
+                    friendRequest = prefs.friendRequest,
+                    friendAccepted = prefs.friendAccepted,
+                    groupRunInvite = prefs.groupRunInvite,
+                    groupRunStarting = prefs.groupRunStarting,
+                    runCompleted = prefs.runCompleted,
+                    weeklyProgress = prefs.weeklyProgress,
+                    liveRunInvite = prefs.liveRunInvite,
+                    liveObserverJoined = prefs.liveObserverJoined,
+                    coachingPlanReminder = prefs.coachingPlanReminder,
                 )
                 Log.d("NotificationSettingsVM", "✅ Preferences loaded")
             } catch (e: Exception) {
