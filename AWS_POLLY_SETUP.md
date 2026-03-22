@@ -23,15 +23,43 @@ Add these to your **Replit Secrets** (or `.env` file for local development):
 ```
 AWS_ACCESS_KEY_ID=your_access_key_id_here
 AWS_SECRET_ACCESS_KEY=your_secret_access_key_here
-AWS_REGION=eu-west-1
 ```
 
-**Region Options:**
-- `eu-west-1` (EU - Ireland) ← **Default, required for Irish/NZ/Indian/South African neural voices**
-- `us-east-1` (US East) — also supports all neural voices
-- `ap-southeast-2` (Australia - Sydney) — **does NOT support Irish, NZ, Indian, South African neural voices**
+**Per-Voice Region Configuration (Optional):**
 
-> ⚠️ **Important:** The Irish (Sean, Niamh), New Zealand (Aria), South African (Ayanda), and Indian (Kajal) Neural voices are only available in `eu-west-1` and `us-east-1`. Using `ap-southeast-2` will cause these voices to fail and fall back to OpenAI.
+Each voice is automatically routed to its optimal AWS region. You can override defaults per accent using these environment variables:
+
+```
+# EU accents (default to eu-west-1)
+AWS_REGION_BRITISH=eu-west-1          # Brian, Amy
+AWS_REGION_IRISH=eu-west-1            # Sean, Niamh (only works in eu-west-1)
+AWS_REGION_SOUTH_AFRICAN=eu-west-1    # Ayanda (only works in eu-west-1)
+AWS_REGION_INDIAN=eu-west-1           # Kajal (only works in eu-west-1)
+
+# AP-Pacific accents (default to ap-southeast-2)
+AWS_REGION_AUSTRALIAN=ap-southeast-2  # Stephen, Olivia
+AWS_REGION_NEW_ZEALAND=ap-southeast-2 # Aria (only works in ap-southeast-2)
+
+# US accent (default to us-east-1)
+AWS_REGION_AMERICAN=us-east-1         # Matthew, Joanna
+```
+
+**Default Region Mapping:**
+| Accent | Default Region | Available Regions |
+|--------|---------------|--------------------|
+| **Irish** | eu-west-1 | eu-west-1, us-east-1 only |
+| **British** | eu-west-1 | eu-west-1, us-east-1 |
+| **South African** | eu-west-1 | eu-west-1, us-east-1 only |
+| **Indian** | eu-west-1 | eu-west-1, us-east-1 only |
+| **Australian** | ap-southeast-2 | ap-southeast-2, us-east-1 |
+| **New Zealand** | ap-southeast-2 | ap-southeast-2, us-east-1 only |
+| **American** | us-east-1 | us-east-1, eu-west-1, ap-southeast-2 |
+
+> ⚠️ **Important:** 
+> - **Irish, South African, Indian** Neural voices are **ONLY** available in `eu-west-1` and `us-east-1`
+> - **New Zealand (Aria)** is **ONLY** available in `ap-southeast-2` and `us-east-1`
+> - **Australian (Olivia, Stephen)** are **ONLY** available in `ap-southeast-2` and `us-east-1`
+> - Using the wrong region for these voices will cause synthesis to fail and fall back to OpenAI
 
 ### 3. Verify Setup
 
@@ -87,32 +115,81 @@ If AWS credentials are not configured:
 
 ## Troubleshooting
 
+### "Polly synthesis failed for Irish/New Zealand/Australian voices"
+This typically means the voice is being synthesized in the wrong region.
+
+**Solution:**
+1. Check that your region overrides are set correctly:
+   - Irish → must use `eu-west-1` (not `ap-southeast-2`)
+   - New Zealand → must use `ap-southeast-2` (not `eu-west-1`)
+   - Australian → must use `ap-southeast-2` (not `eu-west-1`)
+
+2. Example fix for New Zealand (Aria):
+   ```
+   AWS_REGION_NEW_ZEALAND=ap-southeast-2
+   ```
+
+3. Example fix for Irish (Sean, Niamh):
+   ```
+   AWS_REGION_IRISH=eu-west-1
+   ```
+
 ### "Polly synthesis failed, falling back to OpenAI"
 - ✅ Check AWS credentials are set in environment
-- ✅ Verify AWS_REGION is correct
+- ✅ Verify the accent's region is correct (see table above)
 - ✅ Check AWS IAM user has `polly:SynthesizeSpeech` permission
 - ✅ Ensure accent parameter is valid
+- ✅ Check AWS account has not exceeded Polly quota
+- ✅ Verify internet connectivity to AWS
 
 ### "No audio stream returned from Polly"
+- Verify the selected region supports the voice (see default region mapping table)
 - Check AWS account has not exceeded Polly quota
 - Verify internet connectivity to AWS
+- Check AWS IAM credentials have proper permissions
 
-### Region Selection
-- **For users in Australia**: Use `ap-southeast-2` (lowest latency)
-- **For global users**: Use `us-east-1` (most available)
+### Regional Voice Availability Reference
+**If these fail, it's likely a region mismatch:**
+
+```
+Irish (Sean/Niamh)         → ONLY eu-west-1 or us-east-1
+New Zealand (Aria)         → ONLY ap-southeast-2 or us-east-1
+Australian (Olivia/Stephen) → ONLY ap-southeast-2 or us-east-1
+British (Brian/Amy)         → eu-west-1, us-east-1, ap-southeast-2
+American (Matthew/Joanna)   → eu-west-1, us-east-1, ap-southeast-2
+South African (Ayanda)      → ONLY eu-west-1 or us-east-1
+Indian (Kajal)              → ONLY eu-west-1 or us-east-1
+```
 
 ## Architecture
 
 ```
-User requests TTS audio
+User requests TTS audio with accent (e.g., "irish", "new_zealand")
     ↓
 Is Polly configured? 
-    ├─ YES → Use AWS Polly Neural with authentic voice
-    │         (Brian/Amy for British, Matthew/Joanna for American, etc.)
+    ├─ YES → Determine optimal AWS region for accent
+    │        ├─ Irish → eu-west-1 (or override with AWS_REGION_IRISH)
+    │        ├─ New Zealand → ap-southeast-2 (or override with AWS_REGION_NEW_ZEALAND)
+    │        ├─ Australian → ap-southeast-2 (or override with AWS_REGION_AUSTRALIAN)
+    │        └─ etc.
+    │        ↓
+    │        Create region-specific Polly client
+    │        ↓
+    │        Synthesize with Neural voice using optimal region
+    │        (Sean/Niamh for Irish, Aria for NZ, Olivia/Stephen for Australian)
+    │
     └─ NO  → Fall back to OpenAI gpt-4o-mini-tts
     ↓
 Return audio as base64 MP3
 ```
+
+### Per-Region Client Management
+
+The system automatically manages separate AWS Polly clients for each region:
+- **One client per region** (lazy-initialized on first use)
+- **Shared credentials** across all region clients
+- **Automatic routing** based on accent
+- **Client reuse** for performance (no recreating clients for same region)
 
 ## Future Improvements
 

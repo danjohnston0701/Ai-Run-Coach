@@ -195,21 +195,32 @@ export async function getPendingAdaptations(
   trainingPlanId: string,
   userId: string
 ): Promise<PlanAdaptation[]> {
-  const result = await db
-    .select()
-    .from(planAdaptations)
-    .innerJoin(
-      trainingPlans,
-      eq(planAdaptations.trainingPlanId, trainingPlans.id)
-    )
-    .where(
-      and(
-        eq(planAdaptations.trainingPlanId, trainingPlanId),
-        eq(trainingPlans.userId, userId),
-        // Include rows where userAccepted is NULL (never responded) or explicitly false
-        or(isNull(planAdaptations.userAccepted), eq(planAdaptations.userAccepted, false))
+  try {
+    console.log(`[getPendingAdaptations] Querying for plan ${trainingPlanId}, user ${userId}`);
+    const startTime = Date.now();
+    
+    const result = await db
+      .select()
+      .from(planAdaptations)
+      .innerJoin(
+        trainingPlans,
+        eq(planAdaptations.trainingPlanId, trainingPlans.id)
       )
-    );
+      .where(
+        and(
+          eq(planAdaptations.trainingPlanId, trainingPlanId),
+          eq(trainingPlans.userId, userId),
+          // Include rows where userAccepted is NULL (never responded) or explicitly false
+          or(isNull(planAdaptations.userAccepted), eq(planAdaptations.userAccepted, false))
+        )
+      );
 
-  return result.map((r) => r.plan_adaptations);
+    const elapsed = Date.now() - startTime;
+    console.log(`[getPendingAdaptations] ✅ Query completed in ${elapsed}ms. Found ${result.length} results`);
+    
+    return result.map((r) => r.plan_adaptations);
+  } catch (error) {
+    console.error("[getPendingAdaptations] ❌ Error during query:", error);
+    throw error;
+  }
 }

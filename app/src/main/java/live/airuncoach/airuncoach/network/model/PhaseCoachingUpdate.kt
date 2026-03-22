@@ -47,7 +47,10 @@ data class PhaseCoachingUpdate(
     @SerializedName("runnerWeight") val runnerWeight: Double? = null,
     @SerializedName("runnerHeight") val runnerHeight: Double? = null,  // cm
     // Active goals for AI coaching context - sorted by date (soonest first, no date last)
-    @SerializedName("activeGoals") val activeGoals: List<ActiveGoalInfo>? = null
+    @SerializedName("activeGoals") val activeGoals: List<ActiveGoalInfo>? = null,
+    // ========== Session Coaching Context (Phase 1) ==========
+    @SerializedName("linked_workout_id") val linkedWorkoutId: String? = null,
+    @SerializedName("session_structure") val sessionStructure: SessionStructure? = null
 )
 
 data class ActiveGoalInfo(

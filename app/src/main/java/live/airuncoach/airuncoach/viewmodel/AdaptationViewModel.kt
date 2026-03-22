@@ -38,16 +38,19 @@ class AdaptationViewModel @Inject constructor(
                 _isLoading.value = true
                 _errorMessage.value = null
 
+                Log.d("AdaptationViewModel", "Starting to fetch pending adaptations for plan $planId")
+                
                 val response = apiService.getPendingAdaptations(planId)
                 _pendingAdaptations.value = response.adaptations
 
                 Log.d(
                     "AdaptationViewModel",
-                    "Loaded ${response.count} pending adaptations for plan $planId"
+                    "✅ Loaded ${response.count} pending adaptations for plan $planId"
                 )
             } catch (error: Exception) {
-                Log.e("AdaptationViewModel", "Failed to load adaptations", error)
-                _errorMessage.value = error.message ?: "Failed to load adaptations"
+                Log.e("AdaptationViewModel", "❌ Failed to load adaptations", error)
+                error.printStackTrace()
+                _errorMessage.value = "Error: ${error.message ?: "Failed to load adaptations"}"
             } finally {
                 _isLoading.value = false
             }

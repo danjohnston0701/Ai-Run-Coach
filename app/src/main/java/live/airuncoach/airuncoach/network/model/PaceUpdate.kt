@@ -38,5 +38,9 @@ data class PaceUpdate(
     @SerializedName("runnerName") val runnerName: String? = null,
     @SerializedName("runnerAge") val runnerAge: Int? = null,
     // Historical run context
-    @SerializedName("runHistory") val runHistory: RunHistoryStats? = null
+    @SerializedName("runHistory") val runHistory: RunHistoryStats? = null,
+    // ========== Session Coaching Context (Phase 1) ==========
+    @SerializedName("linked_workout_id") val linkedWorkoutId: String? = null,
+    @SerializedName("session_coaching_tone") val sessionCoachingTone: String? = null,
+    @SerializedName("current_session_phase") val currentSessionPhase: String? = null
 )

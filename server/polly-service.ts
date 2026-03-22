@@ -9,22 +9,54 @@
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 
 // Regional availability of Neural voices (as of 2024):
-//   us-east-1     — ALL neural voices supported (safest default)
-//   eu-west-1     — British, Irish, South African, Indian (NOT Aria/Olivia)
-//   ap-southeast-2 — Australian (Olivia), New Zealand (Aria) — NOT Irish/SA/Indian
+//   us-east-1      — ALL neural voices supported (default fallback)
+//   eu-west-1      — British, Irish, South African, Indian
+//   ap-southeast-2  — Australian (Olivia), New Zealand (Aria)
 //
-// We use us-east-1 as the default to cover all accents in one region.
-// If AWS_REGION is explicitly set in env, that overrides (useful for latency tuning).
+// We route each accent to its optimal region for best availability and latency
 const credentials = {
   accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
 };
 
-// Primary client — us-east-1 covers every neural voice we use
-const pollyClient = new PollyClient({
-  region: process.env.AWS_REGION || "us-east-1",
-  credentials,
-});
+/**
+ * Map accent to optimal AWS region for Polly Neural TTS
+ */
+function getRegionForAccent(accent: string | undefined): string {
+  const normalizedAccent = (accent || "british").toLowerCase();
+  
+  const regionMap: Record<string, string> = {
+    // EU accents → eu-west-1 (Dublin)
+    british: process.env.AWS_REGION_BRITISH || "eu-west-1",
+    irish: process.env.AWS_REGION_IRISH || "eu-west-1",
+    south_african: process.env.AWS_REGION_SOUTH_AFRICAN || "eu-west-1",
+    indian: process.env.AWS_REGION_INDIAN || "eu-west-1",
+    
+    // AP accents → ap-southeast-2 (Sydney)
+    australian: process.env.AWS_REGION_AUSTRALIAN || "ap-southeast-2",
+    new_zealand: process.env.AWS_REGION_NEW_ZEALAND || "ap-southeast-2",
+    
+    // US accent → us-east-1 (N. Virginia)
+    american: process.env.AWS_REGION_AMERICAN || "us-east-1",
+  };
+  
+  return regionMap[normalizedAccent] || "us-east-1";
+}
+
+/**
+ * Create or retrieve a Polly client for the specified region
+ */
+const pollyClients: Record<string, PollyClient> = {};
+
+function getPollyClient(region: string): PollyClient {
+  if (!pollyClients[region]) {
+    pollyClients[region] = new PollyClient({
+      region,
+      credentials,
+    });
+  }
+  return pollyClients[region];
+}
 
 /**
  * Map coach accent and gender to Polly Neural voice ID
@@ -117,6 +149,8 @@ export async function synthesizeSpeech(
 
   const voiceId = mapAccentToPollyVoice(accent, gender);
   const languageCode = mapAccentToLanguageCode(accent);
+  const region = getRegionForAccent(accent);
+  const pollyClient = getPollyClient(region);
 
   try {
     const command = new SynthesizeSpeechCommand({

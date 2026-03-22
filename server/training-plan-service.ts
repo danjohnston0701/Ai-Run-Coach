@@ -6,10 +6,11 @@
  */
 
 import { db } from "./db";
-import { trainingPlans, weeklyPlans, plannedWorkouts, users, runs, goals, connectedDevices, planAdaptations } from "@shared/schema";
+import { trainingPlans, weeklyPlans, plannedWorkouts, users, runs, goals, connectedDevices, planAdaptations, sessionInstructions } from "@shared/schema";
 import { eq, and, desc, gte } from "drizzle-orm";
 import { getCurrentFitness } from "./fitness-service";
 import { HeartRateZones } from "./heart-rate-zones"; // Assuming we create this utility
+import { generateSessionInstructions } from "./session-coaching-service";
 import OpenAI from "openai";
 
 const openai = new OpenAI({
@@ -23,6 +24,13 @@ interface WorkoutTemplate {
   workoutType: string;
   intensity: string;
   description: string;
+  instructions?: string;
+  distance?: number;
+  duration?: number;
+  targetPace?: string;
+  intervalCount?: number;
+  sessionGoal?: string; // "build_fitness", "develop_speed", "active_recovery", "endurance"
+  sessionIntent?: string;
 }
 
 /**
@@ -630,24 +638,76 @@ If runner has NO previous runs:
           }
         }
 
-        await db.insert(plannedWorkouts).values({
-          weeklyPlanId,
-          trainingPlanId: planId,
-          dayOfWeek: workout.dayOfWeek,
-          scheduledDate,
-          workoutType: workout.workoutType,
-          distance: workout.distance,
-          targetPace: workout.targetPace,
-          intensity: workout.intensity,
-          hrZoneNumber,
-          hrZoneMinBpm,
-          hrZoneMaxBpm,
-          hrZoneScenario: hrZoneNumber ? (hrZoneScenario as 'device' | 'history' | 'effort') : null,
-          effortDescription,
-          description: workout.description,
-          instructions: workout.instructions,
-          isCompleted: false,
-        });
+        const plannedWorkoutResult = await db
+          .insert(plannedWorkouts)
+          .values({
+            weeklyPlanId,
+            trainingPlanId: planId,
+            dayOfWeek: workout.dayOfWeek,
+            scheduledDate,
+            workoutType: workout.workoutType,
+            distance: workout.distance,
+            targetPace: workout.targetPace,
+            intensity: workout.intensity,
+            hrZoneNumber,
+            hrZoneMinBpm,
+            hrZoneMaxBpm,
+            hrZoneScenario: hrZoneNumber ? (hrZoneScenario as 'device' | 'history' | 'effort') : null,
+            effortDescription,
+            description: workout.description,
+            instructions: workout.instructions,
+            isCompleted: false,
+            sessionGoal: workout.sessionGoal, // "build_fitness", "develop_speed", etc
+            sessionIntent: workout.sessionIntent,
+          })
+          .returning({ id: plannedWorkouts.id });
+
+        // Generate dynamic session coaching instructions
+        if (plannedWorkoutResult && plannedWorkoutResult.length > 0) {
+          const workoutId = plannedWorkoutResult[0].id;
+          try {
+            const coaching = await generateSessionInstructions(userId, workoutId, {
+              userId,
+              plannedWorkoutId: workoutId,
+              workoutType: workout.workoutType,
+              intensity: workout.intensity || 'z3',
+              sessionGoal: workout.sessionGoal,
+              sessionIntent: workout.sessionIntent,
+              intervalCount: workout.intervalCount,
+              distance: workout.distance,
+              duration: workout.duration,
+            });
+
+            // Store the generated session instructions
+            const instructionResult = await db
+              .insert(sessionInstructions)
+              .values({
+                plannedWorkoutId: workoutId,
+                preRunBrief: coaching.preRunBrief,
+                sessionStructure: coaching.sessionStructure,
+                aiDeterminedTone: coaching.aiDeterminedTone,
+                aiDeterminedIntensity: coaching.aiDeterminedIntensity,
+                coachingStyle: coaching.coachingStyle,
+                insightFilters: coaching.insightFilters,
+                toneReasoning: coaching.toneReasoning,
+              })
+              .returning({ id: sessionInstructions.id });
+
+            // Link the session instructions back to the workout
+            if (instructionResult && instructionResult.length > 0) {
+              await db
+                .update(plannedWorkouts)
+                .set({ sessionInstructionsId: instructionResult[0].id })
+                .where(eq(plannedWorkouts.id, workoutId));
+            }
+          } catch (coachingError) {
+            console.warn(
+              `Failed to generate session coaching for workout ${workoutId}:`,
+              coachingError
+            );
+            // Don't fail the whole plan generation, just skip this workout's coaching
+          }
+        }
       }
     }
 

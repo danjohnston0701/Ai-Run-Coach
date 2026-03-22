@@ -63,7 +63,7 @@ interface ApiService {
     suspend fun getFriends(@Path("userId") userId: String): List<Friend>
 
     @GET("/api/users/search")
-    suspend fun searchUsers(@Query("query") query: String): List<Friend> 
+    suspend fun searchUsers(@Query("q") query: String): List<Friend> 
 
     @POST("/api/friend-requests")
     suspend fun sendFriendRequest(@Body request: Map<String, String>)
@@ -452,6 +452,39 @@ interface ApiService {
 
     @POST("/api/share/generate")
     suspend fun generateShareImage(@Body request: ShareImageRequest): okhttp3.ResponseBody
+
+    // ========== SESSION COACHING (Phase 1 Integration) ==========
+    
+    @GET("/api/workouts/{workoutId}/session-instructions")
+    suspend fun getSessionInstructions(@Path("workoutId") workoutId: String): SessionInstructionsResponse
+    
+    @POST("/api/coaching/session-events")
+    suspend fun logCoachingEvent(@Body event: CoachingSessionEvent): Response<Unit>
+
+    // ========== MY DATA - ANALYTICS & INSIGHTS ==========
+    
+    @GET("/api/my-data/personal-bests")
+    suspend fun getMyDataPersonalBests(): Response<MyDataResponse>
+    
+    @GET("/api/my-data/statistics")
+    suspend fun getMyDataStatistics(
+        @Query("days") days: Int = 30
+    ): Response<MyDataResponse>
+    
+    @GET("/api/my-data/trends")
+    suspend fun getMyDataTrends(): Response<MyDataResponse>
+    
+    @GET("/api/my-data/all-time-stats")
+    suspend fun getMyDataAllTimeStats(): Response<MyDataResponse>
+}
+
+/**
+ * Generic response wrapper for My Data endpoints
+ */
+data class MyDataResponse(
+    val success: Boolean = true,
+    val data: Map<String, Any> = emptyMap(),
+    val message: String? = null
 }
 
 /**

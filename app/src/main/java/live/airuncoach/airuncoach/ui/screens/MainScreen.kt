@@ -52,6 +52,7 @@ import live.airuncoach.airuncoach.viewmodel.TrainingPlanViewModel
 sealed class Screen(val route: String, val label: String, val resourceId: Int) {
     object Home : Screen("home", "Home", R.drawable.icon_home_vector)
     object History : Screen("history", "History", R.drawable.icon_chart_vector)
+    object MyData : Screen("my_data", "My Data", R.drawable.icon_chart_vector)
     object Goals : Screen("goals", "Goals", R.drawable.icon_target_vector)
     object AiPlans : Screen("ai_plans", "Ai Plans", R.drawable.icon_calendar_vector)
     object Profile : Screen("profile", "Profile", R.drawable.icon_profile_vector)
@@ -60,6 +61,7 @@ sealed class Screen(val route: String, val label: String, val resourceId: Int) {
 val items = listOf(
     Screen.Home,
     Screen.History,
+    Screen.MyData,
     Screen.Goals,
     Screen.AiPlans,
     Screen.Profile,
@@ -217,6 +219,9 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         navController.navigate("run_summary/$it")
                     }
                 )
+            }
+            composable(Screen.MyData.route) {
+                MyDataScreen()
             }
             composable(Screen.Goals.route) {
                 GoalsScreen(

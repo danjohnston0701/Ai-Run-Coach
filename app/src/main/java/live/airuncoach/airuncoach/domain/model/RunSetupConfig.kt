@@ -1,5 +1,7 @@
 package live.airuncoach.airuncoach.domain.model
 
+import live.airuncoach.airuncoach.network.model.SessionInstructionsResponse
+
 /**
  * Configuration for setting up a run session
  * Includes distance, target time, live tracking, group run settings, and route
@@ -41,7 +43,13 @@ data class RunSetupConfig(
     val restTargetPace: String? = null,    // Target pace for recovery phase (mm:ss/km)
     val intervalHeartRateMin: Int? = null, // Min HR for work phase
     val intervalHeartRateMax: Int? = null, // Max HR for work phase
-    val restHeartRateMax: Int? = null      // Max HR for recovery phase
+    val restHeartRateMax: Int? = null,     // Max HR for recovery phase
+    
+    // ── Session Coaching Context (Phase 1 Enhancement) ──────────────────────────
+    // AI-determined coaching plan for this specific workout session
+    val sessionInstructions: SessionInstructionsResponse? = null,  // Fetched pre-run
+    val sessionCoachingTone: String? = null,   // Cached tone for quick access
+    val sessionCoachingIntensity: String? = null  // "relaxed", "moderate", "intense"
 ) {
     /**
      * Get formatted target time string

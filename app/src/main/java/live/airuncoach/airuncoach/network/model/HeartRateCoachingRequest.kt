@@ -18,5 +18,8 @@ data class HeartRateCoachingRequest(
     @SerializedName("runnerName") val runnerName: String? = null,
     // Coaching plan context — allows HR coaching to know if runner is in target zone
     @SerializedName("workoutIntensity") val workoutIntensity: String? = null,  // "z1"–"z5" from plan
-    @SerializedName("workoutType") val workoutType: String? = null             // easy/tempo/intervals/etc.
+    @SerializedName("workoutType") val workoutType: String? = null,            // easy/tempo/intervals/etc.
+    // ========== Session Coaching Context (Phase 1) ==========
+    @SerializedName("session_coaching_tone") val sessionCoachingTone: String? = null,
+    @SerializedName("linked_workout_id") val linkedWorkoutId: String? = null
 )

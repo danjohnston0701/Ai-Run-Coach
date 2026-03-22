@@ -125,6 +125,11 @@ class CoachSettingsViewModel(private val context: Context) : ViewModel() {
 
     fun onAccentChanged(accent: String) {
         _accent.value = accent
+        
+        // New Zealand only supports female voice
+        if (accent.equals("New Zealand", ignoreCase = true) && _voiceGender.value == "male") {
+            _voiceGender.value = "female"
+        }
     }
 
     fun onCoachingToneChanged(tone: String) {

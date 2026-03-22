@@ -55,7 +55,17 @@ data class IntervalCoachingRequest(
     val elevationGain: Double?, // meters
     
     @SerializedName("wellness_context")
-    val wellnessContext: WellnessPayload?
+    val wellnessContext: WellnessPayload?,
+    
+    // ========== Session Coaching Context (Phase 1) ==========
+    @SerializedName("session_coaching_tone")
+    val sessionCoachingTone: String? = null,
+    
+    @SerializedName("current_phase")
+    val currentPhase: String? = null,
+    
+    @SerializedName("rep_number")
+    val repNumber: Int? = null
 )
 
 /**

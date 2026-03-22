@@ -59,6 +59,7 @@ import {
 } from "./achievements-service";
 import garminOAuthRouter from "./garmin-oauth-bridge";
 import adaptationRouter from "./routes-adaptation";
+import myDataRouter from "./routes-my-data";
 import {
   snapTrackToOSMSegments,
   recordSegmentUsage,
@@ -74,6 +75,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ==================== GARMIN OAUTH BRIDGE ====================
   app.use(garminOAuthRouter);
   app.use("/api", adaptationRouter);
+  app.use("/api/my-data", myDataRouter);
   
   // ==================== AUTH ENDPOINTS ====================
   
@@ -1035,6 +1037,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
         limit: 10,
       });
       
+      
+      // ========== SESSION COACHING CONTEXT (Phase 2 Enhancement) ==========
+      // Fetch session instructions if this run is linked to a planned workout
+      let sessionInstructions: any = null;
+      let coachingEvents: any[] = [];
+      let expectedSessionGoal: string | undefined = undefined;
+      
+      if (run.linkedWorkoutId) {
+        try {
+          // Fetch the planned workout
+          const plannedWorkout = await db.query.plannedWorkouts.findFirst({
+            where: eq(plannedWorkouts.id, run.linkedWorkoutId),
+          });
+          
+          if (plannedWorkout?.sessionInstructionsId) {
+            // Fetch session instructions
+            sessionInstructions = await db.query.sessionInstructions.findFirst({
+              where: eq(sessionInstructions.id, plannedWorkout.sessionInstructionsId),
+            });
+            
+            expectedSessionGoal = plannedWorkout.sessionGoal || undefined;
+          }
+          
+          // Fetch all coaching events from this run
+          coachingEvents = await db.query.coachingSessionEvents.findMany({
+            where: eq(coachingSessionEvents.runId, runId),
+          });
+          
+          console.log(`[comprehensive-analysis] Loaded session context: instructions=${!!sessionInstructions}, events=${coachingEvents.length}`);
+        } catch (sessionErr: any) {
+          console.warn(`[comprehensive-analysis] Could not fetch session context: ${sessionErr?.message}`);
+          // Proceed without session context - analysis still works
+        }
+      }
+
       // Import and call the comprehensive analysis function
       console.log(`[comprehensive-analysis] About to call generateComprehensiveRunAnalysis for run ${runId}`);
       const aiService = await import("./ai-service");
@@ -1103,6 +1140,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         workoutType: run.workoutType || undefined,
         workoutIntensity: run.workoutIntensity || undefined,
         workoutDescription: run.workoutDescription || undefined,
+        // NEW: Session coaching context (Phase 2 Enhancement)
+        sessionInstructions: sessionInstructions ? {
+          aiDeterminedTone: sessionInstructions.aiDeterminedTone,
+          coachingStyle: sessionInstructions.coachingStyle,
+          insightFilters: sessionInstructions.insightFilters,
+          sessionStructure: sessionInstructions.sessionStructure,
+          preRunBrief: sessionInstructions.preRunBrief,
+        } : undefined,
+        coachingEvents: coachingEvents.length > 0 ? coachingEvents.map((e: any) => ({
+          eventType: e.eventType,
+          eventPhase: e.eventPhase,
+          coachingMessage: e.coachingMessage,
+          toneUsed: e.toneUsed,
+          userEngagement: e.userEngagement,
+          triggeredAt: e.triggeredAt,
+        })) : undefined,
+        expectedSessionGoal: expectedSessionGoal,
       });
       const analysisEndTime = Date.now();
       console.log(`[comprehensive-analysis] AI analysis generated in ${analysisEndTime - analysisStartTime}ms for run ${runId}`);
@@ -2984,21 +3038,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // ── Match strategy ─────────────────────────────────────────────────────
-      // PRIMARY: Query our own garmin_activities table (populated by Garmin's
-      //   push webhooks). No outbound API call needed — no pull-token issues.
-      // FALLBACK: If nothing is in DB yet (webhook hasn't arrived), try the
-      //   pull API with a ±20 min window.
+      // Match Garmin activity to AI Run Coach run by comparing START TIMES.
+      // The watch's startTimeInSeconds is much more reliable than the webhook
+      // arrival time (which can be hours later).
+      // 
+      // Search window: ±30 minutes from the AI run's creation time
+      // This handles normal timezone differences and clock skew while being
+      // specific enough to avoid false matches.
       // ───────────────────────────────────────────────────────────────────────
-      const TWENTY_MINS_S = 20 * 60;
-      const runStartTime = new Date(run.createdAt || new Date());
-      const runEndTime = run.completedAt
-        ? new Date(run.completedAt)
-        : new Date(runStartTime.getTime() + (run.duration || 0));
+      const THIRTY_MINS_S = 30 * 60;
+      const runStartTimeMs = run.createdAt?.getTime() || Date.now();
+      const runStartTimeSec = Math.floor(runStartTimeMs / 1000);
 
-      const searchStartSec = Math.floor(runStartTime.getTime() / 1000) - TWENTY_MINS_S;
-      const searchEndSec   = Math.floor(runEndTime.getTime()   / 1000) + TWENTY_MINS_S;
+      const searchStartSec = runStartTimeSec - THIRTY_MINS_S;
+      const searchEndSec   = runStartTimeSec + THIRTY_MINS_S;
 
-      console.log(`[Garmin Enrich] Searching DB for activities between ${new Date(searchStartSec * 1000).toISOString()} and ${new Date(searchEndSec * 1000).toISOString()}`);
+      console.log(`[Garmin Enrich] 🔍 Matching Garmin activity by START TIME (±30 mins)`);
+      console.log(`[Garmin Enrich]    AI run start time: ${new Date(runStartTimeMs).toISOString()}`);
+      console.log(`[Garmin Enrich]    Search window: ${new Date(searchStartSec * 1000).toISOString()} to ${new Date(searchEndSec * 1000).toISOString()}`);
 
       // 4a. Look in our local DB first (activities pushed by Garmin webhook)
       let localActivity = await db.query.garminActivities.findFirst({
@@ -3014,7 +3071,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let activityDetail: any = null;
 
       if (localActivity) {
-        console.log(`[Garmin Enrich] ✅ Found activity in local DB: ${localActivity.garminActivityId}`);
+        console.log(`[Garmin Enrich] ✅ Found matching activity in local DB!`);
+        console.log(`[Garmin Enrich]    Activity ID: ${localActivity.garminActivityId}`);
+        console.log(`[Garmin Enrich]    Started at: ${new Date(localActivity.startTimeInSeconds * 1000).toISOString()}`);
+        console.log(`[Garmin Enrich]    Distance: ${localActivity.distanceInMeters}m, Duration: ${localActivity.durationInSeconds}s`);
         matchingActivityId = localActivity.garminActivityId;
         matchingActivity = localActivity;
         // Use stored data directly as the "detail" — map field names

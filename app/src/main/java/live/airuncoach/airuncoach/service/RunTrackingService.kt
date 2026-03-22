@@ -184,7 +184,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private var lastEliteCoachingTime: Long = 0
     private val ELITE_COACHING_COOLDOWN_MS = 45_000L // 45 second gap between elite coaching
     private var lastTechniqueCoachingTime: Long = 0
-    private val TECHNIQUE_INTERVAL_MS = 180_000L // Technique coaching every ~3 minutes
+    private val TECHNIQUE_INTERVAL_MS = 300_000L // Technique coaching every ~5 minutes (reduced repetition)
 
     // Technique coaching category rotation — ensures variety across 30+ technique areas
     // Each category is tracked so we never repeat the same one consecutively
@@ -514,6 +514,11 @@ class RunTrackingService : Service(), SensorEventListener {
     private var planGoalType: String? = null
     private var planWeekNumber: Int? = null
     private var planTotalWeeks: Int? = null
+    
+    // ========== NEW: Session Coaching Context (Phase 1) ==========
+    private var sessionInstructions: SessionInstructionsResponse? = null
+    private var sessionCoachingTone: String? = null
+    private var sessionCoachingIntensity: String? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // targetDistance comes from RunSetupConfig.targetDistance which is in KILOMETERS.
@@ -1048,7 +1053,10 @@ class RunTrackingService : Service(), SensorEventListener {
                     hasRoute = true,
                     triggerType = "navigation_turn",
                     navigationInstruction = navigationText,
-                    navigationDistance = distanceMeters
+                    navigationDistance = distanceMeters,
+                    // ========== NEW: Session Coaching Context ==========
+                    linkedWorkoutId = planWorkoutId,
+                    sessionStructure = sessionInstructions?.sessionStructure
                 )
                 
                 val response = apiService.getPhaseCoaching(update)
@@ -2596,7 +2604,13 @@ class RunTrackingService : Service(), SensorEventListener {
                     runnerName = currentUser?.name,
                     runnerAge = currentUser?.age,
                     // Historical run context
-                    runHistory = runHistoryStats
+                    runHistory = runHistoryStats,
+                    // ========== NEW: Session Coaching Context ==========
+                    linkedWorkoutId = planWorkoutId,
+                    sessionCoachingTone = sessionCoachingTone,
+                    sessionCoachingIntensity = sessionCoachingIntensity,
+                    sessionStructure = sessionInstructions?.sessionStructure,
+                    expectedMetricsFilters = sessionInstructions?.insightFilters
                 )
                 val response = apiService.getStruggleCoaching(update)
                 // Note: Struggle point already added above before launching coroutine
@@ -2646,7 +2660,11 @@ class RunTrackingService : Service(), SensorEventListener {
                     runnerName = currentUser?.name,
                     runnerAge = currentUser?.age,
                     // Historical run context
-                    runHistory = runHistoryStats
+                    runHistory = runHistoryStats,
+                    // ========== NEW: Session Coaching Context ==========
+                    linkedWorkoutId = planWorkoutId,
+                    sessionCoachingTone = sessionCoachingTone,
+                    currentSessionPhase = null  // Phase detection can be added later if needed
                 )
                 val response = apiService.getPaceUpdate(update)
                 coachingHistory.add(AiCoachingNote(
@@ -2704,7 +2722,10 @@ class RunTrackingService : Service(), SensorEventListener {
                     runnerName = currentUser?.name,
                     // Plan context so HR coaching can tell runner if they're in target zone
                     workoutIntensity = planWorkoutIntensity,
-                    workoutType = planWorkoutType
+                    workoutType = planWorkoutType,
+                    // ========== NEW: Session Coaching Context ==========
+                    sessionCoachingTone = sessionCoachingTone,
+                    linkedWorkoutId = planWorkoutId
                 )
                 val response = apiService.getHeartRateCoaching(request)
                 coachingHistory.add(AiCoachingNote(
@@ -3110,8 +3131,10 @@ class RunTrackingService : Service(), SensorEventListener {
         recordCoachingFired()
         hasCoachingFiredThisTick = true
         val td = targetDistance ?: 0.0
+        // targetDistance is in metres, convert to km for ETA calculation
+        val tdKm = td / 1000.0
         val elapsedSec = duration / 1000.0
-        val projectedFinishSec = if (distKm > 0) (elapsedSec / distKm * td).toLong() else null
+        val projectedFinishSec = if (distKm > 0) (elapsedSec / distKm * tdKm).toLong() else null
         val targetTimeSec = targetTime?.let { it / 1000 }
 
         // Determine target time category using percentage-based thresholds:
@@ -3140,7 +3163,9 @@ class RunTrackingService : Service(), SensorEventListener {
 
     private fun fireMilestoneCoaching(distKm: Double, duration: Long, avgSpeed: Float) {
         val td = targetDistance ?: return
-        val pct = (distKm / td * 100).toInt()
+        // targetDistance is in metres, convert to km for calculations
+        val tdKm = td / 1000.0
+        val pct = (distKm / tdKm * 100).toInt()
         val milestone = when {
             pct >= 75 && lastMilestonePercent < 75 -> 75
             pct >= 50 && lastMilestonePercent < 50 -> 50
@@ -3151,7 +3176,7 @@ class RunTrackingService : Service(), SensorEventListener {
 
         val request = buildBaseEliteRequest("milestone", distKm, duration, avgSpeed).copy(
             milestonePercent = milestone,
-            projectedFinishTime = if (distKm > 0) ((duration / 1000.0) / distKm * td).toLong() else null
+            projectedFinishTime = if (distKm > 0) ((duration / 1000.0) / distKm * tdKm).toLong() else null
         )
         fireEliteCoaching(request, "${milestone}% Milestone")
     }
@@ -3159,7 +3184,9 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun fireTargetEtaCoaching(distKm: Double, duration: Long, avgSpeed: Float) {
         lastTargetEtaKm = distKm.toInt()
         val td = targetDistance ?: return
-        val projectedSec = if (distKm > 0) ((duration / 1000.0) / distKm * td).toLong() else null
+        // targetDistance is in metres, convert to km for ETA calculation
+        val tdKm = td / 1000.0
+        val projectedSec = if (distKm > 0) ((duration / 1000.0) / distKm * tdKm).toLong() else null
 
         val request = buildBaseEliteRequest("target_eta", distKm, duration, avgSpeed).copy(
             projectedFinishTime = projectedSec
@@ -3300,11 +3327,29 @@ class RunTrackingService : Service(), SensorEventListener {
         }
 
         // Priority 3: Fundamentals early in the run
+        // Emphasize key posture & mechanics (reduced posture to avoid repetition)
         if (phase == CoachingPhase.EARLY) {
             val earlyCategories = listOf(
-                "posture_head_neck", "posture_shoulders", "posture_torso_lean",
-                "breathing_rhythm", "arms_swing_direction", "arms_hand_relaxation",
-                "feet_strike_pattern", "feet_cadence"
+                // Only 2 most critical posture tips (not 3)
+                "posture_head_neck",         // Most important first
+                "posture_shoulders",         // Second most important
+                
+                // Breathing variety
+                "breathing_rhythm",
+                "breathing_deep_belly",
+                
+                // Arm technique
+                "arms_swing_direction",
+                "arms_hand_relaxation",
+                "arms_drive_power",          // ADD: arm power for variety
+                
+                // Foot/stride mechanics
+                "feet_strike_pattern",
+                "feet_cadence",
+                
+                // Hip and knee mechanics
+                "hips_forward_drive",        // ADD: hips for variety
+                "knees_lift"                 // ADD: knee lift for variety
             )
             val unused = earlyCategories.filter { it !in usedTechniqueCategories }
             if (unused.isNotEmpty()) return unused.random()

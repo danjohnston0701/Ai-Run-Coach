@@ -20,5 +20,11 @@ data class StruggleUpdate(
     @SerializedName("runnerName") val runnerName: String? = null,
     @SerializedName("runnerAge") val runnerAge: Int? = null,
     // Historical run context
-    @SerializedName("runHistory") val runHistory: RunHistoryStats? = null
+    @SerializedName("runHistory") val runHistory: RunHistoryStats? = null,
+    // ========== Session Coaching Context (Phase 1) ==========
+    @SerializedName("linked_workout_id") val linkedWorkoutId: String? = null,
+    @SerializedName("session_coaching_tone") val sessionCoachingTone: String? = null,
+    @SerializedName("session_coaching_intensity") val sessionCoachingIntensity: String? = null,
+    @SerializedName("session_structure") val sessionStructure: SessionStructure? = null,
+    @SerializedName("expected_metrics_filters") val expectedMetricsFilters: InsightFilters? = null
 )

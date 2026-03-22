@@ -2,6 +2,8 @@ package live.airuncoach.airuncoach.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -38,7 +40,9 @@ import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.LoginViewModel
+import live.airuncoach.airuncoach.util.NotificationPermissionHelper
 import androidx.compose.foundation.ExperimentalFoundationApi
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -57,6 +61,18 @@ fun LoginScreen(
     val emailBringIntoView = remember { BringIntoViewRequester() }
     val passwordBringIntoView = remember { BringIntoViewRequester() }
     val coroutineScope = rememberCoroutineScope()
+    
+    // Notification permission launcher
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { isGranted: Boolean ->
+            if (isGranted) {
+                android.util.Log.d("LoginScreen", "Notification permission granted ✅")
+            } else {
+                android.util.Log.d("LoginScreen", "Notification permission denied")
+            }
+        }
+    )
 
     // Check if already logged in on first load
     LaunchedEffect(Unit) {
@@ -99,8 +115,15 @@ fun LoginScreen(
     // Navigate on successful login
     LaunchedEffect(loginState.isLoginSuccessful) {
         if (loginState.isLoginSuccessful) {
-            android.util.Log.d("LoginScreen", "Login successful, navigating to location permission")
-            // After login, always show location permission screen first
+            android.util.Log.d("LoginScreen", "Login successful, requesting notification permission")
+            
+            // Request notification permission after successful login
+            if (NotificationPermissionHelper.shouldRequestPermission()) {
+                notificationPermissionLauncher.launch(NotificationPermissionHelper.getPermissionString())
+            }
+            
+            // After a brief delay, navigate to location permission screen
+            kotlinx.coroutines.delay(500)
             onNavigateToLocationPermission()
         }
     }

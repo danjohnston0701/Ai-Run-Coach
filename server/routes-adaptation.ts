@@ -6,7 +6,7 @@
  */
 
 import { Router, Request, Response } from "express";
-import { AuthenticatedRequest, authMiddleware } from "./middleware";
+import { AuthenticatedRequest, authMiddleware } from "./auth";
 import {
   acceptAndApplyAdaptation,
   declineAdaptation,
@@ -83,14 +83,20 @@ router.get(
       const { planId } = req.params;
       const userId = req.user!.userId;
 
+      console.log(`[Get Pending Adaptations] Starting query for plan ${planId}, user ${userId}`);
+      const startTime = Date.now();
+      
       const adaptations = await getPendingAdaptations(planId, userId);
+      
+      const elapsed = Date.now() - startTime;
+      console.log(`[Get Pending Adaptations] ✅ Completed in ${elapsed}ms. Found ${adaptations.length} adaptations`);
 
       res.json({
         adaptations,
         count: adaptations.length,
       });
     } catch (error) {
-      console.error("[Get Pending Adaptations]", error);
+      console.error("[Get Pending Adaptations] ❌ Error:", error);
       res.status(500).json({ error: "Failed to fetch adaptations" });
     }
   }

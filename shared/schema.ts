@@ -45,6 +45,14 @@ export const users = pgTable("users", {
   coachHalfKmCheckInEnabled: boolean("coach_half_km_check_in_enabled").default(true),
   coachKmSplitIntervalKm: integer("coach_km_split_interval_km").default(1),
   fcmToken: text("fcm_token"), // Firebase Cloud Messaging token for push notifications
+  
+  // Athletic profile for dynamic session coaching
+  athleticGrade: text("athletic_grade"), // "beginner", "intermediate", "advanced", "elite"
+  previousRunsCount: integer("previous_runs_count").default(0),
+  averageWeeklyMileage: real("average_weekly_mileage").default(0),
+  priorRaceExperience: text("prior_race_experience"), // "none", "local", "national", "elite"
+  injuryHistory: jsonb("injury_history"), // [{date, type, resolved}]
+  allowAiToneAdaptation: boolean("allow_ai_tone_adaptation").default(true), // Let AI adjust tone per session
 });
 
 // Friends table
@@ -1080,6 +1088,12 @@ export const plannedWorkouts = pgTable("planned_workouts", {
   restHeartRateMax: integer("rest_heart_rate_max"), // Max HR for recovery phase
   isCompleted: boolean("is_completed").default(false),
   completedRunId: varchar("completed_run_id").references(() => runs.id),
+  
+  // Session coaching instructions linkage
+  sessionInstructionsId: varchar("session_instructions_id").references(() => sessionInstructions.id),
+  sessionGoal: text("session_goal"), // "build_fitness", "develop_speed", "active_recovery", "endurance"
+  sessionIntent: text("session_intent"), // What the session is designed to achieve
+  
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1093,7 +1107,12 @@ export const planAdaptations = pgTable("plan_adaptations", {
   aiSuggestion: text("ai_suggestion"),
   userAccepted: boolean("user_accepted").default(false),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  // Indexes for performance
+  trainingPlanIdIdx: index("idx_plan_adaptations_training_plan").on(table.trainingPlanId),
+  userAcceptedIdx: index("idx_plan_adaptations_user_accepted").on(table.userAccepted),
+  compositeIdx: index("idx_plan_adaptations_plan_status").on(table.trainingPlanId, table.userAccepted),
+}));
 
 // ==================== SHARED RUNS ====================
 
@@ -1384,3 +1403,65 @@ export type GarminBloodPressure = typeof garminBloodPressure.$inferSelect;
 export type GarminEpochRaw = typeof garminEpochsRaw.$inferSelect;
 export type GarminEpochAggregate = typeof garminEpochsAggregate.$inferSelect;
 export type GarminHealthSnapshot = typeof garminHealthSnapshots.$inferSelect;
+
+// ==================== SESSION COACHING INSTRUCTIONS ====================
+
+// Session instructions table — stores AI-generated coaching plan per workout
+export const sessionInstructions = pgTable("session_instructions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  plannedWorkoutId: varchar("planned_workout_id")
+    .notNull()
+    .unique()
+    .references(() => plannedWorkouts.id, { onDelete: "cascade" }),
+
+  // Pre-run brief
+  preRunBrief: text("pre_run_brief").notNull(),
+
+  // Session structure with phases, triggers, and guidance
+  sessionStructure: jsonb("session_structure").notNull(),
+
+  // Tone/style AI-determined for THIS specific session (can differ from user preference)
+  aiDeterminedTone: text("ai_determined_tone").notNull(), // "light_fun", "direct", "motivational", "calm", "serious"
+  aiDeterminedIntensity: text("ai_determined_intensity").notNull(), // "relaxed", "moderate", "intense"
+  toneReasoning: text("tone_reasoning"), // Why AI chose this tone (for debugging/insights)
+
+  // Coaching style details
+  coachingStyle: jsonb("coaching_style").notNull(), // { tone, encouragementLevel, detailDepth, technicalDepth }
+  insightFilters: jsonb("insight_filters"), // { include: [...], exclude: [...] }
+
+  // Metadata for reference
+  generatedAt: timestamp("generated_at").defaultNow(),
+  generatedVersion: text("generated_version").default("1.0"),
+
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type SessionInstructions = typeof sessionInstructions.$inferSelect;
+export type InsertSessionInstructions = typeof sessionInstructions.$inferInsert;
+
+// ==================== COACHING SESSION EVENTS ====================
+
+// Coaching session events — tracks what coaching was delivered during a run
+export const coachingSessionEvents = pgTable("coaching_session_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id")
+    .notNull()
+    .references(() => runs.id, { onDelete: "cascade" }),
+  plannedWorkoutId: varchar("planned_workout_id").references(() => plannedWorkouts.id),
+
+  eventType: text("event_type").notNull(), // "interval_start", "pace_coaching", "recovery_guidance", etc
+  eventPhase: text("event_phase"), // "warmup", "interval_2_of_6", "recovery", etc
+  coachingMessage: text("coaching_message"),
+  coachingAudioUrl: text("coaching_audio_url"),
+
+  userMetrics: jsonb("user_metrics"), // Current pace, HR, distance, etc at time of coaching
+  toneUsed: text("tone_used"), // Actual tone delivered
+  userEngagement: text("user_engagement"), // "positive", "neutral", "struggled"
+
+  triggeredAt: timestamp("triggered_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type CoachingSessionEvent = typeof coachingSessionEvents.$inferSelect;
+export type InsertCoachingSessionEvent = typeof coachingSessionEvents.$inferInsert;

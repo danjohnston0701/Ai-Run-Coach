@@ -94,7 +94,10 @@ data class RunSession(
     val activeCalories: Int? = null, // kcal
     val restingCalories: Int? = null, // kcal
     val estSweatLoss: Float? = null, // liters
-    val minHeartRate: Int? = null // bpm
+    val minHeartRate: Int? = null, // bpm
+    
+    // Run achievements and milestones
+    val achievements: List<RunAchievement> = emptyList() // Personal bests and milestone badges
 ) {
     fun getDistanceInKm(): Double = distance / 1000.0
     

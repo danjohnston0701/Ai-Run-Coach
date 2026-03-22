@@ -29,6 +29,8 @@ import live.airuncoach.airuncoach.network.model.WeatherPayload
 import live.airuncoach.airuncoach.network.model.IntervalCoachingRequest
 import live.airuncoach.airuncoach.network.model.IntervalCoachingResponse
 import live.airuncoach.airuncoach.network.model.PreRunBriefingResponse
+import live.airuncoach.airuncoach.network.model.SessionInstructionsResponse
+import live.airuncoach.airuncoach.service.SessionCoachingHelper
 import live.airuncoach.airuncoach.service.RunTrackingService
 import live.airuncoach.airuncoach.utils.AudioPlayerHelper
 import live.airuncoach.airuncoach.utils.CoachingAudioQueue
@@ -105,12 +107,14 @@ class RunSessionViewModel @Inject constructor(
     private val textToSpeechHelper = TextToSpeechHelper(context)
     private val audioPlayerHelper = AudioPlayerHelper(context)
     private val weatherRepository = WeatherRepository(context)
+    private val sessionCoachingHelper = SessionCoachingHelper(apiService)  // NEW: Session coaching
 
     private val sharedPrefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
     private var user: User? = null
     private var runConfig: RunSetupConfig? = null
     private var isBriefingAudioPlaying = false // Guard against duplicate audio playback
+    private var sessionInstructions: SessionInstructionsResponse? = null  // NEW: Store session context
 
     // ── Interval Training State ──────────────────────────────────────────────
     // Tracks the current interval phase (work vs recovery) and position within it
@@ -234,6 +238,30 @@ class RunSessionViewModel @Inject constructor(
                 
                 // Add timeout to prevent hanging
                 withTimeout(30000) { // 30 second timeout (audio endpoint generates LLM text + OpenAI TTS)
+                    
+                    // ========== NEW: Fetch session instructions pre-run ==========
+                    if (runConfig?.workoutId != null) {
+                        try {
+                            Log.d("RunSessionViewModel", "Fetching session instructions for workout: ${runConfig?.workoutId}")
+                            sessionInstructions = sessionCoachingHelper.fetchSessionInstructions(runConfig!!.workoutId!!)
+                            
+                            if (sessionInstructions != null) {
+                                Log.d("RunSessionViewModel", "Session instructions fetched - tone: ${sessionInstructions?.aiDeterminedTone}")
+                                // Update the stored config with session context
+                                runConfig = runConfig?.copy(
+                                    sessionInstructions = sessionInstructions,
+                                    sessionCoachingTone = sessionInstructions?.aiDeterminedTone,
+                                    sessionCoachingIntensity = sessionInstructions?.aiDeterminedIntensity
+                                )
+                            } else {
+                                Log.d("RunSessionViewModel", "Session instructions returned null - continuing without context")
+                            }
+                        } catch (e: Exception) {
+                            Log.w("RunSessionViewModel", "Failed to fetch session instructions: ${e.message}")
+                            // Continue without session context - graceful degradation
+                        }
+                    }
+                    // ========== END: Session instructions fetching ==========
                     
                     // Get route data from runConfig if available
                     val route = runConfig?.route

@@ -1,5 +1,7 @@
 package live.airuncoach.airuncoach.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -8,8 +10,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -20,6 +26,7 @@ import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
+import live.airuncoach.airuncoach.util.NotificationPermissionHelper
 import live.airuncoach.airuncoach.viewmodel.NotificationSettingsViewModel
 
 @Composable
@@ -28,6 +35,32 @@ fun NotificationSettingsScreen(
 ) {
     val viewModel: NotificationSettingsViewModel = hiltViewModel()
     val state by viewModel.state.collectAsState()
+    var pendingNotificationEnable by remember { mutableStateOf(false) }
+    
+    // Notification permission launcher
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { isGranted ->
+            if (isGranted) {
+                android.util.Log.d("NotificationSettings", "Notification permission granted ✅")
+                // Permission granted, now enable notifications
+                if (pendingNotificationEnable) {
+                    viewModel.updateAllNotifications(true)
+                    pendingNotificationEnable = false
+                }
+            } else {
+                android.util.Log.d("NotificationSettings", "Notification permission denied")
+                pendingNotificationEnable = false
+            }
+        }
+    )
+    
+    // Request permission when user tries to enable notifications
+    LaunchedEffect(pendingNotificationEnable) {
+        if (pendingNotificationEnable && NotificationPermissionHelper.shouldRequestPermission()) {
+            notificationPermissionLauncher.launch(NotificationPermissionHelper.getPermissionString())
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -134,7 +167,13 @@ fun NotificationSettingsScreen(
                                     state.liveObserverJoined
                                 ),
                                 onCheckedChange = { enabled ->
-                                    viewModel.updateAllNotifications(enabled)
+                                    if (enabled && NotificationPermissionHelper.shouldRequestPermission()) {
+                                        // If enabling notifications, first request permission
+                                        pendingNotificationEnable = true
+                                    } else {
+                                        // If disabling or no permission needed, update directly
+                                        viewModel.updateAllNotifications(enabled)
+                                    }
                                 },
                                 modifier = Modifier.padding(start = Spacing.md)
                             )

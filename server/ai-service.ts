@@ -2655,8 +2655,25 @@ export async function generateComprehensiveRunAnalysis(params: {
   workoutType?: string;
   workoutIntensity?: string;
   workoutDescription?: string;
+  // NEW: Session coaching context (Phase 2 Enhancement)
+  sessionInstructions?: {
+    aiDeterminedTone: string;
+    coachingStyle: any;
+    insightFilters: any;
+    sessionStructure: any;
+    preRunBrief: string;
+  };
+  coachingEvents?: Array<{
+    eventType: string;
+    eventPhase: string;
+    coachingMessage: string;
+    toneUsed: string;
+    userEngagement?: string;
+    triggeredAt: Date;
+  }>;
+  expectedSessionGoal?: string;
 }): Promise<ComprehensiveRunAnalysis> {
-  const { runData, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent, linkedPlanId, planGoalType, planProgressWeek, planProgressWeeks, workoutType, workoutIntensity, workoutDescription } = params;
+  const { runData, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent, linkedPlanId, planGoalType, planProgressWeek, planProgressWeeks, workoutType, workoutIntensity, workoutDescription, sessionInstructions, coachingEvents, expectedSessionGoal } = params;
   
   // Build comprehensive prompt with all available data
   let prompt = `You are ${coachName}, an expert AI running coach with a ${coachTone} style. 
@@ -2713,6 +2730,41 @@ ${planProgressWeek && planProgressWeeks ? `- Week ${planProgressWeek} of ${planP
 ${planProgressWeek && planProgressWeeks ? `- Reference the week number and progression ("Week ${planProgressWeek} of ${planProgressWeeks}").` : ''}
 - If it's an easy/recovery workout, praise consistency and recovery focus. If it's a tempo or interval session, emphasize quality and progression.
 - Highlight how this specific run contributed to the overall plan progression.
+`;
+  }
+
+  // Add session coaching context (Phase 2 Enhancement)
+  if (sessionInstructions || coachingEvents?.length) {
+    prompt += `
+## SESSION COACHING CONTEXT (Planned vs. Delivered):
+`;
+    if (sessionInstructions) {
+      prompt += `
+**Planned Coaching Approach:**
+- Tone: ${sessionInstructions.aiDeterminedTone} (${sessionInstructions.coachingStyle?.encouragementLevel || 'moderate'} encouragement)
+- Detail Level: ${sessionInstructions.coachingStyle?.detailDepth || 'moderate'}
+- Technical Depth: ${sessionInstructions.coachingStyle?.technicalDepth || 'moderate'}
+- Pre-Run Brief: "${sessionInstructions.preRunBrief}"
+- Focus Metrics: ${sessionInstructions.insightFilters?.include?.join(', ') || 'standard metrics'}
+- De-emphasize: ${sessionInstructions.insightFilters?.exclude?.join(', ') || 'none'}
+`;
+    }
+    
+    if (coachingEvents && coachingEvents.length > 0) {
+      prompt += `
+**Coaching Delivered During Run (${coachingEvents.length} cues):**
+`;
+      coachingEvents.forEach((event: any, index: number) => {
+        prompt += `${index + 1}. [${event.eventPhase || 'general'}] "${event.coachingMessage}" (Tone: ${event.toneUsed}, Engagement: ${event.userEngagement || 'not logged'})\n`;
+      });
+    }
+    
+    prompt += `
+**Analysis Guidance:**
+- How well did the actual run execution match the planned session goals?
+- Was the coached tone appropriate and effective for this runner?
+- Did the runner respond well to the coaching cues? 
+- Provide specific insights on coaching effectiveness.
 `;
   }
 

@@ -128,12 +128,15 @@ fun CoachSettingsScreen(
 
             item {
                 SectionTitle(title = "Voice Gender")
+                val isNewZealand = accent.equals("New Zealand", ignoreCase = true)
+                
                 Row(modifier = Modifier.fillMaxWidth()) {
                     GenderButton(
                         text = "Male",
                         isSelected = voiceGender == "male",
                         onClick = { viewModel.onVoiceGenderChanged("male") },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        enabled = !isNewZealand
                     )
                     Spacer(modifier = Modifier.width(Spacing.md))
                     GenderButton(
@@ -143,6 +146,18 @@ fun CoachSettingsScreen(
                         modifier = Modifier.weight(1f)
                     )
                 }
+                
+                // Help text for New Zealand voice limitation
+                if (isNewZealand) {
+                    Spacer(modifier = Modifier.height(Spacing.md))
+                    Text(
+                        text = "New Zealand accent only supports a female voice",
+                        style = AppTextStyles.caption,
+                        color = Colors.textSecondary,
+                        modifier = Modifier.padding(horizontal = Spacing.xs)
+                    )
+                }
+                
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
 
@@ -155,6 +170,39 @@ fun CoachSettingsScreen(
                             isSelected = accent.equals(accentName, ignoreCase = true),
                             onClick = { viewModel.onAccentChanged(accentName) }
                         )
+                        
+                        // Help text for accents with limited voice options
+                        if (accent.equals(accentName, ignoreCase = true)) {
+                            when {
+                                accentName.equals("New Zealand", ignoreCase = true) -> {
+                                    Spacer(modifier = Modifier.height(Spacing.sm))
+                                    Text(
+                                        text = "ℹ️ New Zealand only supports a female voice",
+                                        style = AppTextStyles.caption,
+                                        color = Colors.textSecondary,
+                                        modifier = Modifier.padding(start = Spacing.lg, end = Spacing.md)
+                                    )
+                                }
+                                accentName.equals("South African", ignoreCase = true) -> {
+                                    Spacer(modifier = Modifier.height(Spacing.sm))
+                                    Text(
+                                        text = "ℹ️ South African only has one voice (gender neutral)",
+                                        style = AppTextStyles.caption,
+                                        color = Colors.textSecondary,
+                                        modifier = Modifier.padding(start = Spacing.lg, end = Spacing.md)
+                                    )
+                                }
+                                accentName.equals("Indian", ignoreCase = true) -> {
+                                    Spacer(modifier = Modifier.height(Spacing.sm))
+                                    Text(
+                                        text = "ℹ️ Indian only has one voice (gender neutral)",
+                                        style = AppTextStyles.caption,
+                                        color = Colors.textSecondary,
+                                        modifier = Modifier.padding(start = Spacing.lg, end = Spacing.md)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(Spacing.lg))
@@ -282,14 +330,23 @@ fun CoachSettingsScreen(
 }
 
 @Composable
-fun GenderButton(text: String, isSelected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun GenderButton(
+    text: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
     Button(
         onClick = onClick,
+        enabled = enabled,
         modifier = modifier.height(50.dp),
         shape = RoundedCornerShape(BorderRadius.lg),
         colors = ButtonDefaults.buttonColors(
             containerColor = if (isSelected) Colors.primary else Colors.backgroundSecondary,
-            contentColor = if (isSelected) Colors.buttonText else Colors.textPrimary
+            contentColor = if (isSelected) Colors.buttonText else Colors.textPrimary,
+            disabledContainerColor = Colors.backgroundSecondary.copy(alpha = 0.5f),
+            disabledContentColor = Colors.textMuted
         )
     ) {
         Text(text)

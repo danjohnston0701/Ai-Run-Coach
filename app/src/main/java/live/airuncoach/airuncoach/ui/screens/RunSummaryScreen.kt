@@ -2369,7 +2369,8 @@ private fun ChartsSectionFlagship(run: RunSession) {
                         lineColor = Colors.success,
                         xTitle = if (mode == ChartMode.Time) "Time (min)" else "Distance (km)",
                         yFormatter = { v -> String.format(java.util.Locale.US, "%.0f", v) },
-                        yUnitHint = "m"
+                        yUnitHint = "m",
+                        isElevation = true
                     )
                 }
             }
@@ -2418,7 +2419,8 @@ private fun ChartsSectionFlagship(run: RunSession) {
                     lineColor = Color(0xFF9C27B0),
                     xTitle = if (mode == ChartMode.Time) "Time (min)" else "Distance (km)",
                     yFormatter = { v -> "${v.roundToInt()}" },
-                    yUnitHint = "spm"
+                    yUnitHint = "spm",
+                    isCadence = true
                 )
             }
         }
@@ -2447,7 +2449,8 @@ private fun ChartsSectionFlagship(run: RunSession) {
                     primaryFormatter = { v -> formatPaceSeconds(v.toLong()) },
                     secondaryFormatter = { v -> String.format(java.util.Locale.US, "%.0f", v) },
                     fillSecondary = true,
-                    invertPrimary = true   // Faster pace (lower number) at top
+                    invertPrimary = true,   // Faster pace (lower number) at top
+                    isPaceElevation = true
                 )
             }
         }
@@ -2476,7 +2479,8 @@ private fun ChartsSectionFlagship(run: RunSession) {
                     xTitle = "Distance (km)",
                     primaryFormatter = { v -> "${v.roundToInt()}" },
                     secondaryFormatter = { v -> String.format(java.util.Locale.US, "%.0f", v) },
-                    fillSecondary = true
+                    fillSecondary = true,
+                    isCadenceElevation = true
                 )
             }
         }
@@ -2666,6 +2670,75 @@ private fun FullscreenChartDialog(
 
 /* --------------------------------- CANVAS CHART -------------------------------- */
 
+/**
+ * Calculates Y-axis min/max bounds for graph visualization.
+ * 
+ * For pace charts (invertY=true):
+ * - Adds 50% padding to slowest pace (actual max) as the bottom bound
+ * - Adds 10% padding to fastest pace (actual min) as the top bound
+ * 
+ * For elevation charts:
+ * - Uses minimum 100m variance on Y-axis
+ * - If elevation range < 100m: uses 0m to 100m
+ * - If elevation range >= 100m: uses (min - 100m) to (max + 10%)
+ * 
+ * For cadence and other metrics:
+ * - Adds 15% padding on both sides
+ */
+private fun calculateYAxisBounds(
+    actualMin: Double,
+    actualMax: Double,
+    invertY: Boolean = false,  // For pace: lower values at top
+    isElevation: Boolean = false,
+    isCadence: Boolean = false
+): Pair<Double, Double> {
+    val dataRange = (actualMax - actualMin).coerceAtLeast(1.0)
+    
+    return when {
+        invertY -> {
+            // Pace chart: +10% to fastest (min), +50% to slowest (max)
+            val minBound = actualMin * 0.90  // Fastest pace with 10% top padding
+            val maxBound = actualMax * 1.50  // Slowest pace with 50% bottom padding
+            Pair(minBound, maxBound)
+        }
+        isElevation -> {
+            // Elevation: minimum 100m variance on Y-axis
+            if (dataRange < 100.0) {
+                // Range too small: use 0 to 100m
+                Pair(0.0, 100.0)
+            } else if (actualMax >= 100.0) {
+                // Elevation > 100m: use (min - 100m) to (max + 10%)
+                val minBound = (actualMin - 100.0).coerceAtLeast(0.0)
+                val maxBound = actualMax * 1.10  // +10% buffer on top
+                Pair(minBound, maxBound)
+            } else {
+                // Fallback for edge cases
+                Pair(actualMin - 100.0, actualMax + (dataRange * 0.10))
+            }
+        }
+        isCadence -> {
+            // Cadence: similar to elevation, but different thresholds
+            // Typical cadence range is 120-180 spm, minimum 20 spm variance
+            if (dataRange < 20.0) {
+                // Too narrow range: extend to at least 20 spm variance
+                val center = (actualMin + actualMax) / 2
+                val minBound = (center - 10.0).coerceAtLeast(0.0)
+                val maxBound = center + 10.0
+                Pair(minBound, maxBound)
+            } else {
+                // Normal case: 15% padding on both sides
+                val buf = dataRange * 0.15
+                Pair(actualMin - buf, actualMax + buf)
+            }
+        }
+        else -> {
+            // Default: 15% padding on both sides
+            val buf = dataRange * 0.15
+            Pair(actualMin - buf, actualMax + buf)
+        }
+    }
+}
+
 @Composable
 private fun RunLineChartCanvas(
     series: LabeledSeries,
@@ -2674,6 +2747,8 @@ private fun RunLineChartCanvas(
     yFormatter: (Double) -> String,
     yUnitHint: String,
     invertY: Boolean = false,  // When true, lower Y values at top (for pace: faster = top)
+    isElevation: Boolean = false,  // When true, applies elevation-specific Y-axis scaling
+    isCadence: Boolean = false,    // When true, applies cadence-specific Y-axis scaling
     modifier: Modifier = Modifier,
     height: Dp = 220.dp
 ) {
@@ -2716,27 +2791,17 @@ private fun RunLineChartCanvas(
             val yVals = series.y
 
             // Use actual min/max values to ensure ALL data points fit on the chart
-            // (Previously used 5th/95th percentile which clipped the actual extremes)
             val actualMin = yVals.minOrNull() ?: 0.0
             val actualMax = yVals.maxOrNull() ?: 1.0
-            val dataRange = (actualMax - actualMin).coerceAtLeast(1.0)
 
-            // For pace (invertY): slow pace is maxY. Add 25% of slowest pace value as padding
-            // so consistent runs don't look erratic. For other charts use a 15% range buffer.
-            val axisMinY: Double
-            val axisMaxY: Double
-            if (invertY) {
-                // Pace: faster (lower num) at top, slower (higher num) at bottom
-                // Fast end: small 2% of value buffer so the line doesn't hug the top
-                axisMinY = actualMin * 0.98
-                // Slow end: 15% padding above actual max so all data points fit
-                axisMaxY = actualMax + (dataRange * 0.15)
-            } else {
-                // Other metrics: 15% padding on both sides
-                val buf = dataRange * 0.15
-                axisMinY = actualMin - buf
-                axisMaxY = actualMax + buf
-            }
+            // Calculate Y-axis bounds using chart-type-specific logic
+            val (axisMinY, axisMaxY) = calculateYAxisBounds(
+                actualMin = actualMin,
+                actualMax = actualMax,
+                invertY = invertY,
+                isElevation = isElevation,
+                isCadence = isCadence
+            )
 
             val minY = axisMinY
             val maxY = axisMaxY
@@ -3356,6 +3421,8 @@ private fun DualAxisChartCanvas(
     secondaryFormatter: (Double) -> String,
     fillSecondary: Boolean = true,
     invertPrimary: Boolean = false,  // When true, lower Y values are at top (for pace: faster = top)
+    isPaceElevation: Boolean = false,  // When true, applies pace-specific primary scaling
+    isCadenceElevation: Boolean = false,  // When true, applies cadence-specific primary scaling
     modifier: Modifier = Modifier,
     height: Dp = 250.dp
 ) {
@@ -3392,13 +3459,54 @@ private fun DualAxisChartCanvas(
         androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
             if (n < 2) return@Canvas
 
-            // Compute ranges
-            val priMin = primaryY.take(n).minOrNull() ?: 0.0
-            val priMax = primaryY.take(n).maxOrNull() ?: 0.0
+            // Compute primary Y axis bounds (left axis)
+            val priActualMin = primaryY.take(n).minOrNull() ?: 0.0
+            val priActualMax = primaryY.take(n).maxOrNull() ?: 0.0
+            
+            val (priMin, priMax) = if (isPaceElevation) {
+                // Pace: +10% to fastest (min), +50% to slowest (max)
+                Pair(priActualMin * 0.90, priActualMax * 1.50)
+            } else if (isCadenceElevation) {
+                // Cadence: special handling for narrow ranges
+                val priRange = (priActualMax - priActualMin).coerceAtLeast(1.0)
+                if (priRange < 20.0) {
+                    // Too narrow range: extend to at least 20 spm variance
+                    val center = (priActualMin + priActualMax) / 2
+                    Pair((center - 10.0).coerceAtLeast(0.0), center + 10.0)
+                } else {
+                    // Normal case: 15% padding on both sides
+                    val buf = priRange * 0.15
+                    Pair(priActualMin - buf, priActualMax + buf)
+                }
+            } else {
+                // Default: 15% padding on both sides
+                val priRange = (priActualMax - priActualMin).coerceAtLeast(1.0)
+                val buf = priRange * 0.15
+                Pair(priActualMin - buf, priActualMax + buf)
+            }
+
             val priRange = (priMax - priMin).takeIf { it > 1e-9 } ?: 1.0
 
-            val secMin = secondaryY.take(n).minOrNull() ?: 0.0
-            val secMax = secondaryY.take(n).maxOrNull() ?: 0.0
+            // Compute secondary Y axis bounds (right axis, always elevation)
+            val secActualMin = secondaryY.take(n).minOrNull() ?: 0.0
+            val secActualMax = secondaryY.take(n).maxOrNull() ?: 0.0
+            
+            val (secMin, secMax) = run {
+                val secRange = (secActualMax - secActualMin).coerceAtLeast(1.0)
+                if (secRange < 100.0) {
+                    // Range too small: use 0 to 100m
+                    Pair(0.0, 100.0)
+                } else if (secActualMax >= 100.0) {
+                    // Elevation > 100m: use (min - 100m) to (max + 10%)
+                    val minBound = (secActualMin - 100.0).coerceAtLeast(0.0)
+                    val maxBound = secActualMax * 1.10  // +10% buffer on top
+                    Pair(minBound, maxBound)
+                } else {
+                    // Fallback for edge cases
+                    Pair(secActualMin - 100.0, secActualMax + (secRange * 0.10))
+                }
+            }
+
             val secRange = (secMax - secMin).takeIf { it > 1e-9 } ?: 1.0
 
             val leftPadPx = 50.dp.toPx()

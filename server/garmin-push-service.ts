@@ -13,6 +13,7 @@
 
 import { storage } from './storage';
 import garminService from './garmin-service';
+import activityProcessor from './garmin-activity-processor';
 
 /**
  * Garmin PUSH Notification Types
@@ -141,7 +142,7 @@ async function processActivityPush(
 
   for (const activityFile of notification.activityFiles) {
     try {
-      console.log(`🔍 Fetching activity ${activityFile.activityId}...`);
+      console.log(`🔍 Fetching detailed activity ${activityFile.activityId}...`);
       
       // Check if activity already imported
       const existingRuns = await storage.getUserRuns(userId);
@@ -154,17 +155,28 @@ async function processActivityPush(
         continue;
       }
 
-      // Fetch activity details from callback URL
-      const activityDetails = await garminService.getGarminActivityDetail(accessToken, activityFile.activityId);
+      // Fetch complete activity details with all metrics (splits, HR data, GPS, etc.)
+      const activityDetails = await activityProcessor.fetchCompleteGarminActivityDetail(
+        accessToken, 
+        activityFile.activityId
+      );
       
-      if (!activityDetails || activityDetails.activityType !== 'RUNNING') {
+      if (!activityDetails) {
+        console.warn(`⚠️ Failed to fetch details for activity ${activityFile.activityId}`);
+        continue;
+      }
+
+      // Skip non-running activities
+      if (activityDetails.activityType && activityDetails.activityType !== 'RUNNING') {
         console.log(`⏭️ Skipping non-running activity ${activityFile.activityId}`);
         continue;
       }
 
-      // TODO: Parse and save activity to database
-      // This would use the same logic as syncGarminActivities
-      console.log(`✅ Successfully imported activity ${activityFile.activityId}`);
+      // Save detailed activity to database with all metrics
+      const saveResult = await activityProcessor.saveDetailedGarminActivity(userId, activityDetails);
+      console.log(`✅ Successfully imported activity ${activityFile.activityId} as run ${saveResult.id}`);
+      console.log(`   ${saveResult.message}`);
+
     } catch (error) {
       console.error(`❌ Error processing activity ${activityFile.activityId}:`, error);
     }
