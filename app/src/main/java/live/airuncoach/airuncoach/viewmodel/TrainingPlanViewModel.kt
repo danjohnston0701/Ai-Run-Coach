@@ -60,6 +60,10 @@ class TrainingPlanViewModel @Inject constructor(
     private val _selectedTab = MutableStateFlow(0)
     val selectedTab: StateFlow<Int> = _selectedTab.asStateFlow()
 
+    init {
+        loadUserPlans("active")
+    }
+
     fun selectTab(index: Int) {
         _selectedTab.value = index
         val statusMap = mapOf(0 to "active", 1 to "completed", 2 to "abandoned")
