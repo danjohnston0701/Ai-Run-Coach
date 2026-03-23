@@ -93,12 +93,12 @@ fun PreviousRunsScreen(
                     color = Colors.primary
                 )
                 Text(
-                    text = "Review your performance insights",
+                    text = "Review your performance",
                     style = AppTextStyles.body,
                     color = Colors.textSecondary
                 )
             }
-            
+            /*
             // Refresh button
             IconButton(
                 onClick = { viewModel.fetchRuns() },
@@ -110,6 +110,7 @@ fun PreviousRunsScreen(
                     tint = if (isLoading) Colors.textMuted else Colors.textPrimary
                 )
             }
+             */
         }
         
         Spacer(modifier = Modifier.height(Spacing.lg))

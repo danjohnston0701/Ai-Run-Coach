@@ -210,8 +210,9 @@ export async function getPendingAdaptations(
         and(
           eq(planAdaptations.trainingPlanId, trainingPlanId),
           eq(trainingPlans.userId, userId),
-          // Include rows where userAccepted is NULL (never responded) or explicitly false
-          or(isNull(planAdaptations.userAccepted), eq(planAdaptations.userAccepted, false))
+          // Only include rows where userAccepted is NULL (never responded)
+          // Exclude declined (userAccepted = false) and accepted (userAccepted = true)
+          isNull(planAdaptations.userAccepted)
         )
       );
 

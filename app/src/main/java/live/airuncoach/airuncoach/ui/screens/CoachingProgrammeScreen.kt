@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import java.util.Locale
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.HeartRateZones
 import live.airuncoach.airuncoach.domain.model.Injury
@@ -309,6 +310,7 @@ fun TrainingPlanDashboardScreen(
     val state by viewModel.planDetailState.collectAsState()
     val actionLoading by viewModel.actionLoading.collectAsState()
     val actionError by viewModel.actionError.collectAsState()
+    val pendingAdaptationsCount by viewModel.pendingAdaptationsCount.collectAsState()
 
     var showAbandonDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -369,7 +371,9 @@ fun TrainingPlanDashboardScreen(
                 onShowDeleteDialog = { showDeleteDialog = true },
                 onAddInjury = { showAddInjuryDialog = true },
                 onViewAdaptations = { onViewAdaptations(planId) },
-                modifier = Modifier.fillMaxSize().padding(padding)
+                modifier = Modifier.fillMaxSize().padding(padding),
+                pendingAdaptationsCount = pendingAdaptationsCount,
+                viewModel = viewModel
             )
             }
         }
@@ -595,7 +599,9 @@ fun PlanDashboardContent(
     onShowDeleteDialog: () -> Unit,
     onAddInjury: () -> Unit,
     onViewAdaptations: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    pendingAdaptationsCount: Int = 0,
+    viewModel: TrainingPlanViewModel? = null
 ) {
     // Helpers that stamp plan context into WorkoutHolder before delegating to nav callbacks.
     // This allows WorkoutDetailScreen → run_session to build a plan-aware RunSetupConfig.
@@ -628,16 +634,18 @@ fun PlanDashboardContent(
             Spacer(modifier = Modifier.height(Spacing.lg))
         }
 
-        // ── Adaptations Button ─────────────────────────────────────────────────
-        item {
-            OutlinedButton(
-                onClick = onViewAdaptations,
-                modifier = Modifier.fillMaxWidth().height(44.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
-            ) {
-                Text("📊 View Pending Adaptations", fontWeight = FontWeight.Medium, fontSize = 13.sp)
+        // ── Adaptations Button (only show if there are pending adaptations) ─────
+        if (pendingAdaptationsCount > 0) {
+            item {
+                OutlinedButton(
+                    onClick = onViewAdaptations,
+                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
+                ) {
+                    Text("📊 View Pending Adaptations ($pendingAdaptationsCount)", fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                }
+                Spacer(modifier = Modifier.height(Spacing.lg))
             }
-            Spacer(modifier = Modifier.height(Spacing.lg))
         }
 
         // ── Error ─────────────────────────────────────────────────────────────
@@ -673,6 +681,7 @@ fun PlanDashboardContent(
                         isLoading = actionLoading,
                         onStart = { startWithContext(workout) },
                         onComplete = { onCompleteWorkout(workout) },
+                        onSkip = { viewModel?.skipWorkout(workout.id, details.plan.id) },
                         onViewDetail = { viewWithContext(workout) }
                     )
                     Spacer(modifier = Modifier.height(Spacing.lg))
@@ -789,7 +798,9 @@ fun PlanDashboardContent(
             Spacer(modifier = Modifier.height(Spacing.sm))
         }
 
-        val currentWeekIndex = (progress.currentWeek - 1).coerceAtLeast(0)
+        // Calculate the actual current week based on plan creation date and today
+        val actualCurrentWeek = calculateActualCurrentWeek(details.plan.createdAt)
+        val currentWeekIndex = (actualCurrentWeek - 1).coerceAtLeast(0)
         val currentWeek = details.weeks.getOrNull(currentWeekIndex) ?: details.weeks.firstOrNull()
         if (currentWeek != null) {
             item {
@@ -804,7 +815,7 @@ fun PlanDashboardContent(
             Spacer(modifier = Modifier.height(Spacing.sm))
         }
         items(details.weeks) { week ->
-            WeekSummaryRow(week = week, isCurrent = week.weekNumber == progress.currentWeek)
+            WeekSummaryRow(week = week, isCurrent = week.weekNumber == actualCurrentWeek)
             Spacer(modifier = Modifier.height(Spacing.sm))
         }
 
@@ -895,6 +906,7 @@ fun TodayWorkoutCard(
     isLoading: Boolean,
     onStart: () -> Unit,
     onComplete: () -> Unit,
+    onSkip: () -> Unit = {},
     onViewDetail: () -> Unit
 ) {
     Card(
@@ -941,30 +953,45 @@ fun TodayWorkoutCard(
 
             Spacer(modifier = Modifier.height(Spacing.lg))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                if (workout.workoutType != "rest") {
-                    Button(
-                        onClick = onStart,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                // Primary actions: Start or Complete
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    if (workout.workoutType != "rest") {
+                        Button(
+                            onClick = onStart,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+                            enabled = !isLoading
+                        ) {
+                            Icon(painterResource(R.drawable.icon_play_vector), null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Start", color = Colors.buttonText, style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold))
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = onComplete,
+                        modifier = if (workout.workoutType == "rest") Modifier.fillMaxWidth() else Modifier.weight(1f),
                         enabled = !isLoading
                     ) {
-                        Icon(painterResource(R.drawable.icon_play_vector), null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Start Workout", color = Colors.buttonText, style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold))
+                        if (isLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Colors.primary, strokeWidth = 2.dp)
+                        else {
+                            Icon(painterResource(R.drawable.icon_check_vector), null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(if (workout.workoutType == "rest") "Mark Done" else "Mark Done", style = AppTextStyles.small)
+                        }
                     }
                 }
+                
+                // Secondary action: Skip
                 OutlinedButton(
-                    onClick = onComplete,
-                    modifier = if (workout.workoutType == "rest") Modifier.fillMaxWidth() else Modifier.weight(1f),
+                    onClick = onSkip,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.textMuted),
                     enabled = !isLoading
                 ) {
-                    if (isLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Colors.primary, strokeWidth = 2.dp)
-                    else {
-                        Icon(painterResource(R.drawable.icon_check_vector), null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(if (workout.workoutType == "rest") "Mark Rest Done" else "Manual Complete", style = AppTextStyles.small)
-                    }
+                    Icon(painter = painterResource(R.drawable.icon_x_vector), null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Skip Session", style = AppTextStyles.small)
                 }
             }
         }
@@ -1222,4 +1249,45 @@ fun planStatusColor(status: String) = when (status) {
     "paused" -> Colors.warning
     "completed" -> Colors.primary
     else -> Colors.textMuted
+}
+
+/**
+ * Calculate the actual current week based on plan creation date and today.
+ * Weeks start on Monday.
+ */
+fun calculateActualCurrentWeek(planCreatedAtString: String?): Int {
+    if (planCreatedAtString == null) return 1
+    
+    try {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+        val planCreatedDate = sdf.parse(planCreatedAtString) ?: return 1
+        val today = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.time
+        
+        // Find the Monday of the week the plan was created
+        val planCalendar = java.util.Calendar.getInstance().apply {
+            time = planCreatedDate
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+            
+            // Adjust to Monday of that week (0=Sunday, 1=Monday... 6=Saturday)
+            val dayOfWeek = get(java.util.Calendar.DAY_OF_WEEK)
+            val daysToMonday = if (dayOfWeek == 1) 6 else dayOfWeek - 2  // Sunday is 1, Mon is 2
+            add(java.util.Calendar.DAY_OF_MONTH, -daysToMonday)
+        }
+        
+        val planWeekStart = planCalendar.time
+        val daysDiff = (today.time - planWeekStart.time) / (24 * 60 * 60 * 1000)
+        val weeksDiff = (daysDiff / 7).toInt()
+        
+        return maxOf(1, weeksDiff + 1)
+    } catch (e: Exception) {
+        return 1
+    }
 }

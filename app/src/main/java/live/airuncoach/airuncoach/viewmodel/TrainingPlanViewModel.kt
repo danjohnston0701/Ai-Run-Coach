@@ -57,8 +57,13 @@ class TrainingPlanViewModel @Inject constructor(
     val actionError: StateFlow<String?> = _actionError.asStateFlow()
 
     // Tab selection: 0=Active, 1=Completed, 2=Abandoned
+    // Tab selection: 0=Active, 1=Completed, 2=Abandoned
     private val _selectedTab = MutableStateFlow(0)
     val selectedTab: StateFlow<Int> = _selectedTab.asStateFlow()
+
+    // Pending adaptations count for current plan
+    private val _pendingAdaptationsCount = MutableStateFlow(0)
+    val pendingAdaptationsCount: StateFlow<Int> = _pendingAdaptationsCount.asStateFlow()
 
     init {
         loadUserPlans("active")
@@ -83,6 +88,18 @@ class TrainingPlanViewModel @Inject constructor(
             } catch (e: Exception) {
                 Log.e("TrainingPlanVM", "Error loading plans: ${e.message}", e)
                 _plansListState.value = PlansListState.Error(e.message ?: "Unknown error")
+            }
+        }
+    }
+
+    fun loadPendingAdaptationsCount(planId: String) {
+        viewModelScope.launch {
+            try {
+                val response = apiService.getPendingAdaptations(planId)
+                _pendingAdaptationsCount.value = response.adaptations.size
+            } catch (e: Exception) {
+                Log.w("TrainingPlanVM", "Failed to load pending adaptations count: ${e.message}")
+                _pendingAdaptationsCount.value = 0
             }
         }
     }
@@ -137,6 +154,9 @@ class TrainingPlanViewModel @Inject constructor(
                 Log.d("TrainingPlanVM", "✅ Today workout: ${today?.workout?.description ?: "None"}")
                 _planDetailState.value = PlanDetailState.Success(details, progress, today)
                 Log.d("TrainingPlanVM", "✅ Plan detail state updated")
+                
+                // Load pending adaptations count
+                loadPendingAdaptationsCount(planId)
             } catch (e: Exception) {
                 Log.e("TrainingPlanVM", "Unexpected error loading plan detail: ${e.message}", e)
                 _planDetailState.value = PlanDetailState.Error("Something went wrong. Please try again.")
