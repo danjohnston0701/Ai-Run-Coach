@@ -830,12 +830,15 @@ function buildMiniChart(x: number, y: number, w: number, h: number, data: number
 
 function buildNoDataChart(px: number, py: number, w: number, h: number, s: number, color: string, label: string): string {
   const rx = Math.round(12 * s);
-  const fontSize = Math.round(12 * s);
+  const labelFontSize = Math.round(11 * s);
+  const labelY = py + Math.round(20 * s);
+  const msgFontSize = Math.round(12 * s);
+  const msgY = py + Math.round(h / 2) + Math.round(msgFontSize * 0.4);
   return `
     <rect x="${px}" y="${py}" width="${w}" height="${h}" rx="${rx}" fill="${C.bgCard}" filter="url(#softShadow)"/>
     <rect x="${px}" y="${py}" width="${w}" height="${h}" rx="${rx}" fill="none" stroke="${C.border}" stroke-width="1"/>
-    <text x="${px + w / 2}" y="${py + 18}" font-family="${FONT}" font-size="${Math.round(11 * s)}" font-weight="600" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1">${esc(label)}</text>
-    <text x="${px + w / 2}" y="${py + h / 2 + fontSize * 0.4}" font-family="${FONT}" font-size="${fontSize}" fill="${color}" text-anchor="middle" opacity="0.6">No data for this run</text>
+    <text x="${px + w / 2}" y="${labelY}" font-family="${FONT}" font-size="${labelFontSize}" font-weight="600" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1">${esc(label)}</text>
+    <text x="${px + w / 2}" y="${msgY}" font-family="${FONT}" font-size="${msgFontSize}" fill="${color}" text-anchor="middle" opacity="0.55">No data for this run</text>
   `;
 }
 
@@ -845,8 +848,9 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
   const s = sticker.scale || 1;
   const sw = Math.round(200 * s);
   const sh = Math.round(100 * s);
+  const maxStickerH = Math.round(150 * s); // charts are 140*s tall
   const protectedY = canvasH - LOGO_ZONE_H;
-  if (py + sh > protectedY) return "";
+  if (py + maxStickerH > protectedY) return "";
   const fontSize = Math.round(30 * s);
   const labelSize = Math.round(11 * s);
   const rx = Math.round(16 * s);
@@ -876,23 +880,30 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
     case "chart-elevation": {
       const chartW = Math.round(280 * s);
       const chartH = Math.round(140 * s);
+      const cRx = Math.round(12 * s);
       // Try elevation from GPS track points first
       const rawGps = run.gpsTrack as any[];
       const gpsElevData = rawGps?.length >= 2
         ? rawGps.map((p: any) => p.elevation ?? p.alt ?? p.altitude ?? null).filter((v: any) => v !== null)
         : [];
       if (gpsElevData.length >= 2) {
-        return `<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, gpsElevData, C.green, "Elevation (m)")}</g>`;
+        return `
+          <rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="${C.bgCard}" filter="url(#softShadow)"/>
+          <rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="none" stroke="${C.border}" stroke-width="1"/>
+          <g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, gpsElevData, C.green, "Elevation (m)")}</g>`;
       }
       // Fallback: simulate from pace splits if available (uphill = slower pace)
       if (run.paceData && run.paceData.length >= 2) {
-        const totalElevGain = run.elevationGain || run.elevation || 0;
+        const totalElevGain = run.elevationGain || run.elevation || 30;
         const paceVals = run.paceData.map((p) => p.paceSeconds);
         const minPace = Math.min(...paceVals);
         const maxPace = Math.max(...paceVals);
         const range = maxPace - minPace || 1;
         const simElev = paceVals.map((p) => ((p - minPace) / range) * totalElevGain);
-        return `<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, simElev, C.green, "Elevation (m)")}</g>`;
+        return `
+          <rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="${C.bgCard}" filter="url(#softShadow)"/>
+          <rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="none" stroke="${C.border}" stroke-width="1"/>
+          <g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, simElev, C.green, "Elevation est.")}</g>`;
       }
       // No data placeholder
       return buildNoDataChart(px, py, chartW, chartH, s, C.green, "ELEVATION");
@@ -900,18 +911,26 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
     case "chart-pace": {
       const chartW = Math.round(280 * s);
       const chartH = Math.round(140 * s);
+      const cRx = Math.round(12 * s);
       if (run.paceData && run.paceData.length >= 2) {
         const paceValues = run.paceData.map((p) => p.paceSeconds);
-        return `<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, paceValues, C.orange, "Pace /km")}</g>`;
+        return `
+          <rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="${C.bgCard}" filter="url(#softShadow)"/>
+          <rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="none" stroke="${C.border}" stroke-width="1"/>
+          <g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, paceValues, C.orange, "Pace /km")}</g>`;
       }
       return buildNoDataChart(px, py, chartW, chartH, s, C.orange, "PACE");
     }
     case "chart-heartrate": {
       const chartW = Math.round(280 * s);
       const chartH = Math.round(140 * s);
+      const cRx = Math.round(12 * s);
       if (run.heartRateData && run.heartRateData.length >= 2) {
         const hrSampled = sampleData(run.heartRateData.map((h) => h.value), 30);
-        return `<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, hrSampled, C.red, "Heart Rate")}</g>`;
+        return `
+          <rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="${C.bgCard}" filter="url(#softShadow)"/>
+          <rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="none" stroke="${C.border}" stroke-width="1"/>
+          <g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, hrSampled, C.red, "Heart Rate")}</g>`;
       }
       return buildNoDataChart(px, py, chartW, chartH, s, C.red, "HEART RATE");
     }
@@ -1132,6 +1151,40 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
       ])
       .png({ quality: 95 })
       .toBuffer();
+  }
+
+  // Composite custom image stickers (user-placed photos/logos)
+  if (req.customStickers && req.customStickers.length > 0) {
+    const protectedY = h - LOGO_ZONE_H;
+    const composites: sharp.OverlayOptions[] = [];
+
+    for (const cs of req.customStickers) {
+      try {
+        let b64 = cs.imageBase64;
+        if (b64.startsWith("data:")) b64 = b64.split(",")[1] || b64;
+        const rawBuf = Buffer.from(b64, "base64");
+        const stickerW = Math.round(cs.width * cs.scale);
+        const stickerH = Math.round(cs.height * cs.scale);
+        const left = Math.max(0, Math.min(Math.round(cs.x * w), w - stickerW));
+        const top = Math.max(0, Math.min(Math.round(cs.y * h), protectedY - stickerH));
+        if (stickerW < 1 || stickerH < 1) continue;
+        const resized = await sharp(rawBuf)
+          .resize(stickerW, stickerH, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+          .ensureAlpha()
+          .png()
+          .toBuffer();
+        composites.push({ input: resized, top, left });
+      } catch (e: any) {
+        console.warn("Custom sticker composite skipped:", e.message);
+      }
+    }
+
+    if (composites.length > 0) {
+      svgBuffer = await sharp(svgBuffer)
+        .composite(composites)
+        .png({ quality: 95 })
+        .toBuffer();
+    }
   }
 
   return svgBuffer;
