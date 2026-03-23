@@ -213,7 +213,7 @@ fun WorkoutDetailScreen(
                         WorkoutStatCard(label = "Distance", value = "${it}km", icon = R.drawable.icon_target_vector, modifier = Modifier.weight(1f))
                     }
                     workout.targetPace?.let {
-                        WorkoutStatCard(label = "Target Pace", value = "$it/km", icon = R.drawable.icon_timer_vector, modifier = Modifier.weight(1f))
+                        WorkoutStatCard(label = "Target Pace", value = it, icon = R.drawable.icon_timer_vector, modifier = Modifier.weight(1f))
                     }
                     workout.intensity?.let {
                         // Convert "z1" to "Zone 1", "z2" to "Zone 2", etc.
