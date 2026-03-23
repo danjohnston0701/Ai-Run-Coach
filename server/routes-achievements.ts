@@ -6,7 +6,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { AuthenticatedRequest, authMiddleware } from './auth-middleware';
+import { AuthenticatedRequest, authMiddleware } from './auth';
 import achievementsService from './achievements-service';
 import { db } from './db';
 import { runs } from '@shared/schema';

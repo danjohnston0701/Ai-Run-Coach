@@ -8,7 +8,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { AuthenticatedRequest, authMiddleware } from './auth-middleware';
+import { AuthenticatedRequest, authMiddleware } from './auth';
 import myDataService from './my-data-service';
 
 const router = Router();
