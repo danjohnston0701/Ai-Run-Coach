@@ -104,7 +104,7 @@ export async function sendActivityNotification(
     await storage.createNotification({
       userId,
       title,
-      body,
+      message: body,   // schema field is 'message', not 'body'
       type: "garmin_activity",
       data: notificationData,
       read: false,
@@ -192,7 +192,7 @@ export async function sendBulkNotifications(
       await storage.createNotification({
         userId,
         title,
-        body,
+        message: body,  // schema field is 'message'
         type: "system",
         data,
         read: false,
@@ -265,7 +265,7 @@ export async function sendCoachingPlanReminder(
     await storage.createNotification({
       userId,
       title,
-      body,
+      message: body,  // schema field is 'message'
       type: "coaching_plan_reminder",
       data: notificationData,
       read: false,

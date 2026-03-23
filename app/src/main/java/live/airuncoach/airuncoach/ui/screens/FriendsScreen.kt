@@ -6,18 +6,24 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -73,34 +79,103 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
         ) {
             // Search Section
             item {
+                val keyboardController = LocalSoftwareKeyboardController.current
                 Spacer(modifier = Modifier.height(Spacing.md))
                 Text(
-                    text = "Search for Friends",
-                    style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+                    text = "Find Friends",
+                    style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
                     color = Colors.textPrimary
                 )
-                Spacer(modifier = Modifier.height(Spacing.sm))
-                
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        label = { Text("Search by name or email") },
-                        modifier = Modifier.weight(1f),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Colors.textPrimary,
-                            unfocusedTextColor = Colors.textPrimary,
-                            cursorColor = Colors.primary,
-                            focusedBorderColor = Colors.primary,
-                            unfocusedBorderColor = Colors.textMuted
-                        )
-                    )
-                    Spacer(modifier = Modifier.width(Spacing.sm))
-                    Button(
-                        onClick = { viewModel.searchUsers(searchQuery) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Search by name or email address",
+                    style = AppTextStyles.caption,
+                    color = Colors.textMuted
+                )
+                Spacer(modifier = Modifier.height(Spacing.md))
+
+                // Unified search bar
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Colors.backgroundSecondary,
+                    tonalElevation = 0.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = Spacing.md, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Search")
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            tint = if (searchQuery.isNotBlank()) Colors.primary else Colors.textMuted,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(Spacing.sm))
+                        TextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = {
+                                Text(
+                                    "Search by name or email",
+                                    style = AppTextStyles.body,
+                                    color = Colors.textMuted
+                                )
+                            },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            colors = TextFieldDefaults.colors(
+                                focusedTextColor = Colors.textPrimary,
+                                unfocusedTextColor = Colors.textPrimary,
+                                cursorColor = Colors.primary,
+                                focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                                unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                                focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                                unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                                disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            ),
+                            textStyle = AppTextStyles.body,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = {
+                                if (searchQuery.isNotBlank()) {
+                                    viewModel.searchUsers(searchQuery)
+                                    keyboardController?.hide()
+                                }
+                            })
+                        )
+                        if (searchQuery.isNotBlank()) {
+                            IconButton(
+                                onClick = { searchQuery = "" },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Clear",
+                                    tint = Colors.textMuted,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        FilledIconButton(
+                            onClick = {
+                                if (searchQuery.isNotBlank()) {
+                                    viewModel.searchUsers(searchQuery)
+                                    keyboardController?.hide()
+                                }
+                            },
+                            modifier = Modifier.size(36.dp),
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = if (searchQuery.isNotBlank()) Colors.primary else Colors.backgroundSecondary
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Search",
+                                tint = if (searchQuery.isNotBlank()) androidx.compose.ui.graphics.Color.White else Colors.textMuted,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }

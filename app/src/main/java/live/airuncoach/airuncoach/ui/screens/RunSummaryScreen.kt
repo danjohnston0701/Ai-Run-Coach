@@ -154,6 +154,10 @@ fun RunSummaryScreenFlagship(
     var showRenameDialog by remember { mutableStateOf(false) }
     var runNameDraft by remember { mutableStateOf("") }
     
+    // Delete confirmation dialog state
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var deleteError by remember { mutableStateOf<String?>(null) }
+
     // Goal celebration dialog state
     var showGoalCelebration by remember { mutableStateOf(false) }
     var achievedGoals by remember { mutableStateOf<List<live.airuncoach.airuncoach.domain.model.Goal>>(emptyList()) }
@@ -240,12 +244,7 @@ fun RunSummaryScreenFlagship(
                                 // share a “summary card” (text now; optional bitmap helper included below)
                                 viewModel.shareRunWithLink(context)
                             },
-                            onDelete = {
-                                viewModel.deleteRun(
-                                    onSuccess = { onNavigateBack() },
-                                    onError = { error -> Log.e("RunSummaryScreen", "Delete error: $error") }
-                                )
-                            },
+                            onDelete = { showDeleteConfirm = true },
                             onStruggleComment = viewModel::updateStrugglePointComment,
                             onStruggleDismiss = viewModel::dismissStrugglePoint,
                             onStruggleRestore = viewModel::restoreStrugglePoint,
@@ -259,48 +258,28 @@ fun RunSummaryScreenFlagship(
                             run = runSession!!,
                             lastRunForDelta = lastRunForDelta,
                             strugglePoints = strugglePoints,
-                            onDelete = {
-                                viewModel.deleteRun(
-                                    onSuccess = { onNavigateBack() },
-                                    onError = { error -> Log.e("RunSummaryScreen", "Delete error: $error") }
-                                )
-                            },
+                            onDelete = { showDeleteConfirm = true },
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it }
                         )
 
                         2 -> GraphsTabContent(
                             run = runSession!!,
-                            onDelete = {
-                                viewModel.deleteRun(
-                                    onSuccess = { onNavigateBack() },
-                                    onError = { error -> Log.e("RunSummaryScreen", "Delete error: $error") }
-                                )
-                            },
+                            onDelete = { showDeleteConfirm = true },
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it }
                         )
 
                         3 -> DataTabFlagship(
                             run = runSession!!,
-                            onDelete = {
-                                viewModel.deleteRun(
-                                    onSuccess = { onNavigateBack() },
-                                    onError = { error -> Log.e("RunSummaryScreen", "Delete error: $error") }
-                                )
-                            },
+                            onDelete = { showDeleteConfirm = true },
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it }
                         )
                         4 -> AchievementsTabFlagship(
                             run = runSession!!,
                             analysisState = analysisState,
-                            onDelete = {
-                                viewModel.deleteRun(
-                                    onSuccess = { onNavigateBack() },
-                                    onError = { error -> Log.e("RunSummaryScreen", "Delete error: $error") }
-                                )
-                            },
+                            onDelete = { showDeleteConfirm = true },
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it }
                         )
@@ -335,6 +314,65 @@ fun RunSummaryScreenFlagship(
                             showGoalCelebration = false
                         },
                         onDismiss = { showGoalCelebration = false }
+                    )
+                }
+
+                // Delete confirmation dialog
+                if (showDeleteConfirm) {
+                    AlertDialog(
+                        onDismissRequest = { showDeleteConfirm = false },
+                        containerColor = Colors.backgroundSecondary,
+                        title = {
+                            Text(
+                                "Delete Run?",
+                                style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+                                color = Colors.textPrimary
+                            )
+                        },
+                        text = {
+                            Text(
+                                "This will permanently delete this run and all associated data. This cannot be undone.",
+                                style = AppTextStyles.body,
+                                color = Colors.textSecondary
+                            )
+                        },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    showDeleteConfirm = false
+                                    viewModel.deleteRun(
+                                        onSuccess = { onNavigateBack() },
+                                        onError = { error ->
+                                            deleteError = error
+                                            Log.e("RunSummaryScreen", "Delete error: $error")
+                                        }
+                                    )
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Colors.error)
+                            ) {
+                                Text("Delete", color = androidx.compose.ui.graphics.Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        dismissButton = {
+                            OutlinedButton(onClick = { showDeleteConfirm = false }) {
+                                Text("Cancel", color = Colors.textSecondary)
+                            }
+                        }
+                    )
+                }
+
+                // Delete error snackbar
+                if (deleteError != null) {
+                    AlertDialog(
+                        onDismissRequest = { deleteError = null },
+                        containerColor = Colors.backgroundSecondary,
+                        title = { Text("Delete Failed", color = Colors.error, style = AppTextStyles.h3) },
+                        text = { Text(deleteError ?: "Unknown error", color = Colors.textSecondary, style = AppTextStyles.body) },
+                        confirmButton = {
+                            Button(onClick = { deleteError = null }, colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)) {
+                                Text("OK")
+                            }
+                        }
                     )
                 }
 
