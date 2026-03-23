@@ -28,6 +28,7 @@ import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.MyDataViewModel
 import live.airuncoach.airuncoach.viewmodel.TimePeriod
+import live.airuncoach.airuncoach.viewmodel.TrendDataPoint
 import java.util.Locale
 
 /**
@@ -211,78 +212,88 @@ private fun SectionHeader(title: String) {
     )
 }
 
+// The 5 standard race categories with their target distances
+private val PB_CATEGORIES = listOf(
+    Triple("1K",           "1K",            1.0),
+    Triple("5K",           "5K",            5.0),
+    Triple("10K",          "10K",           10.0),
+    Triple("Half Marathon","Half Marathon",  21.1),
+    Triple("Marathon",     "Marathon",       42.2)
+)
+
 @Composable
 private fun PersonalRecordsSection(
     personalBests: List<live.airuncoach.airuncoach.viewmodel.PersonalBest>
 ) {
-    if (personalBests.isEmpty()) {
-        EmptyStateCard(message = "No personal records yet. Keep running!")
-    } else {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(Colors.backgroundSecondary)
-                .padding(vertical = Spacing.md),
-            verticalArrangement = Arrangement.spacedBy(0.dp)
-        ) {
-            personalBests.forEachIndexed { index, pb ->
-                PersonalBestCard(pb = pb)
-                if (index < personalBests.size - 1) {
-                    HorizontalDivider(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = Spacing.md),
-                        color = Colors.backgroundTertiary,
-                        thickness = 1.dp
-                    )
-                }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Colors.backgroundSecondary)
+            .padding(vertical = Spacing.md),
+        verticalArrangement = Arrangement.spacedBy(0.dp)
+    ) {
+        PB_CATEGORIES.forEachIndexed { index, (_, label, _) ->
+            val pb = personalBests.find { it.category == label }
+            PersonalBestRow(label = label, pb = pb)
+            if (index < PB_CATEGORIES.size - 1) {
+                HorizontalDivider(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.md),
+                    color = Colors.backgroundTertiary,
+                    thickness = 1.dp
+                )
             }
         }
     }
 }
 
 @Composable
-private fun PersonalBestCard(
-    pb: live.airuncoach.airuncoach.viewmodel.PersonalBest
+private fun PersonalBestRow(
+    label: String,
+    pb: live.airuncoach.airuncoach.viewmodel.PersonalBest?
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(Spacing.md),
+            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(
+        // Left: category label
+        Text(
+            text = label,
+            style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+            color = Colors.textPrimary,
             modifier = Modifier.weight(1f)
-        ) {
-            Text(
-                text = pb.category,
-                style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
-                color = Colors.textPrimary
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = pb.date,
-                style = AppTextStyles.caption,
-                color = Colors.textMuted
-            )
-        }
+        )
 
-        Column(
-            horizontalAlignment = Alignment.End
-        ) {
+        // Right: best time + date OR "Not set"
+        if (pb != null) {
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = pb.pace,
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.primary,
+                    fontSize = 15.sp
+                )
+                if (pb.date.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = pb.date,
+                        style = AppTextStyles.caption,
+                        color = Colors.textMuted,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+        } else {
             Text(
-                text = pb.pace,
-                style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
-                color = Colors.primary,
-                fontSize = 16.sp
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = String.format(Locale.getDefault(), "%.1f km", pb.distance),
-                style = AppTextStyles.caption,
-                color = Colors.textMuted
+                text = "Not set",
+                style = AppTextStyles.body,
+                color = Colors.textMuted,
+                fontSize = 14.sp
             )
         }
     }
@@ -424,105 +435,149 @@ private fun PerformanceTrendsSection(
     val elevationTrend by viewModel.elevationTrend.collectAsState()
     val cadenceTrend by viewModel.cadenceTrend.collectAsState()
 
+    val allEmpty = pacesTrend.isEmpty() && hrTrend.isEmpty() &&
+            elevationTrend.isEmpty() && cadenceTrend.isEmpty()
+
+    if (allEmpty) {
+        EmptyStateCard(message = "No run data for this period.\nComplete a run to see your trends!")
+        return
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(Spacing.md)
+    ) {
+        if (pacesTrend.isNotEmpty()) {
+            TrendBarChart(title = "⚡ Avg Pace (min/km)", points = pacesTrend, unit = "/km", invertColors = true)
+        }
+        if (hrTrend.isNotEmpty()) {
+            TrendBarChart(title = "❤️ Avg Heart Rate (bpm)", points = hrTrend, unit = " bpm")
+        }
+        if (elevationTrend.isNotEmpty()) {
+            TrendBarChart(title = "⛰️ Elevation Gain (m)", points = elevationTrend, unit = " m")
+        }
+        if (cadenceTrend.isNotEmpty()) {
+            TrendBarChart(title = "👟 Avg Cadence (spm)", points = cadenceTrend, unit = " spm")
+        }
+    }
+}
+
+/**
+ * A native Compose bar chart showing run-by-run trend data.
+ * invertColors = true means lower value is better (pace: lower = faster = green).
+ */
+@Composable
+private fun TrendBarChart(
+    title: String,
+    points: List<TrendDataPoint>,
+    unit: String,
+    invertColors: Boolean = false
+) {
+    // Show at most last 10 runs for readability
+    val display = if (points.size > 10) points.takeLast(10) else points
+    val maxVal = display.maxOf { it.value }
+    val minVal = display.minOf { it.value }
+    val range = if (maxVal - minVal < 0.001) 1.0 else maxVal - minVal
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(Colors.backgroundSecondary)
-            .padding(Spacing.md),
-        verticalArrangement = Arrangement.spacedBy(Spacing.lg)
+            .padding(Spacing.md)
     ) {
-        if (pacesTrend.isNotEmpty()) {
-            TrendCard(
-                title = "Pace Trend",
-                emoji = "⚡",
-                trend = pacesTrend
-            )
+        Text(
+            text = title,
+            style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+            color = Colors.textPrimary,
+            fontSize = 13.sp
+        )
+        Spacer(modifier = Modifier.height(Spacing.sm))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(80.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            display.forEach { point ->
+                val fraction = ((point.value - minVal) / range).coerceIn(0.1, 1.0)
+                // For pace: lower is better → high bar = slow = red; low bar = fast = green
+                val barColor = if (invertColors) {
+                    lerp(Color(0xFF4CAF50), Color(0xFFF44336), fraction.toFloat())
+                } else {
+                    lerp(Color(0xFFF44336), Color(0xFF4CAF50), fraction.toFloat())
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(fraction.toFloat())
+                        .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                        .background(barColor)
+                )
+            }
         }
 
-        if (hrTrend.isNotEmpty()) {
-            TrendCard(
-                title = "Heart Rate Trend",
-                emoji = "❤️",
-                trend = hrTrend
-            )
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // X-axis: abbreviated dates
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            display.forEach { point ->
+                val shortDate = point.date.takeLast(5) // "MM-DD"
+                Text(
+                    text = shortDate,
+                    modifier = Modifier.weight(1f),
+                    style = AppTextStyles.caption,
+                    color = Colors.textMuted,
+                    fontSize = 8.sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1
+                )
+            }
         }
 
-        if (elevationTrend.isNotEmpty()) {
-            TrendCard(
-                title = "Elevation Trend",
-                emoji = "⛰️",
-                trend = elevationTrend
-            )
-        }
+        Spacer(modifier = Modifier.height(6.dp))
 
-        if (cadenceTrend.isNotEmpty()) {
-            TrendCard(
-                title = "Cadence Trend",
-                emoji = "👟",
-                trend = cadenceTrend
+        // Summary: min / max values
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "Min: ${String.format(Locale.getDefault(), "%.1f", minVal)}$unit",
+                style = AppTextStyles.caption,
+                color = Colors.textMuted,
+                fontSize = 10.sp
+            )
+            Text(
+                text = "${display.size} runs",
+                style = AppTextStyles.caption,
+                color = Colors.textMuted,
+                fontSize = 10.sp
+            )
+            Text(
+                text = "Max: ${String.format(Locale.getDefault(), "%.1f", maxVal)}$unit",
+                style = AppTextStyles.caption,
+                color = Colors.textMuted,
+                fontSize = 10.sp
             )
         }
     }
 }
 
-@Composable
-private fun TrendCard(
-    title: String,
-    emoji: String,
-    trend: List<live.airuncoach.airuncoach.viewmodel.PeriodData>
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text(
-            text = "$emoji $title",
-            style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
-            color = Colors.textPrimary
-        )
-        Spacer(modifier = Modifier.height(Spacing.sm))
-        
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-        ) {
-            trend.forEach { period ->
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Colors.backgroundTertiary)
-                        .padding(Spacing.sm),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = period.trend,
-                        style = AppTextStyles.h3,
-                        color = when (period.trend) {
-                            "↑" -> Color(0xFF4CAF50) // Green - improvement
-                            "↓" -> Color(0xFFF44336) // Red - decline
-                            else -> Colors.primary
-                        },
-                        fontSize = 18.sp
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = String.format(Locale.getDefault(), "%.1f", period.value),
-                        style = AppTextStyles.caption,
-                        color = Colors.textPrimary,
-                        fontSize = 11.sp
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = period.period.label,
-                        style = AppTextStyles.caption,
-                        color = Colors.textMuted,
-                        fontSize = 9.sp
-                    )
-                }
-            }
-        }
-    }
+/** Linear interpolation between two colors */
+private fun lerp(a: Color, b: Color, t: Float): Color {
+    val tc = t.coerceIn(0f, 1f)
+    return Color(
+        red   = a.red   + (b.red   - a.red)   * tc,
+        green = a.green + (b.green - a.green) * tc,
+        blue  = a.blue  + (b.blue  - a.blue)  * tc,
+        alpha = 1f
+    )
 }
 
 @Composable

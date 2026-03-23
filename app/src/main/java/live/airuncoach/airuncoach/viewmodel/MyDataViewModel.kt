@@ -55,12 +55,20 @@ data class PeriodStatistics(
 )
 
 /**
- * Overall performance trend
+ * Overall performance trend (legacy, kept for compatibility)
  */
 data class PeriodData(
     val period: TimePeriod,
     val value: Double,
     val trend: String               // "↑", "↓", "→" for up, down, stable
+)
+
+/**
+ * A single data point for a run-by-run trend graph
+ */
+data class TrendDataPoint(
+    val date: String,   // e.g. "2024-03-15"
+    val value: Double   // metric value for that run
 )
 
 @HiltViewModel
@@ -88,18 +96,18 @@ class MyDataViewModel @Inject constructor(
     private val _currentPeriodStats = MutableStateFlow<PeriodStatistics?>(null)
     val currentPeriodStats: StateFlow<PeriodStatistics?> = _currentPeriodStats.asStateFlow()
     
-    // Trends
-    private val _pacesTrend = MutableStateFlow<List<PeriodData>>(emptyList())
-    val pacesTrend: StateFlow<List<PeriodData>> = _pacesTrend.asStateFlow()
+    // Trends (run-by-run data points for graphing)
+    private val _pacesTrend = MutableStateFlow<List<TrendDataPoint>>(emptyList())
+    val pacesTrend: StateFlow<List<TrendDataPoint>> = _pacesTrend.asStateFlow()
     
-    private val _hrTrend = MutableStateFlow<List<PeriodData>>(emptyList())
-    val hrTrend: StateFlow<List<PeriodData>> = _hrTrend.asStateFlow()
+    private val _hrTrend = MutableStateFlow<List<TrendDataPoint>>(emptyList())
+    val hrTrend: StateFlow<List<TrendDataPoint>> = _hrTrend.asStateFlow()
     
-    private val _elevationTrend = MutableStateFlow<List<PeriodData>>(emptyList())
-    val elevationTrend: StateFlow<List<PeriodData>> = _elevationTrend.asStateFlow()
+    private val _elevationTrend = MutableStateFlow<List<TrendDataPoint>>(emptyList())
+    val elevationTrend: StateFlow<List<TrendDataPoint>> = _elevationTrend.asStateFlow()
     
-    private val _cadenceTrend = MutableStateFlow<List<PeriodData>>(emptyList())
-    val cadenceTrend: StateFlow<List<PeriodData>> = _cadenceTrend.asStateFlow()
+    private val _cadenceTrend = MutableStateFlow<List<TrendDataPoint>>(emptyList())
+    val cadenceTrend: StateFlow<List<TrendDataPoint>> = _cadenceTrend.asStateFlow()
     
     // All-time stats
     private val _allTimeStats = MutableStateFlow<Map<String, Any>>(emptyMap())
@@ -257,51 +265,22 @@ class MyDataViewModel @Inject constructor(
             if (response.isSuccessful) {
                 val data = response.body()?.data ?: emptyMap()
                 
-                // Parse run-by-run trend data for graphs
-                val paceTrendData = (data["paceTrend"] as? List<*>)?.mapNotNull { item ->
+                // Helper to parse a list of {date, value} into TrendDataPoint
+                fun parsePoints(key: String) = (data[key] as? List<*>)?.mapNotNull { item ->
                     val map = item as? Map<*, *> ?: return@mapNotNull null
-                    PeriodData(
-                        period = period, // Use selected period for all points
-                        value = (map["value"] as? Number)?.toDouble() ?: 0.0,
-                        trend = map["date"] as? String ?: "" // Store date for x-axis
+                    val value = (map["value"] as? Number)?.toDouble() ?: return@mapNotNull null
+                    TrendDataPoint(
+                        date = map["date"] as? String ?: "",
+                        value = value
                     )
                 } ?: emptyList()
-                _pacesTrend.value = paceTrendData
+
+                _pacesTrend.value = parsePoints("paceTrend")
+                _hrTrend.value = parsePoints("hrTrend")
+                _elevationTrend.value = parsePoints("elevationTrend")
+                _cadenceTrend.value = parsePoints("cadenceTrend")
                 
-                // Parse HR trend
-                val hrTrendData = (data["hrTrend"] as? List<*>)?.mapNotNull { item ->
-                    val map = item as? Map<*, *> ?: return@mapNotNull null
-                    PeriodData(
-                        period = period,
-                        value = (map["value"] as? Number)?.toDouble() ?: 0.0,
-                        trend = map["date"] as? String ?: ""
-                    )
-                } ?: emptyList()
-                _hrTrend.value = hrTrendData
-                
-                // Parse elevation trend
-                val elevTrendData = (data["elevationTrend"] as? List<*>)?.mapNotNull { item ->
-                    val map = item as? Map<*, *> ?: return@mapNotNull null
-                    PeriodData(
-                        period = period,
-                        value = (map["value"] as? Number)?.toDouble() ?: 0.0,
-                        trend = map["date"] as? String ?: ""
-                    )
-                } ?: emptyList()
-                _elevationTrend.value = elevTrendData
-                
-                // Parse cadence trend
-                val cadenceTrendData = (data["cadenceTrend"] as? List<*>)?.mapNotNull { item ->
-                    val map = item as? Map<*, *> ?: return@mapNotNull null
-                    PeriodData(
-                        period = period,
-                        value = (map["value"] as? Number)?.toDouble() ?: 0.0,
-                        trend = map["date"] as? String ?: ""
-                    )
-                } ?: emptyList()
-                _cadenceTrend.value = cadenceTrendData
-                
-                Log.d(tag, "Loaded detailed trends for ${period.label}: pace=${paceTrendData.size} runs")
+                Log.d(tag, "Loaded detailed trends for ${period.label}: pace=${_pacesTrend.value.size} runs")
             } else {
                 Log.w(tag, "Detailed trends response not successful: ${response.code()}")
             }
