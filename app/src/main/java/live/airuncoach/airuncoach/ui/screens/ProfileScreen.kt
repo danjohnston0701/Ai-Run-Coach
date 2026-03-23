@@ -20,6 +20,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -72,6 +73,10 @@ fun ProfileScreen(
     val user by viewModel.user.collectAsState()
     val friendCount by viewModel.friendCount.collectAsState()
     val profilePicCacheBuster by viewModel.profilePicCacheBuster.collectAsState()
+    
+    // Tab state for Profile and My Data
+    var selectedTab by remember { mutableIntStateOf(0) }
+    val tabs = listOf("Profile", "My Data")
     
     var showImagePickerDialog by remember { mutableStateOf(false) }
     
@@ -182,106 +187,134 @@ fun ProfileScreen(
         )
     }
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Colors.backgroundRoot)
-            .padding(vertical = Spacing.lg),
-        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        item { user?.let { 
-            ProfileHeader(
-                user = it, 
-                cacheBuster = profilePicCacheBuster,
-                onImageClick = { showImagePickerDialog = true }
-            ) 
-        }}
-        item { Spacer(modifier = Modifier.height(Spacing.xl)) }
-
-        item { SectionTitle(title = "Social") }
-        item {
-            SettingsSection {
-                SettingsItem(icon = R.drawable.icon_people_vector, text = "Friends", value = "$friendCount ${if (friendCount == 1) "friend" else "friends"}", onClick = onNavigateToFriends)
-                SettingsItem(icon = R.drawable.icon_people_vector, text = "Group Runs", onClick = onNavigateToGroupRuns)
+        // Tab Row
+        TabRow(
+            selectedTabIndex = selectedTab,
+            modifier = Modifier.fillMaxWidth(),
+            containerColor = Colors.backgroundRoot,
+            divider = {
+                HorizontalDivider(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Colors.backgroundTertiary,
+                    thickness = 1.dp
+                )
             }
-        }
-        item { Spacer(modifier = Modifier.height(Spacing.lg)) }
-
-        item { SectionTitle(title = "Ai Coach") }
-        item {
-            SettingsSection {
-                SettingsItem(icon = R.drawable.icon_ai_vector, text = "Ai Coach Settings", onClick = onNavigateToCoachSettings)
-                SettingsItem(icon = R.drawable.icon_calendar_vector, text = "Coaching Programme", onClick = onNavigateToCoachingProgramme)
-            }
-        }
-        item { Spacer(modifier = Modifier.height(Spacing.lg)) }
-
-        item { SectionTitle(title = "Profile") }
-        item {
-            SettingsSection {
-                SettingsItem(icon = R.drawable.icon_profile_vector, text = "Personal Details", onClick = onNavigateToPersonalDetails)
-                SettingsItem(icon = R.drawable.icon_chart_vector, text = "Fitness Level", onClick = onNavigateToFitnessLevel)
-                SettingsItem(icon = R.drawable.icon_target_vector, text = "Goals", onClick = onNavigateToGoals)
-            }
-        }
-        item { Spacer(modifier = Modifier.height(Spacing.lg)) }
-
-        item { SectionTitle(title = "Settings") }
-        item {
-            SettingsSection {
-                SettingsItem(icon = R.drawable.icon_watch_vector, text = "Connected Devices", onClick = onNavigateToConnectedDevices)
-                SettingsItem(icon = R.drawable.icon_info_vector, text = "Push Notifications", onClick = onNavigateToNotifications)
-                SettingsItem(icon = R.drawable.icon_crown_vector, text = "Subscription", value = user?.subscriptionTier ?: "Free", onClick = onNavigateToSubscription)
+        ) {
+            tabs.forEachIndexed { index, title ->
+                Tab(
+                    selected = selectedTab == index,
+                    onClick = { selectedTab = index },
+                    text = {
+                        Text(
+                            text = title,
+                            style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                            color = if (selectedTab == index) Colors.primary else Colors.textMuted
+                        )
+                    }
+                )
             }
         }
 
-        item { Spacer(modifier = Modifier.height(Spacing.xl)) }
-
-        item {
-            Button(
-                onClick = { 
-                    viewModel.logout()
-                    onNavigateToLogin()
-                },
+        // Tab Content
+        if (selectedTab == 0) {
+            // Profile Tab
+            LazyColumn(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Spacing.lg)
-                    .height(50.dp),
-                shape = RoundedCornerShape(BorderRadius.lg),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Colors.backgroundSecondary,
-                    contentColor = Colors.textPrimary
-                )
+                    .fillMaxSize()
+                    .padding(vertical = Spacing.lg),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("Sign Out", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold))
+                item { user?.let { 
+                    ProfileHeader(
+                        user = it, 
+                        cacheBuster = profilePicCacheBuster,
+                        onImageClick = { showImagePickerDialog = true }
+                    ) 
+                }}
+                item { Spacer(modifier = Modifier.height(Spacing.xl)) }
+
+                item { SectionTitle(title = "Social") }
+                item {
+                    SettingsSection {
+                        SettingsItem(icon = R.drawable.icon_people_vector, text = "Friends", value = "$friendCount ${if (friendCount == 1) "friend" else "friends"}", onClick = onNavigateToFriends)
+                        SettingsItem(icon = R.drawable.icon_people_vector, text = "Group Runs", onClick = onNavigateToGroupRuns)
+                    }
+                }
+                item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+
+                item { SectionTitle(title = "Ai Coach") }
+                item {
+                    SettingsSection {
+                        SettingsItem(icon = R.drawable.icon_ai_vector, text = "Ai Coach Settings", onClick = onNavigateToCoachSettings)
+                        SettingsItem(icon = R.drawable.icon_calendar_vector, text = "Coaching Programme", onClick = onNavigateToCoachingProgramme)
+                    }
+                }
+                item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+
+                item { SectionTitle(title = "Profile") }
+                item {
+                    SettingsSection {
+                        SettingsItem(icon = R.drawable.icon_profile_vector, text = "Personal Details", onClick = onNavigateToPersonalDetails)
+                        SettingsItem(icon = R.drawable.icon_chart_vector, text = "Fitness Level", onClick = onNavigateToFitnessLevel)
+                        SettingsItem(icon = R.drawable.icon_target_vector, text = "Goals", onClick = onNavigateToGoals)
+                    }
+                }
+                item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+
+                item { SectionTitle(title = "Settings") }
+                item {
+                    SettingsSection {
+                        SettingsItem(icon = R.drawable.icon_watch_vector, text = "Connected Devices", onClick = onNavigateToConnectedDevices)
+                        SettingsItem(icon = R.drawable.icon_info_vector, text = "Push Notifications", onClick = onNavigateToNotifications)
+                        SettingsItem(icon = R.drawable.icon_crown_vector, text = "Subscription", value = user?.subscriptionTier ?: "Free", onClick = onNavigateToSubscription)
+                    }
+                }
+
+                item { Spacer(modifier = Modifier.height(Spacing.xl)) }
+
+                item {
+                    Button(
+                        onClick = { 
+                            viewModel.logout()
+                            onNavigateToLogin()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Spacing.lg)
+                            .height(50.dp),
+                        shape = RoundedCornerShape(BorderRadius.lg),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Colors.backgroundSecondary,
+                            contentColor = Colors.textPrimary
+                        )
+                    ) {
+                        Text("Sign Out", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold))
+                    }
+                }
+                item { Spacer(modifier = Modifier.height(Spacing.md)) }
+                item {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "AI Run Coach v1.0.0",
+                            style = AppTextStyles.caption,
+                            color = Colors.textMuted
+                        )
+                    }
+                }
+                item { Spacer(modifier = Modifier.height(Spacing.xxl)) }
             }
+        } else {
+            // My Data Tab
+            MyDataScreen()
         }
-        item { Spacer(modifier = Modifier.height(Spacing.md)) }
-        item {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = "AI Run Coach v1.0.0",
-                    style = AppTextStyles.caption,
-                    color = Colors.textMuted
-                )
-                /*
-               // "Powered by Garmin" attribution (required for Garmin brand guidelines)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Health data powered by Garmin",
-                    style = AppTextStyles.caption.copy(fontSize = 11.sp),
-                    color = Colors.textMuted.copy(alpha = 0.8f)
-                )
-
-                 */
-
-
-            }
-        }
-        item { Spacer(modifier = Modifier.height(Spacing.xxl)) }
     }
 }
 

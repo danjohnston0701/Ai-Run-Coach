@@ -144,10 +144,29 @@ class MyDataViewModel @Inject constructor(
                 val allTimeTask = loadAllTimeStats()
                 
                 // Wait for all to complete
-                pbTask.join()
-                statsTask.join()
-                trendsTask.join()
-                allTimeTask.join()
+                try {
+                    pbTask.join()
+                } catch (e: Exception) {
+                    Log.e(tag, "Error joining pbTask", e)
+                }
+                
+                try {
+                    statsTask.join()
+                } catch (e: Exception) {
+                    Log.e(tag, "Error joining statsTask", e)
+                }
+                
+                try {
+                    trendsTask.join()
+                } catch (e: Exception) {
+                    Log.e(tag, "Error joining trendsTask", e)
+                }
+                
+                try {
+                    allTimeTask.join()
+                } catch (e: Exception) {
+                    Log.e(tag, "Error joining allTimeTask", e)
+                }
                 
                 lastLoadTime = System.currentTimeMillis()
                 cacheValid = true
