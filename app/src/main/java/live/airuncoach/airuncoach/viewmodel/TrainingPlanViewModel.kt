@@ -92,29 +92,43 @@ class TrainingPlanViewModel @Inject constructor(
             Log.d("TrainingPlanVM", "📋 Loading plan detail for planId=$planId...")
             _planDetailState.value = PlanDetailState.Loading
             try {
-                // Fetch details and progress in parallel to reduce total wait time
-                val detailsDeferred = async { 
+                // Wrap each async block in its own try-catch to prevent structured
+                // concurrency from propagating the exception past the outer try-catch.
+                val detailsDeferred = async {
                     Log.d("TrainingPlanVM", "📋 Fetching plan details...")
-                    apiService.getTrainingPlanDetails(planId) 
+                    try {
+                        apiService.getTrainingPlanDetails(planId)
+                    } catch (e: Exception) {
+                        Log.e("TrainingPlanVM", "Details fetch failed: ${e.message}")
+                        throw e  // rethrow so await() delivers it to the outer catch
+                    }
                 }
                 val progressDeferred = async {
                     // Give progress a 10s window — it can be slow on new plans.
                     // If it times out or errors we synthesize it from the details.
                     Log.d("TrainingPlanVM", "📊 Fetching plan progress...")
                     withTimeoutOrNull(10_000L) {
-                        try { 
+                        try {
                             val prog = apiService.getTrainingPlanProgress(planId)
                             Log.d("TrainingPlanVM", "📊 Progress fetched: ${prog.currentWeek}/${prog.totalWeeks} weeks")
                             prog
-                        }
-                        catch (e: Exception) {
+                        } catch (e: Exception) {
                             Log.w("TrainingPlanVM", "Progress fetch failed (${e.message}), will synthesize")
                             null
                         }
                     }
                 }
 
-                val details = detailsDeferred.await()
+                // Await details first — if this throws, cancel progress too
+                val details = try {
+                    detailsDeferred.await()
+                } catch (e: Exception) {
+                    progressDeferred.cancel()
+                    Log.e("TrainingPlanVM", "Error loading plan detail: ${e.message}", e)
+                    _planDetailState.value = PlanDetailState.Error("Unable to load plan. Please try again.")
+                    return@launch
+                }
+
                 Log.d("TrainingPlanVM", "✅ Details loaded: ${details.weeks.size} weeks, ${details.weeks.sumOf { it.workouts.size }} workouts")
                 val progress = progressDeferred.await() ?: synthesizeProgress(details)
                 Log.d("TrainingPlanVM", "✅ Progress: ${progress.completedWorkouts}/${progress.totalWorkouts} workouts done")
@@ -124,8 +138,8 @@ class TrainingPlanViewModel @Inject constructor(
                 _planDetailState.value = PlanDetailState.Success(details, progress, today)
                 Log.d("TrainingPlanVM", "✅ Plan detail state updated")
             } catch (e: Exception) {
-                Log.e("TrainingPlanVM", "Error loading plan detail: ${e.message}", e)
-                _planDetailState.value = PlanDetailState.Error(e.message ?: "Failed to load plan")
+                Log.e("TrainingPlanVM", "Unexpected error loading plan detail: ${e.message}", e)
+                _planDetailState.value = PlanDetailState.Error("Something went wrong. Please try again.")
             }
         }
     }
