@@ -19,7 +19,7 @@ const router = Router();
  */
 router.get('/personal-bests', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
@@ -48,7 +48,7 @@ router.get('/personal-bests', authMiddleware, async (req: AuthenticatedRequest, 
  */
 router.get('/statistics', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
@@ -77,7 +77,7 @@ router.get('/statistics', authMiddleware, async (req: AuthenticatedRequest, res:
  */
 router.get('/trends', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
@@ -105,7 +105,7 @@ router.get('/trends', authMiddleware, async (req: AuthenticatedRequest, res: Res
  */
 router.get('/detailed-trends', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
@@ -134,7 +134,7 @@ router.get('/detailed-trends', authMiddleware, async (req: AuthenticatedRequest,
  */
 router.get('/all-time-stats', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }

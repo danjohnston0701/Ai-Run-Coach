@@ -10656,7 +10656,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   app.get("/api/health/today", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { getTodaySnapshot } = await import('./health-insights-service');
-      const snapshot = await getTodaySnapshot(req.user.id);
+      const snapshot = await getTodaySnapshot(req.user.userId);
       res.json(snapshot);
     } catch (error: any) {
       console.error("Get today snapshot error:", error);
@@ -10669,7 +10669,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     try {
       const { getSleepDetails } = await import('./health-insights-service');
       const date = (req.query.date as string) || new Date().toISOString().split('T')[0];
-      const details = await getSleepDetails(req.user.id, date);
+      const details = await getSleepDetails(req.user.userId, date);
       if (!details) {
         return res.status(404).json({ error: "No sleep data for this date" });
       }
@@ -10684,7 +10684,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   app.get("/api/health/recovery", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { getRecoveryStatus } = await import('./health-insights-service');
-      const status = await getRecoveryStatus(req.user.id);
+      const status = await getRecoveryStatus(req.user.userId);
       res.json(status);
     } catch (error: any) {
       console.error("Get recovery status error:", error);
@@ -10697,7 +10697,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     try {
       const { getDailyWellness } = await import('./health-insights-service');
       const date = (req.query.date as string) || new Date().toISOString().split('T')[0];
-      const wellness = await getDailyWellness(req.user.id, date);
+      const wellness = await getDailyWellness(req.user.userId, date);
       if (!wellness) {
         return res.status(404).json({ error: "No wellness data for this date" });
       }
@@ -10712,7 +10712,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   app.get("/api/health/metrics", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { getHealthMetrics } = await import('./health-insights-service');
-      const metrics = await getHealthMetrics(req.user.id);
+      const metrics = await getHealthMetrics(req.user.userId);
       res.json(metrics);
     } catch (error: any) {
       console.error("Get health metrics error:", error);
@@ -10724,7 +10724,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   app.get("/api/health/insights", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { getHealthInsights } = await import('./health-insights-service');
-      const insights = await getHealthInsights(req.user.id);
+      const insights = await getHealthInsights(req.user.userId);
       res.json(insights);
     } catch (error: any) {
       console.error("Get health insights error:", error);
@@ -10737,7 +10737,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     try {
       const { getTrendData } = await import('./health-insights-service');
       const days = parseInt((req.query.days as string) || '7', 10);
-      const trends = await getTrendData(req.user.id, days);
+      const trends = await getTrendData(req.user.userId, days);
       res.json(trends);
     } catch (error: any) {
       console.error("Get trend data error:", error);

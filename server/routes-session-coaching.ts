@@ -80,7 +80,7 @@ export function registerSessionCoachingRoutes(app: Express) {
     async (req: AuthenticatedRequest, res: Response) => {
       try {
         const { workoutId } = req.params;
-        const userId = req.user?.id;
+        const userId = req.user?.userId;
 
         if (!userId) {
           return res.status(401).json({ error: "Unauthorized" });

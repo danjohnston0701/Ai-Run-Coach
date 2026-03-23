@@ -20,7 +20,7 @@ const router = Router();
  */
 router.post('/runs/:runId/achievements', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     const runId = req.params.runId;
 
     if (!userId) {
@@ -72,7 +72,7 @@ router.post('/runs/:runId/achievements', authMiddleware, async (req: Authenticat
  */
 router.get('/users/:userId/achievements', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const tokenUserId = req.user?.id;
+    const tokenUserId = req.user?.userId;
     const requestedUserId = req.params.userId;
 
     // Users can only view their own achievements or public achievements
