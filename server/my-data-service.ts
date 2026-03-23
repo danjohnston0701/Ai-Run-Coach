@@ -14,12 +14,13 @@ import { sql } from 'drizzle-orm';
  * Calculate personal bests for common distances
  */
 export async function getPersonalBests(userId: string) {
+  // 50m under, 100m over tolerance — matches achievements-service.ts
   const distances = [
-    { min: 0.9, max: 1.1, label: '1K', target: 1.0 },
-    { min: 4.9, max: 5.1, label: '5K', target: 5.0 },
-    { min: 9.9, max: 10.1, label: '10K', target: 10.0 },
-    { min: 20.9, max: 21.1, label: 'Half Marathon', target: 21.1 },
-    { min: 41.9, max: 42.2, label: 'Marathon', target: 42.2 },
+    { min: 0.95, max: 1.1, label: '1K', target: 1.0 },
+    { min: 4.95, max: 5.1, label: '5K', target: 5.0 },
+    { min: 9.95, max: 10.1, label: '10K', target: 10.0 },
+    { min: 21.05, max: 21.2, label: 'Half Marathon', target: 21.1 },
+    { min: 42.15, max: 42.3, label: 'Marathon', target: 42.2 },
   ];
 
   const personalBests = [];
@@ -162,11 +163,12 @@ export async function getPeriodStatistics(userId: string, days: number) {
  * Calculate performance trends across time periods
  */
 export async function getPerformanceTrends(userId: string) {
+  // Period keys must match Android TimePeriod enum values: MONTH, QUARTER, HALF_YEAR, YEAR
   const periods = [
-    { label: '1 Month', days: 30 },
-    { label: '3 Months', days: 90 },
-    { label: '6 Months', days: 180 },
-    { label: '1 Year', days: 365 },
+    { label: '1 Month', days: 30, key: 'MONTH' },
+    { label: '3 Months', days: 90, key: 'QUARTER' },
+    { label: '6 Months', days: 180, key: 'HALF_YEAR' },
+    { label: '1 Year', days: 365, key: 'YEAR' },
   ];
 
   const trends = {
@@ -194,8 +196,9 @@ export async function getPerformanceTrends(userId: string) {
     const previousPace = previous?.averagePace !== '--' ? parseFloat(previous.averagePace.split(':')[0]) : currentPace;
     const paceTrend = previousPace > 0 ? ((currentPace - previousPace) / previousPace) * 100 : 0;
 
+    // Use period.key (e.g. "MONTH") to match Android TimePeriod enum valueOf()
     trends.paceTrend.push({
-      period: current.period,
+      period: current.period.key,
       value: currentPace,
       trend: paceTrend < -2 ? '↑' : paceTrend > 2 ? '↓' : '→', // Lower pace is better
     });
@@ -203,7 +206,7 @@ export async function getPerformanceTrends(userId: string) {
     // HR trend
     const hrTrend = previous ? ((current.averageHeartRate - previous.averageHeartRate) / previous.averageHeartRate) * 100 : 0;
     trends.hrTrend.push({
-      period: current.period,
+      period: current.period.key,
       value: current.averageHeartRate,
       trend: hrTrend < -2 ? '↓' : hrTrend > 2 ? '↑' : '→', // Lower HR is better
     });
@@ -211,7 +214,7 @@ export async function getPerformanceTrends(userId: string) {
     // Elevation trend
     const elevTrend = previous ? ((current.totalElevationGain - previous.totalElevationGain) / previous.totalElevationGain) * 100 : 0;
     trends.elevationTrend.push({
-      period: current.period,
+      period: current.period.key,
       value: current.totalElevationGain,
       trend: elevTrend < -10 ? '↓' : elevTrend > 10 ? '↑' : '→',
     });
@@ -219,7 +222,7 @@ export async function getPerformanceTrends(userId: string) {
     // Cadence trend
     const cadenceTrend = previous ? ((current.averageCadence - previous.averageCadence) / previous.averageCadence) * 100 : 0;
     trends.cadenceTrend.push({
-      period: current.period,
+      period: current.period.key,
       value: current.averageCadence,
       trend: cadenceTrend < -2 ? '↓' : cadenceTrend > 2 ? '↑' : '→',
     });

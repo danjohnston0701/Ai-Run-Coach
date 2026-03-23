@@ -188,7 +188,8 @@ class MyDataViewModel @Inject constructor(
             // API endpoint to fetch all runs and calculate personal bests
             val response = apiService.getMyDataPersonalBests()
             if (response.isSuccessful) {
-                val bests = (response.body()?.data as? List<*>)?.mapNotNull { item ->
+                // Server wraps array as { data: { personalBests: [...] } }
+                val bests = (response.body()?.data?.get("personalBests") as? List<*>)?.mapNotNull { item ->
                     val pb = item as? Map<*, *> ?: return@mapNotNull null
                     PersonalBest(
                         category = pb["category"] as? String ?: "",

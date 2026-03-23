@@ -26,9 +26,10 @@ router.get('/personal-bests', authMiddleware, async (req: AuthenticatedRequest, 
 
     const personalBests = await myDataService.getPersonalBests(userId);
 
+    // Wrap array in object so Android Map<String, Any> deserialization works correctly
     res.json({
       success: true,
-      data: personalBests,
+      data: { personalBests },
     });
   } catch (error: any) {
     console.error('Error getting personal bests:', error);

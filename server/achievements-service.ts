@@ -192,7 +192,7 @@ export async function calculateRunAchievements(
   const achievements: RunAchievement[] = [];
   
   try {
-    const distanceKm = distance / 1000; // Convert meters to km if needed
+    const distanceKm = distance; // distance is already in km (matches runs.distance schema)
     const currentPaceMinutes = parsePaceToMinutes(avgPace);
     
     if (!currentPaceMinutes) {
