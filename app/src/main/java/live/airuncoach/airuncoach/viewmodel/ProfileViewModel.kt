@@ -2,6 +2,8 @@
 package live.airuncoach.airuncoach.viewmodel
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
@@ -12,14 +14,17 @@ import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.model.UploadProfilePictureRequest
+import java.io.ByteArrayOutputStream
 import javax.inject.Inject
 
 @HiltViewModel
@@ -44,6 +49,16 @@ class ProfileViewModel @Inject constructor(
     // Cache buster timestamp to force image reload
     private val _profilePicCacheBuster = MutableStateFlow(System.currentTimeMillis())
     val profilePicCacheBuster: StateFlow<Long> = _profilePicCacheBuster.asStateFlow()
+
+    // Upload state
+    private val _isUploadingProfilePic = MutableStateFlow(false)
+    val isUploadingProfilePic: StateFlow<Boolean> = _isUploadingProfilePic.asStateFlow()
+
+    private val _profilePicUploadError = MutableStateFlow<String?>(null)
+    val profilePicUploadError: StateFlow<String?> = _profilePicUploadError.asStateFlow()
+
+    private val _profilePicUploadSuccess = MutableStateFlow(false)
+    val profilePicUploadSuccess: StateFlow<Boolean> = _profilePicUploadSuccess.asStateFlow()
 
     init {
         loadUser()
@@ -89,47 +104,78 @@ class ProfileViewModel @Inject constructor(
     @OptIn(ExperimentalCoilApi::class)
     fun uploadProfilePicture(imageUri: Uri) {
         viewModelScope.launch {
+            val user = _user.value ?: return@launch
+            _isUploadingProfilePic.value = true
+            _profilePicUploadError.value = null
+            _profilePicUploadSuccess.value = false
+
             try {
-                val user = _user.value ?: return@launch
-                val inputStream = context.contentResolver.openInputStream(imageUri)
-                val imageBytes = inputStream?.readBytes()
-                inputStream?.close()
+                // Compress and resize the image on IO thread
+                val base64Image = withContext(Dispatchers.IO) {
+                    val inputStream = context.contentResolver.openInputStream(imageUri)
+                        ?: throw Exception("Could not open image")
 
-                if (imageBytes != null) {
-                    // Check image size (2MB limit before base64 encoding)
-                    if (imageBytes.size > 2 * 1024 * 1024) {
-                        Log.e("ProfileViewModel", "❌ Image too large: ${imageBytes.size} bytes (max 2MB)")
-                        return@launch
-                    }
+                    // Decode bitmap from stream
+                    val originalBitmap = BitmapFactory.decodeStream(inputStream)
+                    inputStream.close()
 
-                    // Convert to base64 (without data URL prefix - backend handles that)
-                    val base64Image = android.util.Base64.encodeToString(imageBytes, android.util.Base64.NO_WRAP)
-                    
-                    // Backend now expects just the base64 without prefix
-                    val request = UploadProfilePictureRequest(base64Image)
-                    val updatedUser = apiService.uploadProfilePicture(user.id, request)
+                    if (originalBitmap == null) throw Exception("Could not decode image")
 
-                    // 1. Clear Coil image cache to force fresh load
-                    Coil.imageLoader(context).memoryCache?.clear()
-                    Coil.imageLoader(context).diskCache?.clear()
-                    Log.d("ProfileViewModel", "🧹 Coil cache cleared")
+                    // Resize to max 800×800 preserving aspect ratio
+                    val maxDim = 800
+                    val (w, h) = originalBitmap.width to originalBitmap.height
+                    val scale = minOf(maxDim.toFloat() / w, maxDim.toFloat() / h, 1f)
+                    val resized = if (scale < 1f) {
+                        Bitmap.createScaledBitmap(
+                            originalBitmap,
+                            (w * scale).toInt(),
+                            (h * scale).toInt(),
+                            true
+                        )
+                    } else originalBitmap
 
-                    // 2. Update cache buster to force image reload
-                    _profilePicCacheBuster.value = System.currentTimeMillis()
+                    // Compress to JPEG bytes (quality 75 → typically < 200KB)
+                    val out = ByteArrayOutputStream()
+                    resized.compress(Bitmap.CompressFormat.JPEG, 75, out)
+                    val imageBytes = out.toByteArray()
 
-                    // 3. Refresh user from API to get fresh data (don't trust response alone)
-                    refreshUserFromApi()
+                    Log.d("ProfileViewModel", "📸 Compressed to ${imageBytes.size / 1024}KB")
 
-                    Log.d("ProfileViewModel", "✅ Profile picture uploaded successfully")
+                    android.util.Base64.encodeToString(imageBytes, android.util.Base64.NO_WRAP)
                 }
+
+                val request = UploadProfilePictureRequest(base64Image)
+                apiService.uploadProfilePicture(user.id, request)
+
+                // Clear Coil cache so the new image loads fresh
+                Coil.imageLoader(context).memoryCache?.clear()
+                Coil.imageLoader(context).diskCache?.clear()
+
+                // Bump cache buster so ProfileHeader recomposes with new key
+                _profilePicCacheBuster.value = System.currentTimeMillis()
+
+                // Fetch fresh user object (has updated profilePic)
+                refreshUserFromApi()
+
+                _profilePicUploadSuccess.value = true
+                Log.d("ProfileViewModel", "✅ Profile picture uploaded successfully")
+
             } catch (e: JsonSyntaxException) {
-                Log.e("ProfileViewModel", "❌ Backend returned HTML instead of JSON - endpoint not deployed")
-                Log.e("ProfileViewModel", "💡 The profile picture upload endpoint needs to be deployed to the backend server")
+                val msg = "Server error — profile picture endpoint not deployed"
+                Log.e("ProfileViewModel", "❌ $msg")
+                _profilePicUploadError.value = msg
             } catch (e: Exception) {
-                Log.e("ProfileViewModel", "❌ Failed to upload profile picture: ${e.message}", e)
+                val msg = e.message ?: "Unknown error"
+                Log.e("ProfileViewModel", "❌ Failed to upload profile picture: $msg", e)
+                _profilePicUploadError.value = "Upload failed: $msg"
+            } finally {
+                _isUploadingProfilePic.value = false
             }
         }
     }
+
+    fun clearProfilePicUploadSuccess() { _profilePicUploadSuccess.value = false }
+    fun clearProfilePicUploadError() { _profilePicUploadError.value = null }
 
     /**
      * Refresh user data from API instead of relying on upload response

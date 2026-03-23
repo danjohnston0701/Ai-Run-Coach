@@ -27,7 +27,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -74,7 +76,31 @@ fun ProfileScreen(
     val user by viewModel.user.collectAsState()
     val friendCount by viewModel.friendCount.collectAsState()
     val profilePicCacheBuster by viewModel.profilePicCacheBuster.collectAsState()
-    
+    val isUploadingProfilePic by viewModel.isUploadingProfilePic.collectAsState()
+    val profilePicUploadError by viewModel.profilePicUploadError.collectAsState()
+    val profilePicUploadSuccess by viewModel.profilePicUploadSuccess.collectAsState()
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    // Show success / error snackbars
+    LaunchedEffect(profilePicUploadSuccess) {
+        if (profilePicUploadSuccess) {
+            scope.launch {
+                snackbarHostState.showSnackbar("Profile picture updated!")
+            }
+            viewModel.clearProfilePicUploadSuccess()
+        }
+    }
+    LaunchedEffect(profilePicUploadError) {
+        profilePicUploadError?.let { msg ->
+            scope.launch {
+                snackbarHostState.showSnackbar(msg)
+            }
+            viewModel.clearProfilePicUploadError()
+        }
+    }
+
     var showImagePickerDialog by remember { mutableStateOf(false) }
     
     val cameraUri = remember { mutableStateOf<Uri?>(null) }
@@ -184,6 +210,16 @@ fun ProfileScreen(
         )
     }
 
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        containerColor = Colors.backgroundRoot
+    ) { paddingValues ->
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(paddingValues)
+    ) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -195,6 +231,7 @@ fun ProfileScreen(
             ProfileHeader(
                 user = it,
                 cacheBuster = profilePicCacheBuster,
+                isUploading = isUploadingProfilePic,
                 onImageClick = { showImagePickerDialog = true }
             )
         }}
@@ -282,10 +319,32 @@ fun ProfileScreen(
         }
         item { Spacer(modifier = Modifier.height(Spacing.xxl)) }
     }
+
+    // Upload loading overlay
+    if (isUploadingProfilePic) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.45f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(color = Colors.primary)
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "Uploading photo...",
+                    style = AppTextStyles.body,
+                    color = Color.White
+                )
+            }
+        }
+    }
+    } // end Box
+    } // end Scaffold
 }
 
 @Composable
-fun ProfileHeader(user: User, cacheBuster: Long, onImageClick: () -> Unit) {
+fun ProfileHeader(user: User, cacheBuster: Long, isUploading: Boolean = false, onImageClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
@@ -301,16 +360,18 @@ fun ProfileHeader(user: User, cacheBuster: Long, onImageClick: () -> Unit) {
                 contentAlignment = Alignment.Center
             ) {
                 if (!user.profilePic.isNullOrBlank()) {
-                    // Reconstruct data URL from base64 (backend now stores just base64)
-                    // Add cache buster query parameter to force Coil to reload
-                    val imageUrl = remember(user.profilePic, cacheBuster) {
-                        "data:image/jpeg;base64,${user.profilePic}?t=$cacheBuster"
+                    // Decode base64 to ByteArray — pass directly to Coil for reliable rendering
+                    // (data: URIs with query strings are invalid and Coil may reject them)
+                    val imageBytes = remember(user.profilePic, cacheBuster) {
+                        try {
+                            android.util.Base64.decode(user.profilePic, android.util.Base64.DEFAULT)
+                        } catch (_: Exception) { null }
                     }
-                    
+
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
-                            .data(imageUrl)
-                            .memoryCacheKey("${user.id}_profile_$cacheBuster") // Unique cache key per upload
+                            .data(imageBytes)
+                            .memoryCacheKey("${user.id}_profile_$cacheBuster") // unique per upload
                             .crossfade(true)
                             .build(),
                         contentDescription = "User Profile Picture",
@@ -325,6 +386,22 @@ fun ProfileHeader(user: User, cacheBuster: Long, onImageClick: () -> Unit) {
                         contentDescription = "User Profile",
                         modifier = Modifier.size(50.dp),
                         tint = Colors.primary
+                    )
+                }
+            }
+            // Show spinner over the circle while uploading
+            if (isUploading) {
+                Box(
+                    modifier = Modifier
+                        .size(85.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.5f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(32.dp),
+                        color = Colors.primary,
+                        strokeWidth = 3.dp
                     )
                 }
             }
