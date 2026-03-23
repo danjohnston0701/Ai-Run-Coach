@@ -61,6 +61,7 @@ import garminOAuthRouter from "./garmin-oauth-bridge";
 import adaptationRouter from "./routes-adaptation";
 import myDataRouter from "./routes-my-data";
 import achievementsRouter from "./routes-achievements";
+import { registerSessionCoachingRoutes } from "./routes-session-coaching";
 import {
   snapTrackToOSMSegments,
   recordSegmentUsage,
@@ -78,6 +79,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api", adaptationRouter);
   app.use("/api/my-data", myDataRouter);
   app.use("/api", achievementsRouter);
+  registerSessionCoachingRoutes(app);
   
   // ==================== AUTH ENDPOINTS ====================
   

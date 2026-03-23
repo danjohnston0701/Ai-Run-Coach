@@ -402,6 +402,8 @@ class RunTrackingService : Service(), SensorEventListener {
         const val EXTRA_PLAN_GOAL_TYPE = "EXTRA_PLAN_GOAL_TYPE"
         const val EXTRA_PLAN_WEEK_NUMBER = "EXTRA_PLAN_WEEK_NUMBER"
         const val EXTRA_PLAN_TOTAL_WEEKS = "EXTRA_PLAN_TOTAL_WEEKS"
+        // Session coaching: full AI-generated instructions passed as JSON string
+        const val EXTRA_SESSION_INSTRUCTIONS_JSON = "EXTRA_SESSION_INSTRUCTIONS_JSON"
         
         private val _currentRunSession = MutableStateFlow<RunSession?>(null)
         val currentRunSession: StateFlow<RunSession?> = _currentRunSession
@@ -515,10 +517,22 @@ class RunTrackingService : Service(), SensorEventListener {
     private var planWeekNumber: Int? = null
     private var planTotalWeeks: Int? = null
     
-    // ========== NEW: Session Coaching Context (Phase 1) ==========
+    // ========== Session Coaching Context ==========
+    // AI-generated session plan: phases, coaching triggers, tone — passed from ViewModel
     private var sessionInstructions: SessionInstructionsResponse? = null
     private var sessionCoachingTone: String? = null
     private var sessionCoachingIntensity: String? = null
+
+    // Phase engine state — tracks position within the AI-designed session structure
+    private var currentPhaseIndex: Int = 0      // Index into sessionInstructions.phases
+    private var currentPhaseName: String? = null // e.g. "warmup", "interval_1_of_6"
+    private var phaseDistanceStartKm: Double = 0.0  // Total distance when current phase began
+    private var currentRepNumber: Int = 0           // For interval sessions: which rep (1-indexed)
+    private var currentRepIsWorkPhase: Boolean = true // true = work interval, false = recovery
+    private var repDistanceStartKm: Double = 0.0    // Distance at start of current rep/recovery
+    private var lastPhaseTriggerFiredForPhase: String? = null  // Prevents duplicate at_start triggers
+    private var lastRepTriggerFiredAtRep: Int = 0   // Prevents duplicate rep_start/end triggers
+    private val gson = com.google.gson.Gson()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // targetDistance comes from RunSetupConfig.targetDistance which is in KILOMETERS.
@@ -541,6 +555,19 @@ class RunTrackingService : Service(), SensorEventListener {
         planGoalType = intent?.getStringExtra(EXTRA_PLAN_GOAL_TYPE)
         planWeekNumber = intent?.getIntExtra(EXTRA_PLAN_WEEK_NUMBER, 0)?.takeIf { it > 0 }
         planTotalWeeks = intent?.getIntExtra(EXTRA_PLAN_TOTAL_WEEKS, 0)?.takeIf { it > 0 }
+        // Deserialize AI-generated session instructions from JSON if present
+        val sessionJson = intent?.getStringExtra(EXTRA_SESSION_INSTRUCTIONS_JSON)
+        if (sessionJson != null) {
+            try {
+                sessionInstructions = gson.fromJson(sessionJson, SessionInstructionsResponse::class.java)
+                sessionCoachingTone = sessionInstructions?.aiDeterminedTone
+                sessionCoachingIntensity = sessionInstructions?.aiDeterminedIntensity
+                Log.d("RunTrackingService", "✅ Session instructions loaded: tone=${sessionCoachingTone}, phases=${sessionInstructions?.sessionStructure?.phases?.size}")
+            } catch (e: Exception) {
+                Log.w("RunTrackingService", "Failed to deserialize session instructions: ${e.message}")
+                sessionInstructions = null
+            }
+        }
 
         when (intent?.action) {
             ACTION_START_TRACKING -> startTracking()
@@ -646,6 +673,15 @@ class RunTrackingService : Service(), SensorEventListener {
         recentPaceDistances.clear()
         recentPaceTimes.clear()
         lastElevationCoachingTime = 0
+        // Reset phase engine for new run
+        currentPhaseIndex = 0
+        currentPhaseName = null
+        phaseDistanceStartKm = 0.0
+        currentRepNumber = 1
+        currentRepIsWorkPhase = true
+        repDistanceStartKm = 0.0
+        lastPhaseTriggerFiredForPhase = null
+        lastRepTriggerFiredAtRep = 0
         lastHillTopAckTime = 0
         slopeDirection = 0
         slopeDistanceMeters = 0.0
@@ -1780,6 +1816,12 @@ class RunTrackingService : Service(), SensorEventListener {
         // Reset per-tick flag - only one coaching trigger fires per location update
         hasCoachingFiredThisTick = false
 
+        // ── SESSION PHASE ENGINE ──
+        // Check if runner has entered a new session phase and fire coaching triggers
+        if (sessionInstructions != null && !hasCoachingFiredThisTick) {
+            checkSessionPhaseTransitions(displayDistanceKm)
+        }
+
         // ── FINAL STRETCH GATE ──
         // In the last 500m, ONLY elite coaching fires (handles final_500m / final_100m motivation).
         // All analysis, summaries, HR, cadence, pace coaching, km splits are suppressed.
@@ -2479,6 +2521,175 @@ class RunTrackingService : Service(), SensorEventListener {
         }
     }
     
+    // ─────────────────────────────────────────────────────────────────────────
+    // SESSION PHASE ENGINE
+    // Tracks which AI-designed phase the runner is in and fires trigger coaching
+    // messages at phase transitions (warmup→intervals, rep start/end, cooldown, etc.)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun checkSessionPhaseTransitions(currentDistanceKm: Double) {
+        val instructions = sessionInstructions ?: return
+        val phases = instructions.sessionStructure?.phases ?: return
+        if (phases.isEmpty()) return
+
+        // Find what phase the runner should be in based on cumulative distance
+        var cumulativeKm = 0.0
+        var resolvedPhaseIndex = phases.size - 1  // Default to last phase
+        var resolvedPhaseName = phases.last().name
+
+        for ((index, phase) in phases.withIndex()) {
+            val phaseKm = phase.durationKm ?: 0.5
+            val reps = phase.repetitions ?: 1
+            val totalPhaseKm = phaseKm * reps
+
+            if (currentDistanceKm < cumulativeKm + totalPhaseKm) {
+                resolvedPhaseIndex = index
+                // For interval main_set phases, include rep number in phase name
+                resolvedPhaseName = if ((phase.repetitions ?: 1) > 1) {
+                    val repIndex = ((currentDistanceKm - cumulativeKm) / phaseKm).toInt()
+                    "${phase.name}_rep_${repIndex + 1}_of_${phase.repetitions}"
+                } else {
+                    phase.name
+                }
+                break
+            }
+            cumulativeKm += totalPhaseKm
+        }
+
+        // Detect phase transitions
+        val isNewPhase = resolvedPhaseIndex != currentPhaseIndex || 
+                        (currentPhaseName == null && resolvedPhaseName != null)
+
+        if (isNewPhase && resolvedPhaseName != lastPhaseTriggerFiredForPhase) {
+            val previousPhaseName = currentPhaseName
+            currentPhaseIndex = resolvedPhaseIndex
+            currentPhaseName = resolvedPhaseName
+            phaseDistanceStartKm = currentDistanceKm
+            lastPhaseTriggerFiredForPhase = resolvedPhaseName
+
+            Log.d("RunTrackingService", "🏃 Phase transition: $previousPhaseName → $resolvedPhaseName at ${currentDistanceKm}km")
+
+            // Find the at_start coaching trigger for this phase
+            val triggers = instructions.sessionStructure?.coachingTriggers ?: return
+            val phaseBase = phases.getOrNull(resolvedPhaseIndex)?.name ?: resolvedPhaseName
+
+            val trigger = triggers.firstOrNull { t ->
+                (t.phase == phaseBase || t.phase == resolvedPhaseName) && t.trigger == "at_start"
+            }
+
+            if (trigger?.message != null && !hasCoachingFiredThisTick && canFireCoaching()) {
+                fireSessionPhaseTrigger(
+                    message = trigger.message!!,
+                    eventType = "phase_transition",
+                    eventPhase = resolvedPhaseName
+                )
+            }
+        }
+
+        // For interval main_set phases, detect rep boundaries and fire rep_start / rep_end
+        val phase = phases.getOrNull(currentPhaseIndex) ?: return
+        val reps = phase.repetitions ?: 1
+        if (reps > 1 && currentDistanceKm >= phaseDistanceStartKm) {
+            val repKm = phase.durationKm ?: 0.0
+            if (repKm <= 0.0) return
+
+            val positionInMainSet = currentDistanceKm - phaseDistanceStartKm
+            val rawRepIndex = (positionInMainSet / repKm).toInt()
+            val repNumber = (rawRepIndex + 1).coerceAtMost(reps)
+            val positionInRep = positionInMainSet - (rawRepIndex * repKm)
+            val isWorkRep = true  // All reps in main_set are work reps
+
+            // Detect start of a new rep
+            if (repNumber != lastRepTriggerFiredAtRep && positionInRep < 0.05 && !hasCoachingFiredThisTick) {
+                lastRepTriggerFiredAtRep = repNumber
+                val trigger = instructions.sessionStructure?.coachingTriggers?.firstOrNull { t ->
+                    t.phase == phase.name && t.trigger == "rep_start"
+                }
+                if (trigger?.message != null && canFireCoaching()) {
+                    val repMsg = trigger.message!!
+                        .replace("{rep}", "$repNumber")
+                        .replace("{total}", "$reps")
+                    fireSessionPhaseTrigger(
+                        message = "Rep $repNumber of $reps: $repMsg",
+                        eventType = "rep_start",
+                        eventPhase = "rep_${repNumber}_of_$reps"
+                    )
+                }
+            }
+
+            // Detect end of a rep (within 50m of end of rep distance)
+            val repEndKm = rawRepIndex * repKm + repKm
+            val distanceToRepEnd = repEndKm - positionInMainSet
+            if (distanceToRepEnd in 0.0..0.05 && lastRepTriggerFiredAtRep == repNumber && !hasCoachingFiredThisTick) {
+                val trigger = instructions.sessionStructure?.coachingTriggers?.firstOrNull { t ->
+                    t.phase == phase.name && t.trigger == "rep_end"
+                }
+                if (trigger?.message != null && canFireCoaching()) {
+                    fireSessionPhaseTrigger(
+                        message = trigger.message!!,
+                        eventType = "rep_end",
+                        eventPhase = "rep_${repNumber}_of_$reps"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Fire a session-phase coaching trigger message.
+     * Uses TTS/audio to deliver the message and marks the coaching tick as fired.
+     */
+    private fun fireSessionPhaseTrigger(
+        message: String,
+        eventType: String,
+        eventPhase: String
+    ) {
+        if (!coachingFeaturePrefs.motivationalCoachingEnabled) return
+        hasCoachingFiredThisTick = true
+        recordCoachingFired()
+
+        Log.d("RunTrackingService", "🎯 Session trigger [$eventType] phase=$eventPhase: $message")
+        _latestCoachingText.value = message
+
+        serviceScope.launch {
+            try {
+                if (!isMuted) {
+                    // Use CoachingAudioQueue with TTS fallback
+                    CoachingAudioQueue.enqueue(
+                        context = this@RunTrackingService,
+                        base64Audio = null,
+                        format = null,
+                        fallbackText = message,
+                        accent = currentUser?.coachAccent,
+                        onComplete = { _latestCoachingText.value = null }
+                    )
+                }
+
+                // Log coaching event for analytics
+                val runId = _currentRunSession.value?.id ?: "unknown"
+                apiService.logCoachingEvent(
+                    CoachingSessionEvent(
+                        runId = runId,
+                        plannedWorkoutId = planWorkoutId,
+                        eventType = eventType,
+                        eventPhase = eventPhase,
+                        coachingMessage = message,
+                        coachingAudioUrl = null,
+                        userMetrics = mapOf(
+                            "distance_km" to totalDistance / 1000.0,
+                            "pace" to (currentPace),
+                            "heart_rate" to currentHeartRate
+                        ),
+                        toneUsed = sessionCoachingTone,
+                        userEngagement = null
+                    )
+                )
+            } catch (e: Exception) {
+                Log.w("RunTrackingService", "Session trigger delivery failed (non-fatal): ${e.message}")
+            }
+        }
+    }
+
     private fun checkPhaseChange(newPhase: CoachingPhase) {
         if (!coachingFeaturePrefs.motivationalCoachingEnabled) return
         val now = System.currentTimeMillis()

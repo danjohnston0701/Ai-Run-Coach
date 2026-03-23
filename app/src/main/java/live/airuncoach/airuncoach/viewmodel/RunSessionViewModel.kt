@@ -728,6 +728,16 @@ class RunSessionViewModel @Inject constructor(
                     it.planWeekNumber?.let { w -> putExtra(RunTrackingService.EXTRA_PLAN_WEEK_NUMBER, w) }
                     it.planTotalWeeks?.let { total -> putExtra(RunTrackingService.EXTRA_PLAN_TOTAL_WEEKS, total) }
                 }
+                // Pass AI session instructions as JSON so RunTrackingService can use them
+                sessionInstructions?.let { instructions ->
+                    try {
+                        val instructionsJson = gson.toJson(instructions)
+                        putExtra(RunTrackingService.EXTRA_SESSION_INSTRUCTIONS_JSON, instructionsJson)
+                        Log.d("RunSessionViewModel", "Passed session instructions to service (tone=${instructions.aiDeterminedTone})")
+                    } catch (e: Exception) {
+                        Log.w("RunSessionViewModel", "Failed to serialize session instructions: ${e.message}")
+                    }
+                }
             }
             
             // Start service in foreground mode (Android O+)

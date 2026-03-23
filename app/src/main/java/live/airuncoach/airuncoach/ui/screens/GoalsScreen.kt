@@ -639,7 +639,7 @@ fun GoalCard(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    "Get AI Training Plan",
+                    "Generate Ai Training Plan",
                     style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
                     color = Colors.primary
                 )

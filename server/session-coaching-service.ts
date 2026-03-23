@@ -260,31 +260,23 @@ Runner needs: Direct cues, effort encouragement, clear pacing targets.`;
 }
 
 /**
- * Generate complete session instructions for a planned workout
- * This includes pre-run brief, session structure, and coaching style
+ * Generate complete session instructions for a planned workout.
+ * Runs tone determination and AI session design in parallel for speed.
  */
 export async function generateSessionInstructions(
   userId: string,
   plannedWorkoutId: string,
   workoutData: SessionToneRequest
 ) {
-  // Determine optimal tone for this session
-  const toneDecision = await determineSessonCoachingTone({
-    userId,
-    plannedWorkoutId,
-    ...workoutData,
-  });
-
-  // Generate pre-run brief (separate endpoint, but we'll call it here)
-  // For now, we'll create a placeholder that references the coaching style
-  const preRunBrief = generatePreRunBriefing(workoutData, toneDecision);
-
-  // Build session structure with coaching triggers
-  const sessionStructure = buildSessionStructure(workoutData, toneDecision);
+  // Run tone determination and session design in parallel
+  const [toneDecision, sessionDesign] = await Promise.all([
+    determineSessonCoachingTone({ userId, plannedWorkoutId, ...workoutData }),
+    generateAiSessionDesign(workoutData),
+  ]);
 
   return {
-    preRunBrief,
-    sessionStructure,
+    preRunBrief: sessionDesign.preRunBrief,
+    sessionStructure: sessionDesign.sessionStructure,
     aiDeterminedTone: toneDecision.tone,
     aiDeterminedIntensity: toneDecision.intensity,
     coachingStyle: toneDecision.coachingStyle,
@@ -294,97 +286,176 @@ export async function generateSessionInstructions(
 }
 
 /**
- * Generate a brief pre-run briefing based on session and tone
+ * Use GPT-4o-mini to generate a personalised pre-run brief AND a detailed
+ * session structure with phase-by-phase targets and coaching trigger messages.
+ *
+ * Returns both as a single AI call to keep latency and cost low.
  */
-function generatePreRunBriefing(
-  workout: SessionToneRequest,
-  tone: DeterminedTone
-): string {
-  // This is a simplified version
-  // In production, you'd call the full pre-run briefing AI service with tone context
-  const workoutSummary = `${workout.distance?.toFixed(1) || "?"}km ${workout.workoutType}`;
+async function generateAiSessionDesign(workout: SessionToneRequest): Promise<{
+  preRunBrief: string;
+  sessionStructure: any;
+}> {
+  const sessionDesc = buildSessionCharacteristics(workout);
 
-  let brief = `Today's session: ${workoutSummary}\n`;
+  const systemPrompt = `You are an expert running coach AI designing a specific training session.
+Your job is to:
+1. Write a short, motivating pre-run briefing (2-4 sentences) that tells the runner exactly what they're doing today, what to focus on, and why this session matters for their goal.
+2. Design a precise session structure with phases, targets, and coaching trigger messages.
 
-  if (workout.intervalCount) {
-    brief += `Structure: ${workout.intervalCount} repetitions with recovery\n`;
+The briefing should be SPECIFIC to this session — not generic. Mention the exact distances, intensities, and what to feel.
+The session structure must include coaching trigger messages that are ACTIVE and INSTRUCTIVE, not just descriptive.
+
+You must respond with ONLY valid JSON (no markdown, no code blocks).`;
+
+  const userPrompt = `SESSION TO DESIGN:
+${sessionDesc}
+
+Return ONLY valid JSON in this exact format:
+{
+  "preRunBrief": "2-4 sentence motivating brief specific to this session",
+  "sessionStructure": {
+    "type": "${workout.workoutType}",
+    "goal": "${workout.sessionGoal || "general fitness"}",
+    "phases": [
+      {
+        "name": "warmup",
+        "durationKm": 1.0,
+        "durationSeconds": null,
+        "targetIntensity": "z1-z2",
+        "targetPaceNote": "Very easy, conversational",
+        "description": "Description of this phase",
+        "repetitions": null
+      }
+    ],
+    "coachingTriggers": [
+      {
+        "phase": "phase_name",
+        "trigger": "at_start|at_end|rep_start|rep_end|every_km|pace_deviation|hr_alert",
+        "message": "Specific coaching message for this trigger (1-2 sentences, active voice)"
+      }
+    ]
   }
+}
 
-  brief += `Coaching style: ${tone.tone}\n`;
-  brief += `Remember: Focus on the process, not just the numbers.`;
+PHASE DESIGN RULES:
+- For intervals/hill_repeats: warmup (1-2km) + N repetitions of work + recovery between each + cooldown (0.5-1km)
+- For tempo runs: warmup (1km) + tempo block + cooldown (0.5km)
+- For easy/zone2/recovery: single easy_run phase covering the full distance
+- For long runs: easy_run phase with milestone coaching triggers at 25%, 50%, 75%, final_stretch
+- durationKm should be the distance of that phase. For repeating intervals, set repetitions and durationKm = distance per rep.
+- For each interval rep, the coachingTriggers must have rep_start and rep_end triggers with specific messages.
+- Coaching trigger messages must be SHORT (under 20 words), direct, and actionable.`;
 
-  return brief;
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.7,
+      max_tokens: 1500,
+    });
+
+    const responseText = response.choices[0].message.content || "{}";
+    const cleaned = responseText
+      .replace(/```json\n?/g, "")
+      .replace(/```\n?/g, "")
+      .trim();
+
+    const parsed = JSON.parse(cleaned);
+
+    return {
+      preRunBrief: parsed.preRunBrief || buildFallbackBrief(workout),
+      sessionStructure: parsed.sessionStructure || buildFallbackStructure(workout),
+    };
+  } catch (e) {
+    console.error("Failed to generate AI session design, using fallback:", e);
+    return {
+      preRunBrief: buildFallbackBrief(workout),
+      sessionStructure: buildFallbackStructure(workout),
+    };
+  }
 }
 
 /**
- * Build the session structure with phases and coaching triggers
+ * Fallback pre-run brief when AI call fails
  */
-function buildSessionStructure(
-  workout: SessionToneRequest,
-  tone: DeterminedTone
-): any {
-  const structure = {
-    type: workout.workoutType,
-    goal: workout.sessionGoal || "general fitness",
-    phases: [] as any[],
-    coachingTriggers: [] as any[],
-  };
+function buildFallbackBrief(workout: SessionToneRequest): string {
+  const distStr = workout.distance ? `${workout.distance.toFixed(1)}km` : "today's";
+  const typeStr = workout.workoutType.replace(/_/g, " ");
+  if (workout.intervalCount) {
+    return `Today is ${distStr} ${typeStr} with ${workout.intervalCount} repetitions. Hit each rep hard and recover well between them. This session builds your speed and fitness — trust the process.`;
+  }
+  return `Today's ${distStr} ${typeStr} session focuses on ${workout.sessionGoal?.replace(/_/g, " ") || "building your fitness"}. Run at a controlled effort and stay consistent throughout.`;
+}
 
-  // Add basic phases based on workout type
-  if (workout.workoutType === "intervals") {
-    structure.phases = [
-      { name: "warmup", duration_km: 1, description: "Easy warm-up jog" },
-      {
-        name: "main_set",
-        repetitions: workout.intervalCount || 6,
-        description: "Interval repetitions",
-      },
-      {
-        name: "cooldown",
-        duration_km: 0.5,
-        description: "Easy cool-down jog",
-      },
-    ];
-
-    structure.coachingTriggers = [
-      {
-        phase: "warmup",
-        trigger: "at_end",
-        message: "Warmup complete. Ready for intervals?",
-      },
-      {
-        phase: "main_set",
-        trigger: "rep_start",
-        message: `Next rep starting — hit your pace target`,
-      },
-      {
-        phase: "main_set",
-        trigger: "rep_end",
-        message: `Rep complete — recover well`,
-      },
-      {
-        phase: "cooldown",
-        trigger: "at_start",
-        message: `Great effort. Easy cool-down jog now.`,
-      },
-    ];
-  } else if (workout.intensity === "z2") {
-    structure.phases = [
-      {
-        name: "easy_run",
-        duration: workout.duration,
-        description: "Conversational pace zone 2 run",
-      },
-    ];
-
-    structure.coachingTriggers = [
-      {
-        phase: "easy_run",
-        trigger: "every_km",
-        message: `Keep it easy and conversational. Enjoy the run.`,
-      },
-    ];
+/**
+ * Fallback session structure when AI call fails
+ */
+function buildFallbackStructure(workout: SessionToneRequest): any {
+  if (workout.workoutType === "intervals" || workout.workoutType === "hill_repeats") {
+    return {
+      type: workout.workoutType,
+      goal: workout.sessionGoal || "speed_development",
+      phases: [
+        { name: "warmup", durationKm: 1.0, durationSeconds: null, description: "Easy warm-up jog", repetitions: null },
+        { name: "main_set", durationKm: workout.distance ? workout.distance * 0.1 : 0.4, durationSeconds: null, description: `${workout.intervalCount || 6} hard repetitions`, repetitions: workout.intervalCount || 6 },
+        { name: "cooldown", durationKm: 0.5, durationSeconds: null, description: "Easy cool-down", repetitions: null },
+      ],
+      coachingTriggers: [
+        { phase: "warmup", trigger: "at_end", message: "Warmup done. Get ready to push — first rep in 200m." },
+        { phase: "main_set", trigger: "rep_start", message: "GO! Push hard, stay tall, drive those arms." },
+        { phase: "main_set", trigger: "rep_end", message: "Rep done. Shake it out, breathe, recover fully." },
+        { phase: "cooldown", trigger: "at_start", message: "Strong work today. Easy jog to cool down now." },
+      ],
+    };
+  } else if (workout.workoutType === "tempo") {
+    return {
+      type: "tempo",
+      goal: workout.sessionGoal || "threshold_development",
+      phases: [
+        { name: "warmup", durationKm: 1.0, durationSeconds: null, description: "Easy warm-up jog", repetitions: null },
+        { name: "tempo_block", durationKm: (workout.distance || 6) - 1.5, durationSeconds: null, description: "Sustained tempo effort at threshold pace", repetitions: null },
+        { name: "cooldown", durationKm: 0.5, durationSeconds: null, description: "Easy cool-down jog", repetitions: null },
+      ],
+      coachingTriggers: [
+        { phase: "warmup", trigger: "at_end", message: "Build into tempo pace now. Controlled, uncomfortable but manageable." },
+        { phase: "tempo_block", trigger: "at_start", message: "Tempo effort. Find your rhythm, breathe steady, hold the pace." },
+        { phase: "tempo_block", trigger: "every_km", message: "Stay locked in. This discomfort is building your engine." },
+        { phase: "cooldown", trigger: "at_start", message: "Excellent tempo work. Easy jog to finish." },
+      ],
+    };
+  } else if (workout.workoutType === "long_run") {
+    return {
+      type: "long_run",
+      goal: workout.sessionGoal || "endurance",
+      phases: [
+        { name: "easy_run", durationKm: workout.distance || 15, durationSeconds: null, description: "Steady long run at easy conversational pace", repetitions: null },
+      ],
+      coachingTriggers: [
+        { phase: "easy_run", trigger: "at_start", message: "Long run day. Start easy — the goal is time on feet, not speed." },
+        { phase: "easy_run", trigger: "every_km", message: "Stay easy, stay steady. You're building your aerobic engine." },
+      ],
+    };
+  } else {
+    return {
+      type: workout.workoutType,
+      goal: workout.sessionGoal || "general_fitness",
+      phases: [
+        { name: "easy_run", durationKm: workout.distance || 5, durationSeconds: null, description: "Easy conversational run", repetitions: null },
+      ],
+      coachingTriggers: [
+        { phase: "easy_run", trigger: "at_start", message: "Keep it easy and conversational. Enjoy the run." },
+        { phase: "easy_run", trigger: "every_km", message: "Good rhythm. Stay relaxed and breathe steady." },
+      ],
+    };
   }
 
-  return structure;
+  return {
+    type: workout.workoutType,
+    goal: workout.sessionGoal || "general fitness",
+    phases: [],
+    coachingTriggers: [],
+  };
 }
