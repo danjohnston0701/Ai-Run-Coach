@@ -10621,6 +10621,9 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     const gpsTrack = rawGps.length > 1 ? rawGps.map((p: any) => ({
       lat: p.lat ?? p.latitude ?? 0,
       lng: p.lng ?? p.longitude ?? 0,
+      ...(p.elevation != null ? { elevation: p.elevation } : {}),
+      ...(p.alt != null ? { alt: p.alt } : {}),
+      ...(p.altitude != null ? { altitude: p.altitude } : {}),
     })).filter((p: any) => p.lat !== 0 && p.lng !== 0) : undefined;
     
     // Build paceData from kmSplits if paceData not available

@@ -37,6 +37,7 @@ export interface PlacedSticker {
   x: number;
   y: number;
   scale: number;
+  customText?: string;
 }
 
 export interface CustomStickerData {
@@ -72,7 +73,7 @@ export interface RunDataForImage {
   elevationGain?: number;
   elevationLoss?: number;
   difficulty?: string;
-  gpsTrack?: Array<{ lat: number; lng: number }>;
+  gpsTrack?: Array<{ lat: number; lng: number; elevation?: number; alt?: number; altitude?: number }>;
   heartRateData?: Array<{ timestamp: number; value: number }>;
   paceData?: Array<{ km: number; pace: string; paceSeconds: number }>;
   completedAt?: string;
@@ -827,6 +828,17 @@ function buildMiniChart(x: number, y: number, w: number, h: number, data: number
   `;
 }
 
+function buildNoDataChart(px: number, py: number, w: number, h: number, s: number, color: string, label: string): string {
+  const rx = Math.round(12 * s);
+  const fontSize = Math.round(12 * s);
+  return `
+    <rect x="${px}" y="${py}" width="${w}" height="${h}" rx="${rx}" fill="${C.bgCard}" filter="url(#softShadow)"/>
+    <rect x="${px}" y="${py}" width="${w}" height="${h}" rx="${rx}" fill="none" stroke="${C.border}" stroke-width="1"/>
+    <text x="${px + w / 2}" y="${py + 18}" font-family="${FONT}" font-size="${Math.round(11 * s)}" font-weight="600" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1">${esc(label)}</text>
+    <text x="${px + w / 2}" y="${py + h / 2 + fontSize * 0.4}" font-family="${FONT}" font-size="${fontSize}" fill="${color}" text-anchor="middle" opacity="0.6">No data for this run</text>
+  `;
+}
+
 function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: number, canvasH: number): string {
   const px = Math.round(sticker.x * canvasW);
   const py = Math.round(sticker.y * canvasH);
@@ -862,32 +874,59 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
     case "stat-maxhr":
       value = run.maxHeartRate?.toString() || "--"; unit = "bpm"; label = "MAX HR"; color = C.red; break;
     case "chart-elevation": {
-      if (!run.paceData || run.paceData.length < 2) return "";
       const chartW = Math.round(280 * s);
       const chartH = Math.round(140 * s);
-      const elevData = run.paceData.map((_, i) => {
-        const gps = run.gpsTrack;
-        if (gps && gps.length > i) {
-          const point = gps[Math.floor((i / run.paceData!.length) * gps.length)] as any;
-          return point?.elevation || 0;
-        }
-        return 0;
-      });
-      return `<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, elevData, C.green, "Elevation")}</g>`;
+      // Try elevation from GPS track points first
+      const rawGps = run.gpsTrack as any[];
+      const gpsElevData = rawGps?.length >= 2
+        ? rawGps.map((p: any) => p.elevation ?? p.alt ?? p.altitude ?? null).filter((v: any) => v !== null)
+        : [];
+      if (gpsElevData.length >= 2) {
+        return `<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, gpsElevData, C.green, "Elevation (m)")}</g>`;
+      }
+      // Fallback: simulate from pace splits if available (uphill = slower pace)
+      if (run.paceData && run.paceData.length >= 2) {
+        const totalElevGain = run.elevationGain || run.elevation || 0;
+        const paceVals = run.paceData.map((p) => p.paceSeconds);
+        const minPace = Math.min(...paceVals);
+        const maxPace = Math.max(...paceVals);
+        const range = maxPace - minPace || 1;
+        const simElev = paceVals.map((p) => ((p - minPace) / range) * totalElevGain);
+        return `<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, simElev, C.green, "Elevation (m)")}</g>`;
+      }
+      // No data placeholder
+      return buildNoDataChart(px, py, chartW, chartH, s, C.green, "ELEVATION");
     }
     case "chart-pace": {
-      if (!run.paceData || run.paceData.length < 2) return "";
       const chartW = Math.round(280 * s);
       const chartH = Math.round(140 * s);
-      const paceValues = run.paceData.map((p) => p.paceSeconds);
-      return `<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, paceValues, C.orange, "Pace /km")}</g>`;
+      if (run.paceData && run.paceData.length >= 2) {
+        const paceValues = run.paceData.map((p) => p.paceSeconds);
+        return `<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, paceValues, C.orange, "Pace /km")}</g>`;
+      }
+      return buildNoDataChart(px, py, chartW, chartH, s, C.orange, "PACE");
     }
     case "chart-heartrate": {
-      if (!run.heartRateData || run.heartRateData.length < 2) return "";
       const chartW = Math.round(280 * s);
       const chartH = Math.round(140 * s);
-      const hrSampled = sampleData(run.heartRateData.map((h) => h.value), 30);
-      return `<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, hrSampled, C.red, "Heart Rate")}</g>`;
+      if (run.heartRateData && run.heartRateData.length >= 2) {
+        const hrSampled = sampleData(run.heartRateData.map((h) => h.value), 30);
+        return `<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, hrSampled, C.red, "Heart Rate")}</g>`;
+      }
+      return buildNoDataChart(px, py, chartW, chartH, s, C.red, "HEART RATE");
+    }
+    case "text-custom": {
+      const text = sticker.customText || run.name || "My Run";
+      const maxW = Math.round(320 * s);
+      const padX = Math.round(20 * s);
+      const padY = Math.round(14 * s);
+      const tFontSize = Math.round(22 * s);
+      const bh = tFontSize + padY * 2;
+      return `
+        <rect x="${px}" y="${py}" width="${maxW}" height="${bh}" rx="${Math.round(12 * s)}" fill="${C.bgCard}" filter="url(#softShadow)" opacity="0.92"/>
+        <rect x="${px}" y="${py}" width="${maxW}" height="${bh}" rx="${Math.round(12 * s)}" fill="none" stroke="${C.border}" stroke-width="1"/>
+        <text x="${px + padX}" y="${py + padY + tFontSize * 0.75}" font-family="${FONT}" font-size="${tFontSize}" font-weight="700" fill="${C.textDark}">${esc(text)}</text>
+      `;
     }
     case "badge-difficulty": {
       const diff = run.difficulty || "moderate";
