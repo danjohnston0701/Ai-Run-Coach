@@ -305,6 +305,6 @@ function formatPace(minPerKm: number): string {
 export default {
   getPersonalBests,
   getPeriodStatistics,
-  getPerformanceTrends,
+  getDetailedTrends,
   getAllTimeStats,
 };

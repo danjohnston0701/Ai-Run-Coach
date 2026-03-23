@@ -82,7 +82,7 @@ router.get('/trends', authMiddleware, async (req: AuthenticatedRequest, res: Res
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const trends = await myDataService.getPerformanceTrends(userId);
+    const trends = await myDataService.getDetailedTrends(userId, 30);
 
     res.json({
       success: true,
