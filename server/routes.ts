@@ -828,10 +828,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
       
+      // Calculate totalSteps from cadence if available
+      // Formula: steps = cadence (steps/min) × duration (minutes)
+      let totalSteps = runData.totalSteps || 0;
+      if ((totalSteps === 0 || !totalSteps) && runData.cadence && durationInSeconds) {
+        const durationMinutes = durationInSeconds / 60;
+        totalSteps = Math.round(runData.cadence * durationMinutes);
+        console.log(`[POST /api/runs] Calculated totalSteps: ${runData.cadence} steps/min × ${durationMinutes.toFixed(1)} min = ${totalSteps} steps`);
+      }
+
       // Convert timestamp fields from numbers to Date objects for database compatibility
       const processedRunData = {
         ...runData,
         duration: durationInSeconds,
+        totalSteps, // Use calculated or provided value
         completedAt: runData.completedAt ? new Date(runData.completedAt) : undefined,
         startTime: runData.startTime ? new Date(runData.startTime) : undefined,
         endTime: runData.endTime ? new Date(runData.endTime) : undefined,
@@ -847,7 +857,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })),
       };
       
-      // Create run with TSS
+      // Create run with TSS and calculated steps
       console.log(`[POST /api/runs] Creating run for user: ${userId}`);
       const run = await storage.createRun({
         ...processedRunData,
