@@ -244,6 +244,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onNavigateToCoachSettings = { navController.navigate("coach_settings") },
                     onNavigateToPersonalDetails = { navController.navigate("personal_details") },
                     onNavigateToFitnessLevel = { navController.navigate("fitness_level") },
+                    onNavigateToMyData = { navController.navigate("my_data") },
                     onNavigateToGoals = { navController.navigate("goals") },
                     onNavigateToDistanceScale = { navController.navigate("distance_scale") },
                     onNavigateToNotifications = { navController.navigate("notification_settings") },
@@ -251,6 +252,9 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onNavigateToSubscription = { navController.navigate("subscription") },
                     onNavigateToCoachingProgramme = { navController.navigate("coaching_programme") }
                 )
+            }
+            composable("my_data") {
+                MyDataScreen()
             }
             // Map My Run Setup Screen (the beautiful redesigned one!)
             composable("map_my_run_setup/{mode}/{dist}/{timeOn}/{h}/{m}/{s}") { backStackEntry ->
