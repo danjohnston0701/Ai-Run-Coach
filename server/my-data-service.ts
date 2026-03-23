@@ -168,7 +168,7 @@ export async function getDetailedTrends(userId: string, days: number) {
   startDate.setDate(startDate.getDate() - days);
 
   try {
-    const runs = await db
+    const userRuns = await db
       .select()
       .from(runs)
       .where(
@@ -179,7 +179,7 @@ export async function getDetailedTrends(userId: string, days: number) {
       )
       .orderBy(asc(runs.completedAt));
 
-    if (runs.length === 0) {
+    if (userRuns.length === 0) {
       return {
         paceTrend: [],
         hrTrend: [],
@@ -188,28 +188,28 @@ export async function getDetailedTrends(userId: string, days: number) {
       };
     }
 
-    const paceTrend = runs
+    const paceTrend = userRuns
       .map(r => ({
         date: r.completedAt?.toISOString().split('T')[0] || '',
         value: r.avgPace ? parseFloat(r.avgPace.split(':')[0]) : null,
       }))
       .filter((d): d is { date: string; value: number } => d.value !== null);
 
-    const hrTrend = runs
+    const hrTrend = userRuns
       .map(r => ({
         date: r.completedAt?.toISOString().split('T')[0] || '',
         value: r.avgHeartRate || null,
       }))
       .filter((d): d is { date: string; value: number } => d.value !== null);
 
-    const elevationTrend = runs
+    const elevationTrend = userRuns
       .map(r => ({
         date: r.completedAt?.toISOString().split('T')[0] || '',
         value: r.elevationGain || null,
       }))
       .filter((d): d is { date: string; value: number } => d.value !== null);
 
-    const cadenceTrend = runs
+    const cadenceTrend = userRuns
       .map(r => ({
         date: r.completedAt?.toISOString().split('T')[0] || '',
         value: r.cadence || null,
