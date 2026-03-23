@@ -116,7 +116,9 @@ class MyDataViewModel @Inject constructor(
     
     fun selectTimePeriod(period: TimePeriod) {
         _selectedTimePeriod.value = period
-        loadMyData()
+        // Only reload trends and stats, not personal bests (those are all-time)
+        loadPeriodStatistics()
+        loadDetailedTrends()
     }
     
     fun refreshData() {
@@ -140,7 +142,7 @@ class MyDataViewModel @Inject constructor(
                 // Fetch all data in parallel
                 val pbTask = loadPersonalBests()
                 val statsTask = loadPeriodStatistics()
-                val trendsTask = loadTrends()
+                val trendsTask = loadDetailedTrends()
                 val allTimeTask = loadAllTimeStats()
                 
                 // Wait for all to complete
@@ -246,20 +248,22 @@ class MyDataViewModel @Inject constructor(
         }
     }
     
-    private fun loadTrends() = viewModelScope.launch {
+    private fun loadDetailedTrends() = viewModelScope.launch {
         try {
-            val response = apiService.getMyDataTrends()
+            val period = _selectedTimePeriod.value
+            val days = period.days
+            val response = apiService.getMyDataDetailedTrends(days)
             
             if (response.isSuccessful) {
                 val data = response.body()?.data ?: emptyMap()
                 
-                // Parse pace trend
+                // Parse run-by-run trend data for graphs
                 val paceTrendData = (data["paceTrend"] as? List<*>)?.mapNotNull { item ->
                     val map = item as? Map<*, *> ?: return@mapNotNull null
                     PeriodData(
-                        period = TimePeriod.valueOf(map["period"] as? String ?: "MONTH"),
+                        period = period, // Use selected period for all points
                         value = (map["value"] as? Number)?.toDouble() ?: 0.0,
-                        trend = map["trend"] as? String ?: "→"
+                        trend = map["date"] as? String ?: "" // Store date for x-axis
                     )
                 } ?: emptyList()
                 _pacesTrend.value = paceTrendData
@@ -268,9 +272,9 @@ class MyDataViewModel @Inject constructor(
                 val hrTrendData = (data["hrTrend"] as? List<*>)?.mapNotNull { item ->
                     val map = item as? Map<*, *> ?: return@mapNotNull null
                     PeriodData(
-                        period = TimePeriod.valueOf(map["period"] as? String ?: "MONTH"),
+                        period = period,
                         value = (map["value"] as? Number)?.toDouble() ?: 0.0,
-                        trend = map["trend"] as? String ?: "→"
+                        trend = map["date"] as? String ?: ""
                     )
                 } ?: emptyList()
                 _hrTrend.value = hrTrendData
@@ -279,9 +283,9 @@ class MyDataViewModel @Inject constructor(
                 val elevTrendData = (data["elevationTrend"] as? List<*>)?.mapNotNull { item ->
                     val map = item as? Map<*, *> ?: return@mapNotNull null
                     PeriodData(
-                        period = TimePeriod.valueOf(map["period"] as? String ?: "MONTH"),
+                        period = period,
                         value = (map["value"] as? Number)?.toDouble() ?: 0.0,
-                        trend = map["trend"] as? String ?: "→"
+                        trend = map["date"] as? String ?: ""
                     )
                 } ?: emptyList()
                 _elevationTrend.value = elevTrendData
@@ -290,19 +294,19 @@ class MyDataViewModel @Inject constructor(
                 val cadenceTrendData = (data["cadenceTrend"] as? List<*>)?.mapNotNull { item ->
                     val map = item as? Map<*, *> ?: return@mapNotNull null
                     PeriodData(
-                        period = TimePeriod.valueOf(map["period"] as? String ?: "MONTH"),
+                        period = period,
                         value = (map["value"] as? Number)?.toDouble() ?: 0.0,
-                        trend = map["trend"] as? String ?: "→"
+                        trend = map["date"] as? String ?: ""
                     )
                 } ?: emptyList()
                 _cadenceTrend.value = cadenceTrendData
                 
-                Log.d(tag, "Loaded performance trends")
+                Log.d(tag, "Loaded detailed trends for ${period.label}: pace=${paceTrendData.size} runs")
             } else {
-                Log.w(tag, "Trends response not successful: ${response.code()}")
+                Log.w(tag, "Detailed trends response not successful: ${response.code()}")
             }
         } catch (e: Exception) {
-            Log.e(tag, "Error loading trends", e)
+            Log.e(tag, "Error loading detailed trends", e)
             // Keep existing data on error
         }
     }

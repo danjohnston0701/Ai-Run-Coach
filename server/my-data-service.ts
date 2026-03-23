@@ -7,7 +7,7 @@
 
 import { db } from './db';
 import { runs } from '@shared/schema';
-import { eq, gte, lte, and, desc } from 'drizzle-orm';
+import { eq, gte, lte, and, desc, asc } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 
 /**
@@ -160,75 +160,77 @@ export async function getPeriodStatistics(userId: string, days: number) {
 }
 
 /**
- * Calculate performance trends across time periods
+ * Get detailed run-by-run trend data for a specific time period
+ * Returns pace, HR, elevation, and cadence for each run
  */
-export async function getPerformanceTrends(userId: string) {
-  // Period keys must match Android TimePeriod enum values: MONTH, QUARTER, HALF_YEAR, YEAR
-  const periods = [
-    { label: '1 Month', days: 30, key: 'MONTH' },
-    { label: '3 Months', days: 90, key: 'QUARTER' },
-    { label: '6 Months', days: 180, key: 'HALF_YEAR' },
-    { label: '1 Year', days: 365, key: 'YEAR' },
-  ];
+export async function getDetailedTrends(userId: string, days: number) {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
 
-  const trends = {
-    paceTrend: [] as any[],
-    hrTrend: [] as any[],
-    elevationTrend: [] as any[],
-    cadenceTrend: [] as any[],
-  };
+  try {
+    const runs = await db
+      .select()
+      .from(runs)
+      .where(
+        and(
+          eq(runs.userId, userId),
+          gte(runs.completedAt, startDate)
+        )
+      )
+      .orderBy(asc(runs.completedAt));
 
-  const stats: any[] = [];
+    if (runs.length === 0) {
+      return {
+        paceTrend: [],
+        hrTrend: [],
+        elevationTrend: [],
+        cadenceTrend: [],
+      };
+    }
 
-  // Get stats for each period
-  for (const period of periods) {
-    const stat = await getPeriodStatistics(userId, period.days);
-    stats.push({ ...stat, period });
+    const paceTrend = runs
+      .map(r => ({
+        date: r.completedAt?.toISOString().split('T')[0] || '',
+        value: r.avgPace ? parseFloat(r.avgPace.split(':')[0]) : null,
+      }))
+      .filter((d): d is { date: string; value: number } => d.value !== null);
+
+    const hrTrend = runs
+      .map(r => ({
+        date: r.completedAt?.toISOString().split('T')[0] || '',
+        value: r.avgHeartRate || null,
+      }))
+      .filter((d): d is { date: string; value: number } => d.value !== null);
+
+    const elevationTrend = runs
+      .map(r => ({
+        date: r.completedAt?.toISOString().split('T')[0] || '',
+        value: r.elevationGain || null,
+      }))
+      .filter((d): d is { date: string; value: number } => d.value !== null);
+
+    const cadenceTrend = runs
+      .map(r => ({
+        date: r.completedAt?.toISOString().split('T')[0] || '',
+        value: r.cadence || null,
+      }))
+      .filter((d): d is { date: string; value: number } => d.value !== null);
+
+    return {
+      paceTrend,
+      hrTrend,
+      elevationTrend,
+      cadenceTrend,
+    };
+  } catch (error) {
+    console.error('Error getting detailed trends:', error);
+    return {
+      paceTrend: [],
+      hrTrend: [],
+      elevationTrend: [],
+      cadenceTrend: [],
+    };
   }
-
-  // Build trends
-  for (let i = 0; i < stats.length; i++) {
-    const current = stats[i];
-    const previous = i > 0 ? stats[i - 1] : null;
-
-    // Pace trend
-    const currentPace = current.averagePace !== '--' ? parseFloat(current.averagePace.split(':')[0]) : 0;
-    const previousPace = previous?.averagePace !== '--' ? parseFloat(previous.averagePace.split(':')[0]) : currentPace;
-    const paceTrend = previousPace > 0 ? ((currentPace - previousPace) / previousPace) * 100 : 0;
-
-    // Use period.key (e.g. "MONTH") to match Android TimePeriod enum valueOf()
-    trends.paceTrend.push({
-      period: current.period.key,
-      value: currentPace,
-      trend: paceTrend < -2 ? '↑' : paceTrend > 2 ? '↓' : '→', // Lower pace is better
-    });
-
-    // HR trend
-    const hrTrend = previous ? ((current.averageHeartRate - previous.averageHeartRate) / previous.averageHeartRate) * 100 : 0;
-    trends.hrTrend.push({
-      period: current.period.key,
-      value: current.averageHeartRate,
-      trend: hrTrend < -2 ? '↓' : hrTrend > 2 ? '↑' : '→', // Lower HR is better
-    });
-
-    // Elevation trend
-    const elevTrend = previous ? ((current.totalElevationGain - previous.totalElevationGain) / previous.totalElevationGain) * 100 : 0;
-    trends.elevationTrend.push({
-      period: current.period.key,
-      value: current.totalElevationGain,
-      trend: elevTrend < -10 ? '↓' : elevTrend > 10 ? '↑' : '→',
-    });
-
-    // Cadence trend
-    const cadenceTrend = previous ? ((current.averageCadence - previous.averageCadence) / previous.averageCadence) * 100 : 0;
-    trends.cadenceTrend.push({
-      period: current.period.key,
-      value: current.averageCadence,
-      trend: cadenceTrend < -2 ? '↓' : cadenceTrend > 2 ? '↑' : '→',
-    });
-  }
-
-  return trends;
 }
 
 /**

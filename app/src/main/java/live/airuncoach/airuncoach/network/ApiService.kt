@@ -474,6 +474,11 @@ interface ApiService {
     @GET("/api/my-data/trends")
     suspend fun getMyDataTrends(): Response<MyDataResponse>
     
+    @GET("/api/my-data/detailed-trends")
+    suspend fun getMyDataDetailedTrends(
+        @Query("days") days: Int = 30
+    ): Response<MyDataResponse>
+    
     @GET("/api/my-data/all-time-stats")
     suspend fun getMyDataAllTimeStats(): Response<MyDataResponse>
 }

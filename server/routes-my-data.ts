@@ -99,6 +99,36 @@ router.get('/trends', authMiddleware, async (req: AuthenticatedRequest, res: Res
 });
 
 /**
+ * GET /api/my-data/detailed-trends
+ * Get run-by-run trend data for a specific time period
+ * Query: days (optional) - number of days to look back (default 30)
+ */
+router.get('/detailed-trends', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const days = parseInt(req.query.days as string) || 30;
+
+    const trends = await myDataService.getDetailedTrends(userId, days);
+
+    res.json({
+      success: true,
+      data: trends,
+    });
+  } catch (error: any) {
+    console.error('Error getting detailed trends:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch detailed trends',
+      message: error.message,
+    });
+  }
+});
+
+/**
  * GET /api/my-data/all-time-stats
  * Get all-time achievements and statistics
  */
