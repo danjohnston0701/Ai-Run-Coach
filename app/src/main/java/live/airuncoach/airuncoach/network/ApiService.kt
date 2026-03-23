@@ -485,7 +485,9 @@ data class MyDataResponse(
     val success: Boolean = true,
     val data: Map<String, Any> = emptyMap(),
     val message: String? = null
-}
+)
+
+
 
 /**
  * Heatmap data structure
