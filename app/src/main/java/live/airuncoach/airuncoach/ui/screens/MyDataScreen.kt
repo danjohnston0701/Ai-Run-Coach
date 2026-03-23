@@ -99,16 +99,7 @@ fun MyDataScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(Spacing.md)
                     ) {
-                        // Section 1: Time Period Selector
-                        item {
-                            TimePeriodSelector(
-                                selectedPeriod = selectedPeriod,
-                                onPeriodSelected = { viewModel.selectTimePeriod(it) }
-                            )
-                            Spacer(modifier = Modifier.height(Spacing.lg))
-                        }
-
-                        // Section 2: Personal Records
+                        // Section 1: Personal Records (All-Time)
                         item {
                             SectionHeader(title = "🏆 Personal Records")
                             Spacer(modifier = Modifier.height(Spacing.sm))
@@ -116,30 +107,41 @@ fun MyDataScreen(
                             Spacer(modifier = Modifier.height(Spacing.lg))
                         }
 
-                        // Section 3: Period Statistics
-                        if (stats != null) {
-                            item {
-                                SectionHeader(title = "📊 Statistics (${selectedPeriod.label})")
-                                Spacer(modifier = Modifier.height(Spacing.sm))
-                                PeriodStatisticsSection(stats = stats!!)
-                                Spacer(modifier = Modifier.height(Spacing.lg))
-                            }
+                        // Section 2: All-Time Achievements (All-Time totals)
+                        item {
+                            SectionHeader(title = "⭐ All-Time Achievements")
+                            Spacer(modifier = Modifier.height(Spacing.sm))
+                            AllTimeAchievementsSection(allTimeStats = allTimeStats)
+                            Spacer(modifier = Modifier.height(Spacing.lg))
                         }
 
-                        // Section 4: Performance Trends
+                        // Section 3: Time Period Selector (for trends and stats)
                         item {
-                            SectionHeader(title = "📈 Performance Trends")
+                            SectionHeader(title = "📈 View Trends Over Time")
+                            Spacer(modifier = Modifier.height(Spacing.sm))
+                            TimePeriodSelector(
+                                selectedPeriod = selectedPeriod,
+                                onPeriodSelected = { viewModel.selectTimePeriod(it) }
+                            )
+                            Spacer(modifier = Modifier.height(Spacing.lg))
+                        }
+
+                        // Section 4: Performance Trends (filtered by selected period)
+                        item {
+                            SectionHeader(title = "📊 Performance Trends (${selectedPeriod.label})")
                             Spacer(modifier = Modifier.height(Spacing.sm))
                             PerformanceTrendsSection(viewModel = viewModel)
                             Spacer(modifier = Modifier.height(Spacing.lg))
                         }
 
-                        // Section 5: All-Time Achievements
-                        item {
-                            SectionHeader(title = "⭐ All-Time Achievements")
-                            Spacer(modifier = Modifier.height(Spacing.sm))
-                            AllTimeAchievementsSection(allTimeStats = allTimeStats)
-                            Spacer(modifier = Modifier.height(Spacing.xl))
+                        // Section 5: Period Statistics (filtered by selected period)
+                        if (stats != null) {
+                            item {
+                                SectionHeader(title = "📈 Statistics (${selectedPeriod.label})")
+                                Spacer(modifier = Modifier.height(Spacing.sm))
+                                PeriodStatisticsSection(stats = stats!!)
+                                Spacer(modifier = Modifier.height(Spacing.xl))
+                            }
                         }
                     }
                 }
