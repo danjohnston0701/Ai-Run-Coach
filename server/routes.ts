@@ -10690,7 +10690,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       
       const imageBuffer = await generateShareImage({
         templateId,
-        aspectRatio: aspectRatio || "1:1",
+        aspectRatio: aspectRatio || "4:5",
         stickers: stickers || [],
         runData: buildShareRunData(run),
         userName: user?.name || undefined,
@@ -10735,7 +10735,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
       const imageBuffer = await generateShareImage({
         templateId,
-        aspectRatio: aspectRatio || "1:1",
+        aspectRatio: aspectRatio || "4:5",
         stickers: stickers || [],
         runData: buildShareRunData(run),
         userName: user?.name || undefined,

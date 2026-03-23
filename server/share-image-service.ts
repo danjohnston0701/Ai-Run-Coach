@@ -106,7 +106,7 @@ const C = {
 
 const FONT = `'SF Pro Display', 'Inter', 'Helvetica Neue', Arial, sans-serif`;
 
-const LOGO_ZONE_H = 120;
+const LOGO_ZONE_H = 170;
 
 export const TEMPLATES: ShareTemplate[] = [
   {
@@ -187,6 +187,11 @@ function formatDuration(seconds: number): string {
 function formatDate(dateStr?: string): string {
   if (!dateStr) return new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
   return new Date(dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatTime(dateStr?: string): string {
+  if (!dateStr) return "";
+  return new Date(dateStr).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
 function esc(str: string): string {
@@ -277,19 +282,16 @@ function metricRing(
 ): string {
   const strokeW = Math.round(r * 0.18);
 
-  const labelFontSize = Math.min(Math.round(r * 0.2), 22);
+  const labelFontSize = Math.min(Math.round(r * 0.25), 28);
   const valueFontSize = Math.min(Math.round(r * 0.52), 60);
-  const unitFontSize = Math.min(Math.round(r * 0.17), 18);
 
   const labelY = cy - r * 0.22;
   const valueY = cy + r * 0.2;
-  const unitY = valueY + unitFontSize + 5;
 
   return `
     <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="url(#${gradId})" stroke-width="${strokeW}" filter="url(#ringGlow)"/>
-    <text x="${cx}" y="${labelY}" font-family="${FONT}" font-size="${labelFontSize}" font-weight="600" fill="${C.textLight}" text-anchor="middle" letter-spacing="0.5">${esc(label)}</text>
+    <text x="${cx}" y="${labelY}" font-family="${FONT}" font-size="${labelFontSize}" font-weight="700" fill="${C.textDark}" text-anchor="middle" letter-spacing="0.3">${esc(label)}</text>
     <text x="${cx}" y="${valueY}" font-family="${FONT}" font-size="${valueFontSize}" font-weight="800" fill="${C.textDark}" text-anchor="middle">${esc(value)}</text>
-    ${unit ? `<text x="${cx}" y="${unitY}" font-family="${FONT}" font-size="${unitFontSize}" font-weight="500" fill="${C.textMuted}" text-anchor="middle">${esc(unit)}</text>` : ""}
   `;
 }
 
@@ -298,22 +300,32 @@ function buildStatsGridSvg(w: number, h: number, run: RunDataForImage, userName?
   const contentEndY = h - LOGO_ZONE_H;
   const isVertical = h > w;
 
-  let headerY = isVertical ? 60 : 50;
+  const nameFontSize = 26;
+  const metaFontSize = 22;
+
+  let headerY = isVertical ? 64 : 54;
   let headerSvg = "";
 
   if (userName) {
-    headerSvg += `<text x="${cx}" y="${headerY}" font-family="${FONT}" font-size="22" font-weight="700" fill="${C.textDark}" text-anchor="middle">${esc(userName)}</text>`;
-    headerY += 24;
+    headerSvg += `<text x="${cx}" y="${headerY}" font-family="${FONT}" font-size="${nameFontSize}" font-weight="700" fill="${C.textDark}" text-anchor="middle">${esc(userName)}</text>`;
+    headerY += nameFontSize + 8;
   }
-  headerSvg += `<text x="${cx}" y="${headerY}" font-family="${FONT}" font-size="14" fill="${C.textLight}" text-anchor="middle" letter-spacing="0.5">${esc(formatDate(run.completedAt))}</text>`;
-  headerY += 10;
+  // Date — same size as name but not bold
+  headerSvg += `<text x="${cx}" y="${headerY}" font-family="${FONT}" font-size="${metaFontSize}" font-weight="400" fill="${C.textDark}" text-anchor="middle" letter-spacing="0.3">${esc(formatDate(run.completedAt))}</text>`;
+  headerY += metaFontSize + 6;
 
-  const heroY = headerY + 48;
-  const dist = run.distance?.toFixed(2) || "0";
-  headerSvg += `<text x="${cx}" y="${heroY}" font-family="${FONT}" font-size="68" font-weight="900" fill="${C.textDark}" text-anchor="middle" letter-spacing="-2">${esc(dist)}</text>`;
-  headerSvg += `<text x="${cx}" y="${heroY + 30}" font-family="${FONT}" font-size="15" font-weight="700" fill="${C.cyan}" text-anchor="middle" letter-spacing="5">KILOMETERS</text>`;
+  // Run timestamp — same font, not bold, slightly muted
+  const runTime = formatTime(run.completedAt);
+  if (runTime) {
+    headerSvg += `<text x="${cx}" y="${headerY}" font-family="${FONT}" font-size="${metaFontSize}" font-weight="400" fill="${C.textMid}" text-anchor="middle" letter-spacing="0.3">${esc(runTime)}</text>`;
+    headerY += metaFontSize + 6;
+  }
 
-  const ringAreaTop = heroY + 54;
+  // Thin separator line
+  headerSvg += `<line x1="${cx - 80}" y1="${headerY + 4}" x2="${cx + 80}" y2="${headerY + 4}" stroke="url(#fadeLine)" stroke-width="1.5"/>`;
+  headerY += 20;
+
+  const ringAreaTop = headerY;
   const ringAreaBot = contentEndY - 6;
   const ringAreaH = ringAreaBot - ringAreaTop;
   const ringAreaW = w;
@@ -328,6 +340,7 @@ function buildStatsGridSvg(w: number, h: number, run: RunDataForImage, userName?
 
   const durationSec = run.duration || 0;
   const distKm = run.distance || 0;
+  const dist = run.distance?.toFixed(2) || "0";
 
   const distProgress = Math.min(0.3 + distKm / 10 * 0.6, 0.95);
   const durationProgress = Math.min(0.3 + durationSec / 3600 * 0.6, 0.95);
@@ -341,14 +354,12 @@ function buildStatsGridSvg(w: number, h: number, run: RunDataForImage, userName?
   let ring4Progress = 0.55;
   let ring4Label = "Calories";
   let ring4Value = run.calories?.toString() || "--";
-  let ring4Unit = "kcal";
   let ring4Grad = "greenRingGrad";
   let ring4Track = "#00E676";
 
   if (run.avgHeartRate) {
     ring4Label = "Heart Rate";
     ring4Value = run.avgHeartRate.toString();
-    ring4Unit = "bpm";
     ring4Grad = "redRingGrad";
     ring4Track = "#FF5252";
     ring4Progress = Math.min(0.3 + run.avgHeartRate / 200 * 0.6, 0.95);
@@ -356,16 +367,17 @@ function buildStatsGridSvg(w: number, h: number, run: RunDataForImage, userName?
     ring4Progress = Math.min(0.3 + run.calories / 600 * 0.6, 0.95);
   }
 
+  // Units removed — values speak for themselves with the label
   const rings = [
-    { cx: col1X, cy: row1Y, label: "Distance (km)", value: dist, unit: "km", grad: "cyanRingGrad", prog: distProgress, track: "#00E5FF" },
-    { cx: col2X, cy: row1Y, label: "Pace (/km)", value: run.avgPace || "--:--", unit: "/km", grad: "blueRingGrad", prog: paceProgress, track: "#42A5F5" },
-    { cx: col1X, cy: row2Y, label: "Duration", value: formatDuration(durationSec), unit: "", grad: "yellowRingGrad", prog: durationProgress, track: "#FFD600" },
-    { cx: col2X, cy: row2Y, label: ring4Label, value: ring4Value, unit: ring4Unit, grad: ring4Grad, prog: ring4Progress, track: ring4Track },
+    { cx: col1X, cy: row1Y, label: "Distance", value: dist, grad: "cyanRingGrad", prog: distProgress, track: "#00E5FF" },
+    { cx: col2X, cy: row1Y, label: "Pace", value: run.avgPace || "--:--", grad: "blueRingGrad", prog: paceProgress, track: "#42A5F5" },
+    { cx: col1X, cy: row2Y, label: "Duration", value: formatDuration(durationSec), grad: "yellowRingGrad", prog: durationProgress, track: "#FFD600" },
+    { cx: col2X, cy: row2Y, label: ring4Label, value: ring4Value, grad: ring4Grad, prog: ring4Progress, track: ring4Track },
   ];
 
   let ringSvg = "";
   rings.forEach(r => {
-    ringSvg += metricRing(r.cx, r.cy, ringR, r.label, r.value, r.unit, r.grad, r.prog, r.track);
+    ringSvg += metricRing(r.cx, r.cy, ringR, r.label, r.value, "", r.grad, r.prog, r.track);
   });
 
   return `
@@ -987,11 +999,11 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
 async function getLogoBuffer(): Promise<Buffer | null> {
   try {
     const logoPath = path.resolve("server/assets/logo.png");
-    return await sharp(logoPath).resize(86, 86, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer();
+    return await sharp(logoPath).resize(129, 129, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer();
   } catch (e: any) {
     try {
       const altPath = path.resolve("attached_assets/logo_1772693744611.png");
-      return await sharp(altPath).resize(86, 86, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer();
+      return await sharp(altPath).resize(129, 129, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer();
     } catch {
       console.error("Logo not found:", e.message);
       return null;
@@ -1126,20 +1138,24 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
 
   const logoBuffer = await getLogoBuffer();
   if (logoBuffer) {
-    const logoX = 40;
-    const logoY = h - LOGO_ZONE_H + 24;
-    const textX = logoX + 100;
+    const logoSize = 129; // 86 * 1.5
+    const logoX = 36;
+    const logoY = h - LOGO_ZONE_H + Math.round((LOGO_ZONE_H - logoSize) / 2);
+    const textX = logoX + logoSize + 18;
 
     const logoBg = "#0A0A1A";
     const logoTextColor = "#FFFFFF";
     const logoSubColor = "rgba(255,255,255,0.5)";
     const logoLineColor = "rgba(255,255,255,0.15)";
 
+    const brandTextY = logoY + Math.round(logoSize * 0.42);
+    const brandSubY = logoY + Math.round(logoSize * 0.72);
+
     const brandSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
       <rect x="0" y="${h - LOGO_ZONE_H}" width="${w}" height="${LOGO_ZONE_H}" fill="${logoBg}"/>
       <line x1="60" y1="${h - LOGO_ZONE_H}" x2="${w - 60}" y2="${h - LOGO_ZONE_H}" stroke="${logoLineColor}" stroke-width="1" opacity="0.4"/>
-      <text x="${textX}" y="${logoY + 32}" font-family="${FONT}" font-size="29" font-weight="800" fill="${logoTextColor}" letter-spacing="0.3">AI Run Coach</text>
-      <text x="${textX}" y="${logoY + 56}" font-family="${FONT}" font-size="17" font-weight="500" fill="${logoSubColor}" letter-spacing="0.5">Your AI-Powered Running Partner</text>
+      <text x="${textX}" y="${brandTextY}" font-family="${FONT}" font-size="44" font-weight="800" fill="${logoTextColor}" letter-spacing="0.3">Ai Run Coach</text>
+      <text x="${textX}" y="${brandSubY}" font-family="${FONT}" font-size="26" font-weight="500" fill="${logoSubColor}" letter-spacing="0.5">Your AI-Powered Running Partner</text>
     </svg>`;
 
     const brandBuffer = await sharp(Buffer.from(brandSvg)).png().toBuffer();
