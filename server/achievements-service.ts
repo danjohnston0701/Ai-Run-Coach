@@ -327,6 +327,97 @@ export async function calculateRunAchievements(
   }
 }
 
+/**
+ * Check achievements after a run is completed
+ * Fetches run data from DB and calculates any new achievements
+ */
+export async function checkAchievementsAfterRun(
+  runId: string,
+  userId: string
+): Promise<RunAchievement[]> {
+  try {
+    const runRows = await db
+      .select()
+      .from(runs)
+      .where(and(eq(runs.id, runId), eq(runs.userId, userId)))
+      .limit(1);
+
+    if (runRows.length === 0) {
+      console.log(`[achievements] Run ${runId} not found for user ${userId}`);
+      return [];
+    }
+
+    const run = runRows[0];
+    return calculateRunAchievements(
+      userId,
+      runId,
+      run.distance || 0,
+      run.avgPace,
+      run.kmSplits
+    );
+  } catch (error) {
+    console.error('[achievements] Error in checkAchievementsAfterRun:', error);
+    return [];
+  }
+}
+
+/**
+ * Get achievements summary for a user
+ */
+export async function getUserAchievements(userId: string): Promise<{
+  personalBests: Record<string, { pace: string | null; date: string | null }>;
+  totalPBs: number;
+}> {
+  try {
+    const userRuns = await db
+      .select()
+      .from(runs)
+      .where(eq(runs.userId, userId));
+
+    const personalBests: Record<string, { pace: string | null; date: string | null }> = {};
+
+    for (const config of ACHIEVEMENT_CONFIGS) {
+      if (config.type === AchievementType.FASTEST_KM || config.type === AchievementType.FASTEST_MILE) {
+        continue;
+      }
+
+      let bestPace: string | null = null;
+      let bestDate: string | null = null;
+      let bestPaceMinutes: number | null = null;
+
+      for (const run of userRuns) {
+        if (!isWithinRange(run.distance || 0, config)) continue;
+        const paceMinutes = parsePaceToMinutes(run.avgPace);
+        if (paceMinutes === null) continue;
+        if (bestPaceMinutes === null || paceMinutes < bestPaceMinutes) {
+          bestPaceMinutes = paceMinutes;
+          bestPace = run.avgPace;
+          bestDate = run.completedAt ? run.completedAt.toISOString() : null;
+        }
+      }
+
+      personalBests[config.type] = { pace: bestPace, date: bestDate };
+    }
+
+    const totalPBs = Object.values(personalBests).filter(pb => pb.pace !== null).length;
+
+    return { personalBests, totalPBs };
+  } catch (error) {
+    console.error('[achievements] Error in getUserAchievements:', error);
+    return { personalBests: {}, totalPBs: 0 };
+  }
+}
+
+/**
+ * Initialize achievements system (no-op for computed achievements)
+ */
+export async function initializeAchievements(): Promise<void> {
+  console.log('[achievements] Achievements system initialized (computed on-the-fly, no DB setup required)');
+}
+
 export default {
   calculateRunAchievements,
+  checkAchievementsAfterRun,
+  getUserAchievements,
+  initializeAchievements,
 };
