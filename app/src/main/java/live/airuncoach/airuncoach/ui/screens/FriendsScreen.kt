@@ -224,6 +224,123 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
                 else -> {}
             }
 
+            // Add by invite link section
+            item {
+                val keyboardController2 = LocalSoftwareKeyboardController.current
+                var inviteLink by remember { mutableStateOf("") }
+                var inviteLinkError by remember { mutableStateOf<String?>(null) }
+
+                Spacer(modifier = Modifier.height(Spacing.md))
+
+                // Section header
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    Text(
+                        text = "Add via Invite Link",
+                        style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Paste a friend's invite link to send them a request",
+                    style = AppTextStyles.caption,
+                    color = Colors.textMuted
+                )
+                Spacer(modifier = Modifier.height(Spacing.md))
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Colors.backgroundSecondary
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = Spacing.md, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.icon_people_vector),
+                            contentDescription = null,
+                            tint = if (inviteLink.isNotBlank()) Colors.primary else Colors.textMuted,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(Spacing.sm))
+                        TextField(
+                            value = inviteLink,
+                            onValueChange = { inviteLink = it; inviteLinkError = null },
+                            placeholder = {
+                                Text(
+                                    "Paste invite link here…",
+                                    style = AppTextStyles.body,
+                                    color = Colors.textMuted
+                                )
+                            },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            colors = TextFieldDefaults.colors(
+                                focusedTextColor = Colors.textPrimary,
+                                unfocusedTextColor = Colors.textPrimary,
+                                cursorColor = Colors.primary,
+                                focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                                unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                                focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                                unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                                disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            ),
+                            textStyle = AppTextStyles.body,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                            keyboardActions = KeyboardActions(onGo = {
+                                val userId = extractUserIdFromInviteLink(inviteLink)
+                                if (userId != null) {
+                                    viewModel.sendFriendRequest(userId)
+                                    inviteLink = ""
+                                    keyboardController2?.hide()
+                                } else {
+                                    inviteLinkError = "Invalid invite link"
+                                }
+                            })
+                        )
+                        if (inviteLink.isNotBlank()) {
+                            IconButton(onClick = { inviteLink = ""; inviteLinkError = null }, modifier = Modifier.size(32.dp)) {
+                                Icon(imageVector = Icons.Default.Close, contentDescription = "Clear", tint = Colors.textMuted, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        FilledIconButton(
+                            onClick = {
+                                val userId = extractUserIdFromInviteLink(inviteLink)
+                                if (userId != null) {
+                                    viewModel.sendFriendRequest(userId)
+                                    inviteLink = ""
+                                    keyboardController2?.hide()
+                                } else {
+                                    inviteLinkError = "Invalid invite link"
+                                }
+                            },
+                            modifier = Modifier.size(36.dp),
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = if (inviteLink.isNotBlank()) Colors.primary else Colors.backgroundSecondary
+                            )
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.icon_people_vector),
+                                contentDescription = "Add Friend",
+                                tint = if (inviteLink.isNotBlank()) androidx.compose.ui.graphics.Color.White else Colors.textMuted,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+
+                if (inviteLinkError != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = inviteLinkError!!,
+                        style = AppTextStyles.caption,
+                        color = Colors.error
+                    )
+                }
+            }
+
             // Pending Friend Requests Section
             when (val state = pendingRequestsState) {
                 is PendingRequestsUiState.Success -> {
@@ -555,4 +672,17 @@ fun FriendCard(friend: Friend) {
             }
         }
     }
+}
+
+/**
+ * Extracts the userId from an AI Run Coach invite link.
+ * Supports formats like:
+ *   https://ai-run-coach.replit.app/invite/{userId}
+ *   airuncoach://invite/{userId}
+ */
+fun extractUserIdFromInviteLink(link: String): String? {
+    val trimmed = link.trim()
+    // Match /invite/<userId> segment
+    val regex = Regex("""/invite/([a-zA-Z0-9\-]+)""")
+    return regex.find(trimmed)?.groupValues?.getOrNull(1)?.takeIf { it.length >= 8 }
 }

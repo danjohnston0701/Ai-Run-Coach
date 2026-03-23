@@ -232,7 +232,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ==================== USER ENDPOINTS ====================
-  
+
+  /**
+   * GET /api/invite/:userId
+   * Public endpoint — returns just enough profile info to show a "Add friend" preview
+   * when someone opens a friend invite link.
+   */
+  app.get("/api/invite/:userId", async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      // Return minimal public info only
+      res.json({
+        id: user.id,
+        name: user.name,
+        profilePic: user.profilePic ?? null,
+        inviteUrl: `https://ai-run-coach.replit.app/invite/${user.id}`,
+      });
+    } catch (error: any) {
+      console.error("Invite lookup error:", error);
+      res.status(500).json({ error: "Failed to look up invite" });
+    }
+  });
+
   app.get("/api/users/search", async (req: Request, res: Response) => {
     try {
       const query = String(req.query.q || "");
