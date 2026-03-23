@@ -560,7 +560,7 @@ fun SettingsToggleItem(
 
 // ── Friend Invite Link Card ──────────────────────────────────────────────────
 
-private const val INVITE_BASE_URL = "https://ai-run-coach.replit.app/invite"
+private const val INVITE_BASE_URL = "https://airuncoach.live/invite"
 
 @Composable
 fun FriendInviteLinkCard(userId: String, context: Context) {

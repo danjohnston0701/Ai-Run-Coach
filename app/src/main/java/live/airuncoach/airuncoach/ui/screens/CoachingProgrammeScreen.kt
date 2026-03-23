@@ -815,7 +815,27 @@ fun PlanDashboardContent(
             Spacer(modifier = Modifier.height(Spacing.sm))
         }
         items(details.weeks) { week ->
-            WeekSummaryRow(week = week, isCurrent = week.weekNumber == actualCurrentWeek)
+            ExpandableWeekCard(
+                week = week,
+                isCurrent = week.weekNumber == actualCurrentWeek,
+                onWorkoutTap = { workout ->
+                    // If completed, navigate to summary; else navigate to workout detail
+                    if (workout.isCompleted && !workout.completedRunId.isNullOrBlank()) {
+                        // TODO: Navigate to run summary with completedRunId
+                        viewWithContext(workout)
+                    } else {
+                        // Show option to complete or start
+                        viewWithContext(workout)
+                    }
+                },
+                onCompleteWorkout = { workout ->
+                    if (!workout.isCompleted) {
+                        onCompleteWorkout(workout)
+                    }
+                },
+                planId = details.plan.id,
+                viewModel = viewModel
+            )
             Spacer(modifier = Modifier.height(Spacing.sm))
         }
 
@@ -1053,39 +1073,247 @@ fun WorkoutRow(workout: WorkoutDetails, onClick: () -> Unit) {
 }
 
 @Composable
-fun WeekSummaryRow(week: WeekDetails, isCurrent: Boolean) {
+fun ExpandableWeekCard(
+    week: WeekDetails,
+    isCurrent: Boolean,
+    onWorkoutTap: (WorkoutDetails) -> Unit,
+    onCompleteWorkout: (WorkoutDetails) -> Unit,
+    planId: String,
+    viewModel: TrainingPlanViewModel? = null
+) {
+    var isExpanded by remember { mutableStateOf(isCurrent) }
     val completedCount = week.workouts.count { it.isCompleted }
+    val skippedCount = week.workouts.count { it.isSkipped() }
+    val missedCount = week.workouts.count { !it.isCompleted && !it.isSkipped() && !it.workoutType.equals("rest", ignoreCase = true) }
     val totalCount = week.workouts.size
     val fraction = if (totalCount > 0) completedCount.toFloat() / totalCount else 0f
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { isExpanded = !isExpanded },
         colors = CardDefaults.cardColors(
             containerColor = if (isCurrent) Colors.primary.copy(alpha = 0.08f) else Colors.backgroundSecondary
         ),
         shape = RoundedCornerShape(12.dp)
     ) {
-        Row(modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md), verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Week ${week.weekNumber}", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = if (isCurrent) Colors.primary else Colors.textPrimary)
-                    if (isCurrent) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Surface(shape = RoundedCornerShape(4.dp), color = Colors.primary.copy(alpha = 0.2f)) {
-                            Text("Current", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.primary, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+        Column {
+            // Header (always visible)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.lg, vertical = Spacing.md),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Week ${week.weekNumber}",
+                            style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+                            color = if (isCurrent) Colors.primary else Colors.textPrimary
+                        )
+                        if (isCurrent) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(shape = RoundedCornerShape(4.dp), color = Colors.primary.copy(alpha = 0.2f)) {
+                                Text(
+                                    "Current",
+                                    style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+                                    color = Colors.primary,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
                         }
                     }
+                    Text(
+                        week.weekDescription ?: week.focusArea?.replace("_", " ")?.replaceFirstChar { it.uppercase() } ?: "",
+                        style = AppTextStyles.small,
+                        color = Colors.textMuted
+                    )
                 }
-                Text(week.weekDescription ?: week.focusArea?.replace("_", " ")?.replaceFirstChar { it.uppercase() } ?: "", style = AppTextStyles.small, color = Colors.textMuted)
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text("$completedCount/$totalCount", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.textSecondary)
-                LinearProgressIndicator(
-                    progress = { fraction },
-                    modifier = Modifier.width(60.dp).height(4.dp).clip(RoundedCornerShape(2.dp)),
-                    color = Colors.primary,
-                    trackColor = Colors.backgroundTertiary
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("$completedCount/$totalCount", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.textSecondary)
+                    LinearProgressIndicator(
+                        progress = { fraction },
+                        modifier = Modifier.width(60.dp).height(4.dp).clip(RoundedCornerShape(2.dp)),
+                        color = Colors.primary,
+                        trackColor = Colors.backgroundTertiary
+                    )
+                }
+                Spacer(modifier = Modifier.width(Spacing.sm))
+                Icon(
+                    painter = painterResource(if (isExpanded) R.drawable.icon_chevron_up_vector else R.drawable.icon_chevron_down_vector),
+                    contentDescription = "Toggle",
+                    tint = Colors.textMuted,
+                    modifier = Modifier.size(20.dp)
                 )
+            }
+
+            // Expanded content
+            if (isExpanded) {
+                HorizontalDivider(color = Colors.backgroundTertiary, thickness = 1.dp, modifier = Modifier.padding(horizontal = Spacing.lg))
+                
+                Column(modifier = Modifier.padding(Spacing.lg)) {
+                    // Summary stats
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = Spacing.md),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                    ) {
+                        WeekStatChip("Completed", completedCount, Colors.success, modifier = Modifier.weight(1f))
+                        WeekStatChip("Missed", missedCount, Colors.warning, modifier = Modifier.weight(1f))
+                        WeekStatChip("Skipped", skippedCount, Colors.textMuted, modifier = Modifier.weight(1f))
+                    }
+
+                    HorizontalDivider(color = Colors.backgroundTertiary, thickness = 1.dp, modifier = Modifier.padding(vertical = Spacing.md))
+
+                    // Workouts list
+                    week.workouts.sortedBy { it.dayOfWeek }.forEach { workout ->
+                        ExpandedWeekWorkoutRow(
+                            workout = workout,
+                            onClick = { onWorkoutTap(workout) },
+                            onComplete = {
+                                if (!workout.isCompleted) {
+                                    onCompleteWorkout(workout)
+                                }
+                            },
+                            onSkip = {
+                                if (!workout.isCompleted && !workout.isSkipped()) {
+                                    viewModel?.skipWorkout(workout.id, planId)
+                                }
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(Spacing.sm))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun WeekStatChip(label: String, count: Int, color: androidx.compose.ui.graphics.Color, modifier: Modifier = Modifier) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = color.copy(alpha = 0.15f),
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.sm),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                count.toString(),
+                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                color = color
+            )
+            Text(
+                label,
+                style = AppTextStyles.small,
+                color = color
+            )
+        }
+    }
+}
+
+@Composable
+fun ExpandedWeekWorkoutRow(
+    workout: WorkoutDetails,
+    onClick: () -> Unit,
+    onComplete: () -> Unit,
+    onSkip: () -> Unit
+) {
+    val dayName = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat").getOrElse(((workout.dayOfWeek % 7) + 7) % 7) { "Day" }
+    val statusColor = when {
+        workout.isCompleted -> Colors.success
+        workout.isSkipped() -> Colors.textMuted
+        else -> Colors.warning
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, statusColor.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundRoot),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Day and status indicator
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(50.dp)) {
+                Text(dayName, style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.textMuted)
+                Spacer(modifier = Modifier.height(4.dp))
+                when {
+                    workout.isCompleted -> Icon(
+                        painterResource(R.drawable.icon_check_vector),
+                        null,
+                        tint = Colors.success,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    workout.isSkipped() -> Icon(
+                        painterResource(R.drawable.icon_x_vector),
+                        null,
+                        tint = Colors.textMuted,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    else -> Box(modifier = Modifier.size(8.dp).background(Colors.warning, RoundedCornerShape(4.dp)))
+                }
+            }
+
+            Spacer(modifier = Modifier.width(Spacing.md))
+
+            // Workout details
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    workout.description ?: workoutTypeLabel(workout.workoutType),
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
+                    color = Colors.textPrimary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    workout.distance?.let {
+                        Text("${it}km", style = AppTextStyles.small, color = Colors.textMuted)
+                    }
+                    workout.targetPace?.let { raw ->
+                        val paceValue = raw.replace("/km", "").trim()
+                        Text("$paceValue/km", style = AppTextStyles.small, color = Colors.textMuted)
+                    }
+                }
+            }
+
+            // Action buttons (if not completed and not rest day)
+            if (!workout.isCompleted && !workout.workoutType.equals("rest", ignoreCase = true) && !workout.isSkipped()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    IconButton(
+                        onClick = onComplete,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.icon_check_vector),
+                            contentDescription = "Complete",
+                            tint = Colors.success,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = onSkip,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.icon_x_vector),
+                            contentDescription = "Skip",
+                            tint = Colors.textMuted,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -1101,6 +1329,16 @@ fun WorkoutTypeBadge(workoutType: String) {
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
         )
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Extension functions
+// ─────────────────────────────────────────────────────────────────────────────
+
+fun WorkoutDetails.isSkipped(): Boolean {
+    // A workout is skipped if it's completed but has no completedRunId
+    // (indicating it was marked done without actually running)
+    return isCompleted && completedRunId.isNullOrBlank()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

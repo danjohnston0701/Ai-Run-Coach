@@ -232,10 +232,10 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
                     "http://192.168.18.14:3000"
                 }
             } else {
-                "https://ai-run-coach.replit.app"  // Production backend (Replit)
+                "https://airuncoach.live"  // Production backend (Replit)
             }
         } else {
-            "https://ai-run-coach.replit.app"
+            "https://airuncoach.live"
         }
         
         // Log which backend we're connecting to
@@ -289,7 +289,7 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
                     .build()
                 
                 // Determine base URL - ALWAYS use production for Garmin (OAuth requires consistent callback URLs)
-                val baseUrl = "https://ai-run-coach.replit.app"
+                val baseUrl = "https://airuncoach.live"
                 
                 // Build Retrofit with custom Gson that handles ISO date strings in Long fields
                 val retrofit = Retrofit.Builder()
@@ -325,7 +325,7 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
                                     Build.MODEL.contains("Android SDK")
                 if (isEmulator) "http://10.0.2.2:3000" else "http://192.168.18.14:3000"
             } else {
-                "https://ai-run-coach.replit.app"
+                "https://airuncoach.live"
             }
         }
         

@@ -250,7 +250,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         id: user.id,
         name: user.name,
         profilePic: user.profilePic ?? null,
-        inviteUrl: `https://ai-run-coach.replit.app/invite/${user.id}`,
+        inviteUrl: `https://airuncoach.live/invite/${user.id}`,
       });
     } catch (error: any) {
       console.error("Invite lookup error:", error);
@@ -9453,7 +9453,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         regularSessions = [],  // recurring runs the user already does each week
         injuries = [],  // [{ bodyPart, status, notes }]
         goalId = null,  // optional: goal ID to link this plan to
-        userTimezone = null  // IANA timezone name, e.g. "Pacific/Auckland"
+        userTimezone = null,  // IANA timezone name, e.g. "Pacific/Auckland"
+        // User demographics — used as override if DB profile is incomplete
+        age = null,
+        gender = null,
+        height = null,
+        weight = null,
       } = req.body;
 
       if (!goalType || !targetDistance) {
@@ -9472,7 +9477,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         firstSessionStart,
         durationWeeks,
         Array.isArray(injuries) ? injuries : [],
-        userTimezone || null
+        userTimezone || null,
+        goalId || null,
+        // Pass demographics as overrides — used when user's DB profile is missing values
+        age ? Number(age) : null,
+        gender || null,
+        height ? Number(height) : null,
+        weight ? Number(weight) : null,
       );
       
       // Link plan to goal if goalId was provided
@@ -10445,7 +10456,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       
       if (existing.length > 0) {
         const share = existing[0];
-        const shareUrl = `https://ai-run-coach.replit.app/share/${share.shareToken}`;
+        const shareUrl = `https://airuncoach.live/share/${share.shareToken}`;
         return res.json({
           shareToken: share.shareToken,
           shareUrl,
@@ -10471,7 +10482,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         completedAt: run.completedAt || new Date(),
       });
 
-      const shareUrl = `https://ai-run-coach.replit.app/share/${shareToken}`;
+      const shareUrl = `https://airuncoach.live/share/${shareToken}`;
       res.json({
         shareToken,
         shareUrl,
@@ -10808,7 +10819,7 @@ function buildShareLandingPage(share: any): string {
   <meta property="og:title" content="${sharerName} ran ${distance} km!" />
   <meta property="og:description" content="${distance} km in ${duration} | Pace: ${pace} | Tracked with AI Run Coach" />
   <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://ai-run-coach.replit.app/share/${share.shareToken}" />
+  <meta property="og:url" content="https://airuncoach.live/share/${share.shareToken}" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {

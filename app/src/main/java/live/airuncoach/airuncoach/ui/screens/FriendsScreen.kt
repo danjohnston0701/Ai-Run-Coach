@@ -677,7 +677,7 @@ fun FriendCard(friend: Friend) {
 /**
  * Extracts the userId from an AI Run Coach invite link.
  * Supports formats like:
- *   https://ai-run-coach.replit.app/invite/{userId}
+ *   https://airuncoach.live/invite/{userId}
  *   airuncoach://invite/{userId}
  */
 fun extractUserIdFromInviteLink(link: String): String? {

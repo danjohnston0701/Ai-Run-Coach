@@ -63,7 +63,12 @@ export async function generateTrainingPlan(
   firstSessionStart: string = "flexible",  // "today" | "tomorrow" | "flexible"
   durationWeeks?: number,  // user-selected plan duration (takes priority over targetDate)
   injuries: InjuryInput[] = [],
-  userTimezone: string | null = null  // IANA timezone e.g. "Pacific/Auckland"
+  userTimezone: string | null = null,  // IANA timezone e.g. "Pacific/Auckland"
+  goalId: string | null = null,  // optional: fetch goal description/notes to personalise prompt
+  overrideAge: number | null = null,  // demographics from Android (used if DB profile is missing)
+  overrideGender: string | null = null,
+  overrideHeight: number | null = null,  // cm
+  overrideWeight: number | null = null   // kg
 ): Promise<string> {
   try {
     // Get user profile
@@ -192,9 +197,28 @@ export async function generateTrainingPlan(
       daysSpan: daysSpanBetweenFirstAndLatest,
     } : null;
 
-    // ── Calculate BMI from user profile ──
-    const userHeight = user[0]?.height || 170; // cm
-    const userWeight = user[0]?.weight || 70; // kg
+    // ── Fetch linked goal description/notes/event for extra personalisation ──
+    let goalDescription: string | null = null;
+    let goalNotes: string | null = null;
+    let goalEventName: string | null = null;
+    let goalEventLocation: string | null = null;
+    if (goalId) {
+      try {
+        const goalRecord = await db.select().from(goals).where(eq(goals.id, goalId)).limit(1);
+        if (goalRecord[0]) {
+          goalDescription = goalRecord[0].description || null;
+          goalNotes = goalRecord[0].notes || null;
+          goalEventName = goalRecord[0].eventName || null;
+          goalEventLocation = goalRecord[0].eventLocation || null;
+        }
+      } catch (goalErr) {
+        console.warn(`[Training Plan] Could not fetch goal ${goalId} for prompt:`, goalErr);
+      }
+    }
+
+    // ── Calculate BMI from user profile — fall back to Android-sent overrides if DB is empty ──
+    const userHeight = user[0]?.height || overrideHeight || 170; // cm
+    const userWeight = user[0]?.weight || overrideWeight || 70; // kg
     const bmi = userWeight / ((userHeight / 100) ** 2);
     const bmiCategory = bmi < 18.5 ? 'underweight' : bmi < 25 ? 'normal' : bmi < 30 ? 'overweight' : 'obese';
 
@@ -216,8 +240,10 @@ export async function generateTrainingPlan(
       getPlanDuration(goalType, experienceLevel));
     console.log(`[Training Plan] Duration: durationWeeks=${durationWeeks}, weeksUntilTarget=${weeksUntilTarget}`);
 
-    // Calculate user age for HR zone calculations
-    const userAge = user[0]?.dob ? Math.floor((Date.now() - new Date(user[0].dob).getTime()) / 31557600000) : 30;
+    // Calculate user age for HR zone calculations — fall back to Android-sent override if DOB not set
+    const userAge = user[0]?.dob
+      ? Math.floor((Date.now() - new Date(user[0].dob).getTime()) / 31557600000)
+      : (overrideAge || 30);
     const maxHR = HeartRateZones.getMaxHeartRate(userAge);
 
     // Build context for AI
@@ -288,11 +314,14 @@ export async function generateTrainingPlan(
     // hasRunHistory must be declared before runnerProfileSection uses it
     const hasRunHistory = recentRuns.length > 0;
 
+    // Gender: prefer DB value, then Android override
+    const userGender = user[0]?.gender || overrideGender || 'Not specified';
+
     // Build personalized runner profile section  
     const runnerProfileSection = `
 Runner Profile (Personal Details):
 - Name: ${user[0]?.name || 'Runner'}
-- Gender: ${user[0]?.gender || 'Not specified'}
+- Gender: ${userGender}
 - Age: ${userAge} years old
 - Height: ${userHeight}cm
 - Weight: ${userWeight}kg
@@ -344,6 +373,9 @@ ${avgPaceSecs && avgTimeAtGoalDistanceSecs ? `- Current estimated ability: this 
 
 Goal:
 - ${goalType.toUpperCase()} (${targetDistance}km)
+${goalEventName ? `- Target event: ${goalEventName}${goalEventLocation ? ` in ${goalEventLocation}` : ''}` : ''}
+${goalDescription ? `- Goal description: ${goalDescription}` : ''}
+${goalNotes ? `- Runner's own notes about this goal: "${goalNotes}" — use this to personalise coaching cues and session descriptions` : ''}
 ${targetTime ? `- Target time: ${Math.floor(targetTime / 60)}:${String(Math.round((targetTime % 60))).padStart(2,'0')} (mm:ss)
 - Gap to close: ${avgTimeAtGoalDistanceSecs && targetTime ? `runner currently averages ${avgTimeAtGoalDistanceStr}, needs to improve by approximately ${Math.round((avgTimeAtGoalDistanceSecs - targetTime) / 60)} minute(s) ${Math.abs(Math.round((avgTimeAtGoalDistanceSecs - targetTime) % 60))}s` : 'use your expert judgment based on their current pace'}` : ''}
 ${targetDate ? `- Race date: ${targetDate.toDateString()}` : ''}

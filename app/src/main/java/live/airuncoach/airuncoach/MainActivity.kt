@@ -187,7 +187,7 @@ class MainActivity : ComponentActivity() {
     /**
      * Extract a run ID from deep link intents:
      * - airuncoach://run/{runId}?ref={token}
-     * - https://ai-run-coach.replit.app/share/{token} (resolved via API)
+     * - https://airuncoach.live/share/{token} (resolved via API)
      */
     private fun extractSharedRunId(intent: Intent?): String? {
         val uri = intent?.data ?: return null
@@ -202,10 +202,10 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // HTTPS link: https://ai-run-coach.replit.app/share/{token}
+        // HTTPS link: https://airuncoach.live/share/{token}
         // For HTTPS links, the landing page JavaScript will redirect to airuncoach://run/{runId}
         // so this case is a fallback — the primary path is the custom scheme above
-        if (uri.host == "ai-run-coach.replit.app" && uri.path?.startsWith("/share/") == true) {
+        if (uri.host == "airuncoach.live" && uri.path?.startsWith("/share/") == true) {
             val token = uri.pathSegments?.getOrNull(1)
             if (!token.isNullOrBlank()) {
                 Log.d("MainActivity", "HTTPS share link detected, token: $token")

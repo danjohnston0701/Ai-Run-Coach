@@ -100,14 +100,14 @@
                     android:host="run" />
             </intent-filter>
 
-            <!-- HTTP deep link for shared runs (https://ai-run-coach.replit.app/share/{token}) -->
+            <!-- HTTP deep link for shared runs (https://airuncoach.live/share/{token}) -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
                     android:scheme="https"
-                    android:host="ai-run-coach.replit.app"
+                    android:host="airuncoach.live"
                     android:pathPrefix="/share/" />
             </intent-filter>
 
