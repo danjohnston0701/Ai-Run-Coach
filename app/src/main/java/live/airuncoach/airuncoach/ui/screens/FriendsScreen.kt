@@ -43,7 +43,7 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
     val friendsState by viewModel.friendsState.collectAsState()
     val searchState by viewModel.searchState.collectAsState()
     val pendingRequestsState by viewModel.pendingRequestsState.collectAsState()
-    val addedFriendIds by viewModel.addedFriendIds.collectAsState()
+    @Suppress("UNUSED_VARIABLE") val addedFriendIds by viewModel.addedFriendIds.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
 
     Scaffold(
@@ -198,8 +198,8 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
                         items(state.users) { user ->
                             SearchUserCard(
                                 user = user,
-                                isAdded = user.id in addedFriendIds,
-                                onAddClick = { viewModel.sendFriendRequest(user.id) }
+                                onAddClick = { viewModel.sendFriendRequest(user.id) },
+                                onWithdrawClick = { requestId -> viewModel.cancelSentRequest(requestId) }
                             )
                         }
                     } else if (searchQuery.isNotBlank()) {
@@ -474,7 +474,15 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
 }
 
 @Composable
-fun SearchUserCard(user: Friend, isAdded: Boolean, onAddClick: () -> Unit) {
+fun SearchUserCard(
+    user: Friend,
+    onAddClick: () -> Unit,
+    onWithdrawClick: (requestId: String) -> Unit
+) {
+    // Determine state: prefer DB-sourced status, fall back to nothing
+    val dbStatus = user.friendRequestStatus  // "pending", "declined", "withdrawn", "accepted", "received_pending", null
+    val requestId = user.friendRequestId
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
@@ -525,14 +533,49 @@ fun SearchUserCard(user: Friend, isAdded: Boolean, onAddClick: () -> Unit) {
                 }
             }
 
-            Button(
-                onClick = onAddClick,
-                enabled = !isAdded,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isAdded) Colors.backgroundSecondary else Colors.primary
-                )
-            ) {
-                Text(if (isAdded) "Request Sent" else "Add Friend")
+            when {
+                dbStatus == "accepted" -> {
+                    // Already friends
+                    Text(
+                        text = "Friends ✓",
+                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.success,
+                        modifier = Modifier.padding(horizontal = Spacing.sm)
+                    )
+                }
+                dbStatus == "pending" && requestId != null -> {
+                    // Sent, awaiting response — show Withdraw button
+                    Button(
+                        onClick = { onWithdrawClick(requestId) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Colors.error.copy(alpha = 0.15f),
+                            contentColor = Colors.error
+                        ),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text("Withdraw", fontSize = 13.sp)
+                    }
+                }
+                dbStatus == "received_pending" -> {
+                    // They sent us a request — show Accept
+                    Button(
+                        onClick = onAddClick,
+                        colors = ButtonDefaults.buttonColors(containerColor = Colors.success),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text("Accept", fontSize = 13.sp)
+                    }
+                }
+                else -> {
+                    // No request, or previously declined/withdrawn — show Add Friend
+                    Button(
+                        onClick = onAddClick,
+                        colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text("Add Friend", fontSize = 13.sp)
+                    }
+                }
             }
         }
     }

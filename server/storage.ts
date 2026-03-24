@@ -30,6 +30,7 @@ export interface IStorage {
   // Friend Requests
   getFriendRequests(userId: string): Promise<FriendRequest[]>;  // Incoming requests for this user
   getSentFriendRequests(userId: string): Promise<FriendRequest[]>;  // Requests sent by this user
+  getRequestBetweenUsers(requesterId: string, addresseeId: string): Promise<FriendRequest | null>;  // Any request from A→B
   createFriendRequest(requesterId: string, addresseeId: string, message?: string): Promise<FriendRequest>;
   upsertFriendRequest(requesterId: string, addresseeId: string, message?: string): Promise<FriendRequest>;  // Create or re-activate declined request
   acceptFriendRequest(id: string): Promise<void>;
@@ -221,6 +222,16 @@ export class DatabaseStorage implements IStorage {
         eq(friendRequests.status, "pending")
       )
     );
+  }
+
+  async getRequestBetweenUsers(requesterId: string, addresseeId: string): Promise<FriendRequest | null> {
+    const [request] = await db.select().from(friendRequests).where(
+      and(
+        eq(friendRequests.requesterId, requesterId),
+        eq(friendRequests.addresseeId, addresseeId)
+      )
+    );
+    return request ?? null;
   }
 
   async createFriendRequest(requesterId: string, addresseeId: string, message?: string): Promise<FriendRequest> {

@@ -260,23 +260,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/users/search", async (req: Request, res: Response) => {
+  app.get("/api/users/search", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const query = String(req.query.q || "");
       if (!query || query.length < 2) {
         return res.json([]);
       }
-      
+
+      const currentUserId = req.user?.userId;
       const users = await storage.searchUsers(query);
-      const sanitized = users.map(u => ({
-        id: u.id,
-        name: u.name,
-        email: u.email,
-        profilePic: u.profilePic,
-        userCode: u.userCode,
-        shortUserId: u.shortUserId,
+
+      // Enrich each result with current friendship/request status
+      const enriched = await Promise.all(users.map(async (u) => {
+        let friendRequestStatus: string | null = null;
+        let friendRequestId: string | null = null;
+
+        if (currentUserId && currentUserId !== u.id) {
+          // Check for any outgoing request from current user to this user
+          const outgoingRequests = await storage.getRequestBetweenUsers(currentUserId, u.id);
+          const incomingRequests = await storage.getRequestBetweenUsers(u.id, currentUserId);
+
+          if (outgoingRequests) {
+            friendRequestStatus = outgoingRequests.status; // "pending", "declined", "withdrawn", "accepted"
+            friendRequestId = outgoingRequests.id;
+          } else if (incomingRequests) {
+            friendRequestStatus = `received_${incomingRequests.status}`; // "received_pending", etc.
+            friendRequestId = incomingRequests.id;
+          }
+        }
+
+        return {
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          profilePic: u.profilePic,
+          userCode: u.userCode,
+          shortUserId: u.shortUserId,
+          friendRequestStatus,
+          friendRequestId,
+        };
       }));
-      res.json(sanitized);
+
+      res.json(enriched);
     } catch (error: any) {
       console.error("Search users error:", error);
       res.status(500).json({ error: "Failed to search users" });

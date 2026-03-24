@@ -58,6 +58,9 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
     private val _addedFriendIds = MutableStateFlow<Set<String>>(emptySet())
     val addedFriendIds: StateFlow<Set<String>> = _addedFriendIds.asStateFlow()
 
+    // Track last search query so we can refresh search results after sending/withdrawing a request
+    val lastSearchQuery = MutableStateFlow("")
+
     init {
         loadUser()
     }
@@ -119,6 +122,7 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
 
     fun searchUsers(query: String) {
         viewModelScope.launch {
+            lastSearchQuery.value = query
             _searchState.value = SearchUiState.Loading
             try {
                 if (query.isBlank()) {
@@ -144,7 +148,9 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
                 val request = mapOf("addresseeId" to friendId)
                 apiService.sendFriendRequest(request)
                 _addedFriendIds.update { it + friendId }
-                // Refresh pending requests to show the new request
+                // Refresh search results (button flips to Withdraw) and pending section
+                val query = lastSearchQuery.value
+                if (query.isNotBlank()) searchUsers(query)
                 loadPendingRequests()
             } catch (e: Exception) {
                 Log.e("FriendsViewModel", "Failed to send friend request", e)
@@ -181,8 +187,10 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
         viewModelScope.launch {
             try {
                 apiService.withdrawFriendRequest(requestId)
-                // Refresh pending requests
+                // Refresh pending requests and search results so button state updates
                 loadPendingRequests()
+                val query = lastSearchQuery.value
+                if (query.isNotBlank()) searchUsers(query)
             } catch (e: Exception) {
                 Log.e("FriendsViewModel", "Failed to withdraw friend request", e)
             }
