@@ -596,7 +596,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/friend-requests/:id/withdraw", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { id } = req.params;
-      const requesterId = req.user!.id;
+      const requesterId = req.user!.userId;  // fix: was .id (undefined), correct field is .userId
       await storage.withdrawFriendRequest(id, requesterId);
       res.json({ success: true });
     } catch (error) {
