@@ -157,14 +157,25 @@ export class DatabaseStorage implements IStorage {
   }
 
   async searchUsers(query: string): Promise<User[]> {
-    return db.select().from(users).where(
-      or(
-        ilike(users.name, `%${query}%`),
-        ilike(users.email, `%${query}%`),
-        ilike(users.userCode, `%${query}%`),
-        ilike(users.shortUserId, `%${query}%`)
-      )
-    ).limit(20);
+    try {
+      console.log(`[DB Search] Querying users table for: "${query}"`);
+      const results = await db.select().from(users).where(
+        or(
+          ilike(users.name, `%${query}%`),
+          ilike(users.email, `%${query}%`),
+          ilike(users.userCode, `%${query}%`),
+          ilike(users.shortUserId, `%${query}%`)
+        )
+      ).limit(20);
+      console.log(`[DB Search] Query returned ${results.length} results`);
+      if (results.length > 0) {
+        console.log(`[DB Search] First result:`, { id: results[0].id, name: results[0].name, email: results[0].email });
+      }
+      return results;
+    } catch (error) {
+      console.error(`[DB Search] Error querying users:`, error);
+      return [];
+    }
   }
 
   // Friends

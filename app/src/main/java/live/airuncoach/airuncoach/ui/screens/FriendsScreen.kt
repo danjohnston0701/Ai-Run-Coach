@@ -224,7 +224,7 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
                 }
                 else -> {}
             }
-
+    /* Remove Invite Link Section
             // Add by invite link section
             item {
                 val keyboardController2 = LocalSoftwareKeyboardController.current
@@ -341,6 +341,7 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
                     )
                 }
             }
+            */
 
             // Pending Friend Requests Section - always show header
             item {

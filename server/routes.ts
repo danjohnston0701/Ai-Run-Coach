@@ -467,17 +467,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/friend-requests/:userId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { userId } = req.params;
+      const authUserId = req.user?.userId;
+      
+      console.log(`[FriendRequests GET] User ${authUserId} requesting friend requests for ${userId}`);
       
       // Verify user is requesting their own friend requests
-      if (req.user?.userId !== userId) {
+      if (authUserId !== userId) {
+        console.log(`[FriendRequests GET] Forbidden — auth user ${authUserId} != requested user ${userId}`);
         return res.status(403).json({ error: "Forbidden" });
       }
 
       // Fetch both sent and received pending requests
+      console.log(`[FriendRequests GET] Fetching sent/received requests for user ${userId}`);
       const [receivedRequests, sentRequests] = await Promise.all([
         storage.getFriendRequests(userId),
         storage.getSentFriendRequests(userId)
       ]);
+      console.log(`[FriendRequests GET] Found ${sentRequests.length} sent, ${receivedRequests.length} received`);
 
       // Enrich sent requests with addressee user info
       const sent = await Promise.all(sentRequests.map(async (request) => {
