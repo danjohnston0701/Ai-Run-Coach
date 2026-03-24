@@ -81,6 +81,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/my-data", myDataRouter);
   app.use("/api", achievementsRouter);
   registerSessionCoachingRoutes(app);
+
+  // Version probe — tells us immediately which build is running
+  app.get("/api/version", (_req: Request, res: Response) => {
+    res.json({ v: "2026-03-25-v5", status: "ok" });
+  });
+
+  // Friends list — registered early to avoid being blocked by late-loading routes
+  app.get("/api/users/:userId/friends", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const friendUsers = await storage.getFriends(userId);
+      res.json(friendUsers.map(f => ({
+        id: f.id,
+        name: f.name,
+        email: f.email,
+        profilePic: f.profilePic,
+        userCode: f.userCode,
+      })));
+    } catch (error: any) {
+      console.error("[GET /api/users/:userId/friends] Error:", error);
+      res.status(500).json({ error: "Failed to fetch friends" });
+    }
+  });
+
+  // Friend requests — registered early
+  app.get("/api/friend-requests/:userId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { userId } = req.params;
+      if (req.user?.userId !== userId) return res.status(403).json({ error: "Forbidden" });
+
+      const sentResult = await db.execute(
+        sql`SELECT fr.id, fr.requester_id, fr.addressee_id, fr.status, fr.message, fr.created_at,
+                   u.name AS addressee_name, u.profile_pic AS addressee_profile_pic
+            FROM friend_requests fr
+            LEFT JOIN users u ON u.id = fr.addressee_id
+            WHERE fr.requester_id = ${userId} AND fr.status = 'pending'`
+      );
+      const receivedResult = await db.execute(
+        sql`SELECT fr.id, fr.requester_id, fr.addressee_id, fr.status, fr.message, fr.created_at,
+                   u.name AS requester_name, u.profile_pic AS requester_profile_pic
+            FROM friend_requests fr
+            LEFT JOIN users u ON u.id = fr.requester_id
+            WHERE fr.addressee_id = ${userId} AND fr.status = 'pending'`
+      );
+
+      const toRows = (r: any) => Array.isArray(r) ? r : (r.rows ?? []);
+      const sent = toRows(sentResult).map((r: any) => ({
+        id: r.id, requesterId: r.requester_id, addresseeId: r.addressee_id,
+        status: r.status, message: r.message, createdAt: r.created_at,
+        addresseeName: r.addressee_name ?? null, addresseeProfilePic: r.addressee_profile_pic ?? null,
+        requesterName: null, requesterProfilePic: null,
+      }));
+      const received = toRows(receivedResult).map((r: any) => ({
+        id: r.id, requesterId: r.requester_id, addresseeId: r.addressee_id,
+        status: r.status, message: r.message, createdAt: r.created_at,
+        requesterName: r.requester_name ?? null, requesterProfilePic: r.requester_profile_pic ?? null,
+        addresseeName: null, addresseeProfilePic: null,
+      }));
+
+      console.log(`[FriendRequests] userId=${userId} sent=${sent.length} received=${received.length}`);
+      res.json({ v: 5, sent, received });
+    } catch (error: any) {
+      console.error("Get friend requests error:", error);
+      res.status(500).json({ error: "Failed to get friend requests", detail: String(error) });
+    }
+  });
   
   // ==================== AUTH ENDPOINTS ====================
   
@@ -462,54 +528,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Create friend request error:", error);
       res.status(500).json({ error: "Failed to create friend request" });
-    }
-  });
-
-  app.get("/api/friend-requests/:userId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const authUserId = req.user?.userId;
-
-      if (authUserId !== userId) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
-
-      // Raw SQL — bypasses ORM to rule out any Drizzle column-name mismatch
-      const sentResult = await db.execute(
-        sql`SELECT fr.id, fr.requester_id, fr.addressee_id, fr.status, fr.message, fr.created_at,
-                   u.name AS addressee_name, u.profile_pic AS addressee_profile_pic
-            FROM friend_requests fr
-            LEFT JOIN users u ON u.id = fr.addressee_id
-            WHERE fr.requester_id = ${userId} AND fr.status = 'pending'`
-      );
-      const receivedResult = await db.execute(
-        sql`SELECT fr.id, fr.requester_id, fr.addressee_id, fr.status, fr.message, fr.created_at,
-                   u.name AS requester_name, u.profile_pic AS requester_profile_pic
-            FROM friend_requests fr
-            LEFT JOIN users u ON u.id = fr.requester_id
-            WHERE fr.addressee_id = ${userId} AND fr.status = 'pending'`
-      );
-
-      const toRows = (result: any) => Array.isArray(result) ? result : (result.rows ?? []);
-
-      const sent = toRows(sentResult).map((r: any) => ({
-        id: r.id, requesterId: r.requester_id, addresseeId: r.addressee_id,
-        status: r.status, message: r.message, createdAt: r.created_at,
-        addresseeName: r.addressee_name ?? null, addresseeProfilePic: r.addressee_profile_pic ?? null,
-        requesterName: null, requesterProfilePic: null,
-      }));
-      const received = toRows(receivedResult).map((r: any) => ({
-        id: r.id, requesterId: r.requester_id, addresseeId: r.addressee_id,
-        status: r.status, message: r.message, createdAt: r.created_at,
-        requesterName: r.requester_name ?? null, requesterProfilePic: r.requester_profile_pic ?? null,
-        addresseeName: null, addresseeProfilePic: null,
-      }));
-
-      console.log(`[FriendRequests] userId=${userId} sent=${sent.length} received=${received.length}`);
-      res.json({ v: 4, sent, received });
-    } catch (error: any) {
-      console.error("Get friend requests error:", error);
-      res.status(500).json({ error: "Failed to get friend requests", detail: String(error) });
     }
   });
 
@@ -1852,30 +1870,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Delete goal error:", error);
       res.status(500).json({ error: "Failed to delete goal" });
-    }
-  });
-
-  // ==================== FRIENDS ENDPOINTS ====================
-  
-  // Alias for /api/friends to match Android app expectations
-  app.get("/api/users/:userId/friends", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { userId } = req.params;
-      console.log(`[GET /api/users/:userId/friends] Fetching friends for userId: ${userId}`);
-      
-      const friends = await storage.getFriends(userId);
-      res.json(friends.map(f => ({
-        id: f.id,
-        name: f.name,
-        email: f.email,
-        profilePic: f.profilePic,
-        userCode: f.userCode,
-      })));
-      
-      console.log(`[GET /api/users/:userId/friends] Returning ${friends.length} friends`);
-    } catch (error: any) {
-      console.error("[GET /api/users/:userId/friends] Error:", error);
-      res.status(500).json({ error: "Failed to fetch friends" });
     }
   });
 
