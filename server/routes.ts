@@ -495,6 +495,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ==================== FRIENDS ENDPOINTS ====================
+
+  // GET /api/friends/:userId — Android app primary friends endpoint
+  app.get("/api/friends/:userId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const friends = await storage.getFriends(userId);
+      res.json(friends.map(f => ({
+        id: f.id,
+        name: f.name,
+        email: f.email,
+        profilePic: f.profilePic,
+        userCode: f.userCode,
+      })));
+    } catch (error: any) {
+      console.error("[GET /api/friends/:userId] Error:", error);
+      res.status(500).json({ error: "Failed to get friends" });
+    }
+  });
+
+  // POST /api/friends/:userId/add — Android app send friend request
+  app.post("/api/friends/:userId/add", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const requesterId = req.user!.userId;
+      const { userId: addresseeId } = req.params;
+      const { message } = req.body;
+      if (!addresseeId) return res.status(400).json({ error: "Addressee ID is required" });
+      const request = await storage.upsertFriendRequest(requesterId, addresseeId, message);
+      res.status(201).json(request);
+    } catch (error: any) {
+      console.error("[POST /api/friends/:userId/add] Error:", error);
+      res.status(500).json({ error: "Failed to send friend request" });
+    }
+  });
+
+  // DELETE /api/friends/:userId/:friendId — Android app remove friend
+  app.delete("/api/friends/:userId/:friendId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { userId, friendId } = req.params;
+      await storage.removeFriend(userId, friendId);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[DELETE /api/friends/:userId/:friendId] Error:", error);
+      res.status(500).json({ error: "Failed to remove friend" });
+    }
+  });
   
   app.get("/api/friends", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {

@@ -343,7 +343,7 @@ function setupErrorHandler(app: express.Application) {
 
     // SPA fallback: serve web app for browsers, Expo build for mobile
     app.get("*", (req: Request, res: Response) => {
-      if (req.path.startsWith("/api")) return;
+      if (req.path.startsWith("/api")) return res.status(404).json({ error: "Not found" });
 
       // Browser requests: serve web app or landing page
       if (isBrowserRequest(req)) {

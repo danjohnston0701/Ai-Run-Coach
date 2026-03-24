@@ -1,0 +1,43 @@
+2026-03-25 09:15:35.227 15645-15745 RetrofitClient          live.airuncoach.airuncoach           D  📡 Response from /api/auth/login: 404
+2026-03-25 09:15:35.227 15645-15745 RetrofitClient          live.airuncoach.airuncoach           D  📦 RAW RESPONSE BODY: Not Found
+2026-03-25 09:15:35.255 15645-15645 LoginViewModel          live.airuncoach.airuncoach           E  ❌ HTTP Error 404: Not Found (Fix with AI)
+                                                                                                    retrofit2.HttpException: HTTP 404 
+                                                                                                    	at retrofit2.KotlinExtensions$await$2$2.onResponse(KotlinExtensions.kt:53)
+                                                                                                    	at retrofit2.OkHttpCall$1.onResponse(OkHttpCall.java:161)
+                                                                                                    	at okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:519)
+                                                                                                    	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1154)
+                                                                                                    	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:652)
+                                                                                                    	at java.lang.Thread.run(Thread.java:1563)
+2026-03-25 09:15:35.255 15645-15645 LoginViewModel          live.airuncoach.airuncoach           E  ❌ Full response: Response{protocol=h2, code=404, message=, url=https://airuncoach.live/api/auth/login}
+2026-03-25 09:15:35.255 15645-15645 LoginViewModel          live.airuncoach.airuncoach           E  ❌ Request URL: https://airuncoach.live/api/auth/login
+2026-03-25 09:15:35.256 15645-15645 LoginViewModel          live.airuncoach.airuncoach           E  ❌ Parsed error message: Login failed: HTTP 404 
+2026-03-25 09:15:44.712 15645-15645 LoginViewModel          live.airuncoach.airuncoach           D  📧 Attempting login for: danjohnston0701@gmail.com
+2026-03-25 09:15:44.712 15645-15645 LoginViewModel          live.airuncoach.airuncoach           D  📧 Original email: danjohnston0701@gmail.com
+2026-03-25 09:15:44.712 15645-15645 LoginViewModel          live.airuncoach.airuncoach           D  🔑 Password length: 9
+2026-03-25 09:15:44.752 15645-15745 RetrofitClient          live.airuncoach.airuncoach           D  ⚠️ No token for /api/auth/login
+2026-03-25 09:15:44.754 15645-15745 okhttp.OkHttpClient     live.airuncoach.airuncoach           I  --> POST https://airuncoach.live/api/auth/login
+2026-03-25 09:15:44.754 15645-15745 okhttp.OkHttpClient     live.airuncoach.airuncoach           I  Content-Type: application/json; charset=UTF-8
+2026-03-25 09:15:44.755 15645-15745 okhttp.OkHttpClient     live.airuncoach.airuncoach           I  Content-Length: 90
+2026-03-25 09:15:44.756 15645-15745 okhttp.OkHttpClient     live.airuncoach.airuncoach           I  {"email":"danjohnston0701@gmail.com","password":"Sophie*90","timezone":"Pacific/Auckland"}
+2026-03-25 09:15:44.756 15645-15745 okhttp.OkHttpClient     live.airuncoach.airuncoach           I  --> END POST (90-byte body)
+2026-03-25 09:15:44.975 15645-15745 okhttp.OkHttpClient     live.airuncoach.airuncoach           I  <-- 404 https://airuncoach.live/api/auth/login (218ms)
+2026-03-25 09:15:44.976 15645-15745 okhttp.OkHttpClient     live.airuncoach.airuncoach           I  date: Tue, 24 Mar 2026 20:15:45 GMT
+2026-03-25 09:15:44.976 15645-15745 okhttp.OkHttpClient     live.airuncoach.airuncoach           I  content-length: 9
+2026-03-25 09:15:44.976 15645-15745 okhttp.OkHttpClient     live.airuncoach.airuncoach           I  content-type: text/plain; charset=utf-8
+2026-03-25 09:15:44.982 15645-15745 okhttp.OkHttpClient     live.airuncoach.airuncoach           I  via: 1.1 google
+2026-03-25 09:15:44.983 15645-15745 okhttp.OkHttpClient     live.airuncoach.airuncoach           I  alt-svc: h3=":443"; ma=2592000
+2026-03-25 09:15:44.984 15645-15745 okhttp.OkHttpClient     live.airuncoach.airuncoach           I  Not Found
+2026-03-25 09:15:44.985 15645-15745 okhttp.OkHttpClient     live.airuncoach.airuncoach           I  <-- END HTTP (9-byte body)
+2026-03-25 09:15:44.985 15645-15745 RetrofitClient          live.airuncoach.airuncoach           D  📡 Response from /api/auth/login: 404
+2026-03-25 09:15:44.985 15645-15745 RetrofitClient          live.airuncoach.airuncoach           D  📦 RAW RESPONSE BODY: Not Found
+2026-03-25 09:15:44.987 15645-15645 LoginViewModel          live.airuncoach.airuncoach           E  ❌ HTTP Error 404: Not Found (Fix with AI)
+                                                                                                    retrofit2.HttpException: HTTP 404 
+                                                                                                    	at retrofit2.KotlinExtensions$await$2$2.onResponse(KotlinExtensions.kt:53)
+                                                                                                    	at retrofit2.OkHttpCall$1.onResponse(OkHttpCall.java:161)
+                                                                                                    	at okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:519)
+                                                                                                    	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1154)
+                                                                                                    	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:652)
+                                                                                                    	at java.lang.Thread.run(Thread.java:1563)
+2026-03-25 09:15:44.988 15645-15645 LoginViewModel          live.airuncoach.airuncoach           E  ❌ Full response: Response{protocol=h2, code=404, message=, url=https://airuncoach.live/api/auth/login}
+2026-03-25 09:15:44.988 15645-15645 LoginViewModel          live.airuncoach.airuncoach           E  ❌ Request URL: https://airuncoach.live/api/auth/login
+2026-03-25 09:15:44.988 15645-15645 LoginViewModel          live.airuncoach.airuncoach           E  ❌ Parsed error message: Login failed: HTTP 404 

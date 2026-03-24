@@ -18,6 +18,14 @@ console.log("🔌 Connecting to database:", connectionString.substring(0, 30) + 
 
 export const pool = new Pool({ 
   connectionString,
-  ssl: { rejectUnauthorized: false } // Required for Neon
+  ssl: { rejectUnauthorized: false },
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
 });
+
+pool.on("error", (err) => {
+  console.error("[DB Pool] Unexpected error on idle client:", err.message);
+});
+
 export const db = drizzle(pool, { schema });
