@@ -234,16 +234,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getSentFriendRequests(userId: string): Promise<FriendRequest[]> {
-    // Get sent requests (where this user is the requester)
+    // Get ALL sent requests (where this user is the requester) regardless of status
+    // Filtering by "pending" is done in the route layer
     try {
       console.log(`[DB] getSentFriendRequests for userId: ${userId}`);
       const results = await db.select().from(friendRequests).where(
-        and(
-          eq(friendRequests.requesterId, userId),
-          eq(friendRequests.status, "pending")
-        )
+        eq(friendRequests.requesterId, userId)
       );
-      console.log(`[DB] getSentFriendRequests returned ${results.length} results`);
+      console.log(`[DB] getSentFriendRequests returned ${results.length} results (all statuses)`);
       return results;
     } catch (error) {
       console.error(`[DB] getSentFriendRequests error:`, error);
