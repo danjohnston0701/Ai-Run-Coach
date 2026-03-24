@@ -137,18 +137,31 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
         }
     }
 
+    /** Clears search results and resets state to idle (called when X is tapped). */
+    fun clearSearch() {
+        lastSearchQuery.value = ""
+        _searchState.value = SearchUiState.Idle
+    }
+
     fun sendFriendRequest(friendId: String) {
         viewModelScope.launch {
-            val userId = _user.value?.id
-            if (userId == null) {
-                return@launch
-            }
-
+            val userId = _user.value?.id ?: return@launch
             try {
-                val request = mapOf("addresseeId" to friendId)
-                apiService.sendFriendRequest(request)
+                apiService.sendFriendRequest(mapOf("addresseeId" to friendId))
                 _addedFriendIds.update { it + friendId }
-                // Refresh search results (button flips to Withdraw) and pending section
+
+                // Optimistically flip the button in the search list immediately —
+                // mark as "pending" so the Withdraw button shows right away.
+                // The background searchUsers() call will fill in the real requestId.
+                val currentSearch = _searchState.value
+                if (currentSearch is SearchUiState.Success) {
+                    val updated = currentSearch.users.map { u ->
+                        if (u.id == friendId) u.copy(friendRequestStatus = "pending") else u
+                    }
+                    _searchState.value = SearchUiState.Success(updated)
+                }
+
+                // Background refresh for accurate server state + pending section
                 val query = lastSearchQuery.value
                 if (query.isNotBlank()) searchUsers(query)
                 loadPendingRequests()
@@ -187,7 +200,19 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
         viewModelScope.launch {
             try {
                 apiService.withdrawFriendRequest(requestId)
-                // Refresh pending requests and search results so button state updates
+
+                // Optimistically flip the matching search card back to "Add Friend"
+                val currentSearch = _searchState.value
+                if (currentSearch is SearchUiState.Success) {
+                    val updated = currentSearch.users.map { u ->
+                        if (u.friendRequestId == requestId) u.copy(
+                            friendRequestStatus = "withdrawn",
+                            friendRequestId = null
+                        ) else u
+                    }
+                    _searchState.value = SearchUiState.Success(updated)
+                }
+
                 loadPendingRequests()
                 val query = lastSearchQuery.value
                 if (query.isNotBlank()) searchUsers(query)

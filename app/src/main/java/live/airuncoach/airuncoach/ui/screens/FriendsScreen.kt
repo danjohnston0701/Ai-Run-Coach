@@ -148,7 +148,10 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
                         )
                         if (searchQuery.isNotBlank()) {
                             IconButton(
-                                onClick = { searchQuery = "" },
+                                onClick = {
+                                    searchQuery = ""
+                                    viewModel.clearSearch()
+                                },
                                 modifier = Modifier.size(32.dp)
                             ) {
                                 Icon(
