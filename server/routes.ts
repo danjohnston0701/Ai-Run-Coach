@@ -262,8 +262,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/users/search", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
+      console.log("[Search] Raw query params:", JSON.stringify(req.query));
+      
       // Support both ?q= and ?query= param names for flexibility
-      const query = String(req.query.q || req.query.query || "").trim();
+      const query = String(req.query.q || req.query.query || "").trim().toLowerCase();
       if (!query || query.length < 2) {
         console.log("[Search] Query too short or empty:", { q: req.query.q, query: req.query.query });
         return res.json([]);
