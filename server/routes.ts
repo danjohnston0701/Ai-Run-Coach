@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
-import { eq, and, gte, lt, desc, lte, count } from "drizzle-orm";
+import { eq, and, or, gte, lt, desc, lte, count } from "drizzle-orm";
 import { storage } from "./storage";
 import { db } from "./db";
 import { 
@@ -12,7 +12,8 @@ import {
   clubs, clubMemberships, challenges, challengeParticipants, groupRunParticipants, groupRuns,
   achievements, userAchievements, goals, users, notificationPreferences,
   sharedRuns, webhookFailureQueue, garminMoveIQ, garminBloodPressure,
-  garminEpochsRaw, garminEpochsAggregate, garminHealthSnapshots, garminSkinTemperature
+  garminEpochsRaw, garminEpochsAggregate, garminHealthSnapshots, garminSkinTemperature,
+  friendRequests
 } from "@shared/schema";
 import { DateTime } from "luxon";
 import { sql } from "drizzle-orm";
@@ -513,6 +514,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Get friend requests error:", error);
       res.status(500).json({ error: "Failed to get friend requests" });
+    }
+  });
+
+  // DEBUG endpoint — returns ALL friend requests for a user regardless of status
+  app.get("/api/friend-requests/:userId/debug", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const all = await db.select().from(friendRequests).where(
+        or(
+          eq(friendRequests.requesterId, userId),
+          eq(friendRequests.addresseeId, userId)
+        )
+      );
+      console.log(`[DEBUG] All friend requests involving ${userId}:`, JSON.stringify(all));
+      res.json({ total: all.length, requests: all });
+    } catch (error: any) {
+      res.status(500).json({ error: String(error) });
     }
   });
 
