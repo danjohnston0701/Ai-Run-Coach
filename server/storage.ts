@@ -217,22 +217,38 @@ export class DatabaseStorage implements IStorage {
   // Friend Requests
   async getFriendRequests(userId: string): Promise<FriendRequest[]> {
     // Get incoming requests (where this user is the addressee)
-    return db.select().from(friendRequests).where(
-      and(
-        eq(friendRequests.addresseeId, userId),
-        eq(friendRequests.status, "pending")
-      )
-    );
+    try {
+      console.log(`[DB] getFriendRequests for userId: ${userId}`);
+      const results = await db.select().from(friendRequests).where(
+        and(
+          eq(friendRequests.addresseeId, userId),
+          eq(friendRequests.status, "pending")
+        )
+      );
+      console.log(`[DB] getFriendRequests returned ${results.length} results`);
+      return results;
+    } catch (error) {
+      console.error(`[DB] getFriendRequests error:`, error);
+      return [];
+    }
   }
 
   async getSentFriendRequests(userId: string): Promise<FriendRequest[]> {
     // Get sent requests (where this user is the requester)
-    return db.select().from(friendRequests).where(
-      and(
-        eq(friendRequests.requesterId, userId),
-        eq(friendRequests.status, "pending")
-      )
-    );
+    try {
+      console.log(`[DB] getSentFriendRequests for userId: ${userId}`);
+      const results = await db.select().from(friendRequests).where(
+        and(
+          eq(friendRequests.requesterId, userId),
+          eq(friendRequests.status, "pending")
+        )
+      );
+      console.log(`[DB] getSentFriendRequests returned ${results.length} results`);
+      return results;
+    } catch (error) {
+      console.error(`[DB] getSentFriendRequests error:`, error);
+      return [];
+    }
   }
 
   async getRequestBetweenUsers(requesterId: string, addresseeId: string): Promise<FriendRequest | null> {
