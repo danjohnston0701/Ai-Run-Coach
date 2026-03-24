@@ -442,33 +442,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: "Forbidden" });
       }
 
-      const receivedRequests = await storage.getFriendRequests(userId);
-      
-      // Separate sent and received requests and enrich with user data
-      // Fetch sent requests from the new storage method
-      const sentRequests = await storage.getSentFriendRequests(userId);
-      const sent: any[] = sentRequests;
-      const received: any[] = receivedRequests;
+      // Fetch both sent and received pending requests
+      const [receivedRequests, sentRequests] = await Promise.all([
+        storage.getFriendRequests(userId),
+        storage.getSentFriendRequests(userId)
+      ]);
 
-      for (const request of requests) {
-        if (request.requesterId === userId) {
-          // Sent request - get addressee info
-          const addressee = await storage.getUser(request.addresseeId);
-          sent.push({
-            ...request,
-            addresseeName: addressee?.name,
-            addresseeProfilePic: addressee?.profilePic
-          });
-        } else if (request.addresseeId === userId) {
-          // Received request - get requester info
-          const requester = await storage.getUser(request.requesterId);
-          received.push({
-            ...request,
-            requesterName: requester?.name,
-            requesterProfilePic: requester?.profilePic
-          });
-        }
-      }
+      // Enrich sent requests with addressee user info
+      const sent = await Promise.all(sentRequests.map(async (request) => {
+        const addressee = await storage.getUser(request.addresseeId);
+        return {
+          ...request,
+          addresseeName: addressee?.name ?? null,
+          addresseeProfilePic: addressee?.profilePic ?? null,
+          requesterName: null,
+          requesterProfilePic: null
+        };
+      }));
+
+      // Enrich received requests with requester user info
+      const received = await Promise.all(receivedRequests.map(async (request) => {
+        const requester = await storage.getUser(request.requesterId);
+        return {
+          ...request,
+          requesterName: requester?.name ?? null,
+          requesterProfilePic: requester?.profilePic ?? null,
+          addresseeName: null,
+          addresseeProfilePic: null
+        };
+      }));
 
       res.json({ sent, received });
     } catch (error: any) {
