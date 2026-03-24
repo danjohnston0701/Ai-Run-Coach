@@ -3,7 +3,6 @@ modules = ["nodejs-20", "postgresql-16"]
 build = ["sh", "-c", "npm run build"]
 run = ["sh", "-c", "npm run start"]
 deploymentTarget = "cloudrun"
-publicDir = "dist"
 
 [nix]
 channel = "stable-25_05"
