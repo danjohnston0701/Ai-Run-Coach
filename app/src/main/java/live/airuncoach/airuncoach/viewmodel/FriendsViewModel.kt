@@ -156,7 +156,13 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
                 val currentSearch = _searchState.value
                 if (currentSearch is SearchUiState.Success) {
                     val updated = currentSearch.users.map { u ->
-                        if (u.id == friendId) u.copy(friendRequestStatus = "pending") else u
+                        // Set both status AND a temporary requestId ("pending") so the
+                        // Withdraw button renders immediately. The real requestId is filled
+                        // in when the background searchUsers() refresh completes.
+                        if (u.id == friendId) u.copy(
+                            friendRequestStatus = "pending",
+                            friendRequestId = u.friendRequestId ?: "pending"
+                        ) else u
                     }
                     _searchState.value = SearchUiState.Success(updated)
                 }
@@ -199,7 +205,11 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
     fun cancelSentRequest(requestId: String) {
         viewModelScope.launch {
             try {
-                apiService.withdrawFriendRequest(requestId)
+                // If we only have the placeholder "pending" id (optimistic, real id not yet loaded)
+                // skip the API call and just refresh to get the real state from the server
+                if (requestId != "pending") {
+                    apiService.withdrawFriendRequest(requestId)
+                }
 
                 // Optimistically flip the matching search card back to "Add Friend"
                 val currentSearch = _searchState.value
