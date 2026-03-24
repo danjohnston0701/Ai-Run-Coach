@@ -250,12 +250,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getRequestBetweenUsers(requesterId: string, addresseeId: string): Promise<FriendRequest | null> {
+    // Order by createdAt DESC so we always get the MOST RECENT request.
+    // Multiple rows can exist (old declined/withdrawn + new pending) — we always want the latest.
     const [request] = await db.select().from(friendRequests).where(
       and(
         eq(friendRequests.requesterId, requesterId),
         eq(friendRequests.addresseeId, addresseeId)
       )
-    );
+    ).orderBy(desc(friendRequests.createdAt));
     return request ?? null;
   }
 
@@ -270,15 +272,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertFriendRequest(requesterId: string, addresseeId: string, message?: string): Promise<FriendRequest> {
-    // Check if a request already exists between these users (in either direction)
+    // Get the MOST RECENT request between these users (there may be multiple old ones)
     const [existing] = await db.select().from(friendRequests).where(
       and(
         eq(friendRequests.requesterId, requesterId),
         eq(friendRequests.addresseeId, addresseeId)
       )
-    );
+    ).orderBy(desc(friendRequests.createdAt));
     if (existing) {
-      // Re-activate the existing request back to pending (e.g. was declined/withdrawn)
+      // Re-activate the most recent request back to pending (e.g. was declined/withdrawn)
       const [updated] = await db.update(friendRequests)
         .set({ status: "pending", respondedAt: null, message: message ?? existing.message })
         .where(eq(friendRequests.id, existing.id))
