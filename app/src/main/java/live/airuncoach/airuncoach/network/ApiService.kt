@@ -77,6 +77,9 @@ interface ApiService {
     @POST("/api/friend-requests/{id}/decline")
     suspend fun declineFriendRequest(@Path("id") requestId: String)
 
+    @POST("/api/friend-requests/{id}/withdraw")
+    suspend fun withdrawFriendRequest(@Path("id") requestId: String)
+
     @POST("/api/coaching/pace-update")
     suspend fun getPaceUpdate(@Body request: PaceUpdate): PaceUpdateResponse
 

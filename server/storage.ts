@@ -31,8 +31,10 @@ export interface IStorage {
   getFriendRequests(userId: string): Promise<FriendRequest[]>;  // Incoming requests for this user
   getSentFriendRequests(userId: string): Promise<FriendRequest[]>;  // Requests sent by this user
   createFriendRequest(requesterId: string, addresseeId: string, message?: string): Promise<FriendRequest>;
+  upsertFriendRequest(requesterId: string, addresseeId: string, message?: string): Promise<FriendRequest>;  // Create or re-activate declined request
   acceptFriendRequest(id: string): Promise<void>;
   declineFriendRequest(id: string): Promise<void>;
+  withdrawFriendRequest(id: string, requesterId: string): Promise<void>;  // Sender withdraws their own request
   
   // Runs
   getRun(id: string): Promise<Run | undefined>;
@@ -229,6 +231,39 @@ export class DatabaseStorage implements IStorage {
       status: "pending"
     }).returning();
     return request;
+  }
+
+  async upsertFriendRequest(requesterId: string, addresseeId: string, message?: string): Promise<FriendRequest> {
+    // Check if a request already exists between these users (in either direction)
+    const [existing] = await db.select().from(friendRequests).where(
+      and(
+        eq(friendRequests.requesterId, requesterId),
+        eq(friendRequests.addresseeId, addresseeId)
+      )
+    );
+    if (existing) {
+      // Re-activate the existing request back to pending (e.g. was declined/withdrawn)
+      const [updated] = await db.update(friendRequests)
+        .set({ status: "pending", respondedAt: null, message: message ?? existing.message })
+        .where(eq(friendRequests.id, existing.id))
+        .returning();
+      return updated;
+    }
+    // No existing request — create a new one
+    const [request] = await db.insert(friendRequests).values({
+      requesterId,
+      addresseeId,
+      message,
+      status: "pending"
+    }).returning();
+    return request;
+  }
+
+  async withdrawFriendRequest(id: string, requesterId: string): Promise<void> {
+    // Only the original requester can withdraw
+    await db.update(friendRequests)
+      .set({ status: "withdrawn", respondedAt: new Date() })
+      .where(and(eq(friendRequests.id, id), eq(friendRequests.requesterId, requesterId)));
   }
 
   async acceptFriendRequest(id: string): Promise<void> {

@@ -424,7 +424,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Addressee ID is required" });
       }
       
-      const request = await storage.createFriendRequest(requesterId, addresseeId, message);
+      // Re-use any existing declined/withdrawn request (set back to pending) instead of creating a duplicate
+      const request = await storage.upsertFriendRequest(requesterId, addresseeId, message);
       res.status(201).json(request);
     } catch (error: any) {
       console.error("Create friend request error:", error);
@@ -473,6 +474,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Get friend requests error:", error);
       res.status(500).json({ error: "Failed to get friend requests" });
+    }
+  });
+
+  app.post("/api/friend-requests/:id/withdraw", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { id } = req.params;
+      const requesterId = req.user!.id;
+      await storage.withdrawFriendRequest(id, requesterId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error withdrawing friend request:", error);
+      res.status(500).json({ error: "Failed to withdraw friend request" });
     }
   });
 

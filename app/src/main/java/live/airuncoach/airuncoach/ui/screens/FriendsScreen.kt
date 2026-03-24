@@ -342,47 +342,82 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
                 }
             }
 
-            // Pending Friend Requests Section
+            // Pending Friend Requests Section - always show header
+            item {
+                Spacer(modifier = Modifier.height(Spacing.md))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Pending Requests",
+                        style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                    // Refresh button
+                    TextButton(onClick = { viewModel.loadPendingRequests() }) {
+                        Text("Refresh", style = AppTextStyles.caption, color = Colors.primary)
+                    }
+                }
+            }
+
             when (val state = pendingRequestsState) {
-                is PendingRequestsUiState.Success -> {
-                    if (state.received.isNotEmpty() || state.sent.isNotEmpty()) {
-                        item {
-                            Spacer(modifier = Modifier.height(Spacing.md))
-                            Text(
-                                text = "Pending Requests",
-                                style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
-                                color = Colors.textPrimary
+                is PendingRequestsUiState.Loading -> {
+                    item {
+                        Box(modifier = Modifier.fillMaxWidth().padding(Spacing.md)) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp).align(Alignment.Center),
+                                color = Colors.primary,
+                                strokeWidth = 2.dp
                             )
-                        }
-
-                        // Received requests (waiting for you to accept/decline)
-                        if (state.received.isNotEmpty()) {
-                            items(state.received) { request ->
-                                PendingRequestCard(
-                                    request = request,
-                                    isIncoming = true,
-                                    onAccept = { viewModel.acceptFriendRequest(request.id) },
-                                    onDecline = { viewModel.declineFriendRequest(request.id) },
-                                    onCancel = {}
-                                )
-                            }
-                        }
-
-                        // Sent requests (waiting for them to accept)
-                        if (state.sent.isNotEmpty()) {
-                            items(state.sent) { request ->
-                                PendingRequestCard(
-                                    request = request,
-                                    isIncoming = false,
-                                    onAccept = {},
-                                    onDecline = {},
-                                    onCancel = { viewModel.cancelSentRequest(request.id) }
-                                )
-                            }
                         }
                     }
                 }
-                else -> {}
+                is PendingRequestsUiState.Success -> {
+                    if (state.received.isEmpty() && state.sent.isEmpty()) {
+                        item {
+                            Text(
+                                text = "No pending requests",
+                                style = AppTextStyles.caption,
+                                color = Colors.textMuted,
+                                modifier = Modifier.padding(vertical = Spacing.sm)
+                            )
+                        }
+                    }
+
+                    // Received requests (waiting for you to accept/decline)
+                    items(state.received) { request ->
+                        PendingRequestCard(
+                            request = request,
+                            isIncoming = true,
+                            onAccept = { viewModel.acceptFriendRequest(request.id) },
+                            onDecline = { viewModel.declineFriendRequest(request.id) },
+                            onCancel = {}
+                        )
+                    }
+
+                    // Sent requests (waiting for them to accept)
+                    items(state.sent) { request ->
+                        PendingRequestCard(
+                            request = request,
+                            isIncoming = false,
+                            onAccept = {},
+                            onDecline = {},
+                            onCancel = { viewModel.cancelSentRequest(request.id) }
+                        )
+                    }
+                }
+                is PendingRequestsUiState.Error -> {
+                    item {
+                        Text(
+                            text = "⚠️ ${state.message}",
+                            style = AppTextStyles.caption,
+                            color = Colors.error,
+                            modifier = Modifier.padding(vertical = Spacing.sm)
+                        )
+                    }
+                }
             }
 
             // My Friends Section

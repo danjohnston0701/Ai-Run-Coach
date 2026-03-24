@@ -180,11 +180,11 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
     fun cancelSentRequest(requestId: String) {
         viewModelScope.launch {
             try {
-                apiService.declineFriendRequest(requestId)
+                apiService.withdrawFriendRequest(requestId)
                 // Refresh pending requests
                 loadPendingRequests()
             } catch (e: Exception) {
-                Log.e("FriendsViewModel", "Failed to cancel friend request", e)
+                Log.e("FriendsViewModel", "Failed to withdraw friend request", e)
             }
         }
     }
