@@ -102,13 +102,17 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
                 val userId = _user.value?.id
                 if (userId != null) {
                     val response = apiService.getFriendRequests(userId)
+                    Log.d("FriendsViewModel", "Loaded pending requests - Sent: ${response.sent.size}, Received: ${response.received.size}")
                     _pendingRequestsState.value = PendingRequestsUiState.Success(response.sent, response.received)
                 } else {
                     _pendingRequestsState.value = PendingRequestsUiState.Error("User not logged in")
                 }
+            } catch (e: HttpException) {
+                Log.e("FriendsViewModel", "Failed to load pending requests - HTTP ${e.code()}: ${e.message()}", e)
+                _pendingRequestsState.value = PendingRequestsUiState.Error("Failed to load pending requests (HTTP ${e.code()})")
             } catch (e: Exception) {
                 Log.e("FriendsViewModel", "Failed to load pending requests", e)
-                _pendingRequestsState.value = PendingRequestsUiState.Error("Failed to load pending requests")
+                _pendingRequestsState.value = PendingRequestsUiState.Error("Failed to load pending requests: ${e.message}")
             }
         }
     }

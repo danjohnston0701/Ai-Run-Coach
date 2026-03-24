@@ -441,11 +441,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: "Forbidden" });
       }
 
-      const requests = await storage.getFriendRequests(userId);
+      const receivedRequests = await storage.getFriendRequests(userId);
       
       // Separate sent and received requests and enrich with user data
-      const sent: any[] = [];
-      const received: any[] = [];
+      // Fetch sent requests from the new storage method
+      const sentRequests = await storage.getSentFriendRequests(userId);
+      const sent: any[] = sentRequests;
+      const received: any[] = receivedRequests;
 
       for (const request of requests) {
         if (request.requesterId === userId) {
