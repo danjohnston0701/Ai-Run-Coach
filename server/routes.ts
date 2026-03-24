@@ -262,13 +262,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/users/search", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const query = String(req.query.q || "");
+      // Support both ?q= and ?query= param names for flexibility
+      const query = String(req.query.q || req.query.query || "").trim();
       if (!query || query.length < 2) {
+        console.log("[Search] Query too short or empty:", { q: req.query.q, query: req.query.query });
         return res.json([]);
       }
 
       const currentUserId = req.user?.userId;
+      console.log(`[Search] Searching for "${query}" by user ${currentUserId}`);
       const users = await storage.searchUsers(query);
+      console.log(`[Search] Found ${users.length} users for query "${query}"`);
 
       // Enrich each result with current friendship/request status
       const enriched = await Promise.all(users.map(async (u) => {
