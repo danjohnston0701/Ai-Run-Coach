@@ -260,7 +260,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/users/search", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  app.get("/api/users/search", optionalAuthMiddleware, async (req: any, res: Response) => {
     try {
       console.log("[Search] Raw query params:", JSON.stringify(req.query));
       
