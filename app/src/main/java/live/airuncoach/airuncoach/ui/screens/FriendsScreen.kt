@@ -82,11 +82,13 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
             item {
                 val keyboardController = LocalSoftwareKeyboardController.current
                 Spacer(modifier = Modifier.height(Spacing.md))
+                /*
                 Text(
                     text = "Find Friends",
                     style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
                     color = Colors.textPrimary
                 )
+                 */
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = "Search by name or email address",

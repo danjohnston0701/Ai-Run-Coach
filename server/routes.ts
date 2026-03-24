@@ -469,54 +469,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { userId } = req.params;
       const authUserId = req.user?.userId;
-      
-      console.log(`[FriendRequests GET] User ${authUserId} requesting friend requests for ${userId}`);
-      
-      // Verify user is requesting their own friend requests
+
       if (authUserId !== userId) {
-        console.log(`[FriendRequests GET] Forbidden — auth user ${authUserId} != requested user ${userId}`);
         return res.status(403).json({ error: "Forbidden" });
       }
 
-      // Fetch both sent and received pending requests
-      console.log(`[FriendRequests GET] Fetching sent/received requests for user ${userId}`);
-      const [receivedRequests, sentRequests] = await Promise.all([
-        storage.getFriendRequests(userId),
-        storage.getSentFriendRequests(userId)
-      ]);
-      console.log(`[FriendRequests GET] Found ${sentRequests.length} sent, ${receivedRequests.length} received`);
+      // Raw SQL — bypasses ORM to rule out any Drizzle column-name mismatch
+      const sentResult = await db.execute(
+        sql`SELECT fr.id, fr.requester_id, fr.addressee_id, fr.status, fr.message, fr.created_at,
+                   u.name AS addressee_name, u.profile_pic AS addressee_profile_pic
+            FROM friend_requests fr
+            LEFT JOIN users u ON u.id = fr.addressee_id
+            WHERE fr.requester_id = ${userId} AND fr.status = 'pending'`
+      );
+      const receivedResult = await db.execute(
+        sql`SELECT fr.id, fr.requester_id, fr.addressee_id, fr.status, fr.message, fr.created_at,
+                   u.name AS requester_name, u.profile_pic AS requester_profile_pic
+            FROM friend_requests fr
+            LEFT JOIN users u ON u.id = fr.requester_id
+            WHERE fr.addressee_id = ${userId} AND fr.status = 'pending'`
+      );
 
-      // Enrich sent requests with addressee user info — only show pending/withdrawn (not accepted/declined)
-      const pendingSent = sentRequests.filter(r => r.status === "pending");
-      console.log(`[FriendRequests GET] Pending sent: ${pendingSent.length} (total sent: ${sentRequests.length}, statuses: ${sentRequests.map(r => r.status).join(',')})`);
-      const sent = await Promise.all(pendingSent.map(async (request) => {
-        const addressee = await storage.getUser(request.addresseeId);
-        return {
-          ...request,
-          addresseeName: addressee?.name ?? null,
-          addresseeProfilePic: addressee?.profilePic ?? null,
-          requesterName: null,
-          requesterProfilePic: null
-        };
+      const toRows = (result: any) => Array.isArray(result) ? result : (result.rows ?? []);
+
+      const sent = toRows(sentResult).map((r: any) => ({
+        id: r.id, requesterId: r.requester_id, addresseeId: r.addressee_id,
+        status: r.status, message: r.message, createdAt: r.created_at,
+        addresseeName: r.addressee_name ?? null, addresseeProfilePic: r.addressee_profile_pic ?? null,
+        requesterName: null, requesterProfilePic: null,
+      }));
+      const received = toRows(receivedResult).map((r: any) => ({
+        id: r.id, requesterId: r.requester_id, addresseeId: r.addressee_id,
+        status: r.status, message: r.message, createdAt: r.created_at,
+        requesterName: r.requester_name ?? null, requesterProfilePic: r.requester_profile_pic ?? null,
+        addresseeName: null, addresseeProfilePic: null,
       }));
 
-      // Enrich received requests with requester user info
-      const received = await Promise.all(receivedRequests.map(async (request) => {
-        const requester = await storage.getUser(request.requesterId);
-        return {
-          ...request,
-          requesterName: requester?.name ?? null,
-          requesterProfilePic: requester?.profilePic ?? null,
-          addresseeName: null,
-          addresseeProfilePic: null
-        };
-      }));
-
-      // v3 — includes sent requests from getSentFriendRequests
-      res.json({ v: 3, sent, received });
+      console.log(`[FriendRequests] userId=${userId} sent=${sent.length} received=${received.length}`);
+      res.json({ v: 4, sent, received });
     } catch (error: any) {
       console.error("Get friend requests error:", error);
-      res.status(500).json({ error: "Failed to get friend requests" });
+      res.status(500).json({ error: "Failed to get friend requests", detail: String(error) });
     }
   });
 
