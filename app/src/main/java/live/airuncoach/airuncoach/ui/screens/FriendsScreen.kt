@@ -25,6 +25,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import live.airuncoach.airuncoach.R
@@ -588,15 +589,18 @@ fun PendingRequestCard(
                     }
                 }
             } else {
-                IconButton(
+                Button(
                     onClick = onCancel,
-                    modifier = Modifier.size(36.dp)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Colors.error.copy(alpha = 0.1f),
+                        contentColor = Colors.error
+                    ),
+                    modifier = Modifier.height(36.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Close,
-                        contentDescription = "Cancel Request",
-                        tint = Colors.textMuted,
-                        modifier = Modifier.size(20.dp)
+                    Text(
+                        "Withdraw",
+                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
+                        fontSize = 12.sp
                     )
                 }
             }
