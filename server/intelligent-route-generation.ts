@@ -230,13 +230,20 @@ async function generateGraphHopperRoute(
   seed: number = 0,
   preferScenic: boolean = true
 ): Promise<any> {
+  // Try POST with custom_model if scenic preference is set
   if (preferScenic) {
     try {
-      return await generateGraphHopperRoutePost(lat, lng, distanceMeters, seed);
+      const result = await generateGraphHopperRoutePost(lat, lng, distanceMeters, seed);
+      // Verify we got valid data back
+      if (result?.paths?.length > 0) {
+        return result;
+      }
     } catch (error: any) {
-      console.log(`POST with custom_model failed, falling back to GET: ${error.message}`);
+      console.log(`⚠️ POST with custom_model failed (seed ${seed}): ${error.response?.status || error.message}, falling back to GET...`);
     }
   }
+  
+  // Fallback to simple GET request
   return await generateGraphHopperRouteGet(lat, lng, distanceMeters, 'hike', seed);
 }
 
@@ -279,11 +286,16 @@ async function generateGraphHopperRoutePost(
     },
   };
 
-  const response = await axios.post(`${GRAPHHOPPER_BASE_URL}/route?key=${GRAPHHOPPER_API_KEY}`, body, {
-    headers: { 'Content-Type': 'application/json' },
-    timeout: 30000,
-  });
-  return response.data;
+  try {
+    const response = await axios.post(`${GRAPHHOPPER_BASE_URL}/route?key=${GRAPHHOPPER_API_KEY}`, body, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 30000,
+    });
+    return response.data;
+  } catch (error: any) {
+    console.error(`GraphHopper POST failed (seed ${seed}): ${error.response?.status} - ${error.response?.data?.message || error.message}`);
+    throw error;
+  }
 }
 
 /**
