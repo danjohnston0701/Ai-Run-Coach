@@ -10,12 +10,14 @@ import com.google.gson.stream.JsonToken
 import com.google.gson.stream.JsonWriter
 import live.airuncoach.airuncoach.BuildConfig
 import live.airuncoach.airuncoach.data.SessionManager
+import okhttp3.Cache
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -134,7 +136,14 @@ class PersistentCookieJar(private val context: Context) : CookieJar {
 
 class RetrofitClient(context: Context, private val sessionManager: SessionManager) {
 
+    // HTTP Cache: 50MB of cached responses to reduce network transfer
+    private val httpCache = Cache(
+        directory = File(context.cacheDir, "http_cache"),
+        maxSize = 50 * 1024 * 1024  // 50MB
+    )
+
     private val okHttpClient = OkHttpClient.Builder()
+        .cache(httpCache)  // ✅ Enable HTTP caching for bandwidth savings
         .cookieJar(PersistentCookieJar(context))
         // Increase timeouts for AI route generation (OpenAI + Google Maps can take 2+ minutes)
         .connectTimeout(45, TimeUnit.SECONDS)
@@ -268,8 +277,15 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
                 _context = context
                 _sessionManager = sessionManager
                 
+                // HTTP Cache: 50MB of cached responses to reduce network transfer
+                val httpCache = Cache(
+                    directory = File(context.cacheDir, "http_cache"),
+                    maxSize = 50 * 1024 * 1024  // 50MB
+                )
+                
                 // Build okhttp client
                 val client = OkHttpClient.Builder()
+                    .cache(httpCache)  // ✅ Enable HTTP caching for bandwidth savings
                     .connectTimeout(30, TimeUnit.SECONDS)
                     .readTimeout(30, TimeUnit.SECONDS)
                     .writeTimeout(30, TimeUnit.SECONDS)

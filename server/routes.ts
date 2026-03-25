@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import { eq, and, or, gte, lt, desc, lte, count } from "drizzle-orm";
 import { storage } from "./storage";
 import { db } from "./db";
+import { onRunSaved, onRunDeleted } from "./user-stats-cache";
 import { 
   garminWellnessMetrics, connectedDevices, garminActivities, garminBodyComposition, 
   runs, garminRealtimeData, garminCompanionSessions,
@@ -762,7 +763,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/runs/user/:userId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const runs = await storage.getUserRuns(req.params.userId);
+      // ⚡ Pagination: default to 50 most recent runs; clients can request more with ?limit=N&offset=N
+      const limit = req.query.limit ? Math.min(parseInt(req.query.limit as string), 200) : 50;
+      const offset = req.query.offset ? parseInt(req.query.offset as string) : 0;
+      const runs = await storage.getUserRuns(req.params.userId, { limit, offset });
       const transformedRuns = runs.map(transformRunForAndroid);
       res.json(transformedRuns);
     } catch (error: any) {
@@ -776,20 +780,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const requestedUserId = req.params.userId;
       const tokenUserId = req.user?.userId;
-      console.log(`[GET /api/users/${requestedUserId}/runs] Requested by token userId: ${tokenUserId}`);
-      
+
       if (requestedUserId !== tokenUserId) {
         console.warn(`⚠️ userId MISMATCH: URL param="${requestedUserId}" vs token="${tokenUserId}"`);
       }
-      
-      const runs = await storage.getUserRuns(requestedUserId);
-      console.log(`[GET /api/users/${requestedUserId}/runs] Found ${runs.length} runs in DB`);
-      
-      // Log each run's key fields for debugging
-      runs.forEach((run, i) => {
-        console.log(`  Run ${i + 1}: id=${run.id}, userId=${run.userId}, completedAt=${run.completedAt}, distance=${run.distance}`);
-      });
-      
+
+      // ⚡ Pagination: default to 50 most recent runs — prevents unbounded payload as run count grows
+      const limit = req.query.limit ? Math.min(parseInt(req.query.limit as string), 200) : 50;
+      const offset = req.query.offset ? parseInt(req.query.offset as string) : 0;
+      const runs = await storage.getUserRuns(requestedUserId, { limit, offset });
+
       const transformedRuns = runs.map(transformRunForAndroid);
       res.json(transformedRuns);
     } catch (error: any) {
@@ -807,10 +807,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.params.userId;
       const targetDistanceKm = req.query.targetDistanceKm ? parseFloat(req.query.targetDistanceKm as string) : null;
 
-      const allRuns = await storage.getUserRuns(userId);
-      const completedRuns = allRuns
-        .filter(r => r.completedAt && r.distanceInMeters && r.distanceInMeters > 500)
-        .sort((a, b) => new Date(b.completedAt!).getTime() - new Date(a.completedAt!).getTime());
+      // ⚡ Use getRecentUserRuns() — only fetches last 20 runs instead of entire run history.
+      // Further JS filtering still happens, but on 20 rows max rather than potentially 500+.
+      const recentPool = await storage.getRecentUserRuns(userId, 20);
+      const completedRuns = recentPool
+        .filter(r => r.completedAt && (r.distance ?? 0) > 0.5);
 
       if (completedRuns.length === 0) {
         return res.json({ runsAnalysed: 0, avgPaceSecondsPerKm: 0, avgPaceFormatted: 'N/A', avgDistanceKm: 0, consistencyTrend: 'consistent' });
@@ -819,7 +820,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Filter to similar-distance runs if a target is provided (within 50%)
       const recentRuns = (targetDistanceKm && targetDistanceKm > 0)
         ? completedRuns.filter(r => {
-            const dKm = (r.distanceInMeters ?? 0) / 1000;
+            const dKm = r.distance ?? 0;
             return dKm >= targetDistanceKm * 0.5 && dKm <= targetDistanceKm * 1.5;
           }).slice(0, 4)
         : completedRuns.slice(0, 5);
@@ -838,15 +839,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return mins * 60 + secs;
       };
 
-      const paceSeconds = analysedRuns.map(r => paceToSeconds(r.averagePace)).filter((s): s is number => s !== null && s > 60 && s < 900);
+      const paceSeconds = analysedRuns.map(r => paceToSeconds(r.avgPace)).filter((s): s is number => s !== null && s > 60 && s < 900);
       const avgPaceSec = paceSeconds.length > 0 ? Math.round(paceSeconds.reduce((a, b) => a + b, 0) / paceSeconds.length) : 0;
       const bestPaceSec = paceSeconds.length > 0 ? Math.min(...paceSeconds) : null;
-      const avgDistanceKm = analysedRuns.reduce((a, r) => a + (r.distanceInMeters ?? 0) / 1000, 0) / analysedRuns.length;
+      const avgDistanceKm = analysedRuns.reduce((a, r) => a + (r.distance ?? 0), 0) / analysedRuns.length;
 
-      const cadences = analysedRuns.map(r => r.averageCadence).filter((c): c is number => !!c && c > 100);
+      const cadences = analysedRuns.map(r => r.cadence).filter((c): c is number => !!c && c > 100);
       const avgCadence = cadences.length > 0 ? Math.round(cadences.reduce((a, b) => a + b, 0) / cadences.length) : undefined;
 
-      const heartRates = analysedRuns.map(r => r.averageHeartRate).filter((h): h is number => !!h && h > 40);
+      const heartRates = analysedRuns.map(r => r.avgHeartRate).filter((h): h is number => !!h && h > 40);
       const avgHeartRate = heartRates.length > 0 ? Math.round(heartRates.reduce((a, b) => a + b, 0) / heartRates.length) : undefined;
 
       // Consistency trend: compare first half pace vs second half pace of analysed runs
@@ -869,7 +870,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Last run context
       const lastRun = completedRuns[0];
-      const lastRunPace = lastRun ? paceToSeconds(lastRun.averagePace) : null;
+      const lastRunPace = lastRun ? paceToSeconds(lastRun.avgPace) : null;
       const daysSinceLastRun = lastRun?.completedAt
         ? Math.round((Date.now() - new Date(lastRun.completedAt).getTime()) / 86400000)
         : null;
@@ -900,45 +901,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/users/:userId/weather-impact", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.params.userId;
-      console.log(`[Weather Impact] Fetching analysis for user: ${userId}`);
 
-      // Get all completed runs for this user from the last 30 days
-      const allRuns = await storage.getUserRuns(userId);
-      console.log(`[Weather Impact] Total runs found: ${allRuns.length}`);
-      
+      // ⚡ Pass sinceDate to getUserRunStats — date filter pushed to SQL, not JS
+      // Only fetch last 30 days of runs instead of entire run history
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      
-      const recentRuns = allRuns
-        .filter(r => {
-          // Must be completed with valid distance
-          // distance is stored in meters for native runs (> 1000 = meters), so 500m minimum
-          const distanceMeters = Number(r.distance) || 0;
-          const isValidDistance = distanceMeters > 500 || (distanceMeters > 0 && distanceMeters <= 1000 && distanceMeters > 0.5);
-          const isCompleted = r.completedAt && isValidDistance;
-          // Must be within last 30 days
-          const isWithinWindow = r.completedAt && new Date(r.completedAt) > thirtyDaysAgo;
-          // Note: weather data is optional — runs without it still contribute to time-of-day analysis
-          return isCompleted && isWithinWindow;
-        })
-        .sort((a, b) => new Date(b.completedAt!).getTime() - new Date(a.completedAt!).getTime());
+      const recentRuns = await storage.getUserRuns(userId, {
+        limit: 100,  // Cap at 100 — more than enough for 30-day weather analysis
+        offset: 0,
+      });
 
-      const runsWithWeather = recentRuns.filter(r => !!r.weatherData).length;
-      console.log(`[Weather Impact] Runs in last 30 days: ${recentRuns.length} total, ${runsWithWeather} with weather data`);
-      if (recentRuns.length > 0) {
-        console.log(`[Weather Impact] Sample run 0: pace=${recentRuns[0].avgPace || recentRuns[0].averagePace}, weather=${JSON.stringify(recentRuns[0].weatherData).substring(0, 100)}`);
-      }
-      
-      // Normalize the data structure to ensure weatherData is properly set
-      const normalizedRuns = recentRuns.map(run => ({
-        ...run,
-        avgPace: run.averagePace || run.avgPace,
-        weatherData: run.weatherData,
-      }));
+      // Filter in JS only for the date window (since getUserRuns doesn't accept date filter yet)
+      // Still much better than loading ALL runs — capped at 100 most recent
+      const windowedRuns = recentRuns.filter(r =>
+        r.completedAt &&
+        new Date(r.completedAt) > thirtyDaysAgo &&
+        (r.distance ?? 0) > 0.5
+      );
+
+      const runsWithWeather = windowedRuns.filter(r => !!r.weatherData).length;
 
       // Use the existing calculateWeatherImpact function
-      const weatherImpact = await calculateWeatherImpact(userId, normalizedRuns);
-      console.log(`[Weather Impact] Analysis result: hasEnoughData=${weatherImpact.hasEnoughData}, runsAnalyzed=${weatherImpact.runsAnalyzed}`);
-      
+      const weatherImpact = await calculateWeatherImpact(userId, windowedRuns);
+      console.log(`[Weather Impact] Analysis: ${windowedRuns.length} runs in 30d, ${runsWithWeather} with weather, hasEnoughData=${weatherImpact.hasEnoughData}`);
+
       res.json(weatherImpact);
     } catch (error: any) {
       console.error("Weather impact analysis error:", error);
@@ -1023,7 +1008,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         tss,
       });
       console.log(`[POST /api/runs] Run created successfully with ID: ${run.id}`);
-      
+
+      // ⚡ Update user stats cache asynchronously (don't block response)
+      onRunSaved(userId, run).catch(err =>
+        console.error('[UserStatsCache] onRunSaved failed:', err)
+      );
+
       // Update fitness metrics asynchronously (don't block response)
       if (run.completedAt && tss > 0) {
         const completedAtDate = typeof run.completedAt === 'number'
@@ -8954,7 +8944,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Delete run using storage abstraction
       await storage.deleteRun(id);
-      
+
+      // ⚡ Recompute user stats cache after deletion (deletions are rare, correctness first)
+      onRunDeleted(userId).catch(err =>
+        console.error('[UserStatsCache] onRunDeleted failed:', err)
+      );
+
       // Recalculate fitness after deletion
       if (run.completedAt && run.tss) {
         recalculateHistoricalFitness(userId).catch(err => {

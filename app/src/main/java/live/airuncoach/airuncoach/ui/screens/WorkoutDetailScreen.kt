@@ -42,7 +42,8 @@ fun WorkoutDetailScreen(
     workout: WorkoutDetails,
     onNavigateBack: () -> Unit,
     onStartWorkout: (WorkoutDetails) -> Unit,
-    onMarkComplete: (WorkoutDetails) -> Unit
+    onMarkComplete: (WorkoutDetails) -> Unit,
+    onSkipWorkout: (WorkoutDetails) -> Unit = {}
 ) {
     val context = LocalContext.current
     val color = workoutTypeColor(workout.workoutType)
@@ -425,6 +426,17 @@ fun WorkoutDetailScreen(
                     Icon(painterResource(R.drawable.icon_check_vector), null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(Spacing.sm))
                     Text("Mark as Done (no GPS)", style = AppTextStyles.body)
+                }
+                Spacer(modifier = Modifier.height(Spacing.sm))
+                OutlinedButton(
+                    onClick = { onSkipWorkout(workout) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.textMuted)
+                ) {
+                    Icon(painterResource(R.drawable.icon_x_vector), null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(Spacing.sm))
+                    Text("Skip Session", style = AppTextStyles.body)
                 }
             } else {
                 // Rest day

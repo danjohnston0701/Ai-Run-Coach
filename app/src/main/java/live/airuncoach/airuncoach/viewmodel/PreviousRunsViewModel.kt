@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.data.SessionManager
+import live.airuncoach.airuncoach.data.repository.RunRepository  // ⚡ For shared run caching
 import live.airuncoach.airuncoach.domain.model.RunSession
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.ApiService
@@ -22,7 +23,8 @@ import javax.inject.Inject
 class PreviousRunsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val apiService: ApiService,
-    private val sessionManager: SessionManager
+    private val sessionManager: SessionManager,
+    private val runRepository: RunRepository  // ⚡ Inject shared repository for caching
 ) : ViewModel() {
     
     private val sharedPrefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
@@ -89,7 +91,7 @@ class PreviousRunsViewModel @Inject constructor(
                 val userId = getUserId()
                 if (userId != null) {
                     android.util.Log.d("PreviousRunsViewModel", "✅ Fetching runs for user: $userId")
-                    val allRuns = apiService.getRunsForUser(userId)
+                    val allRuns = runRepository.getRunsForUser(userId)  // ⚡ Use repository (cached)
                     _runs.value = filterRunsByTimeRange(allRuns)
                     android.util.Log.d("PreviousRunsViewModel", "✅ Fetched ${allRuns.size} total runs, filtered to ${_runs.value.size}")
                 } else {
@@ -152,7 +154,7 @@ class PreviousRunsViewModel @Inject constructor(
             val userId = getUserId()
             if (userId != null) {
                 try {
-                    val allRuns = apiService.getRunsForUser(userId)
+                    val allRuns = runRepository.getRunsForUser(userId)  // ⚡ Use repository (cached)
                     _runs.value = filterRunsByTimeRange(allRuns)
                     calculateWeatherImpact()
                 } catch (e: Exception) {

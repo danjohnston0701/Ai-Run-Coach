@@ -1576,7 +1576,7 @@ export default function RunSession() {
         }
         setMessage("");
       }
-    }, 10000); // Check every 10 seconds
+    }, 30000); // ⚡ Optimized: 10s → 30s (CU reduction, still catches GPS failures)
     
     return () => clearInterval(watchdogInterval);
   }, [gpsStatus]);
@@ -2593,8 +2593,8 @@ export default function RunSession() {
   useEffect(() => {
     if (!active && time === 0) return;
     
-    const saveInterval = setInterval(saveSessionNow, 5000);
-    const dbSyncInterval = setInterval(syncToDatabase, 30000);
+    const saveInterval = setInterval(saveSessionNow, 30000);       // ⚡ Optimized: 5s → 30s (local save)
+    const dbSyncInterval = setInterval(syncToDatabase, 120000);    // ⚡ Optimized: 30s → 120s (DB sync, CU reduction)
     
     const handleBeforeUnload = () => {
       saveSessionNow();

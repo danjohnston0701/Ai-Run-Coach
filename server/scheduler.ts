@@ -8,8 +8,6 @@ import { trainingPlans, plannedWorkouts, users, notificationPreferences } from '
 import { eq, and, gte, lt } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 
-const SYNC_INTERVAL_MINUTES = 60;
-
 // Track which users have already received a reminder today (user_id -> timestamp of last send)
 // Stores the reminder send timestamp so we don't send twice in the same calendar day for a user
 const coachingPlanRemindersSent = new Map<string, Date>();
@@ -129,7 +127,7 @@ async function runGarminSync(): Promise<void> {
 
 /**
  * Send 8am coaching plan reminders for any active training plans with today's workouts.
- * Respects each user's local timezone. Runs every hour to check if it's 8 AM in any user's timezone.
+ * Respects each user's local timezone. Runs once daily (more efficient than hourly checks).
  */
 async function sendCoachingPlanReminders(): Promise<void> {
   console.log(`[Scheduler] Checking for coaching plan reminders at ${new Date().toISOString()}`);
@@ -265,24 +263,25 @@ async function sendCoachingPlanReminders(): Promise<void> {
 }
 
 export function startScheduler(): void {
-  console.log(`[Scheduler] Starting background scheduler (sync every ${SYNC_INTERVAL_MINUTES} minutes)`);
+  console.log('[Scheduler] Starting background scheduler (Garmin sync every 6 hours)');
   
-  // Garmin wellness data sync (every 60 minutes)
-  cron.schedule(`*/${SYNC_INTERVAL_MINUTES} * * * *`, () => {
+  // Garmin wellness data sync (⚡ Optimized: every hour → every 6 hours, CU reduction)
+  // "0 */6 * * *" = at minute 0, every 6th hour (00:00, 06:00, 12:00, 18:00)
+  cron.schedule('0 */6 * * *', () => {
     runGarminSync();
   });
-  console.log('[Scheduler] Garmin wellness sync scheduled');
+  console.log('[Scheduler] Garmin wellness sync scheduled (every 6 hours)');
   
-  // Coaching plan reminders (every hour — checks if it's 8 AM in user's local timezone)
-  cron.schedule('0 * * * *', () => {
+  // Coaching plan reminders (⚡ Optimized: hourly → once daily at 8 AM UTC, respects user timezone)
+  cron.schedule('0 8 * * *', () => {
     sendCoachingPlanReminders().catch(error => {
       console.error('[Scheduler] Coaching plan reminder error:', error);
     });
   });
-  console.log('[Scheduler] Coaching plan reminders scheduled (hourly, respects user timezone)');
+  console.log('[Scheduler] Coaching plan reminders scheduled (once daily at 8 AM UTC, respects user timezone)');
   
-  // Webhook failure queue processor (every 5 minutes)
-  cron.schedule('*/5 * * * *', () => {
+  // Webhook failure queue processor (⚡ Optimized: 5m → 30m, still robust for retries)
+  cron.schedule('*/30 * * * *', () => {
     console.log('[Scheduler] Running webhook failure queue processor...');
     processWebhookFailureQueue().then(result => {
       if (result.retried > 0 || result.failed > 0) {
@@ -292,7 +291,7 @@ export function startScheduler(): void {
       console.error('[Scheduler] Webhook queue processor error:', error);
     });
   });
-  console.log('[Scheduler] Webhook failure queue processor scheduled (every 5 minutes)');
+  console.log('[Scheduler] Webhook failure queue processor scheduled (every 30 minutes)');
   
   // Run initial syncs after delay
   setTimeout(() => {

@@ -16,6 +16,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import live.airuncoach.airuncoach.domain.model.*
+import live.airuncoach.airuncoach.data.repository.RunRepository  // ⚡ For shared run caching
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.service.RunTrackingService
 import live.airuncoach.airuncoach.network.model.*
@@ -35,7 +36,8 @@ sealed class AiAnalysisState {
 @HiltViewModel
 class RunSummaryViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val apiService: ApiService
+    private val apiService: ApiService,
+    private val runRepository: RunRepository  // ⚡ Inject shared repository for caching
 ) : ViewModel() {
 
     private val sharedPrefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
@@ -118,7 +120,7 @@ class RunSummaryViewModel @Inject constructor(
             _loadError.value = null
             
             try {
-                val session = apiService.getRunById(runId)
+                val session = runRepository.getRunById(runId)  // ⚡ Use repository (cached)
                 _runSession.value = session
                 
                 // Initialize struggle points + comments from run payload (if available)

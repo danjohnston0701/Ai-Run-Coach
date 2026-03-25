@@ -625,6 +625,15 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                                 trainingPlanViewModel.completeWorkout(w.id, null, planId)
                             }
                             navController.popBackStack()
+                        },
+                        onSkipWorkout = { w ->
+                            // Capture planId before clearing WorkoutHolder
+                            val planId = planCtxForComplete?.planId
+                            WorkoutHolder.clear()
+                            if (planId != null) {
+                                trainingPlanViewModel.skipWorkout(w.id, planId)
+                            }
+                            navController.popBackStack()
                         }
                     )
                 }

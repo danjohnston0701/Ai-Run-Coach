@@ -24,6 +24,7 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.Dispatchers
 import live.airuncoach.airuncoach.BuildConfig
 import live.airuncoach.airuncoach.data.SessionManager
+import live.airuncoach.airuncoach.data.repository.RunRepository  // ⚡ For shared run caching
 import live.airuncoach.airuncoach.domain.model.GarminConnection
 import live.airuncoach.airuncoach.domain.model.Goal
 import live.airuncoach.airuncoach.domain.model.RunSession
@@ -41,7 +42,8 @@ import javax.inject.Inject
 class DashboardViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val apiService: ApiService,
-    private val sessionManager: SessionManager
+    private val sessionManager: SessionManager,
+    private val runRepository: RunRepository  // ⚡ Inject shared repository for caching
 ) : ViewModel() {
 
     private val _user = MutableStateFlow<User?>(null)
@@ -335,7 +337,7 @@ class DashboardViewModel @Inject constructor(
                 val userId = _user.value?.id
                 if (userId != null) {
                     Log.d("DashboardViewModel", "Fetching runs for user: $userId")
-                    val runs = apiService.getRunsForUser(userId)
+                    val runs = runRepository.getRunsForUser(userId)  // ⚡ Use repository (cached)
                     _recentRun.value = runs.maxByOrNull { it.startTime }
                     Log.d("DashboardViewModel", "Fetched ${runs.size} runs, most recent: ${_recentRun.value?.id}")
                 } else {

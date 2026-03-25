@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.data.SessionManager
+import live.airuncoach.airuncoach.data.repository.RunRepository  // ⚡ For shared run caching
 import live.airuncoach.airuncoach.domain.model.Goal
 import live.airuncoach.airuncoach.domain.model.RunSession
 import live.airuncoach.airuncoach.domain.model.User
@@ -32,7 +33,10 @@ sealed class CreateGoalState {
     data class Error(val message: String) : CreateGoalState()
 }
 
-class GoalsViewModel(private val context: Context) : ViewModel() {
+class GoalsViewModel(
+    private val context: Context,
+    private val runRepository: RunRepository  // ⚡ Inject shared repository for caching
+) : ViewModel() {
 
     private val sharedPrefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
@@ -137,7 +141,7 @@ class GoalsViewModel(private val context: Context) : ViewModel() {
         viewModelScope.launch {
             try {
                 _isLoadingLinkedRun.value = true
-                _linkedRunSession.value = apiService.getRunById(runId)
+                _linkedRunSession.value = runRepository.getRunById(runId)  // ⚡ Use repository (cached)
             } catch (e: Exception) {
                 android.util.Log.e("GoalsViewModel", "Failed to load linked run $runId: ${e.message}", e)
                 _linkedRunSession.value = null
@@ -419,8 +423,12 @@ class GoalsViewModelFactory(
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(GoalsViewModel::class.java)) {
+            // ⚡ Create RunRepository internally so call sites don't need to pass it
+            val sessionManager = SessionManager(context)
+            val apiService = RetrofitClient(context, sessionManager).instance
+            val runRepository = RunRepository(apiService)
             @Suppress("UNCHECKED_CAST")
-            return GoalsViewModel(context) as T
+            return GoalsViewModel(context, runRepository) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

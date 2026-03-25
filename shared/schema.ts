@@ -1465,3 +1465,52 @@ export const coachingSessionEvents = pgTable("coaching_session_events", {
 
 export type CoachingSessionEvent = typeof coachingSessionEvents.$inferSelect;
 export type InsertCoachingSessionEvent = typeof coachingSessionEvents.$inferInsert;
+
+// ==================== USER STATS CACHE ====================
+
+/**
+ * Pre-computed all-time stats and personal bests per user.
+ *
+ * Updated incrementally after each run save — makes My Data screen reads O(1)
+ * regardless of how many runs a user has accumulated. Backfilled for existing
+ * users on first cache miss (see user-stats-cache.ts).
+ */
+export const userStats = pgTable("user_stats", {
+  userId: varchar("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  updatedAt: timestamp("updated_at").defaultNow(),
+
+  // ── All-time cumulative totals (incremented on each run save) ────────────
+  totalRuns:            integer("total_runs").default(0).notNull(),
+  totalDistanceKm:      real("total_distance_km").default(0).notNull(),
+  totalDurationSeconds: integer("total_duration_seconds").default(0).notNull(),
+  totalElevationGainM:  real("total_elevation_gain_m").default(0).notNull(),
+  totalCalories:        integer("total_calories").default(0).notNull(),
+  totalActiveCalories:  integer("total_active_calories").default(0).notNull(),
+  avgPaceMinPerKm:      real("avg_pace_min_per_km"),
+  fastestPaceMinPerKm:  real("fastest_pace_min_per_km"),
+  longestRunKm:         real("longest_run_km").default(0).notNull(),
+
+  // ── Personal bests — only updated when a new run beats the record ────────
+  pb1kDurationMs:       integer("pb_1k_duration_ms"),
+  pb1kRunId:            varchar("pb_1k_run_id"),
+  pb1kDate:             timestamp("pb_1k_date"),
+
+  pb5kDurationMs:       integer("pb_5k_duration_ms"),
+  pb5kRunId:            varchar("pb_5k_run_id"),
+  pb5kDate:             timestamp("pb_5k_date"),
+
+  pb10kDurationMs:      integer("pb_10k_duration_ms"),
+  pb10kRunId:           varchar("pb_10k_run_id"),
+  pb10kDate:            timestamp("pb_10k_date"),
+
+  pbHalfDurationMs:     integer("pb_half_duration_ms"),
+  pbHalfRunId:          varchar("pb_half_run_id"),
+  pbHalfDate:           timestamp("pb_half_date"),
+
+  pbMarathonDurationMs: integer("pb_marathon_duration_ms"),
+  pbMarathonRunId:      varchar("pb_marathon_run_id"),
+  pbMarathonDate:       timestamp("pb_marathon_date"),
+});
+
+export type UserStats = typeof userStats.$inferSelect;
+export type InsertUserStats = typeof userStats.$inferInsert;

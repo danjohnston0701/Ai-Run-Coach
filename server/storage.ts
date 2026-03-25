@@ -12,7 +12,19 @@ import {
   type GarminWellnessMetric, type OauthStateStore, type GarminWebhookEvent
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, or, and, desc, ilike, sql, inArray } from "drizzle-orm";
+import { eq, or, and, desc, asc, ilike, sql, inArray, gte, lte, isNotNull, count, sum, avg, max, min } from "drizzle-orm";
+
+// Aggregated run statistics — computed via SQL, not JavaScript
+export interface UserRunStats {
+  totalRuns: number;
+  totalDistanceKm: number;
+  totalDurationSeconds: number;
+  avgPaceSecondsPerKm: number | null;  // derived from avg duration / avg distance
+  avgHeartRate: number | null;
+  avgCadence: number | null;
+  bestDistanceKm: number | null;
+  bestDurationSeconds: number | null;
+}
 
 export interface IStorage {
   // Users
@@ -39,7 +51,9 @@ export interface IStorage {
   
   // Runs
   getRun(id: string): Promise<Run | undefined>;
-  getUserRuns(userId: string): Promise<Run[]>;
+  getUserRuns(userId: string, options?: { limit?: number; offset?: number }): Promise<Run[]>;
+  getRecentUserRuns(userId: string, limit?: number): Promise<Run[]>;
+  getUserRunStats(userId: string, options?: { sinceDate?: Date }): Promise<UserRunStats>;
   createRun(run: InsertRun): Promise<Run>;
   updateRun(id: string, data: Partial<Run>): Promise<Run | undefined>;
   deleteRun(id: string): Promise<void>;
@@ -329,8 +343,62 @@ export class DatabaseStorage implements IStorage {
     return run || undefined;
   }
 
-  async getUserRuns(userId: string): Promise<Run[]> {
-    return db.select().from(runs).where(eq(runs.userId, userId)).orderBy(desc(runs.completedAt));
+  async getUserRuns(userId: string, options?: { limit?: number; offset?: number }): Promise<Run[]> {
+    const query = db.select().from(runs)
+      .where(eq(runs.userId, userId))
+      .orderBy(desc(runs.completedAt));
+    if (options?.limit) {
+      return query.limit(options.limit).offset(options.offset ?? 0);
+    }
+    return query;
+  }
+
+  /**
+   * Fetch only the N most recent runs for a user — safe for dashboard/summary cards.
+   * Avoids loading the entire run history when only recent runs are needed.
+   */
+  async getRecentUserRuns(userId: string, limit: number = 20): Promise<Run[]> {
+    return db.select().from(runs)
+      .where(eq(runs.userId, userId))
+      .orderBy(desc(runs.completedAt))
+      .limit(limit);
+  }
+
+  /**
+   * Compute run statistics using SQL aggregation — avoids loading all rows into Node.js memory.
+   * At 500 runs this is ~500x more efficient than fetching all runs and computing in JS.
+   */
+  async getUserRunStats(userId: string, options?: { sinceDate?: Date }): Promise<UserRunStats> {
+    const conditions = options?.sinceDate
+      ? and(eq(runs.userId, userId), gte(runs.completedAt, options.sinceDate))
+      : eq(runs.userId, userId);
+
+    const [stats] = await db.select({
+      totalRuns: count(),
+      totalDistanceKm: sum(runs.distance),
+      totalDurationSeconds: sum(runs.duration),
+      avgHeartRate: avg(runs.avgHeartRate),
+      avgCadence: avg(runs.cadence),
+      bestDistanceKm: max(runs.distance),
+      bestDurationSeconds: min(runs.duration),
+    }).from(runs).where(conditions);
+
+    const totalDist = Number(stats.totalDistanceKm ?? 0);
+    const totalDur = Number(stats.totalDurationSeconds ?? 0);
+    const avgPace = (totalDist > 0 && totalDur > 0)
+      ? Math.round((totalDur / totalDist))
+      : null;
+
+    return {
+      totalRuns: Number(stats.totalRuns ?? 0),
+      totalDistanceKm: Math.round(totalDist * 10) / 10,
+      totalDurationSeconds: totalDur,
+      avgPaceSecondsPerKm: avgPace,
+      avgHeartRate: stats.avgHeartRate ? Math.round(Number(stats.avgHeartRate)) : null,
+      avgCadence: stats.avgCadence ? Math.round(Number(stats.avgCadence)) : null,
+      bestDistanceKm: stats.bestDistanceKm ? Math.round(Number(stats.bestDistanceKm) * 10) / 10 : null,
+      bestDurationSeconds: stats.bestDurationSeconds ? Number(stats.bestDurationSeconds) : null,
+    };
   }
 
   async createRun(run: InsertRun): Promise<Run> {

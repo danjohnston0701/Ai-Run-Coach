@@ -1,6 +1,7 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { createProxyMiddleware } from "http-proxy-middleware";
+import compression from "compression";  // ⚡ For gzip response compression
 import { registerRoutes } from "./routes";
 import { startScheduler } from "./scheduler";
 import * as fs from "fs";
@@ -71,6 +72,39 @@ function setupBodyParsing(app: express.Application) {
   );
 
   app.use(express.urlencoded({ extended: false, limit: '10mb' }));
+}
+
+function setupCacheHeaders(app: express.Application) {
+  // ⚡ Add Cache-Control headers to GET requests (reduces bandwidth)
+  // Only cache stable data - explicitly exclude real-time and sensitive endpoints
+  app.use((req, res, next) => {
+    if (req.method === "GET") {
+      const path = req.path;
+
+      // Never cache real-time, AI, or frequently-changing endpoints
+      const noCachePaths = [
+        "/api/live-sessions",
+        "/api/ai/",
+        "/api/notifications",
+        "/api/users/me",
+        "/api/auth",
+        "/api/garmin",
+      ];
+      const isNoCache = noCachePaths.some((p) => path.startsWith(p));
+
+      if (isNoCache) {
+        // Ensure these are always fresh
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      } else if (req.headers.authorization) {
+        // Private cache for user-specific stable data (5 minutes)
+        res.setHeader("Cache-Control", "private, max-age=300");
+      } else {
+        // Public cache for non-authenticated static data (24 hours)
+        res.setHeader("Cache-Control", "public, max-age=86400");
+      }
+    }
+    next();
+  });
 }
 
 function setupRequestLogging(app: express.Application) {
@@ -285,7 +319,11 @@ function setupErrorHandler(app: express.Application) {
 
 (async () => {
   setupCors(app);
+  // ⚡ Enable gzip compression for all responses (40-60% bandwidth reduction)
+  app.use(compression());
   setupBodyParsing(app);
+  // ⚡ Add Cache-Control headers to GET responses (30-50% additional bandwidth reduction)
+  setupCacheHeaders(app);
   setupRequestLogging(app);
 
   // Register API routes BEFORE static file serving

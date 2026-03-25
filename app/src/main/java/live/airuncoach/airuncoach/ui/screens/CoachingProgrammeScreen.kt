@@ -1082,9 +1082,35 @@ fun ExpandableWeekCard(
     viewModel: TrainingPlanViewModel? = null
 ) {
     var isExpanded by remember { mutableStateOf(isCurrent) }
-    val completedCount = week.workouts.count { it.isCompleted }
     val skippedCount = week.workouts.count { it.isSkipped() }
-    val missedCount = week.workouts.count { !it.isCompleted && !it.isSkipped() && !it.workoutType.equals("rest", ignoreCase = true) }
+    val completedCount = week.workouts.count { it.isCompleted && !it.isSkipped() }
+    
+    // Calculate scheduled vs missed based on date
+    val now = System.currentTimeMillis()
+    val scheduledCount = week.workouts.count { workout ->
+        !workout.isCompleted && !workout.isSkipped() && 
+        !workout.workoutType.equals("rest", ignoreCase = true) &&
+        workout.scheduledDate?.let { dateString ->
+            try {
+                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                val scheduledTime = sdf.parse(dateString)?.time ?: now
+                scheduledTime > now
+            } catch (_: Exception) { false }
+        } ?: false
+    }
+    
+    val missedCount = week.workouts.count { workout ->
+        !workout.isCompleted && !workout.isSkipped() && 
+        !workout.workoutType.equals("rest", ignoreCase = true) &&
+        workout.scheduledDate?.let { dateString ->
+            try {
+                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                val scheduledTime = sdf.parse(dateString)?.time ?: now
+                scheduledTime <= now
+            } catch (_: Exception) { false }
+        } ?: true
+    }
+    
     val totalCount = week.workouts.size
     val fraction = if (totalCount > 0) completedCount.toFloat() / totalCount else 0f
 
@@ -1160,6 +1186,7 @@ fun ExpandableWeekCard(
                             .padding(bottom = Spacing.md),
                         horizontalArrangement = Arrangement.spacedBy(Spacing.md)
                     ) {
+                        WeekStatChip("Scheduled", scheduledCount, Colors.primary, modifier = Modifier.weight(1f))
                         WeekStatChip("Completed", completedCount, Colors.success, modifier = Modifier.weight(1f))
                         WeekStatChip("Missed", missedCount, Colors.warning, modifier = Modifier.weight(1f))
                         WeekStatChip("Skipped", skippedCount, Colors.textMuted, modifier = Modifier.weight(1f))
@@ -1226,10 +1253,25 @@ fun ExpandedWeekWorkoutRow(
     onSkip: () -> Unit
 ) {
     val dayName = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat").getOrElse(((workout.dayOfWeek % 7) + 7) % 7) { "Day" }
+    
+    // Determine status: scheduled, completed, missed, or skipped
+    val now = System.currentTimeMillis()
+    val isScheduled = !workout.isCompleted && !workout.isSkipped() && 
+        workout.scheduledDate?.let { dateString ->
+            try {
+                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                val scheduledTime = sdf.parse(dateString)?.time ?: now
+                scheduledTime > now
+            } catch (_: Exception) { false }
+        } ?: false
+    
+    val isMissed = !workout.isCompleted && !workout.isSkipped() && !isScheduled
+    
     val statusColor = when {
         workout.isCompleted -> Colors.success
         workout.isSkipped() -> Colors.textMuted
-        else -> Colors.warning
+        isMissed -> Colors.warning
+        else -> Colors.textMuted
     }
 
     Card(
@@ -1257,13 +1299,19 @@ fun ExpandedWeekWorkoutRow(
                         tint = Colors.success,
                         modifier = Modifier.size(16.dp)
                     )
+                    isMissed -> Icon(
+                        painterResource(R.drawable.icon_info_vector),
+                        null,
+                        tint = Colors.warning,
+                        modifier = Modifier.size(16.dp)
+                    )
                     workout.isSkipped() -> Icon(
                         painterResource(R.drawable.icon_x_vector),
                         null,
                         tint = Colors.textMuted,
                         modifier = Modifier.size(16.dp)
                     )
-                    else -> Box(modifier = Modifier.size(8.dp).background(Colors.warning, RoundedCornerShape(4.dp)))
+                    // No icon for scheduled sessions
                 }
             }
 
@@ -1284,34 +1332,6 @@ fun ExpandedWeekWorkoutRow(
                     workout.targetPace?.let { raw ->
                         val paceValue = raw.replace("/km", "").trim()
                         Text("$paceValue/km", style = AppTextStyles.small, color = Colors.textMuted)
-                    }
-                }
-            }
-
-            // Action buttons (if not completed and not rest day)
-            if (!workout.isCompleted && !workout.workoutType.equals("rest", ignoreCase = true) && !workout.isSkipped()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    IconButton(
-                        onClick = onComplete,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            painterResource(R.drawable.icon_check_vector),
-                            contentDescription = "Complete",
-                            tint = Colors.success,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    IconButton(
-                        onClick = onSkip,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            painterResource(R.drawable.icon_x_vector),
-                            contentDescription = "Skip",
-                            tint = Colors.textMuted,
-                            modifier = Modifier.size(18.dp)
-                        )
                     }
                 }
             }
@@ -1352,6 +1372,24 @@ fun formatGoalType(goalType: String): String = when (goalType) {
     "marathon" -> "Marathon Plan"
     "ultra" -> "Ultra Marathon Plan"
     else -> "${goalType.replace("_", " ").replaceFirstChar { it.uppercase() }} Plan"
+}
+
+fun formatGoalWithTime(goalType: String, targetDistance: Double?, targetTimeSeconds: Int?): String {
+    val distance = when (goalType) {
+        "5k" -> "5km"
+        "10k" -> "10km"
+        "half_marathon" -> "Half Marathon"
+        "marathon" -> "Marathon"
+        "ultra" -> "Ultra Marathon"
+        else -> "${targetDistance?.toInt() ?: ""}km"
+    }
+    
+    return if (targetTimeSeconds != null && targetTimeSeconds > 0) {
+        val time = formatSeconds(targetTimeSeconds)
+        "Target $distance in $time"
+    } else {
+        "Target $distance"
+    }
 }
 
 fun formatSeconds(seconds: Int): String {
@@ -1406,10 +1444,12 @@ fun AiPlanSummary(details: TrainingPlanDetails) {
                         BaselineRow(icon = R.drawable.icon_chart_vector, text = "You run on average ${baseline.runsPerWeek}x per week")
                     }
                     if (!baseline.avgDistance.isNullOrBlank()) {
-                        BaselineRow(icon = R.drawable.icon_map_pin_vector, text = "Average distance: ${baseline.avgDistance} km")
+                        val avgDistanceKm = baseline.avgDistance.toDoubleOrNull()?.div(1000)?.let { String.format(Locale.US, "%.1f", it) } ?: baseline.avgDistance
+                        BaselineRow(icon = R.drawable.icon_map_pin_vector, text = "Average distance: $avgDistanceKm km")
                     }
                     if (!baseline.longestRun.isNullOrBlank()) {
-                        BaselineRow(icon = R.drawable.icon_trophy_vector, text = "Longest run: ${baseline.longestRun} km")
+                        val longestRunKm = baseline.longestRun.toDoubleOrNull()?.div(1000)?.let { String.format(Locale.US, "%.1f", it) } ?: baseline.longestRun
+                        BaselineRow(icon = R.drawable.icon_trophy_vector, text = "Longest run: $longestRunKm km")
                     }
                     if (baseline.runsRecorded != null) {
                         BaselineRow(icon = R.drawable.icon_chart_vector, text = "Based on your last ${baseline.runsRecorded} runs")
@@ -1427,8 +1467,7 @@ fun AiPlanSummary(details: TrainingPlanDetails) {
                 BaselineRow(icon = R.drawable.icon_person, text = "${details.plan.experienceLevel.replaceFirstChar { it.uppercase() }} runner")
                 BaselineRow(icon = R.drawable.icon_calendar_vector, text = "${details.plan.daysPerWeek} sessions per week")
                 BaselineRow(icon = R.drawable.icon_clock_vector, text = "${details.plan.totalWeeks}-week programme")
-                BaselineRow(icon = R.drawable.icon_target_vector, text = "Target: ${formatGoalType(details.plan.goalType)}")
-                BaselineRow(icon = R.drawable.icon_map_pin_vector, text = "Distance goal: ${details.plan.targetDistance} km")
+                BaselineRow(icon = R.drawable.icon_target_vector, text = formatGoalWithTime(details.plan.goalType, details.plan.targetDistance, details.plan.targetTime))
             }
             
             Spacer(modifier = Modifier.height(Spacing.md))
