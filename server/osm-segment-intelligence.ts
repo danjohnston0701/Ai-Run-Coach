@@ -284,7 +284,7 @@ export async function getRoutePopularityScore(
         unique_users,
         avg_rating
       FROM segment_popularity
-      WHERE osm_way_id = ANY(${{ osmWayIds }})
+      WHERE osm_way_id = ANY(${osmWayIds}::text[])
     `);
     
     if (result.rows.length === 0) {
