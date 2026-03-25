@@ -128,8 +128,9 @@ export async function recomputeForUser(userId: string): Promise<void> {
     totalCalories:       sum(runs.calories),
     totalActiveCalories: sum(runs.activeCalories),
     longestRunKm:        max(runs.distance),
-    fastestPace:         sql<number>`MIN(NULLIF(CAST(${runs.avgPace} AS NUMERIC), 0))`,
-    avgPace:             sql<number>`AVG(NULLIF(CAST(${runs.avgPace} AS NUMERIC), 0))`,
+    // avgPace is stored as "M:SS" format (e.g. "5:22") — parse via SPLIT_PART
+    fastestPace: sql<number>`MIN(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
+    avgPace:     sql<number>`AVG(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
   }).from(runs).where(eq(runs.userId, userId));
 
   // ── Find PBs for each distance category ─────────────────────────────────

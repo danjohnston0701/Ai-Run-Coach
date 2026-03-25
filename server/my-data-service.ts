@@ -144,10 +144,10 @@ export async function getPeriodStatistics(userId: string, days: number) {
       avgHeartRate:       avg(runs.avgHeartRate),
       avgCadence:         avg(runs.cadence),
       longestRunKm:       max(runs.distance),
-      // avgPace is stored as a numeric string — cast to numeric for SQL aggregation
-      avgPaceNumeric: sql<number>`AVG(NULLIF(CAST(${runs.avgPace} AS NUMERIC), 0))`,
-      fastestPaceNumeric: sql<number>`MIN(NULLIF(CAST(${runs.avgPace} AS NUMERIC), 0))`,
-      slowestPaceNumeric: sql<number>`MAX(NULLIF(CAST(${runs.avgPace} AS NUMERIC), 0))`,
+      // avgPace is stored as "M:SS" format (e.g. "5:22") — parse via SPLIT_PART
+      avgPaceNumeric:     sql<number>`AVG(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
+      fastestPaceNumeric: sql<number>`MIN(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
+      slowestPaceNumeric: sql<number>`MAX(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
     }).from(runs).where(and(
       eq(runs.userId, userId),
       gte(runs.completedAt, startDate),
@@ -300,8 +300,8 @@ async function getAllTimeStatsLive(userId: string) {
       totalCalories:        sum(runs.calories),
       totalActiveCalories:  sum(runs.activeCalories),
       longestRunKm:         max(runs.distance),
-      fastestPaceNumeric:   sql<number>`MIN(NULLIF(CAST(${runs.avgPace} AS NUMERIC), 0))`,
-      avgPaceNumeric:       sql<number>`AVG(NULLIF(CAST(${runs.avgPace} AS NUMERIC), 0))`,
+      fastestPaceNumeric: sql<number>`MIN(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
+      avgPaceNumeric:     sql<number>`AVG(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
     }).from(runs).where(eq(runs.userId, userId));
 
     const totalRuns = Number(stats.totalRuns ?? 0);
