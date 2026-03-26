@@ -1530,14 +1530,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/routes/generate-intelligent", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     console.log("🎯 Route generation endpoint HIT!");
     console.log("📦 Request body:", JSON.stringify(req.body, null, 2));
+    console.log("📋 Body keys:", Object.keys(req.body));
     
     try {
-      const { latitude, longitude, distanceKm, preferTrails, avoidHills } = req.body;
+      // Support both old and new parameter names for backward compatibility
+      const latitude = req.body.latitude || req.body.startLat;
+      const longitude = req.body.longitude || req.body.startLng;
+      const distanceKm = req.body.distanceKm || req.body.distance || req.body.targetDistance;
+      const preferTrails = req.body.preferTrails !== false;
+      const avoidHills = req.body.avoidHills === true;
+      
+      console.log(`📍 Parsed values - Lat: ${latitude}, Lng: ${longitude}, Distance: ${distanceKm}, Trails: ${preferTrails}, AvoidHills: ${avoidHills}`);
       
       if (!latitude || !longitude || !distanceKm) {
         console.log("❌ Missing required fields!");
+        console.log(`   latitude: ${latitude}, longitude: ${longitude}, distanceKm: ${distanceKm}`);
         return res.status(400).json({ 
-          error: "Missing required fields: latitude, longitude, distanceKm" 
+          error: "Missing required fields. Received: " + JSON.stringify({latitude, longitude, distanceKm}),
+          receivedBody: req.body
         });
       }
       

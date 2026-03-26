@@ -774,6 +774,7 @@ export async function generateIntelligentRoute(request: RouteRequest): Promise<G
   if (!GRAPHHOPPER_API_KEY) throw new Error("GRAPHHOPPER_API_KEY is not set in environment variables");
   
   console.log(`🗺️ Generating ${distanceKm}km scenic route at (${latitude}, ${longitude})`);
+  console.log(`📊 Request details:`, { latitude, longitude, distanceKm, preferTrails, distanceMeters });
   
   // STEP 1: Discover scenic features via Overpass API
   const searchRadius = Math.max(1500, Math.min(5000, distanceKm * 500));
