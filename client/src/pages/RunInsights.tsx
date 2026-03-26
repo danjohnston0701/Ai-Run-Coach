@@ -1170,7 +1170,7 @@ export default function RunInsights() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground p-6 pb-24 font-sans">
+    <div className="min-h-screen bg-background text-foreground p-6 pb-6 font-sans">
       <header className="mb-8 flex items-center justify-between gap-4">
         <div className="flex items-center gap-4 flex-1">
           <Button

@@ -299,7 +299,7 @@ export default function PrivacyPolicy() {
             <p>We will notify users of material changes at least 30 days before they take effect.</p>
           </div>
 
-          <div className="space-y-4 pb-20">
+          <div className="space-y-4 pb-0">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">15. Contact Us</h3>
             <ul className="list-none pl-0 space-y-1">
               <li><span className="text-primary font-medium">support@airuncoach.live</span></li>

@@ -1239,7 +1239,7 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-background p-6 pb-24 font-sans text-foreground">
+    <div className="min-h-screen bg-background p-6 pb-6 font-sans text-foreground">
       {/* Resume Run Banner */}
       {activeSession && (
         <motion.div

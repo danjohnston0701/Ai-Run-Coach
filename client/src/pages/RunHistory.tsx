@@ -573,7 +573,7 @@ export default function RunHistory() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground p-6 pb-24">
+    <div className="min-h-screen bg-background text-foreground p-6 pb-6">
       <header className="mb-6 flex items-center gap-4">
         <Button
           variant="outline"

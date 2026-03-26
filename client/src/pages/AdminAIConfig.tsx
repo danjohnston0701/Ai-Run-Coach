@@ -298,7 +298,7 @@ export default function AdminAIConfig() {
         </div>
       </header>
 
-      <main className="p-4 pb-24">
+      <main className="p-4 pb-4">
         <Tabs defaultValue="description" className="space-y-4">
           <TabsList className="grid grid-cols-4 h-auto p-1">
             <TabsTrigger value="description" className="flex flex-col gap-1 py-2 text-xs">

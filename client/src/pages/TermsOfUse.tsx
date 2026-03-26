@@ -48,7 +48,7 @@ export default function TermsOfUse() {
             </p>
           </div>
 
-          <div className="space-y-4 pb-20">
+          <div className="space-y-4 pb-0">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">4. Limitation of Liability</h3>
             <p>
               We are not liable for any injuries, health issues, or damages resulting from the use of the application or following AI-generated coaching advice. Always consult a physician before starting a new fitness regimen.

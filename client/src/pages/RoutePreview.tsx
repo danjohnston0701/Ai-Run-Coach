@@ -391,7 +391,7 @@ export default function RoutePreview() {
   };
 
   return (
-    <div className="min-h-screen bg-background p-6 pb-32 font-sans text-foreground">
+    <div className="min-h-screen bg-background p-6 pb-6 font-sans text-foreground">
       <header className="mb-6 flex items-center gap-4">
         <Button
           variant="ghost"

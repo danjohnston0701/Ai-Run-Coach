@@ -341,7 +341,7 @@ export default function Events() {
         </div>
       </header>
 
-      <main className="p-4 pb-24">
+      <main className="p-4 pb-4">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-12">
             <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mb-4" />

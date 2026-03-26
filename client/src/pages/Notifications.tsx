@@ -177,7 +177,7 @@ export default function Notifications() {
   const unreadCount = notifications.filter(n => !n.read).length;
 
   return (
-    <div className="min-h-screen bg-background p-6 pb-24 font-sans text-foreground">
+    <div className="min-h-screen bg-background p-6 pb-6 font-sans text-foreground">
       <header className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Button
