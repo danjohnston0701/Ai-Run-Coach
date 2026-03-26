@@ -221,7 +221,9 @@ function selectScenicWaypoints(
 
 /**
  * Generate a round-trip route using GraphHopper with hike profile
- * Uses POST with custom_model to prefer scenic roads, with GET fallback
+ * NOTE: Custom_model POST requests consistently fail with 400 errors.
+ * Using GET with hike profile instead, which provides good results
+ * when combined with strict multi-tier quality validation.
  */
 async function generateGraphHopperRoute(
   lat: number,
@@ -230,73 +232,25 @@ async function generateGraphHopperRoute(
   seed: number = 0,
   preferScenic: boolean = true
 ): Promise<any> {
-  // Try POST with custom_model if scenic preference is set
-  if (preferScenic) {
-    try {
-      const result = await generateGraphHopperRoutePost(lat, lng, distanceMeters, seed);
-      // Verify we got valid data back
-      if (result?.paths?.length > 0) {
-        return result;
-      }
-    } catch (error: any) {
-      console.log(`⚠️ POST with custom_model failed (seed ${seed}): ${error.response?.status || error.message}, falling back to GET...`);
-    }
-  }
-  
-  // Fallback to simple GET request
+  // Use GET request with hike profile
+  // The 4-tier validation system (TIER 1-3b) will filter for quality
+  // even though we can't use custom_model weightings
   return await generateGraphHopperRouteGet(lat, lng, distanceMeters, 'hike', seed);
 }
 
 /**
- * POST route request with custom_model for scenic preferences
+ * POST route request with custom_model - DISABLED
+ * 
+ * NOTE: GraphHopper custom_model requests consistently return 400 errors
+ * even though the request format appears correct. This might be due to:
+ * - API key plan limitations (custom_model not available)
+ * - Regional availability restrictions
+ * - GraphHopper API changes
+ * 
+ * The GET request with 'hike' profile provides adequate results
+ * when combined with strict multi-tier quality validation.
+ * Deleted the POST function to simplify the code path.
  */
-async function generateGraphHopperRoutePost(
-  lat: number,
-  lng: number,
-  distanceMeters: number,
-  seed: number
-): Promise<any> {
-  const body = {
-    points: [[lng, lat]],
-    profile: "hike",
-    algorithm: "round_trip",
-    "round_trip.distance": distanceMeters,
-    "round_trip.seed": seed,
-    points_encoded: false,
-    elevation: true,
-    instructions: true,
-    details: ["road_class", "surface"],
-    "ch.disable": true,
-    custom_model: {
-      priority: [
-        { if: "road_class == TRACK", multiply_by: 3.0 },
-        { if: "road_class == PATH", multiply_by: 3.0 },
-        { if: "road_class == FOOTWAY", multiply_by: 2.5 },
-        { if: "road_class == CYCLEWAY", multiply_by: 2.0 },
-        { if: "road_class == RESIDENTIAL", multiply_by: 0.4 },
-        { if: "road_class == TERTIARY", multiply_by: 0.3 },
-        { if: "road_class == SECONDARY", multiply_by: 0.2 },
-        { if: "road_class == PRIMARY", multiply_by: 0.1 },
-        { if: "road_class == TRUNK", multiply_by: 0.05 },
-        { if: "road_class == MOTORWAY", multiply_by: 0.01 },
-        { if: "surface == GRAVEL", multiply_by: 1.5 },
-        { if: "surface == DIRT", multiply_by: 1.5 },
-        { if: "surface == GRASS", multiply_by: 1.3 },
-      ],
-    },
-  };
-
-  try {
-    const response = await axios.post(`${GRAPHHOPPER_BASE_URL}/route?key=${GRAPHHOPPER_API_KEY}`, body, {
-      headers: { 'Content-Type': 'application/json' },
-      timeout: 30000,
-    });
-    return response.data;
-  } catch (error: any) {
-    console.error(`GraphHopper POST failed (seed ${seed}): ${error.response?.status} - ${error.response?.data?.message || error.message}`);
-    throw error;
-  }
-}
 
 /**
  * GET route request (fallback — no custom_model, but uses hike profile)
