@@ -1577,6 +1577,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           distance: route.distance,
           elevationGain: route.elevationGain,
           elevationLoss: route.elevationLoss,
+          maxInclineDegrees: route.maxInclineDegrees,
+          maxDeclineDegrees: route.maxDeclineDegrees,
           difficulty: route.difficulty,
           estimatedTime: route.duration,
           popularityScore: route.popularityScore,

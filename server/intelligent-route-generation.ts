@@ -62,6 +62,8 @@ interface GeneratedRoute {
   distance: number; // meters
   elevationGain: number; // meters
   elevationLoss: number; // meters
+  maxInclineDegrees?: number; // Maximum steepness of climb in degrees
+  maxDeclineDegrees?: number; // Maximum steepness of descent in degrees
   duration: number; // seconds (estimated)
   difficulty: string; // "easy", "moderate", "hard"
   popularityScore: number; // 0-1
@@ -448,6 +450,17 @@ function calculateDifficulty(distanceKm: number, elevationGainM: number): string
   return 'hard';
 }
 
+/**
+ * Calculate maximum gradient degrees from elevation gain and horizontal distance
+ * Formula: degrees = arctan(elevationGain / horizontalDistance) * (180 / π)
+ */
+function calculateMaxGradientDegrees(elevationGainMeters: number, distanceMeters: number): number {
+  if (distanceMeters === 0) return 0;
+  const gradientPercent = (elevationGainMeters / distanceMeters) * 100;
+  const gradientDegrees = Math.atan(gradientPercent / 100) * (180 / Math.PI);
+  return Math.round(gradientDegrees * 10) / 10; // Round to 1 decimal place
+}
+
 // ==================== SHAPE & QUALITY ANALYSIS ====================
 
 function calculateCompactness(coordinates: Array<[number, number]>, startLat: number, startLng: number): number {
@@ -828,10 +841,16 @@ export async function generateIntelligentRoute(request: RouteRequest): Promise<G
   
   return selected.map((c, i) => {
     const r = c.route, diff = calculateDifficulty(r.distance / 1000, r.ascend || 0);
+    const elevGain = r.ascend || 0;
+    const elevLoss = r.descend || 0;
+    const maxClimbDegrees = calculateMaxGradientDegrees(elevGain, r.distance);
+    const maxDescentDegrees = calculateMaxGradientDegrees(elevLoss, r.distance);
+    
     console.log(`  Route ${i + 1}: ${(r.distance / 1000).toFixed(2)}km ${c.isScenic ? '🌿' : '🔄'}, Score=${c.totalScore.toFixed(2)}`);
     return {
       id: generateRouteId(), polyline: encodePolyline(r.points.coordinates), coordinates: r.points.coordinates,
-      distance: r.distance, elevationGain: r.ascend || 0, elevationLoss: r.descend || 0,
+      distance: r.distance, elevationGain: elevGain, elevationLoss: elevLoss,
+      maxInclineDegrees: maxClimbDegrees, maxDeclineDegrees: maxDescentDegrees,
       duration: r.time / 1000, difficulty: diff, popularityScore: c.popularityScore,
       qualityScore: c.validation.qualityScore, loopQuality: c.loopQuality, backtrackRatio: c.backtrackRatio,
       turnInstructions: r.instructions || [],
