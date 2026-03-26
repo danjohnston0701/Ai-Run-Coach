@@ -5,10 +5,12 @@ This document specifies the exact API structure and requirements for iOS to gene
 
 ## Endpoint
 
-**URL**: `/api/routes/generate-options`  
+**URL**: `/api/routes/generate-intelligent`  
 **Method**: `POST`  
 **Authentication**: Required (Bearer token in `Authorization` header)  
 **Content-Type**: `application/json`
+
+⚠️ **IMPORTANT**: Use `/api/routes/generate-intelligent` NOT `/api/routes/generate-options`. The intelligent endpoint uses GraphHopper with quality validation that eliminates dead ends and bad routes. The generate-options endpoint uses basic templates and produces lower-quality routes.
 
 ---
 
@@ -16,20 +18,22 @@ This document specifies the exact API structure and requirements for iOS to gene
 
 ```json
 {
-  "startLat": number,      // Latitude of start location (required)
-  "startLng": number,      // Longitude of start location (required)
-  "targetDistance": number, // Distance in kilometers (required)
-  "userId": string         // User ID (optional, for personalized suggestions)
+  "latitude": number,      // Latitude of start location (required)
+  "longitude": number,     // Longitude of start location (required)
+  "distanceKm": number,    // Distance in kilometers (required)
+  "preferTrails": boolean, // Prefer scenic trails (optional, default: true)
+  "avoidHills": boolean    // Avoid hilly terrain (optional, default: false)
 }
 ```
 
 ### Required Fields:
-- **startLat**: Latitude as a decimal number (e.g., `40.7128`)
-- **startLng**: Longitude as a decimal number (e.g., `-74.0060`)
-- **targetDistance**: Distance in kilometers as a number (e.g., `5`, `10`, `21`)
+- **latitude**: Latitude as a decimal number (e.g., `40.7128`)
+- **longitude**: Longitude as a decimal number (e.g., `-74.0060`)
+- **distanceKm**: Distance in kilometers as a number (e.g., `5`, `10`, `21`)
 
 ### Optional Fields:
-- **userId**: User's ID for personalized route recommendations (can be null)
+- **preferTrails**: Boolean to prefer scenic trails over roads (default: `true`)
+- **avoidHills**: Boolean to avoid hilly terrain (default: `false`)
 
 ---
 
@@ -41,24 +45,26 @@ This document specifies the exact API structure and requirements for iOS to gene
 let location = CLLocationCoordinate2D(latitude: -37.898386, longitude: 175.484414)
 let distanceKm = 5.0
 
-var request = URLRequest(url: URL(string: "https://your-backend-url/api/routes/generate-options")!)
+var request = URLRequest(url: URL(string: "https://your-backend-url/api/routes/generate-intelligent")!)
 request.httpMethod = "POST"
 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
 
 let payload: [String: Any] = [
-    "startLat": location.latitude,
-    "startLng": location.longitude,
-    "targetDistance": distanceKm,
-    "userId": userId  // or pass null if not available
+    "latitude": location.latitude,
+    "longitude": location.longitude,
+    "distanceKm": distanceKm,
+    "preferTrails": true,    // Request scenic trails
+    "avoidHills": false      // Include hilly terrain
 ]
 
 request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 
 URLSession.shared.dataTask(with: request) { data, response, error in
     guard let data = data else { return }
-    if let routes = try? JSONDecoder().decode([RouteResponse].self, from: data) {
-        // Handle routes
+    if let response = try? JSONDecoder().decode(RouteResponse.self, from: data) {
+        // response.routes contains the high-quality routes
+        let routes = response.routes
     }
 }.resume()
 ```
@@ -170,18 +176,42 @@ This score (0-1) indicates how popular a route segment is among runners:
 ### cURL Example
 
 ```bash
-curl -X POST https://your-backend-url/api/routes/generate-options \
+curl -X POST https://your-backend-url/api/routes/generate-intelligent \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_AUTH_TOKEN" \
   -d '{
-    "startLat": -37.898386,
-    "startLng": 175.484414,
-    "targetDistance": 5,
-    "userId": "user-123"
+    "latitude": -37.898386,
+    "longitude": 175.484414,
+    "distanceKm": 5,
+    "preferTrails": true,
+    "avoidHills": false
   }'
 ```
 
-### Why Android Works & iOS Didn't
+### Why Route Quality Matters: The Two Generation Systems
+
+The backend has **TWO route generation endpoints** with VERY different quality levels:
+
+#### 1. `/api/routes/generate-options` (❌ POOR - Don't use)
+- Uses basic template-based routing
+- No validation for dead ends, 180° turns, or backtracking
+- Fast but produces low-quality routes (bad circuits, highway segments, poor loops)
+- **This is what iOS was originally calling**
+
+#### 2. `/api/routes/generate-intelligent` (✅ EXCELLENT - Use this!)
+- Uses GraphHopper API with multi-tier quality validation
+- Implements sophisticated route quality checks:
+  - ✅ Eliminates dead ends (max 180° turns)
+  - ✅ Rejects parallel road out-and-back patterns
+  - ✅ Enforces genuine circular loops (> 70% loop quality)
+  - ✅ Validates route compactness (eliminates elongated out-and-back)
+  - ✅ Ensures angular spread (explores multiple directions)
+  - ✅ Limits backtracking to <25%
+  - ✅ Avoids highways and major roads (prefers trails/paths)
+- Returns 1-3 curated routes with detailed quality metrics
+- **This is what Android uses and produces excellent routes**
+
+### Why Original PostgreSQL Error Occurred
 
 **Root Cause**: When a location has no run history, the backend's popularity score query returns NULL instead of an empty array. PostgreSQL's `ANY()` operator requires a proper array type.
 
@@ -214,6 +244,41 @@ if (!osmWayIds || osmWayIds.length === 0) {
 
 ---
 
+## Understanding Route Quality Metrics
+
+Each returned route includes quality metrics so iOS can display them to users:
+
+```json
+{
+  "id": "route_...",
+  "polyline": "encoded_polyline",
+  "distance": 5000,              // meters
+  "elevationGain": 125,          // meters
+  "difficulty": "easy",          // easy | moderate | hard
+  "popularityScore": 0.65,       // 0-1: How popular with runners
+  "qualityScore": 0.85,          // 0-1: Overall route quality
+  "loopQuality": 0.92,           // 0-1: How well it forms a loop
+  "backtrackRatio": 0.08         // 0-1: % of repeated segments (lower is better)
+}
+```
+
+**Quality Thresholds Used by Intelligent Generator**:
+- **Loop Quality** ≥ 0.7 (strict) or 0.4 (loose fallback)
+- **Backtrack Ratio** ≤ 0.25 (strict) or 0.40 (loose fallback)
+- **Proximity Overlap** ≤ 0.25 (strict) or 0.40 (loose fallback)
+- **Compactness** ≥ 0.15 (prevents elongated routes)
+- **Angular Spread** ≥ 0.25 (ensures routes explore multiple directions)
+
+## Implementation Checklist for iOS
+
+✅ Must use `/api/routes/generate-intelligent` endpoint (NOT `/api/routes/generate-options`)
+✅ Send request with: `latitude`, `longitude`, `distanceKm`, `preferTrails`, `avoidHills`
+✅ Handle response with routes array containing quality metrics
+✅ Display 1-3 high-quality route options to user
+✅ Show quality indicators (loop quality, difficulty) to help user choose
+✅ Decode polyline for map display
+✅ Use coordinates array for turn-by-turn navigation
+
 ## Backend Changes Made
 
 **File**: `server/osm-segment-intelligence.ts`  
@@ -227,15 +292,31 @@ if (osmWayIds.length === 0) {
 }
 ```
 
-**Result**: iOS now generates routes successfully, same as Android.
+**Result**: iOS can now call the intelligent route generation endpoint and get the same high-quality routes as Android.
 
 ---
+
+## Troubleshooting
+
+**Problem**: Still getting low-quality routes
+- ✅ Verify you're calling `/api/routes/generate-intelligent`
+- ✅ Check that `latitude`, `longitude`, `distanceKm` are being sent correctly
+- ✅ Ensure auth token is valid (check 401 responses)
+
+**Problem**: Getting "No routes found" (422 error)
+- This area has no suitable routes (too remote, no connected paths)
+- Try a different location or slightly different distance
+
+**Problem**: Timeout or slow response
+- Intelligent generation typically takes 10-30 seconds
+- GraphHopper and Overpass APIs are making multiple queries
+- Set appropriate timeout in your HTTP client (30+ seconds recommended)
 
 ## Questions?
 
 Contact the backend team with:
 1. HTTP status code received
 2. Response body/error message
-3. Request coordinates (lat/lng)
-4. User ID (if applicable)
-5. Replit logs (server-side errors)
+3. Request coordinates (lat/lng) and distance (km)
+4. Check Replit logs for server-side errors
+5. Verify you're using the correct endpoint: `/api/routes/generate-intelligent`
