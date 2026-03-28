@@ -8,6 +8,7 @@ import { users } from "@shared/schema";
 // service account key from the Firebase Console (Project Settings > Service Accounts).
 let firebaseApp: any = null;
 let adminSDK: any = null;
+let adminCredential: any = null;
 
 async function getFirebaseApp(): Promise<any> {
   if (firebaseApp) return firebaseApp;
@@ -21,13 +22,15 @@ async function getFirebaseApp(): Promise<any> {
   try {
     // Dynamically import firebase-admin to handle bundling issues
     if (!adminSDK) {
-      adminSDK = await import("firebase-admin");
+      const admin = await import("firebase-admin");
+      adminSDK = admin.default || admin;
+      adminCredential = adminSDK.credential || admin.credential;
     }
 
     const serviceAccount = JSON.parse(serviceAccountJson);
     console.log(`[Firebase] Initializing with project: ${serviceAccount.project_id || 'unknown'}`);
     firebaseApp = adminSDK.initializeApp({
-      credential: adminSDK.credential.cert(serviceAccount),
+      credential: adminCredential.cert(serviceAccount),
     });
     console.log("[Firebase] Admin SDK initialised ✅");
     return firebaseApp;
@@ -179,7 +182,8 @@ export async function sendFirebasePush(
       },
     };
 
-    const messageId = await adminSDK.messaging(app).send(message);
+    const messaging = adminSDK.messaging ? adminSDK.messaging(app) : adminSDK.default?.messaging(app);
+    const messageId = await messaging.send(message);
     console.log(`[Firebase Push] ✅ Sent to user ${userId} (messageId: ${messageId}): "${title}"`);
     return true;
   } catch (err: any) {
