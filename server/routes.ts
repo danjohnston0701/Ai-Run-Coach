@@ -60,6 +60,13 @@ import {
   initializeAchievements
 } from "./achievements-service";
 import garminOAuthRouter from "./garmin-oauth-bridge";
+import {
+  extractHeartRateData,
+  extractPaceData as extractPaceDataDetailed,
+  extractKmSplits,
+  extractGpsTrack,
+  buildDetailedMetricsFromGarminActivity,
+} from "./garmin-detailed-metrics";
 import adaptationRouter from "./routes-adaptation";
 import myDataRouter from "./routes-my-data";
 import achievementsRouter from "./routes-achievements";
@@ -297,6 +304,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       console.error("[Test] Failed to send test notification:", error);
+      res.status(500).json({ error: "Failed to send test notification", details: error.message });
+    }
+  });
+
+  /**
+   * Test endpoint to send a push notification to verify Firebase setup.
+   * Usage: POST /api/test/push-notification
+   * Body: { userEmail: "user@example.com", title: "Test", body: "Test message" }
+   */
+  app.post("/api/test/push-notification", async (req: Request, res: Response) => {
+    try {
+      const { userEmail, title, body } = req.body;
+
+      if (!userEmail || !title || !body) {
+        return res.status(400).json({ error: "userEmail, title, and body are required" });
+      }
+
+      // Find user by email
+      const user = await storage.getUserByEmail(userEmail);
+      if (!user) {
+        return res.status(404).json({ error: `User not found: ${userEmail}` );
+      }
+
+      if (!user.fcmToken) {
+        return res.status(400).json({
+          error: `User ${userEmail} has no FCM token registered`,
+          hint: "User needs to login with notification permissions granted",
+        });
+      }
+
+      // Import sendFirebasePush here (avoids circular imports)
+      const { sendFirebasePush } = await import("./notification-service");
+
+      // Send the test push
+      const result = await sendFirebasePush(
+        user.id,
+        title,
+        body,
+        { type: "test_notification" }
+      );
+
+      console.log(`[Test] Push notification sent to ${userEmail}:`, result);
+      res.json({
+        success: result,
+        message: result
+          ? `Test push notification sent to ${userEmail}`
+          : `Failed to send push notification (check logs)`,
+        userEmail,
+        hasToken: !!user.fcmToken,
+        tokenPreview: user.fcmToken?.substring(0, 30) + "...",
+      });
+    } catch (error: any) {
+      console.error("[Test] Failed to send test push notification:", error);
       res.status(500).json({ error: "Failed to send test notification", details: error.message });
     }
   });
@@ -3108,9 +3168,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         trainingEffect: parsed.trainingEffect,
         recoveryTime: parsed.recoveryTime ? parsed.recoveryTime * 60 : undefined, // Convert to hours
         caloriesBurned: parsed.calories,
+        paceData: detailedMetricsFromEnrich.paceData,
+        heartRateData: detailedMetricsFromEnrich.heartRateData,
+        kmSplits: detailedMetricsFromEnrich.kmSplits,
+        gpsTrack: detailedMetricsFromEnrich.gpsTrack,
+        elevationProfile: detailedMetricsFromEnrich.elevationProfile,
+        
         rawData: activityDetail,
       });
-      
+
       res.json({ success: true, run, activity: parsed });
     } catch (error: any) {
       console.error("Garmin import activity error:", error);
@@ -4049,7 +4115,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
               const secs = Math.floor(paceSeconds % 60);
               avgPace = `${mins}:${secs.toString().padStart(2, '0')}`;
             }
-            
+
+            // Extract detailed metrics from Garmin activity
+            // This includes pace data, HR data, GPS track, and km splits
+            const detailedMetrics = buildDetailedMetricsFromGarminActivity(activity);
+
             // FUZZY MATCH: Try to find existing AiRunCoach run to merge with
             const mergeCandidate = await fuzzyMatchGarminToAiRunCoachRun(
               {
@@ -4153,6 +4223,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 hasGarminData: true,
                 garminActivityId: String(activity.activityId),
                 garminSummaryId: activity.summaryId,
+                
+                // Detailed metrics from Garmin
+                paceData: detailedMetrics.paceData,
+                heartRateData: detailedMetrics.heartRateData,
+                kmSplits: detailedMetrics.kmSplits,
+                gpsTrack: detailedMetrics.gpsTrack,
+                elevationProfile: detailedMetrics.elevationProfile,
               }).returning();
 
               runId = newRun.id;

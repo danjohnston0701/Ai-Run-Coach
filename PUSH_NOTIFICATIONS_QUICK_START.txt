@@ -1,0 +1,106 @@
+╔═══════════════════════════════════════════════════════════════════════���════════╗
+║                    PUSH NOTIFICATIONS - QUICK START GUIDE                       ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+✅ YOUR SETUP IS COMPLETE
+  - Firebase service account: SET on Replit
+  - Android client: CONFIGURED
+  - google-services.json: PRESENT
+  - Server notification service: READY
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📱 TEST ON YOUR DEVICE (5 minutes)
+
+1. Open AI Run Coach app on your Android phone
+2. Log in with your account
+3. Grant POST_NOTIFICATIONS permission when prompted
+4. Wait 2 seconds for token to upload
+5. Open terminal and run:
+
+   ./test-push-notifications.sh https://your-replit-url your-email@example.com
+
+6. Check your phone for test notification
+   → If you see it: PUSH NOTIFICATIONS WORK! 🎉
+   → If you don't: Follow debugging steps below
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔍 IF TEST FAILS - DEBUG IN 4 STEPS
+
+STEP 1: Check Android app logs
+  adb logcat | grep -i "fcm\|AiRunCoachFCM"
+  
+  Look for: "FCM token saved ✅"
+  If missing: User hasn't granted notification permission
+
+STEP 2: Check database has token
+  SELECT id, email, fcmToken FROM users 
+  WHERE email = 'your-email@example.com' LIMIT 1;
+  
+  Look for: Non-null fcmToken value
+  If null: User hasn't logged in with notification permission
+
+STEP 3: Check server Firebase init
+  Watch server logs on Replit startup:
+  "[Firebase] Admin SDK initialised ✅"
+  
+  If missing: FIREBASE_SERVICE_ACCOUNT_JSON env var not set
+  Fix: Go to Replit Secrets, verify var is there, click "Rerun"
+
+STEP 4: Check notification send logs
+  Trigger Garmin activity sync, watch server logs:
+  "[Firebase Push] ✅ Sent to user..."
+  
+  If you see: "No FCM token for user..." → Go back to Step 2
+  If you see error: Check Replit logs for Firebase errors
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📚 DOCUMENTATION
+
+Quick Start: PUSH_NOTIFICATIONS_QUICK_START.txt (this file)
+Detailed Setup: PUSH_NOTIFICATIONS_SETUP.md
+Changes Made: PUSH_NOTIFICATIONS_CHANGES.md
+Test Script: test-push-notifications.sh
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━��━━━━━━━━��━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎯 WHEN GARMIN ACTIVITY IS SYNCED
+
+User should receive:
+  1. In-app notification (always) - appears in notification center
+  2. Push notification (if token exists) - appears as system notification
+
+If only seeing in-app, not push:
+  → Follow debug steps above (likely missing FCM token)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚡ COMMON ISSUES
+
+Issue: "No FCM token for user"
+Fix: User needs to re-login and grant POST_NOTIFICATIONS permission
+
+Issue: Firebase initialization fails
+Fix: Check FIREBASE_SERVICE_ACCOUNT_JSON is set on Replit (not corrupted)
+
+Issue: Server returns "User not found"
+Fix: Check email matches exactly what's in database
+
+Issue: Notification doesn't appear on device
+Fix: Check Settings → Apps → AI Run Coach → Notifications is ON
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💡 PRO TIPS
+
+• Test notifications are instant - don't need Garmin activity
+• Test endpoint format: POST /api/test/push-notification
+• FCM tokens expire - old tokens are auto-cleared by Firebase
+• In-app notifications always work (they don't need FCM)
+• Logcat is your friend: adb logcat | grep -i notification
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Need help? Check PUSH_NOTIFICATIONS_SETUP.md for detailed troubleshooting.

@@ -20,6 +20,7 @@ function getFirebaseApp(): admin.app.App | null {
 
   try {
     const serviceAccount = JSON.parse(serviceAccountJson);
+    console.log(`[Firebase] Initializing with project: ${serviceAccount.project_id || 'unknown'}`);
     firebaseApp = admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
     });
@@ -134,7 +135,10 @@ export async function sendFirebasePush(
   data?: Record<string, string>
 ): Promise<boolean> {
   const app = getFirebaseApp();
-  if (!app) return false;
+  if (!app) {
+    console.warn(`[Firebase Push] Firebase not initialized — cannot send to user ${userId}`);
+    return false;
+  }
 
   try {
     // Fetch the user's FCM token
@@ -144,10 +148,17 @@ export async function sendFirebasePush(
       .where(eq(users.id, userId))
       .limit(1);
 
-    if (!user?.fcmToken) {
+    if (!user) {
+      console.warn(`[Firebase Push] User ${userId} not found in database`);
+      return false;
+    }
+
+    if (!user.fcmToken) {
       console.log(`[Firebase Push] No FCM token for user ${userId} — skipping push`);
       return false;
     }
+
+    console.log(`[Firebase Push] Sending to user ${userId} with token: ${user.fcmToken.substring(0, 20)}...`);
 
     const message: admin.messaging.Message = {
       token: user.fcmToken,
@@ -163,8 +174,8 @@ export async function sendFirebasePush(
       },
     };
 
-    await admin.messaging(app).send(message);
-    console.log(`[Firebase Push] Sent to user ${userId}: "${title}"`);
+    const messageId = await admin.messaging(app).send(message);
+    console.log(`[Firebase Push] ✅ Sent to user ${userId} (messageId: ${messageId}): "${title}"`);
     return true;
   } catch (err: any) {
     if (err?.code === "messaging/registration-token-not-registered") {
@@ -172,7 +183,11 @@ export async function sendFirebasePush(
       console.warn(`[Firebase Push] Stale FCM token for user ${userId} — clearing`);
       await db.update(users).set({ fcmToken: null }).where(eq(users.id, userId));
     } else {
-      console.error(`[Firebase Push] Error sending to user ${userId}:`, err);
+      console.error(`[Firebase Push] Error sending to user ${userId}:`, {
+        code: err?.code,
+        message: err?.message,
+        stack: err?.stack?.split('\n').slice(0, 3).join('\n'),
+      });
     }
     return false;
   }
