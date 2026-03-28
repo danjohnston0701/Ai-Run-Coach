@@ -324,7 +324,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Find user by email
       const user = await storage.getUserByEmail(userEmail);
       if (!user) {
-        return res.status(404).json({ error: `User not found: ${userEmail}` );
+        return res.status(404).json({ error: `User not found: ${userEmail}` });
       }
 
       if (!user.fcmToken) {
