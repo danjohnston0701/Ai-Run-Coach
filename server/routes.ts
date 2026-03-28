@@ -10777,7 +10777,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   // ==================== SHARE IMAGE CMS ENDPOINTS ====================
 
   // Build normalized run data for share image generation
-  function buildShareRunData(run: any) {
+  function buildShareRunData(run: any, timezone?: string) {
     const distanceKm = normalizeDistanceMeters(run) / 1000;
     const durationSec = normalizeDurationSeconds(run);
     
@@ -10820,6 +10820,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       completedAt: run.completedAt?.toISOString() || undefined,
       name: run.name || undefined,
       weatherData: (run.weatherData as any) || undefined,
+      timezone: timezone || undefined,
     };
   }
 
@@ -10849,7 +10850,11 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         return res.status(403).json({ error: "You can only share your own runs" });
       }
 
-      const user = await storage.getUser(req.user!.userId);
+      const [user, notifPrefs] = await Promise.all([
+        storage.getUser(req.user!.userId),
+        storage.getNotificationPreferences(req.user!.userId),
+      ]);
+      const userTimezone = notifPrefs?.coachingPlanReminderTimezone || "UTC";
 
       const { generateShareImage } = await import("./share-image-service");
       
@@ -10857,7 +10862,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         templateId,
         aspectRatio: aspectRatio || "4:5",
         stickers: stickers || [],
-        runData: buildShareRunData(run),
+        runData: buildShareRunData(run, userTimezone),
         userName: user?.name || undefined,
         customBackground: customBackground || undefined,
         backgroundOpacity: backgroundOpacity ?? undefined,
@@ -10894,7 +10899,11 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         return res.status(403).json({ error: "You can only share your own runs" });
       }
 
-      const user = await storage.getUser(req.user!.userId);
+      const [user, notifPrefs] = await Promise.all([
+        storage.getUser(req.user!.userId),
+        storage.getNotificationPreferences(req.user!.userId),
+      ]);
+      const userTimezone = notifPrefs?.coachingPlanReminderTimezone || "UTC";
 
       const { generateShareImage } = await import("./share-image-service");
 
@@ -10902,7 +10911,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         templateId,
         aspectRatio: aspectRatio || "4:5",
         stickers: stickers || [],
-        runData: buildShareRunData(run),
+        runData: buildShareRunData(run, userTimezone),
         userName: user?.name || undefined,
         customBackground: customBackground || undefined,
         backgroundOpacity: backgroundOpacity ?? undefined,

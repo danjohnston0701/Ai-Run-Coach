@@ -1,6 +1,7 @@
 import sharp from "sharp";
 import path from "path";
 import { fileURLToPath } from "url";
+import { DateTime } from "luxon";
 
 export interface ShareTemplate {
   id: string;
@@ -79,6 +80,7 @@ export interface RunDataForImage {
   completedAt?: string;
   name?: string;
   weatherData?: { temperature?: number; conditions?: string };
+  timezone?: string;
 }
 
 const C = {
@@ -184,14 +186,20 @@ function formatDuration(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-function formatDate(dateStr?: string): string {
-  if (!dateStr) return new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
-  return new Date(dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+function formatDate(dateStr?: string, timezone?: string): string {
+  const tz = timezone || "UTC";
+  if (!dateStr) {
+    return DateTime.now().setZone(tz).toFormat("EEE, MMM d, yyyy");
+  }
+  const dt = DateTime.fromISO(dateStr, { zone: "utc" }).setZone(tz);
+  return dt.isValid ? dt.toFormat("EEE, MMM d, yyyy") : DateTime.now().setZone(tz).toFormat("EEE, MMM d, yyyy");
 }
 
-function formatTime(dateStr?: string): string {
+function formatTime(dateStr?: string, timezone?: string): string {
   if (!dateStr) return "";
-  return new Date(dateStr).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+  const tz = timezone || "UTC";
+  const dt = DateTime.fromISO(dateStr, { zone: "utc" }).setZone(tz);
+  return dt.isValid ? dt.toFormat("h:mm a") : "";
 }
 
 function esc(str: string): string {
@@ -311,11 +319,11 @@ function buildStatsGridSvg(w: number, h: number, run: RunDataForImage, userName?
     headerY += nameFontSize + 8;
   }
   // Date — same size as name but not bold
-  headerSvg += `<text x="${cx}" y="${headerY}" font-family="${FONT}" font-size="${metaFontSize}" font-weight="400" fill="${C.textDark}" text-anchor="middle" letter-spacing="0.3">${esc(formatDate(run.completedAt))}</text>`;
+  headerSvg += `<text x="${cx}" y="${headerY}" font-family="${FONT}" font-size="${metaFontSize}" font-weight="400" fill="${C.textDark}" text-anchor="middle" letter-spacing="0.3">${esc(formatDate(run.completedAt, run.timezone))}</text>`;
   headerY += metaFontSize + 6;
 
   // Run timestamp — same font, not bold, slightly muted
-  const runTime = formatTime(run.completedAt);
+  const runTime = formatTime(run.completedAt, run.timezone);
   if (runTime) {
     headerSvg += `<text x="${cx}" y="${headerY}" font-family="${FONT}" font-size="${metaFontSize}" font-weight="400" fill="${C.textMid}" text-anchor="middle" letter-spacing="0.3">${esc(runTime)}</text>`;
     headerY += metaFontSize + 6;
@@ -415,7 +423,7 @@ function buildRunMetricsSvg(w: number, h: number, run: RunDataForImage, userName
     nameSvg += `<text x="${pad}" y="${y}" font-family="${FONT}" font-size="20" font-weight="600" fill="#FFFFFF" opacity="0.85">${esc(userName)}</text>`;
     y += 28;
   }
-  nameSvg += `<text x="${pad}" y="${y}" font-family="${FONT}" font-size="14" fill="#FFFFFF" opacity="0.55" letter-spacing="0.5">${esc(formatDate(run.completedAt))}</text>`;
+  nameSvg += `<text x="${pad}" y="${y}" font-family="${FONT}" font-size="14" fill="#FFFFFF" opacity="0.55" letter-spacing="0.5">${esc(formatDate(run.completedAt, run.timezone))}</text>`;
   y += 36;
 
   const runName = run.name || "Run";
@@ -588,8 +596,8 @@ function buildRouteMapSvg(w: number, h: number, run: RunDataForImage, userName?:
 
   const footerY = statsY + statH + 28;
   const nameDate = userName
-    ? `${esc(userName)}  ·  ${esc(formatDate(run.completedAt))}`
-    : esc(formatDate(run.completedAt));
+    ? `${esc(userName)}  ·  ${esc(formatDate(run.completedAt, run.timezone))}`
+    : esc(formatDate(run.completedAt, run.timezone));
 
   const mapBg = hasMapTile
     ? ""
@@ -627,7 +635,7 @@ function buildSplitSummarySvg(w: number, h: number, run: RunDataForImage, userNa
   const contentEndY = h - LOGO_ZONE_H;
 
   let headerY = 65;
-  const dateText = esc(formatDate(run.completedAt));
+  const dateText = esc(formatDate(run.completedAt, run.timezone));
   const heroText = `${esc(run.distance?.toFixed(2) || "0")} km`;
   const timeText = esc(formatDuration(run.duration || 0));
 
@@ -761,9 +769,9 @@ function buildAchievementSvg(w: number, h: number, run: RunDataForImage, userNam
   let topSection = "";
   if (userName) {
     topSection += `<text x="${cx}" y="${topY}" font-family="${FONT}" font-size="20" font-weight="700" fill="${C.textDark}" text-anchor="middle">${esc(userName)}</text>`;
-    topSection += `<text x="${cx}" y="${topY + 22}" font-family="${FONT}" font-size="13" fill="${C.textLight}" text-anchor="middle">${esc(formatDate(run.completedAt))}</text>`;
+    topSection += `<text x="${cx}" y="${topY + 22}" font-family="${FONT}" font-size="13" fill="${C.textLight}" text-anchor="middle">${esc(formatDate(run.completedAt, run.timezone))}</text>`;
   } else {
-    topSection += `<text x="${cx}" y="${topY + 12}" font-family="${FONT}" font-size="13" fill="${C.textLight}" text-anchor="middle">${esc(formatDate(run.completedAt))}</text>`;
+    topSection += `<text x="${cx}" y="${topY + 12}" font-family="${FONT}" font-size="13" fill="${C.textLight}" text-anchor="middle">${esc(formatDate(run.completedAt, run.timezone))}</text>`;
   }
 
   return `
@@ -783,8 +791,8 @@ function buildMinimalSvg(w: number, h: number, run: RunDataForImage, userName?: 
 
   const topY = cy - 110;
   const nameDate = userName
-    ? `${esc(userName)}  ·  ${esc(formatDate(run.completedAt))}`
-    : esc(formatDate(run.completedAt));
+    ? `${esc(userName)}  ·  ${esc(formatDate(run.completedAt, run.timezone))}`
+    : esc(formatDate(run.completedAt, run.timezone));
   const topText = `<text x="${cx}" y="${topY}" font-family="${FONT}" font-size="17" font-weight="500" fill="${C.textLight}" text-anchor="middle" letter-spacing="0.5">${nameDate}</text>`;
 
   const lines = `
