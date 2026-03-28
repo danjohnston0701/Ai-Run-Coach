@@ -2,14 +2,14 @@ import { storage } from "./storage";
 import { db } from "./db";
 import { eq } from "drizzle-orm";
 import { users } from "@shared/schema";
-import * as admin from "firebase-admin";
 
 // ── Firebase Admin SDK initialisation ───────────────────────────────────────
 // Set FIREBASE_SERVICE_ACCOUNT_JSON as an env var containing the full JSON
 // service account key from the Firebase Console (Project Settings > Service Accounts).
-let firebaseApp: admin.app.App | null = null;
+let firebaseApp: any = null;
+let adminSDK: any = null;
 
-function getFirebaseApp(): admin.app.App | null {
+async function getFirebaseApp(): Promise<any> {
   if (firebaseApp) return firebaseApp;
 
   const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
@@ -19,10 +19,15 @@ function getFirebaseApp(): admin.app.App | null {
   }
 
   try {
+    // Dynamically import firebase-admin to handle bundling issues
+    if (!adminSDK) {
+      adminSDK = await import("firebase-admin");
+    }
+
     const serviceAccount = JSON.parse(serviceAccountJson);
     console.log(`[Firebase] Initializing with project: ${serviceAccount.project_id || 'unknown'}`);
-    firebaseApp = admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
+    firebaseApp = adminSDK.initializeApp({
+      credential: adminSDK.credential.cert(serviceAccount),
     });
     console.log("[Firebase] Admin SDK initialised ✅");
     return firebaseApp;
@@ -134,7 +139,7 @@ export async function sendFirebasePush(
   body: string,
   data?: Record<string, string>
 ): Promise<boolean> {
-  const app = getFirebaseApp();
+  const app = await getFirebaseApp();
   if (!app) {
     console.warn(`[Firebase Push] Firebase not initialized — cannot send to user ${userId}`);
     return false;
@@ -160,7 +165,7 @@ export async function sendFirebasePush(
 
     console.log(`[Firebase Push] Sending to user ${userId} with token: ${user.fcmToken.substring(0, 20)}...`);
 
-    const message: admin.messaging.Message = {
+    const message: any = {
       token: user.fcmToken,
       notification: { title, body },
       data: data ?? {},
@@ -174,7 +179,7 @@ export async function sendFirebasePush(
       },
     };
 
-    const messageId = await admin.messaging(app).send(message);
+    const messageId = await adminSDK.messaging(app).send(message);
     console.log(`[Firebase Push] ✅ Sent to user ${userId} (messageId: ${messageId}): "${title}"`);
     return true;
   } catch (err: any) {
