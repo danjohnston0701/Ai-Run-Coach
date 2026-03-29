@@ -67,7 +67,9 @@ async function getPersonalBestsLive(userId: string) {
     for (const run of userRuns) {
       if (!run.avgPace || run.distance === null) continue;
       
-      const isInRange = run.distance >= dist.min && run.distance <= dist.max;
+      // Convert distance from meters to km for comparison
+      const distanceKm = run.distance / 1000;
+      const isInRange = distanceKm >= dist.min && distanceKm <= dist.max;
       if (!isInRange) continue;
 
       const pace = parseFloat(run.avgPace);
@@ -332,6 +334,7 @@ export async function getAllTimeStats(userId: string) {
   try {
     const [cached] = await db.select().from(userStats).where(eq(userStats.userId, userId));
     if (cached) {
+      // Note: cached fields are already in km (totalDistanceKm, longestRunKm)
       return {
         totalRuns:             cached.totalRuns ?? 0,
         totalDistanceKm:       Math.round((cached.totalDistanceKm ?? 0) * 10) / 10,

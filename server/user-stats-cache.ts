@@ -76,9 +76,12 @@ export async function onRunSaved(userId: string, run: {
       ? (((existing.avgPaceMinPerKm ?? 0) * existing.totalRuns) + runPace) / newCount
       : existing.avgPaceMinPerKm;
 
+    // Convert run.distance from meters to km
+    const distanceKm = run.distance / 1000;
+
     await db.update(userStats).set({
       totalRuns:            newCount,
-      totalDistanceKm:      (existing.totalDistanceKm ?? 0) + run.distance,
+      totalDistanceKm:      (existing.totalDistanceKm ?? 0) + distanceKm,
       totalDurationSeconds: (existing.totalDurationSeconds ?? 0) + run.duration,
       totalElevationGainM:  (existing.totalElevationGainM ?? 0) + (run.elevationGain ?? 0),
       totalCalories:        (existing.totalCalories ?? 0) + (run.calories ?? 0),
@@ -87,7 +90,7 @@ export async function onRunSaved(userId: string, run: {
       fastestPaceMinPerKm:  (runPace && runPace > 0)
         ? Math.min(existing.fastestPaceMinPerKm ?? 999, runPace)
         : existing.fastestPaceMinPerKm,
-      longestRunKm: Math.max(existing.longestRunKm ?? 0, run.distance),
+      longestRunKm: Math.max(existing.longestRunKm ?? 0, distanceKm),
       updatedAt: new Date(),
     }).where(eq(userStats.userId, userId));
 
@@ -137,13 +140,17 @@ export async function recomputeForUser(userId: string): Promise<void> {
   const pbUpdates: Record<string, number | string | Date | null> = {};
 
   for (const dist of PB_DISTANCES) {
+    // Convert min/max from km to meters for database query
+    const minMeters = dist.minKm * 1000;
+    const maxMeters = dist.maxKm * 1000;
+    
     const [pbRun] = await db
       .select({ id: runs.id, duration: runs.duration, completedAt: runs.completedAt })
       .from(runs)
       .where(and(
         eq(runs.userId, userId),
-        gte(runs.distance, dist.minKm),
-        sql`${runs.distance} <= ${dist.maxKm}`,
+        gte(runs.distance, minMeters),
+        sql`${runs.distance} <= ${maxMeters}`,
         isNotNull(runs.avgPace),
       ))
       .orderBy(runs.avgPace)   // fastest (lowest) pace first
@@ -157,18 +164,22 @@ export async function recomputeForUser(userId: string): Promise<void> {
 
   // ── Upsert the cache row ─────────────────────────────────────────────────
   const totalRuns = Number(agg.totalRuns ?? 0);
+  // Convert from meters to km (database stores distance in meters)
+  const totalDistanceKm = (Number(agg.totalDistanceKm ?? 0)) / 1000;
+  const longestRunKm = (Number(agg.longestRunKm ?? 0)) / 1000;
+  
   const upsertData = {
     userId,
     updatedAt:            new Date(),
     totalRuns,
-    totalDistanceKm:      Number(agg.totalDistanceKm ?? 0),
+    totalDistanceKm,
     totalDurationSeconds: Number(agg.totalDurationSec ?? 0),
     totalElevationGainM:  Number(agg.totalElevationGain ?? 0),
     totalCalories:        Number(agg.totalCalories ?? 0),
     totalActiveCalories:  Number(agg.totalActiveCalories ?? 0),
     avgPaceMinPerKm:      Number(agg.avgPace ?? 0) || null,
     fastestPaceMinPerKm:  Number(agg.fastestPace ?? 0) || null,
-    longestRunKm:         Number(agg.longestRunKm ?? 0),
+    longestRunKm,
     // PB fields (typed assertion safe — we build from PB_COLUMNS keys)
     pb1kDurationMs:       pbUpdates['pb1kDurationMs'] as number | null,
     pb1kRunId:            pbUpdates['pb1kRunId'] as string | null,
@@ -208,7 +219,9 @@ async function maybeUpdatePersonalBests(userId: string, run: {
   avgPace?: string | null;
   completedAt?: Date | null;
 }): Promise<void> {
-  const matchingDist = PB_DISTANCES.find(d => run.distance >= d.minKm && run.distance <= d.maxKm);
+  // Convert run.distance from meters to km for comparison
+  const distanceKm = run.distance / 1000;
+  const matchingDist = PB_DISTANCES.find(d => distanceKm >= d.minKm && distanceKm <= d.maxKm);
   if (!matchingDist || !run.avgPace) return;
 
   const [existing] = await db.select().from(userStats).where(eq(userStats.userId, userId));
