@@ -679,7 +679,8 @@ fun PendingRequestCard(
                         containerColor = Colors.error.copy(alpha = 0.1f),
                         contentColor = Colors.error
                     ),
-                    modifier = Modifier.height(36.dp)
+                    modifier = Modifier.height(36.dp),
+                    enabled = true
                 ) {
                     Text(
                         "Withdraw",
