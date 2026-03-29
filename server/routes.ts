@@ -71,6 +71,7 @@ import adaptationRouter from "./routes-adaptation";
 import myDataRouter from "./routes-my-data";
 import achievementsRouter from "./routes-achievements";
 import { registerSessionCoachingRoutes } from "./routes-session-coaching";
+import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-resolver";
 import {
   snapTrackToOSMSegments,
   recordSegmentUsage,
@@ -3953,20 +3954,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
    * The old date+run matching is intentionally removed: it silently fails on rest
    * days (the most common case that triggered the "Cannot map to user" warning).
    */
-  const resolveGarminUserId = (
-    devices: { userId: string; deviceId: string | null }[],
-    payload: { userId?: string | number; [key: string]: any }
-  ): string | undefined => {
-    // 1. Match numeric Garmin userId from payload against stored deviceId
-    if (payload.userId != null) {
-      const garminId = String(payload.userId);
-      const match = devices.find(d => d.deviceId != null && String(d.deviceId) === garminId);
-      if (match) return match.userId;
-    }
-    // 2. Single connected Garmin account — it must be this user
-    if (devices.length === 1) return devices[0].userId;
-    return undefined;
-  };
+
 
   // ACTIVITY - Activities (when user completes a run/walk)
   // Enhanced with comprehensive logging, notifications, and webhook event tracking
@@ -4524,13 +4512,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const date = sleep.calendarDate || new Date((sleep.startTimeInSeconds || 0) * 1000).toISOString().split('T')[0];
           
-          // Resolve user: match Garmin numeric userId → deviceId, then single-device fallback
-          const userId = resolveGarminUserId(devices, sleep);
-          
-          if (!userId) {
-            console.warn(`⚠️ [Garmin Webhook] Could not map sleep to user for date ${date} (garminUserId=${sleep.userId ?? 'none'})`);
+          // Use unified Garmin user resolver (handles token → userId → single-device fallback)
+          const resolution = await resolveGarminUser(sleep);
+          if (!resolution) {
+            console.warn(`⚠️ [Garmin Webhook] Could not map sleep to user for date ${date} (garminUserId=${sleep.userId ?? 'none'}, hasToken: ${!!sleep.userAccessToken})`);
             continue;
           }
+          const userId = resolution.userId;
           
           console.log(`[Garmin Webhook] Processing sleep for user ${userId}, date: ${date}`);
           
@@ -4656,13 +4644,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const date = stress.calendarDate || new Date((stress.startTimeInSeconds || 0) * 1000).toISOString().split('T')[0];
           
-          // Resolve user: match Garmin numeric userId → deviceId, then single-device fallback
-          const userId = resolveGarminUserId(devices, stress);
-          
-          if (!userId) {
-            console.warn(`⚠️ [Garmin Webhook] Could not map stress to user for date ${date} (garminUserId=${stress.userId ?? 'none'})`);
+          // Use unified Garmin user resolver (handles token → userId → single-device fallback)
+          const resolution = await resolveGarminUser(stress);
+          if (!resolution) {
+            console.warn(`⚠️ [Garmin Webhook] Could not map stress to user for date ${date} (garminUserId=${stress.userId ?? 'none'}, hasToken: ${!!stress.userAccessToken})`);
             continue;
           }
+          const userId = resolution.userId;
           
           console.log(`[Garmin Webhook] Processing stress for user ${userId}, date: ${date}`);
           
@@ -5138,13 +5126,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const date = pox.calendarDate || new Date((pox.startTimeInSeconds || 0) * 1000).toISOString().split('T')[0];
           
-          // Resolve user: match Garmin numeric userId → deviceId, then single-device fallback
-          const userId = resolveGarminUserId(devices, pox);
-          
-          if (!userId) {
-            console.warn(`⚠️ [Garmin Webhook] Could not map pulse ox to user for date ${date} (garminUserId=${pox.userId ?? 'none'})`);
+          // Use unified Garmin user resolver (handles token → userId → single-device fallback)
+          const resolution = await resolveGarminUser(pox);
+          if (!resolution) {
+            console.warn(`⚠️ [Garmin Webhook] Could not map pulse ox to user for date ${date} (garminUserId=${pox.userId ?? 'none'}, hasToken: ${!!pox.userAccessToken})`);
             continue;
           }
+          const userId = resolution.userId;
           
           console.log(`[Garmin Webhook] Processing pulse ox for user ${userId}, date: ${date}`);
           
@@ -5250,22 +5238,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Date+run matching is skipped on rest days so it's not reliable.
           let userId: string | undefined;
 
-          // 1. Match by userAccessToken (most reliable when fresh)
-          if (!userId && resp.userAccessToken) {
-            const deviceByToken = await findUserByGarminToken(resp.userAccessToken);
-            if (deviceByToken) userId = deviceByToken.userId;
-          }
-
-          // 2. Match by Garmin userId stored as deviceId in connected_devices
-          if (!userId && resp.userId) {
-            const garminId = String(resp.userId);
-            const deviceByGarminId = devices.find(d => d.deviceId === garminId);
-            if (deviceByGarminId) userId = deviceByGarminId.userId;
-          }
-
-          // 3. Last resort: if only one Garmin device is connected, use that user
-          if (!userId && devices.length === 1) {
-            userId = devices[0].userId;
+          // Use unified Garmin user resolver (handles token → userId → single-device fallback)
+          const resolution = await resolveGarminUser(resp);
+          if (resolution) {
+            userId = resolution.userId;
           }
 
           if (!userId) {

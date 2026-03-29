@@ -32,6 +32,53 @@ import live.airuncoach.airuncoach.viewmodel.TrendDataPoint
 import java.util.Locale
 
 /**
+ * Format duration in milliseconds to HH:MM:SS format
+ */
+private fun formatDuration(durationMs: Long): String {
+    val totalSeconds = durationMs / 1000
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    
+    return if (hours > 0) {
+        String.format(Locale.getDefault(), "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(Locale.getDefault(), "%d:%02d", minutes, seconds)
+    }
+}
+
+/**
+ * Format duration in seconds to HH:MM:SS format
+ */
+private fun formatLongDuration(durationSec: Long): String {
+    val hours = durationSec / 3600
+    val minutes = (durationSec % 3600) / 60
+    val seconds = durationSec % 60
+    
+    return if (hours > 0) {
+        String.format(Locale.getDefault(), "%d:%02d:%02d", hours, minutes, seconds)
+    } else if (minutes > 0) {
+        String.format(Locale.getDefault(), "%d:%02d", minutes, seconds)
+    } else {
+        String.format(Locale.getDefault(), "%d s", seconds)
+    }
+}
+
+/**
+ * Format date from ISO format (yyyy-MM-dd) to DD/MM/YYYY
+ */
+private fun formatDateToDDMMYYYY(isoDate: String): String {
+    return try {
+        val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val date = dateFormat.parse(isoDate)
+        val outputFormat = java.text.SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+        if (date != null) outputFormat.format(date) else isoDate
+    } catch (_: Exception) {
+        isoDate
+    }
+}
+
+/**
  * My Data Screen - Market-leading performance analytics
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
@@ -212,9 +259,10 @@ private fun SectionHeader(title: String) {
     )
 }
 
-// The 5 standard race categories with their target distances
+// The 6 standard race categories with their target distances
 private val PB_CATEGORIES = listOf(
     Triple("1K",           "1K",            1.0),
+    Triple("Mile",         "Mile",          1.609),
     Triple("5K",           "5K",            5.0),
     Triple("10K",          "10K",           10.0),
     Triple("Half Marathon","Half Marathon",  21.1),
@@ -273,7 +321,7 @@ private fun PersonalBestRow(
         if (pb != null) {
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = pb.pace,
+                    text = formatDuration(pb.duration),
                     style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
                     color = Colors.primary,
                     fontSize = 15.sp
@@ -281,7 +329,7 @@ private fun PersonalBestRow(
                 if (pb.date.isNotBlank()) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = pb.date,
+                        text = formatDateToDDMMYYYY(pb.date),
                         style = AppTextStyles.caption,
                         color = Colors.textMuted,
                         fontSize = 11.sp
@@ -434,6 +482,7 @@ private fun PerformanceTrendsSection(
     val hrTrend by viewModel.hrTrend.collectAsState()
     val elevationTrend by viewModel.elevationTrend.collectAsState()
     val cadenceTrend by viewModel.cadenceTrend.collectAsState()
+    val selectedPeriod by viewModel.selectedTimePeriod.collectAsState()
 
     val allEmpty = pacesTrend.isEmpty() && hrTrend.isEmpty() &&
             elevationTrend.isEmpty() && cadenceTrend.isEmpty()
@@ -448,22 +497,24 @@ private fun PerformanceTrendsSection(
         verticalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
         if (pacesTrend.isNotEmpty()) {
-            TrendBarChart(title = "⚡ Avg Pace (min/km)", points = pacesTrend, unit = "/km", invertColors = true)
+            TrendBarChart(title = "⚡ Avg Pace (min/km)", points = pacesTrend, unit = "/km", period = selectedPeriod, invertColors = true)
         }
         if (hrTrend.isNotEmpty()) {
-            TrendBarChart(title = "❤️ Avg Heart Rate (bpm)", points = hrTrend, unit = " bpm")
+            TrendBarChart(title = "❤️ Avg Heart Rate (bpm)", points = hrTrend, unit = " bpm", period = selectedPeriod)
         }
         if (elevationTrend.isNotEmpty()) {
-            TrendBarChart(title = "⛰️ Elevation Gain (m)", points = elevationTrend, unit = " m")
+            TrendBarChart(title = "⛰️ Elevation Gain (m)", points = elevationTrend, unit = " m", period = selectedPeriod)
         }
         if (cadenceTrend.isNotEmpty()) {
-            TrendBarChart(title = "👟 Avg Cadence (spm)", points = cadenceTrend, unit = " spm")
+            TrendBarChart(title = "👟 Avg Cadence (spm)", points = cadenceTrend, unit = " spm", period = selectedPeriod)
         }
     }
 }
 
 /**
- * A native Compose bar chart showing run-by-run trend data.
+ * A native Compose bar chart showing trend data with grouped aggregation.
+ * For shorter periods (1-3 months): groups by week
+ * For longer periods (6-12 months): groups by month
  * invertColors = true means lower value is better (pace: lower = faster = green).
  */
 @Composable
@@ -471,13 +522,23 @@ private fun TrendBarChart(
     title: String,
     points: List<TrendDataPoint>,
     unit: String,
+    period: TimePeriod = TimePeriod.MONTH,
     invertColors: Boolean = false
 ) {
-    // Show at most last 10 runs for readability
-    val display = if (points.size > 10) points.takeLast(10) else points
+    if (points.isEmpty()) return
+
+    // Group data by week or month based on period
+    val display = groupTrendDataByPeriod(points, period)
+    
+    if (display.isEmpty()) return
+
     val maxVal = display.maxOf { it.value }
     val minVal = display.minOf { it.value }
     val range = if (maxVal - minVal < 0.001) 1.0 else maxVal - minVal
+    
+    // Calculate Y-axis scale
+    val yAxisMax = (maxVal * 1.1).toInt()
+    val yAxisStep = (yAxisMax / 4).coerceAtLeast(1)
 
     Column(
         modifier = Modifier
@@ -495,48 +556,76 @@ private fun TrendBarChart(
         Spacer(modifier = Modifier.height(Spacing.sm))
 
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(80.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.Bottom
-        ) {
-            display.forEach { point ->
-                val fraction = ((point.value - minVal) / range).coerceIn(0.1, 1.0)
-                // For pace: lower is better → high bar = slow = red; low bar = fast = green
-                val barColor = if (invertColors) {
-                    lerp(Color(0xFF4CAF50), Color(0xFFF44336), fraction.toFloat())
-                } else {
-                    lerp(Color(0xFFF44336), Color(0xFF4CAF50), fraction.toFloat())
-                }
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(fraction.toFloat())
-                        .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
-                        .background(barColor)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        // X-axis: abbreviated dates
-        Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            display.forEach { point ->
-                val shortDate = point.date.takeLast(5) // "MM-DD"
-                Text(
-                    text = shortDate,
-                    modifier = Modifier.weight(1f),
-                    style = AppTextStyles.caption,
-                    color = Colors.textMuted,
-                    fontSize = 8.sp,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1
-                )
+            // Y-axis labels
+            Column(
+                modifier = Modifier
+                    .width(35.dp)
+                    .height(140.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+                horizontalAlignment = Alignment.End
+            ) {
+                repeat(5) { index ->
+                    val yValue = yAxisMax - (index * yAxisStep)
+                    Text(
+                        text = yValue.toString(),
+                        style = AppTextStyles.caption,
+                        color = Colors.textMuted,
+                        fontSize = 8.sp
+                    )
+                }
+            }
+
+            // Chart area with bars
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                // Bar chart
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(110.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    display.forEach { point ->
+                        val fraction = ((point.value - minVal) / range).coerceIn(0.1, 1.0)
+                        val barColor = if (invertColors) {
+                            lerp(Color(0xFF4CAF50), Color(0xFFF44336), fraction.toFloat())
+                        } else {
+                            lerp(Color(0xFFF44336), Color(0xFF4CAF50), fraction.toFloat())
+                        }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(fraction.toFloat())
+                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                                .background(barColor)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // X-axis labels
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    display.forEach { point ->
+                        Text(
+                            text = point.label,
+                            modifier = Modifier.weight(1f),
+                            style = AppTextStyles.caption,
+                            color = Colors.textMuted,
+                            fontSize = 8.sp,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1
+                        )
+                    }
+                }
             }
         }
 
@@ -554,7 +643,7 @@ private fun TrendBarChart(
                 fontSize = 10.sp
             )
             Text(
-                text = "${display.size} runs",
+                text = "${display.size} periods",
                 style = AppTextStyles.caption,
                 color = Colors.textMuted,
                 fontSize = 10.sp
@@ -567,6 +656,96 @@ private fun TrendBarChart(
             )
         }
     }
+}
+
+/**
+ * Group trend data by week (for <=3 months) or by month (for >=6 months)
+ */
+private fun groupTrendDataByPeriod(
+    points: List<TrendDataPoint>,
+    period: TimePeriod
+): List<live.airuncoach.airuncoach.viewmodel.GroupedTrendDataPoint> {
+    if (points.isEmpty()) return emptyList()
+
+    return when {
+        period == TimePeriod.MONTH || period == TimePeriod.QUARTER -> groupByWeek(points)
+        else -> groupByMonth(points)
+    }
+}
+
+/**
+ * Group trend data by week, showing Monday date of that week
+ */
+private fun groupByWeek(points: List<TrendDataPoint>): List<live.airuncoach.airuncoach.viewmodel.GroupedTrendDataPoint> {
+    val grouped = mutableMapOf<String, MutableList<Double>>()
+    val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    
+    points.forEach { point ->
+        try {
+            val date = dateFormat.parse(point.date)
+            if (date != null) {
+                val calendar = java.util.Calendar.getInstance()
+                calendar.time = date
+                
+                // Get Monday of this week
+                val dayOfWeek = calendar.get(java.util.Calendar.DAY_OF_WEEK)
+                val daysToSubtract = if (dayOfWeek == java.util.Calendar.SUNDAY) 6 else dayOfWeek - 2
+                calendar.add(java.util.Calendar.DAY_OF_MONTH, -daysToSubtract)
+                
+                val weekKey = String.format(Locale.getDefault(), "%02d/%02d/%02d",
+                    calendar.get(java.util.Calendar.DAY_OF_MONTH),
+                    calendar.get(java.util.Calendar.MONTH) + 1,
+                    calendar.get(java.util.Calendar.YEAR) % 100
+                )
+                
+                grouped.getOrPut(weekKey) { mutableListOf() }.add(point.value)
+            }
+        } catch (_: Exception) {
+            // Skip invalid dates
+        }
+    }
+    
+    return grouped.map { (label, values) ->
+        live.airuncoach.airuncoach.viewmodel.GroupedTrendDataPoint(
+            label = label,
+            value = values.average()
+        )
+    }.sortedBy { it.label }
+}
+
+/**
+ * Group trend data by month - showing month names (Jan, Feb, Mar, etc.)
+ */
+private fun groupByMonth(points: List<TrendDataPoint>): List<live.airuncoach.airuncoach.viewmodel.GroupedTrendDataPoint> {
+    val grouped = mutableMapOf<String, Pair<Int, MutableList<Double>>>() // label -> (sortOrder, values)
+    val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    val monthNames = arrayOf("", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+    
+    points.forEach { point ->
+        try {
+            val date = dateFormat.parse(point.date)
+            if (date != null) {
+                val calendar = java.util.Calendar.getInstance()
+                calendar.time = date
+                val month = calendar.get(java.util.Calendar.MONTH) + 1
+                val year = calendar.get(java.util.Calendar.YEAR)
+                val key = "${monthNames[month]} ${(year % 100).toString().padStart(2, '0')}"
+                val sortOrder = year * 100 + month // For sorting
+                
+                grouped.getOrPut(key) { Pair(sortOrder, mutableListOf()) }
+                    .second.add(point.value)
+            }
+        } catch (_: Exception) {
+            // Skip invalid dates
+        }
+    }
+    
+    return grouped.map { (label, pair) ->
+        live.airuncoach.airuncoach.viewmodel.GroupedTrendDataPoint(
+            label = label,
+            value = pair.second.average()
+        )
+    }.sortedBy { it.label }
 }
 
 /** Linear interpolation between two colors */
@@ -588,10 +767,11 @@ private fun AllTimeAchievementsSection(
         EmptyStateCard(message = "No achievements yet. Start running!")
     } else {
         val achievements = listOf(
-            Triple("🏃", "Total Runs", allTimeStats["totalRuns"]?.toString() ?: "-"),
-            Triple("🌍", "Total Distance", "${allTimeStats["totalDistanceKm"]?.toString() ?: "-"} km"),
-            Triple("⏱️", "Total Time Running", allTimeStats["totalHours"]?.toString() ?: "-"),
-            Triple("🔥", "Total Calories Burned", "${allTimeStats["totalCalories"]?.toString() ?: "-"} kcal")
+            Triple("🔥", "Most Consecutive Runs", allTimeStats["mostConsecutiveRuns"]?.toString() ?: "0"),
+            Triple("📏", "Longest Run", "${allTimeStats["longestRunKm"]?.toString() ?: "-"} km"),
+            Triple("⏱️", "Longest Run Time", formatLongDuration((allTimeStats["longestRunTimeSec"] as? Number)?.toLong() ?: 0L)),
+            Triple("⛰️", "Highest Elevation", "${allTimeStats["highestElevationM"]?.toString() ?: "-"} m"),
+            Triple("🎯", "Goals Achieved", allTimeStats["goalsAchieved"]?.toString() ?: "0")
         )
 
         Column(

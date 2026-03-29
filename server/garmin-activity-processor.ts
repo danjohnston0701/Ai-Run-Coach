@@ -205,6 +205,7 @@ export async function saveDetailedGarminActivity(
 
 /**
  * Create a new runs record or link to existing one with Garmin data
+ * Checks if a run with this externalId was previously deleted to prevent recreation
  */
 async function createOrLinkRunFromGarminActivity(
   userId: string,
@@ -215,6 +216,23 @@ async function createOrLinkRunFromGarminActivity(
   const startTime = activityDetail.startTimeInSeconds
     ? new Date(activityDetail.startTimeInSeconds * 1000)
     : new Date();
+
+  // Check if a run with this externalId already exists (either active or deleted)
+  // If it was deleted, we don't want to recreate it
+  const { eq } = await import('drizzle-orm');
+  const existingRun = await db.select()
+    .from(runs)
+    .where(
+      eq(runs.externalId, activityDetail.activityId)
+    )
+    .limit(1);
+
+  // If a run with this external ID already exists, return it
+  // This prevents re-creating runs that may have been manually deleted by the user
+  if (existingRun.length > 0) {
+    console.log(`⚠️ Run with external ID ${activityDetail.activityId} already exists. Skipping creation.`);
+    return { id: existingRun[0].id };
+  }
 
   // Prepare heart rate data with samples
   const heartRateData = {

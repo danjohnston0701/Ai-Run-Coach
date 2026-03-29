@@ -214,7 +214,7 @@ fun GarminConnectScreen(
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            "For real-time coaching during runs, download the AI Run Coach companion app from the Garmin Connect IQ Store.",
+                            "For real-time coaching during runs, download the Ai Run Coach companion app from the Garmin Connect IQ Store.",
                             style = AppTextStyles.body,
                             color = Colors.textSecondary
                         )
@@ -284,7 +284,7 @@ fun GarminConnectScreen(
             // Privacy notice
             item {
                 Text(
-                    "By connecting, you authorize AI Run Coach to access your Garmin Connect data. You can disconnect at any time from settings.",
+                    "By connecting, you authorize Ai Run Coach to access your Garmin Connect data. You can disconnect at any time from settings.",
                     style = AppTextStyles.caption,
                     color = Colors.textMuted,
                     modifier = Modifier.padding(horizontal = 16.dp)

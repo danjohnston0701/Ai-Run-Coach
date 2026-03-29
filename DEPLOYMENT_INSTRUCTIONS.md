@@ -1,138 +1,92 @@
-# 🚀 Backend Deployment Instructions
+# Deploy Push Notification Updates to Replit
 
-## ✅ What I Just Did
+## What Changed
+✅ Enhanced push notification logging
+✅ Added test endpoint for manual testing
+✅ No breaking changes - all additive
 
-1. **Built the backend**: `npm run server:build` ✅ 
-2. **Committed changes**: Created commit `6fc9e86` ✅
-3. **Pushed to GitHub**: Pushed to `origin/main` ✅
+## Deployment Steps
 
-## 🔧 Manual Deployment Required
-
-Your backend is configured to deploy to **Google Cloud Run via Replit**. The code has been pushed to GitHub, but **Replit requires manual deployment trigger**.
-
-### Option 1: Deploy via Replit Web Interface (Recommended)
-
-1. **Open your Replit project:**
-   - Go to [replit.com](https://replit.com)
-   - Open the "Ai-Run-Coach-IOS-and-Android" project
-
-2. **Trigger deployment:**
-   - Click the **"Deploy"** button in the Replit interface
-   - Or use the **"Run"** button which should trigger a build and deployment
-   - Replit will automatically build and deploy to Google Cloud Run
-
-3. **Monitor deployment:**
-   - Watch the deployment logs in Replit console
-   - Deployment typically takes 2-5 minutes
-
-4. **Verify deployment:**
-   ```bash
-   # Run this after deployment completes
-   cd /Users/danieljohnston/AndroidStudioProjects/AiRunCoach
-   bash test-backend-endpoints.sh
-   ```
-
-### Option 2: Manual Cloud Run Deployment (Advanced)
-
-If you have `gcloud` CLI installed and configured:
-
+### Step 1: Push to GitHub
 ```bash
-cd /Users/danieljohnston/Desktop/Ai-Run-Coach-IOS-and-Android
-
-# Make sure you're logged in
-gcloud auth login
-
-# Deploy to Cloud Run
-gcloud run deploy airuncoach \
-  --source . \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated
+cd /Users/danieljohnston/AndroidStudioProjects/AiRunCoach
+git push origin main
 ```
 
-### Option 3: Use Replit's Auto-Deploy from Web Interface
+### Step 2: On Replit, Pull Latest Changes
+1. Go to https://replit.com → your AI Run Coach project
+2. Click **"Tools"** (bottom left corner)
+3. Select **"Git"** → **"Pull"**
+4. Wait for pull to complete
 
-1. Go to your Replit project
-2. Click on the **"Deployments"** tab
-3. If you have auto-deploy enabled, it should detect the new commit
-4. If not, click **"Create deployment"** or **"Deploy"**
-
-## 🧪 Testing After Deployment
-
-Once deployed, test the endpoints:
-
+Or if you prefer the terminal on Replit:
 ```bash
-# Quick test
-curl -s -o /dev/null -w "%{http_code}" https://airuncoach.live/api/goals/test-id
-
-# Expected result: 401 (not 404)
-# 401 means endpoint exists but needs authentication (correct!)
-# 404 means endpoint doesn't exist (incorrect - needs deployment)
-
-# Full test suite
-bash test-backend-endpoints.sh
+git pull origin main
 ```
 
-## 📱 Testing in the APK
+### Step 3: Server Automatically Restarts
+Replit will detect changes and restart the server automatically.
 
-After successful deployment:
+Watch for these logs to confirm deployment:
+```
+✅ [Firebase] Initializing with project: ai-run-coach-c1b8c
+✅ [Firebase] Admin SDK initialised ✅
+```
 
-1. Install the APK on your device
-2. Login/Register with your account
-3. Navigate to **Goals** → Should load without 404 error
-4. Navigate to **Previous Runs** → Should load your run history
-5. Try creating a new goal → Should save successfully
+### Step 4: Test the New Endpoint
 
-## 🔍 Current Status
+Once deployed, the test endpoint will work:
 
-- ✅ Backend code updated and built
-- ✅ Changes committed to git (commit: `6fc9e86`)
-- ✅ Changes pushed to GitHub
-- ⏳ **Awaiting Replit deployment** ← YOU ARE HERE
-- ⏳ Testing endpoints
-- ⏳ Verifying in APK
+```bash
+./test-push-notifications.sh https://airuncoach.live danjohnston0701@gmail.com
+```
 
-## 🆘 Troubleshooting
+Or with curl:
+```bash
+curl -X POST https://airuncoach.live/api/test/push-notification \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userEmail": "danjohnston0701@gmail.com",
+    "title": "Test Notification",
+    "body": "If you see this, push notifications are working! 🎉"
+  }'
+```
 
-### If endpoints still return 404 after deployment:
+## Expected Response
 
-1. **Check Replit deployment logs:**
-   - Look for build errors
-   - Verify the build command ran: `npm run server:build`
-   - Verify the run command is: `npm run server:prod`
+**Success:**
+```json
+{
+  "success": true,
+  "message": "Test push notification sent to danjohnston0701@gmail.com",
+  "userEmail": "danjohnston0701@gmail.com",
+  "hasToken": true,
+  "tokenPreview": "cJ7Bv_pQi4k2..."
+}
+```
 
-2. **Check environment variables:**
-   - Make sure `.env` file exists in Replit
-   - Verify `DATABASE_URL` is set
-   - Verify `NODE_ENV=production`
-
-3. **Restart the Replit deployment:**
-   - Sometimes a full restart is needed
-   - Stop the current deployment
-   - Click "Deploy" again
-
-4. **Check Cloud Run logs:**
-   - Go to Google Cloud Console
-   - Navigate to Cloud Run
-   - Find "airuncoach" service
-   - Check recent logs for errors
-
-### If you don't have access to Replit:
-
-You'll need to either:
-1. Get access to the Replit account that owns this project
-2. Set up a new deployment on another platform (Railway, Render, Heroku, etc.)
-3. Deploy manually to Google Cloud Run using `gcloud` CLI
-
-## 📧 Next Steps
-
-1. **Deploy via Replit now** (5 minutes)
-2. **Run test script** to verify (30 seconds)
-3. **Test APK** with real device (2 minutes)
-4. **Celebrate!** 🎉
+Your Android device will receive the notification within 10 seconds.
 
 ---
 
-**Created:** January 30, 2026  
-**Commit:** 6fc9e86  
-**Status:** ⏳ Awaiting manual Replit deployment
+## Commit Deployed
+```
+commit: Add push notification testing infrastructure and enhanced debugging
+- Test endpoint (POST /api/test/push-notification)
+- Enhanced logging in notification-service.ts
+- Bash test script (test-push-notifications.sh)
+- Comprehensive setup documentation
+```
+
+---
+
+## Troubleshooting Deployment
+
+If the endpoint still returns "Cannot POST":
+
+1. **Check Replit logs** for deployment errors
+2. **Verify git pull succeeded** - should see new files in file explorer
+3. **Restart Replit server** manually (click "Run")
+4. **Clear browser cache** (test endpoint should now work)
+
+If you still see errors, share the Replit console output and I can help debug further.

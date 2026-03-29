@@ -71,6 +71,14 @@ data class TrendDataPoint(
     val value: Double   // metric value for that run
 )
 
+/**
+ * Grouped trend data point for weekly/monthly aggregation
+ */
+data class GroupedTrendDataPoint(
+    val label: String,  // e.g. "Week 1", "Mar 2024"
+    val value: Double   // aggregated average value for that period
+)
+
 @HiltViewModel
 class MyDataViewModel @Inject constructor(
     private val apiService: ApiService

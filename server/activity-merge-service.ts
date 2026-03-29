@@ -212,6 +212,12 @@ export async function mergeGarminActivityWithAiRunCoachRun(
       `[Merge] Merging Garmin activity ${garminActivity.id} with run ${aiRunCoachRunId}`
     );
 
+    // Import detailed metrics helper
+    const { buildDetailedMetricsFromGarminActivity } = await import('./garmin-detailed-metrics');
+    
+    // Extract detailed metrics from Garmin activity
+    const detailedMetrics = buildDetailedMetricsFromGarminActivity(garminActivity);
+
     // Prepare enriched data from Garmin
     // Use Garmin metrics as primary (wearables are more accurate)
     const enrichedData = {
@@ -232,6 +238,13 @@ export async function mergeGarminActivityWithAiRunCoachRun(
       avgSpeed: garminActivity.averageSpeedInMetersPerSecond,
       activityType: garminActivity.activityType,
       deviceName: garminActivity.deviceName,
+
+      // Detailed metrics from Garmin (pace, heart rate, GPS track, splits, elevation)
+      paceData: detailedMetrics.paceData,
+      heartRateData: detailedMetrics.heartRateData,
+      kmSplits: detailedMetrics.kmSplits,
+      gpsTrack: detailedMetrics.gpsTrack,
+      elevationProfile: detailedMetrics.elevationProfile,
 
       // Merge tracking
       mergeScore: mergeCandidate.matchScore,

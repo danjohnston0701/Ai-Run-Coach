@@ -2,7 +2,7 @@ import {
   users, friends, friendRequests, runs, routes, goals,
   notifications, notificationPreferences, liveRunSessions,
   groupRuns, groupRunParticipants, events, routeRatings, runAnalyses,
-  connectedDevices, deviceData, garminWellnessMetrics, activityMergeLog,
+  connectedDevices, deviceData, garminWellnessMetrics, activityMergeLog, garminActivities,
   oauthStateStore, webhookFailureQueue, garminWebhookEvents,
   type User, type InsertUser, type Run, type InsertRun,
   type Route, type InsertRoute, type Goal, type InsertGoal,
@@ -450,6 +450,13 @@ export class DatabaseStorage implements IStorage {
       await db.delete(activityMergeLog).where(eq(activityMergeLog.aiRunCoachRunId, id));
     } catch (e) {
       console.error("Error deleting activity merge logs:", e);
+    }
+
+    try {
+      // Delete Garmin activities linked to this run
+      await db.delete(garminActivities).where(eq(garminActivities.runId, id));
+    } catch (e) {
+      console.error("Error deleting Garmin activities:", e);
     }
     
     try {

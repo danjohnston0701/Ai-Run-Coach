@@ -14,6 +14,7 @@
 import { db } from './db';
 import { runs, userStats } from '@shared/schema';
 import { eq, gte, and, desc, asc, count, sum, avg, max, min, sql, isNotNull } from 'drizzle-orm';
+import { type InferSelectModel } from 'drizzle-orm';
 
 // ─── Personal Bests ──────────────────────────────────────────────────────────
 
@@ -38,65 +39,131 @@ export async function getPersonalBests(userId: string) {
 }
 
 /**
- * Live PB query — 5 targeted DB calls, each returns 1 row.
- * Used as fallback when cache isn't populated yet.
+ * Live PB query — fetches runs and calculates PBs for both distance-based
+ * and split-based (fastest km/mile) personal bests.
  */
 async function getPersonalBestsLive(userId: string) {
-  const distances = [
-    { min: 0.95, max: 1.1,   label: '1K',           target: 1.0 },
-    { min: 4.95, max: 5.1,   label: '5K',           target: 5.0 },
+  const distancePBs = [
+    { min: 0.95, max: 1.1,   label: '5K',           target: 5.0 },
     { min: 9.95, max: 10.1,  label: '10K',          target: 10.0 },
     { min: 21.05, max: 21.2, label: 'Half Marathon', target: 21.1 },
     { min: 42.15, max: 42.3, label: 'Marathon',      target: 42.2 },
   ];
 
-  const personalBests = [];
+  const personalBests: any[] = [];
 
-  for (const dist of distances) {
-    try {
-      const result = await db
-        .select({
-          id: runs.id,
-          avgPace: runs.avgPace,
-          distance: runs.distance,
-          duration: runs.duration,
-          completedAt: runs.completedAt,
-        })
-        .from(runs)
-        .where(and(
-          eq(runs.userId, userId),
-          gte(runs.distance, dist.min),
-          sql`${runs.distance} <= ${dist.max}`,
-          isNotNull(runs.avgPace),
-        ))
-        .orderBy(runs.avgPace)  // Ascending: fastest pace first (lower = faster)
-        .limit(1);
+  // Fetch all runs to calculate both distance-based and split-based PBs
+  const userRuns = await db
+    .select()
+    .from(runs)
+    .where(eq(runs.userId, userId))
+    .orderBy(asc(runs.completedAt));
 
-      if (result.length > 0) {
-        const run = result[0];
-        const pace = parseFloat(run.avgPace || '0');
-        personalBests.push({
-          category: dist.label,
-          pace: formatPace(pace),
-          distance: run.distance,
-          duration: run.duration,
-          date: run.completedAt?.toISOString().split('T')[0] || '',
-          runId: run.id,
-        });
+  // Calculate distance-based personal bests (5K, 10K, Half Marathon, Marathon)
+  for (const dist of distancePBs) {
+    let bestRun: typeof userRuns[0] | null = null;
+    let bestPace: number | null = null;
+
+    for (const run of userRuns) {
+      if (!run.avgPace || run.distance === null) continue;
+      
+      const isInRange = run.distance >= dist.min && run.distance <= dist.max;
+      if (!isInRange) continue;
+
+      const pace = parseFloat(run.avgPace);
+      if (isNaN(pace)) continue;
+
+      if (bestPace === null || pace < bestPace) {
+        bestPace = pace;
+        bestRun = run;
       }
-    } catch (error) {
-      console.error(`Error getting personal best for ${dist.label}:`, error);
     }
+
+    if (bestRun && bestPace !== null) {
+      personalBests.push({
+        category: dist.label,
+        pace: formatPace(bestPace),
+        distance: bestRun.distance,
+        duration: bestRun.duration,
+        date: bestRun.completedAt?.toISOString().split('T')[0] || '',
+        runId: bestRun.id,
+      });
+    }
+  }
+
+  // Calculate fastest 1K from km splits
+  const fastest1K = findFastestSplitFromRuns(userRuns, 1.0);
+  if (fastest1K) {
+    personalBests.push(fastest1K);
+  }
+
+  // Calculate fastest Mile from km splits
+  const fastestMile = findFastestSplitFromRuns(userRuns, 1.609);
+  if (fastestMile) {
+    personalBests.push(fastestMile);
   }
 
   return personalBests;
 }
 
+/**
+ * Helper: Find fastest split across all runs and return as PersonalBest object
+ */
+function findFastestSplitFromRuns(
+  runs: typeof runs.$inferSelect[],
+  segmentKm: number
+): any | null {
+  let fastestPaceMinutes: number | null = null;
+  let fastestRun: typeof runs.$inferSelect | null = null;
+
+  for (const run of runs) {
+    if (!Array.isArray(run.kmSplits)) continue;
+
+    for (const split of run.kmSplits) {
+      if (!split.pace) continue;
+      const paceMinutes = parsePaceToMinutes(split.pace);
+      if (paceMinutes === null) continue;
+
+      if (fastestPaceMinutes === null || paceMinutes < fastestPaceMinutes) {
+        fastestPaceMinutes = paceMinutes;
+        fastestRun = run;
+      }
+    }
+  }
+
+  if (!fastestRun || fastestPaceMinutes === null) return null;
+
+  const label = segmentKm === 1.0 ? '1K' : 'Mile';
+  return {
+    category: label,
+    pace: formatPace(fastestPaceMinutes),
+    distance: segmentKm,
+    duration: Math.round(fastestPaceMinutes * 60 * 1000), // Convert min to ms
+    date: fastestRun.completedAt?.toISOString().split('T')[0] || '',
+    runId: fastestRun.id,
+  };
+}
+
+/**
+ * Parse pace string (mm:ss/km or mm:ss) to minutes as decimal
+ */
+function parsePaceToMinutes(paceStr: string | null): number | null {
+  if (!paceStr) return null;
+  const match = paceStr.match(/(\d+):(\d+)/);
+  if (!match) return null;
+  const minutes = parseInt(match[1]);
+  const seconds = parseInt(match[2]);
+  return minutes + seconds / 60;
+}
+
 function buildPersonalBestsFromCache(cached: typeof userStats.$inferSelect) {
   const bests = [];
 
+  // Note: For 1K and Mile, these are split-based records (fastest km/mile from any run),
+  // not from runs that are exactly 1K or 1 mile in total distance
   const entries = [
     { label: '1K',           duration: cached.pb1kDurationMs,       runId: cached.pb1kRunId,       date: cached.pb1kDate,       distance: 1.0 },
+    { label: 'Mile',         duration: cached.pbMileDurationMs,     runId: cached.pbMileRunId,     date: cached.pbMileDate,     distance: 1.609 },
     { label: '5K',           duration: cached.pb5kDurationMs,       runId: cached.pb5kRunId,       date: cached.pb5kDate,       distance: 5.0 },
     { label: '10K',          duration: cached.pb10kDurationMs,      runId: cached.pb10kRunId,      date: cached.pb10kDate,      distance: 10.0 },
     { label: 'Half Marathon', duration: cached.pbHalfDurationMs,    runId: cached.pbHalfRunId,     date: cached.pbHalfDate,     distance: 21.1 },
@@ -270,12 +337,11 @@ export async function getAllTimeStats(userId: string) {
         totalDistanceKm:       Math.round((cached.totalDistanceKm ?? 0) * 10) / 10,
         totalHours:            Math.round(((cached.totalDurationSeconds ?? 0) / 3600) * 10) / 10,
         totalCalories:         cached.totalCalories ?? 0,
-        totalElevationGainM:   Math.round(cached.totalElevationGainM ?? 0),
-        personalRecords:       countPersonalRecordsInCache(cached),
+        mostConsecutiveRuns:   cached.mostConsecutiveRuns ?? 0,
         longestRunKm:          Math.round((cached.longestRunKm ?? 0) * 10) / 10,
-        fastestPaceMinPerKm:   formatPace(cached.fastestPaceMinPerKm ?? 0),
-        averagePaceMinPerKm:   formatPace(cached.avgPaceMinPerKm ?? 0),
-        totalActiveCalories:   cached.totalActiveCalories ?? 0,
+        longestRunTimeSec:     cached.longestRunTimeSec ?? 0,
+        highestElevationM:     Math.round(cached.highestElevationM ?? 0),
+        goalsAchieved:         cached.goalsAchieved ?? 0,
       };
     }
   } catch (err) {
@@ -292,6 +358,7 @@ export async function getAllTimeStats(userId: string) {
  */
 async function getAllTimeStatsLive(userId: string) {
   try {
+    // Get basic aggregates
     const [stats] = await db.select({
       totalRuns:            count(),
       totalDistanceKm:      sum(runs.distance),
@@ -300,6 +367,7 @@ async function getAllTimeStatsLive(userId: string) {
       totalCalories:        sum(runs.calories),
       totalActiveCalories:  sum(runs.activeCalories),
       longestRunKm:         max(runs.distance),
+      maxElevation:         max(runs.maxElevation),
       fastestPaceNumeric: sql<number>`MIN(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
       avgPaceNumeric:     sql<number>`AVG(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
     }).from(runs).where(eq(runs.userId, userId));
@@ -308,22 +376,36 @@ async function getAllTimeStatsLive(userId: string) {
     if (totalRuns === 0) {
       return {
         totalRuns: 0, totalDistanceKm: 0, totalHours: 0, totalCalories: 0,
-        totalElevationGainM: 0, personalRecords: 0, longestRunKm: 0,
-        fastestPaceMinPerKm: '--', averagePaceMinPerKm: '--', totalActiveCalories: 0,
+        mostConsecutiveRuns: 0, longestRunKm: 0, longestRunTimeSec: 0,
+        highestElevationM: 0, goalsAchieved: 0,
       };
     }
+
+    // Get longest run time and details
+    const longestRun = await db
+      .select({ duration: runs.duration })
+      .from(runs)
+      .where(eq(runs.userId, userId))
+      .orderBy(desc(runs.distance))
+      .limit(1);
+
+    const longestRunTimeSec = longestRun.length > 0 
+      ? Math.round((longestRun[0].duration || 0) / 1000)
+      : 0;
+
+    // Get highest elevation from any single run
+    const highestElevationM = Math.round(Number(stats.maxElevation ?? 0));
 
     return {
       totalRuns,
       totalDistanceKm:     Math.round(Number(stats.totalDistanceKm ?? 0) * 10) / 10,
       totalHours:          Math.round((Number(stats.totalDurationSec ?? 0) / 3600) * 10) / 10,
       totalCalories:       Number(stats.totalCalories ?? 0),
-      totalElevationGainM: Math.round(Number(stats.totalElevationGain ?? 0)),
-      personalRecords:     5,  // Number of distance categories (filled in once cache is built)
+      mostConsecutiveRuns: 0,  // To be calculated by stats service
       longestRunKm:        Math.round(Number(stats.longestRunKm ?? 0) * 10) / 10,
-      fastestPaceMinPerKm: formatPace(Number(stats.fastestPaceNumeric ?? 0)),
-      averagePaceMinPerKm: formatPace(Number(stats.avgPaceNumeric ?? 0)),
-      totalActiveCalories: Number(stats.totalActiveCalories ?? 0),
+      longestRunTimeSec,
+      highestElevationM,
+      goalsAchieved:       0,  // To be calculated by goals service
     };
   } catch (error) {
     console.error('Error getting all-time stats (live):', error);
@@ -334,6 +416,7 @@ async function getAllTimeStatsLive(userId: string) {
 function countPersonalRecordsInCache(cached: typeof userStats.$inferSelect): number {
   let count = 0;
   if (cached.pb1kDurationMs) count++;
+  if (cached.pbMileDurationMs) count++;
   if (cached.pb5kDurationMs) count++;
   if (cached.pb10kDurationMs) count++;
   if (cached.pbHalfDurationMs) count++;

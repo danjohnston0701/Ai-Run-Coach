@@ -2610,8 +2610,11 @@ export interface GarminWellnessData {
 export interface ComprehensiveRunAnalysis {
   summary: string;
   performanceScore: number; // 1-100
-  paceConsistencyScore?: number; // 1-100
-  effortScore?: number; // 1-100
+  performanceBreakdown?: {
+    executionScore: number; // Did they follow the plan?
+    effortScore: number; // How hard did they push vs plan?
+    consistencyScore: number; // Pace/effort steadiness
+  };
   highlights: string[];
   struggles: string[];
   personalBests: string[];
@@ -2619,18 +2622,54 @@ export interface ComprehensiveRunAnalysis {
   trainingLoadAssessment: string;
   recoveryAdvice: string;
   nextRunSuggestion: string;
-  wellnessImpact: string;
-  weatherImpactAnalysis?: string; // Weather impact analysis based on historical data
   coachMotivationalMessage?: string;
-  strugglePointsInsight?: string | null;
-  technicalAnalysis: {
+  wellnessImpact?: string;
+  weatherImpactAnalysis?: string;
+  
+  // Professional coaching fields
+  comparisonToPreviousRuns?: string; // How this run compares to recent form
+  progressionTrend?: string; // Are they improving? What's the trajectory?
+  runPatternAnalysis?: string; // Patterns noticed in their running style
+  
+  pacingStrategy?: {
+    assessment: string; // Was pacing smart for this workout type?
+    whatWentWell: string; // Pacing decisions that worked
+    whatToAdjust: string; // Specific adjustments for next time
+  };
+  
+  fitnessContext?: {
+    whatThisRunMeans: string; // Did this build fitness, maintain, or recover?
+    sequenceInPlan: string; // How it fits in their training
+    adaptationSignals: string; // Signs of adaptation or need for modification
+  };
+  
+  mentalGame?: {
+    effortQuality: string; // How hard did they really work?
+    paceVariability: string; // Why did pace vary? Fatigue, conditions, effort?
+    coachingForNextTime: string; // Mental strategies for similar workouts
+  };
+  
+  strugglePointsAnalysis?: {
+    identified: string[]; // What struggles occurred
+    likelyReasons: string; // Physiological, pacing, fatigue, terrain?
+    preventionStrategy: string; // How to avoid next time
+  };
+  
+  nextWorkoutCoaching?: {
+    recommendation: string; // Specific workout and intensity
+    reasonWhy: string; // Why this is the right next step
+    focusPoints: string[]; // What to pay attention to
+  };
+  
+  technicalAnalysis?: {
     paceAnalysis: string;
     heartRateAnalysis: string;
     cadenceAnalysis: string;
     runningDynamics: string;
     elevationPerformance: string;
   };
-  garminInsights: {
+  
+  garminInsights?: {
     trainingEffect: string;
     vo2MaxTrend: string;
     recoveryTime: string;
@@ -2676,8 +2715,18 @@ export async function generateComprehensiveRunAnalysis(params: {
   const { runData, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent, linkedPlanId, planGoalType, planProgressWeek, planProgressWeeks, workoutType, workoutIntensity, workoutDescription, sessionInstructions, coachingEvents, expectedSessionGoal } = params;
   
   // Build comprehensive prompt with all available data
-  let prompt = `You are ${coachName}, an expert AI running coach with a ${coachTone} style. 
-Analyze this run comprehensively using all available data from the runner's Garmin device and wellness metrics.
+  let prompt = `You are ${coachName}, an expert running coach with a ${coachTone} coaching style.
+
+## YOUR COACHING APPROACH:
+Your role is to analyze this run and provide professional coaching feedback that:
+1. Interprets the data as a COACH would - understanding the context of their training journey, not just reporting numbers
+2. Identifies patterns in their running and provides targeted guidance for improvement
+3. Acknowledges what went WELL and what needs adjustment - balance honest feedback with motivation
+4. Speaks directly to the runner using "you" and "your" in a conversational, personal way
+5. Explains WHAT happened and WHY it matters for their fitness progression
+6. Gives specific, actionable guidance for their NEXT training session
+
+Think of yourself analyzing a training session you coached in person - you'd understand the context, notice patterns, and guide them forward.
 
 ## RUN DATA:
 - Distance: ${
@@ -2769,7 +2818,24 @@ ${planProgressWeek && planProgressWeeks ? `- Reference the week number and progr
   }
 
   // Add Garmin activity metrics if available
-  if (garminActivity) {
+  // Only include this section if we have meaningful Garmin data
+  const hasGarminMetrics = garminActivity && (
+    garminActivity.averageHeartRate ||
+    garminActivity.maxHeartRate ||
+    garminActivity.averageCadence ||
+    garminActivity.averageStrideLength ||
+    garminActivity.groundContactTime ||
+    garminActivity.verticalOscillation ||
+    garminActivity.verticalRatio ||
+    garminActivity.averagePower ||
+    garminActivity.aerobicTrainingEffect ||
+    garminActivity.anaerobicTrainingEffect ||
+    garminActivity.vo2Max ||
+    garminActivity.recoveryTime ||
+    garminActivity.activeKilocalories
+  );
+  
+  if (hasGarminMetrics) {
     prompt += `
 ## GARMIN ACTIVITY METRICS:
 `;
@@ -2875,12 +2941,24 @@ Acknowledge how weather conditions impacted performance in your analysis.
   if (previousRuns && previousRuns.length > 0) {
     prompt += `
 ## RECENT RUN HISTORY (last ${previousRuns.length} runs):
+Use this to identify patterns in their running - pace trends, consistency, pacing strategy, heart rate patterns, etc.
 `;
     previousRuns.slice(0, 5).forEach((run, i) => {
       prompt += `${i + 1}. ${run.distance?.toFixed(1) || '?'}km at ${run.avgPace || 'N/A'}/km`;
       if (run.avgHeartRate) prompt += `, ${run.avgHeartRate}bpm`;
+      if (run.wasChallenging) prompt += ` [challenging]`;
+      if (run.wasEasy) prompt += ` [easy]`;
       prompt += '\n';
     });
+    prompt += `
+PATTERN ANALYSIS GUIDANCE:
+- Are they getting faster? Slower? Maintaining?
+- Is their pace consistent or variable across runs?
+- How do they handle different distances?
+- Are there patterns in when they struggle?
+- How does their heart rate respond to effort?
+- Any improvements since previous weeks?
+`;
   }
 
   // Add runner-confirmed struggle points (dismissed ones already excluded by the server)
@@ -2912,35 +2990,97 @@ These are real pace drops the runner confirmed as genuine difficulties — not s
 Take these notes into account when assessing performance and writing your summary — the runner may have context about conditions, how they felt, or external factors that the data alone can't show.\n`;
   }
 
-  prompt += `
-## ANALYSIS REQUIRED:
-Based on ALL the data above, provide a comprehensive JSON analysis with these fields:
+  // Build dynamic JSON schema based on available data
+  let analysisSchema = `## ANALYSIS REQUIRED:
+Based on ALL the data above, provide a comprehensive JSON coaching analysis. Always include:
 {
-  "summary": "2-3 sentence personalized summary of the run",
-  "performanceScore": <1-100 based on effort, conditions, and wellness>,
-  "highlights": ["3-5 positive aspects of the run"],
-  "struggles": ["any challenges or areas of concern"],
-  "personalBests": ["any notable achievements or improvements"],
-  "improvementTips": ["3-4 specific, actionable tips for next time"],
-  "trainingLoadAssessment": "Assessment of training stimulus based on training effect",
-  "recoveryAdvice": "Specific recovery recommendations based on wellness and effort",
-  "nextRunSuggestion": "What type of run to do next based on recovery needs",
-  "wellnessImpact": "How their wellness state affected performance",
-  "technicalAnalysis": {
-    "paceAnalysis": "Pace consistency and efficiency analysis",
-    "heartRateAnalysis": "HR zones and cardiovascular response",
-    "cadenceAnalysis": "Step rate assessment",
-    "runningDynamics": "Assessment of stride, ground contact, oscillation",
-    "elevationPerformance": "How they handled hills"
+  "summary": "2-3 sentence personalized summary of the run - speak directly to them ('you')",
+  "performanceScore": <1-100>,
+  "performanceBreakdown": {
+    "executionScore": <1-100: Did they follow the plan?>,
+    "effortScore": <1-100: How hard did they push relative to what was prescribed?>,
+    "consistencyScore": <1-100: How steady was pace/effort?>
   },
+  "highlights": ["3-5 specific positive aspects of this run"],
+  "struggles": ["Real challenges or areas to improve"],
+  "personalBests": ["Any notable achievements or PRs"],
+  "improvementTips": ["3-4 specific, actionable tips for similar workouts"],
+  "trainingLoadAssessment": "Did this build fitness, maintain, or aid recovery?",
+  "recoveryAdvice": "Specific recovery recommendations based on effort and data",
+  "coachMotivationalMessage": "Brief, personal motivation or recognition of their effort",
+  "nextRunSuggestion": "Specific type of run to do next (e.g., 'Easy 5km recovery run tomorrow' or 'Rest day - your body needs it')",
+  
+  "runPatternAnalysis": "Patterns you notice in how they run (negative splits, fade, consistent, etc.) based on this run and recent history",
+  "comparisonToPreviousRuns": "How this run compares to their recent form (faster, slower, more consistent, harder effort, etc.)",
+  "progressionTrend": "Are they improving? What's the trajectory? (E.g., 'Pace improving weekly' or 'Consistency improving across distance')",
+  
+  "pacingStrategy": {
+    "assessment": "Was the pacing smart for this workout type?",
+    "whatWentWell": "Which pacing decisions worked well",
+    "whatToAdjust": "Specific pacing changes for next similar workout"
+  },
+  
+  "fitnessContext": {
+    "whatThisRunMeans": "What this effort tells us about their fitness progression",
+    "sequenceInPlan": "How this fits in their overall training plan or week",
+    "adaptationSignals": "Signs they're adapting well or need modification"
+  },
+  "mentalGame": {
+    "effortQuality": "How hard did they really push vs what was prescribed?",
+    "paceVariability": "Why did pace change? Fatigue, terrain, pacing strategy?",
+    "coachingForNextTime": "Mental strategies or focus points for similar workouts"
+  },
+  "strugglePointsAnalysis": {
+    "likelyReasons": "Why did the struggles happen? (fatigue, pacing, terrain, fitness gap?)",
+    "preventionStrategy": "How to avoid or manage these in future runs"
+  },
+  "nextWorkoutCoaching": {
+    "recommendation": "Specific type and intensity (e.g., '5km easy Z1 run')",
+    "reasonWhy": "Why this is the right next step for their recovery/progression",
+    "focusPoints": ["What to emphasize or monitor in the next run"]
+  }``;
+
+  // Only include technical analysis if we have relevant Garmin data
+  if (hasGarminMetrics) {
+    analysisSchema += `,
+  "technicalAnalysis": {
+    "paceAnalysis": "Pace consistency, splits, efficiency - use actual data",
+    "heartRateAnalysis": "HR zones, cardiovascular response, zones used",
+    "cadenceAnalysis": "Step rate assessment and efficiency",
+    "runningDynamics": "Stride, ground contact, oscillation if available",
+    "elevationPerformance": "How they handled hills/elevation"
+  },
+  "trainingLoadAssessment": "Training stimulus (aerobic/anaerobic effect) and what it means",
   "garminInsights": {
-    "trainingEffect": "Interpretation of aerobic/anaerobic training effect",
-    "vo2MaxTrend": "VO2 max context and what it means",
-    "recoveryTime": "Why recovery time is what it is"
+    "trainingEffect": "Interpretation of aerobic/anaerobic training effect scores",
+    "vo2MaxTrend": "VO2 max context and what it means for their fitness",
+    "recoveryTime": "Recovery recommendation and why it's realistic"
+  }`;
+  } else {
+    analysisSchema += `,
+  "trainingLoadAssessment": "Assessment of training load and stimulus (based on pace, effort, duration)"`;
   }
+
+  // Include wellness impact only if we have wellness data
+  if (wellness) {
+    analysisSchema += `,
+  "wellnessImpact": "How their wellness state (sleep, stress, battery, HRV) affected performance today"`;
+  }
+
+  analysisSchema += `
 }
 
-Be specific, use the actual numbers from the data, and provide actionable insights.`;
+CRITICAL COACHING INSTRUCTIONS:
+- Speak directly to the runner using "you" and "your"
+- Always reference actual numbers from their data
+- Compare this run to their recent history when relevant
+- Focus on ACTIONABLE guidance they can use immediately
+- Explain the "why" behind your observations
+- Balance honesty with encouragement
+- Be specific - avoid generic advice
+- Make it feel like a personal coaching conversation, not a data report`;
+  
+  prompt += analysisSchema;
 
   try {
     const completion = await openai.chat.completions.create({
@@ -2948,18 +3088,34 @@ Be specific, use the actual numbers from the data, and provide actionable insigh
       messages: [
         { 
           role: "system", 
-          content: `You are ${coachName}, an expert running coach with deep knowledge of exercise physiology and Garmin metrics. Provide detailed, personalized analysis using all available biometric data. Respond only with valid JSON. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}` 
+          content: `You are ${coachName}, an expert running coach with deep knowledge of exercise physiology, training methodology, and athlete psychology. 
+
+YOUR COACHING PHILOSOPHY:
+- Interpret data in the context of their training journey, not just report numbers
+- Identify patterns and trends that reveal their running style, strengths, and areas to develop
+- Balance honest feedback with motivation and recognition of effort
+- Provide specific, actionable guidance they can use immediately
+- Explain the "why" behind your recommendations - help them understand their body and fitness
+
+RESPONSE STYLE:
+- Write conversationally, as if you're having a coaching session with them
+- Use their actual performance data to back up your observations
+- Reference their previous runs when analyzing patterns
+- Make personalized recommendations based on their fitness level and goals
+
+Respond only with valid JSON. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}`
         },
         { role: "user", content: prompt }
       ],
-      max_tokens: 1500,
+      max_tokens: 2500,
       temperature: 0.7,
     });
 
     const content = completion.choices[0].message.content || "{}";
     const parsed = JSON.parse(content.replace(/```json\n?|\n?```/g, ''));
     
-    return {
+    // Build response with only relevant fields based on available data
+    const response: any = {
       summary: parsed.summary || "Great run today!",
       performanceScore: parsed.performanceScore || 75,
       highlights: parsed.highlights || ["Completed your run!"],
@@ -2969,24 +3125,105 @@ Be specific, use the actual numbers from the data, and provide actionable insigh
       trainingLoadAssessment: parsed.trainingLoadAssessment || "Moderate training load.",
       recoveryAdvice: parsed.recoveryAdvice || "Get adequate rest and hydration.",
       nextRunSuggestion: parsed.nextRunSuggestion || "An easy recovery run in 24-48 hours.",
-      wellnessImpact: parsed.wellnessImpact || "Your wellness state supported this effort.",
-      weatherImpactAnalysis: weatherImpactAnalysis || parsed.weatherImpactAnalysis || undefined,
-      technicalAnalysis: {
+    };
+
+    // Add performance breakdown if provided
+    if (parsed.performanceBreakdown) {
+      response.performanceBreakdown = {
+        executionScore: parsed.performanceBreakdown.executionScore || parsed.performanceScore || 75,
+        effortScore: parsed.performanceBreakdown.effortScore || parsed.performanceScore || 75,
+        consistencyScore: parsed.performanceBreakdown.consistencyScore || parsed.performanceScore || 75,
+      };
+    }
+
+    // Add professional coaching fields if provided
+    if (parsed.coachMotivationalMessage) {
+      response.coachMotivationalMessage = parsed.coachMotivationalMessage;
+    }
+
+    if (parsed.comparisonToPreviousRuns) {
+      response.comparisonToPreviousRuns = parsed.comparisonToPreviousRuns;
+    }
+
+    if (parsed.progressionTrend) {
+      response.progressionTrend = parsed.progressionTrend;
+    }
+
+    if (parsed.runPatternAnalysis) {
+      response.runPatternAnalysis = parsed.runPatternAnalysis;
+    }
+
+    if (parsed.pacingStrategy) {
+      response.pacingStrategy = {
+        assessment: parsed.pacingStrategy.assessment || "",
+        whatWentWell: parsed.pacingStrategy.whatWentWell || "",
+        whatToAdjust: parsed.pacingStrategy.whatToAdjust || "",
+      };
+    }
+
+    if (parsed.fitnessContext) {
+      response.fitnessContext = {
+        whatThisRunMeans: parsed.fitnessContext.whatThisRunMeans || "",
+        sequenceInPlan: parsed.fitnessContext.sequenceInPlan || "",
+        adaptationSignals: parsed.fitnessContext.adaptationSignals || "",
+      };
+    }
+
+    if (parsed.mentalGame) {
+      response.mentalGame = {
+        effortQuality: parsed.mentalGame.effortQuality || "",
+        paceVariability: parsed.mentalGame.paceVariability || "",
+        coachingForNextTime: parsed.mentalGame.coachingForNextTime || "",
+      };
+    }
+
+    if (parsed.strugglePointsAnalysis) {
+      response.strugglePointsAnalysis = {
+        identified: parsed.strugglePointsAnalysis.identified || [],
+        likelyReasons: parsed.strugglePointsAnalysis.likelyReasons || "",
+        preventionStrategy: parsed.strugglePointsAnalysis.preventionStrategy || "",
+      };
+    }
+
+    if (parsed.nextWorkoutCoaching) {
+      response.nextWorkoutCoaching = {
+        recommendation: parsed.nextWorkoutCoaching.recommendation || "",
+        reasonWhy: parsed.nextWorkoutCoaching.reasonWhy || "",
+        focusPoints: parsed.nextWorkoutCoaching.focusPoints || [],
+      };
+    }
+
+    // Include wellness impact only if we have wellness data
+    if (wellness) {
+      response.wellnessImpact = parsed.wellnessImpact || "Your wellness state supported this effort.";
+    }
+
+    // Include weather analysis if available
+    if (weatherImpactAnalysis) {
+      response.weatherImpactAnalysis = weatherImpactAnalysis;
+    }
+
+    // Include technical analysis and Garmin insights only if we have Garmin metrics
+    if (hasGarminMetrics) {
+      response.technicalAnalysis = {
         paceAnalysis: parsed.technicalAnalysis?.paceAnalysis || "Pace data not available.",
         heartRateAnalysis: parsed.technicalAnalysis?.heartRateAnalysis || "Heart rate data not available.",
         cadenceAnalysis: parsed.technicalAnalysis?.cadenceAnalysis || "Cadence data not available.",
         runningDynamics: parsed.technicalAnalysis?.runningDynamics || "Running dynamics not available.",
         elevationPerformance: parsed.technicalAnalysis?.elevationPerformance || "Elevation data not available.",
-      },
-      garminInsights: {
+      };
+      response.garminInsights = {
         trainingEffect: parsed.garminInsights?.trainingEffect || "Training effect data not available.",
         vo2MaxTrend: parsed.garminInsights?.vo2MaxTrend || "VO2 max data not available.",
         recoveryTime: parsed.garminInsights?.recoveryTime || "Recovery time estimate not available.",
-      },
-    };
+      };
+    }
+
+    return response;
   } catch (error) {
     console.error("Error generating comprehensive run analysis:", error);
-    return {
+    // Build error response with only relevant fields
+    const errorResponse: any = {
       summary: "Great effort on your run today!",
       performanceScore: 70,
       highlights: ["Completed your run", "Stayed consistent"],
@@ -2996,21 +3233,35 @@ Be specific, use the actual numbers from the data, and provide actionable insigh
       trainingLoadAssessment: "Training load recorded.",
       recoveryAdvice: "Rest well and stay hydrated.",
       nextRunSuggestion: "Take a rest day or do an easy run.",
-      wellnessImpact: "Unable to assess wellness impact.",
-      weatherImpactAnalysis: weatherImpactAnalysis || undefined,
-      technicalAnalysis: {
+    };
+
+    // Include wellness impact only if we have wellness data
+    if (wellness) {
+      errorResponse.wellnessImpact = "Unable to assess wellness impact.";
+    }
+
+    // Include weather analysis if available
+    if (weatherImpactAnalysis) {
+      errorResponse.weatherImpactAnalysis = weatherImpactAnalysis;
+    }
+
+    // Include technical analysis and Garmin insights only if we have Garmin metrics
+    if (hasGarminMetrics) {
+      errorResponse.technicalAnalysis = {
         paceAnalysis: "Analysis unavailable.",
         heartRateAnalysis: "Analysis unavailable.",
         cadenceAnalysis: "Analysis unavailable.",
         runningDynamics: "Analysis unavailable.",
         elevationPerformance: "Analysis unavailable.",
-      },
-      garminInsights: {
+      };
+      errorResponse.garminInsights = {
         trainingEffect: "Data unavailable.",
         vo2MaxTrend: "Data unavailable.",
         recoveryTime: "Data unavailable.",
-      },
-    };
+      };
+    }
+
+    return errorResponse;
   }
 }
 

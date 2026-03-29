@@ -1495,6 +1495,10 @@ export const userStats = pgTable("user_stats", {
   pb1kRunId:            varchar("pb_1k_run_id"),
   pb1kDate:             timestamp("pb_1k_date"),
 
+  pbMileDurationMs:     integer("pb_mile_duration_ms"),
+  pbMileRunId:          varchar("pb_mile_run_id"),
+  pbMileDate:           timestamp("pb_mile_date"),
+
   pb5kDurationMs:       integer("pb_5k_duration_ms"),
   pb5kRunId:            varchar("pb_5k_run_id"),
   pb5kDate:             timestamp("pb_5k_date"),
@@ -1510,6 +1514,12 @@ export const userStats = pgTable("user_stats", {
   pbMarathonDurationMs: integer("pb_marathon_duration_ms"),
   pbMarathonRunId:      varchar("pb_marathon_run_id"),
   pbMarathonDate:       timestamp("pb_marathon_date"),
+
+  // ── All-time achievements ────────────────────────────────────────
+  longestRunTimeSec:    integer("longest_run_time_sec"),
+  highestElevationM:    real("highest_elevation_m"),
+  mostConsecutiveRuns:  integer("most_consecutive_runs").default(0),
+  goalsAchieved:        integer("goals_achieved").default(0),
 });
 
 export type UserStats = typeof userStats.$inferSelect;
