@@ -237,7 +237,7 @@ export async function getPeriodStatistics(userId: string, days: number) {
 
     return {
       totalRuns,
-      totalDistance:       Math.round(Number(stats.totalDistanceKm ?? 0) * 10) / 10,
+      totalDistance:       Math.round((Number(stats.totalDistanceKm ?? 0) / 1000) * 10) / 10,
       totalDuration:       totalDurationSec * 1000,  // ms for client compatibility
       totalElevationGain:  Math.round(Number(stats.totalElevationGain ?? 0)),
       averagePace:         formatPace(avgPace),
@@ -246,7 +246,7 @@ export async function getPeriodStatistics(userId: string, days: number) {
       averageRunDuration:  Math.round(totalDurationSec / totalRuns) * 1000,  // ms
       fastestRun:          fastestPace > 0 ? Math.round((1 / fastestPace) * 60 * 10) / 10 : 0,
       slowestRun:          slowestPace > 0 ? Math.round((1 / slowestPace) * 60 * 10) / 10 : 0,
-      longestRun:          Math.round(Number(stats.longestRunKm ?? 0) * 10) / 10,
+      longestRun:          Math.round((Number(stats.longestRunKm ?? 0) / 1000) * 10) / 10,
       totalCalories,
       averageCalories:     Math.round(totalCalories / totalRuns),
       consistencyScore,
@@ -398,11 +398,11 @@ async function getAllTimeStatsLive(userId: string) {
 
     return {
       totalRuns,
-      totalDistanceKm:     Math.round(Number(stats.totalDistanceKm ?? 0) * 10) / 10,
+      totalDistanceKm:     Math.round((Number(stats.totalDistanceKm ?? 0) / 1000) * 10) / 10,
       totalHours:          Math.round((Number(stats.totalDurationSec ?? 0) / 3600) * 10) / 10,
       totalCalories:       Number(stats.totalCalories ?? 0),
       mostConsecutiveRuns: 0,  // To be calculated by stats service
-      longestRunKm:        Math.round(Number(stats.longestRunKm ?? 0) * 10) / 10,
+      longestRunKm:        Math.round((Number(stats.longestRunKm ?? 0) / 1000) * 10) / 10,
       longestRunTimeSec,
       highestElevationM,
       goalsAchieved:       0,  // To be calculated by goals service
