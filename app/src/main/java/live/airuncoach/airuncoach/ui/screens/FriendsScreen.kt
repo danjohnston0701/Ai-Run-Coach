@@ -13,7 +13,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -426,6 +428,27 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
                 }
             }
 
+            // Invite Friend Section
+            item {
+                Spacer(modifier = Modifier.height(Spacing.md))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Invite Friends",
+                        style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                }
+            }
+
+            item {
+                FriendInviteLinkCard(context = LocalContext.current)
+                Spacer(modifier = Modifier.height(Spacing.lg))
+            }
+
             // My Friends Section
             item {
                 Spacer(modifier = Modifier.height(Spacing.md))
@@ -774,4 +797,144 @@ fun extractUserIdFromInviteLink(link: String): String? {
     // Match /invite/<userId> segment
     val regex = Regex("""/invite/([a-zA-Z0-9\-]+)""")
     return regex.find(trimmed)?.groupValues?.getOrNull(1)?.takeIf { it.length >= 8 }
+}
+
+// ── Friend Invite Link Card ──────────────────────────────────────────────────
+
+private const val INVITE_BASE_URL = "https://airuncoach.live/invite"
+
+@Composable
+fun FriendInviteLinkCard(context: android.content.Context) {
+    // Get current user ID from session/shared prefs
+    val sharedPrefs = context.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
+    val userJson = sharedPrefs.getString("user", null)
+    val gson = com.google.gson.Gson()
+    val user = try {
+        if (userJson != null) gson.fromJson(userJson, live.airuncoach.airuncoach.domain.model.User::class.java) else null
+    } catch (@Suppress("UNUSED_VARIABLE") e: Exception) {
+        null
+    }
+    
+    val userId = user?.id ?: return
+    val inviteUrl = "$INVITE_BASE_URL/$userId"
+    var copied by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
+    ) {
+        Column(modifier = Modifier.padding(Spacing.lg)) {
+            // Header row
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Colors.primary.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Share,
+                        contentDescription = null,
+                        tint = Colors.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Column {
+                    Text(
+                        text = "Invite a Friend",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                    Text(
+                        text = "Share your link so friends can add you",
+                        style = AppTextStyles.caption,
+                        color = Colors.textMuted
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(Spacing.md))
+
+            // Link pill
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Colors.backgroundRoot)
+                    .padding(horizontal = Spacing.md, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = inviteUrl,
+                    style = AppTextStyles.caption.copy(fontWeight = FontWeight.Medium),
+                    color = Colors.textSecondary,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(Spacing.md))
+
+            // Action buttons
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                // Copy button
+                OutlinedButton(
+                    onClick = {
+                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Friend invite link", inviteUrl))
+                        copied = true
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = if (copied) Colors.success else Colors.primary),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(
+                        brush = androidx.compose.ui.graphics.SolidColor(if (copied) Colors.success else Colors.primary)
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.ContentCopy,
+                        contentDescription = "Copy",
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(if (copied) "Copied!" else "Copy Link", style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold))
+                }
+
+                // Share button
+                Button(
+                    onClick = {
+                        val sendIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(android.content.Intent.EXTRA_SUBJECT, "Join me on AI Run Coach!")
+                            putExtra(
+                                android.content.Intent.EXTRA_TEXT,
+                                "Hey! I'm using AI Run Coach to track my runs and get AI coaching. " +
+                                "Click this link to add me as a friend: $inviteUrl"
+                            )
+                        }
+                        context.startActivity(android.content.Intent.createChooser(sendIntent, "Share via"))
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Share,
+                        contentDescription = "Share",
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Share", style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold))
+                }
+            }
+        }
+    }
 }
