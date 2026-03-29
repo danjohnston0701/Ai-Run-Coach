@@ -205,10 +205,16 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
     fun cancelSentRequest(requestId: String) {
         viewModelScope.launch {
             try {
+                Log.d("FriendsViewModel", "cancelSentRequest called with requestId: $requestId")
+                
                 // If we only have the placeholder "pending" id (optimistic, real id not yet loaded)
                 // skip the API call and just refresh to get the real state from the server
                 if (requestId != "pending") {
+                    Log.d("FriendsViewModel", "Calling withdrawFriendRequest API for requestId: $requestId")
                     apiService.withdrawFriendRequest(requestId)
+                    Log.d("FriendsViewModel", "withdrawFriendRequest API call succeeded")
+                } else {
+                    Log.d("FriendsViewModel", "Skipping API call for placeholder requestId")
                 }
 
                 // Optimistically flip the matching search card back to "Add Friend"
@@ -223,9 +229,11 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
                     _searchState.value = SearchUiState.Success(updated)
                 }
 
+                Log.d("FriendsViewModel", "Refreshing pending requests...")
                 loadPendingRequests()
                 val query = lastSearchQuery.value
                 if (query.isNotBlank()) searchUsers(query)
+                Log.d("FriendsViewModel", "Refresh complete")
             } catch (e: Exception) {
                 Log.e("FriendsViewModel", "Failed to withdraw friend request", e)
             }
