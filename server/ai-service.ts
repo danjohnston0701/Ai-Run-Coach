@@ -3038,7 +3038,7 @@ Based on ALL the data above, provide a comprehensive JSON coaching analysis. Alw
     "recommendation": "Specific type and intensity (e.g., '5km easy Z1 run')",
     "reasonWhy": "Why this is the right next step for their recovery/progression",
     "focusPoints": ["What to emphasize or monitor in the next run"]
-  }``;
+  }`;
 
   // Only include technical analysis if we have relevant Garmin data
   if (hasGarminMetrics) {
