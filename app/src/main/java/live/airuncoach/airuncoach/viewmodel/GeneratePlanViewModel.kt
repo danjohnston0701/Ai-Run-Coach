@@ -291,6 +291,14 @@ class GeneratePlanViewModel @Inject constructor(
                 )
                 val response = apiService.generateTrainingPlan(request)
                 _generateState.value = GeneratePlanState.Success(response.planId)
+            } catch (e: retrofit2.HttpException) {
+                val friendlyMessage = when (e.code()) {
+                    409 -> "An active Coaching Plan already exists. Unable to generate a duplicate plan."
+                    429 -> "A plan is already being generated. Please wait for it to complete."
+                    else -> "Failed to generate plan (${e.code()})"
+                }
+                Log.e("GeneratePlanVM", "HTTP ${e.code()} generating plan", e)
+                _generateState.value = GeneratePlanState.Error(friendlyMessage)
             } catch (e: Exception) {
                 Log.e("GeneratePlanVM", "Failed to generate plan: ${e.message}", e)
                 _generateState.value = GeneratePlanState.Error(e.message ?: "Failed to generate plan")
