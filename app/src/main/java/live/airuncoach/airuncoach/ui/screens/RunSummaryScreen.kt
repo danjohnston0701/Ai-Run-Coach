@@ -94,6 +94,7 @@ import live.airuncoach.airuncoach.network.model.BasicRunInsights
 import live.airuncoach.airuncoach.network.model.ComprehensiveRunAnalysis
 import live.airuncoach.airuncoach.network.model.GarminInsights
 import live.airuncoach.airuncoach.network.model.TechnicalAnalysis
+import live.airuncoach.airuncoach.ui.components.CoachingPlanBadge
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
@@ -591,6 +592,17 @@ private fun AiInsightsTabContent(
                 lastRunForDelta = lastRunForDelta,
                 onShare = onShareCard
             )
+        }
+
+        // Coaching Plan Badge — show if this run is part of a coaching plan
+        if (run.linkedPlanId != null) {
+            item {
+                CoachingPlanBadge(
+                    workoutType = run.workoutType,
+                    planProgressWeek = run.planProgressWeek,
+                    totalWeeks = run.planProgressWeeks
+                )
+            }
         }
 
         // Create Share Image button
