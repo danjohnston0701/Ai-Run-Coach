@@ -56,6 +56,13 @@ class TrainingPlanViewModel @Inject constructor(
     private val _actionError = MutableStateFlow<String?>(null)
     val actionError: StateFlow<String?> = _actionError.asStateFlow()
 
+    // Emits true when a delete/abandon completes successfully — the screen observes
+    // this to trigger onNavigateBack() only after the list has been refreshed.
+    private val _planActionSuccess = MutableStateFlow(false)
+    val planActionSuccess: StateFlow<Boolean> = _planActionSuccess.asStateFlow()
+
+    fun clearPlanActionSuccess() { _planActionSuccess.value = false }
+
     // Tab selection: 0=Active, 1=Completed, 2=Abandoned
     // Tab selection: 0=Active, 1=Completed, 2=Abandoned
     private val _selectedTab = MutableStateFlow(0)
@@ -258,9 +265,9 @@ class TrainingPlanViewModel @Inject constructor(
             _actionLoading.value = true
             try {
                 apiService.updatePlanStatus(planId, mapOf("status" to "abandoned"))
-                // Reload the current tab to refresh the list
-                val statusMap = mapOf(0 to "active", 1 to "completed", 2 to "abandoned")
-                loadUserPlans(statusMap[_selectedTab.value] ?: "active")
+                // Reload the active-plans list so the caller navigates back to a fresh list
+                loadUserPlansSync("active")
+                _planActionSuccess.value = true
             } catch (e: Exception) {
                 _actionError.value = "Failed to abandon plan: ${e.message}"
             } finally {
@@ -274,14 +281,27 @@ class TrainingPlanViewModel @Inject constructor(
             _actionLoading.value = true
             try {
                 apiService.deleteTrainingPlan(planId)
-                // Reload the current tab to refresh the list
-                val statusMap = mapOf(0 to "active", 1 to "completed", 2 to "abandoned")
-                loadUserPlans(statusMap[_selectedTab.value] ?: "active")
+                // Reload the active-plans list so the caller navigates back to a fresh list
+                loadUserPlansSync("active")
+                _planActionSuccess.value = true
             } catch (e: Exception) {
                 _actionError.value = "Failed to delete plan: ${e.message}"
             } finally {
                 _actionLoading.value = false
             }
+        }
+    }
+
+    /** Loads plans and suspends until the result is stored — used internally so callers
+     *  can `await` the refresh before signalling success. */
+    private suspend fun loadUserPlansSync(status: String) {
+        try {
+            val userId = sessionManager.getUserId() ?: return
+            val plans = apiService.getUserTrainingPlans(userId, status)
+            _plansListState.value = if (plans.isEmpty()) PlansListState.Empty
+                                    else PlansListState.Success(plans)
+        } catch (e: Exception) {
+            Log.e("TrainingPlanVM", "Error reloading plans: ${e.message}", e)
         }
     }
 

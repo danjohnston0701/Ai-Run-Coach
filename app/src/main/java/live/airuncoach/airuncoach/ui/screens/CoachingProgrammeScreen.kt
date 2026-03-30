@@ -311,12 +311,21 @@ fun TrainingPlanDashboardScreen(
     val actionLoading by viewModel.actionLoading.collectAsState()
     val actionError by viewModel.actionError.collectAsState()
     val pendingAdaptationsCount by viewModel.pendingAdaptationsCount.collectAsState()
+    val planActionSuccess by viewModel.planActionSuccess.collectAsState()
 
     var showAbandonDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showAddInjuryDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(planId) { viewModel.loadPlanDetail(planId) }
+
+    // Navigate back only after the API call has completed and the list has been refreshed
+    LaunchedEffect(planActionSuccess) {
+        if (planActionSuccess) {
+            viewModel.clearPlanActionSuccess()
+            onNavigateBack()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -394,9 +403,9 @@ fun TrainingPlanDashboardScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.abandonPlan(planId)
                         showAbandonDialog = false
-                        onNavigateBack()
+                        viewModel.abandonPlan(planId)
+                        // onNavigateBack() is called via LaunchedEffect(planActionSuccess)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
                     enabled = !actionLoading
@@ -429,9 +438,9 @@ fun TrainingPlanDashboardScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.deletePlan(planId)
                         showDeleteDialog = false
-                        onNavigateBack()
+                        viewModel.deletePlan(planId)
+                        // onNavigateBack() is called via LaunchedEffect(planActionSuccess)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Colors.error),
                     enabled = !actionLoading
