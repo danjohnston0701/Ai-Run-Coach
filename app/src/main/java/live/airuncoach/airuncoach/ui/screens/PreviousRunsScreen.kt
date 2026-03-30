@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -133,53 +134,12 @@ fun PreviousRunsScreen(
                     color = Colors.error
                 )
             }
-        } else if (runs.isEmpty() && error == null) {
-            // Empty state - no runs to show
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.DirectionsRun,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = Colors.textMuted
-                    )
-                    Spacer(modifier = Modifier.height(Spacing.md))
-                    Text(
-                        text = "No runs yet",
-                        style = AppTextStyles.h2,
-                        color = Colors.textSecondary
-                    )
-                    Spacer(modifier = Modifier.height(Spacing.sm))
-                    Text(
-                        text = "Complete your first run to see it here!",
-                        style = AppTextStyles.body,
-                        color = Colors.textMuted,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(Spacing.lg))
-                    TextButton(onClick = { viewModel.fetchRuns() }) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Refresh")
-                    }
-                }
-            }
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = Spacing.lg, vertical = Spacing.md)
             ) {
-                // Time Filter Dropdown
+                // Time Filter Dropdown — always visible
                 item {
                     TimeFilterDropdown(
                         selectedFilter = selectedFilter,
@@ -187,14 +147,14 @@ fun PreviousRunsScreen(
                     )
                     Spacer(modifier = Modifier.height(Spacing.lg))
                 }
-                
-                // Summary Stats
+
+                // Summary Stats — always visible (shows 0s when no runs in period)
                 item {
                     SummaryStatsCard(runs = runs)
                     Spacer(modifier = Modifier.height(Spacing.md))
                 }
-                
-                // Weather Impact Analysis - always show card (will display "not enough data" message if needed)
+
+                // Weather Impact Analysis — always show if data available
                 item {
                     weatherImpact?.let { impact ->
                         WeatherImpactAnalysisCard(
@@ -205,11 +165,44 @@ fun PreviousRunsScreen(
                         Spacer(modifier = Modifier.height(Spacing.lg))
                     }
                 }
-                
-                // Run List
-                items(runs) { run ->
-                    RunListItem(run = run, onClick = { onNavigateToRunSummary(run.id) })
-                    Spacer(modifier = Modifier.height(Spacing.md))
+
+                if (runs.isEmpty()) {
+                    // Inline empty state — filter/stats/weather still visible above
+                    item {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 40.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.DirectionsRun,
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp),
+                                tint = Colors.textMuted
+                            )
+                            Spacer(modifier = Modifier.height(Spacing.md))
+                            Text(
+                                text = "No runs in this period",
+                                style = AppTextStyles.h3,
+                                color = Colors.textSecondary,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(Spacing.sm))
+                            Text(
+                                text = "Try a longer date range to see your runs",
+                                style = AppTextStyles.body,
+                                color = Colors.textMuted,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                } else {
+                    // Run List
+                    items(runs) { run ->
+                        RunListItem(run = run, onClick = { onNavigateToRunSummary(run.id) })
+                        Spacer(modifier = Modifier.height(Spacing.md))
+                    }
                 }
             }
         }
