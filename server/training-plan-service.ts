@@ -388,7 +388,7 @@ ${regularSessions.map(s => {
   const countNote = s.countsTowardWeeklyTotal
     ? "counts towards weekly session total"
     : "EXTRA – does NOT count towards weekly session total";
-  return `- ${s.name}: every ${dayNames[s.dayOfWeek] ?? `Day ${s.dayOfWeek}`} at ${time}, ${s.distanceKm}km (${countNote})`;
+  return `- ${s.name}: day ${s.dayOfWeek} (${dayNames[s.dayOfWeek]}) at ${time}, ${s.distanceKm}km (${countNote})`;
 }).join("\n")}
 
 IMPORTANT scheduling rules for regular sessions:
