@@ -519,18 +519,22 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             }
             // ── Coaching Programme routes ───────────────────────────────────────
             composable(Screen.AiPlans.route) {
+                val currentBackStack by navController.currentBackStackEntryAsState()
                 CoachingProgrammeScreen(
                     onNavigateBack = { navController.popBackStack() },
                     onCreatePlan = { navController.navigate("generate_plan") },
-                    onOpenPlan = { planId -> navController.navigate("training_plan/$planId") }
+                    onOpenPlan = { planId -> navController.navigate("training_plan/$planId") },
+                    isActiveDestination = currentBackStack?.destination?.route == Screen.AiPlans.route
                 )
             }
             // Keep legacy route for backwards compatibility with ProfileScreen
             composable("coaching_programme") {
+                val currentBackStack by navController.currentBackStackEntryAsState()
                 CoachingProgrammeScreen(
                     onNavigateBack = { navController.popBackStack() },
                     onCreatePlan = { navController.navigate("generate_plan") },
-                    onOpenPlan = { planId -> navController.navigate("training_plan/$planId") }
+                    onOpenPlan = { planId -> navController.navigate("training_plan/$planId") },
+                    isActiveDestination = currentBackStack?.destination?.route == "coaching_programme"
                 )
             }
             composable("generate_plan") {
