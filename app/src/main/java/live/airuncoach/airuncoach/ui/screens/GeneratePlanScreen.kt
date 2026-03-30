@@ -709,20 +709,29 @@ fun GeneratingScreen() {
         label = "alpha"
     )
 
-    // Cycle through progress messages to keep the user engaged during the ~60s wait
+    // Cycle through progress messages to keep the user engaged during the ~3-5 min wait
     val steps = listOf(
         "Analysing your fitness level...",
-        "Reviewing your recent runs...",
+        "Reviewing your training history...",
         "Calculating optimal weekly load...",
+        "Designing your periodisation structure...",
         "Building your week-by-week schedule...",
         "Personalising training intensities...",
+        "Calibrating easy & tempo paces...",
+        "Scheduling long runs and recovery weeks...",
         "Adding rest & recovery days...",
-        "Finalising your coaching plan..."
+        "Aligning workouts with your race date...",
+        "Fine-tuning session durations...",
+        "Balancing stress and adaptation...",
+        "Applying coach intelligence...",
+        "Reviewing for injury risk...",
+        "Finalising your coaching plan...",
+        "Almost there — putting the finishing touches on..."
     )
     var stepIndex by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
         while (true) {
-            kotlinx.coroutines.delay(7_000L)
+            kotlinx.coroutines.delay(18_000L)  // 18s per step × 16 steps ≈ 288s (4.8 min)
             stepIndex = (stepIndex + 1) % steps.size
         }
     }
@@ -768,7 +777,7 @@ fun GeneratingScreen() {
                 )
             }
             Text(
-                "This usually takes around 30–60 seconds.\nPlease keep the app open.",
+                "This usually takes 3–5 minutes.\nPlease keep the app open.",
                 style = AppTextStyles.small,
                 color = Colors.textSecondary.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center
