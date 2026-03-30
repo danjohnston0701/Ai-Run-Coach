@@ -10383,6 +10383,23 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     try {
       const { planId } = req.params;
       const { status } = req.body as { status: 'active' | 'paused' | 'cancelled' | 'abandoned' };
+      const userId = req.user?.userId;
+
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      // Verify the plan belongs to the user
+      const plan = await db
+        .select()
+        .from(trainingPlans)
+        .where(and(eq(trainingPlans.id, planId), eq(trainingPlans.userId, userId)))
+        .limit(1);
+
+      if (plan.length === 0) {
+        return res.status(404).json({ error: "Plan not found or not authorized" });
+      }
+
       await db.update(trainingPlans).set({ status }).where(eq(trainingPlans.id, planId));
       res.json({ success: true, planId, status });
     } catch (error: any) {
@@ -10423,6 +10440,9 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
       // Delete all weekly plans
       await db.delete(weeklyPlans).where(eq(weeklyPlans.trainingPlanId, planId));
+
+      // Delete all plan adaptations (must be before deleting the training plan due to FK constraint)
+      await db.delete(planAdaptations).where(eq(planAdaptations.trainingPlanId, planId));
 
       // Finally delete the training plan itself
       await db.delete(trainingPlans).where(eq(trainingPlans.id, planId));
