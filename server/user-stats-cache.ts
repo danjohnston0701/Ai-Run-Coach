@@ -26,6 +26,7 @@ import { eq, and, gte, lte, isNotNull, count, sum, avg, max, min, sql } from 'dr
 // Distance band definitions for PB categories (in km)
 const PB_DISTANCES = [
   { key: '1k',      label: '1K',           minKm: 0.95,  maxKm: 1.1   },
+  { key: 'mile',    label: 'Mile',         minKm: 1.59,  maxKm: 1.64  },
   { key: '5k',      label: '5K',           minKm: 4.95,  maxKm: 5.1   },
   { key: '10k',     label: '10K',          minKm: 9.95,  maxKm: 10.1  },
   { key: 'half',    label: 'Half Marathon', minKm: 21.05, maxKm: 21.2  },
@@ -37,6 +38,7 @@ type PbKey = typeof PB_DISTANCES[number]['key'];
 // Map PB key → column names in user_stats
 const PB_COLUMNS: Record<PbKey, { durationCol: string; runIdCol: string; dateCol: string }> = {
   '1k':       { durationCol: 'pb1kDurationMs',       runIdCol: 'pb1kRunId',       dateCol: 'pb1kDate'       },
+  'mile':     { durationCol: 'pbMileDurationMs',     runIdCol: 'pbMileRunId',     dateCol: 'pbMileDate'     },
   '5k':       { durationCol: 'pb5kDurationMs',       runIdCol: 'pb5kRunId',       dateCol: 'pb5kDate'       },
   '10k':      { durationCol: 'pb10kDurationMs',      runIdCol: 'pb10kRunId',      dateCol: 'pb10kDate'      },
   'half':     { durationCol: 'pbHalfDurationMs',     runIdCol: 'pbHalfRunId',     dateCol: 'pbHalfDate'     },
@@ -184,6 +186,9 @@ export async function recomputeForUser(userId: string): Promise<void> {
     pb1kDurationMs:       pbUpdates['pb1kDurationMs'] as number | null,
     pb1kRunId:            pbUpdates['pb1kRunId'] as string | null,
     pb1kDate:             pbUpdates['pb1kDate'] as Date | null,
+    pbMileDurationMs:     pbUpdates['pbMileDurationMs'] as number | null,
+    pbMileRunId:          pbUpdates['pbMileRunId'] as string | null,
+    pbMileDate:           pbUpdates['pbMileDate'] as Date | null,
     pb5kDurationMs:       pbUpdates['pb5kDurationMs'] as number | null,
     pb5kRunId:            pbUpdates['pb5kRunId'] as string | null,
     pb5kDate:             pbUpdates['pb5kDate'] as Date | null,

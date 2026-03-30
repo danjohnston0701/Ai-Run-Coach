@@ -425,8 +425,8 @@ export class DatabaseStorage implements IStorage {
     // Delete in order of dependencies
     
     try {
-      // Delete route data  
-      await db.delete(routes).where(eq(routes.runId, id));
+      // Delete route data (routes are linked via sourceRunId)
+      await db.delete(routes).where(eq(routes.sourceRunId, id));
     } catch (e) {
       console.error("Error deleting routes:", e);
     }
