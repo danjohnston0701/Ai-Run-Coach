@@ -421,50 +421,37 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteRun(id: string): Promise<void> {
-    // Delete related records before deleting the run itself (due to foreign key constraints)
-    // Delete in order of dependencies
-    
+    // Use raw SQL to delete all FK-dependent records in the correct order,
+    // then delete the run itself. This handles ALL tables that reference runs.id
+    // without needing to import every table individually.
+    console.log(`[Storage] Deleting run ${id} and all related records`);
     try {
-      // Delete route data (routes are linked via sourceRunId)
-      await db.delete(routes).where(eq(routes.sourceRunId, id));
-    } catch (e) {
-      console.error("Error deleting routes:", e);
-    }
-    
-    try {
-      // Delete device data
-      await db.delete(deviceData).where(eq(deviceData.runId, id));
-    } catch (e) {
-      console.error("Error deleting device data:", e);
-    }
-    
-    try {
-      // Delete run analyses
-      await db.delete(runAnalyses).where(eq(runAnalyses.runId, id));
-    } catch (e) {
-      console.error("Error deleting run analyses:", e);
-    }
-    
-    try {
-      // Delete activity merge logs
-      await db.delete(activityMergeLog).where(eq(activityMergeLog.aiRunCoachRunId, id));
-    } catch (e) {
-      console.error("Error deleting activity merge logs:", e);
-    }
+      await db.execute(sql`
+        -- Nullable FK refs: null them out to preserve the parent rows
+        UPDATE group_run_participants   SET run_id = NULL          WHERE run_id = ${id};
+        UPDATE garmin_move_iq          SET run_id = NULL          WHERE run_id = ${id};
+        UPDATE garmin_realtime_data    SET run_id = NULL          WHERE run_id = ${id};
+        UPDATE garmin_companion_sessions SET run_id = NULL        WHERE run_id = ${id};
+        UPDATE feed_activities         SET run_id = NULL          WHERE run_id = ${id};
+        UPDATE user_achievements       SET run_id = NULL          WHERE run_id = ${id};
+        UPDATE planned_workouts        SET completed_run_id = NULL WHERE completed_run_id = ${id};
 
-    try {
-      // Delete Garmin activities linked to this run
-      await db.delete(garminActivities).where(eq(garminActivities.runId, id));
-    } catch (e) {
-      console.error("Error deleting Garmin activities:", e);
-    }
-    
-    try {
-      // Finally delete the run itself
-      const result = await db.delete(runs).where(eq(runs.id, id));
+        -- Hard deletes for rows that exist solely to describe this run
+        DELETE FROM segment_efforts      WHERE run_id = ${id};
+        DELETE FROM shared_runs          WHERE run_id = ${id};
+        DELETE FROM route_ratings        WHERE run_id = ${id};
+        DELETE FROM garmin_activities    WHERE run_id = ${id};
+        DELETE FROM activity_merge_log   WHERE ai_run_coach_run_id = ${id};
+        DELETE FROM run_analyses         WHERE run_id = ${id};
+        DELETE FROM device_data          WHERE run_id = ${id};
+        DELETE FROM routes               WHERE source_run_id = ${id};
+
+        -- Finally delete the run itself
+        DELETE FROM runs WHERE id = ${id};
+      `);
       console.log(`[Storage] Successfully deleted run ${id}`);
     } catch (e) {
-      console.error("Error deleting run:", e);
+      console.error(`[Storage] Error deleting run ${id}:`, e);
       throw new Error(`Failed to delete run: ${e}`);
     }
   }

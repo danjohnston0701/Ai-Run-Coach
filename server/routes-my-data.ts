@@ -10,6 +10,7 @@
 import { Router, Request, Response } from 'express';
 import { AuthenticatedRequest, authMiddleware } from './auth';
 import myDataService from './my-data-service';
+import { recomputeForUser } from './user-stats-cache';
 
 const router = Router();
 
@@ -150,6 +151,35 @@ router.get('/all-time-stats', authMiddleware, async (req: AuthenticatedRequest, 
     res.status(500).json({
       success: false,
       error: 'Failed to fetch all-time stats',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/my-data/reset-cache
+ * Force a full recompute of the user's stats cache.
+ * Useful when cached values are stale (e.g. after a data migration or bug fix).
+ */
+router.post('/reset-cache', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    console.log(`[MyData] Force recomputing stats cache for user ${userId}`);
+    await recomputeForUser(userId);
+
+    res.json({
+      success: true,
+      message: 'Stats cache recomputed successfully',
+    });
+  } catch (error: any) {
+    console.error('Error resetting stats cache:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to reset stats cache',
       message: error.message,
     });
   }
