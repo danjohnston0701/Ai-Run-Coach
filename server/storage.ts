@@ -113,6 +113,7 @@ export interface IStorage {
   getConnectedDevice(id: string): Promise<ConnectedDevice | undefined>;
   getConnectedDeviceByGarminToken(userAccessToken: string): Promise<ConnectedDevice | undefined>;
   getConnectedDevicesByGarminId(garminUserId: string): Promise<ConnectedDevice[]>;
+  getConnectedDevicesByType(deviceType: string): Promise<ConnectedDevice[]>;
   createConnectedDevice(data: any): Promise<ConnectedDevice>;
   updateConnectedDevice(id: string, data: Partial<ConnectedDevice>): Promise<ConnectedDevice | undefined>;
   deleteConnectedDevice(id: string): Promise<void>;
@@ -742,7 +743,7 @@ export class DatabaseStorage implements IStorage {
 
   async getConnectedDeviceByGarminToken(userAccessToken: string): Promise<ConnectedDevice | undefined> {
     const [device] = await db.select().from(connectedDevices).where(
-      eq(connectedDevices.garminUserAccessToken, userAccessToken)
+      eq(connectedDevices.accessToken, userAccessToken)
     );
     return device || undefined;
   }
@@ -750,6 +751,12 @@ export class DatabaseStorage implements IStorage {
   async getConnectedDevicesByGarminId(garminUserId: string): Promise<ConnectedDevice[]> {
     return db.select().from(connectedDevices).where(
       eq(connectedDevices.deviceId, garminUserId)
+    );
+  }
+
+  async getConnectedDevicesByType(deviceType: string): Promise<ConnectedDevice[]> {
+    return db.select().from(connectedDevices).where(
+      and(eq(connectedDevices.deviceType, deviceType), eq(connectedDevices.isActive, true))
     );
   }
 

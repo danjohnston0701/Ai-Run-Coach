@@ -85,13 +85,27 @@ export async function resolveGarminUser(
     }
   }
 
-  // Strategy 3: Single device fallback (only if NO token or Garmin ID in payload)
-  if (!userAccessToken && !garminUserId) {
-    console.log(
-      `[Garmin] No userAccessToken or userId in payload. Trying single-device fallback...`
-    );
-    // This is a last resort and should rarely be used
-    // Only applicable if the user has exactly one Garmin device
+  // Strategy 3: Single-device fallback — if exactly one Garmin device is connected, it must be theirs.
+  // This handles the common case where deviceId was never stored during OAuth (profile API failed),
+  // or the Garmin userId format in webhooks doesn't match what was stored.
+  {
+    const allGarminDevices = await storage.getConnectedDevicesByType('garmin');
+    if (allGarminDevices.length === 1) {
+      const device = allGarminDevices[0];
+      console.log(
+        `[Garmin] Single-device fallback: resolving to user ${device.userId} (only one Garmin device connected)`
+      );
+      return {
+        userId: device.userId,
+        device,
+        method: "single_device",
+        hasToken: !!userAccessToken,
+      };
+    } else if (allGarminDevices.length > 1) {
+      console.warn(
+        `[Garmin] Single-device fallback skipped: ${allGarminDevices.length} Garmin devices connected, cannot determine which user`
+      );
+    }
   }
 
   console.warn(

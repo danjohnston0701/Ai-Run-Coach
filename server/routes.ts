@@ -4923,15 +4923,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
 
           if (!device) {
-            // Use resolveGarminUserId helper for user ID based lookup (handles numeric or UUID Garmin IDs)
-            const garminDevices = await db.query.connectedDevices.findMany({
-              where: (d, { eq }) => eq(d.deviceType, 'garmin'),
-              columns: { userId: true, deviceId: true },
-            });
-            const appUserId = resolveGarminUserId(garminDevices, daily);
-            if (appUserId) {
-              device = await db.query.connectedDevices.findFirst({
-                where: (d, { eq }) => eq(d.userId, appUserId),
+            // Use unified Garmin user resolver (handles token → userId → single-device fallback)
+            const resolution = await resolveGarminUser(daily);
+            if (resolution) {
+              device = resolution.device ?? await db.query.connectedDevices.findFirst({
+                where: (d, { eq }) => eq(d.userId, resolution.userId),
               });
             }
           }
