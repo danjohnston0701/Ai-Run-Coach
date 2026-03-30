@@ -9603,6 +9603,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ==================== TRAINING PLAN ENDPOINTS ====================
   
   // Generate AI training plan
+  // In-memory lock to prevent duplicate plan generation when a user taps the
+  // button multiple times or the app retries while the AI is still running.
+  // Key = userId, cleared once the request completes or fails.
+  const planGenerationInProgress = new Set<string>();
+
   app.post("/api/training-plans/generate", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
@@ -9625,6 +9630,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
         height = null,
         weight = null,
       } = req.body;
+
+      // ── Deduplication guard ───────────────────────────────────────────────
+      // 1. In-memory lock: reject if this user's plan is already being generated
+      //    (handles rapid repeated taps within the same server process).
+      if (planGenerationInProgress.has(userId)) {
+        console.warn(`[Training Plan] Duplicate request rejected for user ${userId} — already generating`);
+        return res.status(429).json({
+          error: "A training plan is already being generated for your account. Please wait a moment.",
+          code: "PLAN_GENERATION_IN_PROGRESS",
+        });
+      }
+
+      // 2. DB check: reject if the user already has an active plan with the same goalType.
+      //    This catches duplicates that slipped through during a previous server restart.
+      const existingActivePlan = await db
+        .select({ id: trainingPlans.id })
+        .from(trainingPlans)
+        .where(
+          and(
+            eq(trainingPlans.userId, userId),
+            eq(trainingPlans.status, "active"),
+            eq(trainingPlans.goalType, goalType),
+          )
+        )
+        .limit(1);
+
+      if (existingActivePlan.length > 0) {
+        console.warn(`[Training Plan] Duplicate rejected — user ${userId} already has active ${goalType} plan ${existingActivePlan[0].id}`);
+        return res.status(409).json({
+          error: "You already have an active training plan for this goal. Please complete or delete it before creating a new one.",
+          code: "PLAN_ALREADY_EXISTS",
+          existingPlanId: existingActivePlan[0].id,
+        });
+      }
+
+      planGenerationInProgress.add(userId);
 
       if (!goalType || !targetDistance) {
         return res.status(400).json({ error: "goalType and targetDistance are required" });
@@ -9671,6 +9712,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Generate training plan error:", error);
       res.status(500).json({ error: error.message || "Failed to generate training plan" });
+    } finally {
+      // Always release the lock so the user can try again if something fails
+      planGenerationInProgress.delete(req.user!.userId);
     }
   });
   
