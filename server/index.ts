@@ -4,6 +4,7 @@ import { createProxyMiddleware } from "http-proxy-middleware";
 import compression from "compression";  // ⚡ For gzip response compression
 import { registerRoutes } from "./routes";
 import { startScheduler } from "./scheduler";
+import { runAutoMigrations } from "./auto-migrate";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -325,6 +326,9 @@ function setupErrorHandler(app: express.Application) {
   // ⚡ Add Cache-Control headers to GET responses (30-50% additional bandwidth reduction)
   setupCacheHeaders(app);
   setupRequestLogging(app);
+
+  // Run schema auto-migrations before anything else touches the DB
+  await runAutoMigrations();
 
   // Register API routes BEFORE static file serving
   const server = await registerRoutes(app);
