@@ -393,7 +393,7 @@ ${regularSessions.map(s => {
 
 IMPORTANT scheduling rules for regular sessions:
 1. Sessions that COUNT towards the weekly total: Integrate them into the ${daysPerWeek} AI-generated sessions per week by choosing to perform that regular session on its scheduled day instead of a coached session (prefer replacing sessions that match its intensity/goal).
-2. Sessions that DON'T count (marked "EXTRA"): These are FIXED and always happen on their scheduled day. Avoid placing coached workouts on the same day as EXTRA sessions to prevent overload—instead, schedule your ${daysPerWeek} coached workouts on different days of the week when possible. Only schedule a coached workout on the same day as an EXTRA session if there is no other way to fit the ${daysPerWeek} sessions into the available days (e.g. 7-day plan with 2 EXTRA sessions already fills 2 days).
+2. Sessions that DON'T count (marked "EXTRA"): These are BLOCKED DAYS. Do NOT schedule ANY coached workouts on the same days as EXTRA sessions. Schedule your ${daysPerWeek} coached workouts exclusively on other days. This prevents double-running on the same day.
 ` : ""}
 ${injuries.length > 0 ? `
 INJURIES & LIMITATIONS:
