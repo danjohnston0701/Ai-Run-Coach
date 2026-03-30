@@ -12,7 +12,7 @@
  */
 
 import { db } from './db';
-import { runs, userStats } from '@shared/schema';
+import { runs, userStats, goals } from '@shared/schema';
 import { eq, gte, and, desc, asc, count, sum, avg, max, min, sql, isNotNull } from 'drizzle-orm';
 import { type InferSelectModel } from 'drizzle-orm';
 
@@ -399,6 +399,14 @@ async function getAllTimeStatsLive(userId: string) {
     // Get highest elevation from any single run
     const highestElevationM = Math.round(Number(stats.maxElevation ?? 0));
 
+    // Count completed goals
+    const [completedGoalsResult] = await db
+      .select({ count: count() })
+      .from(goals)
+      .where(and(eq(goals.userId, userId), eq(goals.status, "completed")));
+    
+    const goalsAchieved = Number(completedGoalsResult?.count ?? 0);
+
     return {
       totalRuns,
       totalDistanceKm:     Math.round((Number(stats.totalDistanceKm ?? 0) / 1000) * 10) / 10,
@@ -408,7 +416,7 @@ async function getAllTimeStatsLive(userId: string) {
       longestRunKm:        Math.round((Number(stats.longestRunKm ?? 0) / 1000) * 10) / 10,
       longestRunTimeSec,
       highestElevationM,
-      goalsAchieved:       0,  // To be calculated by goals service
+      goalsAchieved,
     };
   } catch (error) {
     console.error('Error getting all-time stats (live):', error);

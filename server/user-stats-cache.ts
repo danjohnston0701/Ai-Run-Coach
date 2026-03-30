@@ -20,7 +20,7 @@
  */
 
 import { db } from './db';
-import { runs, userStats } from '@shared/schema';
+import { runs, userStats, goals } from '@shared/schema';
 import { eq, and, gte, lte, isNotNull, count, sum, avg, max, min, sql } from 'drizzle-orm';
 
 // Distance band definitions for PB categories (in km)
@@ -164,6 +164,14 @@ export async function recomputeForUser(userId: string): Promise<void> {
     pbUpdates[cols.dateCol]     = pbRun?.completedAt ?? null;
   }
 
+  // ── Count completed goals ─────────────────────────────────────────────────
+  const [completedGoalsResult] = await db
+    .select({ count: count() })
+    .from(goals)
+    .where(and(eq(goals.userId, userId), eq(goals.status, "completed")));
+  
+  const goalsAchieved = Number(completedGoalsResult?.count ?? 0);
+
   // ── Upsert the cache row ─────────────────────────────────────────────────
   const totalRuns = Number(agg.totalRuns ?? 0);
   // Convert from meters to km (database stores distance in meters)
@@ -201,6 +209,7 @@ export async function recomputeForUser(userId: string): Promise<void> {
     pbMarathonDurationMs: pbUpdates['pbMarathonDurationMs'] as number | null,
     pbMarathonRunId:      pbUpdates['pbMarathonRunId'] as string | null,
     pbMarathonDate:       pbUpdates['pbMarathonDate'] as Date | null,
+    goalsAchieved,
   };
 
   await db
