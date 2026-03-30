@@ -1087,7 +1087,17 @@ fun ExpandableWeekCard(
     val completedCount = week.workouts.count { it.isCompleted && !it.isSkipped() }
     
     // Calculate scheduled vs missed based on date
+    // A workout is "scheduled" if it's today or in the future
+    // A workout is "missed" if it was due yesterday or earlier (before today)
     val now = System.currentTimeMillis()
+    val todayCalendar = java.util.Calendar.getInstance().apply {
+        set(java.util.Calendar.HOUR_OF_DAY, 0)
+        set(java.util.Calendar.MINUTE, 0)
+        set(java.util.Calendar.SECOND, 0)
+        set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val tomorrowTime = todayCalendar.apply { add(java.util.Calendar.DAY_OF_MONTH, 1) }.timeInMillis
+    
     val scheduledCount = week.workouts.count { workout ->
         !workout.isCompleted && !workout.isSkipped() && 
         !workout.workoutType.equals("rest", ignoreCase = true) &&
@@ -1095,7 +1105,7 @@ fun ExpandableWeekCard(
             try {
                 val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
                 val scheduledTime = sdf.parse(dateString)?.time ?: now
-                scheduledTime > now
+                scheduledTime >= now && scheduledTime < tomorrowTime + (7 * 24 * 60 * 60 * 1000) // Within 7 days from today
             } catch (_: Exception) { false }
         } ?: false
     }
@@ -1107,7 +1117,7 @@ fun ExpandableWeekCard(
             try {
                 val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
                 val scheduledTime = sdf.parse(dateString)?.time ?: now
-                scheduledTime <= now
+                scheduledTime < tomorrowTime // Before tomorrow (i.e., yesterday or earlier)
             } catch (_: Exception) { false }
         } ?: true
     }
@@ -1180,17 +1190,25 @@ fun ExpandableWeekCard(
                 HorizontalDivider(color = Colors.backgroundTertiary, thickness = 1.dp, modifier = Modifier.padding(horizontal = Spacing.lg))
                 
                 Column(modifier = Modifier.padding(Spacing.lg)) {
-                    // Summary stats
+                    // Summary stats — only show Skipped tile if there are skipped sessions
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = Spacing.md),
                         horizontalArrangement = Arrangement.spacedBy(Spacing.md)
                     ) {
-                        WeekStatChip("Scheduled", scheduledCount, Colors.primary, modifier = Modifier.weight(1f))
-                        WeekStatChip("Completed", completedCount, Colors.success, modifier = Modifier.weight(1f))
-                        WeekStatChip("Missed", missedCount, Colors.warning, modifier = Modifier.weight(1f))
-                        WeekStatChip("Skipped", skippedCount, Colors.textMuted, modifier = Modifier.weight(1f))
+                        if (skippedCount > 0) {
+                            // 4 chips: Scheduled, Completed, Missed, Skipped (each 1/4 width)
+                            WeekStatChip("Scheduled", scheduledCount, Colors.primary, modifier = Modifier.weight(1f))
+                            WeekStatChip("Completed", completedCount, Colors.success, modifier = Modifier.weight(1f))
+                            WeekStatChip("Missed", missedCount, Colors.warning, modifier = Modifier.weight(1f))
+                            WeekStatChip("Skipped", skippedCount, Colors.textMuted, modifier = Modifier.weight(1f))
+                        } else {
+                            // 3 chips: Scheduled, Completed, Missed (each 1/3 width)
+                            WeekStatChip("Scheduled", scheduledCount, Colors.primary, modifier = Modifier.weight(1f))
+                            WeekStatChip("Completed", completedCount, Colors.success, modifier = Modifier.weight(1f))
+                            WeekStatChip("Missed", missedCount, Colors.warning, modifier = Modifier.weight(1f))
+                        }
                     }
 
                     HorizontalDivider(color = Colors.backgroundTertiary, thickness = 1.dp, modifier = Modifier.padding(vertical = Spacing.md))
@@ -1257,16 +1275,31 @@ fun ExpandedWeekWorkoutRow(
     
     // Determine status: scheduled, completed, missed, or skipped
     val now = System.currentTimeMillis()
+    val todayCalendar = java.util.Calendar.getInstance().apply {
+        set(java.util.Calendar.HOUR_OF_DAY, 0)
+        set(java.util.Calendar.MINUTE, 0)
+        set(java.util.Calendar.SECOND, 0)
+        set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val tomorrowTime = todayCalendar.apply { add(java.util.Calendar.DAY_OF_MONTH, 1) }.timeInMillis
+    
     val isScheduled = !workout.isCompleted && !workout.isSkipped() && 
         workout.scheduledDate?.let { dateString ->
             try {
                 val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
                 val scheduledTime = sdf.parse(dateString)?.time ?: now
-                scheduledTime > now
+                scheduledTime >= tomorrowTime // Scheduled for tomorrow or later
             } catch (_: Exception) { false }
         } ?: false
     
-    val isMissed = !workout.isCompleted && !workout.isSkipped() && !isScheduled
+    val isMissed = !workout.isCompleted && !workout.isSkipped() && !isScheduled && 
+        workout.scheduledDate?.let { dateString ->
+            try {
+                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                val scheduledTime = sdf.parse(dateString)?.time ?: now
+                scheduledTime < tomorrowTime // Was due before tomorrow (today or earlier)
+            } catch (_: Exception) { false }
+        } ?: false
     
     val statusColor = when {
         workout.isCompleted -> Colors.success
