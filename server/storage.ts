@@ -421,33 +421,45 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteRun(id: string): Promise<void> {
-    // Execute each statement separately — pg driver does NOT allow multiple
-    // commands in a single prepared statement (causes "cannot insert multiple
-    // commands into a prepared statement" error).
     console.log(`[Storage] Deleting run ${id} and all related records`);
+
+    // Helper: run a cleanup statement but skip gracefully if the table/column
+    // doesn't exist yet in this database (schema migration not yet applied).
+    const tryCleanup = async (label: string, stmt: ReturnType<typeof sql>) => {
+      try {
+        await db.execute(stmt);
+      } catch (e: any) {
+        // 42703 = undefined_column, 42P01 = undefined_table — skip gracefully
+        if (e?.code === '42703' || e?.code === '42P01') {
+          console.warn(`[Storage] Skipping cleanup of ${label} (table/column not in DB): ${e.message}`);
+        } else {
+          throw e;
+        }
+      }
+    };
+
+    // Nullable FK refs: null them out to preserve the parent rows
+    await tryCleanup('group_run_participants.run_id',      sql`UPDATE group_run_participants    SET run_id = NULL           WHERE run_id = ${id}`);
+    await tryCleanup('garmin_move_iq.run_id',              sql`UPDATE garmin_move_iq            SET run_id = NULL           WHERE run_id = ${id}`);
+    await tryCleanup('garmin_realtime_data.run_id',        sql`UPDATE garmin_realtime_data      SET run_id = NULL           WHERE run_id = ${id}`);
+    await tryCleanup('garmin_companion_sessions.run_id',   sql`UPDATE garmin_companion_sessions SET run_id = NULL           WHERE run_id = ${id}`);
+    await tryCleanup('feed_activities.run_id',             sql`UPDATE feed_activities           SET run_id = NULL           WHERE run_id = ${id}`);
+    await tryCleanup('user_achievements.run_id',           sql`UPDATE user_achievements         SET run_id = NULL           WHERE run_id = ${id}`);
+    await tryCleanup('planned_workouts.completed_run_id',  sql`UPDATE planned_workouts          SET completed_run_id = NULL WHERE completed_run_id = ${id}`);
+
+    // Hard deletes for rows that exist solely to describe this run
+    await tryCleanup('segment_efforts',    sql`DELETE FROM segment_efforts    WHERE run_id = ${id}`);
+    await tryCleanup('shared_runs',        sql`DELETE FROM shared_runs        WHERE run_id = ${id}`);
+    await tryCleanup('route_ratings',      sql`DELETE FROM route_ratings      WHERE run_id = ${id}`);
+    await tryCleanup('garmin_activities',  sql`DELETE FROM garmin_activities  WHERE run_id = ${id}`);
+    await tryCleanup('activity_merge_log', sql`DELETE FROM activity_merge_log WHERE ai_run_coach_run_id = ${id}`);
+    await tryCleanup('run_analyses',       sql`DELETE FROM run_analyses       WHERE run_id = ${id}`);
+    await tryCleanup('device_data',        sql`DELETE FROM device_data        WHERE run_id = ${id}`);
+    await tryCleanup('routes',             sql`DELETE FROM routes             WHERE source_run_id = ${id}`);
+
+    // Finally delete the run itself — this one must succeed
     try {
-      // Nullable FK refs: null them out to preserve the parent rows
-      await db.execute(sql`UPDATE group_run_participants    SET run_id = NULL           WHERE run_id = ${id}`);
-      await db.execute(sql`UPDATE garmin_move_iq            SET run_id = NULL           WHERE run_id = ${id}`);
-      await db.execute(sql`UPDATE garmin_realtime_data      SET run_id = NULL           WHERE run_id = ${id}`);
-      await db.execute(sql`UPDATE garmin_companion_sessions SET run_id = NULL           WHERE run_id = ${id}`);
-      await db.execute(sql`UPDATE feed_activities           SET run_id = NULL           WHERE run_id = ${id}`);
-      await db.execute(sql`UPDATE user_achievements         SET run_id = NULL           WHERE run_id = ${id}`);
-      await db.execute(sql`UPDATE planned_workouts          SET completed_run_id = NULL WHERE completed_run_id = ${id}`);
-
-      // Hard deletes for rows that exist solely to describe this run
-      await db.execute(sql`DELETE FROM segment_efforts    WHERE run_id = ${id}`);
-      await db.execute(sql`DELETE FROM shared_runs        WHERE run_id = ${id}`);
-      await db.execute(sql`DELETE FROM route_ratings      WHERE run_id = ${id}`);
-      await db.execute(sql`DELETE FROM garmin_activities  WHERE run_id = ${id}`);
-      await db.execute(sql`DELETE FROM activity_merge_log WHERE ai_run_coach_run_id = ${id}`);
-      await db.execute(sql`DELETE FROM run_analyses       WHERE run_id = ${id}`);
-      await db.execute(sql`DELETE FROM device_data        WHERE run_id = ${id}`);
-      await db.execute(sql`DELETE FROM routes             WHERE source_run_id = ${id}`);
-
-      // Finally delete the run itself
       await db.execute(sql`DELETE FROM runs WHERE id = ${id}`);
-
       console.log(`[Storage] Successfully deleted run ${id}`);
     } catch (e) {
       console.error(`[Storage] Error deleting run ${id}:`, e);
