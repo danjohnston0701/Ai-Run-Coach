@@ -589,6 +589,18 @@ If runner has NO previous runs:
 
     const planId = plan[0].id;
 
+    // Collects workout data as we insert them — passed to background AI generation
+    const pendingSessionInstructions: Array<{
+      workoutId: string;
+      workoutType: string;
+      intensity: string;
+      sessionGoal?: string | null;
+      sessionIntent?: string | null;
+      intervalCount?: number | null;
+      distance?: number | null;
+      duration?: number | null;
+    }> = [];
+
     // Create weekly plans and workouts
     for (const week of planData.weeks) {
       const weeklyPlan = await db
@@ -694,61 +706,107 @@ If runner has NO previous runs:
           })
           .returning({ id: plannedWorkouts.id });
 
-        // Generate dynamic session coaching instructions
+        // Collect workout info for background session instruction generation
         if (plannedWorkoutResult && plannedWorkoutResult.length > 0) {
-          const workoutId = plannedWorkoutResult[0].id;
-          try {
-            const coaching = await generateSessionInstructions(userId, workoutId, {
-              userId,
-              plannedWorkoutId: workoutId,
-              workoutType: workout.workoutType,
-              intensity: workout.intensity || 'z3',
-              sessionGoal: workout.sessionGoal,
-              sessionIntent: workout.sessionIntent,
-              intervalCount: workout.intervalCount,
-              distance: workout.distance,
-              duration: workout.duration,
-            });
-
-            // Store the generated session instructions
-            const instructionResult = await db
-              .insert(sessionInstructions)
-              .values({
-                plannedWorkoutId: workoutId,
-                preRunBrief: coaching.preRunBrief,
-                sessionStructure: coaching.sessionStructure,
-                aiDeterminedTone: coaching.aiDeterminedTone,
-                aiDeterminedIntensity: coaching.aiDeterminedIntensity,
-                coachingStyle: coaching.coachingStyle,
-                insightFilters: coaching.insightFilters,
-                toneReasoning: coaching.toneReasoning,
-              })
-              .returning({ id: sessionInstructions.id });
-
-            // Link the session instructions back to the workout
-            if (instructionResult && instructionResult.length > 0) {
-              await db
-                .update(plannedWorkouts)
-                .set({ sessionInstructionsId: instructionResult[0].id })
-                .where(eq(plannedWorkouts.id, workoutId));
-            }
-          } catch (coachingError) {
-            console.warn(
-              `Failed to generate session coaching for workout ${workoutId}:`,
-              coachingError
-            );
-            // Don't fail the whole plan generation, just skip this workout's coaching
-          }
+          pendingSessionInstructions.push({
+            workoutId: plannedWorkoutResult[0].id,
+            workoutType: workout.workoutType,
+            intensity: workout.intensity || 'z3',
+            sessionGoal: workout.sessionGoal,
+            sessionIntent: workout.sessionIntent,
+            intervalCount: workout.intervalCount,
+            distance: workout.distance,
+            duration: workout.duration,
+          });
         }
       }
     }
 
-    console.log(`✅ Generated ${weeksUntilTarget}-week training plan for user ${userId}`);
+    console.log(`✅ Generated ${weeksUntilTarget}-week training plan for user ${userId} (${pendingSessionInstructions.length} workouts queued for coaching instructions)`);
+
+    // Fire-and-forget: generate session instructions in the background so the plan
+    // is returned to the user immediately (~60s instead of ~5min).
+    // Instructions are generated in parallel batches of 5 to stay within rate limits.
+    setImmediate(() => {
+      generateSessionInstructionsInBackground(userId, pendingSessionInstructions).catch((err) =>
+        console.error(`[SessionInstructions] Background generation failed for plan ${planId}:`, err)
+      );
+    });
+
     return planId;
   } catch (error) {
     console.error("Error generating training plan:", error);
     throw error;
   }
+}
+
+/**
+ * Generate session instructions for all workouts in a plan in the background.
+ * Runs in parallel batches of 5 to balance speed vs. OpenAI rate limits.
+ * Called via setImmediate after generateTrainingPlan returns planId.
+ */
+async function generateSessionInstructionsInBackground(
+  userId: string,
+  workouts: Array<{
+    workoutId: string;
+    workoutType: string;
+    intensity: string;
+    sessionGoal?: string | null;
+    sessionIntent?: string | null;
+    intervalCount?: number | null;
+    distance?: number | null;
+    duration?: number | null;
+  }>
+): Promise<void> {
+  const BATCH_SIZE = 5;
+  console.log(`[SessionInstructions] Starting background generation for ${workouts.length} workouts (batches of ${BATCH_SIZE})`);
+
+  for (let i = 0; i < workouts.length; i += BATCH_SIZE) {
+    const batch = workouts.slice(i, i + BATCH_SIZE);
+    await Promise.allSettled(
+      batch.map(async (w) => {
+        try {
+          const coaching = await generateSessionInstructions(userId, w.workoutId, {
+            userId,
+            plannedWorkoutId: w.workoutId,
+            workoutType: w.workoutType,
+            intensity: w.intensity,
+            sessionGoal: w.sessionGoal ?? undefined,
+            sessionIntent: w.sessionIntent ?? undefined,
+            intervalCount: w.intervalCount ?? undefined,
+            distance: w.distance ?? undefined,
+            duration: w.duration ?? undefined,
+          });
+
+          const instructionResult = await db
+            .insert(sessionInstructions)
+            .values({
+              plannedWorkoutId: w.workoutId,
+              preRunBrief: coaching.preRunBrief,
+              sessionStructure: coaching.sessionStructure,
+              aiDeterminedTone: coaching.aiDeterminedTone,
+              aiDeterminedIntensity: coaching.aiDeterminedIntensity,
+              coachingStyle: coaching.coachingStyle,
+              insightFilters: coaching.insightFilters,
+              toneReasoning: coaching.toneReasoning,
+            })
+            .returning({ id: sessionInstructions.id });
+
+          if (instructionResult && instructionResult.length > 0) {
+            await db
+              .update(plannedWorkouts)
+              .set({ sessionInstructionsId: instructionResult[0].id })
+              .where(eq(plannedWorkouts.id, w.workoutId));
+          }
+        } catch (err) {
+          console.warn(`[SessionInstructions] Failed for workout ${w.workoutId}:`, err);
+        }
+      })
+    );
+    console.log(`[SessionInstructions] Batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(workouts.length / BATCH_SIZE)} complete`);
+  }
+
+  console.log(`[SessionInstructions] Background generation complete for ${workouts.length} workouts`);
 }
 
 /**

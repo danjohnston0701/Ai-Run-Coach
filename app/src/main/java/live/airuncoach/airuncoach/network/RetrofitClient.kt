@@ -147,7 +147,7 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
         .cookieJar(PersistentCookieJar(context))
         // Increase timeouts for AI route generation (OpenAI + Google Maps can take 2+ minutes)
         .connectTimeout(45, TimeUnit.SECONDS)
-        .readTimeout(480, TimeUnit.SECONDS)  // AI plan generation can take up to 5 minutes
+        .readTimeout(120, TimeUnit.SECONDS)  // AI plan generation (gpt-4o call) ~60s; 2min gives headroom
         .writeTimeout(45, TimeUnit.SECONDS)
         // Add Bearer token to all requests
         .addInterceptor { chain ->

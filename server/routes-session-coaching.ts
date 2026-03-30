@@ -46,10 +46,73 @@ export function registerSessionCoachingRoutes(app: Express) {
           .then((rows) => rows[0]);
 
         if (!instructions) {
-          return res.status(404).json({
-            error: "Session instructions not found for this workout",
-            note: "Instructions will be generated on next plan update",
-          });
+          // Background generation may still be in progress — generate on-demand now
+          try {
+            const userId = workout.trainingPlanId
+              ? await db
+                  .select({ userId: (await import("../shared/schema")).trainingPlans.userId })
+                  .from((await import("../shared/schema")).trainingPlans)
+                  .where(eq((await import("../shared/schema")).trainingPlans.id, workout.trainingPlanId!))
+                  .then((r) => r[0]?.userId)
+              : null;
+
+            if (!userId) {
+              return res.status(404).json({
+                error: "Session instructions not found and could not determine user for generation",
+              });
+            }
+
+            const coaching = await generateSessionInstructions(userId, workoutId, {
+              userId,
+              plannedWorkoutId: workoutId,
+              workoutType: workout.workoutType || "easy",
+              intensity: workout.intensity || "z3",
+              sessionGoal: workout.sessionGoal ?? undefined,
+              sessionIntent: workout.sessionIntent ?? undefined,
+              intervalCount: workout.intervalCount ?? undefined,
+              distance: workout.distance ?? undefined,
+              duration: workout.duration ?? undefined,
+            });
+
+            const inserted = await db
+              .insert(sessionInstructions)
+              .values({
+                plannedWorkoutId: workoutId,
+                preRunBrief: coaching.preRunBrief,
+                sessionStructure: coaching.sessionStructure,
+                aiDeterminedTone: coaching.aiDeterminedTone,
+                aiDeterminedIntensity: coaching.aiDeterminedIntensity,
+                coachingStyle: coaching.coachingStyle,
+                insightFilters: coaching.insightFilters,
+                toneReasoning: coaching.toneReasoning,
+              })
+              .returning();
+
+            if (inserted[0]) {
+              await db
+                .update(plannedWorkouts)
+                .set({ sessionInstructionsId: inserted[0].id })
+                .where(eq(plannedWorkouts.id, workoutId));
+            }
+
+            return res.json({
+              workoutId,
+              preRunBrief: coaching.preRunBrief,
+              sessionStructure: coaching.sessionStructure,
+              coachingStyle: coaching.coachingStyle,
+              insightFilters: coaching.insightFilters,
+              aiDeterminedTone: coaching.aiDeterminedTone,
+              aiDeterminedIntensity: coaching.aiDeterminedIntensity,
+              toneReasoning: coaching.toneReasoning,
+              generatedOnDemand: true,
+            });
+          } catch (genErr) {
+            console.error("On-demand session instruction generation failed:", genErr);
+            return res.status(404).json({
+              error: "Session instructions not found for this workout",
+              note: "Background generation may still be in progress — try again shortly",
+            });
+          }
         }
 
         return res.json({
