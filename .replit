@@ -1,6 +1,6 @@
 modules = ["nodejs-20", "postgresql-16"]
 [deployment]
-build = ["sh", "-c", "npm run build"]
+build = ["sh", "-c", "npm run build && npx vite build"]
 run = ["sh", "-c", "npm run start"]
 deploymentTarget = "autoscale"
 

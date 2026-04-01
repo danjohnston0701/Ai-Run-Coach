@@ -130,7 +130,7 @@ export default function PrivacyPolicy() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  <tr><td className="p-3">Real-time workout data (pace, heart rate, cadence, distance)</td><td className="p-3">Data is processed using automated systems to generate coaching insights and feedback within the application.</td><td className="p-3">Real-time coaching prompts and performance feedback</td></tr>
+                  <tr><td className="p-3">Real-time workout data (pace, heart rate, cadence, distance)</td><td className="p-3">Analysed during active sessions and sent (in anonymised form) to AI systems</td><td className="p-3">Real-time coaching prompts and performance feedback</td></tr>
                   <tr><td className="p-3">Historical activity data</td><td className="p-3">Analysed to identify trends and performance patterns</td><td className="p-3">Personalised training plans and insights</td></tr>
                   <tr><td className="p-3">GPS location data</td><td className="p-3">Used for route generation and mapping; shared without personal identifiers</td><td className="p-3">Navigation, route planning, and post-run maps</td></tr>
                   <tr><td className="p-3">User profile data</td><td className="p-3">Combined with activity data to tailor recommendations</td><td className="p-3">Personalised coaching and training</td></tr>
@@ -183,7 +183,7 @@ export default function PrivacyPolicy() {
             <p>All providers are contractually required to protect your data.</p>
 
             <h4 className="font-bold text-foreground mt-4">AI Processing</h4>
-            <p>Only <strong>anonymised, structured workout data</strong> This processing is performed in a controlled and transient manner and is limited strictly to providing user-requested functionality.</p>
+            <p>Only <strong>anonymised, structured workout data</strong> is shared with AI providers. No personal identifiers (such as name, email, or account details) are transmitted.</p>
             <p>AI providers operate under strict data processing agreements and zero-retention configurations where applicable.</p>
 
             <h4 className="font-bold text-foreground mt-4">Garmin Data Restrictions</h4>
