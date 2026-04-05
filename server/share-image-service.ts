@@ -60,6 +60,7 @@ export interface GenerateImageRequest {
   backgroundOpacity?: number;
   backgroundBlur?: number;
   customStickers?: CustomStickerData[];
+  ringLayout?: { topLeft?: string; topRight?: string; bottomLeft?: string; bottomRight?: string };
 }
 
 export interface RunDataForImage {
@@ -303,7 +304,55 @@ function metricRing(
   `;
 }
 
-function buildStatsGridSvg(w: number, h: number, run: RunDataForImage, userName?: string): string {
+type RingMetricData = { label: string; value: string; grad: string; prog: number; track: string };
+
+function getMetricData(metric: string, run: RunDataForImage): RingMetricData {
+  switch (metric) {
+    case "distance": {
+      const d = run.distance || 0;
+      return { label: "Distance", value: run.distance?.toFixed(2) || "0", grad: "cyanRingGrad", prog: Math.min(0.3 + d / 10 * 0.6, 0.95), track: "#00E5FF" };
+    }
+    case "pace": {
+      let p = 0.65;
+      if (run.avgPace) { const s = paceToSeconds(run.avgPace); if (s > 0) p = Math.min(Math.max(0.35, 1 - (s - 180) / 480), 0.95); }
+      return { label: "Pace", value: run.avgPace || "--:--", grad: "blueRingGrad", prog: p, track: "#42A5F5" };
+    }
+    case "duration": {
+      const sec = run.duration || 0;
+      return { label: "Duration", value: formatDuration(sec), grad: "yellowRingGrad", prog: Math.min(0.3 + sec / 3600 * 0.6, 0.95), track: "#FFD600" };
+    }
+    case "heartRate": {
+      const hr = run.avgHeartRate || 0;
+      return { label: "Heart Rate", value: hr ? hr.toString() : "--", grad: "redRingGrad", prog: hr ? Math.min(0.3 + hr / 200 * 0.6, 0.95) : 0.5, track: "#FF5252" };
+    }
+    case "maxHeartRate": {
+      const mhr = run.maxHeartRate || 0;
+      return { label: "Max HR", value: mhr ? mhr.toString() : "--", grad: "redRingGrad", prog: mhr ? Math.min(0.3 + mhr / 220 * 0.6, 0.95) : 0.5, track: "#FF5252" };
+    }
+    case "calories": {
+      const cal = run.calories || 0;
+      return { label: "Calories", value: cal ? cal.toString() : "--", grad: "greenRingGrad", prog: cal ? Math.min(0.3 + cal / 600 * 0.6, 0.95) : 0.5, track: "#00E676" };
+    }
+    case "elevationGain": {
+      const eg = run.elevationGain || 0;
+      return { label: "Elev Gain", value: eg ? `${Math.round(eg)}m` : "--", grad: "orangeRingGrad", prog: eg ? Math.min(0.3 + eg / 200 * 0.6, 0.95) : 0.5, track: "#FF6B35" };
+    }
+    case "elevationLoss": {
+      const el = run.elevationLoss || 0;
+      return { label: "Elev Loss", value: el ? `${Math.round(el)}m` : "--", grad: "blueRingGrad", prog: el ? Math.min(0.3 + el / 200 * 0.6, 0.95) : 0.5, track: "#42A5F5" };
+    }
+    case "cadence": {
+      const cad = run.cadence || 0;
+      return { label: "Cadence", value: cad ? cad.toString() : "--", grad: "greenRingGrad", prog: cad ? Math.min(0.3 + (cad - 140) / 50 * 0.6, 0.95) : 0.5, track: "#00E676" };
+    }
+    default: {
+      const d = run.distance || 0;
+      return { label: "Distance", value: run.distance?.toFixed(2) || "0", grad: "cyanRingGrad", prog: Math.min(0.3 + d / 10 * 0.6, 0.95), track: "#00E5FF" };
+    }
+  }
+}
+
+function buildStatsGridSvg(w: number, h: number, run: RunDataForImage, userName?: string, ringLayout?: { topLeft?: string; topRight?: string; bottomLeft?: string; bottomRight?: string }): string {
   const cx = w / 2;
   const contentEndY = h - LOGO_ZONE_H;
   const isVertical = h > w;
@@ -346,41 +395,11 @@ function buildStatsGridSvg(w: number, h: number, run: RunDataForImage, userName?
   const row1Y = ringAreaTop + ringAreaH * 0.27;
   const row2Y = ringAreaTop + ringAreaH * 0.73;
 
-  const durationSec = run.duration || 0;
-  const distKm = run.distance || 0;
-  const dist = run.distance?.toFixed(2) || "0";
-
-  const distProgress = Math.min(0.3 + distKm / 10 * 0.6, 0.95);
-  const durationProgress = Math.min(0.3 + durationSec / 3600 * 0.6, 0.95);
-
-  let paceProgress = 0.65;
-  if (run.avgPace) {
-    const paceSec = paceToSeconds(run.avgPace);
-    if (paceSec > 0) paceProgress = Math.min(Math.max(0.35, 1 - (paceSec - 180) / 480), 0.95);
-  }
-
-  let ring4Progress = 0.55;
-  let ring4Label = "Calories";
-  let ring4Value = run.calories?.toString() || "--";
-  let ring4Grad = "greenRingGrad";
-  let ring4Track = "#00E676";
-
-  if (run.avgHeartRate) {
-    ring4Label = "Heart Rate";
-    ring4Value = run.avgHeartRate.toString();
-    ring4Grad = "redRingGrad";
-    ring4Track = "#FF5252";
-    ring4Progress = Math.min(0.3 + run.avgHeartRate / 200 * 0.6, 0.95);
-  } else if (run.calories) {
-    ring4Progress = Math.min(0.3 + run.calories / 600 * 0.6, 0.95);
-  }
-
-  // Units removed — values speak for themselves with the label
   const rings = [
-    { cx: col1X, cy: row1Y, label: "Distance", value: dist, grad: "cyanRingGrad", prog: distProgress, track: "#00E5FF" },
-    { cx: col2X, cy: row1Y, label: "Pace", value: run.avgPace || "--:--", grad: "blueRingGrad", prog: paceProgress, track: "#42A5F5" },
-    { cx: col1X, cy: row2Y, label: "Duration", value: formatDuration(durationSec), grad: "yellowRingGrad", prog: durationProgress, track: "#FFD600" },
-    { cx: col2X, cy: row2Y, label: ring4Label, value: ring4Value, grad: ring4Grad, prog: ring4Progress, track: ring4Track },
+    { cx: col1X, cy: row1Y, ...getMetricData(ringLayout?.topLeft     || "distance",      run) },
+    { cx: col2X, cy: row1Y, ...getMetricData(ringLayout?.topRight    || "pace",           run) },
+    { cx: col1X, cy: row2Y, ...getMetricData(ringLayout?.bottomLeft  || "duration",       run) },
+    { cx: col2X, cy: row2Y, ...getMetricData(ringLayout?.bottomRight || "elevationGain",  run) },
   ];
 
   let ringSvg = "";
@@ -1032,7 +1051,7 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
 
   switch (template.id) {
     case "stats-grid":
-      svgContent = buildStatsGridSvg(w, h, req.runData, req.userName);
+      svgContent = buildStatsGridSvg(w, h, req.runData, req.userName, req.ringLayout);
       break;
     case "run-metrics":
       svgContent = buildRunMetricsSvg(w, h, req.runData, req.userName);
@@ -1050,7 +1069,7 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
       svgContent = buildMinimalSvg(w, h, req.runData, req.userName);
       break;
     default:
-      svgContent = buildStatsGridSvg(w, h, req.runData, req.userName);
+      svgContent = buildStatsGridSvg(w, h, req.runData, req.userName, req.ringLayout);
   }
 
   let stickersSvg = "";

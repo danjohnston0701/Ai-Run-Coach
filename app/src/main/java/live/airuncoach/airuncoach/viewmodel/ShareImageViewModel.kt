@@ -33,7 +33,7 @@ data class ShareEditorState(
     val templates: List<ShareTemplate> = emptyList(),
     val stickers: List<StickerWidget> = emptyList(),
     val selectedTemplate: ShareTemplate? = null,
-    val selectedAspectRatio: String = "1:1",
+    val selectedAspectRatio: String = "9:16",
     val placedStickers: List<PlacedSticker> = emptyList(),
     val previewImageBase64: String? = null,
     val isLoadingTemplates: Boolean = false,
@@ -48,7 +48,16 @@ data class ShareEditorState(
     val backgroundOpacity: Float = 0.4f,
     val backgroundBlur: Int = 8,
     // Custom stickers (user-uploaded images)
-    val customStickers: List<CustomSticker> = emptyList()
+    val customStickers: List<CustomSticker> = emptyList(),
+    // Ring layout customization (for stats-grid template)
+    val ringLayout: Map<String, String> = mapOf(
+        "topLeft" to "distance",
+        "topRight" to "pace",
+        "bottomLeft" to "duration",
+        "bottomRight" to "elevationGain"
+    ),
+    val showRingPicker: Boolean = false,
+    val ringPickerPosition: String? = null
 )
 
 @HiltViewModel
@@ -73,12 +82,14 @@ class ShareImageViewModel @Inject constructor(
             try {
                 val response = apiService.getShareTemplates()
                 val defaultTemplate = response.templates.firstOrNull()
+                val defaultRatio = if (defaultTemplate?.aspectRatios?.contains("9:16") == true) "9:16"
+                                   else defaultTemplate?.aspectRatios?.firstOrNull() ?: "9:16"
                 _state.update {
                     it.copy(
                         templates = response.templates,
                         stickers = response.stickers,
                         selectedTemplate = defaultTemplate,
-                        selectedAspectRatio = defaultTemplate?.aspectRatios?.firstOrNull() ?: "1:1",
+                        selectedAspectRatio = defaultRatio,
                         isLoadingTemplates = false
                     )
                 }
@@ -400,7 +411,8 @@ class ShareImageViewModel @Inject constructor(
             customBackground = s.customBackgroundBase64,
             backgroundOpacity = if (s.customBackgroundBase64 != null) s.backgroundOpacity else null,
             backgroundBlur = if (s.customBackgroundBase64 != null) s.backgroundBlur else null,
-            customStickers = s.customStickers.ifEmpty { null }
+            customStickers = s.customStickers.ifEmpty { null },
+            ringLayout = if (template.id == "stats-grid") s.ringLayout else null
         )
     }
 
@@ -521,5 +533,24 @@ class ShareImageViewModel @Inject constructor(
 
     fun clearError() {
         _state.update { it.copy(error = null) }
+    }
+
+    // ═══════════════════ Ring Layout Customization ═══════════════════
+
+    fun openRingPicker(position: String) {
+        _state.update { it.copy(showRingPicker = true, ringPickerPosition = position) }
+    }
+
+    fun setRingMetric(position: String, metric: String) {
+        _state.update { state ->
+            val updated = state.ringLayout.toMutableMap()
+            updated[position] = metric
+            state.copy(ringLayout = updated, showRingPicker = false, ringPickerPosition = null)
+        }
+        requestPreviewDebounced()
+    }
+
+    fun closeRingPicker() {
+        _state.update { it.copy(showRingPicker = false, ringPickerPosition = null) }
     }
 }

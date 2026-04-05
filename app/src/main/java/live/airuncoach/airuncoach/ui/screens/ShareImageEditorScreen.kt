@@ -69,7 +69,8 @@ fun ShareImageEditorScreen(
 
     var isStickerPanelExpanded by remember { mutableStateOf(false) }
     var isBackgroundPanelExpanded by remember { mutableStateOf(false) }
-    
+    var isRingsPanelExpanded by remember { mutableStateOf(false) }
+
     // Collapsible control strip state
     var isControlStripExpanded by remember { mutableStateOf(true) }
 
@@ -161,6 +162,12 @@ fun ShareImageEditorScreen(
                         onRemoveBackground = { viewModel.removeCustomBackground() },
                         onBackgroundOpacityChange = { viewModel.setBackgroundOpacity(it) },
                         onBackgroundBlurChange = { viewModel.setBackgroundBlur(it) },
+                        // Ring customizer
+                        isStatsGridTemplate = state.selectedTemplate?.id == "stats-grid",
+                        isRingsPanelExpanded = isRingsPanelExpanded,
+                        onToggleRings = { isRingsPanelExpanded = !isRingsPanelExpanded },
+                        ringLayout = state.ringLayout,
+                        onRingPositionClick = { position -> viewModel.openRingPicker(position) },
                         // Actions
                         isSaving = state.isSaving,
                         isGenerating = state.isGenerating,
@@ -309,6 +316,18 @@ fun ShareImageEditorScreen(
             ) {
                 Text(msg)
             }
+        }
+
+        // ─── Ring metric picker overlay ───
+        if (state.showRingPicker) {
+            RingPickerOverlay(
+                position = state.ringPickerPosition ?: "",
+                currentMetric = state.ringLayout[state.ringPickerPosition ?: ""] ?: "",
+                onMetricSelected = { metric ->
+                    viewModel.setRingMetric(state.ringPickerPosition ?: "", metric)
+                },
+                onDismiss = { viewModel.closeRingPicker() }
+            )
         }
     }
 }
@@ -479,6 +498,12 @@ private fun ControlStrip(
     onRemoveBackground: () -> Unit,
     onBackgroundOpacityChange: (Float) -> Unit,
     onBackgroundBlurChange: (Int) -> Unit,
+    // Ring customizer (stats-grid only)
+    isStatsGridTemplate: Boolean,
+    isRingsPanelExpanded: Boolean,
+    onToggleRings: () -> Unit,
+    ringLayout: Map<String, String>,
+    onRingPositionClick: (String) -> Unit,
     // Actions
     isSaving: Boolean,
     isGenerating: Boolean,
@@ -681,6 +706,51 @@ private fun ControlStrip(
                     onOpacityChange = onBackgroundOpacityChange,
                     onBlurChange = onBackgroundBlurChange
                 )
+            }
+
+            // ─── Customize Rings (stats-grid only) ───
+            AnimatedVisibility(
+                visible = isStatsGridTemplate,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column {
+                    Surface(onClick = onToggleRings, color = Color.Transparent) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = null,
+                                tint = Colors.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Customize Rings",
+                                style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold),
+                                color = Colors.textPrimary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(
+                                imageVector = if (isRingsPanelExpanded) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                                contentDescription = null,
+                                tint = Colors.textSecondary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                    AnimatedVisibility(
+                        visible = isRingsPanelExpanded,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        RingCustomizerPanel(ringLayout = ringLayout, onRingPositionClick = onRingPositionClick)
+                    }
+                }
             }
 
             // Action buttons
@@ -1220,6 +1290,225 @@ private fun BackgroundControlPanel(
                     modifier = Modifier.width(36.dp),
                     textAlign = TextAlign.End
                 )
+            }
+        }
+    }
+}
+
+/* ═══════════════════════ RING CUSTOMIZER ═══════════════════════ */
+
+private val RING_METRIC_OPTIONS = listOf(
+    "distance"      to "Distance",
+    "pace"          to "Avg Pace",
+    "duration"      to "Duration",
+    "heartRate"     to "Heart Rate",
+    "maxHeartRate"  to "Max HR",
+    "calories"      to "Calories",
+    "elevationGain" to "Elev Gain",
+    "elevationLoss" to "Elev Loss",
+    "cadence"       to "Cadence",
+)
+
+private fun metricLabel(key: String): String =
+    RING_METRIC_OPTIONS.find { it.first == key }?.second ?: key
+
+@Composable
+private fun RingCustomizerPanel(
+    ringLayout: Map<String, String>,
+    onRingPositionClick: (String) -> Unit
+) {
+    val positions = listOf(
+        "topLeft"     to "Top Left",
+        "topRight"    to "Top Right",
+        "bottomLeft"  to "Bottom Left",
+        "bottomRight" to "Bottom Right",
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text = "Tap a position to change its metric",
+            style = AppTextStyles.caption,
+            color = Colors.textMuted,
+            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            positions.take(2).forEach { (posKey, posLabel) ->
+                RingPositionButton(
+                    posLabel = posLabel,
+                    currentMetric = metricLabel(ringLayout[posKey] ?: ""),
+                    onClick = { onRingPositionClick(posKey) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            positions.drop(2).forEach { (posKey, posLabel) ->
+                RingPositionButton(
+                    posLabel = posLabel,
+                    currentMetric = metricLabel(ringLayout[posKey] ?: ""),
+                    onClick = { onRingPositionClick(posKey) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+    }
+}
+
+@Composable
+private fun RingPositionButton(
+    posLabel: String,
+    currentMetric: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2332)),
+        border = BorderStroke(1.dp, Colors.primary.copy(alpha = 0.4f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = posLabel,
+                style = AppTextStyles.caption.copy(fontSize = 10.sp),
+                color = Colors.textMuted,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = currentMetric,
+                style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+                color = Colors.primary,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Icon(
+                imageVector = Icons.Default.Edit,
+                contentDescription = "Change",
+                tint = Colors.textMuted,
+                modifier = Modifier.size(11.dp)
+            )
+        }
+    }
+}
+
+/* ═══════════════════════ RING PICKER OVERLAY ═══════════════════════ */
+
+@Composable
+private fun RingPickerOverlay(
+    position: String,
+    currentMetric: String,
+    onMetricSelected: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val posLabel = when (position) {
+        "topLeft"     -> "Top Left Ring"
+        "topRight"    -> "Top Right Ring"
+        "bottomLeft"  -> "Bottom Left Ring"
+        "bottomRight" -> "Bottom Right Ring"
+        else          -> "Ring"
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.65f))
+            .clickable { onDismiss() }
+    ) {
+        Card(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .clickable { /* consume — prevent dismiss */ },
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117)),
+            border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.5f))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp, vertical = 20.dp)
+            ) {
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = Modifier
+                            .width(36.dp)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(Colors.border)
+                    )
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Tune, null, tint = Colors.primary, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Change Metric — $posLabel",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(RING_METRIC_OPTIONS) { (key, label) ->
+                        val isSelected = key == currentMetric
+                        Card(
+                            onClick = { onMetricSelected(key) },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isSelected) Colors.primary.copy(alpha = 0.18f)
+                                                 else Color(0xFF1A2332)
+                            ),
+                            border = BorderStroke(
+                                if (isSelected) 1.5.dp else 1.dp,
+                                if (isSelected) Colors.primary else Colors.border.copy(alpha = 0.4f)
+                            )
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 14.dp, horizontal = 4.dp)
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) Colors.primary else Colors.textSecondary,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
             }
         }
     }
