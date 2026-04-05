@@ -1307,6 +1307,7 @@ private val RING_METRIC_OPTIONS = listOf(
     "elevationGain" to "Elev Gain",
     "elevationLoss" to "Elev Loss",
     "cadence"       to "Cadence",
+    "steps"         to "Total Steps",
 )
 
 private fun metricLabel(key: String): String =

@@ -10959,6 +10959,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       maxHeartRate: run.maxHeartRate || undefined,
       calories: run.calories || undefined,
       cadence: run.cadence || undefined,
+      totalSteps: run.totalSteps || undefined,
       elevation: run.elevation || undefined,
       elevationGain: run.elevationGain || undefined,
       elevationLoss: run.elevationLoss || undefined,
@@ -10985,7 +10986,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
   app.post("/api/share/generate", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers } = req.body;
+      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers, ringLayout } = req.body;
       if (!templateId || !runId) {
         return res.status(400).json({ error: "templateId and runId are required" });
       }
@@ -11009,7 +11010,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       
       const imageBuffer = await generateShareImage({
         templateId,
-        aspectRatio: aspectRatio || "4:5",
+        aspectRatio: aspectRatio || "9:16",
         stickers: stickers || [],
         runData: buildShareRunData(run, userTimezone),
         userName: user?.name || undefined,
@@ -11017,6 +11018,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         backgroundOpacity: backgroundOpacity ?? undefined,
         backgroundBlur: backgroundBlur ?? undefined,
         customStickers: customStickers || undefined,
+        ringLayout: ringLayout || undefined,
       });
 
       res.set({
@@ -11034,7 +11036,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
   app.post("/api/share/preview", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers } = req.body;
+      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers, ringLayout } = req.body;
       if (!templateId || !runId) {
         return res.status(400).json({ error: "templateId and runId are required" });
       }
@@ -11058,7 +11060,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
       const imageBuffer = await generateShareImage({
         templateId,
-        aspectRatio: aspectRatio || "4:5",
+        aspectRatio: aspectRatio || "9:16",
         stickers: stickers || [],
         runData: buildShareRunData(run, userTimezone),
         userName: user?.name || undefined,
@@ -11066,6 +11068,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         backgroundOpacity: backgroundOpacity ?? undefined,
         backgroundBlur: backgroundBlur ?? undefined,
         customStickers: customStickers || undefined,
+        ringLayout: ringLayout || undefined,
       });
 
       const base64 = imageBuffer.toString("base64");

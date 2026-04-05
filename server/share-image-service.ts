@@ -71,6 +71,7 @@ export interface RunDataForImage {
   maxHeartRate?: number;
   calories?: number;
   cadence?: number;
+  totalSteps?: number;
   elevation?: number;
   elevationGain?: number;
   elevationLoss?: number;
@@ -344,6 +345,10 @@ function getMetricData(metric: string, run: RunDataForImage): RingMetricData {
     case "cadence": {
       const cad = run.cadence || 0;
       return { label: "Cadence", value: cad ? cad.toString() : "--", grad: "greenRingGrad", prog: cad ? Math.min(0.3 + (cad - 140) / 50 * 0.6, 0.95) : 0.5, track: "#00E676" };
+    }
+    case "steps": {
+      const steps = run.totalSteps || 0;
+      return { label: "Steps", value: steps ? steps.toLocaleString() : "--", grad: "cyanRingGrad", prog: steps ? Math.min(0.3 + steps / 10000 * 0.6, 0.95) : 0.5, track: "#00E5FF" };
     }
     default: {
       const d = run.distance || 0;
