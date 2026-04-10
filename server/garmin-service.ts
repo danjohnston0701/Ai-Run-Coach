@@ -4,8 +4,9 @@ const GARMIN_CLIENT_ID = process.env.GARMIN_CLIENT_ID;
 const GARMIN_CLIENT_SECRET = process.env.GARMIN_CLIENT_SECRET;
 
 // Garmin OAuth 2.0 endpoints (PKCE flow)
-const GARMIN_AUTH_URL = 'https://connect.garmin.com/oauth2Confirm';
-const GARMIN_TOKEN_URL = 'https://diauth.garmin.com/di-oauth2-service/oauth/token';
+// Note: The OAuth 2.0 auth endpoint is the "DiAuth" service, NOT connect.garmin.com
+const GARMIN_AUTH_URL = 'https://diauth.garmin.com/oauth-service/oauth/authorize';
+const GARMIN_TOKEN_URL = 'https://diauth.garmin.com/oauth-service/oauth/token';
 // Garmin Health API base (for wellness data - works with OAuth 2.0)
 const GARMIN_API_BASE = 'https://apis.garmin.com';
 // Garmin Connect proxy (for activity data if available)
@@ -105,7 +106,8 @@ export async function getGarminAuthUrl(redirectUri: string, state: string, nonce
   // Cleanup old verifiers periodically
   cleanupOldVerifiers().catch(err => console.error('Failed to cleanup old verifiers:', err));
   
-  // Note: Garmin's scope is managed via app configuration, not in the auth request
+  // Garmin OAuth 2.0 parameters
+  // Note: Scopes are typically configured in the Garmin Developer Portal, but we can request them here
   const params = new URLSearchParams({
     client_id: GARMIN_CLIENT_ID!,
     response_type: 'code',
@@ -113,9 +115,15 @@ export async function getGarminAuthUrl(redirectUri: string, state: string, nonce
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',
     state: state,
+    // Scope is optional for Garmin - it's configured in the app settings
+    // But including common scopes helps ensure proper permissions:
+    // scope: 'ACTIVITY:READ WELLNESS:READ',
   });
   
-  return `${GARMIN_AUTH_URL}?${params.toString()}`;
+  const fullUrl = `${GARMIN_AUTH_URL}?${params.toString()}`;
+  console.log(`[Garmin Auth] Generated auth URL: ${fullUrl}`);
+  
+  return fullUrl;
 }
 
 /**
