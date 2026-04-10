@@ -47,6 +47,13 @@ class GarminWatchManager(private val context: Context) {
     /** Invoked when a command message arrives from the watch. */
     var onWatchCommand: ((action: String) -> Unit)? = null
 
+    /**
+     * Invoked when the watch companion app is resolved and ready to receive messages.
+     * Use this to proactively push an auth token as soon as the watch connects —
+     * even before a run has started.
+     */
+    var onWatchAppReady: (() -> Unit)? = null
+
     // ── Private SDK handles ───────────────────────────────────────────────────
     private var connectIQ: ConnectIQ? = null
     private var connectedDevice: IQDevice? = null
@@ -179,6 +186,9 @@ class GarminWatchManager(private val context: Context) {
                     }
                 }
             )
+            // Watch app is now resolved and listening — notify so caller can push auth
+            Log.d(TAG, "Watch app ready — firing onWatchAppReady")
+            onWatchAppReady?.invoke()
         } catch (e: InvalidStateException) {
             Log.w(TAG, "registerForMessages: ${e.message}")
         }

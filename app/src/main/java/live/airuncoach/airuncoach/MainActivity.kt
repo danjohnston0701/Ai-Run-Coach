@@ -25,6 +25,7 @@ import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.data.GarminAuthManager
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.network.RetrofitClient
+import live.airuncoach.airuncoach.service.GarminWatchManager
 import live.airuncoach.airuncoach.service.RunTrackingService
 import live.airuncoach.airuncoach.ui.navigation.RootNavigationGraph
 import live.airuncoach.airuncoach.ui.theme.AiRunCoachTheme
@@ -33,6 +34,10 @@ import live.airuncoach.airuncoach.ui.theme.AiRunCoachTheme
 class MainActivity : ComponentActivity() {
     
     private lateinit var garminAuthManager: GarminAuthManager
+
+    // Garmin watch bridge — initialized at app startup so the watch can connect
+    // and receive an auth token without the user needing to start a run first.
+    private var garminWatchManager: GarminWatchManager? = null
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,6 +54,11 @@ class MainActivity : ComponentActivity() {
         
         // Initialize Garmin auth manager
         garminAuthManager = GarminAuthManager(this)
+
+        // Initialize Garmin watch bridge at app startup.
+        // This allows the watch companion app to receive an auth token as soon as
+        // the phone app opens — without requiring a run to be in progress.
+        initGarminWatchBridge()
         
         // Handle OAuth callback if present
         handleGarminOAuthCallback(intent)
@@ -227,6 +237,53 @@ class MainActivity : ComponentActivity() {
         }
 
         return null
+    }
+
+    // ── Garmin watch bridge ───────────────────────────────────────────────────
+
+    /**
+     * Initialize the Garmin ConnectIQ bridge so the watch companion app receives
+     * an auth token as soon as the phone app is opened — even with no active run.
+     *
+     * Flow:
+     *   1. ConnectIQ SDK starts up (WIRELESS / Bluetooth)
+     *   2. onSdkReady fires → finds paired watch → resolves companion app
+     *   3. onWatchAppReady fires → we push "auth" message with JWT + runner name
+     *   4. Watch receives "auth" → saves token → shows "Ready" screen
+     */
+    private fun initGarminWatchBridge() {
+        try {
+            val sessionManager = SessionManager(this)
+
+            garminWatchManager = GarminWatchManager(this).also { mgr ->
+                mgr.onWatchAppReady = {
+                    // Watch companion app is resolved and listening — push auth immediately
+                    val token = sessionManager.getAuthToken()
+                    val name  = sessionManager.getUserName() ?: ""
+                    if (token != null) {
+                        Log.d("MainActivity", "Watch app ready — sending auth token to watch")
+                        mgr.sendAuth(token, name)
+                    } else {
+                        Log.d("MainActivity", "Watch app ready but user not logged in — skipping auth push")
+                    }
+                }
+                mgr.initialize()
+                Log.d("MainActivity", "✅ GarminWatchManager initialized at app startup")
+            }
+        } catch (e: Exception) {
+            // Non-fatal: Garmin Connect app may not be installed on this device
+            Log.w("MainActivity", "GarminWatchManager init skipped (non-fatal): ${e.message}")
+            garminWatchManager = null
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            garminWatchManager?.shutdown()
+        } catch (e: Exception) {
+            Log.w("MainActivity", "GarminWatchManager shutdown: ${e.message}")
+        }
     }
 
     companion object {

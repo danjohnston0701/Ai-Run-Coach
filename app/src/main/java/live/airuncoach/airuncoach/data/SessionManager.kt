@@ -68,6 +68,30 @@ class SessionManager(context: Context) {
             remove("auth_token")
             remove("user_id")
             remove("short_user_id")
+            remove("user_name")
+        }
+    }
+
+    /**
+     * Saves the user's display name so it can be sent to the Garmin watch
+     * companion app without an additional API call.
+     */
+    fun saveUserName(name: String?) {
+        if (name.isNullOrBlank()) return
+        sharedPreferences.edit {
+            putString("user_name", name)
+        }
+    }
+
+    /**
+     * Retrieves the user's display name saved at login.
+     */
+    fun getUserName(): String? {
+        return try {
+            sharedPreferences.getString("user_name", null)
+        } catch (e: Exception) {
+            Log.e("SessionManager", "Failed to get user name: ${e.message}")
+            null
         }
     }
     

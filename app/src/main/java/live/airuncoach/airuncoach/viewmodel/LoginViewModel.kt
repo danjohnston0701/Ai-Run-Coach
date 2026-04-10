@@ -101,10 +101,11 @@ class LoginViewModel @Inject constructor(
                 
                 android.util.Log.d("LoginViewModel", "Using token: ${token.take(20)}...")
                 
-                // Save auth token
-                Log.d("LoginViewModel", "💾 Saving auth token and user ID...")
+                // Save auth token, user ID and user name
+                Log.d("LoginViewModel", "💾 Saving auth token, user ID and name...")
                 sessionManager.saveAuthToken(token)
                 sessionManager.saveUserId(user.id)
+                sessionManager.saveUserName(user.name)
                 val savedToken = sessionManager.getAuthToken()
                 android.util.Log.d("LoginViewModel", "Token saved and verified: ${savedToken != null && savedToken == token}")
                 
@@ -251,10 +252,11 @@ class LoginViewModel @Inject constructor(
                 
                 android.util.Log.d("LoginViewModel", "Using token: ${token.take(20)}...")
                 
-                // Save auth token
-                android.util.Log.d("LoginViewModel", "💾 Saving auth token and user ID...")
+                // Save auth token, user ID and user name
+                android.util.Log.d("LoginViewModel", "💾 Saving auth token, user ID and name...")
                 sessionManager.saveAuthToken(token)
                 sessionManager.saveUserId(user.id)
+                sessionManager.saveUserName(user.name)
                 val savedToken = sessionManager.getAuthToken()
                 android.util.Log.d("LoginViewModel", "Token saved and verified: ${savedToken != null && savedToken == token}")
                 
