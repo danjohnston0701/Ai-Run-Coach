@@ -2712,10 +2712,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Use dynamic redirect URI based on request host
       let host = req.get('host') || '';
       
-      // Only add port 5000 for local development, NOT for production Replit
-      const isProduction = host.includes('replit.app');
-      if (!isProduction && !host.includes(':5000') && !host.includes(':')) {
-        host = host.split(':')[0] + ':5000';
+      // Only add port 5000 for local development
+      // Production: replit.app domains, airuncoach.live, or any host with explicit port
+      const isProduction = host.includes('replit.app') || 
+                          host.includes('airuncoach.live') || 
+                          host.includes(':');
+      
+      if (!isProduction) {
+        // Local development: add port 5000 if not already present
+        host = host + ':5000';
       }
       
       const baseUrl = `https://${host}`;
