@@ -44,6 +44,18 @@ class GarminWatchManager(private val context: Context) {
     private val _isWatchConnected = MutableStateFlow(false)
     val isWatchConnected: StateFlow<Boolean> = _isWatchConnected
 
+    /**
+     * True once [getApplicationInfo] confirms the AI Run Coach companion app
+     * is installed on the paired watch.  Stays false if:
+     *   - No watch is paired / connected
+     *   - Garmin Connect app is not installed on the phone
+     *   - The companion app has not been installed on the watch
+     *
+     * Use this to conditionally show "Prepare Run on Watch" in the UI.
+     */
+    private val _isCompanionAppInstalled = MutableStateFlow(false)
+    val isCompanionAppInstalled: StateFlow<Boolean> = _isCompanionAppInstalled
+
     /** Invoked when a command message arrives from the watch. */
     var onWatchCommand: ((action: String) -> Unit)? = null
 
@@ -155,12 +167,14 @@ class GarminWatchManager(private val context: Context) {
                     override fun onApplicationInfoReceived(app: IQApp?) {
                         if (app != null) {
                             iqApp = app
+                            _isCompanionAppInstalled.value = true
                             Log.d(TAG, "Watch app resolved: ${app.getDisplayName()}")
                             registerForMessages(device, app)
                         }
                     }
 
                     override fun onApplicationNotInstalled(appId: String?) {
+                        _isCompanionAppInstalled.value = false
                         Log.w(TAG, "Watch app not installed on device (appId=$appId)")
                     }
                 }
@@ -236,7 +250,12 @@ class GarminWatchManager(private val context: Context) {
                             val connected = status == IQDevice.IQDeviceStatus.CONNECTED
                             Log.d(TAG, "Device status: $status")
                             _isWatchConnected.value = connected
-                            if (connected) resolveApp(device) else iqApp = null
+                            if (connected) {
+                                resolveApp(device)
+                            } else {
+                                iqApp = null
+                                _isCompanionAppInstalled.value = false
+                            }
                         }
                     }
                 )
@@ -260,6 +279,7 @@ class GarminWatchManager(private val context: Context) {
         override fun onSdkShutDown() {
             Log.d(TAG, "ConnectIQ SDK shut down")
             _isWatchConnected.value = false
+            _isCompanionAppInstalled.value = false
         }
     }
 }
