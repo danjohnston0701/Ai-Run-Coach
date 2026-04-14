@@ -45,6 +45,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.network.model.PlacedSticker
 import live.airuncoach.airuncoach.network.model.ShareTemplate
 import live.airuncoach.airuncoach.network.model.StickerWidget
+import live.airuncoach.airuncoach.ui.components.GarminAttributionBadge
+import live.airuncoach.airuncoach.ui.components.GarminBadgeStyle
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
@@ -263,6 +265,17 @@ fun ShareImageEditorScreen(
                     )
                 }
             }
+
+            // ─── Garmin attribution — floating top-right (Garmin API Brand Guidelines) ───
+            // Run data displayed in shared images may originate from a Garmin device.
+            // Attribution must be visible to the user above the fold.
+            GarminAttributionBadge(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(end = 12.dp, top = 14.dp),
+                style = GarminBadgeStyle.INLINE,
+            )
         }
 
         // ─── Error snackbar ───

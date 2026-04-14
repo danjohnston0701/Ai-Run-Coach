@@ -95,6 +95,8 @@ import live.airuncoach.airuncoach.network.model.ComprehensiveRunAnalysis
 import live.airuncoach.airuncoach.network.model.GarminInsights
 import live.airuncoach.airuncoach.network.model.TechnicalAnalysis
 import live.airuncoach.airuncoach.ui.components.CoachingPlanBadge
+import live.airuncoach.airuncoach.ui.components.GarminAttributionBadge
+import live.airuncoach.airuncoach.ui.components.GarminBadgeStyle
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
@@ -562,6 +564,19 @@ private fun AiInsightsTabContent(
             RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected)
         }
 
+        // ── Garmin attribution — REQUIRED by Garmin API Brand Guidelines ──────
+        // Must appear above the fold, directly below the primary heading,
+        // on every screen showing Garmin device-sourced data.
+        // Show whenever: Garmin is connected, OR the run originated from Garmin.
+        if (isGarminConnected || run.externalSource == "garmin" || run.hasGarminData == true) {
+            item {
+                GarminAttributionBadge(
+                    modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+                    style = GarminBadgeStyle.HEADER,
+                )
+            }
+        }
+
         // Run Completed banner with optional difficulty pill
         item {
             RunCompletedBannerWithDifficulty(difficultyLabel = difficultyLabel)
@@ -579,12 +594,8 @@ private fun AiInsightsTabContent(
             }
         }
 
-        // Garmin recognition badge — shown just below the Run Completed banner (after enrichment)
-        if (run.externalSource == "garmin" || (isGarminConnected && run.hasGarminData == true)) {
-            item {
-                GarminPoweredByBadge(text = "Run data Powered by Garmin")
-            }
-        }
+        // Note: Garmin attribution is now shown above the fold (before RunCompletedBanner).
+        // The redundant badge here has been removed to avoid duplication.
 
         item {
             ShareableSummaryCard(

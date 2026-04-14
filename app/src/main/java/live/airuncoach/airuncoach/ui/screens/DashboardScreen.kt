@@ -53,6 +53,8 @@ import live.airuncoach.airuncoach.domain.model.GarminConnection
 import live.airuncoach.airuncoach.domain.model.Goal
 import live.airuncoach.airuncoach.domain.model.RunSession
 import live.airuncoach.airuncoach.domain.model.WeatherData
+import live.airuncoach.airuncoach.ui.components.GarminAttributionBadge
+import live.airuncoach.airuncoach.ui.components.GarminBadgeStyle
 import live.airuncoach.airuncoach.ui.components.TargetTimeCard
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
@@ -193,7 +195,8 @@ fun DashboardScreen(
         item {
             PreviousRunsCard(
                 recentRun = recentRun,
-                onClick = onNavigateToPreviousRuns
+                onClick = onNavigateToPreviousRuns,
+                garminDeviceModel = garminConnection?.deviceName ?: garminConnection?.deviceModel
             )
         }
         item { Spacer(modifier = Modifier.height(Spacing.xxl)) }
@@ -893,7 +896,8 @@ fun AiCoachToggle(
 @Composable
 fun PreviousRunsCard(
     recentRun: RunSession?,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    garminDeviceModel: String? = null,
 ) {
     Card(
         modifier = Modifier
@@ -915,7 +919,10 @@ fun PreviousRunsCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Icon(
                         painter = painterResource(id = R.drawable.icon_clock_vector),
                         contentDescription = "Previous Runs",
@@ -929,6 +936,19 @@ fun PreviousRunsCard(
                         text = "MOST RECENT RUN",
                         style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
                         color = Colors.textPrimary
+                    )
+                }
+
+                // ── Garmin attribution (Garmin API Brand Guidelines) ──────────
+                // Required adjacent to the primary heading of any data view
+                // displaying Garmin device-sourced data.
+                val showAttribution = garminDeviceModel != null ||
+                    (recentRun?.externalSource == "garmin") ||
+                    (recentRun?.hasGarminData == true)
+                if (showAttribution) {
+                    GarminAttributionBadge(
+                        deviceModel = garminDeviceModel,
+                        style = GarminBadgeStyle.INLINE,
                     )
                 }
             }

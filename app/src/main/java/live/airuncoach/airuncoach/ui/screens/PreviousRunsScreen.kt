@@ -38,6 +38,8 @@ import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
+import live.airuncoach.airuncoach.ui.components.GarminAttributionBadge
+import live.airuncoach.airuncoach.ui.components.GarminBadgeStyle
 import live.airuncoach.airuncoach.viewmodel.PreviousRunsViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -56,6 +58,7 @@ fun PreviousRunsScreen(
     val error by viewModel.error.collectAsState()
     val weatherImpact by viewModel.weatherImpactData.collectAsState()
     val selectedFilter by viewModel.selectedFilter.collectAsState()
+    val isGarminConnected by viewModel.isGarminConnected.collectAsState()
     
     var isWeatherImpactExpanded by remember { mutableStateOf(false) }
 
@@ -98,6 +101,15 @@ fun PreviousRunsScreen(
                     style = AppTextStyles.body,
                     color = Colors.textSecondary
                 )
+                // ── Garmin attribution (Garmin API Brand Guidelines) ───────────
+                // Required directly beneath the primary heading when Garmin data
+                // is present. Show whenever the user has a Garmin device connected
+                // or any run in history originated from Garmin.
+                val hasGarminRuns = runs.any { it.externalSource == "garmin" || it.hasGarminData }
+                if (isGarminConnected || hasGarminRuns) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    GarminAttributionBadge(style = GarminBadgeStyle.INLINE)
+                }
             }
             /*
             // Refresh button

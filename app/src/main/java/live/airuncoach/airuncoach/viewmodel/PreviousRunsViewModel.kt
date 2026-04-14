@@ -82,6 +82,10 @@ class PreviousRunsViewModel @Inject constructor(
     private val _selectedFilter = MutableStateFlow("Last 7 Days")
     val selectedFilter: StateFlow<String> = _selectedFilter.asStateFlow()
 
+    // Garmin connection flag — drives attribution badge visibility
+    private val _isGarminConnected = MutableStateFlow(false)
+    val isGarminConnected: StateFlow<Boolean> = _isGarminConnected.asStateFlow()
+
     fun fetchRuns() {
         viewModelScope.launch {
             _isLoading.value = true
@@ -93,6 +97,10 @@ class PreviousRunsViewModel @Inject constructor(
                     android.util.Log.d("PreviousRunsViewModel", "✅ Fetching runs for user: $userId")
                     val allRuns = runRepository.getRunsForUser(userId)  // ⚡ Use repository (cached)
                     _runs.value = filterRunsByTimeRange(allRuns)
+                    // Derive Garmin connection status from run history
+                    _isGarminConnected.value = allRuns.any {
+                        it.externalSource == "garmin" || it.hasGarminData == true
+                    }
                     android.util.Log.d("PreviousRunsViewModel", "✅ Fetched ${allRuns.size} total runs, filtered to ${_runs.value.size}")
                 } else {
                     android.util.Log.e("PreviousRunsViewModel", "❌ Cannot fetch runs: User ID is null")
