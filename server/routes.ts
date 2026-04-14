@@ -783,7 +783,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       cadence: run.cadence || 0,
       maxCadence: run.maxCadence || null,
       heartRate: run.avgHeartRate || 0,
-      routePoints: Array.isArray(run.gpsTrack) ? run.gpsTrack : [],
+      routePoints: Array.isArray(run.gpsTrack) ? run.gpsTrack.map((pt: any) => ({
+        // Garmin-sourced points use 'lat'/'lng'; native app uses 'latitude'/'longitude'.
+        // Always normalise to 'latitude'/'longitude' so the Android LocationPoint model
+        // can deserialise the non-null fields without crashing.
+        latitude:  pt.latitude  ?? pt.lat  ?? 0,
+        longitude: pt.longitude ?? pt.lng  ?? 0,
+        timestamp: pt.timestamp ?? pt.time ?? 0,
+        speed:     pt.speed     ?? pt.pace ?? null,
+        altitude:  pt.altitude  ?? null,
+        heartRate: pt.heartRate ?? pt.hr   ?? null,
+        bearing:   pt.bearing   ?? null,
+        cadence:   pt.cadence   ?? null,
+      })) : [],
       kmSplits: Array.isArray(run.kmSplits) ? run.kmSplits : [],
       heartRateData: normalizeNumericSeries(run.heartRateData),
       paceData: normalizeNumericSeries(run.paceData),
