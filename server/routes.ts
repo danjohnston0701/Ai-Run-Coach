@@ -1000,7 +1000,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error(`[GET /api/runs/${req.params.id}] Run NOT FOUND in database`);
         return res.status(404).json({ error: "Run not found" });
       }
-      console.log(`[GET /api/runs/${req.params.id}] Run found - userId: ${run.userId}, distance: ${run.distanceInMeters}`);
+      console.log(`[GET /api/runs/${req.params.id}] Run found - userId: ${run.userId}, distance: ${run.distance}`);
       const transformedRun = transformRunForAndroid(run);
       res.json(transformedRun);
     } catch (error: any) {
