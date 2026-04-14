@@ -1,15 +1,18 @@
 // RunView.mc
-// Main activity view — now the default/primary screen.
+// Main activity view — full run UI always visible.
 //
-// Displays live run metrics (pace, HR, distance, time, cadence) with an
-// overlay messaging system to guide the user through the auth flow and
-// workout states:
+// Status messages appear as a semi-transparent strip at the BOTTOM of the screen,
+// never blocking the instruments.
 //
-//   OVERLAY_NONE       — Running (metrics visible, no message)
-//   OVERLAY_WAITING    — "Waiting for phone..." + "Open AI Run Coach"
-//   OVERLAY_READY      — "Ready to run" (authenticated, no run active)
-//   OVERLAY_PREPARE    — "Prepare run on watch" button preview
-//   OVERLAY_COACHED    — "Coached run ready" (prepared run received)
+// TOP INSTRUMENT  — local clock time (HH:MM) before run starts,
+//                   switches to elapsed run time once running.
+//
+// Button behaviour:
+//   TOP / START button (onSelect) — not running  → start run
+//                                 — running       → pause / resume toggle
+//   BACK button (onBack)          — not running  → exit app
+//                                 — running, paused → finish confirmation
+//                                 — running, active → pause
 
 using Toybox.Attention;
 using Toybox.Math;
@@ -25,43 +28,43 @@ using Toybox.Communications as Comm;
 
 class RunView extends Ui.View {
 
-    // -- Overlay states --
+    // -- Overlay / prompt states --
     enum {
-        OVERLAY_NONE,
-        OVERLAY_WAITING,
-        OVERLAY_READY,
-        OVERLAY_COACHED
+        OVERLAY_NONE,       // running — no prompt
+        OVERLAY_WAITING,    // not yet authenticated
+        OVERLAY_READY,      // authenticated, idle
+        OVERLAY_COACHED     // coached run prepared, waiting to start
     }
 
     // -- Auth & app state --
     private var _isAuthenticated = false;
     private var _isConnected     = false;
     private var _runnerName      = "";
-    private var _overlayState    = OVERLAY_WAITING;
+    private var _overlayState    = OVERLAY_READY;
     private var _dotCount        = 0;
 
     // -- Prepared-run (coached) state --
-    private var _isPreparedRun   = false;
-    private var _prepRunType     = "";
-    private var _prepRunDist     = 0.0;
-    private var _prepWorkoutType = "";
-    private var _prepTargetPace  = "";
-    private var _prepWorkoutDesc = "";
-    private var _prepIntervalCnt = 0;
+    private var _isPreparedRun    = false;
+    private var _prepRunType      = "";
+    private var _prepRunDist      = 0.0;
+    private var _prepWorkoutType  = "";
+    private var _prepTargetPace   = "";
+    private var _prepWorkoutDesc  = "";
+    private var _prepIntervalCnt  = 0;
     private var _prepIntervalDist = 0.0;
     private var _prepIntervalDur  = 0;
 
     // -- Run metrics --
-    private var _heartRate       = 0;
-    private var _heartRateZone   = 1;
-    private var _distance        = 0.0;
-    private var _pace            = 0.0;
-    private var _elapsedTime     = 0;
-    private var _cadence         = 0;
+    private var _heartRate      = 0;
+    private var _heartRateZone  = 1;
+    private var _distance       = 0.0;
+    private var _pace           = 0.0;
+    private var _elapsedTime    = 0;
+    private var _cadence        = 0;
 
     // -- State --
-    private var _isRunning       = false;
-    private var _isPaused        = false;
+    private var _isRunning      = false;
+    private var _isPaused       = false;
     private var _phoneControlled = false;
 
     // -- Coaching state --
@@ -102,18 +105,14 @@ class RunView extends Ui.View {
         var name = App.Storage.getValue("runnerName");
         _runnerName = (name != null) ? name : "";
 
-        // Always start in READY — users can run without the phone.
-        // Coaching activates automatically when phone connects and sends auth.
-        // OVERLAY_WAITING is no longer a blocking screen.
+        // Always start READY — users can run without the phone.
         _overlayState = OVERLAY_READY;
     }
 
-    function setPhoneControlled(val) {
-        _phoneControlled = val;
-    }
+    function setPhoneControlled(val) { _phoneControlled = val; }
 
     function setCoachingMode(data) {
-        _isCoached = true;
+        _isCoached    = true;
         _overlayState = OVERLAY_COACHED;
         var rt = data.get("runType");
         var tp = data.get("targetPace");
@@ -124,18 +123,40 @@ class RunView extends Ui.View {
         var id = data.get("intervalDistKm");
         var ir = data.get("intervalDurSecs");
 
-        if (rt != null) { _coachRunType      = rt; }
-        if (tp != null) { _coachTargetPace   = tp; _coachTargetPaceSec = _parsePaceString(tp); }
-        if (wt != null) { _prepWorkoutType  = wt; }
-        if (wd != null) { _prepWorkoutDesc  = wd; }
-        if (dd != null) { _prepRunDist      = dd.toFloat(); }
-        if (ic != null) { _prepIntervalCnt  = ic.toNumber(); }
-        if (id != null) { _prepIntervalDist = id.toFloat(); }
-        if (ir != null) { _prepIntervalDur  = ir.toNumber(); }
+        if (rt != null) { _coachRunType       = rt; }
+        if (tp != null) { _coachTargetPace    = tp; _coachTargetPaceSec = _parsePaceString(tp); }
+        if (wt != null) { _prepWorkoutType   = wt; }
+        if (wd != null) { _prepWorkoutDesc   = wd; }
+        if (dd != null) { _prepRunDist       = dd.toFloat(); }
+        if (ic != null) { _prepIntervalCnt   = ic.toNumber(); }
+        if (id != null) { _prepIntervalDist  = id.toFloat(); }
+        if (ir != null) { _prepIntervalDur   = ir.toNumber(); }
     }
 
     function isPaused()  { return _isPaused; }
     function isRunning() { return _isRunning; }
+
+    // -- Start run (called from delegate) --
+    function startRun() {
+        if (_isRunning) { return; }
+        _isRunning    = true;
+        _isPaused     = false;
+        _elapsedMs    = 0;
+        _elapsedTime  = 0;
+        _overlayState = OVERLAY_NONE;
+
+        if (!_phoneControlled) {
+            _startWatchSession();
+            Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
+            Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE]);
+            Sensor.enableSensorEvents(method(:onSensor));
+        } else {
+            _phoneLink.sendCommand("start");
+        }
+
+        _vibrateShort();
+        Ui.requestUpdate();
+    }
 
     // -- Lifecycle --
 
@@ -152,7 +173,6 @@ class RunView extends Ui.View {
 
         _timer = new Timer.Timer();
         _timer.start(method(:onTimer), _tickMs, true);
-
         Sys.println("RunView shown — auth=" + _isAuthenticated + " coached=" + _isCoached);
     }
 
@@ -178,7 +198,7 @@ class RunView extends Ui.View {
                 App.Storage.setValue("authToken", token);
                 _isAuthenticated = true;
                 _isConnected     = true;
-                _overlayState = OVERLAY_READY;
+                if (!_isRunning) { _overlayState = OVERLAY_READY; }
             }
             if (rname != null) {
                 App.Storage.setValue("runnerName", rname);
@@ -198,7 +218,7 @@ class RunView extends Ui.View {
             if (wt   != null) { _prepWorkoutType = wt; }
             if (tp   != null) { _prepTargetPace  = tp; }
             if (wd   != null) { _prepWorkoutDesc = wd; }
-            _overlayState = OVERLAY_COACHED;
+            if (!_isRunning) { _overlayState = OVERLAY_COACHED; }
             Ui.requestUpdate();
 
         } else if (msgType != null && msgType.equals("disconnect")) {
@@ -231,23 +251,21 @@ class RunView extends Ui.View {
             if (runningVal != null) { _isRunning = runningVal; }
             if (pausedVal  != null) { _isPaused  = pausedVal; }
 
-            if (_isRunning && _overlayState != OVERLAY_COACHED) {
-                _overlayState = OVERLAY_NONE;
-            }
+            if (_isRunning) { _overlayState = OVERLAY_NONE; }
             Ui.requestUpdate();
 
         } else if (msgType.equals("coachingCue")) {
             var cue = data.get("cue");
             if (cue != null) {
-                _coachingCue = cue;
-                _coachingCueTicks = 20;
+                _coachingCue       = cue;
+                _coachingCueTicks  = 20;
                 Ui.requestUpdate();
                 _vibrateShort();
             }
 
         } else if (msgType.equals("sessionEnded")) {
             _isRunning = false;
-            _isPaused = false;
+            _isPaused  = false;
             _overlayState = OVERLAY_READY;
             Ui.requestUpdate();
         }
@@ -255,18 +273,13 @@ class RunView extends Ui.View {
 
     // -- Timer tick (250 ms) --
     function onTimer() as Void {
-        // Animation for waiting state
-        if (_overlayState == OVERLAY_WAITING) {
-            _dotCount = (_dotCount + 1) % 4;
-        }
+        _dotCount = (_dotCount + 1) % 4;
 
-        // Increment watch-side time if standalone and running
         if (!_phoneControlled && _isRunning && !_isPaused) {
             _elapsedMs  += _tickMs;
             _elapsedTime = _elapsedMs / 1000;
         }
 
-        // Smooth display values
         var ease = 0.18;
         if (_pace > 0 && _pace < 1200) {
             _dispPace = _dispPace + ((_pace - _dispPace) * ease);
@@ -277,19 +290,16 @@ class RunView extends Ui.View {
         _dispHeartRate = (_dispHeartRate + ((_heartRate - _dispHeartRate) * 0.25)).toNumber();
         _dispCadence   = (_dispCadence   + ((_cadence   - _dispCadence)   * 0.25)).toNumber();
 
-        // Breathing ring
         _ringPhase += 0.18;
         if (_ringPhase > 6.283) { _ringPhase -= 6.283; }
         _ringPulseBoost *= 0.85;
         if (_ringPulseBoost < 0.01) { _ringPulseBoost = 0.0; }
 
-        // Coaching cue countdown
         if (_coachingCueTicks > 0) {
             _coachingCueTicks -= 1;
             if (_coachingCueTicks <= 0) { _coachingCue = ""; }
         }
 
-        // Standalone streaming
         if (!_phoneControlled && _isRunning && !_isPaused) {
             _streamAccumMs += _tickMs;
             if (_streamAccumMs >= 1000) {
@@ -310,7 +320,7 @@ class RunView extends Ui.View {
         Ui.requestUpdate();
     }
 
-    // -- GPS (Scenario 3) --
+    // -- GPS --
     function onPosition(info as Pos.Info) as Void {
         if (info.position != null) {
             var lat = info.position.toDegrees()[0];
@@ -324,7 +334,7 @@ class RunView extends Ui.View {
         }
     }
 
-    // -- Sensors (Scenario 3) --
+    // -- Sensors --
     function onSensor(info as Sensor.Info) as Void {
         if (info.heartRate != null) {
             _heartRate     = info.heartRate;
@@ -333,7 +343,7 @@ class RunView extends Ui.View {
         if (info.cadence != null) { _cadence = info.cadence; }
     }
 
-    // -- Pause / Resume --
+    // -- Pause / Resume / Finish --
 
     function pauseRun() {
         if (_isPaused || !_isRunning) { return; }
@@ -359,8 +369,6 @@ class RunView extends Ui.View {
         Ui.requestUpdate();
     }
 
-    // -- Finish run --
-
     function finishRun() {
         _isRunning = false;
         _isPaused  = false;
@@ -374,7 +382,9 @@ class RunView extends Ui.View {
         Ui.requestUpdate();
     }
 
-    // -- Drawing --
+    // =========================================================================
+    // DRAWING
+    // =========================================================================
 
     function onUpdate(dc) {
         dc.setColor(Gfx.COLOR_BLACK, Gfx.COLOR_BLACK);
@@ -383,16 +393,30 @@ class RunView extends Ui.View {
         var width   = dc.getWidth();
         var height  = dc.getHeight();
         var centerX = width / 2;
-        var centerY = height / 2;
         var isSmall = (height <= 240 || width <= 240);
 
-        // Vertical anchors
-        var paceY      = isSmall ? (height * 0.42).toNumber() : (height * 0.40).toNumber();
-        var unitY      = paceY + (isSmall ? 28 : 34);
-        var secondaryY = isSmall ? (height * 0.70).toNumber() : (height * 0.72).toNumber();
-        var tertiaryY  = isSmall ? (height * 0.82).toNumber() : (height * 0.84).toNumber();
+        // ── Layout anchors ──────────────────────────────────────────────────
+        // Top instrument row (clock / elapsed time) — above HR zone bar
+        var topInstY   = (height * 0.08).toNumber();
 
-        // Breathing ring
+        // HR zone bar
+        var hrBarY     = (isSmall ? height * 0.17 : height * 0.19).toNumber();
+
+        // Primary metric: PACE
+        var paceY      = (isSmall ? height * 0.40 : height * 0.38).toNumber();
+        var unitY      = paceY + (isSmall ? 26 : 32);
+
+        // Secondary row: distance (left) | elapsed / clock (right)
+        var secondaryY = (isSmall ? height * 0.67 : height * 0.69).toNumber();
+
+        // Tertiary row: HR (left) | cadence (right)
+        var tertiaryY  = (isSmall ? height * 0.80 : height * 0.82).toNumber();
+
+        // Bottom prompt strip top edge
+        var promptStripTop = (height * 0.87).toNumber();
+        var promptStripH   = height - promptStripTop;
+
+        // ── Breathing ring ───────────────────────────────────────────────────
         var s          = ((Math.sin(_ringPhase) + 1.0) * 0.5).toFloat();
         var baseRadius = (width / 2) - (isSmall ? 6 : 4);
         var breathe    = s * (isSmall ? 3.0 : 4.0);
@@ -400,35 +424,46 @@ class RunView extends Ui.View {
         var ringRadius = (baseRadius - 2 + breathe + pulse).toNumber();
 
         dc.setColor(0x003A4F, Gfx.COLOR_TRANSPARENT);
-        dc.drawCircle(centerX, centerY, baseRadius);
+        dc.drawCircle(centerX, height / 2, baseRadius);
+        dc.setColor(_isPaused ? Gfx.COLOR_ORANGE : 0x00CFFF, Gfx.COLOR_TRANSPARENT);
+        dc.drawCircle(centerX, height / 2, ringRadius);
 
+        // ── Paused banner ────────────────────────────────────────────────────
         if (_isPaused) {
             dc.setColor(Gfx.COLOR_ORANGE, Gfx.COLOR_TRANSPARENT);
-        } else {
-            dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
-        }
-        dc.drawCircle(centerX, centerY, ringRadius);
-
-        // Paused banner
-        if (_isPaused) {
-            dc.setColor(Gfx.COLOR_ORANGE, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(centerX, height * 0.06, Gfx.FONT_TINY,
+            dc.drawText(centerX, (height * 0.04).toNumber(), Gfx.FONT_TINY,
                 "PAUSED", Gfx.TEXT_JUSTIFY_CENTER);
         }
 
-        // Coaching cue banner
+        // ── Coaching cue (top, only while running + coached) ────────────────
         if (_isCoached && _coachingCue.length() > 0) {
             dc.setColor(0x002A1A, Gfx.COLOR_TRANSPARENT);
-            dc.fillRectangle(0, 0, width, 28);
+            dc.fillRectangle(0, 0, width, 26);
             dc.setColor(Gfx.COLOR_GREEN, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(centerX, 4, Gfx.FONT_TINY,
+            dc.drawText(centerX, 3, Gfx.FONT_TINY,
                 _coachingCue, Gfx.TEXT_JUSTIFY_CENTER);
         }
 
-        // HR Zone bar
-        _drawHrZoneBar(dc, centerX, (isSmall ? height * 0.16 : height * 0.18).toNumber(), width, _heartRateZone);
+        // ── TOP INSTRUMENT: Clock (pre-run) → Elapsed time (running) ────────
+        var topInstFont = isSmall ? Gfx.FONT_SMALL : Gfx.FONT_MEDIUM;
+        if (_isRunning) {
+            // Show elapsed run time prominently at top
+            var topTimeText = _formatTime(_elapsedTime);
+            dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(centerX, topInstY, topInstFont,
+                topTimeText, Gfx.TEXT_JUSTIFY_CENTER);
+        } else {
+            // Show local clock time (HH:MM)
+            var clockText = _formatLocalTime();
+            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(centerX, topInstY, topInstFont,
+                clockText, Gfx.TEXT_JUSTIFY_CENTER);
+        }
 
-        // Primary: PACE
+        // ── HR Zone bar ──────────────────────────────────────────────────────
+        _drawHrZoneBar(dc, centerX, hrBarY, width, _heartRateZone);
+
+        // ── Primary: PACE ────────────────────────────────────────────────────
         var paceText  = _formatPace(_dispPace);
         var paceFonts = [Gfx.FONT_LARGE, Gfx.FONT_MEDIUM];
         var paceFont  = _pickFont(dc, paceText, paceFonts, width - 24);
@@ -443,101 +478,95 @@ class RunView extends Ui.View {
         dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
         dc.drawText(centerX, unitY, Gfx.FONT_TINY, "min/km", Gfx.TEXT_JUSTIFY_CENTER);
 
-        // Secondary: Distance & Time
-        var distText = _formatDistance(_dispDistance);
-        var timeText = _formatTime(_elapsedTime);
-        var secFont  = isSmall ? Gfx.FONT_TINY : Gfx.FONT_SMALL;
+        // Optional target pace badge (coached mode, pre-run)
+        if (_isCoached && _coachTargetPace.length() > 0 && !_isRunning) {
+            dc.setColor(0x004466, Gfx.COLOR_TRANSPARENT);
+            dc.fillRectangle(centerX - 40, unitY + 10, 80, 18);
+            dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(centerX, unitY + 11, Gfx.FONT_TINY,
+                "T: " + _coachTargetPace + "/km", Gfx.TEXT_JUSTIFY_CENTER);
+        }
+
+        // ── Secondary row: Distance | (label) ───────────────────────────────
+        var distText  = _formatDistance(_dispDistance);
+        var secFont   = isSmall ? Gfx.FONT_TINY : Gfx.FONT_SMALL;
 
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText((width * 0.25).toNumber(), secondaryY, secFont, distText, Gfx.TEXT_JUSTIFY_CENTER);
-        dc.drawText((width * 0.75).toNumber(), secondaryY, secFont, timeText, Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText((width * 0.28).toNumber(), secondaryY, secFont,
+            distText, Gfx.TEXT_JUSTIFY_CENTER);
 
-        // Tertiary: HR + Cadence
-        var hrColor = _getHrZoneColor(_heartRateZone);
-        dc.setColor(hrColor, Gfx.COLOR_TRANSPARENT);
-        dc.drawText((width * 0.25).toNumber(), tertiaryY, Gfx.FONT_TINY,
-            _dispHeartRate.format("%d") + " bpm", Gfx.TEXT_JUSTIFY_CENTER);
-
+        // Right side secondary: cadence (we moved time to the top instrument)
         dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
-        dc.drawText((width * 0.75).toNumber(), tertiaryY, Gfx.FONT_TINY,
+        dc.drawText((width * 0.72).toNumber(), secondaryY, secFont,
             _dispCadence.format("%d") + " spm", Gfx.TEXT_JUSTIFY_CENTER);
 
-        // -- Overlay messaging --
-        _drawOverlay(dc, width, height, centerX, centerY);
+        // ── Tertiary row: HR ─────────────────────────────────────────────────
+        var hrColor = _getHrZoneColor(_heartRateZone);
+        dc.setColor(hrColor, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(centerX, tertiaryY, Gfx.FONT_TINY,
+            _dispHeartRate.format("%d") + " bpm", Gfx.TEXT_JUSTIFY_CENTER);
+
+        // ── Bottom prompt strip ───────────────────────────────────────────────
+        _drawBottomPrompt(dc, width, height, centerX, promptStripTop, promptStripH);
     }
 
-    // -- Overlay drawing --
-    private function _drawOverlay(dc, width, height, centerX, centerY) {
+    // ── Bottom prompt strip — only text, never blocks instruments ───────────
+    private function _drawBottomPrompt(dc, width, height, centerX, stripTop, stripH) {
+        if (_overlayState == OVERLAY_NONE) {
+            // Running with no special message — optionally show coached label
+            if (_isCoached) {
+                dc.setColor(0x001A0D, Gfx.COLOR_TRANSPARENT);
+                dc.fillRectangle(0, stripTop, width, stripH);
+                dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
+                dc.drawText(centerX, stripTop + 2, Gfx.FONT_TINY,
+                    "COACHED", Gfx.TEXT_JUSTIFY_CENTER);
+            }
+            return;
+        }
+
+        // Semi-transparent dark strip
+        dc.setColor(0x111111, Gfx.COLOR_TRANSPARENT);
+        dc.fillRectangle(0, stripTop, width, stripH);
+
         if (_overlayState == OVERLAY_WAITING) {
-            _drawWaitingOverlay(dc, width, height, centerX, centerY);
+            // Rare state: show animated dots
+            var dots = "";
+            for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
+            dc.setColor(0x888888, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(centerX, stripTop + 2, Gfx.FONT_TINY,
+                "Connecting" + dots, Gfx.TEXT_JUSTIFY_CENTER);
+
         } else if (_overlayState == OVERLAY_READY) {
-            _drawReadyOverlay(dc, width, height, centerX, centerY);
-        } else if (_overlayState == OVERLAY_COACHED) {
-            _drawCoachedOverlay(dc, width, height, centerX, centerY);
-        }
-    }
-
-    private function _drawWaitingOverlay(dc, width, height, centerX, centerY) {
-        // No longer used as a blocking screen.
-        // Phone-not-connected is shown as a subtle hint on the READY overlay instead.
-    }
-
-    private function _drawReadyOverlay(dc, width, height, centerX, centerY) {
-        // Semi-transparent dark overlay
-        dc.setColor(0x000000, Gfx.COLOR_TRANSPARENT);
-        dc.fillRectangle(0, 0, width, height);
-
-        // Main title
-        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(centerX, centerY - 25, Gfx.FONT_MEDIUM,
-            "Ready to Run", Gfx.TEXT_JUSTIFY_CENTER);
-
-        // Show name if logged in, otherwise show uncoached hint
-        dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
-        if (_runnerName.length() > 0) {
-            dc.drawText(centerX, centerY + 8, Gfx.FONT_SMALL,
-                _runnerName, Gfx.TEXT_JUSTIFY_CENTER);
-        } else {
-            // Phone not connected — show subtle coaching hint (not a blocker)
-            dc.setColor(0x555555, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(centerX, centerY + 8, Gfx.FONT_TINY,
-                "Open phone app for AI coaching", Gfx.TEXT_JUSTIFY_CENTER);
-        }
-
-        dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(centerX, centerY + 38, Gfx.FONT_SMALL,
-            "Press START to begin", Gfx.TEXT_JUSTIFY_CENTER);
-    }
-
-    private function _drawCoachedOverlay(dc, width, height, centerX, centerY) {
-        // Semi-transparent dark overlay
-        dc.setColor(0x000000, Gfx.COLOR_TRANSPARENT);
-        dc.fillRectangle(0, 0, width, height);
-
-        // Text
-        dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(centerX, centerY - 40, Gfx.FONT_MEDIUM,
-            "Coached Run Ready", Gfx.TEXT_JUSTIFY_CENTER);
-
-        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        var typeLabel = _formatRunTypeLabel();
-        dc.drawText(centerX, centerY - 10, Gfx.FONT_SMALL,
-            typeLabel, Gfx.TEXT_JUSTIFY_CENTER);
-
-        if (_prepWorkoutDesc.length() > 0) {
+            // Show runner name (if known) and START prompt
             dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(centerX, centerY + 20, Gfx.FONT_TINY,
-                _prepWorkoutDesc, Gfx.TEXT_JUSTIFY_CENTER);
-        }
+            if (_runnerName.length() > 0) {
+                dc.drawText(centerX, stripTop + 2, Gfx.FONT_TINY,
+                    "Hi " + _runnerName + " \u25B6 START to run",
+                    Gfx.TEXT_JUSTIFY_CENTER);
+            } else {
+                dc.drawText(centerX, stripTop + 2, Gfx.FONT_TINY,
+                    "\u25B6 Press START to begin",
+                    Gfx.TEXT_JUSTIFY_CENTER);
+            }
 
-        if (_prepTargetPace.length() > 0) {
+        } else if (_overlayState == OVERLAY_COACHED) {
+            // Show coached run info
             dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(centerX, centerY + 45, Gfx.FONT_SMALL,
-                "Target: " + _prepTargetPace + "/km", Gfx.TEXT_JUSTIFY_CENTER);
+            var typeLabel = _formatRunTypeLabel();
+            dc.drawText(centerX, stripTop + 2, Gfx.FONT_TINY,
+                typeLabel + " \u25B6 START",
+                Gfx.TEXT_JUSTIFY_CENTER);
         }
     }
 
-    // -- Helper methods --
+    // -- Helper methods -------------------------------------------------------
+
+    private function _formatLocalTime() {
+        var clockTime = Sys.getClockTime();
+        var h = clockTime.hour;
+        var m = clockTime.min;
+        return h.format("%02d") + ":" + m.format("%02d");
+    }
 
     private function _formatRunTypeLabel() {
         if (_prepWorkoutType.length() > 0) {
@@ -614,7 +643,7 @@ class RunView extends Ui.View {
         if (hours > 0) {
             return hours.format("%d") + ":" + mins.format("%02d") + ":" + secs.format("%02d");
         }
-        return mins.format("%d") + ":" + secs.format("%02d");
+        return mins.format("%02d") + ":" + secs.format("%02d");
     }
 
     private function _calcHrZone(hr) {
@@ -637,18 +666,17 @@ class RunView extends Ui.View {
 
     private function _getPaceDeviationColor() {
         if (_coachTargetPaceSec <= 0 || _dispPace <= 0) { return Gfx.COLOR_WHITE; }
-        var diff = _dispPace - _coachTargetPaceSec;
-        var absDiff = diff;
-        if (absDiff < 0) { absDiff = -absDiff; }
-        var pct = (absDiff / _coachTargetPaceSec) * 100.0;
-        if (pct <= 5.0) { return Gfx.COLOR_GREEN; }
+        var diff    = _dispPace - _coachTargetPaceSec;
+        var absDiff = diff < 0 ? -diff : diff;
+        var pct     = (absDiff / _coachTargetPaceSec) * 100.0;
+        if (pct <= 5.0)  { return Gfx.COLOR_GREEN; }
         if (pct <= 12.0) { return Gfx.COLOR_YELLOW; }
         return Gfx.COLOR_RED;
     }
 
     private function _drawHrZoneBar(dc, cx, y, width, zone) {
-        var barW = (width * 0.62).toNumber();
-        var barH = 6;
+        var barW = (width * 0.60).toNumber();
+        var barH = 5;
         var x0   = (cx - (barW / 2)).toNumber();
         var cols = [Gfx.COLOR_BLUE, Gfx.COLOR_GREEN, Gfx.COLOR_YELLOW, Gfx.COLOR_ORANGE, Gfx.COLOR_RED];
 
@@ -658,13 +686,12 @@ class RunView extends Ui.View {
         var segW = (barW / 5).toNumber();
         for (var i = 0; i < 5; i++) {
             var segX = (x0 + (segW * i)).toNumber();
-            if ((i + 1) != zone) {
-                dc.setColor(0x2A2A2A, Gfx.COLOR_TRANSPARENT);
-            } else {
-                dc.setColor(cols[i], Gfx.COLOR_TRANSPARENT);
+            if ((i + 1) == zone) {
                 dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
                 dc.fillRectangle(segX, y - 2, segW - 1, 1);
                 dc.setColor(cols[i], Gfx.COLOR_TRANSPARENT);
+            } else {
+                dc.setColor(0x2A2A2A, Gfx.COLOR_TRANSPARENT);
             }
             dc.fillRectangle(segX, y, segW - 1, barH);
         }
@@ -680,7 +707,22 @@ class RunView extends Ui.View {
     }
 }
 
-// RunDelegate -- button handling
+// =============================================================================
+// RunDelegate — button handling
+// =============================================================================
+//
+//  START / SELECT button (onSelect / onKey KEY_START):
+//    Not running  → start run
+//    Running      → pause
+//    Paused       → resume
+//
+//  BACK button (onBack):
+//    Not running  → exit app
+//    Running, paused → show "Finish run?" confirmation
+//    Running, active → pause run
+//
+// =============================================================================
+
 class RunDelegate extends Ui.BehaviorDelegate {
 
     private var _view;
@@ -693,61 +735,37 @@ class RunDelegate extends Ui.BehaviorDelegate {
         _view = view;
     }
 
-    function onBack() {
-        if (_view != null) {
-            if (_view.isPaused()) {
-                _view.resumeRun();
-            } else if (_view.isRunning()) {
-                Ui.pushView(
-                    new Ui.Confirmation("Pause run?"),
-                    new PauseConfirmDelegate(_view),
-                    Ui.SLIDE_IMMEDIATE
-                );
-            }
-        }
-        return true;
-    }
-
-    function onMenu() {
-        if (_view != null && _view.isRunning()) {
-            Ui.pushView(
-                new Rez.Menus.RunMenu(),
-                new RunMenuDelegate(_view),
-                Ui.SLIDE_IMMEDIATE
-            );
-        }
-        return true;
-    }
-}
-
-class PauseConfirmDelegate extends Ui.ConfirmationDelegate {
-    private var _view;
-    function initialize(view) {
-        ConfirmationDelegate.initialize();
-        _view = view;
-    }
-    function onResponse(response) {
-        if (response == Ui.CONFIRM_YES && _view != null) {
+    // TOP / START button
+    function onSelect() {
+        if (_view == null) { return true; }
+        if (!_view.isRunning()) {
+            _view.startRun();
+        } else if (_view.isPaused()) {
+            _view.resumeRun();
+        } else {
             _view.pauseRun();
         }
         return true;
     }
-}
 
-class RunMenuDelegate extends Ui.MenuInputDelegate {
-    private var _view;
-    function initialize(view) {
-        MenuInputDelegate.initialize();
-        _view = view;
-    }
-    function onMenuItem(item) {
-        if (item == :finish) {
+    // BACK / BOTTOM button
+    function onBack() {
+        if (_view == null) { return true; }
+        if (!_view.isRunning()) {
+            // Exit the app
+            Sys.exit();
+        } else if (_view.isPaused()) {
+            // Offer to finish
             Ui.pushView(
                 new Ui.Confirmation("Finish run?"),
                 new FinishConfirmDelegate(_view),
                 Ui.SLIDE_IMMEDIATE
             );
+        } else {
+            // Pause while running
+            _view.pauseRun();
         }
+        return true;
     }
 }
 
