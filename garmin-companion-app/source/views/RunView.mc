@@ -480,15 +480,14 @@ class RunView extends Ui.View {
     // ── Time row ──────────────────────────────────────────────────────────────
 
     private function _drawTimeRow(dc, cx, h) {
-        var y = (h * 0.13).toNumber();
         if (_isRunning) {
-            // Elapsed time — cyan
-            dc.setColor(0x004466, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, y - 13, Gfx.FONT_XTINY, "ELAPSED", Gfx.TEXT_JUSTIFY_CENTER);
+            // Elapsed time — no label, slightly larger font so it reads at a glance
+            var y = (h * 0.09).toNumber();
             dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, y, Gfx.FONT_SMALL, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(cx, y, Gfx.FONT_MEDIUM, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
         } else {
-            // Local clock — white
+            // Local clock — white, centred top
+            var y = (h * 0.10).toNumber();
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, y, Gfx.FONT_SMALL, _fmtClock(), Gfx.TEXT_JUSTIFY_CENTER);
         }
@@ -498,7 +497,7 @@ class RunView extends Ui.View {
 
     private function _drawZoneBadge(dc, cx, h) {
         if (!_isRunning) { return; }
-        var y  = (h * 0.295).toNumber();
+        var y  = (h * 0.255).toNumber();
         var zn = _heartRateZone;
         var zc = _zoneColors[zn - 1];
 
@@ -511,10 +510,16 @@ class RunView extends Ui.View {
     }
 
     // ── Primary metric: PACE ──────────────────────────────────────────────────
+    //
+    // Layout (label ABOVE value — standard data-field convention):
+    //   h*0.27  "MIN / KM"  (XTINY, dim)
+    //   h*0.31  PACE value  (NUMBER_MILD — smaller than HOT, leaves room below)
+    //   h*0.52  TARGET badge (coached only)
 
     private function _drawPace(dc, cx, w, h) {
         var paceStr = _fmtPace(_dispPace);
-        var y       = (h * 0.36).toNumber();
+        var lblY    = (h * 0.27).toNumber();
+        var y       = (h * 0.31).toNumber();
 
         // Pace colour
         var paceColor;
@@ -526,26 +531,23 @@ class RunView extends Ui.View {
             paceColor = 0x404040;   // dim grey pre-run
         }
 
-        // Font: try NUMBER_HOT first, fall back to LARGE
-        var font = Gfx.FONT_NUMBER_HOT;
-        if (dc.getTextWidthInPixels(paceStr, font) > w - 36) {
-            font = Gfx.FONT_NUMBER_MILD;
-        }
+        // Font: NUMBER_MILD as primary (smaller than HOT — leaves room for 3 metrics below)
+        var font = Gfx.FONT_NUMBER_MILD;
         if (dc.getTextWidthInPixels(paceStr, font) > w - 36) {
             font = Gfx.FONT_LARGE;
         }
 
+        // "MIN / KM" label — drawn ABOVE the value
+        dc.setColor(0x383838, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, lblY, Gfx.FONT_XTINY, "MIN / KM", Gfx.TEXT_JUSTIFY_CENTER);
+
+        // Pace value
         dc.setColor(paceColor, Gfx.COLOR_TRANSPARENT);
         dc.drawText(cx, y, font, paceStr, Gfx.TEXT_JUSTIFY_CENTER);
 
-        // Unit label
-        var unitY = (h * 0.65).toNumber();
-        dc.setColor(0x383838, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, unitY, Gfx.FONT_XTINY, "MIN / KM", Gfx.TEXT_JUSTIFY_CENTER);
-
-        // Coached target badge
+        // Coached target badge — sits just below the pace value
         if (_isCoached && _coachTargetPace.length() > 0) {
-            var tY = (h * 0.695).toNumber();
+            var tY = (h * 0.535).toNumber();
             dc.setColor(0x00263A, Gfx.COLOR_TRANSPARENT);
             dc.fillRectangle(cx - 50, tY - 1, 100, 15);
             dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
@@ -556,49 +558,57 @@ class RunView extends Ui.View {
     }
 
     // ── Secondary row: Distance | HR ──────────────────────────────────────────
+    //
+    // Layout (label ABOVE value):
+    //   h*0.575  "KM"  (left)  |  "BPM" (right)   — XTINY dim labels
+    //   h*0.615  value          |  value            — FONT_SMALL
+    //   Divider: thin vertical line between the two columns
 
     private function _drawSecondary(dc, cx, w, h) {
-        var y     = (h * 0.73).toNumber();
-        var lblY  = (h * 0.80).toNumber();
+        var lblY  = (h * 0.575).toNumber();
+        var y     = (h * 0.615).toNumber();
         var lx    = (w * 0.27).toNumber();
         var rx    = (w * 0.73).toNumber();
 
         // Thin vertical divider
         dc.setColor(0x242424, Gfx.COLOR_TRANSPARENT);
-        dc.drawLine(cx, y - 4, cx, lblY + 12);
+        dc.drawLine(cx, lblY - 2, cx, y + 20);
 
-        // Distance (left) — white
+        // Distance (left) — label above, value below
+        dc.setColor(0x404040, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(lx, lblY, Gfx.FONT_XTINY, "KM", Gfx.TEXT_JUSTIFY_CENTER);
         var distStr = (_dispDistance / 1000.0).format("%.2f");
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         dc.drawText(lx, y, Gfx.FONT_SMALL, distStr, Gfx.TEXT_JUSTIFY_CENTER);
-        dc.setColor(0x404040, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(lx, lblY, Gfx.FONT_XTINY, "KM", Gfx.TEXT_JUSTIFY_CENTER);
 
-        // Heart rate (right) — zone colour
+        // Heart rate (right) — label above, value below
+        dc.setColor(0x404040, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(rx, lblY, Gfx.FONT_XTINY, "BPM", Gfx.TEXT_JUSTIFY_CENTER);
         var hrStr = _dispHR > 0 ? _dispHR.format("%d") : "--";
         var hrCol = _isRunning ? _zoneColors[_heartRateZone - 1] : 0x383838;
         dc.setColor(hrCol, Gfx.COLOR_TRANSPARENT);
         dc.drawText(rx, y, Gfx.FONT_SMALL, hrStr, Gfx.TEXT_JUSTIFY_CENTER);
-        dc.setColor(0x404040, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, lblY, Gfx.FONT_XTINY, "BPM", Gfx.TEXT_JUSTIFY_CENTER);
     }
 
     // ── Cadence ───────────────────────────────────────────────────────────────
 
     private function _drawCadence(dc, cx, h) {
-        var y   = (h * 0.87).toNumber();
+        var y   = (h * 0.765).toNumber();
         var str = _dispCadence > 0 ? _dispCadence.format("%d") + " spm" : "-- spm";
         dc.setColor(0x363636, Gfx.COLOR_TRANSPARENT);
         dc.drawText(cx, y, Gfx.FONT_XTINY, str, Gfx.TEXT_JUSTIFY_CENTER);
     }
 
-    // ── Status / prompt (bottom, inside circular safe zone) ───────────────────
+    // ── Status / prompt ───────────────────────────────────────────────────────
+    //
+    // Two lines at h*0.840 and h*0.878 — both safely inside the circular safe zone
+    // (for a 260px fenix7 that's ~218px and ~228px; bezel intrudes at ~240px).
 
     private function _drawStatus(dc, cx, h) {
         if (_overlayState == OVERLAY_NONE) {
-            // Running — small COACHED badge if applicable
+            // Running — small COACHED badge
             if (_isCoached) {
-                var y = (h * 0.93).toNumber();
+                var y = (h * 0.855).toNumber();
                 dc.setColor(0x003344, Gfx.COLOR_TRANSPARENT);
                 dc.fillRectangle(cx - 32, y, 64, 13);
                 dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
@@ -607,8 +617,8 @@ class RunView extends Ui.View {
             return;
         }
 
-        var y1 = (h * 0.90).toNumber();
-        var y2 = (h * 0.935).toNumber();
+        var y1 = (h * 0.840).toNumber();
+        var y2 = (h * 0.878).toNumber();
 
         if (_overlayState == OVERLAY_WAITING) {
             var dots = "";
