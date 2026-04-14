@@ -11,7 +11,11 @@ import { Express, Response } from "express";
 import { db } from "./db";
 import { sessionInstructions, plannedWorkouts, coachingSessionEvents } from "../shared/schema";
 import { eq } from "drizzle-orm";
-import { generateSessionInstructions } from "./session-coaching-service";
+import {
+  generateSessionInstructions,
+  getOrGenerateSessionCoaching,
+  loadSessionCoachingPlan,
+} from "./session-coaching-service";
 import { AuthenticatedRequest } from "./types";
 
 export function registerSessionCoachingRoutes(app: Express) {
@@ -293,6 +297,97 @@ export function registerSessionCoachingRoutes(app: Express) {
       } catch (error) {
         console.error("Error fetching coaching session events:", error);
         res.status(500).json({ error: "Failed to fetch coaching events" });
+      }
+    }
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // NEW: Dynamic Session Coaching (v2.0)
+  // These endpoints power the bespoke per-session coaching system.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * POST /api/workouts/:workoutId/prepare-coaching
+   *
+   * Called when the user taps "Prepare Run" / "Prepare Run on Watch".
+   * Generates (or returns cached) a bespoke SessionCoachingPlan for the workout.
+   *
+   * The plan includes:
+   * - phases (warmup, main effort, cooldown, reps, recovery jogs, etc.)
+   * - triggers (conditions that fire live cues during the run)
+   * - cueingStrategy (how the run engine should apply the coaching)
+   * - preRunBrief (text shown before the run starts)
+   * - targetMetrics (pace/HR targets, session classification)
+   *
+   * Response is cached — subsequent calls return the cached plan instantly.
+   * Pass ?force=true to bypass cache and regenerate.
+   */
+  app.post(
+    "/api/workouts/:workoutId/prepare-coaching",
+    async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { workoutId } = req.params;
+        const userId = req.user?.userId;
+        const forceRegenerate = req.query.force === "true";
+
+        if (!userId) {
+          return res.status(401).json({ error: "Unauthorized" });
+        }
+
+        const plan = await getOrGenerateSessionCoaching({
+          userId,
+          plannedWorkoutId: workoutId,
+          forceRegenerate,
+        });
+
+        return res.json({
+          workoutId,
+          plan,
+          cueingStrategy: plan.cueingStrategy,
+          coachingTone:   plan.coachingTone,
+          preRunBrief:    plan.preRunBrief,
+          whyThisSession: plan.whyThisSession,
+          phasesCount:    plan.phases.length,
+          triggersCount:  plan.triggers.length,
+        });
+      } catch (error) {
+        console.error("Error preparing session coaching:", error);
+        res.status(500).json({ error: "Failed to prepare session coaching" });
+      }
+    }
+  );
+
+  /**
+   * GET /api/workouts/:workoutId/coaching-plan
+   *
+   * Fetch the current SessionCoachingPlan for a workout (read-only).
+   * Returns null if no plan has been generated yet (user hasn't prepared the run).
+   * Used by the run engine to load the coaching plan when a run starts.
+   */
+  app.get(
+    "/api/workouts/:workoutId/coaching-plan",
+    async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { workoutId } = req.params;
+        const userId = req.user?.userId;
+
+        if (!userId) {
+          return res.status(401).json({ error: "Unauthorized" });
+        }
+
+        const plan = await loadSessionCoachingPlan(workoutId);
+
+        if (!plan) {
+          return res.status(404).json({
+            error: "No coaching plan found",
+            note: "Call POST /prepare-coaching first to generate a plan",
+          });
+        }
+
+        return res.json({ workoutId, plan });
+      } catch (error) {
+        console.error("Error fetching coaching plan:", error);
+        res.status(500).json({ error: "Failed to fetch coaching plan" });
       }
     }
   );

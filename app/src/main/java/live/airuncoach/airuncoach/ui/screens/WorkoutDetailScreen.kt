@@ -6,9 +6,16 @@ import android.content.pm.PackageManager
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -23,18 +30,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
+import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.HeartRateZones
 import live.airuncoach.airuncoach.network.model.WorkoutDetails
+import live.airuncoach.airuncoach.ui.components.PrepareRunOnWatchButton
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
+import live.airuncoach.airuncoach.viewmodel.RunSessionViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,6 +58,23 @@ fun WorkoutDetailScreen(
 ) {
     val context = LocalContext.current
     val color = workoutTypeColor(workout.workoutType)
+    val runSessionViewModel: RunSessionViewModel = hiltViewModel()
+    val companionInstalled by runSessionViewModel.isWatchCompanionInstalled.collectAsState()
+    // Drive watch send state from ViewModel (supports async prepare-coaching flow)
+    val watchSendState by runSessionViewModel.watchSendState.collectAsState()
+
+    // ── AI Coaching generation state ──────────────────────────────────────
+    val coachingState by runSessionViewModel.coachingGenerationState.collectAsState()
+    val isCoachingReady = coachingState == RunSessionViewModel.CoachingGenerationState.READY ||
+                          coachingState == RunSessionViewModel.CoachingGenerationState.FAILED
+    val isCoachingGenerating = coachingState == RunSessionViewModel.CoachingGenerationState.GENERATING
+
+    // Trigger AI coaching generation as soon as the screen opens
+    LaunchedEffect(workout.id) {
+        if (workout.workoutType != "rest") {
+            runSessionViewModel.generateCoachingForWorkout(workout.id)
+        }
+    }
 
     // ── GPS / permission state ─────────────────────────────────────────────
     var hasLocationPermission by remember {
@@ -124,8 +152,8 @@ fun WorkoutDetailScreen(
         }
     }
 
-    // "Start This Workout" is only enabled once GPS is confirmed
-    val canStart = hasLocationPermission && gpsReady && !isGettingLocation
+    // "Start This Workout" is only enabled once GPS is confirmed AND coaching is ready
+    val canStart = hasLocationPermission && gpsReady && !isGettingLocation && isCoachingReady
 
     Scaffold(
         topBar = {
@@ -389,6 +417,33 @@ fun WorkoutDetailScreen(
                     Text("Workout Complete!", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.success)
                 }
             } else if (workout.workoutType != "rest") {
+
+                // ── AI Coaching generation banner ──────────────────────────
+                AiCoachingGenerationBanner(
+                    state = coachingState,
+                    modifier = Modifier.padding(bottom = Spacing.sm)
+                )
+
+                // "Prepare Run on Watch" — only shown when companion app is installed on watch
+                // Disabled while coaching is still generating
+                PrepareRunOnWatchButton(
+                    companionInstalled = companionInstalled && isCoachingReady,
+                    sendState = watchSendState,
+                    onPrepare = {
+                        runSessionViewModel.prepareRunOnWatchWithCoaching(
+                            workoutId        = workout.id,
+                            distanceKm       = workout.distance?.toFloat() ?: 0f,
+                            workoutType      = workout.workoutType,
+                            workoutIntensity = workout.intensity,
+                            targetPace       = workout.targetPace,
+                            intervalCount    = workout.intervalCount,
+                            intervalDistKm   = workout.intervalDistanceMeters?.let { it / 1000f },
+                            intervalDurSecs  = workout.intervalDurationSeconds
+                        )
+                    },
+                    modifier = Modifier.padding(bottom = Spacing.sm)
+                )
+
                 Button(
                     onClick = { onStartWorkout(workout) },
                     enabled = canStart,
@@ -399,7 +454,15 @@ fun WorkoutDetailScreen(
                     ),
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    if (isGettingLocation) {
+                    if (isCoachingGenerating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = Colors.buttonText
+                        )
+                        Spacer(modifier = Modifier.width(Spacing.sm))
+                        Text("Preparing AI Coaching…", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
+                    } else if (isGettingLocation) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(18.dp),
                             strokeWidth = 2.dp,
@@ -453,6 +516,106 @@ fun WorkoutDetailScreen(
             }
 
             Spacer(modifier = Modifier.height(Spacing.xl))
+        }
+    }
+}
+
+// ── AI Coaching generation banner ─────────────────────────────────────────────
+
+/**
+ * Displays a bottom banner showing the AI coaching generation progress.
+ *
+ * States:
+ *  - IDLE / not shown (handled externally)
+ *  - GENERATING → pulsing cyan banner "Generating your AI coaching plan…"
+ *  - READY       → green banner "AI coaching ready" (auto-hides after short display)
+ *  - FAILED      → subtle amber notice "Coaching unavailable — run will still be tracked"
+ */
+@Composable
+private fun AiCoachingGenerationBanner(
+    state: RunSessionViewModel.CoachingGenerationState,
+    modifier: Modifier = Modifier
+) {
+    if (state == RunSessionViewModel.CoachingGenerationState.IDLE) return
+
+    val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(
+        initialValue = 0.5f,
+        targetValue  = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+
+    val bgColor: Color
+    val accentColor: Color
+    val icon: String
+    val message: String
+    when (state) {
+        RunSessionViewModel.CoachingGenerationState.GENERATING -> {
+            bgColor     = Color(0xFF001A2E)
+            accentColor = Color(0xFF00E5FF)
+            icon        = "⚡"
+            message     = "Generating your AI coaching plan…"
+        }
+        RunSessionViewModel.CoachingGenerationState.READY -> {
+            bgColor     = Color(0xFF001A14)
+            accentColor = Color(0xFF00FF88)
+            icon        = "✓"
+            message     = "AI coaching ready"
+        }
+        RunSessionViewModel.CoachingGenerationState.FAILED -> {
+            bgColor     = Color(0xFF1A1200)
+            accentColor = Color(0xFFFFB300)
+            icon        = "⚠"
+            message     = "Coaching unavailable — run will still be tracked"
+        }
+        else -> return
+    }
+
+    val dynamicAlpha = if (state == RunSessionViewModel.CoachingGenerationState.GENERATING) pulse else 1f
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(bgColor)
+            .border(
+                width = 1.dp,
+                color = accentColor.copy(alpha = dynamicAlpha),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            if (state == RunSessionViewModel.CoachingGenerationState.GENERATING) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = accentColor
+                )
+            } else {
+                Text(icon, fontSize = 14.sp, color = accentColor)
+            }
+            Column {
+                Text(
+                    message,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = accentColor.copy(alpha = dynamicAlpha)
+                )
+                if (state == RunSessionViewModel.CoachingGenerationState.GENERATING) {
+                    Text(
+                        "Preparing phases, triggers & pacing targets for this session",
+                        fontSize = 11.sp,
+                        color = accentColor.copy(alpha = 0.6f)
+                    )
+                }
+            }
         }
     }
 }

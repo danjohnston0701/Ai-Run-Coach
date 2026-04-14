@@ -2,6 +2,11 @@ import OpenAI from "openai";
 import { db } from "./db";
 import { sessionInstructions, plannedWorkouts, users } from "../shared/schema";
 import { eq, and } from "drizzle-orm";
+import {
+  generateSessionCoaching,
+  type GenerateSessionCoachingParams,
+  type SessionCoachingPlan,
+} from "./ai-service";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -458,4 +463,189 @@ function buildFallbackStructure(workout: SessionToneRequest): any {
     phases: [],
     coachingTriggers: [],
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getOrGenerateSessionCoaching
+//
+// The main orchestration function for the new dynamic coaching system.
+// Called when a user taps "Prepare Run" — generates and caches a bespoke
+// SessionCoachingPlan for the specific workout.
+//
+// Caching: if a plan already exists for this workout, returns the cached
+// version immediately (no extra AI cost). This handles the case where the
+// user prepares, goes back, and prepares again.
+//
+// Returns the full SessionCoachingPlan including phases, triggers, tone,
+// and cueingStrategy — ready for the live run engine to use.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SessionCoachingRequest {
+  userId: string;
+  plannedWorkoutId: string;
+  forceRegenerate?: boolean;  // bypass cache and generate fresh
+}
+
+export async function getOrGenerateSessionCoaching(
+  request: SessionCoachingRequest
+): Promise<SessionCoachingPlan> {
+  const { userId, plannedWorkoutId, forceRegenerate = false } = request;
+
+  // 1. Check cache — return existing plan if available and not forced to regenerate
+  if (!forceRegenerate) {
+    const existing = await db
+      .select()
+      .from(sessionInstructions)
+      .where(eq(sessionInstructions.plannedWorkoutId, plannedWorkoutId))
+      .then((rows) => rows[0]);
+
+    if (existing?.sessionStructure) {
+      const structure = existing.sessionStructure as any;
+
+      // Check if this is the new-format SessionCoachingPlan (has phases + triggers)
+      if (structure?.phases && structure?.triggers && structure?.cueingStrategy) {
+        console.log(`[getOrGenerateSessionCoaching] Cache hit for workout ${plannedWorkoutId}`);
+        return structure as SessionCoachingPlan;
+      }
+    }
+  }
+
+  // 2. Load workout details
+  const workout = await db
+    .select()
+    .from(plannedWorkouts)
+    .where(eq(plannedWorkouts.id, plannedWorkoutId))
+    .then((rows) => rows[0]);
+
+  if (!workout) {
+    throw new Error(`Planned workout not found: ${plannedWorkoutId}`);
+  }
+
+  // 3. Load user profile
+  const user = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, userId))
+    .then((rows) => rows[0]);
+
+  if (!user) {
+    throw new Error(`User not found: ${userId}`);
+  }
+
+  // 4. Parse target pace from "mm:ss" string to sec/km integer
+  function paceStringToSecPerKm(paceStr?: string | null): number | undefined {
+    if (!paceStr) return undefined;
+    const parts = paceStr.split(":");
+    if (parts.length !== 2) return undefined;
+    return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+  }
+
+  // 5. Build GenerateSessionCoachingParams from DB workout data
+  const params: GenerateSessionCoachingParams = {
+    sessionType:           workout.workoutType,
+    sessionGoal:           workout.sessionGoal ?? "general_fitness",
+    targetDurationMinutes: workout.duration ? Math.round(workout.duration / 60) : 45,
+    targetDistanceKm:      workout.distance ?? 5,
+    targetPaceMin:         paceStringToSecPerKm(workout.targetPace),
+    targetPaceMax:         workout.targetPace
+                             ? paceStringToSecPerKm(workout.targetPace)! + 30  // +30s/km tolerance
+                             : undefined,
+    targetHRMin:           workout.hrZoneMinBpm ?? undefined,
+    targetHRMax:           workout.hrZoneMaxBpm ?? undefined,
+    sessionInstructions:   workout.instructions ?? workout.description ?? undefined,
+    runnerProfile: {
+      age:                  (user as any).age ?? undefined,
+      gender:               (user as any).gender ?? undefined,
+      fitnessLevel:         (user as any).fitnessLevel ?? "intermediate",
+      recentPaceAvgSecPerKm: (user as any).recentPaceAvgSecPerKm ?? undefined,
+      recentHRAvg:          (user as any).recentHRAvg ?? undefined,
+      injuries:             (user as any).injuryHistory ? [(user as any).injuryHistory] : [],
+      weeklyMileageKm:      (user as any).averageWeeklyMileage ?? undefined,
+    },
+    coachName:  (user as any).coachName  ?? "Coach",
+    coachTone:  (user as any).coachTone  ?? "motivational",
+    coachAccent: (user as any).coachAccent ?? undefined,
+  };
+
+  // 6. Generate the bespoke coaching plan
+  console.log(`[getOrGenerateSessionCoaching] Generating plan for ${workout.workoutType} workout ${plannedWorkoutId}`);
+  const plan = await generateSessionCoaching(params);
+
+  // 7. Persist to DB — upsert into sessionInstructions
+  //    Store the full plan in sessionStructure (jsonb) alongside the existing fields
+  //    for backward compatibility with any code reading the old format
+  try {
+    const existingRecord = await db
+      .select({ id: sessionInstructions.id })
+      .from(sessionInstructions)
+      .where(eq(sessionInstructions.plannedWorkoutId, plannedWorkoutId))
+      .then((rows) => rows[0]);
+
+    const upsertData = {
+      plannedWorkoutId,
+      preRunBrief:            plan.preRunBrief,
+      sessionStructure:       plan as any,  // full plan stored here
+      aiDeterminedTone:       plan.coachingTone,
+      aiDeterminedIntensity:  plan.targetMetrics.isRecovery ? "relaxed"
+                                : plan.targetMetrics.isSpeedWork ? "intense"
+                                : "moderate",
+      toneReasoning:          `Dynamic coaching plan. CueingStrategy: ${plan.cueingStrategy}. Goal: ${plan.sessionGoal}.`,
+      coachingStyle: {
+        tone:               plan.coachingTone,
+        encouragementLevel: plan.targetMetrics.isRecovery ? "low" : plan.targetMetrics.isSpeedWork ? "high" : "moderate",
+        detailDepth:        plan.targetMetrics.isSpeedWork ? "detailed" : "moderate",
+        technicalDepth:     plan.targetMetrics.isSpeedWork ? "advanced" : "moderate",
+      },
+      insightFilters: {
+        include: plan.targetMetrics.primaryMetric === "heart_rate"
+          ? ["hr_zone", "pace_deviation", "effort_level"]
+          : ["pace_deviation", "effort_level", "split_time"],
+        exclude: plan.targetMetrics.isRecovery ? ["pace_deviation"] : [],
+      },
+      generatedVersion: "2.0",
+      updatedAt: new Date(),
+    };
+
+    if (existingRecord) {
+      await db
+        .update(sessionInstructions)
+        .set(upsertData)
+        .where(eq(sessionInstructions.id, existingRecord.id));
+    } else {
+      await db.insert(sessionInstructions).values(upsertData);
+    }
+
+    console.log(`[getOrGenerateSessionCoaching] Persisted plan for workout ${plannedWorkoutId}`);
+  } catch (dbError) {
+    // Non-fatal — log but return plan anyway so the run isn't blocked
+    console.error("[getOrGenerateSessionCoaching] Failed to persist coaching plan:", dbError);
+  }
+
+  return plan;
+}
+
+/**
+ * Load a previously generated SessionCoachingPlan from DB.
+ * Returns null if no plan exists yet (run hasn't been prepared).
+ */
+export async function loadSessionCoachingPlan(
+  plannedWorkoutId: string
+): Promise<SessionCoachingPlan | null> {
+  const record = await db
+    .select()
+    .from(sessionInstructions)
+    .where(eq(sessionInstructions.plannedWorkoutId, plannedWorkoutId))
+    .then((rows) => rows[0]);
+
+  if (!record?.sessionStructure) return null;
+
+  const structure = record.sessionStructure as any;
+
+  // Ensure it's the new format (v2.0 with phases/triggers)
+  if (structure?.phases && structure?.triggers && structure?.cueingStrategy) {
+    return structure as SessionCoachingPlan;
+  }
+
+  // Old format — return null, will be regenerated on next prepare
+  return null;
 }

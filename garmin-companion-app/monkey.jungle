@@ -1,28 +1,80 @@
 # Garmin Connect IQ Build Configuration
-# This file defines the build targets and source files
 
-# Project information
 project.manifest = manifest.xml
 
-# Base settings for all devices
 base.sourcePath = source
 base.resourcePath = resources
+base.lang = eng
 
-# Device-specific builds
-fenix7.sourcePath = $(base.sourcePath)
-fenix7.resourcePath = $(base.resourcePath)
-
+# All supported devices — must match manifest.xml product list exactly
 fenix6.sourcePath = $(base.sourcePath)
 fenix6.resourcePath = $(base.resourcePath)
 
-fr955.sourcePath = $(base.sourcePath)
-fr955.resourcePath = $(base.resourcePath)
+fenix6pro.sourcePath = $(base.sourcePath)
+fenix6pro.resourcePath = $(base.resourcePath)
+
+fenix6s.sourcePath = $(base.sourcePath)
+fenix6s.resourcePath = $(base.resourcePath)
+
+fenix6spro.sourcePath = $(base.sourcePath)
+fenix6spro.resourcePath = $(base.resourcePath)
+
+fenix6xpro.sourcePath = $(base.sourcePath)
+fenix6xpro.resourcePath = $(base.resourcePath)
+
+fenix7.sourcePath = $(base.sourcePath)
+fenix7.resourcePath = $(base.resourcePath)
+
+fenix7s.sourcePath = $(base.sourcePath)
+fenix7s.resourcePath = $(base.resourcePath)
+
+fenix7x.sourcePath = $(base.sourcePath)
+fenix7x.resourcePath = $(base.resourcePath)
+
+fenix7pro.sourcePath = $(base.sourcePath)
+fenix7pro.resourcePath = $(base.resourcePath)
+
+fenix7spro.sourcePath = $(base.sourcePath)
+fenix7spro.resourcePath = $(base.resourcePath)
+
+fenix7xpro.sourcePath = $(base.sourcePath)
+fenix7xpro.resourcePath = $(base.resourcePath)
+
+fr55.sourcePath = $(base.sourcePath)
+fr55.resourcePath = $(base.resourcePath)
+
+fr245.sourcePath = $(base.sourcePath)
+fr245.resourcePath = $(base.resourcePath)
+
+fr255.sourcePath = $(base.sourcePath)
+fr255.resourcePath = $(base.resourcePath)
 
 fr265.sourcePath = $(base.sourcePath)
 fr265.resourcePath = $(base.resourcePath)
 
+fr945.sourcePath = $(base.sourcePath)
+fr945.resourcePath = $(base.resourcePath)
+
+fr955.sourcePath = $(base.sourcePath)
+fr955.resourcePath = $(base.resourcePath)
+
+fr965.sourcePath = $(base.sourcePath)
+fr965.resourcePath = $(base.resourcePath)
+
+vivoactive4.sourcePath = $(base.sourcePath)
+vivoactive4.resourcePath = $(base.resourcePath)
+
+vivoactive5.sourcePath = $(base.sourcePath)
+vivoactive5.resourcePath = $(base.resourcePath)
+
+venu.sourcePath = $(base.sourcePath)
+venu.resourcePath = $(base.resourcePath)
+
+venu2.sourcePath = $(base.sourcePath)
+venu2.resourcePath = $(base.resourcePath)
+
+venu2plus.sourcePath = $(base.sourcePath)
+venu2plus.resourcePath = $(base.resourcePath)
+
 venu3.sourcePath = $(base.sourcePath)
 venu3.resourcePath = $(base.resourcePath)
-
-# Language settings
-base.lang = eng

@@ -1,23 +1,15 @@
 // RunView.mc
-// Main activity view while the user is running.
+// Main activity view — now the default/primary screen.
 //
-// Supports two modes:
+// Displays live run metrics (pace, HR, distance, time, cadence) with an
+// overlay messaging system to guide the user through the auth flow and
+// workout states:
 //
-//  
-//   SCENARIO 2  Phone + Watch (phoneControlled = true)            
-//     All run data (pace, HR, distance, time) comes from the phone 
-//      via PhoneLink "runUpdate" messages.                          
-//     START / PAUSE / RESUME / STOP commands are sent TO the phone.
-//     Watch does NOT start its own ActivityRecording session      
-//      Garmin records independently via sensor fusion; phone owns   
-//      the session.                                                 
-//  
-//  
-//   SCENARIO 3  Standalone (phoneControlled = false)              
-//     Watch records its own ActivityRecording session.             
-//     GPS + HR pulled from watch sensors directly.                 
-//     DataStreamer sends metrics to server every second.           
-//  
+//   OVERLAY_NONE       — Running (metrics visible, no message)
+//   OVERLAY_WAITING    — "Waiting for phone..." + "Open AI Run Coach"
+//   OVERLAY_READY      — "Ready to run" (authenticated, no run active)
+//   OVERLAY_PREPARE    — "Prepare run on watch" button preview
+//   OVERLAY_COACHED    — "Coached run ready" (prepared run received)
 
 using Toybox.Attention;
 using Toybox.Math;
@@ -28,173 +20,290 @@ using Toybox.Sensor as Sensor;
 using Toybox.System as Sys;
 using Toybox.Timer as Timer;
 using Toybox.ActivityRecording as Record;
+using Toybox.Application as App;
+using Toybox.Communications as Comm;
 
 class RunView extends Ui.View {
 
-    //  Run metrics 
-    private var _heartRate    = 0;
-    private var _heartRateZone = 1;
-    private var _distance     = 0.0;   // metres
-    private var _pace         = 0.0;   // sec/km
-    private var _elapsedTime  = 0;     // seconds
-    private var _cadence      = 0;
+    // -- Overlay states --
+    enum {
+        OVERLAY_NONE,
+        OVERLAY_WAITING,
+        OVERLAY_READY,
+        OVERLAY_COACHED
+    }
 
-    //  State 
-    private var _isRunning        = false;
-    private var _isPaused         = false;
-    private var _phoneControlled  = false;  // Scenario 2 vs 3
+    // -- Auth & app state --
+    private var _isAuthenticated = false;
+    private var _isConnected     = false;
+    private var _runnerName      = "";
+    private var _overlayState    = OVERLAY_WAITING;
+    private var _dotCount        = 0;
 
-    //  Infrastructure 
+    // -- Prepared-run (coached) state --
+    private var _isPreparedRun   = false;
+    private var _prepRunType     = "";
+    private var _prepRunDist     = 0.0;
+    private var _prepWorkoutType = "";
+    private var _prepTargetPace  = "";
+    private var _prepWorkoutDesc = "";
+    private var _prepIntervalCnt = 0;
+    private var _prepIntervalDist = 0.0;
+    private var _prepIntervalDur  = 0;
+
+    // -- Run metrics --
+    private var _heartRate       = 0;
+    private var _heartRateZone   = 1;
+    private var _distance        = 0.0;
+    private var _pace            = 0.0;
+    private var _elapsedTime     = 0;
+    private var _cadence         = 0;
+
+    // -- State --
+    private var _isRunning       = false;
+    private var _isPaused        = false;
+    private var _phoneControlled = false;
+
+    // -- Coaching state --
+    private var _isCoached          = false;
+    private var _coachRunType       = "";
+    private var _coachTargetPace    = "";
+    private var _coachTargetPaceSec = 0.0;
+    private var _coachingCue        = "";
+    private var _coachingCueTicks   = 0;
+
+    // -- Infrastructure --
     private var _timer        = null;
     private var _dataStreamer = null;
     private var _phoneLink    = null;
-    private var _session      = null;   // ActivityRecording session (Scenario 3 only)
+    private var _session      = null;
 
-    //  UI animation 
-    private var _elapsedMs        = 0;
-    private var _tickMs           = 250;
-    private var _streamAccumMs    = 0;
+    // -- UI animation --
+    private var _elapsedMs      = 0;
+    private var _tickMs         = 250;
+    private var _streamAccumMs  = 0;
 
-    private var _dispPace         = 0.0;
-    private var _dispDistance     = 0.0;
-    private var _dispHeartRate    = 0;
-    private var _dispCadence      = 0;
+    private var _dispPace       = 0.0;
+    private var _dispDistance   = 0.0;
+    private var _dispHeartRate  = 0;
+    private var _dispCadence    = 0;
 
-    private var _ringPhase        = 0.0;
-    private var _ringPulseBoost   = 0.0;
+    private var _ringPhase      = 0.0;
+    private var _ringPulseBoost = 0.0;
 
-    // 
     function initialize() {
         View.initialize();
         _phoneLink    = new PhoneLink();
         _dataStreamer = new DataStreamer();
+
+        // Check persisted auth state
+        var token = App.Storage.getValue("authToken");
+        _isAuthenticated = (token != null && token.length() > 0);
+        var name = App.Storage.getValue("runnerName");
+        _runnerName = (name != null) ? name : "";
+
+        // Set initial overlay state
+        if (_isAuthenticated) {
+            _overlayState = OVERLAY_READY;
+        } else {
+            _overlayState = OVERLAY_WAITING;
+        }
     }
 
-    // Called by StartView / StartDelegate before the view is shown
     function setPhoneControlled(val) {
         _phoneControlled = val;
     }
 
-    // State accessors used by delegates
-    function isPaused()   { return _isPaused; }
-    function isRunning()  { return _isRunning; }
+    function setCoachingMode(data) {
+        _isCoached = true;
+        _overlayState = OVERLAY_COACHED;
+        var rt = data.get("runType");
+        var tp = data.get("targetPace");
+        var wt = data.get("workoutType");
+        var wd = data.get("workoutDesc");
+        var dd = data.get("distance");
+        var ic = data.get("intervalCount");
+        var id = data.get("intervalDistKm");
+        var ir = data.get("intervalDurSecs");
 
-    //  Lifecycle 
+        if (rt != null) { _coachRunType      = rt; }
+        if (tp != null) { _coachTargetPace   = tp; _coachTargetPaceSec = _parsePaceString(tp); }
+        if (wt != null) { _prepWorkoutType  = wt; }
+        if (wd != null) { _prepWorkoutDesc  = wd; }
+        if (dd != null) { _prepRunDist      = dd.toFloat(); }
+        if (ic != null) { _prepIntervalCnt  = ic.toNumber(); }
+        if (id != null) { _prepIntervalDist = id.toFloat(); }
+        if (ir != null) { _prepIntervalDur  = ir.toNumber(); }
+    }
+
+    function isPaused()  { return _isPaused; }
+    function isRunning() { return _isRunning; }
+
+    // -- Lifecycle --
 
     function onShow() {
-        // Register for phone messages (both scenarios  harmless in Scenario 3)
         _phoneLink.register(method(:onPhoneMessage));
+        Comm.registerForPhoneAppMessages(method(:onPhoneAppMessage));
 
-        if (!_phoneControlled) {
-            //  Scenario 3: start watch-owned recording immediately 
+        if (!_phoneControlled && _isRunning) {
             _startWatchSession();
-            _isRunning = true;
-            _isPaused  = false;
-
-            // GPS
             Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
-            // HR + cadence
             Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE]);
             Sensor.enableSensorEvents(method(:onSensor));
-        } else {
-            //  Scenario 2: send "ready" to phone so it knows watch is live 
-            _phoneLink.sendCommand("watchReady");
-            // We don`t start our own session  phone drives everything
         }
 
-        // UI refresh timer
         _timer = new Timer.Timer();
         _timer.start(method(:onTimer), _tickMs, true);
 
-        Sys.println("RunView shown — phoneControlled=" + _phoneControlled);
+        Sys.println("RunView shown — auth=" + _isAuthenticated + " coached=" + _isCoached);
     }
 
     function onHide() {
-        if (_timer != null) {
-            _timer.stop();
-            _timer = null;
-        }
-        if (!_phoneControlled) {
+        if (_timer != null) { _timer.stop(); _timer = null; }
+        if (!_phoneControlled && _isRunning) {
             Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
             Sensor.enableSensorEvents(null);
         }
     }
 
-    //  Phone message handler (Scenario 2) 
+    // -- Phone App Message (auth token, prepared run, etc.) --
+    function onPhoneAppMessage(msg as Comm.PhoneAppMessage) as Void {
+        if (msg == null) { return; }
+        var data = msg.data;
+        if (data == null) { return; }
+        var msgType = data["type"];
+
+        if (msgType != null && msgType.equals("auth")) {
+            var token = data["authToken"];
+            var rname = data["runnerName"];
+            if (token != null && token.length() > 0) {
+                App.Storage.setValue("authToken", token);
+                _isAuthenticated = true;
+                _isConnected     = true;
+                _overlayState = OVERLAY_READY;
+            }
+            if (rname != null) {
+                App.Storage.setValue("runnerName", rname);
+                _runnerName = rname;
+            }
+            Ui.requestUpdate();
+
+        } else if (msgType != null && msgType.equals("preparedRun")) {
+            _isPreparedRun = true;
+            var dist = data["distance"];
+            var rt   = data["runType"];
+            var wt   = data["workoutType"];
+            var tp   = data["targetPace"];
+            var wd   = data["workoutDesc"];
+            if (dist != null) { _prepRunDist     = dist.toFloat(); }
+            if (rt   != null) { _prepRunType     = rt; }
+            if (wt   != null) { _prepWorkoutType = wt; }
+            if (tp   != null) { _prepTargetPace  = tp; }
+            if (wd   != null) { _prepWorkoutDesc = wd; }
+            _overlayState = OVERLAY_COACHED;
+            Ui.requestUpdate();
+
+        } else if (msgType != null && msgType.equals("disconnect")) {
+            _isConnected = false;
+            Ui.requestUpdate();
+        }
+    }
+
+    // -- PhoneLink message handler (run updates, coaching cues) --
     function onPhoneMessage(data) {
         if (data == null) { return; }
-
         var msgType = data.get("type");
         if (msgType == null) { return; }
 
         if (msgType.equals("runUpdate")) {
-            // Receive live metrics from the phone
             var paceVal = data.get("pace");
             var distVal = data.get("distance");
             var hrVal   = data.get("hr");
             var timeVal = data.get("elapsedTime");
             var cadVal  = data.get("cadence");
 
-            if (paceVal   != null) { _pace        = paceVal.toFloat(); }
-            if (distVal   != null) { _distance    = distVal.toFloat(); }
-            if (hrVal     != null) { _heartRate   = hrVal.toNumber(); _heartRateZone = calculateHeartRateZone(_heartRate); }
-            if (timeVal   != null) { _elapsedTime = timeVal.toNumber(); _elapsedMs = _elapsedTime * 1000; }
-            if (cadVal    != null) { _cadence     = cadVal.toNumber(); }
+            if (paceVal != null) { _pace        = paceVal.toFloat(); }
+            if (distVal != null) { _distance    = distVal.toFloat(); }
+            if (hrVal   != null) { _heartRate   = hrVal.toNumber(); _heartRateZone = _calcHrZone(_heartRate); }
+            if (timeVal != null) { _elapsedTime = timeVal.toNumber(); _elapsedMs = _elapsedTime * 1000; }
+            if (cadVal  != null) { _cadence     = cadVal.toNumber(); }
 
             var runningVal = data.get("isRunning");
             var pausedVal  = data.get("isPaused");
             if (runningVal != null) { _isRunning = runningVal; }
             if (pausedVal  != null) { _isPaused  = pausedVal; }
 
+            if (_isRunning && _overlayState != OVERLAY_COACHED) {
+                _overlayState = OVERLAY_NONE;
+            }
             Ui.requestUpdate();
 
+        } else if (msgType.equals("coachingCue")) {
+            var cue = data.get("cue");
+            if (cue != null) {
+                _coachingCue = cue;
+                _coachingCueTicks = 20;
+                Ui.requestUpdate();
+                _vibrateShort();
+            }
+
         } else if (msgType.equals("sessionEnded")) {
-            // Phone has ended the run  pop back to start
-            Ui.popView(Ui.SLIDE_RIGHT);
+            _isRunning = false;
+            _isPaused = false;
+            _overlayState = OVERLAY_READY;
+            Ui.requestUpdate();
         }
     }
 
-    //  Timer tick (250 ms) 
+    // -- Timer tick (250 ms) --
     function onTimer() as Void {
-        // Only increment watch-side elapsed time in standalone mode
+        // Animation for waiting state
+        if (_overlayState == OVERLAY_WAITING) {
+            _dotCount = (_dotCount + 1) % 4;
+        }
+
+        // Increment watch-side time if standalone and running
         if (!_phoneControlled && _isRunning && !_isPaused) {
             _elapsedMs  += _tickMs;
             _elapsedTime = _elapsedMs / 1000;
         }
 
-        //  Smooth display values 
+        // Smooth display values
         var ease = 0.18;
-
         if (_pace > 0 && _pace < 1200) {
             _dispPace = _dispPace + ((_pace - _dispPace) * ease);
         } else {
             _dispPace = _dispPace + ((0.0 - _dispPace) * 0.10);
         }
-
         _dispDistance  = _dispDistance  + ((_distance  - _dispDistance)  * ease);
         _dispHeartRate = (_dispHeartRate + ((_heartRate - _dispHeartRate) * 0.25)).toNumber();
         _dispCadence   = (_dispCadence   + ((_cadence   - _dispCadence)   * 0.25)).toNumber();
 
-        //  Breathing ring animation 
+        // Breathing ring
         _ringPhase += 0.18;
         if (_ringPhase > 6.283) { _ringPhase -= 6.283; }
-
         _ringPulseBoost *= 0.85;
         if (_ringPulseBoost < 0.01) { _ringPulseBoost = 0.0; }
 
-        //  Standalone: stream to backend every 1 s 
-        if (!_phoneControlled) {
+        // Coaching cue countdown
+        if (_coachingCueTicks > 0) {
+            _coachingCueTicks -= 1;
+            if (_coachingCueTicks <= 0) { _coachingCue = ""; }
+        }
+
+        // Standalone streaming
+        if (!_phoneControlled && _isRunning && !_isPaused) {
             _streamAccumMs += _tickMs;
             if (_streamAccumMs >= 1000) {
                 _streamAccumMs = 0;
-                if (_dataStreamer != null && _isRunning && !_isPaused) {
+                if (_dataStreamer != null) {
                     _dataStreamer.sendData({
-                        "heartRate"    => _heartRate,
-                        "heartRateZone"=> _heartRateZone,
-                        "distance"     => _distance,
-                        "pace"         => _pace,
-                        "cadence"      => _cadence,
-                        "elapsedTime"  => _elapsedTime
+                        "heartRate"     => _heartRate,
+                        "heartRateZone" => _heartRateZone,
+                        "distance"      => _distance,
+                        "pace"          => _pace,
+                        "cadence"       => _cadence,
+                        "elapsedTime"   => _elapsedTime
                     });
                 }
             }
@@ -203,90 +312,71 @@ class RunView extends Ui.View {
         Ui.requestUpdate();
     }
 
-    //  GPS (Scenario 3 only) 
+    // -- GPS (Scenario 3) --
     function onPosition(info as Pos.Info) as Void {
         if (info.position != null) {
             var lat = info.position.toDegrees()[0];
             var lon = info.position.toDegrees()[1];
-
-            if (info.altitude != null) {
-                if (_dataStreamer != null) {
-                    _dataStreamer.updateGPS(lat, lon, info.altitude);
-                }
+            if (info.altitude != null && _dataStreamer != null) {
+                _dataStreamer.updateGPS(lat, lon, info.altitude);
             }
-
             if (info.speed != null && info.speed > 0.1) {
                 _pace = 1000.0 / (info.speed * 60.0);
             }
         }
     }
 
-    //  Sensors (Scenario 3 only) 
+    // -- Sensors (Scenario 3) --
     function onSensor(info as Sensor.Info) as Void {
         if (info.heartRate != null) {
             _heartRate     = info.heartRate;
-            _heartRateZone = calculateHeartRateZone(_heartRate);
+            _heartRateZone = _calcHrZone(_heartRate);
         }
         if (info.cadence != null) { _cadence = info.cadence; }
     }
 
-    //  Pause / Resume 
+    // -- Pause / Resume --
 
     function pauseRun() {
         if (_isPaused || !_isRunning) { return; }
         _isPaused = true;
-
         if (_phoneControlled) {
             _phoneLink.sendCommand("pause");
-        } else {
-            // Scenario 3: pause ActivityRecording
-            if (_session != null && _session.isRecording()) {
-                _session.stop();
-            }
+        } else if (_session != null && _session.isRecording()) {
+            _session.stop();
         }
-
         _vibrateShort();
-        Sys.println("Run paused");
         Ui.requestUpdate();
     }
 
     function resumeRun() {
         if (!_isPaused) { return; }
         _isPaused = false;
-
         if (_phoneControlled) {
             _phoneLink.sendCommand("resume");
-        } else {
-            // Scenario 3: resume ActivityRecording
-            if (_session != null && !_session.isRecording()) {
-                _session.start();
-            }
+        } else if (_session != null && !_session.isRecording()) {
+            _session.start();
         }
-
         _vibrateShort();
-        Sys.println("Run resumed");
         Ui.requestUpdate();
     }
 
-    //  Finish run 
+    // -- Finish run --
 
     function finishRun() {
         _isRunning = false;
         _isPaused  = false;
-
         if (_phoneControlled) {
             _phoneLink.sendCommand("stop");
         } else {
-            // Scenario 3: stop + save ActivityRecording
             _stopWatchSession();
         }
-
+        _overlayState = OVERLAY_READY;
         _vibrateLong();
-        Sys.println("Run finished — distance=" + _distance + "m  time=" + _elapsedTime + "s");
-        Ui.popView(Ui.SLIDE_RIGHT);
+        Ui.requestUpdate();
     }
 
-    //  Drawing 
+    // -- Drawing --
 
     function onUpdate(dc) {
         dc.setColor(Gfx.COLOR_BLACK, Gfx.COLOR_BLACK);
@@ -296,7 +386,6 @@ class RunView extends Ui.View {
         var height  = dc.getHeight();
         var centerX = width / 2;
         var centerY = height / 2;
-
         var isSmall = (height <= 240 || width <= 240);
 
         // Vertical anchors
@@ -305,7 +394,7 @@ class RunView extends Ui.View {
         var secondaryY = isSmall ? (height * 0.70).toNumber() : (height * 0.72).toNumber();
         var tertiaryY  = isSmall ? (height * 0.82).toNumber() : (height * 0.84).toNumber();
 
-        //  Breathing ring 
+        // Breathing ring
         var s          = ((Math.sin(_ringPhase) + 1.0) * 0.5).toFloat();
         var baseRadius = (width / 2) - (isSmall ? 6 : 4);
         var breathe    = s * (isSmall ? 3.0 : 4.0);
@@ -315,46 +404,58 @@ class RunView extends Ui.View {
         dc.setColor(0x003A4F, Gfx.COLOR_TRANSPARENT);
         dc.drawCircle(centerX, centerY, baseRadius);
 
-        // Accent ring colour: cyan normally, orange when paused
         if (_isPaused) {
             dc.setColor(Gfx.COLOR_ORANGE, Gfx.COLOR_TRANSPARENT);
-            dc.drawCircle(centerX, centerY, ringRadius);
         } else {
             dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
-            dc.drawCircle(centerX, centerY, ringRadius);
         }
+        dc.drawCircle(centerX, centerY, ringRadius);
 
-        //  Paused banner 
+        // Paused banner
         if (_isPaused) {
             dc.setColor(Gfx.COLOR_ORANGE, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(centerX, height * 0.20, Gfx.FONT_TINY, "PAUSED", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(centerX, height * 0.06, Gfx.FONT_TINY,
+                "PAUSED", Gfx.TEXT_JUSTIFY_CENTER);
         }
 
-        //  HR Zone bar 
-        drawHrZoneBar(dc, centerX, (isSmall ? height * 0.16 : height * 0.18).toNumber(), width, _heartRateZone);
+        // Coaching cue banner
+        if (_isCoached && _coachingCue.length() > 0) {
+            dc.setColor(0x002A1A, Gfx.COLOR_TRANSPARENT);
+            dc.fillRectangle(0, 0, width, 28);
+            dc.setColor(Gfx.COLOR_GREEN, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(centerX, 4, Gfx.FONT_TINY,
+                _coachingCue, Gfx.TEXT_JUSTIFY_CENTER);
+        }
 
-        //  Primary: PACE 
-        var paceText = formatPace(_dispPace);
+        // HR Zone bar
+        _drawHrZoneBar(dc, centerX, (isSmall ? height * 0.16 : height * 0.18).toNumber(), width, _heartRateZone);
+
+        // Primary: PACE
+        var paceText  = _formatPace(_dispPace);
         var paceFonts = [Gfx.FONT_LARGE, Gfx.FONT_MEDIUM];
-        var paceFont  = pickLargestFontThatFits(dc, paceText, paceFonts, width - 24);
+        var paceFont  = _pickFont(dc, paceText, paceFonts, width - 24);
 
-        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        if (_isCoached && _coachTargetPaceSec > 0 && _dispPace > 0) {
+            dc.setColor(_getPaceDeviationColor(), Gfx.COLOR_TRANSPARENT);
+        } else {
+            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        }
         dc.drawText(centerX, paceY, paceFont, paceText, Gfx.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
         dc.drawText(centerX, unitY, Gfx.FONT_TINY, "min/km", Gfx.TEXT_JUSTIFY_CENTER);
 
-        //  Secondary: Distance & Time 
-        var distText = formatDistance(_dispDistance);
-        var timeText = formatTime(_elapsedTime);
+        // Secondary: Distance & Time
+        var distText = _formatDistance(_dispDistance);
+        var timeText = _formatTime(_elapsedTime);
         var secFont  = isSmall ? Gfx.FONT_TINY : Gfx.FONT_SMALL;
 
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         dc.drawText((width * 0.25).toNumber(), secondaryY, secFont, distText, Gfx.TEXT_JUSTIFY_CENTER);
         dc.drawText((width * 0.75).toNumber(), secondaryY, secFont, timeText, Gfx.TEXT_JUSTIFY_CENTER);
 
-        //  Tertiary: HR + Cadence 
-        var hrColor = getHeartRateZoneColor(_heartRateZone);
+        // Tertiary: HR + Cadence
+        var hrColor = _getHrZoneColor(_heartRateZone);
         dc.setColor(hrColor, Gfx.COLOR_TRANSPARENT);
         dc.drawText((width * 0.25).toNumber(), tertiaryY, Gfx.FONT_TINY,
             _dispHeartRate.format("%d") + " bpm", Gfx.TEXT_JUSTIFY_CENTER);
@@ -362,9 +463,103 @@ class RunView extends Ui.View {
         dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
         dc.drawText((width * 0.75).toNumber(), tertiaryY, Gfx.FONT_TINY,
             _dispCadence.format("%d") + " spm", Gfx.TEXT_JUSTIFY_CENTER);
+
+        // -- Overlay messaging --
+        _drawOverlay(dc, width, height, centerX, centerY);
     }
 
-    //  Private helpers 
+    // -- Overlay drawing --
+    private function _drawOverlay(dc, width, height, centerX, centerY) {
+        if (_overlayState == OVERLAY_WAITING) {
+            _drawWaitingOverlay(dc, width, height, centerX, centerY);
+        } else if (_overlayState == OVERLAY_READY) {
+            _drawReadyOverlay(dc, width, height, centerX, centerY);
+        } else if (_overlayState == OVERLAY_COACHED) {
+            _drawCoachedOverlay(dc, width, height, centerX, centerY);
+        }
+    }
+
+    private function _drawWaitingOverlay(dc, width, height, centerX, centerY) {
+        var dots = "";
+        for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
+
+        // Semi-transparent dark overlay
+        dc.setColor(0x000000, Gfx.COLOR_TRANSPARENT);
+        dc.fillRectangle(0, 0, width, height);
+
+        // Text
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(centerX, centerY - 30, Gfx.FONT_MEDIUM,
+            "Waiting for phone" + dots, Gfx.TEXT_JUSTIFY_CENTER);
+
+        dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(centerX, centerY + 10, Gfx.FONT_SMALL,
+            "Open AI Run Coach", Gfx.TEXT_JUSTIFY_CENTER);
+
+        dc.drawText(centerX, centerY + 40, Gfx.FONT_SMALL,
+            "on your phone", Gfx.TEXT_JUSTIFY_CENTER);
+    }
+
+    private function _drawReadyOverlay(dc, width, height, centerX, centerY) {
+        // Semi-transparent dark overlay
+        dc.setColor(0x000000, Gfx.COLOR_TRANSPARENT);
+        dc.fillRectangle(0, 0, width, height);
+
+        // Text
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(centerX, centerY - 20, Gfx.FONT_MEDIUM,
+            "Ready to Run", Gfx.TEXT_JUSTIFY_CENTER);
+
+        dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
+        if (_runnerName.length() > 0) {
+            dc.drawText(centerX, centerY + 10, Gfx.FONT_SMALL,
+                _runnerName, Gfx.TEXT_JUSTIFY_CENTER);
+        }
+
+        dc.drawText(centerX, centerY + 40, Gfx.FONT_SMALL,
+            "Press START to begin", Gfx.TEXT_JUSTIFY_CENTER);
+    }
+
+    private function _drawCoachedOverlay(dc, width, height, centerX, centerY) {
+        // Semi-transparent dark overlay
+        dc.setColor(0x000000, Gfx.COLOR_TRANSPARENT);
+        dc.fillRectangle(0, 0, width, height);
+
+        // Text
+        dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(centerX, centerY - 40, Gfx.FONT_MEDIUM,
+            "Coached Run Ready", Gfx.TEXT_JUSTIFY_CENTER);
+
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        var typeLabel = _formatRunTypeLabel();
+        dc.drawText(centerX, centerY - 10, Gfx.FONT_SMALL,
+            typeLabel, Gfx.TEXT_JUSTIFY_CENTER);
+
+        if (_prepWorkoutDesc.length() > 0) {
+            dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(centerX, centerY + 20, Gfx.FONT_TINY,
+                _prepWorkoutDesc, Gfx.TEXT_JUSTIFY_CENTER);
+        }
+
+        if (_prepTargetPace.length() > 0) {
+            dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(centerX, centerY + 45, Gfx.FONT_SMALL,
+                "Target: " + _prepTargetPace + "/km", Gfx.TEXT_JUSTIFY_CENTER);
+        }
+    }
+
+    // -- Helper methods --
+
+    private function _formatRunTypeLabel() {
+        if (_prepWorkoutType.length() > 0) {
+            var first = _prepWorkoutType.substring(0, 1).toUpper();
+            var rest  = _prepWorkoutType.substring(1, _prepWorkoutType.length());
+            return first + rest + " Run";
+        }
+        if (_prepRunType.equals("route"))    { return "Route Run"; }
+        if (_prepRunType.equals("training")) { return "Training"; }
+        return "Coached Run";
+    }
 
     private function _startWatchSession() {
         _session = Record.createSession({
@@ -379,7 +574,6 @@ class RunView extends Ui.View {
             if (_session.isRecording()) { _session.stop(); }
             _session.save();
             _session = null;
-            Sys.println("ActivityRecording saved");
         }
     }
 
@@ -399,12 +593,24 @@ class RunView extends Ui.View {
         }
     }
 
-    private function formatDistance(meters) {
+    private function _parsePaceString(paceStr) {
+        var colonIdx = paceStr.find(":");
+        if (colonIdx == null || colonIdx < 0) { return 0.0; }
+        var minPart = paceStr.substring(0, colonIdx);
+        var secPart = paceStr.substring(colonIdx + 1, paceStr.length());
+        var mins = minPart.toNumber();
+        var secs = secPart.toNumber();
+        if (mins == null) { mins = 0; }
+        if (secs == null) { secs = 0; }
+        return (mins * 60 + secs).toFloat();
+    }
+
+    private function _formatDistance(meters) {
         var km = meters / 1000.0;
         return km.format("%.2f") + "km";
     }
 
-    private function formatPace(secondsPerKm) {
+    private function _formatPace(secondsPerKm) {
         if (secondsPerKm <= 0 || secondsPerKm > 1200) { return "--:--"; }
         var total   = secondsPerKm.toNumber();
         var minutes = (total / 60).toNumber();
@@ -412,7 +618,7 @@ class RunView extends Ui.View {
         return minutes.format("%d") + ":" + seconds.format("%02d");
     }
 
-    private function formatTime(seconds) {
+    private function _formatTime(seconds) {
         var hours = (seconds / 3600).toNumber();
         var mins  = ((seconds % 3600) / 60).toNumber();
         var secs  = (seconds % 60).toNumber();
@@ -422,26 +628,36 @@ class RunView extends Ui.View {
         return mins.format("%d") + ":" + secs.format("%02d");
     }
 
-    private function calculateHeartRateZone(hr) {
-        // Default max HR
+    private function _calcHrZone(hr) {
         var maxHR = 185;
-        var percent = (hr.toFloat() / maxHR) * 100.0;
-        if (percent < 60.0) { return 1; }
-        if (percent < 70.0) { return 2; }
-        if (percent < 80.0) { return 3; }
-        if (percent < 90.0) { return 4; }
+        var pct = (hr.toFloat() / maxHR) * 100.0;
+        if (pct < 60.0) { return 1; }
+        if (pct < 70.0) { return 2; }
+        if (pct < 80.0) { return 3; }
+        if (pct < 90.0) { return 4; }
         return 5;
     }
 
-    private function getHeartRateZoneColor(zone) {
-        if (zone == 1) { return Gfx.COLOR_BLUE;   }
-        if (zone == 2) { return Gfx.COLOR_GREEN;  }
+    private function _getHrZoneColor(zone) {
+        if (zone == 1) { return Gfx.COLOR_BLUE; }
+        if (zone == 2) { return Gfx.COLOR_GREEN; }
         if (zone == 3) { return Gfx.COLOR_YELLOW; }
         if (zone == 4) { return Gfx.COLOR_ORANGE; }
         return Gfx.COLOR_RED;
     }
 
-    private function drawHrZoneBar(dc, cx, y, width, zone) {
+    private function _getPaceDeviationColor() {
+        if (_coachTargetPaceSec <= 0 || _dispPace <= 0) { return Gfx.COLOR_WHITE; }
+        var diff = _dispPace - _coachTargetPaceSec;
+        var absDiff = diff;
+        if (absDiff < 0) { absDiff = -absDiff; }
+        var pct = (absDiff / _coachTargetPaceSec) * 100.0;
+        if (pct <= 5.0) { return Gfx.COLOR_GREEN; }
+        if (pct <= 12.0) { return Gfx.COLOR_YELLOW; }
+        return Gfx.COLOR_RED;
+    }
+
+    private function _drawHrZoneBar(dc, cx, y, width, zone) {
         var barW = (width * 0.62).toNumber();
         var barH = 6;
         var x0   = (cx - (barW / 2)).toNumber();
@@ -465,7 +681,7 @@ class RunView extends Ui.View {
         }
     }
 
-    private function pickLargestFontThatFits(dc, text, fonts, maxWidth) {
+    private function _pickFont(dc, text, fonts, maxWidth) {
         for (var i = 0; i < fonts.size(); i++) {
             if (dc.getTextWidthInPixels(text, fonts[i]) <= maxWidth) {
                 return fonts[i];
@@ -475,9 +691,7 @@ class RunView extends Ui.View {
     }
 }
 
-// 
-// RunDelegate  button handling during an active run
-// 
+// RunDelegate -- button handling
 class RunDelegate extends Ui.BehaviorDelegate {
 
     private var _view;
@@ -490,12 +704,11 @@ class RunDelegate extends Ui.BehaviorDelegate {
         _view = view;
     }
 
-    // BACK / DOWN button  pause or resume
     function onBack() {
         if (_view != null) {
             if (_view.isPaused()) {
                 _view.resumeRun();
-            } else {
+            } else if (_view.isRunning()) {
                 Ui.pushView(
                     new Ui.Confirmation("Pause run?"),
                     new PauseConfirmDelegate(_view),
@@ -506,29 +719,24 @@ class RunDelegate extends Ui.BehaviorDelegate {
         return true;
     }
 
-    // LAP button  show finish menu
     function onMenu() {
-        Ui.pushView(
-            new Rez.Menus.RunMenu(),
-            new RunMenuDelegate(_view),
-            Ui.SLIDE_IMMEDIATE
-        );
+        if (_view != null && _view.isRunning()) {
+            Ui.pushView(
+                new Rez.Menus.RunMenu(),
+                new RunMenuDelegate(_view),
+                Ui.SLIDE_IMMEDIATE
+            );
+        }
         return true;
     }
 }
 
-// 
-// Pause confirmation dialog
-// 
 class PauseConfirmDelegate extends Ui.ConfirmationDelegate {
-
     private var _view;
-
     function initialize(view) {
         ConfirmationDelegate.initialize();
         _view = view;
     }
-
     function onResponse(response) {
         if (response == Ui.CONFIRM_YES && _view != null) {
             _view.pauseRun();
@@ -537,18 +745,12 @@ class PauseConfirmDelegate extends Ui.ConfirmationDelegate {
     }
 }
 
-// 
-// Run menu delegate (LAP button menu)
-// 
 class RunMenuDelegate extends Ui.MenuInputDelegate {
-
     private var _view;
-
     function initialize(view) {
         MenuInputDelegate.initialize();
         _view = view;
     }
-
     function onMenuItem(item) {
         if (item == :finish) {
             Ui.pushView(
@@ -560,18 +762,12 @@ class RunMenuDelegate extends Ui.MenuInputDelegate {
     }
 }
 
-// 
-// Finish confirmation dialog
-// 
 class FinishConfirmDelegate extends Ui.ConfirmationDelegate {
-
     private var _view;
-
     function initialize(view) {
         ConfirmationDelegate.initialize();
         _view = view;
     }
-
     function onResponse(response) {
         if (response == Ui.CONFIRM_YES && _view != null) {
             _view.finishRun();

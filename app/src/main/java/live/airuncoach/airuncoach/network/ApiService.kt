@@ -456,13 +456,33 @@ interface ApiService {
     @POST("/api/share/generate")
     suspend fun generateShareImage(@Body request: ShareImageRequest): okhttp3.ResponseBody
 
-    // ========== SESSION COACHING (Phase 1 Integration) ==========
+    // ========== SESSION COACHING (Phase 1 — legacy) ==========
     
     @GET("/api/workouts/{workoutId}/session-instructions")
     suspend fun getSessionInstructions(@Path("workoutId") workoutId: String): SessionInstructionsResponse
     
     @POST("/api/coaching/session-events")
     suspend fun logCoachingEvent(@Body event: CoachingSessionEvent): Response<Unit>
+
+    // ========== SESSION COACHING (Phase 2 — dynamic bespoke coaching) ==========
+
+    /**
+     * Generate (or return cached) bespoke SessionCoachingPlan for a workout.
+     * Called at "Prepare Run" time. Returns phases, triggers, cueingStrategy.
+     * Pass forceRegenerate=true to bypass cache.
+     */
+    @POST("/api/workouts/{workoutId}/prepare-coaching")
+    suspend fun prepareSessionCoaching(
+        @Path("workoutId") workoutId: String,
+        @Query("force") forceRegenerate: Boolean = false
+    ): Response<PrepareCoachingResponse>
+
+    /**
+     * Fetch the current SessionCoachingPlan for a workout (read-only).
+     * Returns 404 if not yet prepared.
+     */
+    @GET("/api/workouts/{workoutId}/coaching-plan")
+    suspend fun getCoachingPlan(@Path("workoutId") workoutId: String): Response<CoachingPlanResponse>
 
     // ========== MY DATA - ANALYTICS & INSIGHTS ==========
     

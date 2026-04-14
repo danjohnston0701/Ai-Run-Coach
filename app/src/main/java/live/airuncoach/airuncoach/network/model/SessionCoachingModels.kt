@@ -105,3 +105,105 @@ data class SessionCoachingContext(
     val intensity: String,
     val targetPace: Double?  // If available from workout metadata
 )
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 2: Dynamic Bespoke Session Coaching Models
+//
+// These models support the new unified generateSessionCoaching() system where
+// every session type (new or existing) gets bespoke AI coaching.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Response from POST /api/workouts/{workoutId}/prepare-coaching
+ *
+ * Contains the full bespoke SessionCoachingPlan generated for this workout.
+ * Returned at "Prepare Run" time and cached for the run.
+ */
+data class PrepareCoachingResponse(
+    val workoutId: String,
+    val plan: DynamicSessionCoachingPlan,
+    val cueingStrategy: String,   // "interval" | "threshold" | "paced" | "freerun"
+    val coachingTone: String,
+    val preRunBrief: String,
+    val whyThisSession: String,
+    val phasesCount: Int,
+    val triggersCount: Int
+)
+
+/**
+ * Response from GET /api/workouts/{workoutId}/coaching-plan
+ */
+data class CoachingPlanResponse(
+    val workoutId: String,
+    val plan: DynamicSessionCoachingPlan
+)
+
+/**
+ * The full dynamic coaching plan — works for ANY session type.
+ * Contains phases, triggers, and metadata needed by the live run engine.
+ */
+data class DynamicSessionCoachingPlan(
+    val sessionType: String,
+    val sessionGoal: String,
+    val coachingTone: String,
+    val cueingStrategy: String,       // "interval" | "threshold" | "paced" | "freerun"
+    val preRunBrief: String,
+    val whyThisSession: String,
+    val phases: List<DynamicCoachingPhase>,
+    val triggers: List<DynamicCoachingTrigger>,
+    val targetMetrics: DynamicTargetMetrics
+)
+
+/**
+ * A phase in the coaching plan.
+ * For intervals: one phase per rep + one per recovery jog.
+ * For continuous runs: warmup + main_effort + cooldown.
+ */
+data class DynamicCoachingPhase(
+    val name: String,               // "warmup", "hill_rep_1", "recovery_jog_1", "cooldown", etc.
+    val order: Int,                 // 0-indexed execution order
+    val durationMinutes: Double?,
+    val distanceKm: Double?,
+    val targetPaceMin: Int?,        // sec/km  e.g. 330 = 5:30/km
+    val targetPaceMax: Int?,        // sec/km
+    val targetHRMin: Int?,          // BPM
+    val targetHRMax: Int?,          // BPM
+    val effort: String,             // "easy" | "moderate" | "threshold" | "hard" | "max"
+    val coachingFocus: String,      // "relaxation" | "power" | "rhythm" | "endurance" | "speed"
+    val phaseInstructions: String?
+)
+
+/**
+ * A trigger that fires a coaching cue during the run.
+ * Evaluated against live metrics by the run tracking engine.
+ */
+data class DynamicCoachingTrigger(
+    val id: String,                         // Unique identifier
+    val type: String,                       // "phase_start" | "phase_end" | "pace_deviation" | "hr_zone" | "milestone"
+    val condition: String,                  // e.g. "pace > targetPaceMax + 30" or "phase == warmup"
+    val message: String,                    // Coaching cue to display/speak
+    val frequency: String,                  // "once" | "on_condition" | "repeating_Nmin"
+    val alternativeMessages: List<String>?, // Optional variations to rotate through
+    val alertType: String?,                 // "vibrate" | "audio" | "none"
+    val suppressWhenIntensity: List<String>? // e.g. ["z1"] = don't fire during recovery
+)
+
+/**
+ * Metrics targets and session classification.
+ * Used by the live run engine to know what to measure and compare.
+ */
+data class DynamicTargetMetrics(
+    val totalDurationMinutes: Int,
+    val totalDistanceKm: Double,
+    val primaryMetric: String,          // "pace" | "heart_rate" | "effort" | "distance" | "time"
+    val secondaryMetric: String?,
+    val mainEffortPaceMin: Int?,        // sec/km
+    val mainEffortPaceMax: Int?,        // sec/km
+    val mainEffortHRMin: Int?,          // BPM
+    val mainEffortHRMax: Int?,          // BPM
+    val structure: String,              // "continuous" | "repeats" | "progression" | "threshold_block"
+    val isSpeedWork: Boolean,
+    val isEnduranceWork: Boolean,
+    val isStrengthWork: Boolean,
+    val isRecovery: Boolean
+)

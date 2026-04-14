@@ -1,5 +1,6 @@
 // AI Run Coach - Garmin Connect IQ Companion App
 // Main Application Entry Point
+// Now uses RunView as the default screen with overlay messaging for auth flow.
 
 using Toybox.Application as App;
 using Toybox.WatchUi as Ui;
@@ -21,11 +22,12 @@ class AiRunCoachApp extends App.AppBase {
         Sys.println("AI Run Coach stopped");
     }
 
-    // Return the initial view — pass the view to its delegate so the delegate
-    // can call view methods (isAuthenticated, launchRunView).
+    // Return RunView as the initial view (no StartView).
+    // RunView displays overlay messaging to guide the user through auth & run flow.
     function getInitialView() {
-        var view     = new StartView();
-        var delegate = new StartDelegate(view);
+        var view     = new RunView();
+        var delegate = new RunDelegate();
+        delegate.setView(view);
         return [view, delegate];
     }
 

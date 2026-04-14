@@ -30,6 +30,7 @@ import live.airuncoach.airuncoach.network.model.IntervalCoachingRequest
 import live.airuncoach.airuncoach.network.model.IntervalCoachingResponse
 import live.airuncoach.airuncoach.network.model.PreRunBriefingResponse
 import live.airuncoach.airuncoach.network.model.SessionInstructionsResponse
+import live.airuncoach.airuncoach.service.GarminWatchManager
 import live.airuncoach.airuncoach.service.SessionCoachingHelper
 import live.airuncoach.airuncoach.service.RunTrackingService
 import live.airuncoach.airuncoach.utils.AudioPlayerHelper
@@ -89,10 +90,158 @@ class RunSessionViewModel @Inject constructor(
     private val sessionManager: SessionManager,
     private val healthConnectRepository: HealthConnectRepository,
     private val syncQueue: SyncQueue,
+    private val garminWatchManager: GarminWatchManager,
 ) : ViewModel() {
 
     private val _runState = MutableStateFlow(RunState())
     val runState: StateFlow<RunState> = _runState.asStateFlow()
+
+    // ── Garmin watch companion ────────────────────────────────────────────────
+    /** True when the AI Run Coach app is confirmed installed on the paired watch. */
+    val isWatchCompanionInstalled: StateFlow<Boolean> =
+        garminWatchManager.isCompanionAppInstalled
+
+    // ── Watch send state (for PrepareRunOnWatchButton UI) ────────────────────
+    private val _watchSendState = MutableStateFlow(live.airuncoach.airuncoach.ui.components.WatchSendState.IDLE)
+    val watchSendState: StateFlow<live.airuncoach.airuncoach.ui.components.WatchSendState> =
+        _watchSendState.asStateFlow()
+
+    // ── AI Coaching generation state ─────────────────────────────────────────
+    /** Tracks the state of AI coaching plan generation for the current workout preview. */
+    enum class CoachingGenerationState {
+        IDLE,        // Not started yet
+        GENERATING,  // API call in progress
+        READY,       // Plan generated successfully — run can start
+        FAILED       // Generation failed — run can still start (coaching best-effort)
+    }
+
+    private val _coachingGenerationState = MutableStateFlow(CoachingGenerationState.IDLE)
+    val coachingGenerationState: StateFlow<CoachingGenerationState> = _coachingGenerationState.asStateFlow()
+
+    /** ID of the workout whose coaching plan is currently cached. */
+    private var coachingGeneratedForWorkoutId: String? = null
+
+    /**
+     * Generate the bespoke AI coaching plan for a workout when the user opens the detail screen.
+     * Called via LaunchedEffect in WorkoutDetailScreen — runs once per workout (cached).
+     *
+     * Sets [coachingGenerationState] to GENERATING → READY or FAILED.
+     * Stores the plan in [activeSessionCoachingPlan] for use at run time.
+     *
+     * If coaching for this workoutId was already generated in this session, skips silently.
+     */
+    fun generateCoachingForWorkout(workoutId: String) {
+        // Skip if already generated for this workout
+        if (coachingGeneratedForWorkoutId == workoutId &&
+            _coachingGenerationState.value == CoachingGenerationState.READY) {
+            Log.d("RunSessionViewModel", "Coaching already generated for $workoutId — skipping")
+            return
+        }
+
+        viewModelScope.launch {
+            _coachingGenerationState.value = CoachingGenerationState.GENERATING
+            Log.d("RunSessionViewModel", "Generating AI coaching for workout $workoutId...")
+
+            try {
+                val response = apiService.prepareSessionCoaching(workoutId)
+                if (response.isSuccessful) {
+                    val body = response.body()
+                    activeSessionCoachingPlan = body?.plan
+                    coachingGeneratedForWorkoutId = workoutId
+                    _coachingGenerationState.value = CoachingGenerationState.READY
+                    Log.d("RunSessionViewModel",
+                        "AI coaching ready for $workoutId: ${body?.phasesCount} phases, " +
+                        "strategy=${body?.cueingStrategy}, tone=${body?.coachingTone}"
+                    )
+                } else {
+                    Log.w("RunSessionViewModel", "Coaching API returned ${response.code()} — marking FAILED")
+                    _coachingGenerationState.value = CoachingGenerationState.FAILED
+                }
+            } catch (e: Exception) {
+                Log.w("RunSessionViewModel", "Coaching generation failed: ${e.message}")
+                _coachingGenerationState.value = CoachingGenerationState.FAILED
+            }
+        }
+    }
+
+    /** Reset coaching state when navigating away from a workout detail screen. */
+    fun resetCoachingState() {
+        _coachingGenerationState.value = CoachingGenerationState.IDLE
+        coachingGeneratedForWorkoutId = null
+    }
+
+    /**
+     * Send the prepared run configuration to the watch over ConnectIQ BT.
+     * The watch will switch from idle to "Coached Run Ready ▶" mode.
+     */
+    fun prepareRunOnWatch(
+        distanceKm: Float,
+        runType: String,                    // "route" | "free" | "training"
+        workoutType: String?      = null,
+        workoutIntensity: String? = null,
+        workoutDesc: String?      = null,
+        routePolyline: String?    = null,
+        targetPace: String?       = null,
+        intervalCount: Int?       = null,
+        intervalDistKm: Float?    = null,
+        intervalDurSecs: Int?     = null
+    ) {
+        garminWatchManager.sendPreparedRun(
+            distanceKm        = distanceKm,
+            runType           = runType,
+            workoutType       = workoutType,
+            workoutIntensity  = workoutIntensity,
+            workoutDesc       = workoutDesc,
+            routePolyline     = routePolyline,
+            targetPace        = targetPace,
+            intervalCount     = intervalCount,
+            intervalDistKm    = intervalDistKm,
+            intervalDurSecs   = intervalDurSecs
+        )
+        Log.d("RunSessionViewModel", "prepareRunOnWatch sent: type=$runType dist=${distanceKm}km")
+    }
+
+    /**
+     * Send the prepared run to the watch using the already-generated coaching plan.
+     *
+     * Coaching generation happens at screen-open time via [generateCoachingForWorkout].
+     * By the time the user taps "Prepare Run on Watch", the plan should already be READY.
+     * If not (e.g., failed), falls back gracefully — the run still proceeds.
+     */
+    fun prepareRunOnWatchWithCoaching(
+        workoutId: String,
+        distanceKm: Float,
+        workoutType: String,
+        workoutIntensity: String? = null,
+        targetPace: String?       = null,
+        intervalCount: Int?       = null,
+        intervalDistKm: Float?    = null,
+        intervalDurSecs: Int?     = null
+    ) {
+        _watchSendState.value = live.airuncoach.airuncoach.ui.components.WatchSendState.SENDING
+
+        // Use the pre-generated coaching brief if available
+        val preRunBrief = activeSessionCoachingPlan?.preRunBrief
+
+        garminWatchManager.sendPreparedRun(
+            distanceKm       = distanceKm,
+            runType          = "training",
+            workoutType      = workoutType,
+            workoutIntensity = workoutIntensity,
+            workoutDesc      = preRunBrief ?: "Coached ${workoutType.replace("_", " ")} session",
+            targetPace       = targetPace,
+            intervalCount    = intervalCount,
+            intervalDistKm   = intervalDistKm,
+            intervalDurSecs  = intervalDurSecs
+        )
+
+        _watchSendState.value = live.airuncoach.airuncoach.ui.components.WatchSendState.SENT
+        Log.d("RunSessionViewModel", "prepareRunOnWatchWithCoaching sent: workout=$workoutId type=$workoutType, coachingReady=${activeSessionCoachingPlan != null}")
+    }
+
+    /** The active dynamic coaching plan, set when prepareRunOnWatchWithCoaching() succeeds. */
+    var activeSessionCoachingPlan: live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan? = null
+        private set
 
     val runSession = RunTrackingService.currentRunSession
     

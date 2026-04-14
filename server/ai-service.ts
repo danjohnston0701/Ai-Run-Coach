@@ -55,31 +55,31 @@ const accentDirective = (accent?: string): string => {
   const normalized = (accent || '').trim().toLowerCase();
   switch (normalized) {
     case 'british':
-      return 'Write with British English phrasing — "brilliant", "well done", "cracking pace", "spot on". Use "kilometres" not "kilometers". Avoid Americanisms.';
+      return 'Write with British English phrasing, using words like — "brilliant", "well done", "cracking pace", "spot on". Use "kilometres" not "kilometers". Avoid Americanisms.';
     case 'irish':
-      return 'Write with Irish English phrasing — "grand", "mighty", "fair play", "dead on". Warm and friendly. Use "kilometres".';
+      return 'Write with Irish English phrasing, using words like — "grand", "mighty", "fair play", "dead on". Warm and friendly. Use "kilometres".';
     case 'scottish':
-      return 'Write with Scottish English phrasing — "brilliant", "cracking", "braw", "well done". Direct and warm. Use "kilometres".';
+      return 'Write with Scottish English phrasing, using words like — "brilliant", "cracking", "braw", "well done". Direct and warm. Use "kilometres".';
     case 'australian':
-      return 'Write with Australian English phrasing — "legend", "ripper", "no worries", "you beauty". Relaxed and confident. Use "kilometres".';
+      return 'Write with Australian English phrasing, using words like — "legend", "ripper", "no worries", "you beauty". Relaxed and confident. Use "kilometres".';
     case 'new zealand':
     case 'newzealand':
     case 'nz':
-      return 'Write with New Zealand English phrasing — "sweet as", "good on ya", "choice", "chur". Understated Kiwi warmth. Use "kilometres".';
+      return 'Write with New Zealand English phrasing, using words like — "sweet as", "good on ya", "choice", "chur". Understated Kiwi warmth. Use "kilometres".';
     case 'american':
-      return 'Write with American English phrasing — "awesome", "great job", "crushing it". High energy and direct.';
+      return 'Write with American English phrasing, using words like — "awesome", "great job", "crushing it". High energy and direct.';
     case 'south african':
-      return 'Write with South African English phrasing — "lekker", "shame" (sympathetic), "howzit". Resilient warmth. Use "kilometres".';
+      return 'Write with South African English phrasing, using words like — "lekker", "shame" (sympathetic), "howzit". Resilient warmth. Use "kilometres".';
     case 'canadian':
-      return 'Write with Canadian English phrasing — "eh", "for sure", "beauty". Friendly and humble. Use "kilometres".';
+      return 'Write with Canadian English phrasing, using words like — "eh", "for sure", "beauty". Friendly and humble. Use "kilometres".';
     case 'welsh':
-      return 'Write with Welsh English phrasing — "lovely", "tidy", "fair play", "cracking on". Passionate warmth. Use "kilometres".';
+      return 'Write with Welsh English phrasing, using words like — "lovely", "tidy", "fair play", "cracking on". Passionate warmth. Use "kilometres".';
     case 'indian':
-      return 'Write with Indian English phrasing — "very good", "excellent", "superb". Articulate and warm. Use "kilometres".';
+      return 'Write with Indian English phrasing, using words like  — "very good", "excellent", "superb". Articulate and warm. Use "kilometres".';
     case 'caribbean':
-      return 'Write with Caribbean English phrasing — "wicked", "big up yourself", "nuff respect". Rhythmic and uplifting. Use "kilometres".';
+      return 'Write with Caribbean English phrasing, using words like — "wicked", "big up yourself", "nuff respect". Rhythmic and uplifting. Use "kilometres".';
     case 'scandinavian':
-      return 'Write with Scandinavian-influenced English — "very nice", "exactly", "perfect". Clean and understated. Use "kilometres".';
+      return 'Write with Scandinavian-influenced English, using words like — "very nice", "exactly", "perfect". Clean and understated. Use "kilometres".';
     default:
       return '';
   }
@@ -3721,4 +3721,485 @@ Keep it to 2-3 spoken sentences (under 20 seconds of audio). Every word must add
     console.error(`Elite coaching (${coachingType}) error:`, error);
     return "";
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// generateSessionCoaching
+//
+// Unified AI function that generates a complete, bespoke coaching plan for ANY
+// session type — intervals, tempo, long run, hill repeats, recovery, or any
+// future session type added to the plan.
+//
+// Key principles:
+//  - No hardcoded session type branches — AI determines structure from context
+//  - Called once at "Prepare Run" time, stored in DB, reused during the run
+//  - Returns phases, triggers, tone, targets, and cueingStrategy
+//  - Simple sessions (recovery, race pace) get cueingStrategy = "freerun"
+//    so they reuse the existing free-run coaching infrastructure
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface GenerateSessionCoachingParams {
+  sessionType: string;          // "easy", "intervals", "tempo", "long_run", "hill_repeats", etc.
+  sessionGoal: string;          // "speed", "endurance", "recovery", "threshold", "power"
+  targetDurationMinutes: number;
+  targetDistanceKm: number;
+  targetPaceMin?: number;       // sec/km  e.g. 330 = 5:30/km
+  targetPaceMax?: number;       // sec/km
+  targetHRMin?: number;         // BPM
+  targetHRMax?: number;         // BPM
+  sessionInstructions?: string; // Full AI-generated session instructions text
+  runnerProfile: {
+    age?: number;
+    gender?: string;
+    fitnessLevel?: string;
+    recentPaceAvgSecPerKm?: number;
+    recentHRAvg?: number;
+    injuries?: string[];
+    weeklyMileageKm?: number;
+  };
+  coachName?: string;
+  coachTone?: string;
+  coachAccent?: string;
+  recentRuns?: Array<{
+    distanceKm: number;
+    durationMinutes: number;
+    avgPaceSecPerKm: number;
+    avgHR?: number;
+    workoutType?: string;
+  }>;
+}
+
+export interface SessionCoachingPlan {
+  sessionType: string;
+  sessionGoal: string;
+  coachingTone: string;
+  cueingStrategy: string;  // "interval" | "threshold" | "paced" | "freerun"
+  preRunBrief: string;
+  whyThisSession: string;
+  phases: SessionCoachingPhase[];
+  triggers: SessionCoachingTrigger[];
+  targetMetrics: {
+    totalDurationMinutes: number;
+    totalDistanceKm: number;
+    primaryMetric: string;
+    secondaryMetric?: string;
+    mainEffortPaceMin?: number;
+    mainEffortPaceMax?: number;
+    mainEffortHRMin?: number;
+    mainEffortHRMax?: number;
+    structure: string;
+    isSpeedWork: boolean;
+    isEnduranceWork: boolean;
+    isStrengthWork: boolean;
+    isRecovery: boolean;
+  };
+}
+
+export interface SessionCoachingPhase {
+  name: string;
+  order: number;
+  durationMinutes?: number;
+  distanceKm?: number;
+  targetPaceMin?: number;
+  targetPaceMax?: number;
+  targetHRMin?: number;
+  targetHRMax?: number;
+  effort: string;
+  coachingFocus: string;
+  phaseInstructions?: string;
+}
+
+export interface SessionCoachingTrigger {
+  id: string;
+  type: string;
+  condition: string;
+  message: string;
+  frequency: string;
+  alternativeMessages?: string[];
+  alertType?: string;
+  suppressWhenIntensity?: string[];
+}
+
+// Determine the cueingStrategy from session type + characteristics
+// This tells the runtime HOW to use the coaching plan during a run
+function determineCueingStrategy(
+  sessionType: string,
+  sessionGoal: string,
+  phases: SessionCoachingPhase[]
+): string {
+  // Sessions with repeating rep phases = interval strategy
+  const hasReps = phases.some(p =>
+    p.name.includes("rep") ||
+    p.name.includes("interval") ||
+    p.name.includes("hill") ||
+    p.name.includes("fartlek")
+  );
+  if (hasReps) return "interval";
+
+  // Sustained hard effort without reps = threshold strategy
+  if (
+    sessionType === "tempo" ||
+    sessionType === "threshold" ||
+    sessionGoal === "threshold"
+  ) return "threshold";
+
+  // Target pace focus (race pace, progression) = paced strategy
+  if (
+    sessionType === "race_pace" ||
+    sessionType === "progression_run"
+  ) return "paced";
+
+  // Everything else: recovery, easy, long run = freerun strategy
+  // (reuses existing free-run coaching with session targets injected)
+  return "freerun";
+}
+
+// Format sec/km pace as human-readable string for AI prompt
+function formatPaceForPrompt(secPerKm?: number): string {
+  if (!secPerKm) return "not specified";
+  const mins = Math.floor(secPerKm / 60);
+  const secs = Math.round(secPerKm % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}/km`;
+}
+
+export async function generateSessionCoaching(
+  params: GenerateSessionCoachingParams
+): Promise<SessionCoachingPlan> {
+  const {
+    sessionType,
+    sessionGoal,
+    targetDurationMinutes,
+    targetDistanceKm,
+    targetPaceMin,
+    targetPaceMax,
+    targetHRMin,
+    targetHRMax,
+    sessionInstructions,
+    runnerProfile,
+    coachName = "Coach",
+    coachTone = "motivational",
+    recentRuns = [],
+  } = params;
+
+  // Build runner context
+  const runnerContext = `
+Runner Profile:
+- Age: ${runnerProfile.age ?? "unknown"}
+- Gender: ${runnerProfile.gender ?? "unknown"}
+- Fitness Level: ${runnerProfile.fitnessLevel ?? "intermediate"}
+- Average Recent Pace: ${formatPaceForPrompt(runnerProfile.recentPaceAvgSecPerKm)}
+- Average Recent HR: ${runnerProfile.recentHRAvg ?? "unknown"} bpm
+- Weekly Mileage: ${runnerProfile.weeklyMileageKm ?? "unknown"} km/week
+- Injuries: ${runnerProfile.injuries?.join(", ") || "none"}`.trim();
+
+  // Build recent runs context (last 3)
+  const recentRunsContext = recentRuns.slice(0, 3).length > 0
+    ? `\nRecent Runs (last ${recentRuns.slice(0, 3).length}):\n` +
+      recentRuns.slice(0, 3).map((r, i) =>
+        `  Run ${i + 1}: ${r.distanceKm.toFixed(1)}km in ${r.durationMinutes}min ` +
+        `@ ${formatPaceForPrompt(r.avgPaceSecPerKm)}${r.avgHR ? ` / ${r.avgHR}bpm avg HR` : ""}`
+      ).join("\n")
+    : "\nRecent Runs: No data available";
+
+  // Build session context
+  const sessionContext = `
+Session Details:
+- Type: ${sessionType}
+- Goal: ${sessionGoal}
+- Target Duration: ${targetDurationMinutes} minutes
+- Target Distance: ${targetDistanceKm} km
+- Target Pace Range: ${formatPaceForPrompt(targetPaceMin)} – ${formatPaceForPrompt(targetPaceMax)}
+- Target HR Range: ${targetHRMin ?? "not set"}–${targetHRMax ?? "not set"} bpm
+${sessionInstructions ? `\nSession Instructions from Training Plan:\n${sessionInstructions}` : ""}`.trim();
+
+  const systemPrompt = `You are ${coachName}, an expert AI running coach designing a bespoke coaching plan for a single training session.
+
+Your job is to generate a complete, session-specific coaching plan that includes:
+1. A breakdown of the session into phases (warmup, main effort, cooldown, reps, recovery jogs, etc.)
+2. Specific coaching triggers — conditions that fire live cues during the run
+3. A pre-run brief (2-4 sentences) telling the runner what to do and why
+4. A "why this session matters" explanation (1-2 sentences)
+5. The optimal coaching tone for this session
+
+CRITICAL RULES:
+- Do NOT use generic coaching — every message must be specific to THIS session type, distance, pace, and runner
+- Phase names must reflect the actual session (e.g., "hill_rep_1", "tempo_block", "recovery_jog_2")
+- Trigger messages must be SHORT (under 20 words), direct, and actionable
+- For interval/rep sessions: create explicit rep_start and rep_end triggers for each rep
+- For continuous sessions: use pace_deviation, hr_zone, and milestone triggers
+- Choose cueingStrategy based on session complexity:
+  * "interval" — sessions with repeating effort phases (intervals, hill reps, fartlek)
+  * "threshold" — sustained hard effort without reps (tempo, threshold)
+  * "paced" — target-pace sessions (race pace, progression)
+  * "freerun" — simple continuous sessions (easy, recovery, long run)
+- The preRunBrief MUST mention the specific session targets (distance, pace, or effort zones)
+- Coaching tone should be SESSION-appropriate, not just user-preference:
+  * Recovery/easy: calm, light, conversational
+  * Intervals/hills: direct, energetic, motivational
+  * Tempo/threshold: focused, technical, steady
+  * Long run: supportive, steady, milestone-aware
+
+${toneDirective(coachTone)}
+${accentDirective(params.coachAccent)}
+
+You must respond with ONLY valid JSON (no markdown, no code blocks).`;
+
+  const userPrompt = `${runnerContext}
+
+${recentRunsContext}
+
+${sessionContext}
+
+Design a complete coaching plan for this session.
+
+Return ONLY valid JSON in this exact format:
+{
+  "sessionType": "${sessionType}",
+  "sessionGoal": "${sessionGoal}",
+  "coachingTone": "calm|motivational|energetic|technical|supportive",
+  "cueingStrategy": "interval|threshold|paced|freerun",
+  "preRunBrief": "2-4 sentence motivating brief specific to this session and its targets",
+  "whyThisSession": "1-2 sentences explaining training benefit",
+  "phases": [
+    {
+      "name": "warmup",
+      "order": 0,
+      "durationMinutes": 10,
+      "distanceKm": 1.5,
+      "targetPaceMin": 390,
+      "targetPaceMax": 420,
+      "targetHRMin": 110,
+      "targetHRMax": 130,
+      "effort": "easy",
+      "coachingFocus": "relaxation",
+      "phaseInstructions": "Easy jog to warm up muscles and elevate heart rate gently"
+    }
+  ],
+  "triggers": [
+    {
+      "id": "warmup_start",
+      "type": "phase_start",
+      "condition": "phase == warmup",
+      "message": "Start easy — loosen up and find your rhythm",
+      "frequency": "once",
+      "alternativeMessages": [],
+      "alertType": "none",
+      "suppressWhenIntensity": []
+    },
+    {
+      "id": "pace_too_slow",
+      "type": "pace_deviation",
+      "condition": "pace > targetPaceMax + 30",
+      "message": "Pick it up slightly — you're running slower than target",
+      "frequency": "repeating_3min",
+      "alertType": "vibrate",
+      "suppressWhenIntensity": ["z1"]
+    },
+    {
+      "id": "hr_too_high",
+      "type": "hr_zone",
+      "condition": "hr > targetHRMax",
+      "message": "Heart rate too high — ease off the pace",
+      "frequency": "on_condition",
+      "alertType": "vibrate",
+      "suppressWhenIntensity": []
+    }
+  ],
+  "targetMetrics": {
+    "totalDurationMinutes": ${targetDurationMinutes},
+    "totalDistanceKm": ${targetDistanceKm},
+    "primaryMetric": "pace|heart_rate|effort|distance|time",
+    "secondaryMetric": "pace|heart_rate|cadence|null",
+    "mainEffortPaceMin": ${targetPaceMin ?? null},
+    "mainEffortPaceMax": ${targetPaceMax ?? null},
+    "mainEffortHRMin": ${targetHRMin ?? null},
+    "mainEffortHRMax": ${targetHRMax ?? null},
+    "structure": "continuous|repeats|progression|threshold_block",
+    "isSpeedWork": false,
+    "isEnduranceWork": false,
+    "isStrengthWork": false,
+    "isRecovery": false
+  }
+}
+
+PHASE DESIGN RULES:
+- Intervals/hill_repeats: warmup (1-2km) + N work phases + N recovery phases alternating + cooldown
+- Tempo: warmup (1km) + tempo_block + cooldown (0.5-1km)
+- Long run: single main_effort phase + milestone triggers at 25%, 50%, 75%, final km
+- Easy/recovery: single main_effort phase, very light triggers only
+- Fartlek: alternating effort and float phases as runner decides
+- ALWAYS include a warmup phase and a cooldown phase
+- Each trigger id must be unique
+- Trigger messages must be under 20 words, present tense, active voice`;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",  // Full model for quality — this is called once per session not per cue
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.7,
+      max_tokens: 2500,
+      response_format: { type: "json_object" },
+    });
+
+    const responseText = completion.choices[0].message.content || "{}";
+    const parsed = JSON.parse(responseText);
+
+    // Determine cueing strategy — validate or derive from phases
+    const derivedStrategy = determineCueingStrategy(
+      parsed.sessionType ?? sessionType,
+      parsed.sessionGoal ?? sessionGoal,
+      parsed.phases ?? []
+    );
+
+    const plan: SessionCoachingPlan = {
+      sessionType:   parsed.sessionType   ?? sessionType,
+      sessionGoal:   parsed.sessionGoal   ?? sessionGoal,
+      coachingTone:  parsed.coachingTone  ?? coachTone,
+      cueingStrategy: parsed.cueingStrategy ?? derivedStrategy,
+      preRunBrief:   parsed.preRunBrief   ?? `Get ready for your ${sessionType.replace(/_/g, " ")} session.`,
+      whyThisSession: parsed.whyThisSession ?? "Building your running fitness.",
+      phases:   parsed.phases   ?? [],
+      triggers: parsed.triggers ?? [],
+      targetMetrics: {
+        totalDurationMinutes: parsed.targetMetrics?.totalDurationMinutes ?? targetDurationMinutes,
+        totalDistanceKm:      parsed.targetMetrics?.totalDistanceKm      ?? targetDistanceKm,
+        primaryMetric:        parsed.targetMetrics?.primaryMetric        ?? "pace",
+        secondaryMetric:      parsed.targetMetrics?.secondaryMetric,
+        mainEffortPaceMin:    parsed.targetMetrics?.mainEffortPaceMin    ?? targetPaceMin,
+        mainEffortPaceMax:    parsed.targetMetrics?.mainEffortPaceMax    ?? targetPaceMax,
+        mainEffortHRMin:      parsed.targetMetrics?.mainEffortHRMin      ?? targetHRMin,
+        mainEffortHRMax:      parsed.targetMetrics?.mainEffortHRMax      ?? targetHRMax,
+        structure:            parsed.targetMetrics?.structure            ?? "continuous",
+        isSpeedWork:          parsed.targetMetrics?.isSpeedWork          ?? false,
+        isEnduranceWork:      parsed.targetMetrics?.isEnduranceWork      ?? false,
+        isStrengthWork:       parsed.targetMetrics?.isStrengthWork       ?? false,
+        isRecovery:           parsed.targetMetrics?.isRecovery           ?? false,
+      },
+    };
+
+    console.log(
+      `[generateSessionCoaching] Generated plan for ${sessionType}:`,
+      `${plan.phases.length} phases, ${plan.triggers.length} triggers,`,
+      `strategy=${plan.cueingStrategy}, tone=${plan.coachingTone}`
+    );
+
+    return plan;
+
+  } catch (error) {
+    console.error("[generateSessionCoaching] Error generating session coaching:", error);
+
+    // Robust fallback — always returns a usable plan
+    return buildFallbackSessionCoaching(params);
+  }
+}
+
+/**
+ * Builds a safe fallback SessionCoachingPlan when AI call fails.
+ * Ensures the run can always proceed with basic coaching.
+ */
+function buildFallbackSessionCoaching(
+  params: GenerateSessionCoachingParams
+): SessionCoachingPlan {
+  const { sessionType, sessionGoal, targetDurationMinutes, targetDistanceKm,
+          targetPaceMin, targetPaceMax, targetHRMin, targetHRMax } = params;
+
+  const isInterval = sessionType === "intervals" || sessionType === "hill_repeats";
+  const isTempo    = sessionType === "tempo" || sessionType === "threshold";
+  const isRecovery = sessionType === "recovery" || sessionType === "easy";
+  const isLongRun  = sessionType === "long_run";
+
+  const strategy = isInterval ? "interval"
+    : isTempo     ? "threshold"
+    : sessionType === "race_pace" || sessionType === "progression_run" ? "paced"
+    : "freerun";
+
+  const tone = isRecovery ? "calm"
+    : isInterval   ? "motivational"
+    : isTempo      ? "technical"
+    : "encouraging";
+
+  const phases: SessionCoachingPhase[] = [
+    {
+      name: "warmup", order: 0, durationMinutes: 10,
+      effort: "easy", coachingFocus: "relaxation",
+      phaseInstructions: "Easy warm-up jog to get the body moving",
+    },
+    {
+      name: "main_effort", order: 1,
+      durationMinutes: targetDurationMinutes - 15,
+      distanceKm: targetDistanceKm,
+      targetPaceMin, targetPaceMax, targetHRMin, targetHRMax,
+      effort: isRecovery ? "easy" : isInterval ? "hard" : isTempo ? "threshold" : "moderate",
+      coachingFocus: isRecovery ? "relaxation" : isInterval ? "power" : "rhythm",
+      phaseInstructions: `Main ${sessionType.replace(/_/g, " ")} effort`,
+    },
+    {
+      name: "cooldown", order: 2, durationMinutes: 5,
+      effort: "easy", coachingFocus: "relaxation",
+      phaseInstructions: "Easy cool-down jog",
+    },
+  ];
+
+  const triggers: SessionCoachingTrigger[] = [
+    {
+      id: "warmup_start", type: "phase_start",
+      condition: "phase == warmup",
+      message: "Start easy — warm up and settle into the session",
+      frequency: "once", alertType: "none",
+    },
+    {
+      id: "main_start", type: "phase_start",
+      condition: "phase == main_effort",
+      message: `${sessionType.replace(/_/g, " ")} starts now — find your target effort`,
+      frequency: "once", alertType: "vibrate",
+    },
+    {
+      id: "pace_check", type: "pace_deviation",
+      condition: "pace > targetPaceMax + 30",
+      message: "Ease into your target pace — stay controlled",
+      frequency: "repeating_3min", alertType: "none",
+      suppressWhenIntensity: ["z1"],
+    },
+    {
+      id: "hr_high", type: "hr_zone",
+      condition: "hr > targetHRMax",
+      message: "Heart rate climbing — ease off slightly to stay in zone",
+      frequency: "on_condition", alertType: "vibrate",
+    },
+    {
+      id: "cooldown_start", type: "phase_start",
+      condition: "phase == cooldown",
+      message: "Great work — easy jog to cool down now",
+      frequency: "once", alertType: "none",
+    },
+  ];
+
+  return {
+    sessionType, sessionGoal,
+    coachingTone: tone,
+    cueingStrategy: strategy,
+    preRunBrief: `Today's session is a ${targetDistanceKm}km ${sessionType.replace(/_/g, " ")}. ${
+      targetPaceMin ? `Target pace: ${formatPaceForPrompt(targetPaceMin)}–${formatPaceForPrompt(targetPaceMax)}.` : ""
+    } Focus on consistent effort throughout.`,
+    whyThisSession: `This session builds your ${sessionGoal.replace(/_/g, " ")} and improves running fitness.`,
+    phases,
+    triggers,
+    targetMetrics: {
+      totalDurationMinutes: targetDurationMinutes,
+      totalDistanceKm:      targetDistanceKm,
+      primaryMetric:        targetHRMin ? "heart_rate" : "pace",
+      mainEffortPaceMin:    targetPaceMin,
+      mainEffortPaceMax:    targetPaceMax,
+      mainEffortHRMin:      targetHRMin,
+      mainEffortHRMax:      targetHRMax,
+      structure:            isInterval ? "repeats" : isTempo ? "threshold_block" : "continuous",
+      isSpeedWork:          isInterval,
+      isEnduranceWork:      isLongRun,
+      isStrengthWork:       sessionType === "hill_repeats",
+      isRecovery:           isRecovery,
+    },
+  };
 }
