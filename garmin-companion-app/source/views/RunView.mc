@@ -102,12 +102,10 @@ class RunView extends Ui.View {
         var name = App.Storage.getValue("runnerName");
         _runnerName = (name != null) ? name : "";
 
-        // Set initial overlay state
-        if (_isAuthenticated) {
-            _overlayState = OVERLAY_READY;
-        } else {
-            _overlayState = OVERLAY_WAITING;
-        }
+        // Always start in READY — users can run without the phone.
+        // Coaching activates automatically when phone connects and sends auth.
+        // OVERLAY_WAITING is no longer a blocking screen.
+        _overlayState = OVERLAY_READY;
     }
 
     function setPhoneControlled(val) {
@@ -480,24 +478,8 @@ class RunView extends Ui.View {
     }
 
     private function _drawWaitingOverlay(dc, width, height, centerX, centerY) {
-        var dots = "";
-        for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
-
-        // Semi-transparent dark overlay
-        dc.setColor(0x000000, Gfx.COLOR_TRANSPARENT);
-        dc.fillRectangle(0, 0, width, height);
-
-        // Text
-        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(centerX, centerY - 30, Gfx.FONT_MEDIUM,
-            "Waiting for phone" + dots, Gfx.TEXT_JUSTIFY_CENTER);
-
-        dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(centerX, centerY + 10, Gfx.FONT_SMALL,
-            "Open AI Run Coach", Gfx.TEXT_JUSTIFY_CENTER);
-
-        dc.drawText(centerX, centerY + 40, Gfx.FONT_SMALL,
-            "on your phone", Gfx.TEXT_JUSTIFY_CENTER);
+        // No longer used as a blocking screen.
+        // Phone-not-connected is shown as a subtle hint on the READY overlay instead.
     }
 
     private function _drawReadyOverlay(dc, width, height, centerX, centerY) {
@@ -505,18 +487,25 @@ class RunView extends Ui.View {
         dc.setColor(0x000000, Gfx.COLOR_TRANSPARENT);
         dc.fillRectangle(0, 0, width, height);
 
-        // Text
+        // Main title
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(centerX, centerY - 20, Gfx.FONT_MEDIUM,
+        dc.drawText(centerX, centerY - 25, Gfx.FONT_MEDIUM,
             "Ready to Run", Gfx.TEXT_JUSTIFY_CENTER);
 
+        // Show name if logged in, otherwise show uncoached hint
         dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
         if (_runnerName.length() > 0) {
-            dc.drawText(centerX, centerY + 10, Gfx.FONT_SMALL,
+            dc.drawText(centerX, centerY + 8, Gfx.FONT_SMALL,
                 _runnerName, Gfx.TEXT_JUSTIFY_CENTER);
+        } else {
+            // Phone not connected — show subtle coaching hint (not a blocker)
+            dc.setColor(0x555555, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(centerX, centerY + 8, Gfx.FONT_TINY,
+                "Open phone app for AI coaching", Gfx.TEXT_JUSTIFY_CENTER);
         }
 
-        dc.drawText(centerX, centerY + 40, Gfx.FONT_SMALL,
+        dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(centerX, centerY + 38, Gfx.FONT_SMALL,
             "Press START to begin", Gfx.TEXT_JUSTIFY_CENTER);
     }
 
