@@ -376,8 +376,44 @@ Goal:
 ${goalEventName ? `- Target event: ${goalEventName}${goalEventLocation ? ` in ${goalEventLocation}` : ''}` : ''}
 ${goalDescription ? `- Goal description: ${goalDescription}` : ''}
 ${goalNotes ? `- Runner's own notes about this goal: "${goalNotes}" — use this to personalise coaching cues and session descriptions` : ''}
-${targetTime ? `- Target time: ${Math.floor(targetTime / 60)}:${String(Math.round((targetTime % 60))).padStart(2,'0')} (mm:ss)
-- Gap to close: ${avgTimeAtGoalDistanceSecs && targetTime ? `runner currently averages ${avgTimeAtGoalDistanceStr}, needs to improve by approximately ${Math.round((avgTimeAtGoalDistanceSecs - targetTime) / 60)} minute(s) ${Math.abs(Math.round((avgTimeAtGoalDistanceSecs - targetTime) % 60))}s` : 'use your expert judgment based on their current pace'}` : ''}
+${targetTime ? (() => {
+  // Pre-compute goal pace and training paces from goal time
+  const goalPaceSecs = Math.round(targetTime / targetDistance);
+  const goalPaceStr = `${Math.floor(goalPaceSecs / 60)}:${String(goalPaceSecs % 60).padStart(2, "0")}/km`;
+  const easyPaceSecs = goalPaceSecs + 90;
+  const easyPaceStr = `${Math.floor(easyPaceSecs / 60)}:${String(easyPaceSecs % 60).padStart(2, "0")}/km`;
+  const tempoPaceSecs = goalPaceSecs + 20; // ~20s/km above goal = threshold
+  const tempoPaceStr = `${Math.floor(tempoPaceSecs / 60)}:${String(tempoPaceSecs % 60).padStart(2, "0")}/km`;
+  const intervalPaceSecs = Math.max(goalPaceSecs - 20, 150); // ~20s/km below goal = neuromuscular
+  const intervalPaceStr = `${Math.floor(intervalPaceSecs / 60)}:${String(intervalPaceSecs % 60).padStart(2, "0")}/km`;
+  const longRunPaceSecs = goalPaceSecs + 75;
+  const longRunPaceStr = `${Math.floor(longRunPaceSecs / 60)}:${String(longRunPaceSecs % 60).padStart(2, "0")}/km`;
+  const currentPaceStr = avgPaceStr || "unknown";
+  const currentTimeStr = avgTimeAtGoalDistanceStr || "unknown";
+  return `- Target time: ${Math.floor(targetTime / 60)}:${String(Math.round((targetTime % 60))).padStart(2,'0')} (mm:ss)
+- Goal pace: ${goalPaceStr} (this is the pace required to achieve the target time)
+- Gap to close: ${avgTimeAtGoalDistanceSecs && targetTime ? `runner currently averages ${currentTimeStr} for ${targetDistance}km (${currentPaceStr}), needs to improve by approximately ${Math.round((avgTimeAtGoalDistanceSecs - targetTime) / 60)} minute(s) ${Math.abs(Math.round((avgTimeAtGoalDistanceSecs - targetTime) % 60))}s` : 'use your expert judgment based on their current pace'}
+
+TRAINING PACE PRESCRIPTION (derived from goal pace ${goalPaceStr}):
+These are the target paces you MUST use when assigning workouts. Do NOT anchor hard/tempo/interval paces to the runner's current easy pace.
+- Easy / recovery runs:  ~${easyPaceStr}  (aerobic base; conversational effort)
+- Long runs:             ~${longRunPaceStr} (comfortable aerobic, builds endurance)
+- Tempo / threshold:     ~${tempoPaceStr}  (lactate threshold work; comfortably hard but sustainable for 20-40 min)
+- Race pace sessions:    ${goalPaceStr}    (exactly the goal pace; conditions body and mind for race day)
+- Interval reps (400m-1000m): ~${intervalPaceStr} (faster than race pace; neuromuscular conditioning so race pace feels controlled)
+- Hill repeats:          effort-based (target race-pace effort / zone 4 HR — pace is secondary due to gradient)
+
+PACE PROGRESSION OVER THE PLAN:
+- Weeks 1-3:  Focus on easy miles. Introduce tempo at current-ability threshold (~current pace - 30s). Intervals at goal pace.
+- Weeks 4-6:  Tempo creeps toward ${tempoPaceStr}. Intervals at ${intervalPaceStr}. First race pace taste.
+- Weeks 7-9:  Tempo AT ${tempoPaceStr}. Sustained race pace blocks (1-2km at ${goalPaceStr}). Intervals well below race pace.
+- Final weeks: Race-pace specific sessions. Taper volume, maintain intensity.
+
+CRITICAL: The runner CANNOT achieve ${goalPaceStr} race pace if they never train at or faster than that pace. Every plan MUST include:
+1. Interval sessions with reps at ${intervalPaceStr} or faster (conditions body to handle race pace easily)
+2. Tempo sessions at ~${tempoPaceStr} (builds lactate threshold)
+3. Race-pace conditioning runs at exactly ${goalPaceStr} (as the plan progresses)`;
+})() : ''}
 ${targetDate ? `- Race date: ${targetDate.toDateString()}` : ''}
 
 ${regularSessions.length > 0 ? `
@@ -414,14 +450,19 @@ Schedule:
 }
 
 Requirements:
-1. Base all paces on the runner's actual current ability shown above — NOT generic tables. If their current ${targetDistance}km time is ${avgTimeAtGoalDistanceStr || 'unknown'}, pace prescriptions must start from that reality.
+1. PACE RULES — follow this strictly:
+   a) Easy/recovery/long runs: use the runner's CURRENT ability (their average pace + 30-90s/km). These should feel genuinely easy.
+   b) Tempo/threshold sessions: use the TRAINING PACE PRESCRIPTION above (~goal pace + 20s/km). Do NOT use current easy pace for tempo — this is the most common coaching mistake.
+   c) Interval sessions: use the TRAINING PACE PRESCRIPTION above (~goal pace - 20s/km). Reps must be faster than race pace.
+   d) Race pace sessions: use the exact GOAL PACE derived from the target time. These sessions exist to make the runner comfortable at their race pace.
+   e) Hill repeats: specify effort (e.g. "Zone 4 effort / hard") not exact pace, since gradient makes pace unreliable.
 2. Build gradually from current ${weeklyMileageBase.toFixed(1)}km/week base
-3. Include easy runs, tempo runs, intervals, and long runs
-4. Follow 80/20 rule (80% easy, 20% hard)
+3. Include easy runs, tempo runs, intervals, and long runs across each week
+4. Follow 80/20 rule (80% easy effort, 20% quality/hard sessions)
 5. Build for 3 weeks, recover 1 week pattern
 6. Taper for final 2 weeks before race
 7. Increase weekly volume by max 10% per week
-8. Reference the runner's current performance data when writing workout descriptions (e.g. "your current 5km is around ${avgTimeAtGoalDistanceStr || 'estimated from pace data'} — today's tempo target will bring you closer to your goal")
+8. Reference the runner's current performance AND goal in workout descriptions (e.g. "your current 5km is around ${avgTimeAtGoalDistanceStr || 'estimated from pace data'}. Today's tempo at [X:XX/km] is building your lactate threshold toward your [goal time] goal")
 
 Return JSON with this exact structure:
 {
@@ -452,6 +493,27 @@ Return JSON with this exact structure:
           "intensity": "z2",
           "description": "Easy recovery run",
           "instructions": "Keep heart rate in zone 2. Should feel conversational."
+        },
+        {
+          "dayOfWeek": 3,
+          "workoutType": "tempo",
+          "distance": 5.0,
+          "targetPace": "TEMPO_PACE_HERE (use goal-derived tempo pace from TRAINING PACE PRESCRIPTION, NOT easy pace)",
+          "intensity": "z4",
+          "description": "Threshold tempo run — this pace is derived from your GOAL pace, not your easy pace",
+          "instructions": "Warm up 1km easy, then hold tempo pace for 3km, cool down 1km. This should be comfortably hard."
+        },
+        {
+          "dayOfWeek": 5,
+          "workoutType": "intervals",
+          "distance": 5.0,
+          "targetPace": "INTERVAL_PACE_HERE (use goal-derived interval pace from TRAINING PACE PRESCRIPTION — faster than race pace)",
+          "intensity": "z5",
+          "intervalCount": 6,
+          "intervalDistanceMeters": 400,
+          "intervalDurationSeconds": null,
+          "description": "Speed intervals — faster than race pace to make goal pace feel controlled",
+          "instructions": "400m reps at interval pace with 90s recovery jog between reps."
         }
       ]
     }
