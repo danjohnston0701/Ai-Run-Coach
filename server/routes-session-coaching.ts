@@ -17,6 +17,7 @@ import {
   loadSessionCoachingPlan,
 } from "./session-coaching-service";
 import { AuthenticatedRequest } from "./types";
+import { authMiddleware } from "./auth";
 
 export function registerSessionCoachingRoutes(app: Express) {
   /**
@@ -324,6 +325,7 @@ export function registerSessionCoachingRoutes(app: Express) {
    */
   app.post(
     "/api/workouts/:workoutId/prepare-coaching",
+    authMiddleware,
     async (req: AuthenticatedRequest, res: Response) => {
       try {
         const { workoutId } = req.params;
@@ -366,6 +368,7 @@ export function registerSessionCoachingRoutes(app: Express) {
    */
   app.get(
     "/api/workouts/:workoutId/coaching-plan",
+    authMiddleware,
     async (req: AuthenticatedRequest, res: Response) => {
       try {
         const { workoutId } = req.params;
