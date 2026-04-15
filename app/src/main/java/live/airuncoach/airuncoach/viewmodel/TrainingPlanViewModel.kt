@@ -264,9 +264,12 @@ class TrainingPlanViewModel @Inject constructor(
         viewModelScope.launch {
             _actionLoading.value = true
             try {
-                apiService.updatePlanStatus(planId, mapOf("status" to "abandoned"))
-                // Reload the active-plans list so the caller navigates back to a fresh list
-                loadUserPlansSync("active")
+                val response = apiService.updatePlanStatus(planId, mapOf("status" to "abandoned"))
+                if (!response.isSuccessful) {
+                    throw Exception("Server returned ${response.code()}: ${response.errorBody()?.string()}")
+                }
+                // Signal success — CoachingProgrammeScreen's LaunchedEffect(isActiveDestination)
+                // will reload the list when we navigate back, so no pre-fetch needed here.
                 _planActionSuccess.value = true
             } catch (e: Exception) {
                 _actionError.value = "Failed to abandon plan: ${e.message}"
@@ -280,28 +283,18 @@ class TrainingPlanViewModel @Inject constructor(
         viewModelScope.launch {
             _actionLoading.value = true
             try {
-                apiService.deleteTrainingPlan(planId)
-                // Reload the active-plans list so the caller navigates back to a fresh list
-                loadUserPlansSync("active")
+                val response = apiService.deleteTrainingPlan(planId)
+                if (!response.isSuccessful) {
+                    throw Exception("Server returned ${response.code()}: ${response.errorBody()?.string()}")
+                }
+                // Signal success — CoachingProgrammeScreen's LaunchedEffect(isActiveDestination)
+                // will reload the list when we navigate back, so no pre-fetch needed here.
                 _planActionSuccess.value = true
             } catch (e: Exception) {
                 _actionError.value = "Failed to delete plan: ${e.message}"
             } finally {
                 _actionLoading.value = false
             }
-        }
-    }
-
-    /** Loads plans and suspends until the result is stored — used internally so callers
-     *  can `await` the refresh before signalling success. */
-    private suspend fun loadUserPlansSync(status: String) {
-        try {
-            val userId = sessionManager.getUserId() ?: return
-            val plans = apiService.getUserTrainingPlans(userId, status)
-            _plansListState.value = if (plans.isEmpty()) PlansListState.Empty
-                                    else PlansListState.Success(plans)
-        } catch (e: Exception) {
-            Log.e("TrainingPlanVM", "Error reloading plans: ${e.message}", e)
         }
     }
 

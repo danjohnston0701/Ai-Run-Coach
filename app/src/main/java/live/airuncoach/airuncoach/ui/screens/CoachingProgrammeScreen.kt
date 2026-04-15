@@ -61,8 +61,14 @@ fun CoachingProgrammeScreen(
     // Using LaunchedEffect(isActiveDestination) is more reliable than a lifecycle
     // observer in Compose Navigation — it fires every time the value flips true
     // (i.e. when we pop back from training_plan or any child screen).
+    // Reload whichever tab is currently selected so the user sees fresh data
+    // after a delete/abandon action (not always the "active" tab).
+    val tabStatusMap = mapOf(0 to "active", 1 to "completed", 2 to "abandoned")
     LaunchedEffect(isActiveDestination) {
-        if (isActiveDestination) viewModel.loadUserPlans()
+        if (isActiveDestination) {
+            val currentStatus = tabStatusMap[selectedTab] ?: "active"
+            viewModel.loadUserPlans(currentStatus)
+        }
     }
 
     Scaffold(
