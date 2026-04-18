@@ -127,6 +127,9 @@ class RunTrackingService : Service(), SensorEventListener {
     private var splitPausedMs: Long = 0          // Paused time within the current km split
     private var currentCadence: Int = 0
     private var currentHeartRate: Int = 0
+    private var maxHeartRate: Int = 0         // Peak HR seen during this run
+    private var heartRateSum: Long = 0        // Running sum for true average calculation
+    private var heartRateSampleCount: Int = 0 // Number of HR samples taken
     private var initialStepCount: Int = -1
     private var lastStepTimestamp: Long = 0
     // Step detector cadence tracking (fallback)
@@ -669,6 +672,9 @@ class RunTrackingService : Service(), SensorEventListener {
         cadenceCount = 0
         maxCadenceValue = 0
         currentHeartRate = 0
+        maxHeartRate = 0
+        heartRateSum = 0L
+        heartRateSampleCount = 0
         initialStepCount = -1
         lastStepTimestamp = 0
         stepDetectorSteps = 0
@@ -2303,15 +2309,21 @@ class RunTrackingService : Service(), SensorEventListener {
     }
     
     private suspend fun uploadRunToBackend(runSession: RunSession) {
+        // Compute true average HR from accumulated samples (not just the last reading)
+        val computedAvgHR = if (heartRateSampleCount > 0)
+            (heartRateSum / heartRateSampleCount).toInt()
+        else if (runSession.heartRate > 0) runSession.heartRate  // Fallback to last reading
+        else null
+
         val uploadRequest = UploadRunRequest(
             routeId = null, // TODO: Add if user selected a saved route
             startTime = runSession.startTime,
             distance = runSession.distance,
             duration = runSession.duration,
             avgPace = runSession.averagePace ?: "0:00",
-            avgHeartRate = if (runSession.heartRate > 0) runSession.heartRate else null,
-            maxHeartRate = null, // TODO: Track max HR
-            minHeartRate = null, // TODO: Track min HR
+            avgHeartRate = computedAvgHR,
+            maxHeartRate = if (maxHeartRate > 0) maxHeartRate else null,
+            minHeartRate = null, // TODO: Track min HR (need to track separately)
             calories = runSession.calories,
             cadence = if (runSession.cadence > 0) runSession.cadence else null,
             maxCadence = runSession.maxCadence,
@@ -2350,6 +2362,7 @@ class RunTrackingService : Service(), SensorEventListener {
             totalSteps = runSession.totalSteps,
             activeCalories = runSession.activeCalories,
             avgSpeed = runSession.avgSpeed,
+            maxSpeed = runSession.maxSpeed,
             movingTime = runSession.movingTime,
             elapsedTime = runSession.elapsedTime,
             avgStrideLength = runSession.avgStrideLength,
@@ -4049,6 +4062,10 @@ class RunTrackingService : Service(), SensorEventListener {
                     hrSum += hr
                     hrCount += 1
                     if (hr > maxHr) maxHr = hr
+                    // Class-level tracking for run-end summary
+                    heartRateSum += hr
+                    heartRateSampleCount++
+                    if (hr > maxHeartRate) maxHeartRate = hr
                 }
             }
         }

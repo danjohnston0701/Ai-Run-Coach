@@ -1075,25 +1075,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })),
       };
 
-      // Explicitly extract target fields — these can be lost when Drizzle maps a
-      // Record<string,any> spread through the InsertRun Zod schema boundary.
-      // Pulling them out explicitly guarantees they reach the INSERT statement.
-      const targetDistance = typeof runData.targetDistance === 'number' ? runData.targetDistance : null;
-      const targetTime     = typeof runData.targetTime     === 'number' ? runData.targetTime     : null;
+      // Explicitly extract fields that have naming mismatches or type ambiguities.
+      // These can be lost when Drizzle maps a Record<string,any> spread through the
+      // InsertRun type boundary — explicit extraction guarantees they reach the INSERT.
+      const targetDistance    = typeof runData.targetDistance    === 'number'  ? runData.targetDistance    : null;
+      const targetTime        = typeof runData.targetTime        === 'number'  ? runData.targetTime        : null;
       const wasTargetAchieved = typeof runData.wasTargetAchieved === 'boolean' ? runData.wasTargetAchieved : null;
 
-      console.log(`[POST /api/runs] Target fields received — targetDistance: ${targetDistance} km, targetTime: ${targetTime} ms, wasTargetAchieved: ${wasTargetAchieved}`);
+      // NAMING MISMATCH FIX: Android sends maxInclinePercent/maxDeclinePercent but the
+      // DB schema columns are named steepestIncline/steepestDecline.  The spread passes
+      // the Android names, which Drizzle silently ignores.  Map explicitly here.
+      const steepestIncline = typeof runData.maxInclinePercent === 'number'
+        ? runData.maxInclinePercent
+        : (typeof runData.steepestIncline === 'number' ? runData.steepestIncline : null);
+      const steepestDecline = typeof runData.maxDeclinePercent === 'number'
+        ? runData.maxDeclinePercent
+        : (typeof runData.steepestDecline === 'number' ? runData.steepestDecline : null);
+
+      // MISSING COLUMN FIX: Android sends startTime (epoch ms) but the runs table has
+      // no startTime column.  Store it as startedAt (we add this column in the migration).
+      const startedAt = runData.startTime ? new Date(runData.startTime) : null;
+
+      console.log(`[POST /api/runs] Target fields — targetDistance: ${targetDistance} km, targetTime: ${targetTime} ms, wasTargetAchieved: ${wasTargetAchieved}`);
+      console.log(`[POST /api/runs] Elevation fields — steepestIncline: ${steepestIncline}%, steepestDecline: ${steepestDecline}%`);
 
       // Create run with TSS and calculated steps
       console.log(`[POST /api/runs] Creating run for user: ${userId}`);
+      // Also extract maxSpeed, totalSteps explicitly (safe names but good habit)
+      const maxSpeed    = typeof runData.maxSpeed    === 'number' ? runData.maxSpeed    : null;
+      const totalSteps2 = typeof runData.totalSteps  === 'number' ? runData.totalSteps  : (totalSteps || null);
+
       const run = await storage.createRun({
         ...processedRunData,
         userId,
         tss,
-        // Override with explicit values to guarantee these columns are written
+        // Explicit overrides — guaranteed to reach the INSERT statement
         targetDistance,
         targetTime,
         wasTargetAchieved,
+        steepestIncline,
+        steepestDecline,
+        startedAt,
+        maxSpeed,
+        totalSteps: totalSteps2,
       });
       console.log(`[POST /api/runs] Run created successfully with ID: ${run.id}`);
 

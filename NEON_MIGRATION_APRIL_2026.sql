@@ -41,6 +41,35 @@ UPDATE garmin_realtime_data
   WHERE source IS NULL;
 
 -- ============================================================================
+-- 2. ADD MISSING COLUMNS TO runs TABLE
+-- ============================================================================
+-- These were identified as data loss gaps in an audit of the upload pipeline:
+--
+--   startedAt     — actual run start time from device clock.  Previously
+--                   the runs table only had completedAt (end time).  The
+--                   Android app sends startTime in the upload but there was
+--                   no column to store it.
+--
+--   totalSteps    — total step count for the run.  Previously computed by
+--                   the server from cadence × duration but silently dropped
+--                   because there was no column in the runs table.
+--                   (totalSteps exists in garmin_epochs_aggregate, not runs.)
+
+ALTER TABLE runs
+  ADD COLUMN IF NOT EXISTS started_at timestamptz;
+
+ALTER TABLE runs
+  ADD COLUMN IF NOT EXISTS total_steps integer;
+
+-- Backfill startedAt from completedAt - duration for existing rows
+-- (duration is stored in seconds, completedAt is a timestamp)
+UPDATE runs
+  SET started_at = completed_at - (duration || ' seconds')::interval
+  WHERE started_at IS NULL
+    AND completed_at IS NOT NULL
+    AND duration IS NOT NULL;
+
+-- ============================================================================
 -- Verification queries (run after migration to confirm)
 -- ============================================================================
 

@@ -206,6 +206,11 @@ export const runs = pgTable("runs", {
   workoutIntensity: varchar("workout_intensity"), // "z1", "z2", "z3", "z4", "z5"
   workoutDescription: text("workout_description"), // Human-readable workout description
   
+  // Run timing (startedAt is the actual run start; completedAt is when it finished)
+  startedAt: timestamp("started_at"),              // Actual start of the run (from device clock)
+  // Step count for the run (calculated from cadence × duration if step counter unavailable)
+  totalSteps: integer("total_steps"),              // Total steps taken during the run
+  
   createdAt: timestamp("created_at").defaultNow(), // When record was created in database
   updatedAt: timestamp("updated_at").defaultNow(), // When record was last updated
 });

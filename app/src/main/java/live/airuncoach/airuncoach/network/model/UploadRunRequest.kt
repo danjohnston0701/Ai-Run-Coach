@@ -47,6 +47,7 @@ data class UploadRunRequest(
     val totalSteps: Int? = null,
     val activeCalories: Int? = null,
     val avgSpeed: Float? = null,
+    val maxSpeed: Float? = null,      // peak speed (m/s) — from RunSession.maxSpeed
     val movingTime: Long? = null,
     val elapsedTime: Long? = null,
     val avgStrideLength: Float? = null,
