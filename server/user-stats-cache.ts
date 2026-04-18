@@ -116,6 +116,8 @@ export async function recomputeForUser(userId: string): Promise<void> {
     totalCalories:       sum(runs.calories),
     totalActiveCalories: sum(runs.activeCalories),
     longestRunM:         max(runs.distance),      // meters — divide by 1000 for km
+    // Highest elevation: prefer maxElevation column; fall back to elevationGain
+    highestElevationM:   sql<number>`COALESCE(MAX(${runs.maxElevation}), MAX(${runs.elevationGain}), 0)`,
     // avgPace is stored as "M:SS" format (e.g. "5:22") — parse via SPLIT_PART
     fastestPace: sql<number>`MIN(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
     avgPace:     sql<number>`AVG(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
@@ -207,7 +209,21 @@ export async function recomputeForUser(userId: string): Promise<void> {
   // runs.duration is in SECONDS → store directly (column is total_duration_seconds)
   const totalDurationSeconds = Number(agg.totalDurationSec ?? 0);
 
-  console.log(`[UserStatsCache] Recomputing for user ${userId}: ${totalRuns} runs, ${totalDistanceKm.toFixed(2)}km, ${totalDurationSeconds}s`);
+  // Longest run time: duration of the run with the greatest distance (already in seconds)
+  let longestRunTimeSec = 0;
+  if (totalRuns > 0) {
+    const [longestRun] = await db
+      .select({ duration: runs.duration })
+      .from(runs)
+      .where(eq(runs.userId, userId))
+      .orderBy(sql`${runs.distance} DESC NULLS LAST`)
+      .limit(1);
+    longestRunTimeSec = Math.round(longestRun?.duration || 0);
+  }
+
+  const highestElevationM = Math.round(Number(agg.highestElevationM ?? 0));
+
+  console.log(`[UserStatsCache] Recomputing for user ${userId}: ${totalRuns} runs, ${totalDistanceKm.toFixed(2)}km, ${totalDurationSeconds}s, longestTime=${longestRunTimeSec}s, highElev=${highestElevationM}m`);
 
   const upsertData = {
     userId,
@@ -221,6 +237,8 @@ export async function recomputeForUser(userId: string): Promise<void> {
     avgPaceMinPerKm:      Number(agg.avgPace ?? 0) || null,
     fastestPaceMinPerKm:  Number(agg.fastestPace ?? 0) || null,
     longestRunKm,
+    longestRunTimeSec,
+    highestElevationM,
     // PB fields — all duration columns store MILLISECONDS
     pb1kDurationMs:       pbUpdates['pb1kDurationMs'] as number | null,
     pb1kRunId:            pbUpdates['pb1kRunId'] as string | null,

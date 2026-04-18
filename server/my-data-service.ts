@@ -393,12 +393,16 @@ async function getAllTimeStatsLive(userId: string) {
       .orderBy(desc(runs.distance))
       .limit(1);
 
-    const longestRunTimeSec = longestRun.length > 0 
-      ? Math.round((longestRun[0].duration || 0) / 1000)
+    // duration is stored in SECONDS — do NOT divide by 1000
+    const longestRunTimeSec = longestRun.length > 0
+      ? Math.round(longestRun[0].duration || 0)
       : 0;
 
-    // Get highest elevation from any single run
-    const highestElevationM = Math.round(Number(stats.maxElevation ?? 0));
+    // Highest elevation: prefer maxElevation if populated, fall back to max elevationGain
+    // (most Android runs have elevationGain but not maxElevation)
+    const highestElevationM = Math.round(
+      Number(stats.maxElevation ?? 0) || Number(stats.totalElevationGain ?? 0)
+    );
 
     // Count completed goals
     const [completedGoalsResult] = await db
