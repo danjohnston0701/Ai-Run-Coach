@@ -12,6 +12,7 @@ import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.data.SyncQueue
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.RetrofitClient
+import live.airuncoach.airuncoach.service.GarminWatchManager
 import javax.inject.Singleton
 
 @Module
@@ -46,5 +47,18 @@ object AppModule {
     @Provides
     fun provideSyncQueue(@ApplicationContext context: Context): SyncQueue {
         return SyncQueue(context)
+    }
+
+    /**
+     * Single GarminWatchManager instance shared across the whole app.
+     * MainActivity initialises it at startup; RunTrackingService and ViewModels
+     * can inject it to send run state updates and prepared-run configs to the watch.
+     *
+     * Note: initialize() must be called once (MainActivity.onCreate) before use.
+     */
+    @Singleton
+    @Provides
+    fun provideGarminWatchManager(@ApplicationContext context: Context): GarminWatchManager {
+        return GarminWatchManager(context)
     }
 }

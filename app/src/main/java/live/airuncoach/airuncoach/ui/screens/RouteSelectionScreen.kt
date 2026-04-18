@@ -27,8 +27,12 @@ import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.MapView
 import com.google.android.gms.maps.model.*
 import com.google.maps.android.PolyUtil
+import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.domain.model.GeneratedRoute
 import live.airuncoach.airuncoach.domain.model.RouteDifficulty
+import live.airuncoach.airuncoach.ui.components.PrepareRunOnWatchButton
+import live.airuncoach.airuncoach.ui.components.WatchSendState
+import live.airuncoach.airuncoach.viewmodel.RunSessionViewModel
 import kotlin.math.atan
 import kotlin.math.roundToInt
 
@@ -45,6 +49,13 @@ fun RouteSelectionScreen(
     aiCoachEnabled: Boolean,
     onAiCoachToggle: (Boolean) -> Unit
 ) {
+    val viewModel: RunSessionViewModel = hiltViewModel()
+    val companionInstalled by viewModel.isWatchCompanionInstalled.collectAsState()
+    var watchSendState by remember { mutableStateOf(WatchSendState.IDLE) }
+
+    // Reset watch send state when route changes
+    LaunchedEffect(selectedRouteId) { watchSendState = WatchSendState.IDLE }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -135,8 +146,8 @@ fun RouteSelectionScreen(
                 }
             }
 
-            // Bottom: Start Run Button
-            Box(
+            // Bottom: action buttons
+            Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
@@ -145,8 +156,26 @@ fun RouteSelectionScreen(
                             listOf(Color.Transparent, Color(0xFF0A1628))
                         )
                     )
-                    .padding(16.dp)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                // "Prepare Run on Watch" — shown only when companion app is installed
+                val selectedRoute = routes.find { it.id == selectedRouteId }
+                PrepareRunOnWatchButton(
+                    companionInstalled = companionInstalled && selectedRouteId != null,
+                    sendState = watchSendState,
+                    onPrepare = {
+                        watchSendState = WatchSendState.SENDING
+                        viewModel.prepareRunOnWatch(
+                            distanceKm = distanceKm.toFloat(),
+                            runType = "route",
+                            routePolyline = selectedRoute?.polyline
+                        )
+                        watchSendState = WatchSendState.SENT
+                    }
+                )
+
+                // Primary "Start Run on Phone" button
                 Button(
                     onClick = onStartRun,
                     enabled = selectedRouteId != null,

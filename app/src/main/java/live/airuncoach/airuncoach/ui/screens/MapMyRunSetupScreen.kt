@@ -32,6 +32,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
 import live.airuncoach.airuncoach.domain.model.RunSetupConfig
+import live.airuncoach.airuncoach.ui.components.PrepareRunOnWatchButton
+import live.airuncoach.airuncoach.ui.components.WatchSendState
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
@@ -72,6 +74,8 @@ fun MapMyRunSetupScreen(
     val context = LocalContext.current
     val runSessionViewModel: RunSessionViewModel = hiltViewModel()
     val runState by runSessionViewModel.runState.collectAsState()
+    val companionInstalled by runSessionViewModel.isWatchCompanionInstalled.collectAsState()
+    var watchSendState by remember { mutableStateOf(WatchSendState.IDLE) }
 
     // Minor metadata
     var activityMode by remember { mutableStateOf(ActivityMode.RUN) }
@@ -315,7 +319,19 @@ fun MapMyRunSetupScreen(
                         }
                     )
                 } else {
-                    // no_route mode: single start run action
+                    // no_route mode: Prepare on Watch (if installed) + Start Run
+                    PrepareRunOnWatchButton(
+                        companionInstalled = companionInstalled,
+                        sendState = watchSendState,
+                        onPrepare = {
+                            watchSendState = WatchSendState.SENDING
+                            runSessionViewModel.prepareRunOnWatch(
+                                distanceKm = targetDistance,
+                                runType = "free"
+                            )
+                            watchSendState = WatchSendState.SENT
+                        }
+                    )
                     PrimaryCtaButton(
                         text = when {
                             !hasLocationPermission -> "GRANT LOCATION"

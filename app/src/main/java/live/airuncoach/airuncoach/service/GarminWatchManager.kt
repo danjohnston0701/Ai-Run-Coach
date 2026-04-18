@@ -37,7 +37,7 @@ class GarminWatchManager(private val context: Context) {
     companion object {
         private const val TAG = "GarminWatchManager"
         // Must match the UUID in garmin-companion-app/manifest.xml
-        const val APP_ID = "691e015cecad4dcf8c940228b7acdeca"
+        const val APP_ID = "F05F6F7A3B2347668CCACE4B043DB794"
     }
 
     // ── Public state ──────────────────────────────────────────────────────────
@@ -130,6 +130,53 @@ class GarminWatchManager(private val context: Context) {
 
     fun sendStartRun() {
         sendToWatch(mapOf("type" to "startRun"))
+    }
+
+    /**
+     * Push a prepared run configuration to the watch.
+     *
+     * The watch StartView receives this as a "preparedRun" message and switches
+     * from the default idle state to "Coached Run Ready ▶" mode.
+     *
+     * @param distanceKm       Target distance in km (0.0 = open-ended)
+     * @param runType          "route" | "free" | "training"
+     * @param workoutType      e.g. "easy", "tempo", "intervals" (nullable)
+     * @param workoutIntensity e.g. "z2", "z4" (nullable)
+     * @param workoutDesc      Short description shown on watch (nullable)
+     * @param routePolyline    Encoded polyline string for navigation (nullable)
+     * @param targetPace       Target pace string e.g. "5:30" (nullable)
+     * @param intervalCount    Number of intervals for interval workouts (nullable)
+     * @param intervalDistKm   Distance per interval in km (nullable)
+     * @param intervalDurSecs  Duration per interval in seconds (nullable)
+     */
+    fun sendPreparedRun(
+        distanceKm: Float,
+        runType: String,
+        workoutType: String? = null,
+        workoutIntensity: String? = null,
+        workoutDesc: String? = null,
+        routePolyline: String? = null,
+        targetPace: String? = null,
+        intervalCount: Int? = null,
+        intervalDistKm: Float? = null,
+        intervalDurSecs: Int? = null
+    ) {
+        val payload = mutableMapOf<String, Any>(
+            "type"     to "preparedRun",
+            "distance" to distanceKm,
+            "runType"  to runType
+        )
+        workoutType?.let      { payload["workoutType"]      = it }
+        workoutIntensity?.let { payload["workoutIntensity"] = it }
+        workoutDesc?.let      { payload["workoutDesc"]      = it }
+        routePolyline?.let    { payload["routePolyline"]    = it }
+        targetPace?.let       { payload["targetPace"]       = it }
+        intervalCount?.let    { payload["intervalCount"]    = it }
+        intervalDistKm?.let   { payload["intervalDistKm"]  = it }
+        intervalDurSecs?.let  { payload["intervalDurSecs"] = it }
+
+        Log.d(TAG, "Sending preparedRun to watch: type=$runType dist=${distanceKm}km workout=$workoutType")
+        sendToWatch(payload)
     }
 
     fun sendSessionEnded() {

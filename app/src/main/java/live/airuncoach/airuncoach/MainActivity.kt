@@ -27,6 +27,7 @@ import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.service.GarminWatchManager
 import live.airuncoach.airuncoach.service.RunTrackingService
+import javax.inject.Inject
 import live.airuncoach.airuncoach.ui.navigation.RootNavigationGraph
 import live.airuncoach.airuncoach.ui.theme.AiRunCoachTheme
 
@@ -35,9 +36,8 @@ class MainActivity : ComponentActivity() {
     
     private lateinit var garminAuthManager: GarminAuthManager
 
-    // Garmin watch bridge — initialized at app startup so the watch can connect
-    // and receive an auth token without the user needing to start a run first.
-    private var garminWatchManager: GarminWatchManager? = null
+    // Injected singleton — shared with RunTrackingService and ViewModels via Hilt
+    @Inject lateinit var garminWatchManager: GarminWatchManager
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -255,32 +255,29 @@ class MainActivity : ComponentActivity() {
         try {
             val sessionManager = SessionManager(this)
 
-            garminWatchManager = GarminWatchManager(this).also { mgr ->
-                mgr.onWatchAppReady = {
-                    // Watch companion app is resolved and listening — push auth immediately
-                    val token = sessionManager.getAuthToken()
-                    val name  = sessionManager.getUserName() ?: ""
-                    if (token != null) {
-                        Log.d("MainActivity", "Watch app ready — sending auth token to watch")
-                        mgr.sendAuth(token, name)
-                    } else {
-                        Log.d("MainActivity", "Watch app ready but user not logged in — skipping auth push")
-                    }
+            garminWatchManager.onWatchAppReady = {
+                // Watch companion app is resolved and listening — push auth immediately
+                val token = sessionManager.getAuthToken()
+                val name  = sessionManager.getUserName() ?: ""
+                if (token != null) {
+                    Log.d("MainActivity", "Watch app ready — sending auth token to watch")
+                    garminWatchManager.sendAuth(token, name)
+                } else {
+                    Log.d("MainActivity", "Watch app ready but user not logged in — skipping auth push")
                 }
-                mgr.initialize()
-                Log.d("MainActivity", "✅ GarminWatchManager initialized at app startup")
             }
+            garminWatchManager.initialize()
+            Log.d("MainActivity", "✅ GarminWatchManager initialized at app startup")
         } catch (e: Exception) {
             // Non-fatal: Garmin Connect app may not be installed on this device
             Log.w("MainActivity", "GarminWatchManager init skipped (non-fatal): ${e.message}")
-            garminWatchManager = null
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         try {
-            garminWatchManager?.shutdown()
+            garminWatchManager.shutdown()
         } catch (e: Exception) {
             Log.w("MainActivity", "GarminWatchManager shutdown: ${e.message}")
         }
