@@ -154,7 +154,8 @@ export async function recomputeForUser(userId: string): Promise<void> {
       const durationMs = Math.round(Number(best.pace_seconds) * splitDist.segmentKm * 1000);
       pbUpdates[cols.durationCol] = durationMs;
       pbUpdates[cols.runIdCol]    = best.id;
-      pbUpdates[cols.dateCol]     = best.completed_at ?? null;
+      // Neon driver may return timestamp as string — ensure we pass a real Date object
+      pbUpdates[cols.dateCol]     = toDate(best.completed_at as any);
     } else {
       pbUpdates[cols.durationCol] = null;
       pbUpdates[cols.runIdCol]    = null;
@@ -183,10 +184,11 @@ export async function recomputeForUser(userId: string): Promise<void> {
       .limit(1);
 
     const cols = PB_COLUMNS[dist.key];
-    // Convert seconds → milliseconds for pb_*_duration_ms column
+    // Convert seconds → milliseconds for pb_*_duration_ms column.
+    // Also ensure completedAt is a real Date object (Neon driver returns strings).
     pbUpdates[cols.durationCol] = pbRun?.duration != null ? pbRun.duration * 1000 : null;
     pbUpdates[cols.runIdCol]    = pbRun?.id ?? null;
-    pbUpdates[cols.dateCol]     = pbRun?.completedAt ?? null;
+    pbUpdates[cols.dateCol]     = toDate(pbRun?.completedAt as any);
   }
 
   // ── Count completed goals ─────────────────────────────────────────────────
@@ -254,6 +256,19 @@ export async function recomputeForUser(userId: string): Promise<void> {
 }
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
+
+/**
+ * Safely convert any timestamp value (Date, string, number, null) to a Date or null.
+ * Needed because the Neon postgres driver returns timestamp columns as ISO strings,
+ * not JS Date objects, but Drizzle's PgTimestamp.mapToDriverValue() calls .toISOString()
+ * which fails on strings.
+ */
+function toDate(value: Date | string | number | null | undefined): Date | null {
+  if (value == null) return null;
+  if (value instanceof Date) return value;
+  const d = new Date(value as string | number);
+  return isNaN(d.getTime()) ? null : d;
+}
 
 /**
  * Parse a "M:SS" pace string into total seconds per km. Returns null on failure.
