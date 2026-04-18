@@ -145,6 +145,7 @@ fun RunSummaryScreenFlagship(
     val strugglePoints by viewModel.strugglePoints.collectAsState()
     val isAdmin = viewModel.isAdminUser()
     val isGarminConnected by viewModel.isGarminConnected.collectAsState()
+    val newPersonalBests by viewModel.newPersonalBests.collectAsState()
 
     val context = LocalContext.current
 
@@ -317,6 +318,14 @@ fun RunSummaryScreenFlagship(
                             showGoalCelebration = false
                         },
                         onDismiss = { showGoalCelebration = false }
+                    )
+                }
+
+                // Personal Best Celebration Dialog
+                if (newPersonalBests.isNotEmpty()) {
+                    PersonalBestCelebrationDialog(
+                        categories = newPersonalBests,
+                        onDismiss = { viewModel.clearNewPersonalBests() }
                     )
                 }
 

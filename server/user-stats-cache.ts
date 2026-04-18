@@ -60,6 +60,7 @@ export async function onRunSaved(userId: string, run: {
   activeCalories?: number | null;
   avgPace?: string | null;
   completedAt?: Date | null;
+  kmSplits?: Array<{ km?: number; pace?: string; [key: string]: any }> | null;
 }): Promise<void> {
   try {
     const [existing] = await db.select().from(userStats).where(eq(userStats.userId, userId));
@@ -141,7 +142,45 @@ export async function recomputeForUser(userId: string): Promise<void> {
   // ── Find PBs for each distance category ─────────────────────────────────
   const pbUpdates: Record<string, number | string | Date | null> = {};
 
-  for (const dist of PB_DISTANCES) {
+  // 1K and Mile PBs: fastest SPLIT from any run (not runs of exactly that distance)
+  // Uses PostgreSQL jsonb_array_elements to scan km_splits across all runs.
+  for (const splitDist of [
+    { key: '1k'   as PbKey, segmentKm: 1.0   },
+    { key: 'mile' as PbKey, segmentKm: 1.609 },
+  ]) {
+    const rows = await db.execute<{ id: string; completed_at: Date | null; pace_seconds: number }>(sql`
+      SELECT
+        r.id,
+        r.completed_at,
+        SPLIT_PART(elem->>'pace', ':', 1)::numeric * 60
+          + SPLIT_PART(elem->>'pace', ':', 2)::numeric AS pace_seconds
+      FROM runs r,
+      LATERAL jsonb_array_elements(r.km_splits) AS elem
+      WHERE r.user_id = ${userId}
+        AND r.km_splits IS NOT NULL
+        AND jsonb_typeof(r.km_splits) = 'array'
+        AND (elem->>'pace') LIKE '%:%'
+      ORDER BY pace_seconds ASC
+      LIMIT 1
+    `);
+
+    const best = rows.rows?.[0];
+    const cols = PB_COLUMNS[splitDist.key];
+    if (best) {
+      // Duration = time to cover the segment at this pace (pace_seconds is sec/km)
+      const durationMs = Math.round(best.pace_seconds * splitDist.segmentKm * 1000);
+      pbUpdates[cols.durationCol] = durationMs;
+      pbUpdates[cols.runIdCol]    = best.id;
+      pbUpdates[cols.dateCol]     = best.completed_at ?? null;
+    } else {
+      pbUpdates[cols.durationCol] = null;
+      pbUpdates[cols.runIdCol]    = null;
+      pbUpdates[cols.dateCol]     = null;
+    }
+  }
+
+  // 5K, 10K, Half Marathon, Marathon: best run by total distance in band
+  for (const dist of PB_DISTANCES.filter(d => d.key !== '1k' && d.key !== 'mile')) {
     // Convert min/max from km to meters for database query
     const minMeters = dist.minKm * 1000;
     const maxMeters = dist.maxKm * 1000;
@@ -224,7 +263,20 @@ export async function recomputeForUser(userId: string): Promise<void> {
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
 /**
+ * Parse a "M:SS" pace string into total seconds per km. Returns null on failure.
+ */
+function parsePaceToSeconds(paceStr: string | null | undefined): number | null {
+  if (!paceStr) return null;
+  const match = paceStr.match(/^(\d+):(\d+)$/);
+  if (!match) return null;
+  return parseInt(match[1]) * 60 + parseInt(match[2]);
+}
+
+/**
  * Check if the saved run beats any PB and update just those fields.
+ * Handles:
+ *   - 5K / 10K / Half / Marathon: total-run distance band comparison
+ *   - 1K / Mile: fastest km split from this run vs current best split PB
  */
 async function maybeUpdatePersonalBests(userId: string, run: {
   id: string;
@@ -232,27 +284,69 @@ async function maybeUpdatePersonalBests(userId: string, run: {
   duration: number;
   avgPace?: string | null;
   completedAt?: Date | null;
+  kmSplits?: Array<{ km?: number; pace?: string; [key: string]: any }> | null;
 }): Promise<void> {
-  // Convert run.distance from meters to km for comparison
-  const distanceKm = run.distance / 1000;
-  const matchingDist = PB_DISTANCES.find(d => distanceKm >= d.minKm && distanceKm <= d.maxKm);
-  if (!matchingDist || !run.avgPace) return;
-
   const [existing] = await db.select().from(userStats).where(eq(userStats.userId, userId));
   if (!existing) return;
 
-  const cols = PB_COLUMNS[matchingDist.key];
-  const existingDuration = (existing as any)[cols.durationCol] as number | null;
+  const updates: Record<string, number | string | Date> = {};
 
-  // Lower duration = faster run = new PB
-  if (!existingDuration || run.duration < existingDuration) {
+  // ── 1K and Mile: check fastest km split from this run ──────────────────
+  if (Array.isArray(run.kmSplits) && run.kmSplits.length > 0) {
+    // Find the fastest individual km split in this run
+    let fastestSplitSeconds: number | null = null;
+    for (const split of run.kmSplits) {
+      const sec = parsePaceToSeconds(split.pace);
+      if (sec !== null && (fastestSplitSeconds === null || sec < fastestSplitSeconds)) {
+        fastestSplitSeconds = sec;
+      }
+    }
+
+    if (fastestSplitSeconds !== null) {
+      const runDate = run.completedAt ?? new Date();
+
+      // 1K: duration = fastest km split pace in ms
+      const new1kMs = Math.round(fastestSplitSeconds * 1000);
+      const cur1k = existing.pb1kDurationMs as number | null;
+      if (!cur1k || new1kMs < cur1k) {
+        updates['pb1kDurationMs'] = new1kMs;
+        updates['pb1kRunId']      = run.id;
+        updates['pb1kDate']       = runDate;
+        console.log(`[UserStatsCache] New 1K PB for user ${userId}: ${new1kMs}ms (split pace)`);
+      }
+
+      // Mile: duration = fastest km split pace × 1.609 in ms
+      const newMileMs = Math.round(fastestSplitSeconds * 1.609 * 1000);
+      const curMile = existing.pbMileDurationMs as number | null;
+      if (!curMile || newMileMs < curMile) {
+        updates['pbMileDurationMs'] = newMileMs;
+        updates['pbMileRunId']      = run.id;
+        updates['pbMileDate']       = runDate;
+        console.log(`[UserStatsCache] New Mile PB for user ${userId}: ${newMileMs}ms (split pace)`);
+      }
+    }
+  }
+
+  // ── 5K, 10K, Half, Marathon: total-run distance band ──────────────────
+  const distanceKm = run.distance / 1000;
+  const matchingDist = PB_DISTANCES.find(
+    d => d.key !== '1k' && d.key !== 'mile' && distanceKm >= d.minKm && distanceKm <= d.maxKm
+  );
+  if (matchingDist && run.avgPace) {
+    const cols = PB_COLUMNS[matchingDist.key];
+    const existingDuration = (existing as any)[cols.durationCol] as number | null;
+    if (!existingDuration || run.duration < existingDuration) {
+      updates[cols.durationCol] = run.duration;
+      updates[cols.runIdCol]    = run.id;
+      updates[cols.dateCol]     = run.completedAt ?? new Date();
+      console.log(`[UserStatsCache] New ${matchingDist.label} PB for user ${userId}: ${run.duration}ms`);
+    }
+  }
+
+  if (Object.keys(updates).length > 0) {
     await db.update(userStats).set({
-      [cols.durationCol]: run.duration,
-      [cols.runIdCol]:    run.id,
-      [cols.dateCol]:     run.completedAt ?? new Date(),
-      updatedAt:          new Date(),
+      ...updates,
+      updatedAt: new Date(),
     }).where(eq(userStats.userId, userId));
-
-    console.log(`[UserStatsCache] New ${matchingDist.label} PB for user ${userId}: ${run.duration}ms`);
   }
 }

@@ -67,6 +67,13 @@ class RunSummaryViewModel @Inject constructor(
     private val _isGarminConnected = MutableStateFlow(false)
     val isGarminConnected: StateFlow<Boolean> = _isGarminConnected.asStateFlow()
 
+    /**
+     * Non-empty list of PB categories set by this run (e.g. ["Fastest 1K", "5K"]).
+     * Populated after loading the run session. Drives the PB celebration dialog.
+     */
+    private val _newPersonalBests = MutableStateFlow<List<String>>(emptyList())
+    val newPersonalBests: StateFlow<List<String>> = _newPersonalBests.asStateFlow()
+
     private val _isEnrichingWithGarmin = MutableStateFlow(false)
     val isEnrichingWithGarmin: StateFlow<Boolean> = _isEnrichingWithGarmin.asStateFlow()
 
@@ -130,6 +137,9 @@ class RunSummaryViewModel @Inject constructor(
 
                 // Load any saved AI analysis for this run (if present)
                 loadSavedAnalysis(runId)
+
+                // Check if this run sets any new personal bests
+                checkPersonalBests(runId)
                 
                 // Auto-complete workout if this run was linked to a planned workout
                 if (session.linkedWorkoutId != null && session.linkedPlanId != null) {
@@ -685,6 +695,41 @@ class RunSummaryViewModel @Inject constructor(
             Log.w("RunSummaryViewModel", "Failed to load weather insights", e)
             null
         }
+    }
+
+    /**
+     * Fetch personal bests and check if any of them are attributed to [runId].
+     * Populates [newPersonalBests] with e.g. ["Fastest 1K", "5K"] so the UI
+     * can show a celebration dialog.
+     */
+    private fun checkPersonalBests(runId: String) {
+        viewModelScope.launch {
+            try {
+                val response = apiService.getMyDataPersonalBests()
+                if (!response.isSuccessful) return@launch
+
+                val pbList = (response.body()?.data?.get("personalBests") as? List<*>)
+                    ?: return@launch
+
+                val achievedCategories = pbList.mapNotNull { item ->
+                    val pb = item as? Map<*, *> ?: return@mapNotNull null
+                    val category = pb["category"] as? String ?: return@mapNotNull null
+                    val pbRunId = pb["runId"] as? String ?: return@mapNotNull null
+                    if (pbRunId == runId) category else null
+                }
+
+                if (achievedCategories.isNotEmpty()) {
+                    _newPersonalBests.value = achievedCategories
+                    Log.d("RunSummaryVM", "Run $runId sets PBs: $achievedCategories")
+                }
+            } catch (e: Exception) {
+                Log.w("RunSummaryVM", "Could not check personal bests (non-fatal)", e)
+            }
+        }
+    }
+
+    fun clearNewPersonalBests() {
+        _newPersonalBests.value = emptyList()
     }
 
     private fun loadSavedAnalysis(runId: String) {
