@@ -1074,13 +1074,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
           timestamp: sp.timestamp ? new Date(sp.timestamp) : undefined,
         })),
       };
-      
+
+      // Explicitly extract target fields — these can be lost when Drizzle maps a
+      // Record<string,any> spread through the InsertRun Zod schema boundary.
+      // Pulling them out explicitly guarantees they reach the INSERT statement.
+      const targetDistance = typeof runData.targetDistance === 'number' ? runData.targetDistance : null;
+      const targetTime     = typeof runData.targetTime     === 'number' ? runData.targetTime     : null;
+      const wasTargetAchieved = typeof runData.wasTargetAchieved === 'boolean' ? runData.wasTargetAchieved : null;
+
+      console.log(`[POST /api/runs] Target fields received — targetDistance: ${targetDistance} km, targetTime: ${targetTime} ms, wasTargetAchieved: ${wasTargetAchieved}`);
+
       // Create run with TSS and calculated steps
       console.log(`[POST /api/runs] Creating run for user: ${userId}`);
       const run = await storage.createRun({
         ...processedRunData,
         userId,
         tss,
+        // Override with explicit values to guarantee these columns are written
+        targetDistance,
+        targetTime,
+        wasTargetAchieved,
       });
       console.log(`[POST /api/runs] Run created successfully with ID: ${run.id}`);
 

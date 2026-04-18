@@ -404,6 +404,8 @@ export class DatabaseStorage implements IStorage {
 
   async createRun(run: InsertRun): Promise<Run> {
     console.log('[createRun] Input fields:', Object.keys(run as any).join(', '));
+    const r = run as any;
+    console.log(`[createRun] Target values → targetDistance: ${r.targetDistance}, targetTime: ${r.targetTime}, wasTargetAchieved: ${r.wasTargetAchieved}`);
     const dateFieldsBeforeConversion = Object.entries(run as any)
       .filter(([_, v]) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v as string))
       .map(([k]) => k);
