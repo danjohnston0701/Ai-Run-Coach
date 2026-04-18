@@ -59,6 +59,7 @@ fun PreviousRunsScreen(
     val weatherImpact by viewModel.weatherImpactData.collectAsState()
     val selectedFilter by viewModel.selectedFilter.collectAsState()
     val isGarminConnected by viewModel.isGarminConnected.collectAsState()
+    val personalBestRunIds by viewModel.personalBestRunIds.collectAsState()
     
     var isWeatherImpactExpanded by remember { mutableStateOf(false) }
 
@@ -212,7 +213,11 @@ fun PreviousRunsScreen(
                 } else {
                     // Run List
                     items(runs) { run ->
-                        RunListItem(run = run, onClick = { onNavigateToRunSummary(run.id) })
+                        RunListItem(
+                            run = run,
+                            isPersonalBest = run.id in personalBestRunIds,
+                            onClick = { onNavigateToRunSummary(run.id) }
+                        )
                         Spacer(modifier = Modifier.height(Spacing.md))
                     }
                 }
@@ -957,7 +962,7 @@ fun WeatherImpactAnalysisCard(
 }
 
 @Composable
-fun RunListItem(run: RunSession, onClick: () -> Unit) {
+fun RunListItem(run: RunSession, isPersonalBest: Boolean = false, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1038,6 +1043,22 @@ fun RunListItem(run: RunSession, onClick: () -> Unit) {
                     }
                 }
                 
+                // Personal Best trophy badge
+                if (isPersonalBest) {
+                    Spacer(modifier = Modifier.width(Spacing.sm))
+                    Text(
+                        text = "🏆 PB",
+                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                        color = Color(0xFFFFB300),
+                        modifier = Modifier
+                            .background(
+                                color = Color(0xFFFFB300).copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(6.dp)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+
                 Icon(
                     painter = painterResource(id = R.drawable.icon_arrow_left),
                     contentDescription = "View Details",

@@ -86,6 +86,10 @@ class PreviousRunsViewModel @Inject constructor(
     private val _isGarminConnected = MutableStateFlow(false)
     val isGarminConnected: StateFlow<Boolean> = _isGarminConnected.asStateFlow()
 
+    // Set of run IDs that hold at least one personal best — drives 🏆 badge on run cards
+    private val _personalBestRunIds = MutableStateFlow<Set<String>>(emptySet())
+    val personalBestRunIds: StateFlow<Set<String>> = _personalBestRunIds.asStateFlow()
+
     fun fetchRuns() {
         viewModelScope.launch {
             _isLoading.value = true
@@ -102,6 +106,8 @@ class PreviousRunsViewModel @Inject constructor(
                         it.externalSource == "garmin" || it.hasGarminData == true
                     }
                     android.util.Log.d("PreviousRunsViewModel", "✅ Fetched ${allRuns.size} total runs, filtered to ${_runs.value.size}")
+                    // Fetch PBs in parallel — non-fatal if it fails
+                    fetchPersonalBestRunIds()
                 } else {
                     android.util.Log.e("PreviousRunsViewModel", "❌ Cannot fetch runs: User ID is null")
                     val hasToken = sessionManager.getAuthToken() != null
@@ -156,6 +162,30 @@ class PreviousRunsViewModel @Inject constructor(
         }
     }
     
+    /**
+     * Fetch personal bests from the API and extract the set of run IDs that
+     * hold at least one PB. Used to show the 🏆 badge on run list cards.
+     * Non-fatal — if this fails the run list still works, just without badges.
+     */
+    private fun fetchPersonalBestRunIds() {
+        viewModelScope.launch {
+            try {
+                val response = apiService.getMyDataPersonalBests()
+                if (!response.isSuccessful) return@launch
+                val pbList = (response.body()?.data?.get("personalBests") as? List<*>) ?: return@launch
+                // Collect the set of run IDs that hold at least one PB category
+                val ids = pbList.mapNotNull { item ->
+                    val pb = item as? Map<*, *> ?: return@mapNotNull null
+                    pb["runId"] as? String
+                }.toSet()
+                _personalBestRunIds.value = ids
+                android.util.Log.d("PreviousRunsViewModel", "✅ Loaded ${ids.size} PB run IDs")
+            } catch (e: Exception) {
+                android.util.Log.w("PreviousRunsViewModel", "Could not load PB run IDs (non-fatal): ${e.message}")
+            }
+        }
+    }
+
     fun setTimeFilter(filter: String) {
         _selectedFilter.value = filter
         viewModelScope.launch {
