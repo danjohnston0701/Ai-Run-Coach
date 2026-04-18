@@ -504,6 +504,11 @@ interface ApiService {
     
     @GET("/api/my-data/all-time-stats")
     suspend fun getMyDataAllTimeStats(): Response<MyDataResponse>
+
+    @GET("/api/my-data/coaching-summary")
+    suspend fun getMyDataCoachingSummary(
+        @Query("days") days: Int = 90
+    ): Response<MyDataResponse>
 }
 
 /**

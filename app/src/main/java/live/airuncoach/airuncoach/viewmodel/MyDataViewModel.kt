@@ -79,6 +79,44 @@ data class GroupedTrendDataPoint(
     val value: Double   // aggregated average value for that period
 )
 
+/**
+ * Intensity count breakdown for coaching sessions
+ */
+data class IntensityBreakdown(
+    val easy: Int     = 0,
+    val moderate: Int = 0,
+    val hard: Int     = 0,
+    val unset: Int    = 0,
+)
+
+/**
+ * The best coaching session within the selected period
+ */
+data class BestCoachingRun(
+    val runId: String,
+    val date: String,
+    val distanceKm: Double,
+    val pace: String,
+)
+
+/**
+ * Coaching-plan specific analytics shown in the Coaching Plan Summary section
+ */
+data class CoachingPlanSummary(
+    val hasCoachingSessions: Boolean,
+    val totalSessions: Int,
+    val sessionsThisPeriod: Int,
+    val totalDistanceKm: Double,
+    val avgPaceDisplay: String,
+    val targetAchievementRate: Int,         // 0-100%
+    val avgWeeklyCoachingSessions: Double,
+    val intensityBreakdown: IntensityBreakdown,
+    val workoutTypeBreakdown: Map<String, Int>,
+    val progressionTrend: String,           // "IMPROVING" | "DECLINING" | "STABLE"
+    val progressionNote: String,
+    val bestCoachingRun: BestCoachingRun?,
+)
+
 @HiltViewModel
 class MyDataViewModel @Inject constructor(
     private val apiService: ApiService
@@ -120,6 +158,10 @@ class MyDataViewModel @Inject constructor(
     // All-time stats
     private val _allTimeStats = MutableStateFlow<Map<String, Any>>(emptyMap())
     val allTimeStats: StateFlow<Map<String, Any>> = _allTimeStats.asStateFlow()
+
+    // Coaching plan summary
+    private val _coachingSummary = MutableStateFlow<CoachingPlanSummary?>(null)
+    val coachingSummary: StateFlow<CoachingPlanSummary?> = _coachingSummary.asStateFlow()
     
     // Cache with TTL (5 minutes)
     private var lastLoadTime = 0L
@@ -132,9 +174,10 @@ class MyDataViewModel @Inject constructor(
     
     fun selectTimePeriod(period: TimePeriod) {
         _selectedTimePeriod.value = period
-        // Only reload trends and stats, not personal bests (those are all-time)
+        // Only reload period-sensitive data, not personal bests (those are all-time)
         loadPeriodStatistics()
         loadDetailedTrends()
+        loadCoachingSummary()
     }
     
     fun refreshData() {
@@ -160,6 +203,7 @@ class MyDataViewModel @Inject constructor(
                 val statsTask = loadPeriodStatistics()
                 val trendsTask = loadDetailedTrends()
                 val allTimeTask = loadAllTimeStats()
+                val coachingTask = loadCoachingSummary()
                 
                 // Wait for all to complete
                 try {
@@ -184,6 +228,12 @@ class MyDataViewModel @Inject constructor(
                     allTimeTask.join()
                 } catch (e: Exception) {
                     Log.e(tag, "Error joining allTimeTask", e)
+                }
+
+                try {
+                    coachingTask.join()
+                } catch (e: Exception) {
+                    Log.e(tag, "Error joining coachingTask", e)
                 }
                 
                 lastLoadTime = System.currentTimeMillis()
@@ -312,6 +362,68 @@ class MyDataViewModel @Inject constructor(
         } catch (e: Exception) {
             Log.e(tag, "Error loading all-time stats", e)
             // Keep existing data on error
+        }
+    }
+
+    fun loadCoachingSummary() = viewModelScope.launch {
+        try {
+            val days = _selectedTimePeriod.value.days
+            val response = apiService.getMyDataCoachingSummary(days)
+
+            if (response.isSuccessful) {
+                val d = response.body()?.data ?: emptyMap()
+
+                @Suppress("UNCHECKED_CAST")
+                fun asInt(key: String) = (d[key] as? Number)?.toInt() ?: 0
+                fun asDouble(key: String) = (d[key] as? Number)?.toDouble() ?: 0.0
+                fun asString(key: String) = d[key] as? String ?: ""
+                fun asBool(key: String)   = d[key] as? Boolean ?: false
+
+                val intensityMap = d["intensityBreakdown"] as? Map<*, *>
+                val intensity = IntensityBreakdown(
+                    easy     = (intensityMap?.get("easy")     as? Number)?.toInt() ?: 0,
+                    moderate = (intensityMap?.get("moderate") as? Number)?.toInt() ?: 0,
+                    hard     = (intensityMap?.get("hard")     as? Number)?.toInt() ?: 0,
+                    unset    = (intensityMap?.get("unset")    as? Number)?.toInt() ?: 0,
+                )
+
+                val typeMap = d["workoutTypeBreakdown"] as? Map<*, *>
+                val workoutTypes = typeMap?.entries?.mapNotNull { (k, v) ->
+                    val key = k as? String ?: return@mapNotNull null
+                    val count = (v as? Number)?.toInt() ?: 0
+                    key to count
+                }?.toMap() ?: emptyMap()
+
+                val bestRunMap = d["bestCoachingRun"] as? Map<*, *>
+                val bestRun = bestRunMap?.let {
+                    BestCoachingRun(
+                        runId      = it["runId"]      as? String ?: "",
+                        date       = it["date"]       as? String ?: "",
+                        distanceKm = (it["distanceKm"] as? Number)?.toDouble() ?: 0.0,
+                        pace       = it["pace"]       as? String ?: "--",
+                    )
+                }
+
+                _coachingSummary.value = CoachingPlanSummary(
+                    hasCoachingSessions       = asBool("hasCoachingSessions"),
+                    totalSessions             = asInt("totalSessions"),
+                    sessionsThisPeriod        = asInt("sessionsThisPeriod"),
+                    totalDistanceKm           = asDouble("totalDistanceKm"),
+                    avgPaceDisplay            = asString("avgPaceDisplay"),
+                    targetAchievementRate     = asInt("targetAchievementRate"),
+                    avgWeeklyCoachingSessions = asDouble("avgWeeklyCoachingSessions"),
+                    intensityBreakdown        = intensity,
+                    workoutTypeBreakdown      = workoutTypes,
+                    progressionTrend          = asString("progressionTrend"),
+                    progressionNote           = asString("progressionNote"),
+                    bestCoachingRun           = bestRun,
+                )
+                Log.d(tag, "Loaded coaching summary: ${_coachingSummary.value?.sessionsThisPeriod} sessions")
+            } else {
+                Log.w(tag, "Coaching summary response not successful: ${response.code()}")
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "Error loading coaching summary", e)
         }
     }
 }

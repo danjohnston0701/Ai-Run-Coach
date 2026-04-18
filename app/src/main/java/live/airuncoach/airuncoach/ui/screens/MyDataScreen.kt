@@ -26,6 +26,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
+import live.airuncoach.airuncoach.viewmodel.CoachingPlanSummary
 import live.airuncoach.airuncoach.viewmodel.MyDataViewModel
 import live.airuncoach.airuncoach.viewmodel.TimePeriod
 import live.airuncoach.airuncoach.viewmodel.TrendDataPoint
@@ -92,6 +93,7 @@ fun MyDataScreen(
     val personalBests by viewModel.personalBests.collectAsState()
     val stats by viewModel.currentPeriodStats.collectAsState()
     val allTimeStats by viewModel.allTimeStats.collectAsState()
+    val coachingSummary by viewModel.coachingSummary.collectAsState()
     
     val pullRefreshState = rememberPullRefreshState(
         refreshing = isLoading,
@@ -188,6 +190,16 @@ fun MyDataScreen(
                                 SectionHeader(title = "📈 Statistics (${selectedPeriod.label})")
                                 Spacer(modifier = Modifier.height(Spacing.sm))
                                 PeriodStatisticsSection(stats = stats!!)
+                                Spacer(modifier = Modifier.height(Spacing.lg))
+                            }
+                        }
+
+                        // Section 6: Coaching Plan Summary
+                        if (coachingSummary != null) {
+                            item {
+                                SectionHeader(title = "🎯 Coaching Plan Summary (${selectedPeriod.label})")
+                                Spacer(modifier = Modifier.height(Spacing.sm))
+                                CoachingPlanSummarySection(summary = coachingSummary!!)
                                 Spacer(modifier = Modifier.height(Spacing.xl))
                             }
                         }
@@ -829,6 +841,311 @@ private fun AchievementItem(
             style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
             color = Colors.primary,
             fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+// ─────────────────────────── COACHING PLAN SUMMARY ───────────────────────────
+
+/**
+ * Coaching Plan Summary section — only shown when the user has coaching plan sessions.
+ * Shows target achievement rate, intensity mix, workout type breakdown,
+ * progression trend, and the best coached run.
+ */
+@Composable
+private fun CoachingPlanSummarySection(summary: CoachingPlanSummary) {
+    if (!summary.hasCoachingSessions) {
+        EmptyStateCard(message = "No coaching plan sessions in this period.\nStart a training plan to see insights here!")
+        return
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+    ) {
+        // ── Top stats row ────────────────────────────────────────────────────
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            StatCard(
+                label = "Sessions",
+                value = summary.sessionsThisPeriod.toString(),
+                modifier = Modifier.weight(1f)
+            )
+            StatCard(
+                label = "Avg/Week",
+                value = String.format(Locale.getDefault(), "%.1f", summary.avgWeeklyCoachingSessions),
+                modifier = Modifier.weight(1f)
+            )
+            StatCard(
+                label = "Target Hit",
+                value = "${summary.targetAchievementRate}%",
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        // ── Pace + Distance row ──────────────────────────────────────────────
+        if (summary.avgPaceDisplay.isNotBlank() && summary.avgPaceDisplay != "--") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                StatCard(
+                    label = "Avg Pace",
+                    value = summary.avgPaceDisplay,
+                    modifier = Modifier.weight(1f)
+                )
+                StatCard(
+                    label = "Distance",
+                    value = String.format(Locale.getDefault(), "%.1f km", summary.totalDistanceKm),
+                    modifier = Modifier.weight(1f)
+                )
+                StatCard(
+                    label = "All-Time",
+                    value = "${summary.totalSessions} sessions",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        // ── Progression trend card ────────────────────────────────────────────
+        val trendColor = when (summary.progressionTrend) {
+            "IMPROVING" -> Color(0xFF4CAF50)
+            "DECLINING" -> Color(0xFFF44336)
+            else        -> Colors.textSecondary
+        }
+        val trendIcon = when (summary.progressionTrend) {
+            "IMPROVING" -> "↑"
+            "DECLINING" -> "↓"
+            else        -> "→"
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(Colors.backgroundSecondary)
+                .padding(Spacing.md)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                Text(
+                    text = trendIcon,
+                    fontSize = 22.sp,
+                    color = trendColor
+                )
+                Column {
+                    Text(
+                        text = "Progression",
+                        style = AppTextStyles.caption,
+                        color = Colors.textMuted,
+                        fontSize = 11.sp
+                    )
+                    Text(
+                        text = summary.progressionNote,
+                        style = AppTextStyles.body,
+                        color = Colors.textPrimary,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+        }
+
+        // ── Intensity breakdown ───────────────────────────────────────────────
+        val intensityTotal = (summary.intensityBreakdown.easy +
+                summary.intensityBreakdown.moderate +
+                summary.intensityBreakdown.hard +
+                summary.intensityBreakdown.unset).coerceAtLeast(1)
+
+        if (intensityTotal > 0 && summary.intensityBreakdown.unset < intensityTotal) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Colors.backgroundSecondary)
+                    .padding(Spacing.md),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "Intensity Mix",
+                    style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
+                    color = Colors.textMuted,
+                    fontSize = 11.sp
+                )
+                CoachingIntensityBar(
+                    easy     = summary.intensityBreakdown.easy,
+                    moderate = summary.intensityBreakdown.moderate,
+                    hard     = summary.intensityBreakdown.hard,
+                    total    = intensityTotal
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    CoachingIntensityLegend(color = Color(0xFF4CAF50), label = "Easy",     count = summary.intensityBreakdown.easy)
+                    CoachingIntensityLegend(color = Color(0xFFFF9800), label = "Moderate", count = summary.intensityBreakdown.moderate)
+                    CoachingIntensityLegend(color = Color(0xFFF44336), label = "Hard",     count = summary.intensityBreakdown.hard)
+                }
+            }
+        }
+
+        // ── Workout type breakdown (if populated) ────────────────────────────
+        val hasTypes = summary.workoutTypeBreakdown.isNotEmpty() &&
+                summary.workoutTypeBreakdown.keys.any { it != "other" && it.isNotBlank() }
+
+        if (hasTypes) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Colors.backgroundSecondary)
+                    .padding(Spacing.md),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "Session Types",
+                    style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
+                    color = Colors.textMuted,
+                    fontSize = 11.sp
+                )
+                val typeOrder = listOf("easy_run", "long_run", "tempo", "intervals",
+                    "hill_repeats", "recovery", "other")
+                val typeLabels = mapOf(
+                    "easy_run"     to "Easy Run",
+                    "long_run"     to "Long Run",
+                    "tempo"        to "Tempo",
+                    "intervals"    to "Intervals",
+                    "hill_repeats" to "Hill Repeats",
+                    "recovery"     to "Recovery",
+                    "other"        to "Other"
+                )
+                typeOrder.forEach { key ->
+                    val cnt = summary.workoutTypeBreakdown[key] ?: 0
+                    if (cnt > 0) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = typeLabels[key] ?: key.replace('_', ' ').replaceFirstChar { it.uppercase() },
+                                style = AppTextStyles.caption,
+                                color = Colors.textSecondary,
+                                fontSize = 12.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = "$cnt",
+                                style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                                color = Colors.primary,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Best coaching run ─────────────────────────────────────────────────
+        summary.bestCoachingRun?.let { best ->
+            if (best.runId.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Colors.backgroundSecondary)
+                        .padding(Spacing.md)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "⭐ Best Coached Run",
+                                style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
+                                color = Colors.textMuted,
+                                fontSize = 11.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = String.format(
+                                    Locale.getDefault(),
+                                    "%.2f km  ·  %s/km",
+                                    best.distanceKm,
+                                    best.pace
+                                ),
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                                color = Colors.textPrimary,
+                                fontSize = 14.sp
+                            )
+                        }
+                        if (best.date.isNotBlank()) {
+                            Text(
+                                text = formatDateToDDMMYYYY(best.date),
+                                style = AppTextStyles.caption,
+                                color = Colors.textMuted,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Segmented intensity bar (green/orange/red) */
+@Composable
+private fun CoachingIntensityBar(easy: Int, moderate: Int, hard: Int, total: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(10.dp)
+            .clip(RoundedCornerShape(5.dp))
+    ) {
+        if (easy > 0) Box(
+            modifier = Modifier
+                .weight(easy.toFloat() / total)
+                .fillMaxHeight()
+                .background(Color(0xFF4CAF50))
+        )
+        if (moderate > 0) Box(
+            modifier = Modifier
+                .weight(moderate.toFloat() / total)
+                .fillMaxHeight()
+                .background(Color(0xFFFF9800))
+        )
+        if (hard > 0) Box(
+            modifier = Modifier
+                .weight(hard.toFloat() / total)
+                .fillMaxHeight()
+                .background(Color(0xFFF44336))
+        )
+    }
+}
+
+@Composable
+private fun CoachingIntensityLegend(color: Color, label: String, count: Int) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(color)
+        )
+        Text(
+            text = "$label ($count)",
+            style = AppTextStyles.caption,
+            color = Colors.textMuted,
+            fontSize = 10.sp
         )
     }
 }

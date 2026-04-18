@@ -13,7 +13,7 @@
 
 import { db } from './db';
 import { runs, userStats, goals } from '@shared/schema';
-import { eq, gte, and, desc, asc, count, sum, avg, max, min, sql, isNotNull } from 'drizzle-orm';
+import { eq, gte, and, desc, asc, count, sum, avg, max, min, sql, isNotNull, isNull, or, lt } from 'drizzle-orm';
 import { type InferSelectModel } from 'drizzle-orm';
 
 // ─── Personal Bests ──────────────────────────────────────────────────────────
@@ -282,6 +282,8 @@ export async function getDetailedTrends(userId: string, days: number) {
 
   try {
     // ⚡ Only fetch the 5 columns needed for charts — not SELECT *
+    // Coaching plan sessions are EXCLUDED (linked_plan_id/linked_workout_id IS NULL)
+    // so trends only reflect the runner's natural free-run performance.
     const userRuns = await db
       .select({
         completedAt:   runs.completedAt,
@@ -291,7 +293,12 @@ export async function getDetailedTrends(userId: string, days: number) {
         cadence:       runs.cadence,
       })
       .from(runs)
-      .where(and(eq(runs.userId, userId), gte(runs.completedAt, startDate)))
+      .where(and(
+        eq(runs.userId, userId),
+        gte(runs.completedAt, startDate),
+        isNull(runs.linkedPlanId),
+        isNull(runs.linkedWorkoutId),
+      ))
       .orderBy(asc(runs.completedAt));
 
     if (userRuns.length === 0) {
@@ -321,6 +328,208 @@ export async function getDetailedTrends(userId: string, days: number) {
   } catch (error) {
     console.error('Error getting detailed trends:', error);
     return { paceTrend: [], hrTrend: [], elevationTrend: [], cadenceTrend: [] };
+  }
+}
+
+// ─── Coaching Plan Summary ───────────────────────────────────────────────────
+
+/**
+ * Get analytics specifically for coaching-plan sessions (runs with linked_plan_id
+ * or linked_workout_id set).  Provides insight into plan adherence, intensity
+ * distribution, workout type mix, and performance progression within coached sessions.
+ */
+export async function getCoachingPlanSummary(userId: string, days: number) {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+
+  // Coaching plan sessions = runs that are linked to a plan OR a specific workout
+  const coachingFilter = and(
+    eq(runs.userId, userId),
+    or(isNotNull(runs.linkedPlanId), isNotNull(runs.linkedWorkoutId)),
+  );
+
+  const periodFilter = and(
+    coachingFilter,
+    gte(runs.completedAt, startDate),
+  );
+
+  try {
+    // ── 1. Aggregate counts for the selected period ──────────────────────────
+    const [periodAgg] = await db.select({
+      sessionCount:      count(),
+      targetHitCount:    sql<number>`COUNT(*) FILTER (WHERE ${runs.wasTargetAchieved} = true)`,
+      totalDistanceM:    sum(runs.distance),
+      totalDurationSec:  sum(runs.duration),
+      avgPaceNumeric:    sql<number>`AVG(CASE
+        WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%'
+        THEN NULL
+        ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0
+        END)`,
+    }).from(runs).where(periodFilter!);
+
+    const sessionCount    = Number(periodAgg?.sessionCount  ?? 0);
+    const targetHitCount  = Number(periodAgg?.targetHitCount ?? 0);
+    const totalDistanceKm = Math.round(((Number(periodAgg?.totalDistanceM ?? 0)) / 1000) * 10) / 10;
+    const avgPaceNum      = Number(periodAgg?.avgPaceNumeric ?? 0);
+
+    const targetAchievementRate = sessionCount > 0
+      ? Math.round((targetHitCount / sessionCount) * 100)
+      : 0;
+
+    // ── 2. All-time total coaching sessions ──────────────────────────────────
+    const [allTimeAgg] = await db.select({ total: count() }).from(runs).where(coachingFilter!);
+    const totalSessions = Number(allTimeAgg?.total ?? 0);
+
+    if (sessionCount === 0) {
+      return {
+        hasCoachingSessions: false,
+        totalSessions,
+        sessionsThisPeriod: 0,
+        totalDistanceKm: 0,
+        targetAchievementRate: 0,
+        avgWeeklyCoachingSessions: 0,
+        intensityBreakdown: { easy: 0, moderate: 0, hard: 0, unset: 0 },
+        workoutTypeBreakdown: {},
+        progressionTrend: 'STABLE',
+        progressionNote: 'No coaching sessions in this period.',
+        bestCoachingRun: null,
+      };
+    }
+
+    // ── 3. Intensity breakdown ───────────────────────────────────────────────
+    const intensityRows = await db.select({
+      intensity: runs.workoutIntensity,
+      cnt:       count(),
+    }).from(runs).where(periodFilter!).groupBy(runs.workoutIntensity);
+
+    const intensityBreakdown = { easy: 0, moderate: 0, hard: 0, unset: 0 };
+    for (const row of intensityRows) {
+      const n = Number(row.cnt ?? 0);
+      switch ((row.intensity ?? '').toLowerCase()) {
+        case 'z1': case 'z2': case 'easy': case 'recovery':
+          intensityBreakdown.easy += n; break;
+        case 'z3': case 'moderate': case 'tempo':
+          intensityBreakdown.moderate += n; break;
+        case 'z4': case 'z5': case 'hard': case 'max': case 'intervals':
+          intensityBreakdown.hard += n; break;
+        default:
+          intensityBreakdown.unset += n; break;
+      }
+    }
+
+    // ── 4. Workout type breakdown ────────────────────────────────────────────
+    const typeRows = await db.select({
+      workoutType: runs.workoutType,
+      cnt:         count(),
+    }).from(runs).where(periodFilter!).groupBy(runs.workoutType);
+
+    const workoutTypeBreakdown: Record<string, number> = {};
+    for (const row of typeRows) {
+      const label = row.workoutType ?? 'other';
+      workoutTypeBreakdown[label] = Number(row.cnt ?? 0);
+    }
+
+    // ── 5. Progression trend (compare first half vs second half of period) ───
+    const allSessionsForPeriod = await db.select({
+      completedAt: runs.completedAt,
+      avgPace:     runs.avgPace,
+    }).from(runs).where(periodFilter!).orderBy(asc(runs.completedAt));
+
+    let progressionTrend = 'STABLE';
+    let progressionNote  = `${sessionCount} coaching session${sessionCount !== 1 ? 's' : ''} this period.`;
+
+    if (allSessionsForPeriod.length >= 4) {
+      const parsePace = (s: string | null) => {
+        if (!s || !s.includes(':')) return null;
+        const [m, sec] = s.split(':').map(Number);
+        return isNaN(m) || isNaN(sec) ? null : m + sec / 60;
+      };
+
+      const validSessions = allSessionsForPeriod
+        .map(r => parsePace(r.avgPace))
+        .filter((v): v is number => v !== null && v > 0);
+
+      if (validSessions.length >= 4) {
+        const half    = Math.floor(validSessions.length / 2);
+        const firstH  = validSessions.slice(0, half);
+        const secondH = validSessions.slice(-half);
+        const avgFirst  = firstH.reduce((a, b) => a + b, 0) / firstH.length;
+        const avgSecond = secondH.reduce((a, b) => a + b, 0) / secondH.length;
+        const diffPct   = ((avgFirst - avgSecond) / avgFirst) * 100; // positive = got faster
+
+        if (diffPct > 3) {
+          progressionTrend = 'IMPROVING';
+          const secFaster = Math.round((avgFirst - avgSecond) * 60);
+          progressionNote  = `Pace improved ~${secFaster}s/km over coached sessions this period. 🔥`;
+        } else if (diffPct < -3) {
+          progressionTrend = 'DECLINING';
+          const secSlower = Math.round((avgSecond - avgFirst) * 60);
+          progressionNote  = `Pace slowed ~${secSlower}s/km in recent coached sessions — consider easier recovery runs.`;
+        } else {
+          progressionTrend = 'STABLE';
+          progressionNote  = `Consistent pace across coached sessions this period. Keep it up!`;
+        }
+      }
+    }
+
+    // ── 6. Best coaching run in period ──────────────────────────────────────
+    const bestRuns = await db.select({
+      id:          runs.id,
+      completedAt: runs.completedAt,
+      distance:    runs.distance,
+      avgPace:     runs.avgPace,
+    })
+      .from(runs)
+      .where(and(periodFilter!, isNotNull(runs.avgPace))!)
+      .orderBy(
+        // Order by pace numerically (lower = faster) — avoid nulls
+        sql`CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN 9999 ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END ASC`,
+      )
+      .limit(1);
+
+    const bestRun = bestRuns[0] ?? null;
+
+    // ── 7. Weekly average ────────────────────────────────────────────────────
+    const weeksInPeriod = Math.max(1, days / 7);
+    const avgWeeklyCoachingSessions = Math.round((sessionCount / weeksInPeriod) * 10) / 10;
+
+    // ── 8. Avg pace string for display ──────────────────────────────────────
+    const avgPaceDisplay = avgPaceNum > 0 ? formatPace(avgPaceNum) : '--';
+
+    return {
+      hasCoachingSessions: true,
+      totalSessions,
+      sessionsThisPeriod: sessionCount,
+      totalDistanceKm,
+      avgPaceDisplay,
+      targetAchievementRate,
+      avgWeeklyCoachingSessions,
+      intensityBreakdown,
+      workoutTypeBreakdown,
+      progressionTrend,
+      progressionNote,
+      bestCoachingRun: bestRun ? {
+        runId:      bestRun.id,
+        date:       bestRun.completedAt?.toISOString().split('T')[0] ?? '',
+        distanceKm: Math.round(((bestRun.distance ?? 0) / 1000) * 100) / 100,
+        pace:       bestRun.avgPace ?? '--',
+      } : null,
+    };
+  } catch (error) {
+    console.error('[CoachingSummary] Error:', error);
+    return {
+      hasCoachingSessions: false,
+      totalSessions: 0,
+      sessionsThisPeriod: 0,
+      totalDistanceKm: 0,
+      targetAchievementRate: 0,
+      avgWeeklyCoachingSessions: 0,
+      intensityBreakdown: { easy: 0, moderate: 0, hard: 0, unset: 0 },
+      workoutTypeBreakdown: {},
+      progressionTrend: 'STABLE',
+      progressionNote: 'Unable to load coaching summary.',
+      bestCoachingRun: null,
+    };
   }
 }
 
@@ -450,4 +659,4 @@ function formatPace(minPerKm: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}/km`;
 }
 
-export default { getPersonalBests, getPeriodStatistics, getDetailedTrends, getAllTimeStats };
+export default { getPersonalBests, getPeriodStatistics, getDetailedTrends, getAllTimeStats, getCoachingPlanSummary };

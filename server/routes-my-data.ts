@@ -160,6 +160,29 @@ router.get('/all-time-stats', authMiddleware, async (req: AuthenticatedRequest, 
 });
 
 /**
+ * GET /api/my-data/coaching-summary
+ * Coaching-plan-specific analytics:
+ *  - session count, target achievement rate, intensity/type breakdown
+ *  - progression trend (improving/declining/stable)
+ *  - best coaching run in period
+ * Query: days (optional, default 90) — number of days to look back
+ */
+router.get('/coaching-summary', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const days = parseInt(req.query.days as string) || 90;
+    const summary = await myDataService.getCoachingPlanSummary(userId, days);
+
+    res.json({ success: true, data: summary });
+  } catch (error: any) {
+    console.error('[CoachingSummary] Error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch coaching summary', message: error.message });
+  }
+});
+
+/**
  * POST /api/my-data/reset-cache
  * Force a full recompute of the user's stats cache.
  * Useful when cached values are stale (e.g. after a data migration or bug fix).
