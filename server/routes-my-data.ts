@@ -11,6 +11,9 @@ import { Router, Request, Response } from 'express';
 import { AuthenticatedRequest, authMiddleware } from './auth';
 import myDataService from './my-data-service';
 import { recomputeForUser } from './user-stats-cache';
+import { db } from './db';
+import { users } from '@shared/schema';
+import { eq } from 'drizzle-orm';
 
 const router = Router();
 
@@ -160,6 +163,10 @@ router.get('/all-time-stats', authMiddleware, async (req: AuthenticatedRequest, 
  * POST /api/my-data/reset-cache
  * Force a full recompute of the user's stats cache.
  * Useful when cached values are stale (e.g. after a data migration or bug fix).
+ *
+ * POST /api/my-data/admin/recompute-all
+ * Admin-only: recompute stats for EVERY user.
+ * Call this after deploying user-stats-cache.ts fixes to correct historical data.
  */
 router.post('/reset-cache', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -182,6 +189,62 @@ router.post('/reset-cache', authMiddleware, async (req: AuthenticatedRequest, re
       error: 'Failed to reset stats cache',
       message: error.message,
     });
+  }
+});
+
+/**
+ * POST /api/my-data/admin/recompute-all
+ * Admin-only: recomputes user_stats for every user in the system.
+ * Safe to call multiple times — fully idempotent.
+ *
+ * Use this after:
+ *   - Deploying unit-fix changes to user-stats-cache.ts
+ *   - Discovering corrupted totals (e.g. wrong distance/PB units)
+ *   - Adding new PB distance categories
+ */
+router.post('/admin/recompute-all', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    // Fetch requesting user and check admin flag
+    const [requestingUser] = await db.select({ isAdmin: (users as any).isAdmin }).from(users).where(eq((users as any).id, userId));
+    if (!requestingUser?.isAdmin) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    // Get all distinct user IDs that have runs
+    const allUsers = await db.selectDistinct({ id: (users as any).id }).from(users);
+    const userIds = allUsers.map(u => u.id as string).filter(Boolean);
+
+    console.log(`[MyData][Admin] Recomputing stats for ${userIds.length} users...`);
+
+    let successCount = 0;
+    let errorCount   = 0;
+    const errors: string[] = [];
+
+    for (const uid of userIds) {
+      try {
+        await recomputeForUser(uid);
+        successCount++;
+      } catch (err: any) {
+        errorCount++;
+        errors.push(`${uid}: ${err.message}`);
+        console.error(`[MyData][Admin] Failed for user ${uid}:`, err.message);
+      }
+    }
+
+    console.log(`[MyData][Admin] Recompute complete — ${successCount} ok, ${errorCount} errors`);
+    res.json({
+      success: true,
+      total:   userIds.length,
+      ok:      successCount,
+      errors:  errorCount,
+      errorDetails: errors.length > 0 ? errors : undefined,
+    });
+  } catch (error: any) {
+    console.error('[MyData][Admin] Recompute-all failed:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

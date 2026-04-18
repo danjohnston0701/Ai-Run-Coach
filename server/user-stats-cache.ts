@@ -9,28 +9,36 @@
  *      With the cache, it's a single PK lookup — O(1) forever.
  *
  * UPDATE TRIGGERS:
- *   - onRunSaved(userId, run)    → called after createRun succeeds
- *   - onRunDeleted(userId, runId)→ called after deleteRun succeeds (triggers full recompute)
+ *   - onRunSaved(userId, run)    → always triggers full recompute for correctness
+ *   - onRunDeleted(userId)       → full recompute
  *   - recomputeForUser(userId)   → full recompute from scratch (backfill / recovery)
  *
- * CONSISTENCY:
- *   - For cumulative totals (distance, duration, calories): incremented atomically
- *   - For personal bests: only updated when the new run beats the current record
- *   - On delete: full recompute (deletions are rare, correctness trumps speed)
+ * UNIT CONVENTIONS (sourced from actual DB data):
+ *   - runs.distance     → meters (e.g. 21248.13 for a 21.248km half marathon)
+ *   - runs.duration     → seconds (e.g. 6276 = 104.6 minutes — NOT milliseconds)
+ *   - km_splits[].time  → milliseconds per km split
+ *   - pb_*_duration_ms  → milliseconds (we convert runs.duration × 1000 when storing)
+ *   - total_distance_km → km (runs.distance / 1000)
+ *   - total_duration_s  → seconds (runs.duration summed directly)
+ *
+ * NOTE: Despite the "_ms" column suffix, historical rows may contain seconds if
+ * written by old code. The recompute-all admin endpoint corrects all rows.
  */
 
 import { db } from './db';
 import { runs, userStats, goals } from '@shared/schema';
 import { eq, and, gte, lte, isNotNull, count, sum, avg, max, min, sql } from 'drizzle-orm';
 
-// Distance band definitions for PB categories (in km)
+// Distance band definitions for PB categories (in km).
+// Half marathon band is deliberately wide (21.0–21.6) because GPS tracks 21.097km
+// but runners often end up anywhere in 21.0–21.5 depending on GPS drift and route.
 const PB_DISTANCES = [
-  { key: '1k',      label: '1K',           minKm: 0.95,  maxKm: 1.1   },
-  { key: 'mile',    label: 'Mile',         minKm: 1.59,  maxKm: 1.64  },
-  { key: '5k',      label: '5K',           minKm: 4.95,  maxKm: 5.1   },
-  { key: '10k',     label: '10K',          minKm: 9.95,  maxKm: 10.1  },
-  { key: 'half',    label: 'Half Marathon', minKm: 21.05, maxKm: 21.2  },
-  { key: 'marathon',label: 'Marathon',      minKm: 42.15, maxKm: 42.3  },
+  { key: '1k',      label: '1K',            minKm: 0.95,  maxKm: 1.1   },
+  { key: 'mile',    label: 'Mile',          minKm: 1.59,  maxKm: 1.65  },
+  { key: '5k',      label: '5K',            minKm: 4.9,   maxKm: 5.2   },
+  { key: '10k',     label: '10K',           minKm: 9.9,   maxKm: 10.2  },
+  { key: 'half',    label: 'Half Marathon', minKm: 21.0,  maxKm: 21.6  },  // ← was 21.05–21.2, too narrow
+  { key: 'marathon',label: 'Marathon',      minKm: 42.0,  maxKm: 42.5  },  // ← also widened
 ] as const;
 
 type PbKey = typeof PB_DISTANCES[number]['key'];
@@ -49,7 +57,8 @@ const PB_COLUMNS: Record<PbKey, { durationCol: string; runIdCol: string; dateCol
 
 /**
  * Call this immediately after a run is saved.
- * Increments cumulative totals and updates PBs if this run sets a record.
+ * Always does a full recompute for correctness — the incremental path had
+ * too many unit-conversion edge cases that caused data drift over time.
  */
 export async function onRunSaved(userId: string, run: {
   id: string;
@@ -63,44 +72,10 @@ export async function onRunSaved(userId: string, run: {
   kmSplits?: Array<{ km?: number; pace?: string; [key: string]: any }> | null;
 }): Promise<void> {
   try {
-    const [existing] = await db.select().from(userStats).where(eq(userStats.userId, userId));
-
-    if (!existing) {
-      // First run for this user — build the cache from scratch
-      await recomputeForUser(userId);
-      return;
-    }
-
-    const runPace = parseFloat(run.avgPace || '0') || null;
-    const newCount = existing.totalRuns + 1;
-
-    // Incremental average: newAvg = (oldAvg * oldCount + newValue) / newCount
-    const newAvgPace = (runPace && runPace > 0)
-      ? (((existing.avgPaceMinPerKm ?? 0) * existing.totalRuns) + runPace) / newCount
-      : existing.avgPaceMinPerKm;
-
-    // Convert run.distance from meters to km
-    const distanceKm = run.distance / 1000;
-
-    await db.update(userStats).set({
-      totalRuns:            newCount,
-      totalDistanceKm:      (existing.totalDistanceKm ?? 0) + distanceKm,
-      totalDurationSeconds: (existing.totalDurationSeconds ?? 0) + run.duration,
-      totalElevationGainM:  (existing.totalElevationGainM ?? 0) + (run.elevationGain ?? 0),
-      totalCalories:        (existing.totalCalories ?? 0) + (run.calories ?? 0),
-      totalActiveCalories:  (existing.totalActiveCalories ?? 0) + (run.activeCalories ?? 0),
-      avgPaceMinPerKm:      newAvgPace,
-      fastestPaceMinPerKm:  (runPace && runPace > 0)
-        ? Math.min(existing.fastestPaceMinPerKm ?? 999, runPace)
-        : existing.fastestPaceMinPerKm,
-      longestRunKm: Math.max(existing.longestRunKm ?? 0, distanceKm),
-      updatedAt: new Date(),
-    }).where(eq(userStats.userId, userId));
-
-    // Check if this run sets a PB in any distance category
-    await maybeUpdatePersonalBests(userId, run);
-
-    console.log(`[UserStatsCache] Updated stats for user ${userId} after run ${run.id}`);
+    // Always full-recompute — this is O(runs_count) SQL but runs < 1000 for any user
+    // and avoids the incremental drift bugs that caused Wayne's 19321km total_distance_km.
+    await recomputeForUser(userId);
+    console.log(`[UserStatsCache] Recomputed stats for user ${userId} after run ${run.id}`);
   } catch (error) {
     // Non-fatal: My Data screen has a live fallback, cache miss is graceful
     console.error(`[UserStatsCache] Failed to update stats for user ${userId}:`, error);
@@ -109,7 +84,7 @@ export async function onRunSaved(userId: string, run: {
 
 /**
  * Call this after a run is deleted.
- * Deletions are rare so we do a full recompute for correctness.
+ * Full recompute for correctness.
  */
 export async function onRunDeleted(userId: string): Promise<void> {
   try {
@@ -122,18 +97,23 @@ export async function onRunDeleted(userId: string): Promise<void> {
 
 /**
  * Full recompute from scratch using SQL aggregation.
- * Used for: first run, run deletions, and backfilling existing users.
+ * Used for: all run saves, deletions, and admin backfill.
+ *
+ * UNIT NOTES:
+ *   - runs.distance is in METERS → divide by 1000 for km columns
+ *   - runs.duration is in SECONDS → store directly in total_duration_seconds
+ *   - pb_*_duration_ms columns store MILLISECONDS → runs.duration × 1000
  */
 export async function recomputeForUser(userId: string): Promise<void> {
   // ── Aggregate all-time totals in a single SQL query ──────────────────────
   const [agg] = await db.select({
     totalRuns:           count(),
-    totalDistanceKm:     sum(runs.distance),
-    totalDurationSec:    sum(runs.duration),
+    totalDistanceM:      sum(runs.distance),      // meters — divide by 1000 for km
+    totalDurationSec:    sum(runs.duration),      // seconds — store as-is
     totalElevationGain:  sum(runs.elevationGain),
     totalCalories:       sum(runs.calories),
     totalActiveCalories: sum(runs.activeCalories),
-    longestRunKm:        max(runs.distance),
+    longestRunM:         max(runs.distance),      // meters — divide by 1000 for km
     // avgPace is stored as "M:SS" format (e.g. "5:22") — parse via SPLIT_PART
     fastestPace: sql<number>`MIN(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
     avgPace:     sql<number>`AVG(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
@@ -142,8 +122,9 @@ export async function recomputeForUser(userId: string): Promise<void> {
   // ── Find PBs for each distance category ─────────────────────────────────
   const pbUpdates: Record<string, number | string | Date | null> = {};
 
-  // 1K and Mile PBs: fastest SPLIT from any run (not runs of exactly that distance)
+  // 1K and Mile PBs: fastest SPLIT from any run (not runs of exactly that distance).
   // Uses PostgreSQL jsonb_array_elements to scan km_splits across all runs.
+  // Stores result in MILLISECONDS.
   for (const splitDist of [
     { key: '1k'   as PbKey, segmentKm: 1.0   },
     { key: 'mile' as PbKey, segmentKm: 1.609 },
@@ -167,8 +148,8 @@ export async function recomputeForUser(userId: string): Promise<void> {
     const best = rows.rows?.[0];
     const cols = PB_COLUMNS[splitDist.key];
     if (best) {
-      // Duration = time to cover the segment at this pace (pace_seconds is sec/km)
-      const durationMs = Math.round(best.pace_seconds * splitDist.segmentKm * 1000);
+      // pace_seconds = seconds per km. Duration = time to cover segment in ms.
+      const durationMs = Math.round(Number(best.pace_seconds) * splitDist.segmentKm * 1000);
       pbUpdates[cols.durationCol] = durationMs;
       pbUpdates[cols.runIdCol]    = best.id;
       pbUpdates[cols.dateCol]     = best.completed_at ?? null;
@@ -179,12 +160,14 @@ export async function recomputeForUser(userId: string): Promise<void> {
     }
   }
 
-  // 5K, 10K, Half Marathon, Marathon: best run by total distance in band
+  // 5K, 10K, Half Marathon, Marathon: best run by total distance in band.
+  // runs.duration is in SECONDS → multiply × 1000 to store as milliseconds
+  // so that pb_*_duration_ms column names are accurate.
   for (const dist of PB_DISTANCES.filter(d => d.key !== '1k' && d.key !== 'mile')) {
-    // Convert min/max from km to meters for database query
+    // Convert min/max from km to meters for database query (distance stored in meters)
     const minMeters = dist.minKm * 1000;
     const maxMeters = dist.maxKm * 1000;
-    
+
     const [pbRun] = await db
       .select({ id: runs.id, duration: runs.duration, completedAt: runs.completedAt })
       .from(runs)
@@ -194,11 +177,12 @@ export async function recomputeForUser(userId: string): Promise<void> {
         sql`${runs.distance} <= ${maxMeters}`,
         isNotNull(runs.avgPace),
       ))
-      .orderBy(runs.avgPace)   // fastest (lowest) pace first
+      .orderBy(runs.avgPace)   // fastest (lowest) pace first ("4:00" < "5:00" alphabetically ✓)
       .limit(1);
 
     const cols = PB_COLUMNS[dist.key];
-    pbUpdates[cols.durationCol] = pbRun?.duration ?? null;
+    // Convert seconds → milliseconds for pb_*_duration_ms column
+    pbUpdates[cols.durationCol] = pbRun?.duration != null ? pbRun.duration * 1000 : null;
     pbUpdates[cols.runIdCol]    = pbRun?.id ?? null;
     pbUpdates[cols.dateCol]     = pbRun?.completedAt ?? null;
   }
@@ -208,28 +192,32 @@ export async function recomputeForUser(userId: string): Promise<void> {
     .select({ count: count() })
     .from(goals)
     .where(and(eq(goals.userId, userId), eq(goals.status, "completed")));
-  
+
   const goalsAchieved = Number(completedGoalsResult?.count ?? 0);
 
   // ── Upsert the cache row ─────────────────────────────────────────────────
   const totalRuns = Number(agg.totalRuns ?? 0);
-  // Convert from meters to km (database stores distance in meters)
-  const totalDistanceKm = (Number(agg.totalDistanceKm ?? 0)) / 1000;
-  const longestRunKm = (Number(agg.longestRunKm ?? 0)) / 1000;
-  
+  // runs.distance is in METERS → divide by 1000 for km columns
+  const totalDistanceKm = Number(agg.totalDistanceM ?? 0) / 1000;
+  const longestRunKm    = Number(agg.longestRunM    ?? 0) / 1000;
+  // runs.duration is in SECONDS → store directly (column is total_duration_seconds)
+  const totalDurationSeconds = Number(agg.totalDurationSec ?? 0);
+
+  console.log(`[UserStatsCache] Recomputing for user ${userId}: ${totalRuns} runs, ${totalDistanceKm.toFixed(2)}km, ${totalDurationSeconds}s`);
+
   const upsertData = {
     userId,
     updatedAt:            new Date(),
     totalRuns,
     totalDistanceKm,
-    totalDurationSeconds: Number(agg.totalDurationSec ?? 0),
+    totalDurationSeconds,
     totalElevationGainM:  Number(agg.totalElevationGain ?? 0),
     totalCalories:        Number(agg.totalCalories ?? 0),
     totalActiveCalories:  Number(agg.totalActiveCalories ?? 0),
     avgPaceMinPerKm:      Number(agg.avgPace ?? 0) || null,
     fastestPaceMinPerKm:  Number(agg.fastestPace ?? 0) || null,
     longestRunKm,
-    // PB fields (typed assertion safe — we build from PB_COLUMNS keys)
+    // PB fields — all duration columns store MILLISECONDS
     pb1kDurationMs:       pbUpdates['pb1kDurationMs'] as number | null,
     pb1kRunId:            pbUpdates['pb1kRunId'] as string | null,
     pb1kDate:             pbUpdates['pb1kDate'] as Date | null,
@@ -270,83 +258,4 @@ function parsePaceToSeconds(paceStr: string | null | undefined): number | null {
   const match = paceStr.match(/^(\d+):(\d+)$/);
   if (!match) return null;
   return parseInt(match[1]) * 60 + parseInt(match[2]);
-}
-
-/**
- * Check if the saved run beats any PB and update just those fields.
- * Handles:
- *   - 5K / 10K / Half / Marathon: total-run distance band comparison
- *   - 1K / Mile: fastest km split from this run vs current best split PB
- */
-async function maybeUpdatePersonalBests(userId: string, run: {
-  id: string;
-  distance: number;
-  duration: number;
-  avgPace?: string | null;
-  completedAt?: Date | null;
-  kmSplits?: Array<{ km?: number; pace?: string; [key: string]: any }> | null;
-}): Promise<void> {
-  const [existing] = await db.select().from(userStats).where(eq(userStats.userId, userId));
-  if (!existing) return;
-
-  const updates: Record<string, number | string | Date> = {};
-
-  // ── 1K and Mile: check fastest km split from this run ──────────────────
-  if (Array.isArray(run.kmSplits) && run.kmSplits.length > 0) {
-    // Find the fastest individual km split in this run
-    let fastestSplitSeconds: number | null = null;
-    for (const split of run.kmSplits) {
-      const sec = parsePaceToSeconds(split.pace);
-      if (sec !== null && (fastestSplitSeconds === null || sec < fastestSplitSeconds)) {
-        fastestSplitSeconds = sec;
-      }
-    }
-
-    if (fastestSplitSeconds !== null) {
-      const runDate = run.completedAt ?? new Date();
-
-      // 1K: duration = fastest km split pace in ms
-      const new1kMs = Math.round(fastestSplitSeconds * 1000);
-      const cur1k = existing.pb1kDurationMs as number | null;
-      if (!cur1k || new1kMs < cur1k) {
-        updates['pb1kDurationMs'] = new1kMs;
-        updates['pb1kRunId']      = run.id;
-        updates['pb1kDate']       = runDate;
-        console.log(`[UserStatsCache] New 1K PB for user ${userId}: ${new1kMs}ms (split pace)`);
-      }
-
-      // Mile: duration = fastest km split pace × 1.609 in ms
-      const newMileMs = Math.round(fastestSplitSeconds * 1.609 * 1000);
-      const curMile = existing.pbMileDurationMs as number | null;
-      if (!curMile || newMileMs < curMile) {
-        updates['pbMileDurationMs'] = newMileMs;
-        updates['pbMileRunId']      = run.id;
-        updates['pbMileDate']       = runDate;
-        console.log(`[UserStatsCache] New Mile PB for user ${userId}: ${newMileMs}ms (split pace)`);
-      }
-    }
-  }
-
-  // ── 5K, 10K, Half, Marathon: total-run distance band ──────────────────
-  const distanceKm = run.distance / 1000;
-  const matchingDist = PB_DISTANCES.find(
-    d => d.key !== '1k' && d.key !== 'mile' && distanceKm >= d.minKm && distanceKm <= d.maxKm
-  );
-  if (matchingDist && run.avgPace) {
-    const cols = PB_COLUMNS[matchingDist.key];
-    const existingDuration = (existing as any)[cols.durationCol] as number | null;
-    if (!existingDuration || run.duration < existingDuration) {
-      updates[cols.durationCol] = run.duration;
-      updates[cols.runIdCol]    = run.id;
-      updates[cols.dateCol]     = run.completedAt ?? new Date();
-      console.log(`[UserStatsCache] New ${matchingDist.label} PB for user ${userId}: ${run.duration}ms`);
-    }
-  }
-
-  if (Object.keys(updates).length > 0) {
-    await db.update(userStats).set({
-      ...updates,
-      updatedAt: new Date(),
-    }).where(eq(userStats.userId, userId));
-  }
 }
