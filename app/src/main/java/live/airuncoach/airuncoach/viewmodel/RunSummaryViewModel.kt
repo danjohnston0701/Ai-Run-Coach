@@ -20,7 +20,6 @@ import live.airuncoach.airuncoach.data.repository.RunRepository  // ⚡ For shar
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.service.RunTrackingService
 import live.airuncoach.airuncoach.network.model.*
-import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
 
@@ -71,8 +70,8 @@ class RunSummaryViewModel @Inject constructor(
      * Non-empty list of PB categories set by this run (e.g. ["Fastest 1K", "5K"]).
      * Populated after loading the run session. Drives the PB celebration dialog.
      */
-    private val _newPersonalBests = MutableStateFlow<List<String>>(emptyList())
-    val newPersonalBests: StateFlow<List<String>> = _newPersonalBests.asStateFlow()
+    private val _runPersonalBests = MutableStateFlow<List<String>>(emptyList())
+    val runPersonalBests: StateFlow<List<String>> = _runPersonalBests.asStateFlow()
 
     private val _isEnrichingWithGarmin = MutableStateFlow(false)
     val isEnrichingWithGarmin: StateFlow<Boolean> = _isEnrichingWithGarmin.asStateFlow()
@@ -699,7 +698,7 @@ class RunSummaryViewModel @Inject constructor(
 
     /**
      * Fetch personal bests and check if any of them are attributed to [runId].
-     * Populates [newPersonalBests] with e.g. ["Fastest 1K", "5K"] so the UI
+     * Populates [runPersonalBests] with e.g. ["Fastest 1K", "5K"] so the UI
      * can show a celebration dialog.
      */
     private fun checkPersonalBests(runId: String) {
@@ -719,17 +718,13 @@ class RunSummaryViewModel @Inject constructor(
                 }
 
                 if (achievedCategories.isNotEmpty()) {
-                    _newPersonalBests.value = achievedCategories
+                    _runPersonalBests.value = achievedCategories
                     Log.d("RunSummaryVM", "Run $runId sets PBs: $achievedCategories")
                 }
             } catch (e: Exception) {
                 Log.w("RunSummaryVM", "Could not check personal bests (non-fatal)", e)
             }
         }
-    }
-
-    fun clearNewPersonalBests() {
-        _newPersonalBests.value = emptyList()
     }
 
     private fun loadSavedAnalysis(runId: String) {

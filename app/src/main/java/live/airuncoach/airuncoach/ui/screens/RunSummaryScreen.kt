@@ -7,30 +7,21 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.view.View
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.*
-import androidx.compose.ui.draw.*
 import androidx.compose.ui.graphics.*
-import androidx.compose.ui.unit.*
 import androidx.compose.ui.platform.LocalDensity
 import kotlin.math.roundToInt
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -43,11 +34,9 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.*
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,7 +59,6 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.core.view.drawToBitmap
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -112,7 +100,6 @@ import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.pow
-import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -145,7 +132,7 @@ fun RunSummaryScreenFlagship(
     val strugglePoints by viewModel.strugglePoints.collectAsState()
     val isAdmin = viewModel.isAdminUser()
     val isGarminConnected by viewModel.isGarminConnected.collectAsState()
-    val newPersonalBests by viewModel.newPersonalBests.collectAsState()
+    val runPersonalBests by viewModel.runPersonalBests.collectAsState()
 
     val context = LocalContext.current
 
@@ -157,7 +144,9 @@ fun RunSummaryScreenFlagship(
     var selectedTab by remember { mutableStateOf(0) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var runNameDraft by remember { mutableStateOf("") }
-    
+    // PB celebration dialog — shown once per screen visit (local flag, banner remains visible)
+    var pbCelebrationDismissed by remember { mutableStateOf(false) }
+
     // Delete confirmation dialog state
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var deleteError by remember { mutableStateOf<String?>(null) }
@@ -255,7 +244,8 @@ fun RunSummaryScreenFlagship(
                             difficultyLabel = runSession?.let { formatTerrainLabel(it.getDifficultyLevel()) },
                             onCreateShareImage = { onNavigateToShareImage(runId) },
                             selectedTab = selectedTab,
-                            onTabSelected = { selectedTab = it }
+                            onTabSelected = { selectedTab = it },
+                            personalBests = runPersonalBests,
                         )
 
                         1 -> SummaryTabContent(
@@ -264,7 +254,8 @@ fun RunSummaryScreenFlagship(
                             strugglePoints = strugglePoints,
                             onDelete = { showDeleteConfirm = true },
                             selectedTab = selectedTab,
-                            onTabSelected = { selectedTab = it }
+                            onTabSelected = { selectedTab = it },
+                            personalBests = runPersonalBests,
                         )
 
                         2 -> GraphsTabContent(
@@ -321,11 +312,11 @@ fun RunSummaryScreenFlagship(
                     )
                 }
 
-                // Personal Best Celebration Dialog
-                if (newPersonalBests.isNotEmpty()) {
+                // Personal Best Celebration Dialog — one-time confetti; banner persists separately
+                if (runPersonalBests.isNotEmpty() && !pbCelebrationDismissed) {
                     PersonalBestCelebrationDialog(
-                        categories = newPersonalBests,
-                        onDismiss = { viewModel.clearNewPersonalBests() }
+                        categories = runPersonalBests,
+                        onDismiss = { pbCelebrationDismissed = true }
                     )
                 }
 
@@ -560,6 +551,7 @@ private fun AiInsightsTabContent(
     onCreateShareImage: () -> Unit = {},
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
+    personalBests: List<String> = emptyList(),
 ) {
     LazyColumn(
         modifier = Modifier
@@ -589,6 +581,13 @@ private fun AiInsightsTabContent(
         // Run Completed banner with optional difficulty pill
         item {
             RunCompletedBannerWithDifficulty(difficultyLabel = difficultyLabel)
+        }
+
+        // Personal Best banner — always visible when this run holds any PBs
+        if (personalBests.isNotEmpty()) {
+            item {
+                PersonalBestRunBanner(categories = personalBests)
+            }
         }
 
         // Garmin enrich CTA — prominent banner when Garmin is connected but run not yet enriched
@@ -705,6 +704,7 @@ private fun SummaryTabContent(
     onDelete: () -> Unit,
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
+    personalBests: List<String> = emptyList(),
 ) {
     LazyColumn(
         modifier = Modifier
@@ -716,6 +716,13 @@ private fun SummaryTabContent(
         // Tabs for navigation
         item {
             RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected)
+        }
+
+        // Personal Best banner — always visible when this run holds any PBs
+        if (personalBests.isNotEmpty()) {
+            item {
+                PersonalBestRunBanner(categories = personalBests)
+            }
         }
 
         // Map
@@ -928,6 +935,54 @@ private fun RunCompletedBannerWithDifficulty(difficultyLabel: String?) {
             if (!isUnknown) {
                 DifficultyPillFlagship(label = difficultyLabel!!)
             }
+        }
+    }
+}
+
+/* ─────────────── PERSONAL BEST BANNER ─────────────── */
+
+/**
+ * Persistent gold banner shown at the top of the run summary whenever the run
+ * holds one or more personal bests. Displays a trophy + each PB category.
+ * Always visible once loaded — not dismissed by the celebration dialog.
+ */
+@Composable
+private fun PersonalBestRunBanner(categories: List<String>) {
+    if (categories.isEmpty()) return
+
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xFFFFB800).copy(alpha = 0.13f)
+        ),
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Trophy emoji
+            Text(text = "🏆", fontSize = 26.sp)
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (categories.size == 1) "Personal Best!" else "Personal Bests!",
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
+                    color = Color(0xFFFFB800)
+                )
+                Text(
+                    text = categories.joinToString(" • "),
+                    style = AppTextStyles.small.copy(fontWeight = FontWeight.Medium),
+                    color = Color(0xFFFFB800).copy(alpha = 0.85f)
+                )
+            }
+
+            // Star icon on the right
+            Text(text = "⭐", fontSize = 18.sp)
         }
     }
 }
