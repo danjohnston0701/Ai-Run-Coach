@@ -3,7 +3,9 @@ package live.airuncoach.airuncoach.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,12 +32,14 @@ fun NotificationsScreen(onNavigateBack: () -> Unit) {
                     }
                 }
             )
-        }
-    ) {
+        },
+        contentWindowInsets = WindowInsets(0) // outer Scaffold already applies nav bar insets
+    ) { paddingValues ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Colors.backgroundRoot),
+                .background(Colors.backgroundRoot)
+                .padding(paddingValues),
             contentAlignment = Alignment.Center
         ) {
             Text(text = "Notifications Screen", color = Colors.textPrimary)

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest xmlns="http://tizen.org/ns/packages" package="com.airuncoach.watch" version="1.0.0" api-version="9">
+  <label>AI Run Coach</label>
+  <author email="support@airuncoach.live">AI Run Coach</author>
+  <description>Real-time AI coaching for your runs on Samsung Galaxy Watch</description>
+
+  <privileges>
+    <privilege>http://tizen.org/privilege/location</privilege>
+    <privilege>http://tizen.org/privilege/healthinfo</privilege>
+    <privilege>http://tizen.org/privilege/internet</privilege>
+    <privilege>http://tizen.org/privilege/bluetooth</privilege>
+  </privileges>
+
+  <ui-application appid="com.airuncoach.watch" exec="index.html" type="web" launch_mode="single">
+    <label>AI Run Coach</label>
+    <icon type="image/png">icon.png</icon>
+    <metadata key="http://samsung.com/metadata/wearable_app_info" value="watch"/>
+    <splash-screens/>
+    <app-widget id="com.airuncoach.watch.widget" exec="widget.html" type="widget-shell"/>
+  </ui-application>
+
+  <service-application appid="com.airuncoach.watch.service" exec="service.js" type="javascript" auto-restart="true">
+    <label>AI Run Coach Service</label>
+  </service-application>
+</manifest>

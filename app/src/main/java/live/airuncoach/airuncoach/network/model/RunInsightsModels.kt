@@ -5,45 +5,52 @@ import com.google.gson.annotations.SerializedName
 
 /**
  * Basic AI insights (fallback).
+ * All fields nullable to guard against Gson ignoring Kotlin default values on null JSON.
  */
 data class BasicRunInsights(
-    @SerializedName("highlights") val highlights: List<String> = emptyList(),
-    @SerializedName("struggles") val struggles: List<String> = emptyList(),
-    @SerializedName("tips") val tips: List<String> = emptyList(),
+    @SerializedName("highlights") val highlights: List<String>? = null,
+    @SerializedName("struggles") val struggles: List<String>? = null,
+    @SerializedName("tips") val tips: List<String>? = null,
     @SerializedName("overallScore") val overallScore: Int = 0,
-    @SerializedName("summary") val summary: String = ""
+    @SerializedName("summary") val summary: String? = null
 )
 
 /**
  * Comprehensive AI analysis (primary).
+ *
+ * NOTE: All String fields are nullable (String?) even where the API contract says they
+ * should always be present. Gson ignores Kotlin default values during deserialization —
+ * if the backend returns null or omits a field (e.g. older saved runs before a field was
+ * added), Gson will set it to null regardless of any `= ""` default. Making fields
+ * nullable lets the UI safely handle missing data with `.isNullOrBlank()` / `.orEmpty()`.
  */
 data class ComprehensiveRunAnalysis(
-    @SerializedName("summary") val summary: String,
-    @SerializedName("performanceScore") val performanceScore: Int,
-    @SerializedName("highlights") val highlights: List<String> = emptyList(),
-    @SerializedName("struggles") val struggles: List<String> = emptyList(),
-    @SerializedName("personalBests") val personalBests: List<String> = emptyList(),
-    @SerializedName("improvementTips") val improvementTips: List<String> = emptyList(),
-    @SerializedName("trainingLoadAssessment") val trainingLoadAssessment: String = "",
-    @SerializedName("recoveryAdvice") val recoveryAdvice: String = "",
-    @SerializedName("nextRunSuggestion") val nextRunSuggestion: String = "",
-    @SerializedName("wellnessImpact") val wellnessImpact: String = "",
-    @SerializedName("technicalAnalysis") val technicalAnalysis: TechnicalAnalysis,
+    @SerializedName("summary") val summary: String? = null,
+    @SerializedName("performanceScore") val performanceScore: Int = 0,
+    @SerializedName("highlights") val highlights: List<String>? = null,
+    @SerializedName("struggles") val struggles: List<String>? = null,
+    @SerializedName("personalBests") val personalBests: List<String>? = null,
+    @SerializedName("improvementTips") val improvementTips: List<String>? = null,
+    @SerializedName("trainingLoadAssessment") val trainingLoadAssessment: String? = null,
+    @SerializedName("recoveryAdvice") val recoveryAdvice: String? = null,
+    @SerializedName("nextRunSuggestion") val nextRunSuggestion: String? = null,
+    @SerializedName("wellnessImpact") val wellnessImpact: String? = null,
+    @SerializedName("technicalAnalysis") val technicalAnalysis: TechnicalAnalysis? = null,
     @SerializedName("garminInsights") val garminInsights: GarminInsights? = null
 )
 
 data class TechnicalAnalysis(
-    @SerializedName("paceAnalysis") val paceAnalysis: String = "",
-    @SerializedName("heartRateAnalysis") val heartRateAnalysis: String = "",
-    @SerializedName("cadenceAnalysis") val cadenceAnalysis: String = "",
-    @SerializedName("runningDynamics") val runningDynamics: String = "",
-    @SerializedName("elevationPerformance") val elevationPerformance: String = ""
+    @SerializedName("paceAnalysis") val paceAnalysis: String? = null,
+    @SerializedName("heartRateAnalysis") val heartRateAnalysis: String? = null,
+    @SerializedName("cadenceAnalysis") val cadenceAnalysis: String? = null,
+    @SerializedName("runningDynamics") val runningDynamics: String? = null,
+    @SerializedName("elevationPerformance") val elevationPerformance: String? = null
 )
 
 data class GarminInsights(
-    @SerializedName("trainingEffect") val trainingEffect: String = "",
-    @SerializedName("vo2MaxTrend") val vo2MaxTrend: String = "",
-    @SerializedName("recoveryTime") val recoveryTime: String = ""
+    @SerializedName("trainingEffect") val trainingEffect: String? = null,
+    @SerializedName("vo2MaxTrend") val vo2MaxTrend: String? = null,
+    @SerializedName("recoveryTime") val recoveryTime: String? = null
 )
 
 /**

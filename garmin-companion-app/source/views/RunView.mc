@@ -109,6 +109,12 @@ class RunView extends Ui.View {
 
     function setPhoneControlled(v) { _phoneControlled = v; }
 
+    // Called by AiRunCoachApp.onCoachingCue when a cue arrives from the backend response
+    function setCoachingCue(cueText) {
+        _coachingCue      = cueText;
+        _coachingCueTicks = 20;   // ~5 seconds at 250 ms ticks
+    }
+
     function setCoachingMode(data) {
         _isCoached    = true;
         _overlayState = OVERLAY_COACHED;
@@ -349,7 +355,7 @@ class RunView extends Ui.View {
         _drawTimeRow(dc, cx, h);
 
         // ── Zone + HR badge (running only) ────────────────────────────────────
-        _drawZoneBadge(dc, cx, h);
+        // Zone badge removed — HR already shown in secondary row
 
         // ── Primary metric: PACE ──────────────────────────────────────────────
         _drawPace(dc, cx, w, h);
@@ -482,7 +488,7 @@ class RunView extends Ui.View {
     private function _drawTimeRow(dc, cx, h) {
         if (_isRunning) {
             // Elapsed time — no label, slightly larger font so it reads at a glance
-            var y = (h * 0.09).toNumber();
+            var y = (h * 0.13).toNumber();
             dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, y, Gfx.FONT_MEDIUM, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
         } else {
@@ -497,7 +503,7 @@ class RunView extends Ui.View {
 
     private function _drawZoneBadge(dc, cx, h) {
         if (!_isRunning) { return; }
-        var y  = (h * 0.255).toNumber();
+        var y  = (h * 0.23).toNumber();
         var zn = _heartRateZone;
         var zc = _zoneColors[zn - 1];
 
@@ -518,8 +524,8 @@ class RunView extends Ui.View {
 
     private function _drawPace(dc, cx, w, h) {
         var paceStr = _fmtPace(_dispPace);
-        var lblY    = (h * 0.27).toNumber();
-        var y       = (h * 0.31).toNumber();
+        var lblY    = (h * 0.26).toNumber();
+        var y       = (h * 0.32).toNumber();
 
         // Pace colour
         var paceColor;
@@ -538,7 +544,7 @@ class RunView extends Ui.View {
         }
 
         // "MIN / KM" label — drawn ABOVE the value
-        dc.setColor(0x383838, Gfx.COLOR_TRANSPARENT);
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         dc.drawText(cx, lblY, Gfx.FONT_XTINY, "MIN / KM", Gfx.TEXT_JUSTIFY_CENTER);
 
         // Pace value
@@ -565,8 +571,8 @@ class RunView extends Ui.View {
     //   Divider: thin vertical line between the two columns
 
     private function _drawSecondary(dc, cx, w, h) {
-        var lblY  = (h * 0.575).toNumber();
-        var y     = (h * 0.615).toNumber();
+        var lblY  = (h * 0.555).toNumber();
+        var y     = (h * 0.625).toNumber();
         var lx    = (w * 0.27).toNumber();
         var rx    = (w * 0.73).toNumber();
 
@@ -575,14 +581,14 @@ class RunView extends Ui.View {
         dc.drawLine(cx, lblY - 2, cx, y + 20);
 
         // Distance (left) — label above, value below
-        dc.setColor(0x404040, Gfx.COLOR_TRANSPARENT);
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         dc.drawText(lx, lblY, Gfx.FONT_XTINY, "KM", Gfx.TEXT_JUSTIFY_CENTER);
         var distStr = (_dispDistance / 1000.0).format("%.2f");
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         dc.drawText(lx, y, Gfx.FONT_SMALL, distStr, Gfx.TEXT_JUSTIFY_CENTER);
 
         // Heart rate (right) — label above, value below
-        dc.setColor(0x404040, Gfx.COLOR_TRANSPARENT);
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         dc.drawText(rx, lblY, Gfx.FONT_XTINY, "BPM", Gfx.TEXT_JUSTIFY_CENTER);
         var hrStr = _dispHR > 0 ? _dispHR.format("%d") : "--";
         var hrCol = _isRunning ? _zoneColors[_heartRateZone - 1] : 0x383838;
@@ -595,7 +601,7 @@ class RunView extends Ui.View {
     private function _drawCadence(dc, cx, h) {
         var y   = (h * 0.765).toNumber();
         var str = _dispCadence > 0 ? _dispCadence.format("%d") + " spm" : "-- spm";
-        dc.setColor(0x363636, Gfx.COLOR_TRANSPARENT);
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         dc.drawText(cx, y, Gfx.FONT_XTINY, str, Gfx.TEXT_JUSTIFY_CENTER);
     }
 
@@ -623,7 +629,7 @@ class RunView extends Ui.View {
         if (_overlayState == OVERLAY_WAITING) {
             var dots = "";
             for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
-            dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
+            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, y1, Gfx.FONT_XTINY, "Connecting" + dots, Gfx.TEXT_JUSTIFY_CENTER);
 
         } else if (_overlayState == OVERLAY_READY) {
@@ -631,15 +637,15 @@ class RunView extends Ui.View {
                 dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
                 dc.drawText(cx, y1, Gfx.FONT_XTINY, _runnerName, Gfx.TEXT_JUSTIFY_CENTER);
             }
-            dc.setColor(0x383838, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, y2, Gfx.FONT_XTINY, "\u25B6  START to run", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, y2, Gfx.FONT_XTINY, "START to run", Gfx.TEXT_JUSTIFY_CENTER);
 
         } else if (_overlayState == OVERLAY_COACHED) {
             var lbl = _runTypeLabel();
             dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, y1, Gfx.FONT_XTINY, lbl, Gfx.TEXT_JUSTIFY_CENTER);
-            dc.setColor(0x383838, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, y2, Gfx.FONT_XTINY, "\u25B6  START to run", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, y2, Gfx.FONT_XTINY, "START to run", Gfx.TEXT_JUSTIFY_CENTER);
         }
     }
 

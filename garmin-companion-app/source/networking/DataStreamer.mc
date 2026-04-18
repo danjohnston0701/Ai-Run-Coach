@@ -97,15 +97,18 @@ class DataStreamer {
     // Callback when data is sent
     function onDataSent(responseCode as Lang.Number, data as Lang.Dictionary or Lang.String or Null) as Void {
         _pendingRequests--;
-        
+
         if (responseCode == 200) {
-            Sys.println("Data sent successfully");
-            
-            // Check if coaching response included
+            // Deliver coaching cue to the active RunView if one was piggybacked on the response
             if (data != null && data.get("coaching") != null) {
-                // TODO: Display coaching on watch
                 var coachingText = data.get("coaching");
-                Sys.println("Coaching: " + coachingText);
+                Sys.println("Coaching cue received: " + coachingText);
+
+                // Notify RunView via the app object so it can display the cue overlay
+                var app = Application.getApp();
+                if (app has :onCoachingCue) {
+                    app.onCoachingCue(coachingText);
+                }
             }
         } else {
             Sys.println("Data send failed: " + responseCode);

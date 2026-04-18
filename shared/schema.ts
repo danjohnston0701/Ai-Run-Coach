@@ -905,6 +905,9 @@ export const garminRealtimeData = pgTable("garmin_realtime_data", {
   activityType: text("activity_type"), // running, walking, cycling
   isMoving: boolean("is_moving").default(true),
   isPaused: boolean("is_paused").default(false),
+
+  // Data source — identifies which device/platform produced this row
+  source: text("source").default("garmin_watch"), // 'garmin_watch', 'samsung_watch', etc.
   
   // Cumulative stats at this point
   cumulativeDistance: real("cumulative_distance"), // meters

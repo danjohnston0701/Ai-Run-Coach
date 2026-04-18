@@ -40,6 +40,7 @@ data class PhaseCoachingUpdate(
     @SerializedName("currentAvgPaceSecondsPerKm") val currentAvgPaceSecondsPerKm: Double? = null, // Overall avg pace
     @SerializedName("rollingPaceSecondsPerKm") val rollingPaceSecondsPerKm: Double? = null,     // Recent rolling pace
     @SerializedName("progressPercent") val progressPercent: Double? = null,                      // 0-100 how far through the run
+    @SerializedName("consecutiveBehindCues") val consecutiveBehindCues: Int? = null,            // How many consecutive "behind target" cues fired
     // Runner profile for personalised coaching
     @SerializedName("fitnessLevel") val fitnessLevel: String? = null,
     @SerializedName("runnerName") val runnerName: String? = null,

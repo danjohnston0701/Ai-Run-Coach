@@ -161,9 +161,24 @@ class RunTrackingService : Service(), SensorEventListener {
     private var slopeElevationGain: Double = 0.0 // Total metres gained in current uphill segment
     private var slopeElevationLoss: Double = 0.0 // Total metres lost in current downhill segment
     private var downhillFinishTriggered: Boolean = false
+
+    // Rolling terrain detection — 1km sliding window to classify terrain type
+    // Tracks gain/loss/direction changes so we can tell the difference between
+    // "genuine hill" (sustained single direction) and "rolling terrain" (undulating)
+    private var rollingWindowGainM: Double = 0.0     // Total gain in the current 1km window
+    private var rollingWindowLossM: Double = 0.0     // Total loss in the current 1km window
+    private var rollingWindowDirectionChanges: Int = 0 // How many times slope direction flipped
+    private var rollingWindowStartKm: Double = 0.0   // Distance at which current window started
+    private var lastRollingTerrainCoachKm: Int = -2  // Last km at which rolling terrain cue fired
+    private var rollingTerrainDetected: Boolean = false // True once rolling pattern confirmed this run
     // Altitude smoothing - rolling window to filter GPS noise
     private val recentAltitudes = ArrayList<Double>() // Rolling window of recent altitudes
     private var smoothedAltitude: Double? = null // Smoothed altitude from rolling average
+    // Real-time grade: current slope % from smoothed altitude (NOT the whole-run average)
+    // Used for isOnHill and hill coaching triggers — updated every GPS point
+    private var currentSmoothedGrade: Double = 0.0
+    // True once GPS altitude data has been received — lets coaching payloads signal terrain awareness
+    private var hasGpsElevation: Boolean = false
 
     // Heart rate coaching
     private var hrSum: Long = 0
@@ -303,6 +318,8 @@ class RunTrackingService : Service(), SensorEventListener {
     private var paceTargetAbandonedNotified = false     // True after we've told the runner once
     private var consecutiveOverPaceChecks = 0           // How many checks in a row they've been slow
     private var lastPaceDeviationPercent: Double = 0.0  // Track trend
+    // Plateau detection: count how many consecutive cues have been "behind target" without improvement
+    private var consecutiveBehindTargetCues = 0        // Resets when runner improves pace
     
     // Pace coaching intervals (distance-based, varies by run phase)
     private val PACE_FIRST_CHECK_M = 100.0            // First pace check at 100m
@@ -359,28 +376,42 @@ class RunTrackingService : Service(), SensorEventListener {
         private const val ELEVATION_NOISE_THRESHOLD = 1.5 // Ignore changes < 1.5m (they're GPS noise)
         
         // ELEVATION-BASED TRIGGERS (Primary) — More reliable than grade % which can be noisy from GPS
-        private const val UPHILL_ELEVATION_TRIGGER_M = 10.0  // Trigger uphill coaching after gaining 10m elevation
-        private const val DOWNHILL_ELEVATION_TRIGGER_M = 10.0 // Trigger downhill coaching after losing 10m elevation
-        private const val GENTLE_HILL_ELEVATION_M = 8.0      // Gentle hill awareness for 8m+ gains
-        private const val MODERATE_HILL_ELEVATION_M = 15.0   // Moderate hill coaching for 15m+ gains
-        private const val STEEP_HILL_ELEVATION_M = 25.0      // Steep hill coaching for 25m+ gains
+        // Thresholds are deliberately conservative to avoid GPS drift false positives on flat terrain.
+        // A genuine sustained uphill at parkrun pace covers ~300m at 4% = 12m gain — so 15m is a safe bar.
+        private const val UPHILL_ELEVATION_TRIGGER_M = 15.0  // Raised from 10m — needs 15m sustained gain to fire
+        private const val DOWNHILL_ELEVATION_TRIGGER_M = 15.0
+        private const val GENTLE_HILL_ELEVATION_M = 10.0     // Gentle hill awareness for 10m+ gains
+        private const val MODERATE_HILL_ELEVATION_M = 18.0   // Moderate hill for 18m+ gains
+        private const val STEEP_HILL_ELEVATION_M = 28.0      // Steep hill for 28m+ gains
         
         // GRADE-BASED TRIGGERS (Secondary) — For context and validation, not primary driver
-        private const val UPHILL_GRADE_THRESHOLD = 2.0       // Lowered: Min grade to count as "uphill" (reduced from 3%)
-        private const val STEEP_UPHILL_GRADE_THRESHOLD = 4.0 // Lowered: Smoothed grade for steep uphill (reduced from 5%)
-        private const val DOWNHILL_GRADE_THRESHOLD = -2.0    // Lowered: Min grade to count as "downhill" (reduced from -3%)
-        private const val STEEP_DOWNHILL_GRADE_THRESHOLD = -4.0 // Lowered: Smoothed grade for steep downhill (reduced from -5%)
+        // Raised from 2% to 3% — GPS altitude at ±5m error over 150m = ~3% apparent grade on flat terrain.
+        // So 3% is the reliable lower bound that separates real hills from GPS noise.
+        private const val UPHILL_GRADE_THRESHOLD = 3.0       // Was 2.0 — raised to reduce false positives
+        private const val STEEP_UPHILL_GRADE_THRESHOLD = 5.0 // Was 4.0
+        private const val DOWNHILL_GRADE_THRESHOLD = -3.0    // Was -2.0
+        private const val STEEP_DOWNHILL_GRADE_THRESHOLD = -5.0 // Was -4.0
         
         // DISTANCE AND COOLDOWN TRIGGERS
-        private const val HILL_TOP_MIN_DISTANCE_M = 150.0    // Min uphill distance before hill-top ack (reduced from 200m)
-        private const val UPHILL_MIN_DISTANCE_M = 150.0      // Min sustained uphill distance (reduced from 200m)
-        private const val DOWNHILL_MIN_DISTANCE_M = 200.0    // Min sustained downhill distance (reduced from 250m)
+        private const val HILL_TOP_MIN_DISTANCE_M = 200.0    // Min uphill distance before hill-top ack
+        private const val UPHILL_MIN_DISTANCE_M = 200.0      // Min sustained uphill distance before coaching fires
+        private const val DOWNHILL_MIN_DISTANCE_M = 250.0    // Min sustained downhill distance
         private const val DOWNHILL_FINISH_DISTANCE_KM = 1.0  // Within this distance of finish for downhill_finish
         
         // These are now SECONDARY — elevation metres trigger first
-        private const val MIN_ELEVATION_GAIN_M = 10.0        // Min metres climbed in segment (reduced from 15m)
-        private const val MIN_ELEVATION_LOSS_M = 10.0        // Min metres descended in segment (reduced from 15m)
-        private const val HILL_TOP_MIN_GAIN_M = 8.0          // Min metres gained before hill-top ack (reduced from 12m)
+        private const val MIN_ELEVATION_GAIN_M = 12.0
+        private const val MIN_ELEVATION_LOSS_M = 12.0
+        private const val HILL_TOP_MIN_GAIN_M = 10.0
+
+        // ROLLING TERRAIN DETECTION — 1km sliding window
+        // If within a 1km window the runner has both >8m of total gain AND >5m of total loss,
+        // AND direction has changed 2+ times, that's rolling terrain — not a hill.
+        // Rolling terrain cue fires at most once per 2km to avoid being repetitive.
+        private const val ROLLING_TERRAIN_MIN_GAIN_M = 8.0   // Min accumulated gain in 1km window
+        private const val ROLLING_TERRAIN_MIN_LOSS_M = 5.0   // Min accumulated loss in 1km window
+        private const val ROLLING_TERRAIN_MIN_DIRECTION_CHANGES = 2  // Min slope reversals in window
+        private const val ROLLING_TERRAIN_WINDOW_KM = 1.0    // Sliding window size (km)
+        private const val ROLLING_TERRAIN_COACH_INTERVAL_KM = 2  // Fire rolling cue at most every 2km
         private const val ALTITUDE_SMOOTHING_WINDOW = 5      // Number of altitude readings to average for smoothing
         
         const val ACTION_START_TRACKING = "ACTION_START_TRACKING"
@@ -628,6 +659,8 @@ class RunTrackingService : Service(), SensorEventListener {
         totalDistance = 0.0
         maxSpeed = 0f
         totalElevationGain = 0.0
+        hasGpsElevation = false
+        currentSmoothedGrade = 0.0
         totalElevationLoss = 0.0
         weatherAtStart = null
         weatherAtEnd = null
@@ -688,6 +721,12 @@ class RunTrackingService : Service(), SensorEventListener {
         slopeElevationGain = 0.0
         slopeElevationLoss = 0.0
         downhillFinishTriggered = false
+        rollingWindowGainM = 0.0
+        rollingWindowLossM = 0.0
+        rollingWindowDirectionChanges = 0
+        rollingWindowStartKm = 0.0
+        lastRollingTerrainCoachKm = -2
+        rollingTerrainDetected = false
         recentAltitudes.clear()
         smoothedAltitude = null
         hrSum = 0
@@ -1152,6 +1191,7 @@ class RunTrackingService : Service(), SensorEventListener {
             paceTargetAbandoned = false
             paceTargetAbandonedNotified = false
             consecutiveOverPaceChecks = 0
+            consecutiveBehindTargetCues = 0
             lastPaceCoachingDistance = 0.0
             lastPaceCoachingTime = 0
             lastPaceDeviationPercent = 0.0
@@ -1347,6 +1387,15 @@ class RunTrackingService : Service(), SensorEventListener {
         progressFraction: Double,
         isAbandoning: Boolean
     ) {
+        // Update plateau counter: if behind target (+ve deviation > 10%), increment; else reset
+        if (!isAbandoning) {
+            if (paceDeviation > 0.10) {
+                consecutiveBehindTargetCues++
+            } else {
+                consecutiveBehindTargetCues = 0  // Runner improved — reset plateau
+            }
+        }
+
         serviceScope.launch {
             try {
                 val tDist = targetDistance ?: return@launch
@@ -1373,7 +1422,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     runnerWeight = currentUser?.weight,
                     runnerHeight = currentUser?.height,
                     activityType = "run",
-                    hasRoute = hasRoute,
+                    hasRoute = hasGpsElevation || hasRoute,  // True when GPS altitude available, not just when planned route loaded
                     targetTime = (tTime / 1000).toInt(),
                     targetPace = formatPace(targetPaceSecondsPerKm),
                     triggerType = if (isAbandoning) "pace_abandon" else "pace_coaching",
@@ -1383,7 +1432,9 @@ class RunTrackingService : Service(), SensorEventListener {
                     projectedFinishSeconds = projectedFinishSeconds,
                     currentAvgPaceSecondsPerKm = currentAvgPace,
                     rollingPaceSecondsPerKm = rollingPace,
-                    progressPercent = progressFraction * 100
+                    progressPercent = progressFraction * 100,
+                    // Plateau detection
+                    consecutiveBehindCues = consecutiveBehindTargetCues
                 )
                 
                 Log.d("PaceCoaching", "Requesting LLM pace coaching: triggerType=${update.triggerType}, " +
@@ -1434,8 +1485,62 @@ class RunTrackingService : Service(), SensorEventListener {
         val optimalMin: Double,
         val optimalMax: Double,
         val terrainContext: String, // "flat", "uphill", "downhill"
-        val isFatigued: Boolean
+        val isFatigued: Boolean,
+        val optimalCadenceMin: Int,   // personalised lower-bound spm (pace + height + age)
+        val optimalCadenceTarget: Int, // personalised target spm
+        val optimalCadenceMax: Int    // personalised upper-bound spm
     )
+
+    /**
+     * Biomechanics-based personalised cadence calculator.
+     *
+     * Optimal cadence is NOT a fixed universal value — it depends on:
+     *   - Speed/pace: faster running requires higher cadence
+     *   - Height: taller runners have longer natural step length → slightly lower optimal cadence
+     *   - Age: runners over 50 have reduced lower-limb reactivity → relax target by ~1 spm per 5 years
+     *
+     * Formula:
+     *   stepLengthRatio = 0.58 + (speed_ms - 2.78) × 0.16   (calibrated against research norms)
+     *   stepLength = stepLengthRatio × heightM
+     *   optimalCadence = (speed_ms / stepLength) × 60
+     *
+     * Research calibration points (175cm runner):
+     *   6:00/km (2.78 m/s) → ~163 spm
+     *   5:00/km (3.33 m/s) → ~168 spm
+     *   4:00/km (4.17 m/s) → ~177 spm
+     *
+     * @param speedMs    Current speed in metres/second
+     * @param heightCm   Runner height in cm (default 170)
+     * @param age        Runner age in years (optional, adjusts for over-50s)
+     * @return Triple(optimalCadenceMin, optimalCadenceTarget, optimalCadenceMax)
+     */
+    private fun calculatePersonalisedCadenceRange(
+        speedMs: Double,
+        heightCm: Double = 170.0,
+        age: Int? = null
+    ): Triple<Int, Int, Int> {
+        val heightM = heightCm.coerceIn(140.0, 220.0) / 100.0
+        val speed   = speedMs.coerceIn(1.5, 6.0)         // ~2:45/km to walking pace
+
+        val BASE_SPEED = 2.78    // m/s at 6:00/km
+        val BASE_RATIO = 0.58    // step length as fraction of height at base speed
+        val RATIO_PER_MS = 0.16  // ratio increase per m/s of speed increase
+
+        val stepLengthRatio = (BASE_RATIO + (speed - BASE_SPEED) * RATIO_PER_MS).coerceIn(0.45, 0.95)
+        val stepLength = stepLengthRatio * heightM
+        var optimal = ((speed / stepLength) * 60).toInt()
+
+        // Age-based adjustment: reduce target by ~1 spm per 5 years over age 50 (max –6 spm)
+        if (age != null && age > 50) {
+            val adjustment = ((age - 50) / 5).coerceAtMost(6)
+            optimal = (optimal - adjustment).coerceAtLeast(148)
+        }
+
+        val low  = optimal - 8   // Below this is worth a coaching cue
+        val high = optimal + 6   // Above this is excellent
+
+        return Triple(low, optimal, high)
+    }
 
     private fun getCurrentStrideAnalysis(): StrideSnapshot? {
         if (currentCadence <= 0) return null
@@ -1460,25 +1565,32 @@ class RunTrackingService : Service(), SensorEventListener {
         if (recentStrideLengths.size > 30) recentStrideLengths.removeAt(0)
 
         // Height-based optimal stride range (or use default 1.70m)
-        val heightM = (currentUser?.height?.toDouble() ?: 170.0) / 100.0
+        val heightCm = currentUser?.height?.toDouble() ?: 170.0
+        val heightM = heightCm / 100.0
         val optimalMin = heightM * 0.35
         val optimalMax = heightM * 0.45
 
-        // Terrain context
-        val grade = calculateAverageGradient().toDouble()
+        // Personalised cadence range using biomechanics model
+        val (cadenceLow, cadenceTarget, cadenceHigh) = calculatePersonalisedCadenceRange(
+            speedMs = currentSpeed,
+            heightCm = heightCm,
+            age = currentUser?.age
+        )
+
+        // Terrain context — use real-time smoothed grade, not the whole-run average gradient
+        val grade = currentSmoothedGrade
         val terrain = when {
             grade > UPHILL_GRADE_THRESHOLD -> "uphill"
             grade < DOWNHILL_GRADE_THRESHOLD -> "downhill"
             else -> "flat"
         }
 
-        // Stride zone with terrain adjustment
+        // Stride zone — uses personalised cadence thresholds, not hardcoded values
         val zone = when {
             terrain == "uphill" -> "OPTIMAL" // Shorter strides uphill are natural
             strideLength > heightM * 0.50 -> "OVERSTRIDING"
             strideLength > optimalMax -> "OVERSTRIDING"
-            currentCadence < 155 && terrain == "flat" -> "UNDERSTRIDING"
-            currentCadence < 160 && terrain == "flat" && currentSpeed > 2.78 -> "UNDERSTRIDING" // faster than 6:00/km
+            terrain == "flat" && currentCadence < cadenceLow -> "UNDERSTRIDING"
             else -> "OPTIMAL"
         }
 
@@ -1492,7 +1604,18 @@ class RunTrackingService : Service(), SensorEventListener {
             cadenceSamplesForBaseline++
         }
 
-        return StrideSnapshot(currentCadence, strideLength, zone, optimalMin, optimalMax, terrain, isFatigued)
+        return StrideSnapshot(
+            cadence = currentCadence,
+            strideLength = strideLength,
+            strideZone = zone,
+            optimalMin = optimalMin,
+            optimalMax = optimalMax,
+            terrainContext = terrain,
+            isFatigued = isFatigued,
+            optimalCadenceMin = cadenceLow,
+            optimalCadenceTarget = cadenceTarget,
+            optimalCadenceMax = cadenceHigh
+        )
     }
 
     private fun requestLocationUpdates() {
@@ -1645,6 +1768,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     speedReadingCount++
                 }
                 if (newPoint.altitude != null && prevPoint.altitude != null) {
+                    hasGpsElevation = true   // GPS altitude is available for this run
                     val elevChange = newPoint.altitude - prevPoint.altitude
                     // Only count elevation changes > threshold to filter out GPS noise
                     // GPS altitude has ±5-10m error, so ignore small fluctuations
@@ -1658,10 +1782,14 @@ class RunTrackingService : Service(), SensorEventListener {
                     val prevSmoothed = smoothedAltitude
                     smoothedAltitude = recentAltitudes.average()
                     
-                    // Use smoothed altitude difference for elevation coaching (only when running a route)
-                    if (hasRoute && prevSmoothed != null && recentAltitudes.size >= ALTITUDE_SMOOTHING_WINDOW) {
+                    // Use smoothed altitude difference for elevation coaching.
+                    // Fires regardless of hasRoute — GPS altitude is always available outdoors
+                    // and runners deserve hill coaching on free runs, parkruns, etc.
+                    if (prevSmoothed != null && recentAltitudes.size >= ALTITUDE_SMOOTHING_WINDOW) {
                         val smoothedElevChange = smoothedAltitude!! - prevSmoothed
                         val smoothedGradePercent = (smoothedElevChange / distanceIncrement) * 100
+                        // Track current real-time grade for isOnHill (not the whole-run average)
+                        currentSmoothedGrade = smoothedGradePercent
                         updateElevationCoaching(distanceIncrement, smoothedGradePercent, smoothedElevChange)
                     }
                 }
@@ -1718,8 +1846,18 @@ class RunTrackingService : Service(), SensorEventListener {
         if (baselinePace > 0f) {
             val paceDropPercent = (smoothedPaceSeconds - baselinePace) / baselinePace * 100
             val now = System.currentTimeMillis()
-            // 25% drop threshold on smoothed data = genuine struggle, not GPS noise
-            if (paceDropPercent > 25 && (now - lastStruggleTriggerTime) > STRUGGLE_COOLDOWN_MS) {
+            // Personalised struggle threshold — lower for advanced runners (their pace is more consistent),
+            // higher for beginners (more natural variation). Also relaxed on uphills to avoid false positives.
+            val fitnessThreshold = when (currentUser?.fitnessLevel?.lowercase()) {
+                "advanced", "elite" -> 18.0   // Tight — advanced runners maintain pace well
+                "intermediate" -> 25.0         // Standard
+                "beginner" -> 35.0             // Relaxed — beginners have more natural variation
+                else -> 25.0
+            }
+            // On a steep hill, add 10% tolerance (uphill naturally slows pace)
+            val hillTolerance = if (currentSmoothedGrade > STEEP_UPHILL_GRADE_THRESHOLD) 10.0 else 0.0
+            val effectiveThreshold = fitnessThreshold + hillTolerance
+            if (paceDropPercent > effectiveThreshold && (now - lastStruggleTriggerTime) > STRUGGLE_COOLDOWN_MS) {
                 isStruggling = true
                 lastStruggleTriggerTime = now
                 // Suppress struggle coaching in the final 500m — only motivation allowed
@@ -2484,7 +2622,7 @@ class RunTrackingService : Service(), SensorEventListener {
                         targetDistance = targetDistance?.let { it / 1000.0 },  // Convert metres to km
                         elapsedTime = getActiveRunDuration() / 1000,  // Convert ms to seconds
                         currentPace = currentAvgPaceStr,
-                        currentGrade = calculateAverageGradient().toDouble(),
+                        currentGrade = currentSmoothedGrade,  // Real-time grade, not whole-run average
                         totalElevationGain = totalElevationGain,
                         heartRate = currentHeartRate.takeIf { it > 0 },
                         cadence = currentCadence.takeIf { it > 0 },
@@ -2498,7 +2636,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     runnerWeight = currentUser?.weight,
                     runnerHeight = currentUser?.height,
                         activityType = "run",
-                        hasRoute = hasRoute,
+                        hasRoute = hasGpsElevation || hasRoute,  // True when GPS altitude available, not just when planned route loaded
                         targetTime = targetTime?.let { (it / 1000).toInt() },
                         targetPace = targetPaceStr,
                         triggerType = "500m_checkin"
@@ -2730,7 +2868,7 @@ class RunTrackingService : Service(), SensorEventListener {
                         targetDistance = targetDistance?.let { it / 1000.0 },  // Convert metres to km
                         elapsedTime = getActiveRunDuration() / 1000,  // Convert ms to seconds
                         currentPace = phaseCurrentPaceStr,
-                        currentGrade = calculateAverageGradient().toDouble(),
+                        currentGrade = currentSmoothedGrade,  // Real-time grade, not whole-run average
                         totalElevationGain = totalElevationGain,
                         heartRate = currentHeartRate.takeIf { it > 0 },
                         cadence = currentCadence.takeIf { it > 0 },
@@ -2744,7 +2882,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     runnerWeight = currentUser?.weight,
                     runnerHeight = currentUser?.height,
                         activityType = "run",
-                        hasRoute = hasRoute,
+                        hasRoute = hasGpsElevation || hasRoute,  // True when GPS altitude available, not just when planned route loaded
                         targetTime = targetTime?.let { (it / 1000).toInt() },
                         targetPace = phaseTargetPaceStr,
                         triggerType = "phase_change"
@@ -2809,7 +2947,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     coachTone = currentUser?.coachTone,
                     coachGender = currentUser?.coachGender,
                     coachAccent = currentUser?.coachAccent,
-                    hasRoute = hasRoute,
+                    hasRoute = hasGpsElevation || hasRoute,  // True when GPS altitude available, not just when planned route loaded
                     // User profile
                     fitnessLevel = currentUser?.fitnessLevel,
                     runnerName = currentUser?.name,
@@ -2849,10 +2987,25 @@ class RunTrackingService : Service(), SensorEventListener {
                     KmSplit(km = s.km, time = s.time / 1000, pace = s.pace)
                 }
                 
+                // Compute overall average pace for context (separate from the split pace)
+                val elapsedMs = getActiveRunDuration()
+                val elapsedSec = elapsedMs / 1000.0
+                val distKm = totalDistance / 1000.0
+                val overallAvgPaceStr = if (distKm > 0 && elapsedSec > 0) {
+                    formatPace(elapsedSec / distKm)
+                } else "0:00"
+
+                // Compute target pace string (from target time + distance) for split comparison
+                val targetPaceStr = if (targetTime != null && targetDistance != null && targetDistance!! > 0) {
+                    val totalSec = targetTime!! / 1000.0
+                    val tDistKm = targetDistance!! / 1000.0
+                    formatPace(totalSec / tDistKm)
+                } else null
+
                 val update = PaceUpdate(
                     distance = totalDistance / 1000.0,
                     targetDistance = targetDistance?.let { it / 1000.0 },  // Convert metres to km
-                    currentPace = split.pace,
+                    currentPace = overallAvgPaceStr,  // Overall avg pace (for context/trend)
                     elapsedTime = getActiveRunDuration() / 1000,  // Convert ms to seconds
                     coachName = currentUser?.coachName,
                     coachTone = currentUser?.coachTone,
@@ -2860,12 +3013,14 @@ class RunTrackingService : Service(), SensorEventListener {
                     coachAccent = currentUser?.coachAccent,
                     isSplit = true,
                     splitKm = split.km,
-                    splitPace = split.pace,
-                    currentGrade = calculateAverageGradient().toDouble(),
+                    splitPace = split.pace,   // Pace for this specific km split
+                    currentGrade = currentSmoothedGrade,   // Real-time grade, not whole-run average
                     totalElevationGain = totalElevationGain,
-                    isOnHill = abs(calculateAverageGradient()) > 3f,
+                    isOnHill = abs(currentSmoothedGrade) > UPHILL_GRADE_THRESHOLD,
                     kmSplits = splitsForBackend,  // Send with seconds, not milliseconds
-                    hasRoute = hasRoute,
+                    hasRoute = hasGpsElevation,   // True when GPS altitude data is available
+                    targetPace = targetPaceStr,   // Target pace so AI can compare split vs target
+                    averagePace = overallAvgPaceStr,
                     // User profile
                     fitnessLevel = currentUser?.fitnessLevel,
                     runnerName = currentUser?.name,
@@ -2995,8 +3150,9 @@ class RunTrackingService : Service(), SensorEventListener {
                     userHeight = currentUser?.height?.let { it / 100.0 },
                     userWeight = currentUser?.weight?.toDouble(),
                     userAge = currentUser?.age,
-                    optimalCadenceMin = 160,
-                    optimalCadenceMax = 180,
+                    // Personalised optimal cadence from biomechanics model (not hardcoded)
+                    optimalCadenceMin = stride.optimalCadenceMin,
+                    optimalCadenceMax = stride.optimalCadenceMax,
                     optimalStrideLengthMin = stride.optimalMin,
                     optimalStrideLengthMax = stride.optimalMax,
                     coachName = currentUser?.coachName,
@@ -3290,10 +3446,10 @@ class RunTrackingService : Service(), SensorEventListener {
             coachGender = currentUser?.coachGender,
             coachAccent = currentUser?.coachAccent,
             nicknameStyle = "occasional",  // Default: use nicknames sparingly in coaching
-            hasRoute = hasRoute,
+            hasRoute = hasGpsElevation || hasRoute,
             heartRate = if (currentHeartRate > 0) currentHeartRate else null,
             cadence = if (currentCadence > 0) currentCadence else null,
-            currentGrade = calculateAverageGradient().toDouble(),
+            currentGrade = currentSmoothedGrade,
             totalElevationGain = totalElevationGain,
             totalElevationLoss = totalElevationLoss,
             targetTime = targetTime?.let { it / 1000 },
@@ -3637,20 +3793,22 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun updateElevationCoaching(distanceIncrement: Double, gradePercent: Double, elevationChange: Double) {
         if (!coachingFeaturePrefs.elevationCoachingEnabled) return
         val now = System.currentTimeMillis()
+        val currentKm = totalDistance / 1000.0
         val direction = when {
             gradePercent >= UPHILL_GRADE_THRESHOLD -> 1
             gradePercent <= DOWNHILL_GRADE_THRESHOLD -> -1
             else -> 0
         }
 
+        // ─── Slope segment tracking ───────────────────────────────────────────
         if (direction == slopeDirection) {
             slopeDistanceMeters += distanceIncrement
-            // Track actual elevation gained/lost in this slope segment
             if (elevationChange > 0) slopeElevationGain += elevationChange
             if (elevationChange < 0) slopeElevationLoss += abs(elevationChange)
         } else {
+            // Direction changed — close out the finished slope segment
+
             // Hill-top acknowledgement when leaving a sustained uphill
-            // Only fires if the runner actually climbed a meaningful amount
             if (slopeDirection == 1 &&
                 slopeDistanceMeters >= HILL_TOP_MIN_DISTANCE_M &&
                 slopeElevationGain >= HILL_TOP_MIN_GAIN_M &&
@@ -3660,6 +3818,22 @@ class RunTrackingService : Service(), SensorEventListener {
                 triggerElevationCoaching("hill_top", gradePercent, slopeDistanceMeters)
                 lastHillTopAckTime = now
             }
+
+            // ── Rolling terrain window: accumulate the closed segment into the 1km window ──
+            // Reset window if we've moved past ROLLING_TERRAIN_WINDOW_KM since window start
+            if (currentKm - rollingWindowStartKm >= ROLLING_TERRAIN_WINDOW_KM) {
+                rollingWindowGainM = 0.0
+                rollingWindowLossM = 0.0
+                rollingWindowDirectionChanges = 0
+                rollingWindowStartKm = currentKm
+            }
+            // Accumulate the closed segment's gain/loss into the rolling window
+            rollingWindowGainM += slopeElevationGain
+            rollingWindowLossM += slopeElevationLoss
+            if (slopeDirection != 0 && direction != 0 && slopeDirection != direction) {
+                rollingWindowDirectionChanges++
+            }
+
             // Reset slope tracking for new direction
             slopeDirection = direction
             slopeDistanceMeters = distanceIncrement
@@ -3667,84 +3841,83 @@ class RunTrackingService : Service(), SensorEventListener {
             slopeElevationLoss = if (elevationChange < 0) abs(elevationChange) else 0.0
         }
 
-        // Cooldown check
+        // ─── Cooldown check ───────────────────────────────────────────────────
         if (now - lastElevationCoachingTime < ELEVATION_COOLDOWN_MS) return
 
-        // UPHILL coaching: triggered primarily by elevation gain (metres), validated by grade
-        // More reliable than grade % which can be noisy from GPS altitude fluctuations
-        if (direction == 1 &&
-            slopeDistanceMeters >= UPHILL_MIN_DISTANCE_M
+        // ─── ROLLING TERRAIN DETECTION ────────────────────────────────────────
+        // Check the 1km window: if we've seen both meaningful gain AND loss with multiple
+        // direction changes, this is undulating terrain — not a sustained hill climb.
+        // Fire a contextual "rolling terrain" cue instead of hill-specific coaching.
+        // This prevents GPS drift on flat terrain from triggering false hill cues, because
+        // GPS drift noise is random (it produces direction changes, not sustained single direction).
+        val isRollingTerrain = rollingWindowGainM >= ROLLING_TERRAIN_MIN_GAIN_M &&
+            rollingWindowLossM >= ROLLING_TERRAIN_MIN_LOSS_M &&
+            rollingWindowDirectionChanges >= ROLLING_TERRAIN_MIN_DIRECTION_CHANGES
+
+        val currentKmInt = currentKm.toInt()
+        if (isRollingTerrain &&
+            currentKmInt >= 1 &&
+            currentKmInt - lastRollingTerrainCoachKm >= ROLLING_TERRAIN_COACH_INTERVAL_KM &&
+            now - lastElevationCoachingTime >= ELEVATION_COOLDOWN_MS
         ) {
-            // Primary trigger: elevation metres gained
-            // Secondary validation: grade threshold (but more lenient now to avoid GPS noise)
+            rollingTerrainDetected = true
+            lastRollingTerrainCoachKm = currentKmInt
+            lastElevationCoachingTime = now
+            Log.d("ElevationCoaching", "Rolling terrain: ${rollingWindowGainM.toInt()}m gain, " +
+                "${rollingWindowLossM.toInt()}m loss, ${rollingWindowDirectionChanges} direction changes in last ${(currentKm - rollingWindowStartKm).toInt()}km")
+            triggerElevationCoaching("rolling_terrain", gradePercent, slopeDistanceMeters)
+            return
+        }
+
+        // ─── TRUE HILL COACHING ───────────────────────────────────────────────
+        // Only fires when the slope has been sustained in ONE direction long enough to be a real hill.
+        // If rolling terrain is detected in the window, suppress hill-specific cues — the runner
+        // knows it's undulating; calling every small rise a "hill" feels condescending.
+        if (isRollingTerrain && rollingTerrainDetected) {
+            // Already in rolling terrain mode — don't fire separate uphill/downhill cues
+            return
+        }
+
+        // UPHILL coaching: needs sustained gain AND grade (both required to defeat GPS noise)
+        if (direction == 1 && slopeDistanceMeters >= UPHILL_MIN_DISTANCE_M) {
             val byElevationGain = slopeElevationGain >= UPHILL_ELEVATION_TRIGGER_M
             val byGrade = gradePercent >= UPHILL_GRADE_THRESHOLD
-            
             if (byElevationGain && byGrade) {
-                // Determine intensity based on elevation gain
                 val coachingType = when {
-                    slopeElevationGain >= STEEP_HILL_ELEVATION_M -> "uphill"        // Steep: 25m+
-                    slopeElevationGain >= MODERATE_HILL_ELEVATION_M -> "uphill"     // Moderate: 15m+
-                    slopeElevationGain >= GENTLE_HILL_ELEVATION_M -> "hill_uphill_technique" // Gentle: 8m+
-                    else -> "uphill"
+                    slopeElevationGain >= STEEP_HILL_ELEVATION_M -> "uphill"
+                    slopeElevationGain >= MODERATE_HILL_ELEVATION_M -> "uphill"
+                    else -> "hill_uphill_technique"
                 }
-                
-                Log.d("ElevationCoaching", "Uphill trigger: ${slopeElevationGain.toInt()}m gained (${gradePercent.toInt()}% grade) over ${slopeDistanceMeters.toInt()}m")
+                Log.d("ElevationCoaching", "Uphill: ${slopeElevationGain.toInt()}m (${gradePercent.toInt()}%) over ${slopeDistanceMeters.toInt()}m")
                 lastElevationCoachingTime = now
                 triggerElevationCoaching(coachingType, gradePercent, slopeDistanceMeters)
             }
         }
-        // DOWNHILL coaching: triggered primarily by elevation loss (metres), validated by grade
-        else if (direction == -1 &&
-            slopeDistanceMeters >= DOWNHILL_MIN_DISTANCE_M
-        ) {
-            // Primary trigger: elevation metres lost
-            // Secondary validation: grade threshold (but more lenient now to avoid GPS noise)
+        // DOWNHILL coaching: needs sustained loss AND grade
+        else if (direction == -1 && slopeDistanceMeters >= DOWNHILL_MIN_DISTANCE_M) {
             val byElevationLoss = slopeElevationLoss >= DOWNHILL_ELEVATION_TRIGGER_M
             val byGrade = gradePercent <= DOWNHILL_GRADE_THRESHOLD
-            
             if (byElevationLoss && byGrade) {
                 val remainingDistanceKm = targetDistance?.let { (it - totalDistance) / 1000.0 }
                 if (!downhillFinishTriggered &&
-                    hasRoute &&
+                    (hasGpsElevation || hasRoute) &&
                     remainingDistanceKm != null &&
                     remainingDistanceKm <= DOWNHILL_FINISH_DISTANCE_KM
                 ) {
                     downhillFinishTriggered = true
                     lastElevationCoachingTime = now
-                    Log.d("ElevationCoaching", "Downhill finish trigger: ${slopeElevationLoss.toInt()}m lost, ${remainingDistanceKm}km to go")
+                    Log.d("ElevationCoaching", "Downhill finish: ${slopeElevationLoss.toInt()}m lost, ${remainingDistanceKm}km to go")
                     triggerElevationCoaching("downhill_finish", gradePercent, slopeDistanceMeters)
                     return
                 }
-                
-                // Determine intensity based on elevation loss
                 val coachingType = when {
-                    slopeElevationLoss >= STEEP_HILL_ELEVATION_M -> "downhill"        // Steep: 25m+
-                    slopeElevationLoss >= MODERATE_HILL_ELEVATION_M -> "downhill"     // Moderate: 15m+
-                    slopeElevationLoss >= GENTLE_HILL_ELEVATION_M -> "hill_downhill_technique" // Gentle: 8m+
-                    else -> "downhill"
+                    slopeElevationLoss >= STEEP_HILL_ELEVATION_M -> "downhill"
+                    slopeElevationLoss >= MODERATE_HILL_ELEVATION_M -> "downhill"
+                    else -> "hill_downhill_technique"
                 }
-                
-                Log.d("ElevationCoaching", "Downhill trigger: ${slopeElevationLoss.toInt()}m lost (${gradePercent.toInt()}% grade) over ${slopeDistanceMeters.toInt()}m")
+                Log.d("ElevationCoaching", "Downhill: ${slopeElevationLoss.toInt()}m (${gradePercent.toInt()}%) over ${slopeDistanceMeters.toInt()}m")
                 lastElevationCoachingTime = now
                 triggerElevationCoaching(coachingType, gradePercent, slopeDistanceMeters)
-            }
-        }
-
-        // FLAT TERRAIN coaching: on flat/undulating routes, give terrain-aware insights
-        // every 2km after the first 2km (when there's enough data to analyze)
-        val currentKm = (totalDistance / 1000).toInt()
-        if (direction == 0 && currentKm >= 2 && currentKm - lastFlatTerrainCoachingKm >= 2
-            && now - lastElevationCoachingTime >= ELEVATION_COOLDOWN_MS
-        ) {
-            val distKm = totalDistance / 1000.0
-            val elevPerKm = if (distKm > 0.5) totalElevationGain / distKm else 0.0
-            // Only fire for genuinely flat/undulating routes (< 15m gain/km)
-            if (elevPerKm < 15) {
-                lastFlatTerrainCoachingKm = currentKm
-                lastElevationCoachingTime = now
-                Log.d("ElevationCoaching", "Flat terrain insight at ${currentKm}km: ${elevPerKm.toInt()}m/km elevation")
-                triggerElevationCoaching("flat_terrain", gradePercent, totalDistance)
             }
         }
     }
@@ -3785,7 +3958,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     segmentDistanceMeters = segmentDistanceMeters,
                     totalElevationGain = totalElevationGain,
                     totalElevationLoss = totalElevationLoss,
-                    hasRoute = hasRoute,
+                    hasRoute = hasGpsElevation || hasRoute,  // True when GPS altitude available, not just when planned route loaded
                     coachName = currentUser?.coachName,
                     coachTone = currentUser?.coachTone,
                     coachGender = currentUser?.coachGender,

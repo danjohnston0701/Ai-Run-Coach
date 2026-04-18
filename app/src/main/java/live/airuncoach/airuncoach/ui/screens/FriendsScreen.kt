@@ -70,7 +70,8 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot)
             )
         },
-        containerColor = Colors.backgroundRoot
+        containerColor = Colors.backgroundRoot,
+        contentWindowInsets = WindowInsets(0) // outer Scaffold already applies nav bar insets
     ) { padding ->
         LazyColumn(
             modifier = Modifier

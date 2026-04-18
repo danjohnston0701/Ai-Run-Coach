@@ -72,6 +72,7 @@ fun CoachSettingsScreen(
             )
         },
         containerColor = Colors.backgroundRoot,
+        contentWindowInsets = WindowInsets(0), // outer Scaffold already applies nav bar insets
         bottomBar = {
             // Sticky save button at the bottom
             Surface(

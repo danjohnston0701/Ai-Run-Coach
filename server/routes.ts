@@ -71,6 +71,7 @@ import adaptationRouter from "./routes-adaptation";
 import myDataRouter from "./routes-my-data";
 import achievementsRouter from "./routes-achievements";
 import { registerSessionCoachingRoutes } from "./routes-session-coaching";
+import { registerSamsungCompanionRoutes } from "./routes-samsung-companion";
 import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-resolver";
 import {
   snapTrackToOSMSegments,
@@ -90,6 +91,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/my-data", myDataRouter);
   app.use("/api", achievementsRouter);
   registerSessionCoachingRoutes(app);
+  await registerSamsungCompanionRoutes(app);
 
   // Version probe — tells us immediately which build is running
   app.get("/api/version", (_req: Request, res: Response) => {
@@ -8019,6 +8021,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Publish real-time data (single data point)
+  // ── In-memory coaching cue queue (sessionId → pending cue) ─────────────────
+  // iOS posts a cue here; the next watch data POST response delivers it and clears it.
+  const pendingCues = new Map<string, { text: string; postedAt: number }>();
+
   app.post("/api/garmin-companion/data", companionAuthMiddleware, async (req: Request, res: Response) => {
     try {
       const { userId } = (req as any).companionUser;
@@ -8074,13 +8080,101 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
         .where(eq(garminCompanionSessions.sessionId, data.sessionId));
       
+      // Deliver any pending coaching cue and clear it
+      const pendingCue = pendingCues.get(data.sessionId);
+      if (pendingCue) {
+        pendingCues.delete(data.sessionId);
+        return res.json({ success: true, id: inserted.id, coaching: pendingCue.text });
+      }
+
       res.json({ success: true, id: inserted.id });
     } catch (error: any) {
       console.error("Companion data error:", error);
       res.status(500).json({ error: "Failed to save data" });
     }
   });
-  
+
+  // ── iOS → POST coaching cue for watch ────────────────────────────────────
+  // iOS app POSTs here after AI generates a cue; next watch data push will deliver it.
+  app.post("/api/live-session/cue", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { sessionId, cue } = req.body as { sessionId: string; cue: string };
+      if (!sessionId || !cue) {
+        return res.status(400).json({ error: "sessionId and cue required" });
+      }
+      pendingCues.set(sessionId, { text: cue, postedAt: Date.now() });
+      console.log(`[LiveSession] Coaching cue queued for ${sessionId}: "${cue}"`);
+      res.json({ success: true, queued: true });
+    } catch (error: any) {
+      console.error("Queue cue error:", error);
+      res.status(500).json({ error: "Failed to queue cue" });
+    }
+  });
+
+  // ── Watch → GET pending coaching cue (alternative to cue-in-response) ────
+  // Galaxy Watch / future watches can poll this directly if preferred.
+  app.get("/api/live-session/cue", async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.query.sessionId as string;
+      if (!sessionId) return res.status(400).json({ error: "sessionId required" });
+      const cue = pendingCues.get(sessionId);
+      if (cue) {
+        pendingCues.delete(sessionId);
+        return res.json({ cue: cue.text, delivered: true });
+      }
+      res.json({ cue: null, delivered: false });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to get cue" });
+    }
+  });
+
+  // ── iOS → GET latest metrics from active Garmin session ──────────────────
+  // GarminLiveSessionManager.swift polls this every 3 seconds during a run.
+  // Accepts ?sessionId=xxx  OR  ?userId=xxx (resolves active session automatically).
+  app.get("/api/live-session/metrics", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      let { sessionId } = req.query as { sessionId?: string };
+
+      // If no sessionId supplied, find the user's active session
+      if (!sessionId) {
+        const [active] = await db.select().from(garminCompanionSessions)
+          .where(and(
+            eq(garminCompanionSessions.userId, userId),
+            eq(garminCompanionSessions.status, "active")
+          ))
+          .orderBy(sql`started_at DESC`)
+          .limit(1);
+        sessionId = active?.sessionId;
+      }
+
+      if (!sessionId) {
+        return res.json({ active: false, metrics: null, session: null });
+      }
+
+      const [latest] = await db.select().from(garminRealtimeData)
+        .where(eq(garminRealtimeData.sessionId, sessionId))
+        .orderBy(sql`timestamp DESC`)
+        .limit(1);
+
+      const [session] = await db.select().from(garminCompanionSessions)
+        .where(eq(garminCompanionSessions.sessionId, sessionId))
+        .limit(1);
+
+      res.json({
+        active: !!session,
+        sessionId,
+        session,
+        metrics: latest ?? null,
+        // Also surface any pending cue so iOS UI can show it
+        pendingCue: pendingCues.get(sessionId)?.text ?? null,
+      });
+    } catch (error: any) {
+      console.error("Live session metrics error:", error);
+      res.status(500).json({ error: "Failed to get metrics" });
+    }
+  });
+
   // Publish batch data (multiple data points for efficiency)
   app.post("/api/garmin-companion/data/batch", companionAuthMiddleware, async (req: Request, res: Response) => {
     try {

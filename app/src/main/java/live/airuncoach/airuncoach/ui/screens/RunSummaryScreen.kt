@@ -1774,47 +1774,47 @@ private fun ComprehensiveAnalysisFlagship(analysis: ComprehensiveRunAnalysis) {
         PerformanceScoreCardFlagship(score = analysis.performanceScore)
 
         Text(
-            text = analysis.summary,
+            text = analysis.summary.orEmpty(),
             style = AppTextStyles.body,
             color = Colors.textSecondary
         )
 
-        if (analysis.personalBests.isNotEmpty()) {
+        if (!analysis.personalBests.isNullOrEmpty()) {
             PillHeaderFlagship("Personal Bests", Colors.warning)
             BulletListFlagship(analysis.personalBests, bulletColor = Colors.warning)
         }
 
-        if (analysis.highlights.isNotEmpty()) {
+        if (!analysis.highlights.isNullOrEmpty()) {
             PillHeaderFlagship("Highlights", Colors.success)
             BulletListFlagship(analysis.highlights, bulletColor = Colors.success)
         }
 
-        if (analysis.struggles.isNotEmpty()) {
+        if (!analysis.struggles.isNullOrEmpty()) {
             PillHeaderFlagship("Areas to Improve", Colors.accent)
             BulletListFlagship(analysis.struggles, bulletColor = Colors.accent)
         }
 
-        if (analysis.improvementTips.isNotEmpty()) {
+        if (!analysis.improvementTips.isNullOrEmpty()) {
             PillHeaderFlagship("Coach Tips", Colors.primary)
             ParagraphListFlagship(analysis.improvementTips)
         }
 
-        if (analysis.nextRunSuggestion.isNotBlank()) {
+        if (!analysis.nextRunSuggestion.isNullOrBlank()) {
             PillHeaderFlagship("Next Run", Colors.textSecondary)
             Text(analysis.nextRunSuggestion, style = AppTextStyles.body, color = Colors.textSecondary)
         }
 
-        if (analysis.trainingLoadAssessment.isNotBlank()) {
+        if (!analysis.trainingLoadAssessment.isNullOrBlank()) {
             SectionCardFlagship("Training Load", analysis.trainingLoadAssessment, tag = null)
         }
-        if (analysis.recoveryAdvice.isNotBlank()) {
+        if (!analysis.recoveryAdvice.isNullOrBlank()) {
             SectionCardFlagship("Recovery", analysis.recoveryAdvice, tag = null)
         }
-        if (analysis.wellnessImpact.isNotBlank()) {
+        if (!analysis.wellnessImpact.isNullOrBlank()) {
             SectionCardFlagship("Wellness Impact", analysis.wellnessImpact, tag = "GARMIN")
         }
 
-        TechnicalAnalysisCardsFlagship(analysis.technicalAnalysis)
+        analysis.technicalAnalysis?.let { TechnicalAnalysisCardsFlagship(it) }
         analysis.garminInsights?.let { GarminInsightsCardsFlagship(it) }
     }
 }
@@ -1823,17 +1823,17 @@ private fun ComprehensiveAnalysisFlagship(analysis: ComprehensiveRunAnalysis) {
 private fun BasicAnalysisFlagship(insights: BasicRunInsights) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         PerformanceScoreCardFlagship(score = (insights.overallScore * 10).coerceIn(0, 100))
-        Text(insights.summary, style = AppTextStyles.body, color = Colors.textSecondary)
+        Text(insights.summary.orEmpty(), style = AppTextStyles.body, color = Colors.textSecondary)
 
-        if (insights.highlights.isNotEmpty()) {
+        if (!insights.highlights.isNullOrEmpty()) {
             PillHeaderFlagship("Highlights", Colors.success)
             BulletListFlagship(insights.highlights, bulletColor = Colors.success)
         }
-        if (insights.struggles.isNotEmpty()) {
+        if (!insights.struggles.isNullOrEmpty()) {
             PillHeaderFlagship("Areas to Improve", Colors.accent)
             BulletListFlagship(insights.struggles, bulletColor = Colors.accent)
         }
-        if (insights.tips.isNotEmpty()) {
+        if (!insights.tips.isNullOrEmpty()) {
             PillHeaderFlagship("Coach Tips", Colors.primary)
             ParagraphListFlagship(insights.tips)
         }
@@ -1976,8 +1976,8 @@ private fun GarminInsightsCardsFlagship(analysis: GarminInsights) {
 }
 
 @Composable
-private fun LabeledAnalysisCardFlagship(label: String, body: String, labelColor: Color, iconRes: Int? = null) {
-    if (body.isBlank()) return
+private fun LabeledAnalysisCardFlagship(label: String, body: String?, labelColor: Color, iconRes: Int? = null) {
+    if (body.isNullOrBlank()) return
     Card(
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
         shape = RoundedCornerShape(16.dp),
@@ -1997,7 +1997,7 @@ private fun LabeledAnalysisCardFlagship(label: String, body: String, labelColor:
                 }
                 Text(label, style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold), color = labelColor)
             }
-            Text(body, style = AppTextStyles.small, color = Colors.textSecondary)
+            Text(body.orEmpty(), style = AppTextStyles.small, color = Colors.textSecondary)
         }
     }
 }
@@ -5837,8 +5837,9 @@ private fun AchievementsTabFlagship(
         item {
             when (analysisState) {
                 is AiAnalysisState.Comprehensive -> {
-                    if (analysisState.analysis.personalBests.isNotEmpty()) {
-                        PersonalBestsCardFlagship(analysisState.analysis.personalBests)
+                    val pbs = analysisState.analysis.personalBests
+                    if (!pbs.isNullOrEmpty()) {
+                        PersonalBestsCardFlagship(pbs)
                     } else {
                         EmptyStateCardFlagship("No personal bests detected on this run.")
                     }

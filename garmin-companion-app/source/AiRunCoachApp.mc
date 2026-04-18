@@ -8,6 +8,8 @@ using Toybox.System as Sys;
 
 class AiRunCoachApp extends App.AppBase {
 
+    private var _runView = null;
+
     function initialize() {
         AppBase.initialize();
     }
@@ -25,14 +27,23 @@ class AiRunCoachApp extends App.AppBase {
     // Return RunView as the initial view (no StartView).
     // RunView displays overlay messaging to guide the user through auth & run flow.
     function getInitialView() {
-        var view     = new RunView();
+        _runView  = new RunView();
         var delegate = new RunDelegate();
-        delegate.setView(view);
-        return [view, delegate];
+        delegate.setView(_runView);
+        return [_runView, delegate];
     }
 
     // Handle settings changes (e.g. from Garmin Connect app)
     function onSettingsChanged() {
         Ui.requestUpdate();
+    }
+
+    // Called by DataStreamer.onDataSent when the backend piggybacks a coaching cue
+    // on the metrics POST response.  Forwards to RunView so it can show the overlay.
+    function onCoachingCue(cueText) {
+        if (_runView != null) {
+            _runView.setCoachingCue(cueText);
+            Ui.requestUpdate();
+        }
     }
 }

@@ -4,9 +4,11 @@ const GARMIN_CLIENT_ID = process.env.GARMIN_CLIENT_ID;
 const GARMIN_CLIENT_SECRET = process.env.GARMIN_CLIENT_SECRET;
 
 // Garmin OAuth 2.0 endpoints (PKCE flow)
-// Production environment uses connectapi.garmin.com.
-// diauth.garmin.com was the Development/Integration (DI) sandbox — now deprecated.
-const GARMIN_AUTH_URL = 'https://connectapi.garmin.com/oauth-service/oauth/authorize';
+// IMPORTANT: The Authorization URL is on connect.garmin.com (the user-facing Garmin Connect website).
+// The Token URL is on connectapi.garmin.com (the API backend).
+// Using the old oauth-service/oauth/authorize URL causes "NotAllowedException" because that
+// is the OAuth 1.0a endpoint — it doesn't accept PKCE/OAuth 2.0 parameters.
+const GARMIN_AUTH_URL = 'https://connect.garmin.com/oauthConfirm';
 const GARMIN_TOKEN_URL = 'https://connectapi.garmin.com/oauth-service/oauth/token';
 // Garmin Health API base (for wellness data - works with OAuth 2.0)
 const GARMIN_API_BASE = 'https://apis.garmin.com';

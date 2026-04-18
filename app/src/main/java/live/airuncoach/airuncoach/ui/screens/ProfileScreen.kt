@@ -212,7 +212,11 @@ fun ProfileScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        containerColor = Colors.backgroundRoot
+        containerColor = Colors.backgroundRoot,
+        // The outer MainScreen Scaffold already applies nav bar + status bar insets to the NavHost.
+        // Setting contentWindowInsets = WindowInsets(0) prevents this inner Scaffold from claiming
+        // those insets again, which would cause a ghost padding gap above the bottom nav bar.
+        contentWindowInsets = WindowInsets(0)
     ) { paddingValues ->
 
     Box(

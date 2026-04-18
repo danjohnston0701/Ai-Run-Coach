@@ -135,7 +135,8 @@ fun ConnectedDevicesScreen(
                 )
             )
         },
-        containerColor = Colors.backgroundRoot
+        containerColor = Colors.backgroundRoot,
+        contentWindowInsets = WindowInsets(0) // outer Scaffold already applies nav bar insets
     ) { paddingValues ->
         LazyColumn(
             modifier = Modifier
