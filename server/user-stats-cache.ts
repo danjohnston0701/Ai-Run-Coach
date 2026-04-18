@@ -37,6 +37,7 @@ const PB_DISTANCES = [
   { key: 'mile',    label: 'Mile',          minKm: 1.59,  maxKm: 1.65  },
   { key: '5k',      label: '5K',            minKm: 4.9,   maxKm: 5.2   },
   { key: '10k',     label: '10K',           minKm: 9.9,   maxKm: 10.2  },
+  { key: '20k',     label: '20K',           minKm: 19.8,  maxKm: 20.3  },
   { key: 'half',    label: 'Half Marathon', minKm: 21.0,  maxKm: 21.6  },  // ← was 21.05–21.2, too narrow
   { key: 'marathon',label: 'Marathon',      minKm: 42.0,  maxKm: 42.5  },  // ← also widened
 ] as const;
@@ -49,6 +50,7 @@ const PB_COLUMNS: Record<PbKey, { durationCol: string; runIdCol: string; dateCol
   'mile':     { durationCol: 'pbMileDurationMs',     runIdCol: 'pbMileRunId',     dateCol: 'pbMileDate'     },
   '5k':       { durationCol: 'pb5kDurationMs',       runIdCol: 'pb5kRunId',       dateCol: 'pb5kDate'       },
   '10k':      { durationCol: 'pb10kDurationMs',      runIdCol: 'pb10kRunId',      dateCol: 'pb10kDate'      },
+  '20k':      { durationCol: 'pb20kDurationMs',      runIdCol: 'pb20kRunId',      dateCol: 'pb20kDate'      },
   'half':     { durationCol: 'pbHalfDurationMs',     runIdCol: 'pbHalfRunId',     dateCol: 'pbHalfDate'     },
   'marathon': { durationCol: 'pbMarathonDurationMs', runIdCol: 'pbMarathonRunId', dateCol: 'pbMarathonDate' },
 };
@@ -230,6 +232,9 @@ export async function recomputeForUser(userId: string): Promise<void> {
     pb10kDurationMs:      pbUpdates['pb10kDurationMs'] as number | null,
     pb10kRunId:           pbUpdates['pb10kRunId'] as string | null,
     pb10kDate:            pbUpdates['pb10kDate'] as Date | null,
+    pb20kDurationMs:      pbUpdates['pb20kDurationMs'] as number | null,
+    pb20kRunId:           pbUpdates['pb20kRunId'] as string | null,
+    pb20kDate:            pbUpdates['pb20kDate'] as Date | null,
     pbHalfDurationMs:     pbUpdates['pbHalfDurationMs'] as number | null,
     pbHalfRunId:          pbUpdates['pbHalfRunId'] as string | null,
     pbHalfDate:           pbUpdates['pbHalfDate'] as Date | null,

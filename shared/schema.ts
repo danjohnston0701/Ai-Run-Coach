@@ -1515,6 +1515,10 @@ export const userStats = pgTable("user_stats", {
   pb10kRunId:           varchar("pb_10k_run_id"),
   pb10kDate:            timestamp("pb_10k_date"),
 
+  pb20kDurationMs:      integer("pb_20k_duration_ms"),
+  pb20kRunId:           varchar("pb_20k_run_id"),
+  pb20kDate:            timestamp("pb_20k_date"),
+
   pbHalfDurationMs:     integer("pb_half_duration_ms"),
   pbHalfRunId:          varchar("pb_half_run_id"),
   pbHalfDate:           timestamp("pb_half_date"),

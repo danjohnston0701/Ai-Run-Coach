@@ -265,6 +265,7 @@ private val PB_CATEGORIES = listOf(
     Triple("Mile",         "Mile",          1.609),
     Triple("5K",           "5K",            5.0),
     Triple("10K",          "10K",           10.0),
+    Triple("20K",          "20K",           20.0),
     Triple("Half Marathon","Half Marathon",  21.1),
     Triple("Marathon",     "Marathon",       42.2)
 )

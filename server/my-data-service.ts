@@ -168,6 +168,7 @@ function buildPersonalBestsFromCache(cached: typeof userStats.$inferSelect) {
     { label: 'Mile',         duration: cached.pbMileDurationMs,     runId: cached.pbMileRunId,     date: cached.pbMileDate,     distance: 1.609 },
     { label: '5K',           duration: cached.pb5kDurationMs,       runId: cached.pb5kRunId,       date: cached.pb5kDate,       distance: 5.0 },
     { label: '10K',          duration: cached.pb10kDurationMs,      runId: cached.pb10kRunId,      date: cached.pb10kDate,      distance: 10.0 },
+    { label: '20K',          duration: (cached as any).pb20kDurationMs, runId: (cached as any).pb20kRunId, date: (cached as any).pb20kDate, distance: 20.0 },
     { label: 'Half Marathon', duration: cached.pbHalfDurationMs,    runId: cached.pbHalfRunId,     date: cached.pbHalfDate,     distance: 21.1 },
     { label: 'Marathon',     duration: cached.pbMarathonDurationMs, runId: cached.pbMarathonRunId, date: cached.pbMarathonDate, distance: 42.2 },
   ];
@@ -430,6 +431,7 @@ function countPersonalRecordsInCache(cached: typeof userStats.$inferSelect): num
   if (cached.pbMileDurationMs) count++;
   if (cached.pb5kDurationMs) count++;
   if (cached.pb10kDurationMs) count++;
+  if ((cached as any).pb20kDurationMs) count++;
   if (cached.pbHalfDurationMs) count++;
   if (cached.pbMarathonDurationMs) count++;
   return count;

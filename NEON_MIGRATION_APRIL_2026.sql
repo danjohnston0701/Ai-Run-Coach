@@ -126,6 +126,21 @@ UPDATE runs
     AND duration IS NOT NULL;
 
 -- ============================================================================
+-- 5. ADD 20K PERSONAL BEST COLUMNS TO user_stats
+-- ============================================================================
+-- New PB category between 10K and Half Marathon.
+-- Populated automatically on next recomputeForUser call (or recompute-all).
+
+ALTER TABLE user_stats
+  ADD COLUMN IF NOT EXISTS pb_20k_duration_ms integer;
+
+ALTER TABLE user_stats
+  ADD COLUMN IF NOT EXISTS pb_20k_run_id varchar;
+
+ALTER TABLE user_stats
+  ADD COLUMN IF NOT EXISTS pb_20k_date timestamptz;
+
+-- ============================================================================
 -- Verification queries (uncomment and run to confirm)
 -- ============================================================================
 
