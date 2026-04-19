@@ -933,71 +933,30 @@ private fun StickerOverlayChip(
     val currentOnScale by rememberUpdatedState(onScale)
     val currentContainerSize by rememberUpdatedState(containerSize)
 
-    val baseChipW = 90.dp
-    val baseChipH = 36.dp
-    val chipW = baseChipW * placed.scale
-    val chipH = baseChipH * placed.scale
+    // Fixed button row height so the draggable area offset is stable
+    val buttonRowH = 26.dp
+    val buttonSize = 22.dp
+
+    // Component footprint scales with placed.scale; buttons stay fixed size
+    val baseW = 100.dp
+    val baseH = 64.dp
+    val compW = baseW * placed.scale
+    val compH = baseH * placed.scale
 
     Box(
         modifier = Modifier
             .offset(
-                x = xDp - chipW / 2,
-                y = yDp - chipH / 2
+                x = xDp - compW / 2,
+                y = yDp - compH / 2 - buttonRowH
             )
     ) {
-        // Main draggable chip
-        Surface(
-            shape = RoundedCornerShape(chipH / 2),
-            color = Colors.primary.copy(alpha = 0.85f),
-            border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.3f)),
-            shadowElevation = 6.dp,
-            modifier = Modifier
-                .width(chipW)
-                .height(chipH)
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragEnd = {
-                            currentOnDragEnd(currentPlaced.widgetId)
-                        }
-                    ) { change, dragAmount ->
-                        change.consume()
-                        val newX = currentPlaced.x + dragAmount.x / currentContainerSize.width
-                        val newY = currentPlaced.y + dragAmount.y / currentContainerSize.height
-                        currentOnDrag(currentPlaced.widgetId, newX, newY)
-                    }
-                }
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 8.dp * placed.scale),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                val icon = stickerIcon(widget.icon)
-                Icon(
-                    imageVector = icon,
-                    contentDescription = widget.label,
-                    tint = Colors.buttonText,
-                    modifier = Modifier.size(14.dp * placed.scale)
-                )
-                Spacer(modifier = Modifier.width(4.dp * placed.scale))
-                Text(
-                    text = widget.label,
-                    color = Colors.buttonText,
-                    fontSize = (10 * placed.scale).sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-
-        // Control buttons — positioned above the chip
+        // Fixed-size action buttons — always 22dp regardless of component scale
         Row(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .offset(y = (-22).dp),
+                .height(buttonRowH)
+                .padding(bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             // Scale down
@@ -1010,7 +969,7 @@ private fun StickerOverlayChip(
                 shape = CircleShape,
                 color = Color(0xFF1A2332).copy(alpha = 0.95f),
                 border = BorderStroke(1.dp, Colors.border),
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(buttonSize)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(Icons.Default.Remove, contentDescription = "Smaller", tint = Color.White, modifier = Modifier.size(12.dp))
@@ -1026,7 +985,7 @@ private fun StickerOverlayChip(
                 shape = CircleShape,
                 color = Color(0xFF1A2332).copy(alpha = 0.95f),
                 border = BorderStroke(1.dp, Colors.border),
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(buttonSize)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(Icons.Default.Add, contentDescription = "Larger", tint = Color.White, modifier = Modifier.size(12.dp))
@@ -1037,12 +996,48 @@ private fun StickerOverlayChip(
                 onClick = onRemove,
                 shape = CircleShape,
                 color = Colors.error.copy(alpha = 0.95f),
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(buttonSize)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(Icons.Default.Close, contentDescription = "Remove", tint = Color.White, modifier = Modifier.size(12.dp))
                 }
             }
+        }
+
+        // Draggable component area — user drags this directly, no separate handle
+        Box(
+            modifier = Modifier
+                .offset(y = buttonRowH)
+                .width(compW)
+                .height(compH)
+                .border(
+                    width = 1.5.dp,
+                    color = Color.White.copy(alpha = 0.35f),
+                    shape = RoundedCornerShape(8.dp)
+                )
+                .background(
+                    color = Color.White.copy(alpha = 0.08f),
+                    shape = RoundedCornerShape(8.dp)
+                )
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragEnd = { currentOnDragEnd(currentPlaced.widgetId) }
+                    ) { change, dragAmount ->
+                        change.consume()
+                        val newX = currentPlaced.x + dragAmount.x / currentContainerSize.width
+                        val newY = currentPlaced.y + dragAmount.y / currentContainerSize.height
+                        currentOnDrag(currentPlaced.widgetId, newX, newY)
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            val icon = stickerIcon(widget.icon)
+            Icon(
+                imageVector = icon,
+                contentDescription = widget.label,
+                tint = Color.White.copy(alpha = 0.5f),
+                modifier = Modifier.size(20.dp)
+            )
         }
     }
 }
