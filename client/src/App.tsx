@@ -26,6 +26,8 @@ import PreEvent from "@/pages/PreEvent";
 import Goals from "@/pages/Goals";
 import FriendProfile from "@/pages/FriendProfile";
 import Features from "@/pages/Features";
+import ForgotPassword from "@/pages/ForgotPassword";
+import ResetPassword from "@/pages/ResetPassword";
 import { migrateLocalDataToDatabase } from "@/lib/dataMigration";
 
 function ScrollToTop() {
@@ -93,6 +95,8 @@ function Router() {
       <Route path="/privacy" component={PrivacyPolicy} />
       <Route path="/terms" component={TermsOfUse} />
       <Route path="/login" component={Login} />
+      <Route path="/forgot-password" component={ForgotPassword} />
+      <Route path="/reset-password" component={ResetPassword} />
       <Route path="/features" component={Features} />
       {!hasProfile && (
         <>

@@ -169,11 +169,19 @@ export default function Auth() {
                     </div>
                   </div>
                 </CardContent>
-                <CardFooter>
+                <CardFooter className="flex-col gap-3">
                   <Button type="submit" className="w-full h-12 bg-primary text-background hover:bg-primary/90 font-bold uppercase tracking-widest" disabled={loading}>
                     {loading ? "Logging in..." : "Login"}
                     {!loading && <LogIn className="ml-2 w-4 h-4" />}
                   </Button>
+                  <button
+                    type="button"
+                    onClick={() => setLocation("/forgot-password")}
+                    className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                    data-testid="link-forgot-password"
+                  >
+                    Forgot your password?
+                  </button>
                 </CardFooter>
               </form>
             </TabsContent>
