@@ -11,6 +11,7 @@ import { Router, Request, Response } from 'express';
 import { AuthenticatedRequest, authMiddleware } from './auth';
 import myDataService from './my-data-service';
 import { recomputeForUser } from './user-stats-cache';
+import { refreshRunnerProfile, getRunnerProfile } from './runner-profile-service';
 import { db } from './db';
 import { users } from '@shared/schema';
 import { eq } from 'drizzle-orm';
@@ -179,6 +180,45 @@ router.get('/coaching-summary', authMiddleware, async (req: AuthenticatedRequest
   } catch (error: any) {
     console.error('[CoachingSummary] Error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch coaching summary', message: error.message });
+  }
+});
+
+/**
+ * GET /api/my-data/runner-profile
+ * Return the current AI runner profile ("What I know about you") for the
+ * authenticated user.  Returns null if not yet generated.
+ */
+router.get('/runner-profile', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const profile = await getRunnerProfile(userId);
+
+    res.json({ success: true, data: { profile } });
+  } catch (error: any) {
+    console.error('[RunnerProfile] GET error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch runner profile', message: error.message });
+  }
+});
+
+/**
+ * POST /api/my-data/refresh-runner-profile
+ * Trigger an immediate (awaited) regeneration of the AI runner profile.
+ * Useful after onboarding, goal changes, or injury updates — or for testing.
+ */
+router.post('/refresh-runner-profile', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    await refreshRunnerProfile(userId);
+    const profile = await getRunnerProfile(userId);
+
+    res.json({ success: true, data: { profile } });
+  } catch (error: any) {
+    console.error('[RunnerProfile] Refresh error:', error);
+    res.status(500).json({ success: false, error: 'Failed to refresh runner profile', message: error.message });
   }
 });
 

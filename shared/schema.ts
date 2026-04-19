@@ -1532,6 +1532,21 @@ export const userStats = pgTable("user_stats", {
   highestElevationM:    real("highest_elevation_m"),
   mostConsecutiveRuns:  integer("most_consecutive_runs").default(0),
   goalsAchieved:        integer("goals_achieved").default(0),
+
+  // ── AI Runner Profile — "What I know about you" ──────────────────────────
+  // A living, AI-generated plain-text summary of this runner. Updated after
+  // every run. Injected into AI prompts across the app (plan generation,
+  // pre-run insights, route suggestions, in-run coaching, post-run analysis)
+  // so every feature has immediate personal context without re-joining tables.
+  //
+  // Example content:
+  //   "Dan is an intermediate runner, 34M, training for a half marathon in
+  //    June. Averages 3 runs/week, 25km/week. Strong on flat tempo runs but
+  //    struggles with hills — often gets a stitch at ~3km on hilly routes.
+  //    Best 5K: 24:12 (improving). Current plan: Week 6 of 12. Last run: 8km
+  //    easy, felt good. Focus: build aerobic base, avoid overstriding."
+  aiRunnerProfile:      text("ai_runner_profile"),
+  aiRunnerProfileUpdatedAt: timestamp("ai_runner_profile_updated_at"),
 });
 
 export type UserStats = typeof userStats.$inferSelect;

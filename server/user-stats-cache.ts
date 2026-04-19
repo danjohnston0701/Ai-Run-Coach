@@ -28,6 +28,7 @@
 import { db } from './db';
 import { runs, userStats, goals } from '@shared/schema';
 import { eq, and, gte, lte, isNotNull, count, sum, avg, max, min, sql } from 'drizzle-orm';
+import { refreshRunnerProfile } from './runner-profile-service';
 
 // Distance band definitions for PB categories (in km).
 // Half marathon band is deliberately wide (21.0–21.6) because GPS tracks 21.097km
@@ -82,6 +83,12 @@ export async function onRunSaved(userId: string, run: {
     // Non-fatal: My Data screen has a live fallback, cache miss is graceful
     console.error(`[UserStatsCache] Failed to update stats for user ${userId}:`, error);
   }
+
+  // Refresh AI runner profile non-blocking — fire and forget.
+  // If it fails the profile just stays at its last value (graceful degradation).
+  refreshRunnerProfile(userId).catch(err =>
+    console.error(`[UserStatsCache] Runner profile refresh failed for ${userId}:`, err),
+  );
 }
 
 /**

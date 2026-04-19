@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import polyline from '@mapbox/polyline';
+import { runnerProfileBlock } from './runner-profile-service';
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -52,7 +53,8 @@ export async function generateAIRoutesWithGoogle(
   startLat: number,
   startLng: number,
   targetDistanceKm: number,
-  activityType: string = 'run'
+  activityType: string = 'run',
+  runnerProfile?: string | null
 ): Promise<EnhancedRoute[]> {
   console.log(`[AI Route Gen] 🤖 Using OpenAI to design ${targetDistanceKm}km circuits`);
   
@@ -60,7 +62,7 @@ export async function generateAIRoutesWithGoogle(
   const nearbyFeatures = await discoverNearbyFeatures(startLat, startLng, targetDistanceKm);
   
   // Step 2: Use OpenAI to design 5 intelligent circuit routes
-  const aiRoutes = await designCircuitsWithAI(startLat, startLng, targetDistanceKm, nearbyFeatures);
+  const aiRoutes = await designCircuitsWithAI(startLat, startLng, targetDistanceKm, nearbyFeatures, runnerProfile);
   
   console.log(`[AI Route Gen] 🎨 OpenAI designed ${aiRoutes.length} circuit routes`);
   
@@ -217,7 +219,8 @@ async function designCircuitsWithAI(
   startLat: number,
   startLng: number,
   targetDistance: number,
-  nearbyFeatures: any[]
+  nearbyFeatures: any[],
+  runnerProfile?: string | null
 ): Promise<AIGeneratedRoute[]> {
   
   const featuresContext = nearbyFeatures.length > 0
@@ -278,7 +281,7 @@ IMPORTANT: Ensure waypoints form actual circles/loops, not straight lines!`;
       messages: [
         {
           role: 'system',
-          content: 'You are an expert running route designer specializing in creating circular loop routes. You understand geography, street patterns, and how to create safe, interesting running circuits.'
+          content: `You are an expert running route designer specializing in creating circular loop routes. You understand geography, street patterns, and how to create safe, interesting running circuits.${runnerProfileBlock(runnerProfile)}`
         },
         {
           role: 'user',

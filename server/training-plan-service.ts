@@ -11,6 +11,7 @@ import { eq, and, desc, gte } from "drizzle-orm";
 import { getCurrentFitness } from "./fitness-service";
 import { HeartRateZones } from "./heart-rate-zones"; // Assuming we create this utility
 import { generateSessionInstructions } from "./session-coaching-service";
+import { getRunnerProfile, runnerProfileBlock } from "./runner-profile-service";
 import OpenAI from "openai";
 
 const openai = new OpenAI({
@@ -541,12 +542,15 @@ If runner has NO previous runs:
 - estimatedWeeklyMileage: appropriate starting point for a beginner
 - focusAreas: should include "establish baseline", "build aerobic foundation", "injury prevention"`;
 
+    // Fetch AI runner profile for richer personalisation
+    const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
+
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: "You are an expert running coach who creates scientifically-sound training plans. Always respond with valid JSON only, no extra text."
+          content: `You are an expert running coach who creates scientifically-sound training plans. Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunnerProfile)}`
         },
         {
           role: "user",
@@ -955,12 +959,14 @@ Recommend adaptations in JSON format:
   "continueAsIs": false
 }`;
 
+    const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
+
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: "You are an expert running coach providing training plan adaptations. Respond with JSON only."
+          content: `You are an expert running coach providing training plan adaptations. Respond with JSON only.${runnerProfileBlock(aiRunnerProfile)}`
         },
         {
           role: "user",
@@ -1128,13 +1134,14 @@ Provide your assessment in JSON format:
   ]
 }`;
 
+        const aiRunnerProfileForReassess = await getRunnerProfile(userId).catch(() => null);
+
         const response = await openai.chat.completions.create({
           model: "gpt-4o",
           messages: [
             {
               role: "system",
-              content:
-                "You are an expert running coach providing training plan reassessments based on run data. Respond with JSON only. Be balanced - not every run requires plan changes.",
+              content: `You are an expert running coach providing training plan reassessments based on run data. Respond with JSON only. Be balanced - not every run requires plan changes.${runnerProfileBlock(aiRunnerProfileForReassess)}`,
             },
             {
               role: "user",

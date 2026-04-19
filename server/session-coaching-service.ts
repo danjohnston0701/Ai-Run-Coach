@@ -7,6 +7,7 @@ import {
   type GenerateSessionCoachingParams,
   type SessionCoachingPlan,
 } from "./ai-service";
+import { getRunnerProfile, runnerProfileBlock } from "./runner-profile-service";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -81,6 +82,9 @@ export async function determineSessonCoachingTone(
   // Build session characteristics summary
   const sessionCharacteristics = buildSessionCharacteristics(request);
 
+  // Fetch AI runner profile for hyper-personalised tone selection
+  const aiRunnerProfile = await getRunnerProfile(request.userId).catch(() => null);
+
   // Call OpenAI to determine optimal tone
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -102,7 +106,7 @@ Your recommendation should sometimes OVERRIDE their stated preference if the ses
 For example: An elite runner doing an easy recovery run should get a light, playful tone (not serious/direct).
 A beginner doing their first tempo session might need more encouragement and detailed guidance.
 
-You must respond with ONLY valid JSON (no markdown, no code blocks).`,
+You must respond with ONLY valid JSON (no markdown, no code blocks).${runnerProfileBlock(aiRunnerProfile)}`,
       },
       {
         role: "user",
@@ -273,10 +277,13 @@ export async function generateSessionInstructions(
   plannedWorkoutId: string,
   workoutData: SessionToneRequest
 ) {
+  // Fetch AI runner profile once — reuse in both parallel calls
+  const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
+
   // Run tone determination and session design in parallel
   const [toneDecision, sessionDesign] = await Promise.all([
     determineSessonCoachingTone({ userId, plannedWorkoutId, ...workoutData }),
-    generateAiSessionDesign(workoutData),
+    generateAiSessionDesign(workoutData, aiRunnerProfile),
   ]);
 
   return {
@@ -296,7 +303,7 @@ export async function generateSessionInstructions(
  *
  * Returns both as a single AI call to keep latency and cost low.
  */
-async function generateAiSessionDesign(workout: SessionToneRequest): Promise<{
+async function generateAiSessionDesign(workout: SessionToneRequest, aiRunnerProfile?: string | null): Promise<{
   preRunBrief: string;
   sessionStructure: any;
 }> {
@@ -310,7 +317,7 @@ Your job is to:
 The briefing should be SPECIFIC to this session — not generic. Mention the exact distances, intensities, and what to feel.
 The session structure must include coaching trigger messages that are ACTIVE and INSTRUCTIVE, not just descriptive.
 
-You must respond with ONLY valid JSON (no markdown, no code blocks).`;
+You must respond with ONLY valid JSON (no markdown, no code blocks).${runnerProfileBlock(aiRunnerProfile)}`;
 
   const userPrompt = `SESSION TO DESIGN:
 ${sessionDesc}

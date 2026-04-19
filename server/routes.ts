@@ -4,6 +4,7 @@ import { eq, and, or, gte, lt, desc, lte, count } from "drizzle-orm";
 import { storage } from "./storage";
 import { db } from "./db";
 import { onRunSaved, onRunDeleted } from "./user-stats-cache";
+import { getRunnerProfile, runnerProfileBlock } from "./runner-profile-service";
 import { 
   garminWellnessMetrics, connectedDevices, garminActivities, garminBodyComposition, 
   runs, garminRealtimeData, garminCompanionSessions,
@@ -1495,9 +1496,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Strip heavy arrays to keep payload small for OpenAI
       const { gpsData, heartRateData, routePoints, splitData, ...runSummary } = run as any;
 
-      const user = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-      const coachName = (user[0] as any)?.coachName || "Coach";
-      const coachPersonality = (user[0] as any)?.coachPersonality || "motivating";
+      const [userRows, aiRunnerProfile] = await Promise.all([
+        db.select().from(users).where(eq(users.id, userId)).limit(1),
+        getRunnerProfile(userId).catch(() => null),
+      ]);
+      const coachName = (userRows[0] as any)?.coachName || "Coach";
+      const coachPersonality = (userRows[0] as any)?.coachPersonality || "motivating";
 
       const contextJson = JSON.stringify(runSummary, null, 2);
 
@@ -1513,7 +1517,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         messages: [
           {
             role: "system",
-            content: `You are ${coachName}, a ${coachPersonality} running coach. Write in markdown format. Be concise but insightful. Keep response under 300 words.`
+            content: `You are ${coachName}, a ${coachPersonality} running coach. Write in markdown format. Be concise but insightful. Keep response under 300 words.${runnerProfileBlock(aiRunnerProfile)}`
           },
           { role: "user", content: prompt }
         ],
@@ -1726,12 +1730,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Missing required fields: startLat, startLng, distance" });
       }
       
+      const userId = (req as AuthenticatedRequest).user?.userId;
+      const aiRunnerProfile = userId
+        ? await getRunnerProfile(userId).catch(() => null)
+        : null;
+
       const routeGenAI = await import("./route-generation-ai");
       const routes = await routeGenAI.generateAIRoutesWithGoogle(
         parseFloat(startLat),
         parseFloat(startLng),
         parseFloat(distance),
-        activityType || 'run'
+        activityType || 'run',
+        aiRunnerProfile,
       );
       
       console.log("[API] ✅ Generated AI routes count:", routes.length);
@@ -7243,6 +7253,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         weatherImpact: weatherImpactData,
         runnerName: req.body.runnerName || user?.name || undefined,
         fitnessLevel: user?.fitnessLevel || undefined,
+        runnerProfile: await getRunnerProfile(req.user!.userId).catch(() => null),
         // Training plan context for personalized coaching
         trainingPlanId: trainingPlanId,
         planGoalType: planGoalType,
@@ -7408,6 +7419,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         weatherImpact,
         runnerName: req.body.runnerName || user?.name || undefined,
         fitnessLevel: user?.fitnessLevel || undefined,
+        runnerProfile: await getRunnerProfile(req.user!.userId).catch(() => null),
         // Training plan context — enables workout-specific coaching briefings
         trainingPlanId,
         planGoalType,
@@ -7521,6 +7533,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return ai.buildTTSInstructions(coachAccent, coachTone, coachGender, coachName);
   };
 
+  // Helper: optionally fetch runner profile if userId is provided in the coaching request body.
+  // Silently returns null if not available so in-run coaching degrades gracefully.
+  const getCoachingProfile = async (body: any): Promise<string | null> => {
+    const uid = body.userId ?? body.user_id;
+    if (!uid) return null;
+    return getRunnerProfile(Number(uid)).catch(() => null);
+  };
+
   // Pace Update Coaching with TTS
   app.post("/api/coaching/pace-update", async (req: Request, res: Response) => {
     try {
@@ -7535,7 +7555,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       req.body.coachTone = effectiveTone;
 
       const aiService = await import("./ai-service");
-      const message = await aiService.generatePaceUpdate(req.body);
+      const runnerProfile = await getCoachingProfile(req.body);
+      const message = await aiService.generatePaceUpdate({ ...req.body, runnerProfile });
       
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
       let base64Audio: string | null = null;
@@ -7574,7 +7595,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       req.body.coachTone = effectiveTone;
 
       const aiService = await import("./ai-service");
-      const message = await aiService.generateStruggleCoaching(req.body);
+      const runnerProfile = await getCoachingProfile(req.body);
+      const message = await aiService.generateStruggleCoaching({ ...req.body, runnerProfile });
       
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
       let base64Audio: string | null = null;
@@ -7602,7 +7624,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/coaching/cadence-coaching", async (req: Request, res: Response) => {
     try {
       const aiService = await import("./ai-service");
-      const message = await aiService.generateCadenceCoaching(req.body);
+      const runnerProfile = await getCoachingProfile(req.body);
+      const message = await aiService.generateCadenceCoaching({ ...req.body, runnerProfile });
       
       // Generate TTS audio with user's voice settings (resilient - falls back to text-only)
       let base64Audio: string | null = null;
@@ -7631,7 +7654,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/coaching/elevation-coaching", async (req: Request, res: Response) => {
     try {
       const aiService = await import("./ai-service");
-      const message = await aiService.getElevationCoaching(req.body);
+      const runnerProfile = await getCoachingProfile(req.body);
+      const message = await aiService.getElevationCoaching({ ...req.body, runnerProfile });
       
       // Generate TTS audio with user's voice settings
       let base64Audio: string | null = null;
@@ -7660,7 +7684,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/coaching/elite-coaching", async (req: Request, res: Response) => {
     try {
       const aiService = await import("./ai-service");
-      const message = await aiService.generateEliteCoaching(req.body);
+      const runnerProfile = await getCoachingProfile(req.body);
+      const message = await aiService.generateEliteCoaching({ ...req.body, runnerProfile });
 
       // Skip TTS if AI returned empty (e.g. no terrain coaching for route-less runs)
       if (!message) {
@@ -7704,7 +7729,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       req.body.coachTone = effectiveTone;
 
       const aiService = await import("./ai-service");
-      const message = await aiService.generatePhaseCoaching(req.body);
+      const runnerProfile = await getCoachingProfile(req.body);
+      const message = await aiService.generatePhaseCoaching({ ...req.body, runnerProfile });
       
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
       let base64Audio: string | null = null;
@@ -7882,6 +7908,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         runnerAge,
         fitnessLevel: req.body.fitnessLevel ?? (user as any)?.fitnessLevel ?? undefined,
         runnerName: req.body.runnerName ?? user?.name ?? undefined,
+        runnerProfile: await getRunnerProfile(req.user!.userId).catch(() => null),
       });
       
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)

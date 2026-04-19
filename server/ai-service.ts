@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { COACHING_PHASE_PROMPT, determinePhase, type CoachingPhase } from "../shared/coaching-statements";
+import { runnerProfileBlock } from "./runner-profile-service";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
@@ -242,6 +243,7 @@ export interface CoachingContext {
   coachTone?: string;
   coachAccent?: string;
   totalDistance?: number;
+  runnerProfile?: string | null; // AI runner profile — "What I know about you"
 }
 
 export async function getCoachingResponse(message: string, context: CoachingContext): Promise<string> {
@@ -270,6 +272,7 @@ export async function generatePreRunCoaching(params: {
   coachName: string;
   coachTone: string;
   coachAccent?: string;
+  runnerProfile?: string | null;
 }): Promise<string> {
   const { distance, elevationGain, elevationLoss, difficulty, activityType, weather, coachName, coachTone, coachAccent } = params;
   
@@ -290,7 +293,7 @@ Be encouraging, specific to the conditions, and give one actionable tip. Speak n
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep responses brief, encouraging, and actionable. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep responses brief, encouraging, and actionable. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock((params as any).runnerProfile)}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 120,
@@ -378,6 +381,7 @@ export async function generatePaceUpdate(params: {
   runnerAge?: number;
   // Historical context
   runHistory?: RunHistoryStats;
+  runnerProfile?: string | null;
 }): Promise<string> {
   const { distance, targetDistance, currentPace, elapsedTime, coachName, coachTone, isSplit, splitKm, splitPace, currentGrade, totalElevationGain, isOnHill, kmSplits, hasRoute, fitnessLevel, runnerName, runHistory } = params;
   const accentRule = accentDirective((params as any).coachAccent);
@@ -491,7 +495,7 @@ Give a very brief (1-2 sentences) pace check-in. MUST cite their pace (${spokenC
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). When run history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(hasRoute || (typeof currentGrade === 'number' && Math.abs(currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}CRITICAL: NEVER praise a slow split when the runner is behind their target pace. Be honest about pace — if they need to pick it up, tell them clearly. ${toneDirective(coachTone)}${accentRule ? ' ' + accentRule : ''}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). When run history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(hasRoute || (typeof currentGrade === 'number' && Math.abs(currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}CRITICAL: NEVER praise a slow split when the runner is behind their target pace. Be honest about pace — if they need to pick it up, tell them clearly. ${toneDirective(coachTone)}${accentRule ? ' ' + accentRule : ''}${runnerProfileBlock(params.runnerProfile)}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 110,
@@ -501,7 +505,7 @@ Give a very brief (1-2 sentences) pace check-in. MUST cite their pace (${spokenC
   return completion.choices[0].message.content || (isSplit ? `Kilometer ${splitKm} done at ${spokenSplitPace}. Keep it up!` : "Looking good, keep this pace!");
 }
 
-export async function generateRunSummary(runData: any): Promise<any> {
+export async function generateRunSummary(runData: any, runnerProfile?: string | null): Promise<any> {
   const prompt = `Analyze this run and provide a brief summary with highlights, struggles, and tips:
 Run Data:
 - Distance: ${runData.distance}km
@@ -516,7 +520,7 @@ Provide response as JSON with fields: highlights (array), struggles (array), tip
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: "You are an expert running coach providing post-run analysis. Respond only with valid JSON." },
+      { role: "system", content: `You are an expert running coach providing post-run analysis. Respond only with valid JSON.${runnerProfileBlock(runnerProfile)}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 500,
@@ -563,6 +567,7 @@ export async function generatePhaseCoaching(params: {
   runnerAge?: number;
   runnerWeight?: number;
   runnerHeight?: number;
+  runnerProfile?: string | null;
 }): Promise<string> {
   const { phase, distance, targetDistance, elapsedTime, currentPace, currentGrade, totalElevationGain, heartRate, cadence, coachName, coachTone, coachAccent, coachGender, activityType, hasRoute, targetPace, targetTime, triggerType, navigationInstruction, navigationDistance, fitnessLevel, runnerName, runnerAge, runnerWeight, runnerHeight } = params;
   
@@ -720,7 +725,7 @@ You MUST include the actual direction (left, right, straight, etc.) and street n
 Be concise — the runner needs to hear this quickly. Add a tiny bit of coach personality but prioritise clarity.
 Examples of good output: "Quick right turn onto May Street, looking good!", "Left here onto Dublin Road, keep that rhythm!"`;
 
-    const navSystemMsg = `You are ${coachName}, a ${coachTone} running coach delivering a navigation cue. Be extremely brief and clear — max 1 sentence, max 15 words. The direction must be unmistakable. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}`;
+    const navSystemMsg = `You are ${coachName}, a ${coachTone} running coach delivering a navigation cue. Be extremely brief and clear — max 1 sentence, max 15 words. The direction must be unmistakable. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`;
 
     const navCompletion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -853,7 +858,7 @@ ${progressPercent > 80 ? "They're in the final stretch — be extra motivating!"
 Do NOT use markdown, emojis, or bullet points — this will be spoken aloud.
 Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight into the pace coaching.${runnerFirstName ? ` The runner's name is ${runnerFirstName} — use it naturally but not as a greeting.` : ''}`;
 
-    const paceSystemMsg = `You are ${coachName}, a ${coachTone} running coach giving pace guidance. Be specific with pace numbers (use "X minutes Y seconds per kilometre" format, not "X:YY"). Keep it concise (2-3 sentences). NEVER start with greetings. NEVER praise a slow pace as good when the runner is behind target — be honest and specific. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}`;
+    const paceSystemMsg = `You are ${coachName}, a ${coachTone} running coach giving pace guidance. Be specific with pace numbers (use "X minutes Y seconds per kilometre" format, not "X:YY"). Keep it concise (2-3 sentences). NEVER start with greetings. NEVER praise a slow pace as good when the runner is behind target — be honest and specific. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`;
 
     const paceCompletion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -992,7 +997,7 @@ CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", "Hello
 
 CRITICAL: You MUST weave in at least 2 specific data points from the Runner Status above (e.g. their actual pace like "${spokenPhasePace}", distance "${distance.toFixed(1)}km", time "${timeFormatted}", cadence, heart rate). Runners want to hear their real numbers — do NOT give vague encouragement without citing their actual stats.${targetPace ? ` You MUST tell the runner whether they are on track for their target pace of ${spokenTargetPace}. ${paceVerdict} — communicate this clearly and honestly. Do NOT praise slow pace when they are behind target.` : ''}${targetTime && targetTime > 0 ? ` You MUST mention whether they are on track for their target time of ${formatDurationForTTS(targetTime)}.` : ''}${cadenceCoachingDirective ? ' You MUST include the cadence coaching directive above.' : ''}${elevationInstruction ? ' You MUST acknowledge the elevation context.' : ''}${hasRoute === true && !elevationInstruction ? ' Consider terrain if relevant.' : ''}`;
 
-    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful — always cite the runner's actual numbers (pace, distance, time etc). NEVER start with greetings like "Hey there", "Hey!", "Hi!" — jump straight into coaching. NEVER praise a poor split or slow pace when the runner is behind target — be honest and direct. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}`;
+    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful — always cite the runner's actual numbers (pace, distance, time etc). NEVER start with greetings like "Hey there", "Hey!", "Hi!" — jump straight into coaching. NEVER praise a poor split or slow pace when the runner is behind target — be honest and direct. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`;
   }
 
   const completion = await openai.chat.completions.create({
@@ -1047,6 +1052,7 @@ export async function generateIntervalCoaching(params: {
   coachGender?: string;
   fitnessLevel?: string;
   runnerName?: string;
+  runnerProfile?: string | null;
 }): Promise<string> {
   const {
     intervalNumber,
@@ -1106,7 +1112,8 @@ Give 1–2 punchy, direct sentences. ${isWorkPhase ? 'Push them hard but safely.
   const systemMsg = buildCoachingSystemPrompt({
     coachName,
     coachTone,
-    activityType: 'interval running'
+    activityType: 'interval running',
+    runnerProfile: params.runnerProfile,
   });
 
   try {
@@ -1150,6 +1157,7 @@ export async function generateStruggleCoaching(params: {
   runHistory?: RunHistoryStats;
   // Coaching plan context
   targetHeartRateZone?: number; // 1-5; if Zone 1-2, struggle coaching is not relevant
+  runnerProfile?: string | null;
 }): Promise<string> {
   const { distance, elapsedTime, currentPace, baselinePace, paceDropPercent, currentGrade, totalElevationGain, coachName, coachTone, coachAccent, hasRoute, fitnessLevel, runnerName, runHistory, targetHeartRateZone } = params;
   
@@ -1224,7 +1232,7 @@ Give a brief (1-2 sentences) supportive message tailored to this runner's fitnes
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Be supportive during tough moments — always reference actual data. Keep it brief. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Be supportive during tough moments — always reference actual data. Keep it brief. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 100,
@@ -1283,6 +1291,7 @@ export async function generateCadenceCoaching(params: {
   coachName?: string;
   coachTone?: string;
   coachAccent?: string;
+  runnerProfile?: string | null;
 }): Promise<string> {
   const { cadence, strideLength, strideZone, currentPace, speed, distance, elapsedTime,
     heartRate, userHeight, userWeight, userAge,
@@ -1414,7 +1423,7 @@ Give a coaching message (2-3 sentences). IMPORTANT: Tell them their PERSONALISED
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, an elite ${coachTone} running biomechanics coach. You specialize in cadence optimization and stride analysis. Give specific, actionable technique coaching — tell the runner exactly what to change and how. Reference actual numbers. No emojis. ${PACE_FORMAT_RULE} Keep it to 3-4 sentences that can be spoken in under 20 seconds. ${toneDirective(coachTone)}${cadenceAccentRule ? ' ' + cadenceAccentRule : ''}` },
+      { role: "system", content: `You are ${coachName}, an elite ${coachTone} running biomechanics coach. You specialize in cadence optimization and stride analysis. Give specific, actionable technique coaching — tell the runner exactly what to change and how. Reference actual numbers. No emojis. ${PACE_FORMAT_RULE} Keep it to 3-4 sentences that can be spoken in under 20 seconds. ${toneDirective(coachTone)}${cadenceAccentRule ? ' ' + cadenceAccentRule : ''}${runnerProfileBlock(params.runnerProfile)}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 200,
@@ -1495,6 +1504,7 @@ export async function getElevationCoaching(params: {
   change?: string;
   grade?: number;
   upcoming?: string;
+  runnerProfile?: string | null;
 }): Promise<string> {
   const coachName = params.coachName || 'Coach';
   const coachTone = params.coachTone || 'energetic';
@@ -1622,7 +1632,7 @@ CRITICAL RULES:
 - Correlate metrics: "your pace dropped 15 seconds on that climb but your heart rate stayed controlled — that's textbook hill management"
 - Give ONE actionable technique cue specific to the current terrain
 - Keep it to 2-3 sentences maximum — this is spoken while they're running
-- ${toneDirective(coachTone)}${params.coachAccent ? '\n- ' + accentDirective(params.coachAccent) : ''}`;
+- ${toneDirective(coachTone)}${params.coachAccent ? '\n- ' + accentDirective(params.coachAccent) : ''}` + runnerProfileBlock(params.runnerProfile);
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -1664,6 +1674,7 @@ export async function generateEmotionalCoaching(params: {
   coachGender?: string;
   runnerName?: string;
   runHistory?: any;
+  runnerProfile?: string | null;
 }): Promise<string> {
   const {
     category,
@@ -1778,7 +1789,7 @@ Make it feel personal and genuine — reference something specific about their r
     messages: [
       {
         role: "system",
-        content: `You are ${coachName}, a ${coachTone} running coach delivering emotional coaching. Keep it brief (2-3 sentences max), genuine, and impactful. NEVER start with greetings. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}`
+        content: `You are ${coachName}, a ${coachTone} running coach delivering emotional coaching. Keep it brief (2-3 sentences max), genuine, and impactful. NEVER start with greetings. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`
       },
       { role: "user", content: prompt }
     ],
@@ -2036,6 +2047,9 @@ function buildCoachingSystemPrompt(context: CoachingContext): string {
       prompt += `\n\n${accentRule}`;
     }
   }
+
+  // Inject AI runner profile if available — gives every in-run cue full personal context
+  prompt += runnerProfileBlock(context.runnerProfile);
   
   return prompt;
 }
@@ -2361,6 +2375,7 @@ export async function generateWellnessAwarePreRunBriefing(params: {
   workoutType?: string;
   workoutIntensity?: string;
   workoutDescription?: string;
+  runnerProfile?: string | null;
 }): Promise<{
   briefing: string;
   intensityAdvice: string;
@@ -2538,7 +2553,7 @@ Respond as JSON with fields: briefing, intensityAdvice, weatherAdvice, warnings 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: `You are ${coachName}, a ${coachTone} running coach who uses biometric data for personalized coaching. Respond only with valid JSON. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}` },
+        { role: "system", content: `You are ${coachName}, a ${coachTone} running coach who uses biometric data for personalized coaching. Respond only with valid JSON. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock((params as any).runnerProfile)}` },
         { role: "user", content: prompt }
       ],
       max_tokens: 600,
@@ -2676,6 +2691,7 @@ export async function generateHeartRateCoaching(params: {
   runnerAge?: number;
   fitnessLevel?: string;
   runnerName?: string;
+  runnerProfile?: string | null;
 }): Promise<string> {
   const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes, coachName, coachTone, coachAccent, wellness, runnerAge, fitnessLevel, runnerName } = params;
 
@@ -2727,7 +2743,7 @@ Give a brief (1-2 sentences) heart rate coaching tip tailored to this runner's a
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: `You are ${coachName}, giving brief real-time HR coaching. Always cite the runner's actual heart rate and zone. Keep it to 1-2 short sentences. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}` },
+        { role: "system", content: `You are ${coachName}, giving brief real-time HR coaching. Always cite the runner's actual heart rate and zone. Keep it to 1-2 short sentences. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}` },
         { role: "user", content: prompt }
       ],
       max_tokens: 80,
@@ -2899,6 +2915,7 @@ export async function generateComprehensiveRunAnalysis(params: {
     triggeredAt: Date;
   }>;
   expectedSessionGoal?: string;
+  runnerProfile?: string | null;
 }): Promise<ComprehensiveRunAnalysis> {
   const { runData, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent, linkedPlanId, planGoalType, planProgressWeek, planProgressWeeks, workoutType, workoutIntensity, workoutDescription, sessionInstructions, coachingEvents, expectedSessionGoal } = params;
   
@@ -3291,7 +3308,7 @@ RESPONSE STYLE:
 - Reference their previous runs when analyzing patterns
 - Make personalized recommendations based on their fitness level and goals
 
-Respond only with valid JSON. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}`
+Respond only with valid JSON. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`
         },
         { role: "user", content: prompt }
       ],
@@ -3512,6 +3529,7 @@ export interface EliteCoachingParams {
   planGoalType?: string;      // 5k | 10k | half_marathon | marathon
   planWeekNumber?: number;
   planTotalWeeks?: number;
+  runnerProfile?: string | null;
 }
 
 export async function generateEliteCoaching(params: EliteCoachingParams): Promise<string> {
@@ -3892,7 +3910,7 @@ ${PACE_FORMAT_RULE}
 
 Keep it to 2-3 spoken sentences (under 20 seconds of audio). Every word must add value.`;
 
-  const systemMsg = `You are ${coachName}, an elite ${coachTone} running coach delivering real-time audio coaching during a run. You combine data-driven insight with elite technique coaching. Reference the runner's actual numbers. Never give empty motivation — every word is backed by data or technique knowledge. ${systemExtra} ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}`;
+  const systemMsg = `You are ${coachName}, an elite ${coachTone} running coach delivering real-time audio coaching during a run. You combine data-driven insight with elite technique coaching. Reference the runner's actual numbers. Never give empty motivation — every word is backed by data or technique knowledge. ${systemExtra} ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${runnerProfileBlock(params.runnerProfile)}`;
 
   try {
     const completion = await openai.chat.completions.create({
@@ -3949,6 +3967,7 @@ export interface GenerateSessionCoachingParams {
   coachName?: string;
   coachTone?: string;
   coachAccent?: string;
+  aiRunnerProfile?: string | null; // AI "What I know about you" text — separate from structured runnerProfile
   recentRuns?: Array<{
     distanceKm: number;
     durationMinutes: number;
@@ -4130,7 +4149,7 @@ CRITICAL RULES:
 
 ${toneDirective(coachTone)}
 ${accentDirective(params.coachAccent)}
-
+${runnerProfileBlock(params.aiRunnerProfile)}
 You must respond with ONLY valid JSON (no markdown, no code blocks).`;
 
   const userPrompt = `${runnerContext}
