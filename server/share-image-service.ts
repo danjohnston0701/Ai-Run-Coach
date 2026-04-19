@@ -110,7 +110,8 @@ const C = {
 
 const FONT = `'SF Pro Display', 'Inter', 'Helvetica Neue', Arial, sans-serif`;
 
-const LOGO_ZONE_H = 170;
+const LOGO_ZONE_H = 185;
+const LOGO_GRADIENT_H = 90; // gradient bleed above the solid banner
 
 export const TEMPLATES: ShareTemplate[] = [
   {
@@ -1169,34 +1170,67 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
   }
 
   const logoBuffer = await getLogoBuffer();
-  if (logoBuffer) {
-    const logoSize = 129; // 86 * 1.5
-    const logoX = 36;
-    const logoY = h - LOGO_ZONE_H + Math.round((LOGO_ZONE_H - logoSize) / 2);
-    const textX = logoX + logoSize + 18;
+  {
+    // ── Premium brand banner ──────────────────────────────────────────
+    const bannerTop = h - LOGO_ZONE_H;
+    const gradTop   = bannerTop - LOGO_GRADIENT_H;
 
-    const logoBg = "#0A0A1A";
-    const logoTextColor = "#FFFFFF";
-    const logoSubColor = "rgba(255,255,255,0.5)";
-    const logoLineColor = "rgba(255,255,255,0.15)";
+    // Logo sits left, vertically centered in the solid banner
+    const logoSize  = 96;
+    const logoX     = 40;
+    const logoY     = bannerTop + Math.round((LOGO_ZONE_H - logoSize) / 2);
+    const textX     = logoX + logoSize + 20;
 
-    const brandTextY = logoY + Math.round(logoSize * 0.42);
-    const brandSubY = logoY + Math.round(logoSize * 0.72);
+    // Text anchor points
+    const midBanner = bannerTop + Math.round(LOGO_ZONE_H / 2);
+    const brandTextY = midBanner - 8;
+    const brandSubY  = midBanner + 36;
+    const urlY       = h - 28;
 
     const brandSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
-      <rect x="0" y="${h - LOGO_ZONE_H}" width="${w}" height="${LOGO_ZONE_H}" fill="${logoBg}"/>
-      <line x1="60" y1="${h - LOGO_ZONE_H}" x2="${w - 60}" y2="${h - LOGO_ZONE_H}" stroke="${logoLineColor}" stroke-width="1" opacity="0.4"/>
-      <text x="${textX}" y="${brandTextY}" font-family="${FONT}" font-size="44" font-weight="800" fill="${logoTextColor}" letter-spacing="0.3">Ai Run Coach</text>
-      <text x="${textX}" y="${brandSubY}" font-family="${FONT}" font-size="26" font-weight="500" fill="${logoSubColor}" letter-spacing="0.5">Your AI-Powered Running Partner</text>
+      <defs>
+        <linearGradient id="brandFade" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#0A0A1A" stop-opacity="0"/>
+          <stop offset="100%" stop-color="#0A0A1A" stop-opacity="1"/>
+        </linearGradient>
+        <filter id="cyanGlow">
+          <feGaussianBlur stdDeviation="3" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+
+      <!-- Gradient bleed — fades content into the banner -->
+      <rect x="0" y="${gradTop}" width="${w}" height="${LOGO_GRADIENT_H}" fill="url(#brandFade)"/>
+
+      <!-- Solid banner -->
+      <rect x="0" y="${bannerTop}" width="${w}" height="${LOGO_ZONE_H}" fill="#0A0A1A"/>
+
+      <!-- Glowing cyan accent line -->
+      <line x1="0" y1="${bannerTop}" x2="${w}" y2="${bannerTop}" stroke="#00D4FF" stroke-width="1.5" opacity="0.55" filter="url(#cyanGlow)"/>
+
+      <!-- Brand name — bold uppercase white -->
+      <text x="${textX}" y="${brandTextY}" font-family="${FONT}" font-size="52" font-weight="900" fill="#FFFFFF" letter-spacing="2">AI RUN COACH</text>
+
+      <!-- Tagline — cyan accent -->
+      <text x="${textX}" y="${brandSubY}" font-family="${FONT}" font-size="23" font-weight="600" fill="#00D4FF" letter-spacing="1.5" opacity="0.9">YOUR AI-POWERED RUNNING PARTNER</text>
+
+      <!-- URL — subtle, right-aligned -->
+      <text x="${w - 40}" y="${urlY}" font-family="${FONT}" font-size="20" font-weight="400" fill="rgba(255,255,255,0.35)" text-anchor="end" letter-spacing="0.5">airuncoach.live</text>
     </svg>`;
 
     const brandBuffer = await sharp(Buffer.from(brandSvg)).png().toBuffer();
 
+    const composites: sharp.OverlayOptions[] = [{ input: brandBuffer, top: 0, left: 0 }];
+    if (logoBuffer) {
+      const resizedLogo = await sharp(logoBuffer)
+        .resize(logoSize, logoSize, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .png()
+        .toBuffer();
+      composites.push({ input: resizedLogo, top: logoY, left: logoX });
+    }
+
     svgBuffer = await sharp(svgBuffer)
-      .composite([
-        { input: brandBuffer, top: 0, left: 0 },
-        { input: logoBuffer, top: logoY, left: logoX },
-      ])
+      .composite(composites)
       .png({ quality: 95 })
       .toBuffer();
   }

@@ -69,7 +69,7 @@ fun ShareImageEditorScreen(
 
     var isStickerPanelExpanded by remember { mutableStateOf(false) }
     var isBackgroundPanelExpanded by remember { mutableStateOf(false) }
-    var isRingsPanelExpanded by remember { mutableStateOf(false) }
+    var isRingsPanelExpanded by remember { mutableStateOf(true) }
 
     // Collapsible control strip state
     var isControlStripExpanded by remember { mutableStateOf(true) }
@@ -885,9 +885,9 @@ private fun AspectRatioChip(
     onClick: () -> Unit
 ) {
     val label = when (ratio) {
-        "1:1" -> "1:1"
-        "9:16" -> "9:16"
-        "4:5" -> "4:5"
+        "1:1" -> "Square"
+        "9:16" -> "Story"
+        "4:5" -> "Post"
         else -> ratio
     }
 
@@ -895,9 +895,15 @@ private fun AspectRatioChip(
         onClick = onClick,
         shape = RoundedCornerShape(8.dp),
         color = if (isSelected) Colors.primary else Color(0xFF1A2332),
-        modifier = Modifier.size(36.dp)
+        modifier = Modifier
+            .height(30.dp)
+            .widthIn(min = 44.dp)
+            .padding(horizontal = 2.dp)
     ) {
-        Box(contentAlignment = Alignment.Center) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(horizontal = 8.dp)
+        ) {
             Text(
                 text = label,
                 fontSize = 9.sp,
