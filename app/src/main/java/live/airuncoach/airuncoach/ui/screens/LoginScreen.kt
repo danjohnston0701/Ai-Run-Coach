@@ -21,7 +21,6 @@ import androidx.compose.ui.focus.onFocusEvent
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -51,6 +50,7 @@ fun LoginScreen(
     onNavigateToLocationPermission: () -> Unit = {},
     onNavigateToMain: () -> Unit = {},
     onNavigateToSignUp: () -> Unit = {},
+    onNavigateToForgotPassword: () -> Unit = {},
     viewModel: LoginViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -343,9 +343,8 @@ fun LoginScreen(
             Spacer(modifier = Modifier.height(Spacing.sm))
 
             // Forgot password link
-            val uriHandler = LocalUriHandler.current
             TextButton(
-                onClick = { uriHandler.openUri("https://airuncoach.live/forgot-password") },
+                onClick = onNavigateToForgotPassword,
                 modifier = Modifier.align(Alignment.End)
             ) {
                 Text(

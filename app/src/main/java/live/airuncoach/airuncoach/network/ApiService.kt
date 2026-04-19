@@ -29,6 +29,9 @@ interface ApiService {
     @POST("/api/auth/login")
     suspend fun login(@Body request: LoginRequest): AuthResponse
 
+    @POST("/api/auth/forgot-password")
+    suspend fun forgotPassword(@Body request: ForgotPasswordRequest): ForgotPasswordResponse
+
     @GET("/api/users/{id}")
     suspend fun getUser(@Path("id") userId: String): User
 

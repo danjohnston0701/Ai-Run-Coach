@@ -1,12 +1,11 @@
 package live.airuncoach.airuncoach.ui.navigation
 
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import live.airuncoach.airuncoach.AppRoutes
-import live.airuncoach.airuncoach.data.SessionManager
+import live.airuncoach.airuncoach.ui.screens.ForgotPasswordScreen
 import live.airuncoach.airuncoach.ui.screens.LoginScreen
 import live.airuncoach.airuncoach.ui.screens.SignUpScreen
 import live.airuncoach.airuncoach.ui.screens.LocationPermissionScreen
@@ -37,6 +36,16 @@ fun RootNavigationGraph(navController: NavHostController) {
                 },
                 onNavigateToSignUp = {
                     navController.navigate("sign_up")
+                },
+                onNavigateToForgotPassword = {
+                    navController.navigate(AppRoutes.FORGOT_PASSWORD)
+                }
+            )
+        }
+        composable(AppRoutes.FORGOT_PASSWORD) {
+            ForgotPasswordScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
                 }
             )
         }

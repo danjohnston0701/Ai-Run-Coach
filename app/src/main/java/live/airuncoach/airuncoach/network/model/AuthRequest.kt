@@ -11,3 +11,12 @@ data class RegisterRequest(
     val email: String,
     val password: String
 )
+
+data class ForgotPasswordRequest(
+    val email: String
+)
+
+data class ForgotPasswordResponse(
+    val ok: Boolean? = null,
+    val error: String? = null
+)
