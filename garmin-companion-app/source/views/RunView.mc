@@ -70,6 +70,14 @@ class RunView extends Ui.View {
     private var _phoneLink    = null;
     private var _session      = null;
 
+    // Watch GPS cache — populated by onPosition(), streamed to phone every 2 s
+    // in phone-controlled mode so the phone can use the superior Garmin GPS.
+    private var _lastGpsLat    = null;
+    private var _lastGpsLng    = null;
+    private var _lastGpsAlt    = null;
+    private var _lastGpsSpeed  = 0.0;
+    private var _gpsStreamTick = 0;   // increments every 250 ms tick; flush at 8 (= 2 s)
+
     // Animation
     private var _elapsedMs     = 0;
     private var _tickMs        = 250;
@@ -135,16 +143,22 @@ class RunView extends Ui.View {
 
     function startRun() {
         if (_isRunning) { return; }
-        _isRunning    = true;
-        _isPaused     = false;
-        _elapsedMs    = 0;
-        _elapsedTime  = 0;
-        _overlayState = OVERLAY_NONE;
+        _isRunning     = true;
+        _isPaused      = false;
+        _elapsedMs     = 0;
+        _elapsedTime   = 0;
+        _overlayState  = OVERLAY_NONE;
+        _gpsStreamTick = 0;
+
+        // Always enable watch GPS and HR sensor regardless of mode.
+        // In phone-controlled mode coordinates are streamed back every 2 s so
+        // the phone can use the superior Garmin multi-band GPS for tracking.
+        Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
+        Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE]);
+        Sensor.enableSensorEvents(method(:onSensor));
+
         if (!_phoneControlled) {
             _startSession();
-            Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
-            Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE]);
-            Sensor.enableSensorEvents(method(:onSensor));
         } else {
             _phoneLink.sendCommand("start");
         }
@@ -175,6 +189,9 @@ class RunView extends Ui.View {
         _isRunning    = false;
         _isPaused     = false;
         _overlayState = OVERLAY_READY;
+        // Disable GPS and sensors for all modes
+        Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
+        Sensor.enableSensorEvents(null);
         if (_phoneControlled) { _phoneLink.sendCommand("stop"); }
         else { _stopSession(); }
         _vibeLong();
@@ -196,7 +213,8 @@ class RunView extends Ui.View {
 
     function onHide() {
         if (_timer != null) { _timer.stop(); _timer = null; }
-        if (!_phoneControlled && _isRunning) {
+        // Disable GPS/sensors for all running modes (phone-controlled also uses watch GPS now)
+        if (_isRunning) {
             Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
             Sensor.enableSensorEvents(null);
         }
@@ -312,6 +330,24 @@ class RunView extends Ui.View {
                 }
             }
         }
+
+        // Phone-controlled mode: stream watch GPS to phone every 2 s (8 × 250 ms ticks).
+        // The phone will prefer these higher-accuracy Garmin coordinates over its own GPS.
+        if (_phoneControlled && _isRunning && !_isPaused) {
+            _gpsStreamTick += 1;
+            if (_gpsStreamTick >= 8 && _lastGpsLat != null && _lastGpsLng != null) {
+                _gpsStreamTick = 0;
+                _phoneLink.sendRunData({
+                    "lat"   => _lastGpsLat,
+                    "lng"   => _lastGpsLng,
+                    "alt"   => _lastGpsAlt,
+                    "speed" => _lastGpsSpeed,
+                    "hr"    => _heartRate,
+                    "cad"   => _cadence
+                });
+            }
+        }
+
         Ui.requestUpdate();
     }
 
@@ -320,11 +356,17 @@ class RunView extends Ui.View {
     function onPosition(info as Pos.Info) as Void {
         if (info.position != null) {
             var deg = info.position.toDegrees();
-            if (info.altitude != null && _dataStreamer != null) {
-                _dataStreamer.updateGPS(deg[0], deg[1], info.altitude);
-            }
+            // Always cache the latest fix — used for phone streaming in phone-controlled mode
+            _lastGpsLat = deg[0];
+            _lastGpsLng = deg[1];
+            _lastGpsAlt = info.altitude;
             if (info.speed != null && info.speed > 0.1) {
+                _lastGpsSpeed = info.speed;
                 _pace = 1000.0 / (info.speed * 60.0);
+            }
+            // Standalone mode: also push to DataStreamer for backend HTTP stream
+            if (!_phoneControlled && info.altitude != null && _dataStreamer != null) {
+                _dataStreamer.updateGPS(deg[0], deg[1], info.altitude);
             }
         }
     }

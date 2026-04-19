@@ -60,6 +60,14 @@ class GarminWatchManager(private val context: Context) {
     var onWatchCommand: ((action: String) -> Unit)? = null
 
     /**
+     * Invoked when the watch sends a GPS fix during a phone-controlled run.
+     * The watch enables its own GPS and streams coordinates every ~2 s so the
+     * phone can use the superior Garmin multi-band antenna for distance tracking.
+     * Callback args: (latDeg, lngDeg, altMetres?, speedMetresPerSec?)
+     */
+    var onWatchGpsUpdate: ((Double, Double, Double?, Float?) -> Unit)? = null
+
+    /**
      * Invoked when the watch companion app is resolved and ready to receive messages.
      * Use this to proactively push an auth token as soon as the watch connects —
      * even before a run has started.
@@ -266,7 +274,17 @@ class GarminWatchManager(private val context: Context) {
                     Log.d(TAG, "Watch command: $action")
                     onWatchCommand?.invoke(action)
                 }
-                "watchData" -> Log.d(TAG, "Watch sensor data: $map")
+                "watchData" -> {
+                    // Watch GPS fix streamed from phone-controlled run
+                    val lat   = (map["lat"]   as? Number)?.toDouble()
+                    val lng   = (map["lng"]   as? Number)?.toDouble()
+                    val altM  = (map["alt"]   as? Number)?.toDouble()
+                    val speed = (map["speed"] as? Number)?.toFloat()
+                    Log.d(TAG, "Watch GPS: lat=$lat lng=$lng alt=$altM speed=${speed}m/s")
+                    if (lat != null && lng != null) {
+                        onWatchGpsUpdate?.invoke(lat, lng, altM, speed)
+                    }
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "handleWatchMessage: ${e.message}")

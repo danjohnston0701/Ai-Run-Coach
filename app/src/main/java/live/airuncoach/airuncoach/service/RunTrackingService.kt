@@ -80,6 +80,10 @@ class RunTrackingService : Service(), SensorEventListener {
     // Gracefully no-ops if the ConnectIQ SDK is not present or no watch is paired.
     private var garminWatchManager: GarminWatchManager? = null
 
+    // Timestamp of the last watch GPS injection (ms).  While watch GPS is flowing
+    // (within 5 s) phone GPS updates are skipped to prevent double-counting distance.
+    private var lastWatchGpsMs: Long = 0L
+
     // AI Coaching
     private lateinit var coachingFeaturePrefs: live.airuncoach.airuncoach.data.CoachingFeaturePreferences
     private lateinit var apiService: ApiService
@@ -531,6 +535,13 @@ class RunTrackingService : Service(), SensorEventListener {
                         }
                     }
                 }
+            }
+
+            // Watch GPS stream — inject Garmin coordinates into the tracking pipeline.
+            // The watch enables its own GPS during phone-controlled runs and streams
+            // fixes every ~2 s.  These are preferred over phone GPS (3 m vs 10–25 m).
+            garminWatchManager?.onWatchGpsUpdate = { lat, lng, altM, speedMs ->
+                injectWatchLocation(lat, lng, altM, speedMs)
             }
         } catch (e: Exception) {
             Log.w("RunTrackingService", "GarminWatchManager init failed (non-fatal): ${e.message}")
@@ -1624,6 +1635,31 @@ class RunTrackingService : Service(), SensorEventListener {
         )
     }
 
+    /**
+     * Inject a GPS fix received from the Garmin watch into the normal location pipeline.
+     *
+     * Creates a synthetic [Location] tagged with provider "garmin" and accuracy 3 m
+     * (Garmin multi-band GPS typical accuracy) then routes it through [onNewLocation]
+     * exactly as a phone GPS update would be — all distance calculation, elevation
+     * accumulation, coaching triggers and route tracking work unchanged.
+     *
+     * Called by [GarminWatchManager.onWatchGpsUpdate] during phone-controlled runs.
+     */
+    fun injectWatchLocation(lat: Double, lng: Double, altM: Double?, speedMs: Float?) {
+        if (!isTracking) return
+        val loc = android.location.Location("garmin").apply {
+            latitude  = lat
+            longitude = lng
+            altM?.let  { altitude = it }
+            speedMs?.let { speed = it }
+            accuracy  = 3.0f          // Garmin multi-band GPS ≈ 3 m CEP
+            time      = System.currentTimeMillis()
+        }
+        lastWatchGpsMs = System.currentTimeMillis()
+        Log.d("RunTrackingService", "Watch GPS injected: lat=$lat lng=$lng alt=$altM speed=$speedMs")
+        onNewLocation(loc)
+    }
+
     private fun requestLocationUpdates() {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             Log.e("RunTrackingService", "Location permission not granted - stopping service")
@@ -1674,6 +1710,14 @@ class RunTrackingService : Service(), SensorEventListener {
 
     private fun onNewLocation(location: Location) {
         if (!isTracking) return
+
+        // If the watch is actively streaming GPS (within the last 5 s), skip phone GPS
+        // updates entirely to prevent double-counting distance.  The watch's Garmin
+        // multi-band antenna is significantly more accurate than the phone GPS.
+        if (location.provider != "garmin" && (System.currentTimeMillis() - lastWatchGpsMs) < 5_000L) {
+            Log.d("RunTrackingService", "Skipping phone GPS — watch GPS is active (${System.currentTimeMillis() - lastWatchGpsMs}ms ago)")
+            return
+        }
 
         // Calculate incline degrees from elevation change
         var inclineDegrees: Float? = null
