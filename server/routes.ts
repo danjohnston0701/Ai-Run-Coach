@@ -1503,15 +1503,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Store the analysis (save the analysis object directly, not wrapped)
       await storage.upsertRunAnalysis(runId, analysis);
       
-      // Update run with ai insights summary - ensure proper serialization
+      // Update run with ai insights summary — only update aiInsights, never touch aiCoachingNotes
       await storage.updateRun(runId, { 
         aiInsights: JSON.stringify({
           summary: analysis.summary,
           performanceScore: analysis.performanceScore,
           highlights: analysis.highlights,
         } as any),
-        // Ensure aiCoachingNotes is properly handled - may be stringified by db
-        aiCoachingNotes: analysis as any,
       } as any);
       
       console.log(`[comprehensive-analysis] Successfully returning analysis for run ${runId}`);

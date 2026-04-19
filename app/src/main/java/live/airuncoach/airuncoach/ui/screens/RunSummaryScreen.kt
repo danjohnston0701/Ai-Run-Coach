@@ -667,6 +667,30 @@ private fun AiInsightsTabContent(
             )
         }
 
+        // Pace Consistency — moved here from Summary tab so it sits alongside the AI analysis
+        item { PaceConsistencyCard(run = run) }
+
+        // AI Coaching During Run — standalone section, always visible regardless of analysis state
+        if (coachingNotes.isNotEmpty()) {
+            val filteredNotes = coachingNotes.filter { note ->
+                note.message.length >= 30 ||
+                !note.message.contains("turn", ignoreCase = true) &&
+                !note.message.contains("left", ignoreCase = true) &&
+                !note.message.contains("right", ignoreCase = true) &&
+                !note.message.contains("hill", ignoreCase = true) &&
+                !note.message.contains("ahead", ignoreCase = true) &&
+                !note.message.contains("speed", ignoreCase = true) &&
+                !note.message.contains("slow", ignoreCase = true) &&
+                !note.message.contains("meter", ignoreCase = true) &&
+                !note.message.contains("metre", ignoreCase = true)
+            }
+            if (filteredNotes.isNotEmpty()) {
+                item {
+                    CoachingDuringRunSection(notes = filteredNotes)
+                }
+            }
+        }
+
         // Delete run button at the bottom of the tab
         item {
             Spacer(modifier = Modifier.height(Spacing.md))
@@ -747,9 +771,6 @@ private fun SummaryTabContent(
                 KmSplitsCardFlagship(run.kmSplits)
             }
         }
-
-        // Pace Consistency & Split Analysis
-        item { PaceConsistencyCard(run = run) }
 
         item { SplitAnalysisCard(run = run) }
 
@@ -1492,64 +1513,66 @@ private fun AiSectionFlagship(
             }
         }
 
-        // AI Coaching Logs - shown after the AI summary (excluding navigation prompts)
-        if (coachingNotes.isNotEmpty()) {
-            val filteredNotes = coachingNotes.filter { note ->
-                // Exclude short navigation-like prompts (typically under 30 chars)
-                // Navigation prompts are things like "Turn left", "Hill ahead", "Speed up"
-                note.message.length >= 30 || 
-                !note.message.contains("turn", ignoreCase = true) &&
-                !note.message.contains("left", ignoreCase = true) &&
-                !note.message.contains("right", ignoreCase = true) &&
-                !note.message.contains("hill", ignoreCase = true) &&
-                !note.message.contains("ahead", ignoreCase = true) &&
-                !note.message.contains("speed", ignoreCase = true) &&
-                !note.message.contains("slow", ignoreCase = true) &&
-                !note.message.contains("meter", ignoreCase = true) &&
-                !note.message.contains("metre", ignoreCase = true)
-            }
-            
-            if (filteredNotes.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(Spacing.md))
-                HorizontalDivider(color = Colors.border.copy(alpha = 0.4f))
-                Spacer(modifier = Modifier.height(Spacing.md))
-                
-                Text(
-                    text = "AI Coaching During Run",
-                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                    color = Colors.textPrimary
-                )
-                
-                Spacer(modifier = Modifier.height(Spacing.sm))
-                
-                filteredNotes.forEach { note ->
-                    val minutes = note.time / 60000
-                    val seconds = (note.time % 60000) / 1000
-                    val timeStr = String.format(Locale.US, "%d:%02d", minutes, seconds)
-                    
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = Colors.backgroundTertiary.copy(alpha = 0.4f)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
+    }
+}
+
+/**
+ * Standalone coaching-during-run section shown beneath the AI analysis card.
+ * Displayed as a separate card so it is always visible regardless of analysis state.
+ */
+@Composable
+private fun CoachingDuringRunSection(notes: List<AiCoachingNote>) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.7f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            Text(
+                text = "AI Coaching During Run",
+                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                color = Colors.textPrimary
+            )
+            Text(
+                text = "${notes.size} coaching moment${if (notes.size == 1) "" else "s"}",
+                style = AppTextStyles.small,
+                color = Colors.textMuted
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            notes.forEach { note ->
+                val minutes = note.time / 60000
+                val seconds = (note.time % 60000) / 1000
+                val timeStr = String.format(Locale.US, "%d:%02d", minutes, seconds)
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = Colors.backgroundTertiary.copy(alpha = 0.5f)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.Top
                     ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Text(
-                                text = timeStr,
-                                style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
-                                color = Colors.primary
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = note.message,
-                                style = AppTextStyles.body,
-                                color = Colors.textPrimary
-                            )
-                        }
+                        Text(
+                            text = timeStr,
+                            style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.primary,
+                            modifier = Modifier.widthIn(min = 36.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = note.message,
+                            style = AppTextStyles.body,
+                            color = Colors.textPrimary
+                        )
                     }
-                    Spacer(modifier = Modifier.height(Spacing.sm))
                 }
             }
         }
