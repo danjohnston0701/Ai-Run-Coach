@@ -1,25 +1,45 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
-function createTransporter() {
-  const host = process.env.SMTP_HOST;
-  const port = parseInt(process.env.SMTP_PORT || "587", 10);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  const from = process.env.SMTP_FROM || user;
+// Resend integration via Replit Connectors — never cache this client
+async function getResendClient(): Promise<{ client: Resend; fromEmail: string }> {
+  const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
+  const xReplitToken = process.env.REPL_IDENTITY
+    ? "repl " + process.env.REPL_IDENTITY
+    : process.env.WEB_REPL_RENEWAL
+    ? "depl " + process.env.WEB_REPL_RENEWAL
+    : null;
 
-  if (!host || !user || !pass) {
-    throw new Error("Email service not configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS environment variables.");
+  if (!hostname || !xReplitToken) {
+    throw new Error("Resend integration not available in this environment");
   }
 
-  return { transporter: nodemailer.createTransporter({ host, port, secure: port === 465, auth: { user, pass } }), from };
+  const data = await fetch(
+    "https://" + hostname + "/api/v2/connection?include_secrets=true&connector_names=resend",
+    {
+      headers: {
+        Accept: "application/json",
+        "X-Replit-Token": xReplitToken,
+      },
+    }
+  ).then((r) => r.json());
+
+  const settings = data.items?.[0];
+  if (!settings?.settings?.api_key) {
+    throw new Error("Resend not connected — please link your Resend account in Replit integrations");
+  }
+
+  return {
+    client: new Resend(settings.settings.api_key),
+    fromEmail: settings.settings.from_email || "noreply@airuncoach.live",
+  };
 }
 
 export async function sendPasswordResetEmail(to: string, resetToken: string): Promise<void> {
-  const { transporter, from } = createTransporter();
+  const { client, fromEmail } = await getResendClient();
   const resetUrl = `https://airuncoach.live/reset-password?token=${resetToken}`;
 
-  await transporter.sendMail({
-    from: `"AI Run Coach" <${from}>`,
+  await client.emails.send({
+    from: `AI Run Coach <${fromEmail}>`,
     to,
     subject: "Reset your AI Run Coach password",
     html: `
