@@ -21,6 +21,7 @@ import androidx.compose.ui.focus.onFocusEvent
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -337,6 +338,21 @@ fun LoginScreen(
                         style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
                     )
                 }
+            }
+
+            Spacer(modifier = Modifier.height(Spacing.sm))
+
+            // Forgot password link
+            val uriHandler = LocalUriHandler.current
+            TextButton(
+                onClick = { uriHandler.openUri("https://airuncoach.live/forgot-password") },
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Text(
+                    text = "Forgot Password?",
+                    style = AppTextStyles.small,
+                    color = Colors.primary
+                )
             }
 
             Spacer(modifier = Modifier.height(Spacing.lg))

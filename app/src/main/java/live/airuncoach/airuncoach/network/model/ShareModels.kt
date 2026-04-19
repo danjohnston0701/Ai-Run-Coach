@@ -24,12 +24,13 @@ data class StickerWidget(
 data class ShareImageRequest(
     val runId: String,
     val templateId: String,
-    val aspectRatio: String = "1:1",
+    val aspectRatio: String = "9:16",
     val stickers: List<PlacedSticker> = emptyList(),
     val customBackground: String? = null,
     val backgroundOpacity: Float? = null,
     val backgroundBlur: Int? = null,
-    val customStickers: List<CustomSticker>? = null
+    val customStickers: List<CustomSticker>? = null,
+    val ringLayout: Map<String, String>? = null
 )
 
 data class PlacedSticker(

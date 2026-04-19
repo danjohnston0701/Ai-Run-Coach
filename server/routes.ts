@@ -268,6 +268,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/auth/forgot-password
+  app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
+    try {
+      const { email } = req.body;
+      if (!email) return res.status(400).json({ error: "Email is required" });
+
+      const user = await storage.getUserByEmail(email.toLowerCase().trim());
+      // Always respond with 200 to avoid user enumeration
+      if (!user) return res.json({ ok: true });
+
+      const crypto = await import("crypto");
+      const token = crypto.randomBytes(32).toString("hex");
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+      await storage.createPasswordResetToken(token, user.id, expiresAt);
+
+      const { sendPasswordResetEmail } = await import("./email-service");
+      await sendPasswordResetEmail(user.email, token);
+
+      res.json({ ok: true });
+    } catch (error: any) {
+      console.error("Forgot password error:", error);
+      res.status(500).json({ error: "Failed to send reset email" });
+    }
+  });
+
+  // GET /api/auth/verify-reset-token
+  app.get("/api/auth/verify-reset-token", async (req: Request, res: Response) => {
+    try {
+      const { token } = req.query as { token: string };
+      if (!token) return res.status(400).json({ error: "Token is required" });
+
+      const record = await storage.getPasswordResetToken(token);
+      if (!record || record.expiresAt < new Date()) {
+        return res.status(400).json({ error: "Invalid or expired token" });
+      }
+      res.json({ ok: true });
+    } catch (error: any) {
+      console.error("Verify reset token error:", error);
+      res.status(500).json({ error: "Failed to verify token" });
+    }
+  });
+
+  // POST /api/auth/reset-password
+  app.post("/api/auth/reset-password", async (req: Request, res: Response) => {
+    try {
+      const { token, password } = req.body;
+      if (!token || !password) return res.status(400).json({ error: "Token and password are required" });
+      if (password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+
+      const record = await storage.getPasswordResetToken(token);
+      if (!record || record.expiresAt < new Date()) {
+        return res.status(400).json({ error: "Invalid or expired reset link" });
+      }
+
+      const hashed = await hashPassword(password);
+      await storage.updateUser(record.userId, { password: hashed });
+      await storage.deletePasswordResetToken(token);
+
+      res.json({ ok: true });
+    } catch (error: any) {
+      console.error("Reset password error:", error);
+      res.status(500).json({ error: "Failed to reset password" });
+    }
+  });
+
   // ==================== TEST ENDPOINTS ====================
 
   /**
@@ -10986,6 +11052,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       maxHeartRate: run.maxHeartRate || undefined,
       calories: run.calories || undefined,
       cadence: run.cadence || undefined,
+      totalSteps: run.totalSteps || undefined,
       elevation: run.elevation || undefined,
       elevationGain: run.elevationGain || undefined,
       elevationLoss: run.elevationLoss || undefined,
@@ -11012,7 +11079,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
   app.post("/api/share/generate", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers } = req.body;
+      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers, ringLayout } = req.body;
       if (!templateId || !runId) {
         return res.status(400).json({ error: "templateId and runId are required" });
       }
@@ -11036,7 +11103,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       
       const imageBuffer = await generateShareImage({
         templateId,
-        aspectRatio: aspectRatio || "4:5",
+        aspectRatio: aspectRatio || "9:16",
         stickers: stickers || [],
         runData: buildShareRunData(run, userTimezone),
         userName: user?.name || undefined,
@@ -11044,6 +11111,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         backgroundOpacity: backgroundOpacity ?? undefined,
         backgroundBlur: backgroundBlur ?? undefined,
         customStickers: customStickers || undefined,
+        ringLayout: ringLayout || undefined,
       });
 
       res.set({
@@ -11061,7 +11129,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
   app.post("/api/share/preview", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers } = req.body;
+      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers, ringLayout } = req.body;
       if (!templateId || !runId) {
         return res.status(400).json({ error: "templateId and runId are required" });
       }
@@ -11085,7 +11153,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
       const imageBuffer = await generateShareImage({
         templateId,
-        aspectRatio: aspectRatio || "4:5",
+        aspectRatio: aspectRatio || "9:16",
         stickers: stickers || [],
         runData: buildShareRunData(run, userTimezone),
         userName: user?.name || undefined,
@@ -11093,6 +11161,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         backgroundOpacity: backgroundOpacity ?? undefined,
         backgroundBlur: backgroundBlur ?? undefined,
         customStickers: customStickers || undefined,
+        ringLayout: ringLayout || undefined,
       });
 
       const base64 = imageBuffer.toString("base64");

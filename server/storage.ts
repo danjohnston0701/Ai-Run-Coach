@@ -3,13 +3,13 @@ import {
   notifications, notificationPreferences, liveRunSessions,
   groupRuns, groupRunParticipants, events, routeRatings, runAnalyses,
   connectedDevices, deviceData, garminWellnessMetrics, activityMergeLog, garminActivities,
-  oauthStateStore, webhookFailureQueue, garminWebhookEvents,
+  oauthStateStore, webhookFailureQueue, garminWebhookEvents, passwordResetTokens,
   type User, type InsertUser, type Run, type InsertRun,
   type Route, type InsertRoute, type Goal, type InsertGoal,
   type Friend, type FriendRequest, type Notification, type NotificationPreference,
   type LiveRunSession, type GroupRun, type GroupRunParticipant, type Event,
   type RouteRating, type RunAnalysis, type ConnectedDevice, type DeviceData,
-  type GarminWellnessMetric, type OauthStateStore, type GarminWebhookEvent
+  type GarminWellnessMetric, type OauthStateStore, type GarminWebhookEvent, type PasswordResetToken
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, or, and, desc, asc, ilike, sql, inArray, gte, lte, isNotNull, count, sum, avg, max, min } from "drizzle-orm";
@@ -27,6 +27,11 @@ export interface UserRunStats {
 }
 
 export interface IStorage {
+  // Password reset
+  createPasswordResetToken(token: string, userId: string, expiresAt: Date): Promise<void>;
+  getPasswordResetToken(token: string): Promise<PasswordResetToken | undefined>;
+  deletePasswordResetToken(token: string): Promise<void>;
+
   // Users
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
@@ -893,6 +898,21 @@ export class DatabaseStorage implements IStorage {
       .where(eq(garminWebhookEvents.userId, userId))
       .orderBy(desc(garminWebhookEvents.createdAt))
       .limit(limit);
+  }
+
+  // Password Reset Tokens
+  async createPasswordResetToken(token: string, userId: string, expiresAt: Date): Promise<void> {
+    await db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, userId));
+    await db.insert(passwordResetTokens).values({ token, userId, expiresAt });
+  }
+
+  async getPasswordResetToken(token: string): Promise<PasswordResetToken | undefined> {
+    const [row] = await db.select().from(passwordResetTokens).where(eq(passwordResetTokens.token, token));
+    return row || undefined;
+  }
+
+  async deletePasswordResetToken(token: string): Promise<void> {
+    await db.delete(passwordResetTokens).where(eq(passwordResetTokens.token, token));
   }
 }
 
