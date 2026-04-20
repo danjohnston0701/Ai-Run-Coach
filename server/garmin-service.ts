@@ -1,15 +1,15 @@
 import crypto from 'crypto';
 
 // Garmin Health API uses OAuth 1.0a — NOT OAuth 2.0 / PKCE.
-// env vars must be set in Replit Secrets:
-//   GARMIN_CONSUMER_KEY    = your Garmin app consumer key
-//   GARMIN_CONSUMER_SECRET = your Garmin app consumer secret
-const GARMIN_CONSUMER_KEY    = process.env.GARMIN_CONSUMER_KEY;
-const GARMIN_CONSUMER_SECRET = process.env.GARMIN_CONSUMER_SECRET;
+// env vars must be set in Replit Secrets (use CLIENT_ID/CLIENT_SECRET naming):
+//   GARMIN_CLIENT_ID     = your Garmin app consumer key
+//   GARMIN_CLIENT_SECRET = your Garmin app consumer secret
+const GARMIN_CLIENT_ID     = process.env.GARMIN_CLIENT_ID;
+const GARMIN_CLIENT_SECRET = process.env.GARMIN_CLIENT_SECRET;
 
-// Keep these aliases so existing code that reads CLIENT_ID / CLIENT_SECRET still compiles
-const GARMIN_CLIENT_ID     = GARMIN_CONSUMER_KEY;
-const GARMIN_CLIENT_SECRET = GARMIN_CONSUMER_SECRET;
+// Keep these aliases for consistency with OAuth 1.0a naming
+const GARMIN_CONSUMER_KEY    = GARMIN_CLIENT_ID;
+const GARMIN_CONSUMER_SECRET = GARMIN_CLIENT_SECRET;
 
 // Garmin OAuth 1.0a endpoints
 const GARMIN_REQUEST_TOKEN_URL = 'https://connectapi.garmin.com/oauth-service/oauth/request_token';
