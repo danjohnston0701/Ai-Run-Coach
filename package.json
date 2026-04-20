@@ -16,7 +16,7 @@
     "check:format": "prettier --check \"**/*.{js,ts,tsx,css,json}\"",
     "format": "prettier --write \"**/*.{js,ts,tsx,css,json}\"",
     "build": "npm run server:build",
-    "start": "NODE_ENV=production node server_dist/index.js"
+    "start": "NODE_ENV=production tsx server/index.ts"
   },
   "dependencies": {
     "@aws-sdk/client-polly": "^3.1010.0",
