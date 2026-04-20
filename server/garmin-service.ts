@@ -1,6 +1,4 @@
 import crypto from 'crypto';
-import { eq, sql } from 'drizzle-orm';
-import { oauthStateStore } from '@shared/schema';
 
 // Garmin Health API uses OAuth 1.0a — NOT OAuth 2.0 / PKCE.
 // env vars must be set in Replit Secrets:
@@ -25,71 +23,52 @@ const GARMIN_API_BASE = 'https://apis.garmin.com';
 // Garmin Connect proxy (for activity data if available)
 const GARMIN_CONNECT_API = 'https://connect.garmin.com/modern/proxy';
 
-// Import database for PKCE storage
+// Import database (still needed by other functions in this file)
 import { db } from './db';
+import { sql } from 'drizzle-orm';
 
-// ─── Token-secret helpers ─────────────────────────────────────────────────────
-// The OAuth 1.0a request_token_secret is stored in the oauth_state_store record
-// (token_secret column) by nonce, then retrieved + cleared at callback time.
-// This piggy-backs on the existing oauth_state_store row created in routes.ts so
-// there is no separate table to maintain.
+// ─── Token-secret helpers (in-memory) ────────────────────────────────────────
+// The OAuth 1.0a request_token_secret must survive from the initiation request
+// to the callback request (~30–60 seconds later).  An in-memory Map is the
+// simplest and fastest approach — no DB schema changes, no migrations.
+// Entries are auto-expired after 15 minutes so they never accumulate.
+
+interface TokenEntry { secret: string; expiresAt: number; }
+const _tokenSecretMap = new Map<string, TokenEntry>();
+const TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+function _cleanupExpiredTokens(): void {
+  const now = Date.now();
+  for (const [key, entry] of _tokenSecretMap) {
+    if (now > entry.expiresAt) _tokenSecretMap.delete(key);
+  }
+}
 
 async function storeCodeVerifier(nonce: string, verifier: string): Promise<void> {
-  try {
-    await db
-      .update(oauthStateStore)
-      .set({ tokenSecret: verifier })
-      .where(eq(oauthStateStore.nonce, nonce));
-    console.log(`[Garmin] Stored token secret in oauth_state_store for nonce: ${nonce}`);
-  } catch (error) {
-    console.error(`[Garmin] Failed to store token secret:`, error);
-    throw error;
-  }
+  _cleanupExpiredTokens();
+  _tokenSecretMap.set(nonce, { secret: verifier, expiresAt: Date.now() + TOKEN_TTL_MS });
+  console.log(`[Garmin] Stored token secret in memory for nonce: ${nonce}`);
 }
 
 async function getCodeVerifier(nonce: string): Promise<string | null> {
-  try {
-    const [row] = await db
-      .select({ tokenSecret: oauthStateStore.tokenSecret })
-      .from(oauthStateStore)
-      .where(eq(oauthStateStore.nonce, nonce));
-    const verifier = row?.tokenSecret ?? null;
-    if (verifier) {
-      console.log(`[Garmin] Found token secret in oauth_state_store for nonce: ${nonce}`);
-    } else {
-      console.log(`[Garmin] Token secret NOT found in oauth_state_store for nonce: ${nonce}`);
-    }
-    return verifier;
-  } catch (error) {
-    console.error(`[Garmin] Failed to get token secret:`, error);
+  const entry = _tokenSecretMap.get(nonce);
+  if (!entry || Date.now() > entry.expiresAt) {
+    _tokenSecretMap.delete(nonce);
+    console.log(`[Garmin] Token secret NOT found (or expired) in memory for nonce: ${nonce}`);
     return null;
   }
+  console.log(`[Garmin] Found token secret in memory for nonce: ${nonce}`);
+  return entry.secret;
 }
 
 async function deleteCodeVerifier(nonce: string): Promise<void> {
-  // Clear the token secret from the record (the full record is deleted later by
-  // claimOauthState, so we just null it out here to prevent double-use).
-  try {
-    await db
-      .update(oauthStateStore)
-      .set({ tokenSecret: null })
-      .where(eq(oauthStateStore.nonce, nonce));
-    console.log(`[Garmin] Cleared token secret from oauth_state_store for nonce: ${nonce}`);
-  } catch (error) {
-    console.error(`[Garmin] Failed to clear token secret:`, error);
-  }
+  _tokenSecretMap.delete(nonce);
+  console.log(`[Garmin] Deleted token secret from memory for nonce: ${nonce}`);
 }
 
-// Clean up any old oauth_state_store rows that slipped past normal expiry
+// No-op — cleanup handled inline by storeCodeVerifier
 async function cleanupOldVerifiers(): Promise<void> {
-  try {
-    await db.execute(sql`
-      DELETE FROM oauth_state_store
-      WHERE expires_at < NOW() - INTERVAL '15 minutes'
-    `);
-  } catch (error) {
-    console.error(`[Garmin] Failed to cleanup old oauth states:`, error);
-  }
+  _cleanupExpiredTokens();
 }
 
 /**

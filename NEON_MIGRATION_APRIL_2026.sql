@@ -265,12 +265,3 @@ ALTER TABLE user_stats
 --     'workout_intensity', 'workout_description', 'updated_at'
 --   );
 
--- ============================================================================
--- Garmin OAuth 1.0a — token_secret column on oauth_state_store
--- ============================================================================
--- Stores the OAuth 1.0a request_token_secret between the /api/auth/garmin
--- initiation step and the /api/auth/garmin/callback step.
--- Previously this tried to write to a non-existent `oauth_state` table and
--- caused a 500 error every time a user clicked "Continue to Garmin".
-ALTER TABLE oauth_state_store
-  ADD COLUMN IF NOT EXISTS token_secret text;
