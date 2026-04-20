@@ -28,7 +28,7 @@ using Toybox.Communications as Comm;
 class RunView extends Ui.View {
 
     // Overlay / prompt state
-    enum { OVERLAY_NONE, OVERLAY_WAITING, OVERLAY_READY, OVERLAY_COACHED }
+    enum { OVERLAY_NONE, OVERLAY_WAITING, OVERLAY_GPS_WAIT, OVERLAY_READY, OVERLAY_COACHED }
 
     // Auth & app state
     private var _isAuthenticated = false;
@@ -78,6 +78,11 @@ class RunView extends Ui.View {
     private var _lastGpsSpeed  = 0.0;
     private var _gpsStreamTick = 0;   // increments every 250 ms tick; flush at 8 (= 2 s)
 
+    // GPS acquisition state
+    private var _gpsReady     = false;   // true once quality >= QUALITY_USABLE (3)
+    private var _gpsQuality   = 0;       // last Pos.Quality value (0-4)
+    private var _gpsListening = false;   // true while location events are active
+
     // Animation
     private var _elapsedMs     = 0;
     private var _tickMs        = 250;
@@ -112,7 +117,8 @@ class RunView extends Ui.View {
         _isAuthenticated = (tok != null && tok.length() > 0);
         var nm  = App.Storage.getValue("runnerName");
         _runnerName = (nm != null) ? nm : "";
-        _overlayState = OVERLAY_READY;
+        // If already authenticated, show GPS wait; else wait for phone auth
+        _overlayState = _isAuthenticated ? OVERLAY_GPS_WAIT : OVERLAY_WAITING;
     }
 
     function setPhoneControlled(v) { _phoneControlled = v; }
@@ -143,6 +149,11 @@ class RunView extends Ui.View {
 
     function startRun() {
         if (_isRunning) { return; }
+        // Block start until we have at least a usable GPS fix
+        if (!_gpsReady) {
+            _vibeShort();   // haptic cue: "not ready yet"
+            return;
+        }
         _isRunning     = true;
         _isPaused      = false;
         _elapsedMs     = 0;
@@ -154,6 +165,7 @@ class RunView extends Ui.View {
         // In phone-controlled mode coordinates are streamed back every 2 s so
         // the phone can use the superior Garmin multi-band GPS for tracking.
         Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
+        _gpsListening = true;
         Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE]);
         Sensor.enableSensorEvents(method(:onSensor));
 
@@ -191,6 +203,9 @@ class RunView extends Ui.View {
         _overlayState = OVERLAY_READY;
         // Disable GPS and sensors for all modes
         Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
+        _gpsListening = false;
+        // _gpsReady remains true — the satellite fix was valid during the run
+        // so the user can start another run immediately without re-acquiring.
         Sensor.enableSensorEvents(null);
         if (_phoneControlled) { _phoneLink.sendCommand("stop"); }
         else { _stopSession(); }
@@ -206,6 +221,12 @@ class RunView extends Ui.View {
             Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
             Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE]);
             Sensor.enableSensorEvents(method(:onSensor));
+            _gpsListening = true;
+        } else if (_isAuthenticated && !_gpsListening) {
+            // Start GPS pre-acquisition so the user can see signal strength
+            // and the START button is gated until a usable fix is obtained.
+            Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
+            _gpsListening = true;
         }
         _timer = new Timer.Timer();
         _timer.start(method(:onTick), _tickMs, true);
@@ -213,9 +234,12 @@ class RunView extends Ui.View {
 
     function onHide() {
         if (_timer != null) { _timer.stop(); _timer = null; }
-        // Disable GPS/sensors for all running modes (phone-controlled also uses watch GPS now)
-        if (_isRunning) {
+        // Disable GPS if we started it (running OR pre-run acquisition)
+        if (_gpsListening) {
             Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
+            _gpsListening = false;
+        }
+        if (_isRunning) {
             Sensor.enableSensorEvents(null);
         }
     }
@@ -235,7 +259,14 @@ class RunView extends Ui.View {
                 App.Storage.setValue("authToken", tok);
                 _isAuthenticated = true;
                 _isConnected     = true;
-                if (!_isRunning) { _overlayState = OVERLAY_READY; }
+                if (!_isRunning) {
+                    // Begin GPS acquisition and show the GPS wait screen
+                    if (!_gpsListening) {
+                        Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
+                        _gpsListening = true;
+                    }
+                    _overlayState = _gpsReady ? OVERLAY_READY : OVERLAY_GPS_WAIT;
+                }
             }
             if (nm != null) { App.Storage.setValue("runnerName", nm); _runnerName = nm; }
             Ui.requestUpdate();
@@ -354,6 +385,23 @@ class RunView extends Ui.View {
     // ── Sensors / GPS ─────────────────────────────────────────────────────────
 
     function onPosition(info as Pos.Info) as Void {
+        // Track GPS quality for the pre-run acquisition gate
+        // Pos.Quality values: 0=NOT_AVAILABLE, 1=LAST_KNOWN, 2=POOR, 3=USABLE, 4=GOOD
+        if (info.accuracy != null) {
+            _gpsQuality = info.accuracy;
+            var wasReady = _gpsReady;
+            _gpsReady = (_gpsQuality >= 3);   // QUALITY_USABLE or better
+            // Transition overlay from GPS_WAIT → READY / COACHED once lock acquired
+            if (_gpsReady && !wasReady && !_isRunning) {
+                if (_overlayState == OVERLAY_GPS_WAIT) {
+                    _overlayState = (_isCoached || _prepRunType.length() > 0)
+                        ? OVERLAY_COACHED
+                        : OVERLAY_READY;
+                }
+                _vibeShort();   // haptic confirmation of GPS lock
+            }
+        }
+
         if (info.position != null) {
             var deg = info.position.toDegrees();
             // Always cache the latest fix — used for phone streaming in phone-controlled mode
@@ -362,7 +410,9 @@ class RunView extends Ui.View {
             _lastGpsAlt = info.altitude;
             if (info.speed != null && info.speed > 0.1) {
                 _lastGpsSpeed = info.speed;
-                _pace = 1000.0 / (info.speed * 60.0);
+                if (_isRunning) {
+                    _pace = 1000.0 / (info.speed * 60.0);
+                }
             }
             // Standalone mode: also push to DataStreamer for backend HTTP stream
             if (!_phoneControlled && info.altitude != null && _dataStreamer != null) {
@@ -389,6 +439,18 @@ class RunView extends Ui.View {
         // ── Background ────────────────────────────────────────────────────────
         dc.setColor(Gfx.COLOR_BLACK, Gfx.COLOR_BLACK);
         dc.clear();
+
+        // ── GPS acquisition screen (blocks dashboard until fix obtained) ───────
+        if (_overlayState == OVERLAY_GPS_WAIT) {
+            _drawGpsWaitScreen(dc, cx, cy, w, h);
+            return;
+        }
+
+        // ── Waiting-for-phone screen ───────────────────────────────────────────
+        if (_overlayState == OVERLAY_WAITING) {
+            _drawWaitingForPhoneScreen(dc, cx, cy, w, h);
+            return;
+        }
 
         // ── Zone arc ──────────────────────────────────────────────────────────
         _drawZoneArc(dc, cx, cy, w, h);
@@ -422,6 +484,118 @@ class RunView extends Ui.View {
             dc.drawText(cx, (h * 0.03).toNumber(), Gfx.FONT_TINY,
                 "— PAUSED —", Gfx.TEXT_JUSTIFY_CENTER);
         }
+    }
+
+    // ── GPS Acquisition Screen ────────────────────────────────────────────────
+    //
+    // Shown from app launch until Pos.Quality >= QUALITY_USABLE (3).
+    // Draws a full-screen UI so the user clearly understands they must wait.
+    //   Top area   : app title + thin accent ring
+    //   Centre     : large "GPS" label with signal-bar indicator
+    //   Lower half : animated "Acquiring..." text + quality description
+    //   Bottom     : "Cannot start until GPS ready"
+    //
+    private function _drawGpsWaitScreen(dc, cx, cy, w, h) {
+        // Outer accent ring
+        dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
+        dc.drawCircle(cx, cy, (w / 2) - 4);
+
+        // App title
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, (h * 0.10).toNumber(), Gfx.FONT_TINY,
+            "AI RUN COACH", Gfx.TEXT_JUSTIFY_CENTER);
+
+        // Thin divider
+        dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
+        dc.drawLine((w * 0.2).toNumber(), (h * 0.22).toNumber(),
+                    (w * 0.8).toNumber(), (h * 0.22).toNumber());
+
+        // Large GPS label
+        dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, (h * 0.27).toNumber(), Gfx.FONT_MEDIUM,
+            "GPS", Gfx.TEXT_JUSTIFY_CENTER);
+
+        // Signal-bar indicator (4 bars, coloured by quality 0-4)
+        // Bars grow left-to-right; lit bars use a colour ramp (grey→green)
+        var barColors = [0x333333, 0xF44336, 0xFFD740, 0x00E676, 0x00E676];
+        var barW = 10;
+        var barGap = 5;
+        var totalW = 4 * barW + 3 * barGap;
+        var bx0 = cx - totalW / 2;
+        var baseY = (h * 0.52).toNumber();
+        for (var b = 0; b < 4; b++) {
+            var barH = 6 + b * 6;           // bars get taller left→right
+            var bx   = bx0 + b * (barW + barGap);
+            var by   = baseY - barH;
+            // Lit if quality > b  (quality 0 = no bars, quality 4 = all bars)
+            var lit  = (_gpsQuality > b);
+            var col  = lit ? barColors[b + 1] : 0x222222;
+            dc.setColor(col, Gfx.COLOR_TRANSPARENT);
+            dc.fillRectangle(bx, by, barW, barH);
+            // Outline on lit bars
+            if (lit) {
+                dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+                dc.drawRectangle(bx, by, barW, barH);
+            }
+        }
+
+        // Quality label
+        var qualLabels = ["No signal", "Last known", "Poor", "Usable", "Good"];
+        var qLabel = (_gpsQuality >= 0 && _gpsQuality <= 4)
+            ? qualLabels[_gpsQuality]
+            : "Searching";
+        var qColor = (_gpsQuality >= 3) ? 0x00E676 : Gfx.COLOR_LT_GRAY;
+        dc.setColor(qColor, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, (h * 0.57).toNumber(), Gfx.FONT_XTINY,
+            qLabel, Gfx.TEXT_JUSTIFY_CENTER);
+
+        // Animated "Acquiring..." text
+        var dots = "";
+        for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
+        dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, (h * 0.66).toNumber(), Gfx.FONT_TINY,
+            "Acquiring" + dots, Gfx.TEXT_JUSTIFY_CENTER);
+
+        // "Stand still outdoors" hint
+        dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, (h * 0.75).toNumber(), Gfx.FONT_XTINY,
+            "Stand still outdoors", Gfx.TEXT_JUSTIFY_CENTER);
+
+        // Cannot-start warning at bottom
+        dc.setColor(Gfx.COLOR_ORANGE, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, (h * 0.84).toNumber(), Gfx.FONT_XTINY,
+            "START disabled", Gfx.TEXT_JUSTIFY_CENTER);
+    }
+
+    // ── Waiting-for-phone screen ──────────────────────────────────────────────
+    //
+    // Shown when the auth token has not yet arrived from the phone app.
+    //
+    private function _drawWaitingForPhoneScreen(dc, cx, cy, w, h) {
+        var dots = "";
+        for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
+
+        // Outer accent ring
+        dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
+        dc.drawCircle(cx, cy, (w / 2) - 4);
+
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, (h * 0.10).toNumber(), Gfx.FONT_TINY,
+            "AI RUN COACH", Gfx.TEXT_JUSTIFY_CENTER);
+
+        dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
+        dc.drawLine((w * 0.2).toNumber(), (h * 0.22).toNumber(),
+                    (w * 0.8).toNumber(), (h * 0.22).toNumber());
+
+        dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, cy - 20, Gfx.FONT_SMALL,
+            "Waiting" + dots, Gfx.TEXT_JUSTIFY_CENTER);
+
+        dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, cy + 10, Gfx.FONT_TINY,
+            "Open AI Run Coach", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, (h * 0.74).toNumber(), Gfx.FONT_TINY,
+            "on your phone", Gfx.TEXT_JUSTIFY_CENTER);
     }
 
     // ── Zone Arc ──────────────────────────────────────────────────────────────
@@ -668,13 +842,7 @@ class RunView extends Ui.View {
         var y1 = (h * 0.840).toNumber();
         var y2 = (h * 0.878).toNumber();
 
-        if (_overlayState == OVERLAY_WAITING) {
-            var dots = "";
-            for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
-            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, y1, Gfx.FONT_XTINY, "Connecting" + dots, Gfx.TEXT_JUSTIFY_CENTER);
-
-        } else if (_overlayState == OVERLAY_READY) {
+        if (_overlayState == OVERLAY_READY) {
             if (_runnerName.length() > 0) {
                 dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
                 dc.drawText(cx, y1, Gfx.FONT_XTINY, _runnerName, Gfx.TEXT_JUSTIFY_CENTER);

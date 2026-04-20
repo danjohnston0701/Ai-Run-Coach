@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import { eq, sql } from 'drizzle-orm';
+import { oauthStateStore } from '@shared/schema';
 
 // Garmin Health API uses OAuth 1.0a — NOT OAuth 2.0 / PKCE.
 // env vars must be set in Replit Secrets:
@@ -25,56 +27,68 @@ const GARMIN_CONNECT_API = 'https://connect.garmin.com/modern/proxy';
 
 // Import database for PKCE storage
 import { db } from './db';
-import { sql } from 'drizzle-orm';
 
-// Store PKCE code verifiers in database (survives server restarts)
+// ─── Token-secret helpers ─────────────────────────────────────────────────────
+// The OAuth 1.0a request_token_secret is stored in the oauth_state_store record
+// (token_secret column) by nonce, then retrieved + cleared at callback time.
+// This piggy-backs on the existing oauth_state_store row created in routes.ts so
+// there is no separate table to maintain.
+
 async function storeCodeVerifier(nonce: string, verifier: string): Promise<void> {
   try {
-    await db.execute(sql`
-      INSERT INTO oauth_state (nonce, code_verifier, created_at)
-      VALUES (${nonce}, ${verifier}, NOW())
-      ON CONFLICT (nonce) DO UPDATE SET code_verifier = ${verifier}, created_at = NOW()
-    `);
-    console.log(`[Garmin] Stored code verifier in database for nonce: ${nonce}`);
+    await db
+      .update(oauthStateStore)
+      .set({ tokenSecret: verifier })
+      .where(eq(oauthStateStore.nonce, nonce));
+    console.log(`[Garmin] Stored token secret in oauth_state_store for nonce: ${nonce}`);
   } catch (error) {
-    console.error(`[Garmin] Failed to store code verifier:`, error);
+    console.error(`[Garmin] Failed to store token secret:`, error);
     throw error;
   }
 }
 
 async function getCodeVerifier(nonce: string): Promise<string | null> {
   try {
-    const result = await db.execute(sql`
-      SELECT code_verifier FROM oauth_state WHERE nonce = ${nonce}
-    `);
-    const verifier = (result.rows[0] as any)?.code_verifier || null;
+    const [row] = await db
+      .select({ tokenSecret: oauthStateStore.tokenSecret })
+      .from(oauthStateStore)
+      .where(eq(oauthStateStore.nonce, nonce));
+    const verifier = row?.tokenSecret ?? null;
     if (verifier) {
-      console.log(`[Garmin] Found code verifier in database for nonce: ${nonce}`);
+      console.log(`[Garmin] Found token secret in oauth_state_store for nonce: ${nonce}`);
     } else {
-      console.log(`[Garmin] Code verifier NOT found in database for nonce: ${nonce}`);
+      console.log(`[Garmin] Token secret NOT found in oauth_state_store for nonce: ${nonce}`);
     }
     return verifier;
   } catch (error) {
-    console.error(`[Garmin] Failed to get code verifier:`, error);
+    console.error(`[Garmin] Failed to get token secret:`, error);
     return null;
   }
 }
 
 async function deleteCodeVerifier(nonce: string): Promise<void> {
+  // Clear the token secret from the record (the full record is deleted later by
+  // claimOauthState, so we just null it out here to prevent double-use).
   try {
-    await db.execute(sql`DELETE FROM oauth_state WHERE nonce = ${nonce}`);
-    console.log(`[Garmin] Deleted code verifier from database for nonce: ${nonce}`);
+    await db
+      .update(oauthStateStore)
+      .set({ tokenSecret: null })
+      .where(eq(oauthStateStore.nonce, nonce));
+    console.log(`[Garmin] Cleared token secret from oauth_state_store for nonce: ${nonce}`);
   } catch (error) {
-    console.error(`[Garmin] Failed to delete code verifier:`, error);
+    console.error(`[Garmin] Failed to clear token secret:`, error);
   }
 }
 
-// Clean up old verifiers (older than 15 minutes) - called periodically
+// Clean up any old oauth_state_store rows that slipped past normal expiry
 async function cleanupOldVerifiers(): Promise<void> {
   try {
-    await db.execute(sql`DELETE FROM oauth_state WHERE created_at < NOW() - INTERVAL '15 minutes'`);
+    await db.execute(sql`
+      DELETE FROM oauth_state_store
+      WHERE expires_at < NOW() - INTERVAL '15 minutes'
+    `);
   } catch (error) {
-    console.error(`[Garmin] Failed to cleanup old verifiers:`, error);
+    console.error(`[Garmin] Failed to cleanup old oauth states:`, error);
   }
 }
 
