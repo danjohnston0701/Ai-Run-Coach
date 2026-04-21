@@ -8048,8 +8048,8 @@ var init_garmin_service = __esm({
     init_db();
     GARMIN_CLIENT_ID = process.env.GARMIN_CLIENT_ID;
     GARMIN_CLIENT_SECRET = process.env.GARMIN_CLIENT_SECRET;
-    GARMIN_AUTH_URL = "https://connect.garmin.com/oauth/authorize";
-    GARMIN_TOKEN_URL = "https://connectapi.garmin.com/oauth-service/oauth/token";
+    GARMIN_AUTH_URL = "https://auth.garmin.com/auth/authorize";
+    GARMIN_TOKEN_URL = "https://auth.garmin.com/oauth/token";
     GARMIN_API_BASE = "https://apis.garmin.com";
     GARMIN_CONNECT_API = "https://connect.garmin.com/modern/proxy";
     garmin_service_default = {

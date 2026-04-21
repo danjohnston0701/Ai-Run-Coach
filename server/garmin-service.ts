@@ -4,9 +4,8 @@ const GARMIN_CLIENT_ID = process.env.GARMIN_CLIENT_ID;
 const GARMIN_CLIENT_SECRET = process.env.GARMIN_CLIENT_SECRET;
 
 // Garmin OAuth 2.0 endpoints
-// Try the newer authorize endpoint first (some evaluation apps might not support oauthConfirm)
-const GARMIN_AUTH_URL = 'https://connect.garmin.com/oauth/authorize';
-const GARMIN_TOKEN_URL = 'https://connectapi.garmin.com/oauth-service/oauth/token';
+const GARMIN_AUTH_URL = 'https://auth.garmin.com/auth/authorize';
+const GARMIN_TOKEN_URL = 'https://auth.garmin.com/oauth/token';
 // Garmin Health API base (for wellness data - works with OAuth 2.0)
 const GARMIN_API_BASE = 'https://apis.garmin.com';
 // Garmin Connect proxy (for activity data if available)
