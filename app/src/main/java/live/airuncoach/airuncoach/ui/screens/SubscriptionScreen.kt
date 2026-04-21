@@ -40,21 +40,35 @@ fun SubscriptionScreen(onNavigateBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Subscription") },
+                title = { 
+                    Text(
+                        "Subscription",
+                        style = AppTextStyles.h2,
+                        color = Colors.textPrimary
+                    ) 
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Colors.textPrimary
+                        )
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Colors.backgroundRoot
+                )
             )
-        }
-    ) {
+        },
+        containerColor = Colors.backgroundRoot,
+        contentWindowInsets = WindowInsets(0)
+    ) { paddingValues ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Colors.backgroundRoot)
-                
-                .padding(Spacing.lg),
+                .padding(paddingValues)
+                .padding(horizontal = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             item { PremiumHeader() }
