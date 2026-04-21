@@ -17313,7 +17313,8 @@ ${contextJson}`;
     console.log("Full URL:", req.originalUrl);
     console.log("================================");
     try {
-      const { code, state, error } = req.query;
+      const { code, state } = req.query;
+      const errorParam = req.query.error;
       let appRedirectUrl = "airuncoach://connected-devices";
       let userId = "";
       let historyDays = 30;
@@ -17358,35 +17359,31 @@ ${contextJson}`;
         const errorUrl = appRedirectUrl.includes("?") ? `${appRedirectUrl}&garmin=error&message=missing_state` : `${appRedirectUrl}?garmin=error&message=missing_state`;
         return res.redirect(errorUrl);
       }
-      if (error) {
-        console.error("Garmin OAuth error:", error);
+      if (errorParam) {
+        console.error("Garmin OAuth error:", errorParam);
         await storage.deleteOauthState(state);
-        const errorUrl = appRedirectUrl.includes("?") ? `${appRedirectUrl}&garmin=error&message=${encodeURIComponent(error)}` : `${appRedirectUrl}?garmin=error&message=${encodeURIComponent(error)}`;
+        const errorUrl = appRedirectUrl.includes("?") ? `${appRedirectUrl}&garmin=error&message=${encodeURIComponent(errorParam)}` : `${appRedirectUrl}?garmin=error&message=${encodeURIComponent(errorParam)}`;
         return res.redirect(errorUrl);
       }
-      const { oauth_token, oauth_verifier } = req.query;
-      if (!oauth_token || !oauth_verifier || !nonce) {
-        console.error("Garmin callback - missing OAuth 1.0a params:", {
-          oauth_token: !!oauth_token,
-          oauth_verifier: !!oauth_verifier,
+      if (!code || !nonce) {
+        console.error("Garmin callback - missing OAuth 2.0 params:", {
+          code: !!code,
           nonce: !!nonce
         });
         const errorUrl = appRedirectUrl.includes("?") ? `${appRedirectUrl}&garmin=error&message=missing_params` : `${appRedirectUrl}?garmin=error&message=missing_params`;
         return res.redirect(errorUrl);
       }
       const garminService = await Promise.resolve().then(() => (init_garmin_service(), garmin_service_exports));
-      const tokens = await garminService.exchangeGarminOAuth1Token(
-        oauth_token,
-        oauth_verifier,
+      const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/garmin/callback`;
+      const tokens = await garminService.exchangeGarminCode(
+        code,
+        redirectUri,
         nonce
       );
       let garminUserId = tokens.athleteId ? String(tokens.athleteId) : void 0;
       if (!garminUserId) {
         try {
-          const profile = await garminService.getGarminUserProfile(
-            tokens.accessToken,
-            tokens.accessTokenSecret
-          );
+          const profile = await garminService.getGarminUserProfile(tokens.accessToken);
           garminUserId = profile?.userId ? String(profile.userId) : void 0;
           if (garminUserId) {
             console.log(`[Garmin OAuth] Resolved Garmin userId from profile API: ${garminUserId}`);
@@ -17433,8 +17430,8 @@ ${contextJson}`;
             endDate.toISOString()
           );
           console.log(`\u2705 Garmin backfill requested \u2014 historical activities will arrive via webhook shortly`);
-        } catch (error2) {
-          console.error("Error in Garmin OAuth flow:", error2);
+        } catch (error) {
+          console.error("Error in Garmin OAuth flow:", error);
         }
       } else {
         console.log("\u23ED\uFE0F Skipping historical activity sync (historyDays = 0)");

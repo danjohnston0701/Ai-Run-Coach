@@ -2880,7 +2880,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log("Full URL:", req.originalUrl);
     console.log("================================");
     try {
-      const { code, state, error } = req.query;
+      const { code, state } = req.query;
+      const errorParam = req.query.error;
       
       let appRedirectUrl = 'airuncoach://connected-devices';
       let userId = '';
@@ -2952,23 +2953,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.redirect(errorUrl);
       }
       
-      if (error) {
-        console.error("Garmin OAuth error:", error);
+      if (errorParam) {
+        console.error("Garmin OAuth error:", errorParam);
         await storage.deleteOauthState(state as string);
         const errorUrl = appRedirectUrl.includes('?') 
-          ? `${appRedirectUrl}&garmin=error&message=${encodeURIComponent(error as string)}`
-          : `${appRedirectUrl}?garmin=error&message=${encodeURIComponent(error as string)}`;
+          ? `${appRedirectUrl}&garmin=error&message=${encodeURIComponent(errorParam as string)}`
+          : `${appRedirectUrl}?garmin=error&message=${encodeURIComponent(errorParam as string)}`;
         return res.redirect(errorUrl);
       }
       
-      // Garmin OAuth 1.0a callback: Garmin sends oauth_token + oauth_verifier (not code).
-      // The state param was embedded in the callback URL during the request_token step.
-      const { oauth_token, oauth_verifier } = req.query;
-
-      if (!oauth_token || !oauth_verifier || !nonce) {
-        console.error("Garmin callback - missing OAuth 1.0a params:", {
-          oauth_token: !!oauth_token,
-          oauth_verifier: !!oauth_verifier,
+      // Garmin OAuth 2.0 callback: Garmin sends authorization code
+      if (!code || !nonce) {
+        console.error("Garmin callback - missing OAuth 2.0 params:", {
+          code: !!code,
           nonce: !!nonce,
         });
         const errorUrl = appRedirectUrl.includes('?')
@@ -2979,9 +2976,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const garminService = await import("./garmin-service");
 
-      const tokens = await garminService.exchangeGarminOAuth1Token(
-        oauth_token  as string,
-        oauth_verifier as string,
+      // Exchange authorization code for tokens (OAuth 2.0 PKCE flow)
+      const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/garmin/callback`;
+      const tokens = await garminService.exchangeGarminCode(
+        code as string,
+        redirectUri,
         nonce
       );
       
@@ -2991,12 +2990,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let garminUserId: string | undefined = tokens.athleteId ? String(tokens.athleteId) : undefined;
       if (!garminUserId) {
         try {
-          // Pass accessTokenSecret (stored in tokens.accessTokenSecret) so the
-          // profile call is properly signed with OAuth 1.0a.
-          const profile = await garminService.getGarminUserProfile(
-            tokens.accessToken,
-            (tokens as any).accessTokenSecret
-          );
+          // OAuth 2.0: just pass the access token, no signature needed
+          const profile = await garminService.getGarminUserProfile(tokens.accessToken);
           garminUserId = profile?.userId ? String(profile.userId) : undefined;
           if (garminUserId) {
             console.log(`[Garmin OAuth] Resolved Garmin userId from profile API: ${garminUserId}`);
