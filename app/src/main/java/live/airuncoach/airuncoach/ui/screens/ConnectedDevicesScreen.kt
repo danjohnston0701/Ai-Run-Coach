@@ -49,9 +49,22 @@ fun ConnectedDevicesScreen(
 ) {
     val garminConnectionStatus by viewModel.garminConnectionStatus.collectAsState()
     
-    // Refresh connection status whenever screen is shown (after OAuth callback)
-    LaunchedEffect(Unit) {
+    // Refresh connection status when screen is shown
+    // Using a lifecycle observer to refresh when returning from OAuth callback
+    DisposableEffect(onNavigateToGarminConnect) {
+        // Refresh immediately when screen appears
         viewModel.refreshGarminStatus()
+        
+        // Also refresh after a short delay in case OAuth is still being processed
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val runnable = Runnable {
+            viewModel.refreshGarminStatus()
+        }
+        handler.postDelayed(runnable, 500)
+        
+        onDispose {
+            handler.removeCallbacks(runnable)
+        }
     }
     
     // Garmin - Available now
