@@ -2809,6 +2809,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
     `);
   });
 
+  // Admin: inject a fake Garmin connection for a user by email (bypasses OAuth for demo/testing)
+  // Usage: GET /api/admin/inject-garmin?email=user@example.com&secret=airuncoach_admin_2024
+  app.get("/api/admin/inject-garmin", async (req: Request, res: Response) => {
+    try {
+      const { email, secret } = req.query as { email: string; secret: string };
+
+      // Simple secret guard so this can't be abused in production
+      if (secret !== 'airuncoach_admin_2024') {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      if (!email) {
+        return res.status(400).json({ error: 'email query param required' });
+      }
+
+      const user = await storage.getUserByEmail(email);
+      if (!user) {
+        return res.status(404).json({ error: `No user found with email: ${email}` });
+      }
+
+      // Remove any existing garmin devices first
+      const existing = await storage.getConnectedDevices(user.id);
+      for (const dev of existing.filter(d => d.deviceType === 'garmin')) {
+        await storage.deleteConnectedDevice(dev.id);
+      }
+
+      // Create a demo Garmin device record with a placeholder token
+      const device = await storage.createConnectedDevice({
+        userId: user.id,
+        deviceType: 'garmin',
+        deviceName: 'Garmin Connect (Demo)',
+        deviceId: `demo_garmin_${user.id}`,
+        accessToken: `demo_access_token_${user.id}`,
+        refreshToken: `demo_refresh_token_${user.id}`,
+        tokenExpiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
+        isActive: true,
+        grantedScopes: 'ACTIVITY_EXPORT,HEALTH_EXPORT,USER_INFO',
+      });
+
+      console.log(`[Admin] Injected Garmin device for user ${email} (id=${user.id})`);
+      res.json({ success: true, message: `Garmin connected for ${email}`, device });
+    } catch (error: any) {
+      console.error('[Admin] inject-garmin error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Initiate Garmin OAuth flow
   app.get("/api/auth/garmin", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
