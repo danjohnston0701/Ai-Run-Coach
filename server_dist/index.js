@@ -7374,10 +7374,18 @@ function parseFormEncoded(body) {
 }
 async function getGarminAuthUrl(redirectUri, state, nonce) {
   if (!GARMIN_CONSUMER_KEY || !GARMIN_CONSUMER_SECRET) {
+    console.error("\u274C GARMIN_CONSUMER_KEY:", GARMIN_CONSUMER_KEY ? "***SET***" : "NOT SET");
+    console.error("\u274C GARMIN_CONSUMER_SECRET:", GARMIN_CONSUMER_SECRET ? "***SET***" : "NOT SET");
+    console.error("\u274C GARMIN_CLIENT_ID:", process.env.GARMIN_CLIENT_ID ? "***SET***" : "NOT SET");
+    console.error("\u274C GARMIN_CLIENT_SECRET:", process.env.GARMIN_CLIENT_SECRET ? "***SET***" : "NOT SET");
     throw new Error(
-      "GARMIN_CONSUMER_KEY / GARMIN_CONSUMER_SECRET not set in environment. Add them as Replit Secrets (Settings \u2192 Secrets)."
+      "GARMIN_CONSUMER_KEY / GARMIN_CONSUMER_SECRET not set in environment. Add them as Replit Secrets (Settings \u2192 Secrets). See GARMIN_OAUTH_SETUP.md for instructions."
     );
   }
+  console.log("[Garmin OAuth 1.0a] \u2705 Credentials loaded");
+  console.log("[Garmin OAuth 1.0a] Consumer Key (first 4 chars):", GARMIN_CONSUMER_KEY.substring(0, 4) + "...");
+  console.log("[Garmin OAuth 1.0a] Consumer Key length:", GARMIN_CONSUMER_KEY.length);
+  console.log("[Garmin OAuth 1.0a] Consumer Secret length:", GARMIN_CONSUMER_SECRET.length);
   cleanupOldVerifiers().catch((err) => console.error("[Garmin] Failed to cleanup old verifiers:", err));
   const callbackUrl = `${redirectUri}?state=${encodeURIComponent(state)}`;
   const timestamp2 = Math.floor(Date.now() / 1e3).toString();
@@ -7395,13 +7403,30 @@ async function getGarminAuthUrl(redirectUri, state, nonce) {
   const authHeader = buildOAuth1Header(oauthParams, signature);
   console.log("[Garmin OAuth 1.0a] Requesting token from Garmin...");
   console.log("[Garmin OAuth 1.0a] Callback URL:", callbackUrl);
+  console.log("[Garmin OAuth 1.0a] Request URL:", GARMIN_REQUEST_TOKEN_URL);
+  console.log("[Garmin OAuth 1.0a] OAuth timestamp:", timestamp2);
+  console.log("[Garmin OAuth 1.0a] Authorization header:", authHeader);
   const response = await fetch(GARMIN_REQUEST_TOKEN_URL, {
     method: "POST",
-    headers: { Authorization: authHeader }
+    headers: {
+      "Authorization": authHeader,
+      "Content-Type": "application/x-www-form-urlencoded"
+    }
   });
   const body = await response.text();
   if (!response.ok) {
-    console.error("[Garmin OAuth 1.0a] Request token failed:", response.status, body);
+    console.error("[Garmin OAuth 1.0a] \u274C Request token FAILED");
+    console.error("[Garmin OAuth 1.0a] HTTP Status:", response.status);
+    console.error("[Garmin OAuth 1.0a] Response body:", body.substring(0, 500));
+    console.error("[Garmin OAuth 1.0a] Base string used for signing:", baseString);
+    console.error("[Garmin OAuth 1.0a] Authorization header sent:", authHeader);
+    if (response.status === 401) {
+      console.error("[Garmin OAuth 1.0a] \u26A0\uFE0F  CHECK THESE IN YOUR REPLIT SECRETS:");
+      console.error("  Env var name should be: GARMIN_CLIENT_ID (NOT GARMIN_CONSUMER_KEY)");
+      console.error("  Env var name should be: GARMIN_CLIENT_SECRET (NOT GARMIN_CONSUMER_SECRET)");
+      console.error("  Consumer Key first 4 chars:", GARMIN_CONSUMER_KEY.substring(0, 4));
+      console.error("  Consumer Key last 2 chars:", GARMIN_CONSUMER_KEY.slice(-2));
+    }
     throw new Error(`Garmin request_token failed: ${response.status} \u2014 ${body}`);
   }
   const tokenData = parseFormEncoded(body);
@@ -8083,8 +8108,8 @@ var GARMIN_CLIENT_ID, GARMIN_CLIENT_SECRET, GARMIN_CONSUMER_KEY, GARMIN_CONSUMER
 var init_garmin_service = __esm({
   "server/garmin-service.ts"() {
     init_db();
-    GARMIN_CLIENT_ID = process.env.GARMIN_CLIENT_ID;
-    GARMIN_CLIENT_SECRET = process.env.GARMIN_CLIENT_SECRET;
+    GARMIN_CLIENT_ID = process.env.GARMIN_CLIENT_ID?.trim();
+    GARMIN_CLIENT_SECRET = process.env.GARMIN_CLIENT_SECRET?.trim();
     GARMIN_CONSUMER_KEY = GARMIN_CLIENT_ID;
     GARMIN_CONSUMER_SECRET = GARMIN_CLIENT_SECRET;
     GARMIN_REQUEST_TOKEN_URL = "https://connectapi.garmin.com/oauth-service/oauth/request_token";
