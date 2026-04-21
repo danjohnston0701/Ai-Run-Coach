@@ -58,7 +58,7 @@ fun ConnectedDevicesScreen(
     val garminDevice = remember(garminConnectionStatus) {
         DeviceInfo(
             name = "Garmin",
-            description = "Connect via Garmin Connect OAuth for activity sync and health data",
+            description = "Connect via Garmin Connect for activity sync and health data",
             iconDrawable = R.drawable.ic_garmin_logo, // Garmin Connect logo
             supportsRealtimeHR = true, // Real-time data via Garmin Connect IQ app
             supportsPostRunSync = true,
@@ -85,7 +85,7 @@ fun ConnectedDevicesScreen(
             ),
             DeviceInfo(
                 name = "Samsung Galaxy Watch",
-                description = "Connect via Samsung Health SDK for real-time heart rate tracking",
+                description = "Connect via Samsung Health for real-time heart rate tracking",
                 icon = Icons.Default.Star,
                 supportsRealtimeHR = true,
                 supportsPostRunSync = true,
@@ -150,8 +150,6 @@ fun ConnectedDevicesScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            item { Spacer(modifier = Modifier.height(8.dp)) }
-            
             // Header
             item {
                 Column {
