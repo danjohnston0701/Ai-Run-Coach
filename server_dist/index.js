@@ -7282,10 +7282,8 @@ var init_route_generation_ai = __esm({
 // server/garmin-service.ts
 var garmin_service_exports = {};
 __export(garmin_service_exports, {
-  buildGarminApiAuthHeader: () => buildGarminApiAuthHeader,
   default: () => garmin_service_default,
   exchangeGarminCode: () => exchangeGarminCode,
-  exchangeGarminOAuth1Token: () => exchangeGarminOAuth1Token,
   generateTCXFile: () => generateTCXFile,
   getAndRemoveCodeVerifier: () => getAndRemoveCodeVerifier,
   getGarminActivities: () => getGarminActivities,
@@ -7312,33 +7310,55 @@ __export(garmin_service_exports, {
 });
 import crypto2 from "crypto";
 import { sql as sql8 } from "drizzle-orm";
-function _cleanupExpiredTokens() {
-  const now = Date.now();
-  for (const [key, entry] of _tokenSecretMap) {
-    if (now > entry.expiresAt) _tokenSecretMap.delete(key);
-  }
-}
 async function storeCodeVerifier(nonce, verifier) {
-  _cleanupExpiredTokens();
-  _tokenSecretMap.set(nonce, { secret: verifier, expiresAt: Date.now() + TOKEN_TTL_MS });
-  console.log(`[Garmin] Stored token secret in memory for nonce: ${nonce}`);
+  try {
+    await db.execute(sql8`
+      INSERT INTO oauth_state (nonce, code_verifier, created_at)
+      VALUES (${nonce}, ${verifier}, NOW())
+      ON CONFLICT (nonce) DO UPDATE SET code_verifier = ${verifier}, created_at = NOW()
+    `);
+    console.log(`[Garmin] Stored code verifier in database for nonce: ${nonce}`);
+  } catch (error) {
+    console.error(`[Garmin] Failed to store code verifier:`, error);
+    throw error;
+  }
 }
 async function getCodeVerifier(nonce) {
-  const entry = _tokenSecretMap.get(nonce);
-  if (!entry || Date.now() > entry.expiresAt) {
-    _tokenSecretMap.delete(nonce);
-    console.log(`[Garmin] Token secret NOT found (or expired) in memory for nonce: ${nonce}`);
+  try {
+    const result = await db.execute(sql8`
+      SELECT code_verifier FROM oauth_state WHERE nonce = ${nonce}
+    `);
+    const verifier = result.rows[0]?.code_verifier || null;
+    if (verifier) {
+      console.log(`[Garmin] Found code verifier in database for nonce: ${nonce}`);
+    } else {
+      console.log(`[Garmin] Code verifier NOT found in database for nonce: ${nonce}`);
+    }
+    return verifier;
+  } catch (error) {
+    console.error(`[Garmin] Failed to get code verifier:`, error);
     return null;
   }
-  console.log(`[Garmin] Found token secret in memory for nonce: ${nonce}`);
-  return entry.secret;
 }
 async function deleteCodeVerifier(nonce) {
-  _tokenSecretMap.delete(nonce);
-  console.log(`[Garmin] Deleted token secret from memory for nonce: ${nonce}`);
+  try {
+    await db.execute(sql8`DELETE FROM oauth_state WHERE nonce = ${nonce}`);
+    console.log(`[Garmin] Deleted code verifier from database for nonce: ${nonce}`);
+  } catch (error) {
+    console.error(`[Garmin] Failed to delete code verifier:`, error);
+  }
 }
 async function cleanupOldVerifiers() {
-  _cleanupExpiredTokens();
+  try {
+    await db.execute(sql8`DELETE FROM oauth_state WHERE created_at < NOW() - INTERVAL '15 minutes'`);
+  } catch (error) {
+    console.error(`[Garmin] Failed to cleanup old verifiers:`, error);
+  }
+}
+function generatePKCE() {
+  const codeVerifier = crypto2.randomBytes(32).toString("base64url");
+  const codeChallenge = crypto2.createHash("sha256").update(codeVerifier).digest("base64url");
+  return { codeVerifier, codeChallenge };
 }
 async function getAndRemoveCodeVerifier(nonce) {
   console.log(`[Garmin] Looking up code verifier for nonce: ${nonce}`);
@@ -7351,156 +7371,94 @@ async function getAndRemoveCodeVerifier(nonce) {
   console.log(`[Garmin] Code verifier NOT found for nonce: ${nonce}`);
   return null;
 }
-function buildOAuth1BaseString(method, url, params) {
-  const sorted = Object.keys(params).sort().map((k) => `${pctEncode(k)}=${pctEncode(params[k])}`).join("&");
-  return `${method.toUpperCase()}&${pctEncode(url)}&${pctEncode(sorted)}`;
-}
-function signOAuth1(baseString, consumerSecret, tokenSecret) {
-  const key = `${pctEncode(consumerSecret)}&${pctEncode(tokenSecret)}`;
-  return crypto2.createHmac("sha1", key).update(baseString).digest("base64");
-}
-function pctEncode(s) {
-  return encodeURIComponent(s).replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
-}
-function buildOAuth1Header(params, signature) {
-  const all = { ...params, oauth_signature: signature };
-  const parts = Object.keys(all).filter((k) => k.startsWith("oauth_")).sort().map((k) => `${k}="${pctEncode(all[k])}"`);
-  return `OAuth ${parts.join(", ")}`;
-}
-function parseFormEncoded(body) {
-  return Object.fromEntries(
-    body.split("&").map((p) => p.split("=").map(decodeURIComponent))
-  );
-}
 async function getGarminAuthUrl(redirectUri, state, nonce) {
-  if (!GARMIN_CONSUMER_KEY || !GARMIN_CONSUMER_SECRET) {
-    console.error("\u274C GARMIN_CONSUMER_KEY:", GARMIN_CONSUMER_KEY ? "***SET***" : "NOT SET");
-    console.error("\u274C GARMIN_CONSUMER_SECRET:", GARMIN_CONSUMER_SECRET ? "***SET***" : "NOT SET");
-    console.error("\u274C GARMIN_CLIENT_ID:", process.env.GARMIN_CLIENT_ID ? "***SET***" : "NOT SET");
-    console.error("\u274C GARMIN_CLIENT_SECRET:", process.env.GARMIN_CLIENT_SECRET ? "***SET***" : "NOT SET");
-    throw new Error(
-      "GARMIN_CONSUMER_KEY / GARMIN_CONSUMER_SECRET not set in environment. Add them as Replit Secrets (Settings \u2192 Secrets). See GARMIN_OAUTH_SETUP.md for instructions."
-    );
+  const { codeVerifier, codeChallenge } = generatePKCE();
+  await storeCodeVerifier(nonce, codeVerifier);
+  cleanupOldVerifiers().catch((err) => console.error("Failed to cleanup old verifiers:", err));
+  const params = new URLSearchParams({
+    client_id: GARMIN_CLIENT_ID,
+    response_type: "code",
+    redirect_uri: redirectUri,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
+    state
+    // Scope is optional for Garmin - it's configured in the app settings
+    // But including common scopes helps ensure proper permissions:
+    // scope: 'ACTIVITY:READ WELLNESS:READ',
+  });
+  const fullUrl = `${GARMIN_AUTH_URL}?${params.toString()}`;
+  console.log(`[Garmin Auth] Generated auth URL: ${fullUrl}`);
+  return fullUrl;
+}
+async function exchangeGarminCode(code, redirectUri, nonce) {
+  const codeVerifier = await getAndRemoveCodeVerifier(nonce);
+  if (!codeVerifier) {
+    throw new Error("Invalid state - PKCE code verifier not found for nonce: " + nonce);
   }
-  console.log("[Garmin OAuth 1.0a] \u2705 Credentials loaded");
-  console.log("[Garmin OAuth 1.0a] Consumer Key (first 4 chars):", GARMIN_CONSUMER_KEY.substring(0, 4) + "...");
-  console.log("[Garmin OAuth 1.0a] Consumer Key length:", GARMIN_CONSUMER_KEY.length);
-  console.log("[Garmin OAuth 1.0a] Consumer Secret length:", GARMIN_CONSUMER_SECRET.length);
-  cleanupOldVerifiers().catch((err) => console.error("[Garmin] Failed to cleanup old verifiers:", err));
-  const callbackUrl = `${redirectUri}?state=${encodeURIComponent(state)}`;
-  const timestamp2 = Math.floor(Date.now() / 1e3).toString();
-  const oauthNonce = crypto2.randomBytes(16).toString("hex");
-  const oauthParams = {
-    oauth_callback: callbackUrl,
-    oauth_consumer_key: GARMIN_CONSUMER_KEY,
-    oauth_nonce: oauthNonce,
-    oauth_signature_method: "HMAC-SHA1",
-    oauth_timestamp: timestamp2,
-    oauth_version: "1.0"
-  };
-  const baseString = buildOAuth1BaseString("POST", GARMIN_REQUEST_TOKEN_URL, oauthParams);
-  const signature = signOAuth1(baseString, GARMIN_CONSUMER_SECRET, "");
-  const authHeader = buildOAuth1Header(oauthParams, signature);
-  console.log("[Garmin OAuth 1.0a] Requesting token from Garmin...");
-  console.log("[Garmin OAuth 1.0a] Callback URL:", callbackUrl);
-  console.log("[Garmin OAuth 1.0a] Request URL:", GARMIN_REQUEST_TOKEN_URL);
-  console.log("[Garmin OAuth 1.0a] OAuth timestamp:", timestamp2);
-  console.log("[Garmin OAuth 1.0a] Authorization header:", authHeader);
-  const response = await fetch(GARMIN_REQUEST_TOKEN_URL, {
+  const formParts = [
+    `grant_type=authorization_code`,
+    `code=${encodeURIComponent(code)}`,
+    `redirect_uri=${encodeURIComponent(redirectUri)}`,
+    `code_verifier=${encodeURIComponent(codeVerifier)}`,
+    `client_id=${encodeURIComponent(GARMIN_CLIENT_ID)}`,
+    `client_secret=${encodeURIComponent(GARMIN_CLIENT_SECRET)}`
+  ];
+  const formBody = formParts.join("&");
+  console.log("=== GARMIN TOKEN EXCHANGE ===");
+  console.log("Token URL:", GARMIN_TOKEN_URL);
+  console.log("Redirect URI:", redirectUri);
+  console.log("Nonce:", nonce);
+  console.log("Code:", code);
+  console.log("Code verifier:", codeVerifier);
+  console.log("Code verifier length:", codeVerifier.length);
+  console.log("Client ID:", GARMIN_CLIENT_ID);
+  console.log("Client Secret (first 5 chars):", GARMIN_CLIENT_SECRET?.substring(0, 5));
+  console.log("Request body:", formBody);
+  console.log("==============================");
+  const response = await fetch(GARMIN_TOKEN_URL, {
     method: "POST",
     headers: {
-      "Authorization": authHeader,
       "Content-Type": "application/x-www-form-urlencoded"
-    }
+    },
+    body: formBody
   });
-  const body = await response.text();
   if (!response.ok) {
-    console.error("[Garmin OAuth 1.0a] \u274C Request token FAILED");
-    console.error("[Garmin OAuth 1.0a] HTTP Status:", response.status);
-    console.error("[Garmin OAuth 1.0a] Response body:", body.substring(0, 500));
-    console.error("[Garmin OAuth 1.0a] Base string used for signing:", baseString);
-    console.error("[Garmin OAuth 1.0a] Authorization header sent:", authHeader);
-    if (response.status === 401) {
-      console.error("[Garmin OAuth 1.0a] \u26A0\uFE0F  CHECK THESE IN YOUR REPLIT SECRETS:");
-      console.error("  Env var name should be: GARMIN_CLIENT_ID (NOT GARMIN_CONSUMER_KEY)");
-      console.error("  Env var name should be: GARMIN_CLIENT_SECRET (NOT GARMIN_CONSUMER_SECRET)");
-      console.error("  Consumer Key first 4 chars:", GARMIN_CONSUMER_KEY.substring(0, 4));
-      console.error("  Consumer Key last 2 chars:", GARMIN_CONSUMER_KEY.slice(-2));
-    }
-    throw new Error(`Garmin request_token failed: ${response.status} \u2014 ${body}`);
+    const errorText = await response.text();
+    console.error("Garmin token exchange failed:", errorText);
+    throw new Error(`Failed to exchange Garmin code: ${response.status}`);
   }
-  const tokenData = parseFormEncoded(body);
-  const requestToken = tokenData["oauth_token"];
-  const tokenSecret = tokenData["oauth_token_secret"];
-  if (!requestToken || !tokenSecret) {
-    throw new Error(`Garmin request_token response missing fields: ${body}`);
-  }
-  await storeCodeVerifier(nonce, tokenSecret);
-  const authUrl = `${GARMIN_AUTH_URL}?oauth_token=${requestToken}`;
-  console.log("[Garmin OAuth 1.0a] Auth URL:", authUrl);
-  return authUrl;
-}
-async function exchangeGarminOAuth1Token(oauthToken, oauthVerifier, nonce) {
-  const requestTokenSecret = await getAndRemoveCodeVerifier(nonce);
-  if (!requestTokenSecret) {
-    throw new Error("OAuth 1.0a request_token_secret not found for nonce: " + nonce);
-  }
-  if (!GARMIN_CONSUMER_KEY || !GARMIN_CONSUMER_SECRET) {
-    throw new Error("GARMIN_CONSUMER_KEY / GARMIN_CONSUMER_SECRET not set");
-  }
-  const timestamp2 = Math.floor(Date.now() / 1e3).toString();
-  const oauthNonce = crypto2.randomBytes(16).toString("hex");
-  const oauthParams = {
-    oauth_consumer_key: GARMIN_CONSUMER_KEY,
-    oauth_nonce: oauthNonce,
-    oauth_signature_method: "HMAC-SHA1",
-    oauth_timestamp: timestamp2,
-    oauth_token: oauthToken,
-    oauth_verifier: oauthVerifier,
-    oauth_version: "1.0"
-  };
-  const baseString = buildOAuth1BaseString("POST", GARMIN_ACCESS_TOKEN_URL, oauthParams);
-  const signature = signOAuth1(baseString, GARMIN_CONSUMER_SECRET, requestTokenSecret);
-  const authHeader = buildOAuth1Header(oauthParams, signature);
-  console.log("[Garmin OAuth 1.0a] Exchanging verifier for access token...");
-  const response = await fetch(GARMIN_ACCESS_TOKEN_URL, {
-    method: "POST",
-    headers: { Authorization: authHeader }
-  });
-  const body = await response.text();
-  if (!response.ok) {
-    console.error("[Garmin OAuth 1.0a] Access token exchange failed:", response.status, body);
-    throw new Error(`Garmin access_token exchange failed: ${response.status} \u2014 ${body}`);
-  }
-  const tokenData = parseFormEncoded(body);
-  const accessToken = tokenData["oauth_token"];
-  const accessTokenSecret = tokenData["oauth_token_secret"];
-  if (!accessToken || !accessTokenSecret) {
-    throw new Error(`Garmin access_token response missing fields: ${body}`);
-  }
-  console.log("[Garmin OAuth 1.0a] \u2705 Access token obtained");
+  const data = await response.json();
   return {
-    accessToken,
-    accessTokenSecret,
-    refreshToken: accessTokenSecret,
-    // stored in refreshToken column for later use
-    expiresIn: 31536e4,
-    // 10 years — Garmin 1.0a tokens don't expire
-    athleteId: tokenData["user_id"]
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresIn: data.expires_in || 7776e3,
+    // Default 90 days
+    athleteId: data.user_id
   };
-}
-async function exchangeGarminCode(_code, _redirectUri, _nonce) {
-  throw new Error(
-    "exchangeGarminCode() is deprecated \u2014 Garmin uses OAuth 1.0a, not OAuth 2.0. Use exchangeGarminOAuth1Token(oauthToken, oauthVerifier, nonce) instead."
-  );
 }
 async function refreshGarminToken(refreshToken) {
-  console.log("[Garmin] refreshGarminToken() called \u2014 OAuth 1.0a tokens do not expire, no-op");
+  const response = await fetch(GARMIN_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: GARMIN_CLIENT_ID,
+      client_secret: GARMIN_CLIENT_SECRET
+    })
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Garmin token refresh failed:", errorText);
+    throw new Error(`Failed to refresh Garmin token: ${response.status}`);
+  }
+  const data = await response.json();
   return {
-    accessToken: refreshToken,
-    // caller should pass the real accessToken here
-    refreshToken,
-    expiresIn: 31536e4
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token || refreshToken,
+    expiresIn: data.expires_in || 7776e3
   };
 }
 async function requestGarminBackfill(accessToken, startTime, endTime) {
@@ -7827,31 +7785,11 @@ function calculateReadinessScore(sleep, stress, bodyBattery, hrv) {
   }
   return { score, recommendation };
 }
-function buildGarminApiAuthHeader(method, url, accessToken, accessTokenSecret, extraParams = {}) {
-  if (!GARMIN_CONSUMER_KEY || !GARMIN_CONSUMER_SECRET) {
-    throw new Error("GARMIN_CONSUMER_KEY / GARMIN_CONSUMER_SECRET not set");
-  }
-  const timestamp2 = Math.floor(Date.now() / 1e3).toString();
-  const oauthNonce = crypto2.randomBytes(16).toString("hex");
-  const oauthParams = {
-    oauth_consumer_key: GARMIN_CONSUMER_KEY,
-    oauth_nonce: oauthNonce,
-    oauth_signature_method: "HMAC-SHA1",
-    oauth_timestamp: timestamp2,
-    oauth_token: accessToken,
-    oauth_version: "1.0",
-    ...extraParams
-  };
-  const allParams = { ...oauthParams };
-  const baseString = buildOAuth1BaseString(method, url, allParams);
-  const signature = signOAuth1(baseString, GARMIN_CONSUMER_SECRET, accessTokenSecret);
-  return buildOAuth1Header(oauthParams, signature);
-}
-async function getGarminUserProfile(accessToken, accessTokenSecret) {
-  const url = `${GARMIN_API_BASE}/wellness-api/rest/user/id`;
-  const authHeader = accessTokenSecret ? buildGarminApiAuthHeader("GET", url, accessToken, accessTokenSecret) : `Bearer ${accessToken}`;
-  const response = await fetch(url, {
-    headers: { Authorization: authHeader }
+async function getGarminUserProfile(accessToken) {
+  const response = await fetch(`${GARMIN_API_BASE}/wellness-api/rest/user/id`, {
+    headers: {
+      "Authorization": `Bearer ${accessToken}`
+    }
   });
   if (!response.ok) {
     throw new Error(`Failed to fetch Garmin user profile: ${response.status}`);
@@ -8078,7 +8016,7 @@ async function uploadRunToGarmin(userId, runData, accessToken, refreshToken, tok
         SET 
           access_token = ${tokenData.accessToken},
           refresh_token = ${tokenData.refreshToken},
-          token_expires_at = ${tokenData.expiresAt}
+          token_expires_at = ${new Date(Date.now() + tokenData.expiresIn * 1e3)}
         WHERE user_id = ${userId} AND device_type = 'garmin' AND is_active = true
       `);
       console.log("\u2705 Token refreshed successfully for upload");
@@ -8104,21 +8042,16 @@ async function uploadRunToGarmin(userId, runData, accessToken, refreshToken, tok
     };
   }
 }
-var GARMIN_CLIENT_ID, GARMIN_CLIENT_SECRET, GARMIN_CONSUMER_KEY, GARMIN_CONSUMER_SECRET, GARMIN_REQUEST_TOKEN_URL, GARMIN_AUTH_URL, GARMIN_ACCESS_TOKEN_URL, GARMIN_API_BASE, GARMIN_CONNECT_API, _tokenSecretMap, TOKEN_TTL_MS, garmin_service_default;
+var GARMIN_CLIENT_ID, GARMIN_CLIENT_SECRET, GARMIN_AUTH_URL, GARMIN_TOKEN_URL, GARMIN_API_BASE, GARMIN_CONNECT_API, garmin_service_default;
 var init_garmin_service = __esm({
   "server/garmin-service.ts"() {
     init_db();
-    GARMIN_CLIENT_ID = process.env.GARMIN_CLIENT_ID?.trim();
-    GARMIN_CLIENT_SECRET = process.env.GARMIN_CLIENT_SECRET?.trim();
-    GARMIN_CONSUMER_KEY = GARMIN_CLIENT_ID;
-    GARMIN_CONSUMER_SECRET = GARMIN_CLIENT_SECRET;
-    GARMIN_REQUEST_TOKEN_URL = "https://connectapi.garmin.com/oauth-service/oauth/request_token";
+    GARMIN_CLIENT_ID = process.env.GARMIN_CLIENT_ID;
+    GARMIN_CLIENT_SECRET = process.env.GARMIN_CLIENT_SECRET;
     GARMIN_AUTH_URL = "https://connect.garmin.com/oauthConfirm";
-    GARMIN_ACCESS_TOKEN_URL = "https://connectapi.garmin.com/oauth-service/oauth/access_token";
+    GARMIN_TOKEN_URL = "https://connectapi.garmin.com/oauth-service/oauth/token";
     GARMIN_API_BASE = "https://apis.garmin.com";
     GARMIN_CONNECT_API = "https://connect.garmin.com/modern/proxy";
-    _tokenSecretMap = /* @__PURE__ */ new Map();
-    TOKEN_TTL_MS = 15 * 60 * 1e3;
     garmin_service_default = {
       getGarminAuthUrl,
       exchangeGarminCode,

@@ -178,7 +178,7 @@ fun LoginScreen(
 
             // Title
             Text(
-                text = "AI Run Coach",
+                text = "Ai Run Coach",
                 style = AppTextStyles.h1.copy(fontWeight = FontWeight.Bold),
                 color = Colors.textPrimary
             )
