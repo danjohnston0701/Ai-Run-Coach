@@ -30,6 +30,7 @@ import live.airuncoach.airuncoach.service.RunTrackingService
 import javax.inject.Inject
 import live.airuncoach.airuncoach.ui.navigation.RootNavigationGraph
 import live.airuncoach.airuncoach.ui.theme.AiRunCoachTheme
+import live.airuncoach.airuncoach.util.GarminConnectionState
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -166,6 +167,13 @@ class MainActivity : ComponentActivity() {
     private fun handleGarminOAuthCallback(intent: Intent?) {
         intent?.data?.let { uri ->
             android.util.Log.d("MainActivity", "Received URI: $uri")
+
+            // Garmin OAuth 2.0 success — server stored the token and redirected back here
+            if (uri.scheme == "airuncoach" && uri.host == "connected-devices"
+                && uri.getQueryParameter("garmin") == "success") {
+                android.util.Log.d("MainActivity", "✅ Garmin OAuth success deep link received — notifying screen to refresh")
+                GarminConnectionState.notifyConnected()
+            }
             
             if (uri.scheme == "airuncoach" && uri.host == "garmin" && uri.path == "/auth-complete") {
                 android.util.Log.d("MainActivity", "✅ Garmin OAuth callback detected!")

@@ -24,9 +24,6 @@ import live.airuncoach.airuncoach.R
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.ui.theme.*
 import live.airuncoach.airuncoach.viewmodel.ConnectedDevicesViewModel
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 
 data class DeviceInfo(
     val name: String,
@@ -52,23 +49,6 @@ fun ConnectedDevicesScreen(
 ) {
     val garminConnectionStatus by viewModel.garminConnectionStatus.collectAsState()
 
-    // Refresh every time this screen is RESUMED (navigating back from GarminConnectScreen
-    // or returning from the browser after OAuth). This is the canonical Compose Navigation
-    // pattern — the NavBackStackEntry lifecycle goes ON_RESUME each time the screen returns
-    // to the foreground.
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                viewModel.refreshGarminStatus()
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-    
     // Garmin - Available now
     val garminDevice = remember(garminConnectionStatus) {
         DeviceInfo(

@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.data.GarminAuthManager
 import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.util.GarminConnectionState
 import javax.inject.Inject
 
 @HiltViewModel
@@ -31,6 +32,12 @@ class ConnectedDevicesViewModel @Inject constructor(
 
     init {
         checkGarminConnection()
+        // Re-check whenever MainActivity signals a successful Garmin OAuth callback
+        viewModelScope.launch {
+            GarminConnectionState.refreshTick.collect { tick ->
+                if (tick > 0) checkGarminConnection()
+            }
+        }
     }
 
     private fun checkGarminConnection() {
