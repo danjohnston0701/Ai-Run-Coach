@@ -3,9 +3,11 @@ import crypto from 'crypto';
 const GARMIN_CLIENT_ID = process.env.GARMIN_CLIENT_ID;
 const GARMIN_CLIENT_SECRET = process.env.GARMIN_CLIENT_SECRET;
 
-// Garmin OAuth 2.0 endpoints
-const GARMIN_AUTH_URL = 'https://auth.garmin.com/auth/authorize';
-const GARMIN_TOKEN_URL = 'https://auth.garmin.com/oauth/token';
+// Garmin OAuth 2.0 PKCE endpoints — from official spec: OAuth2PKCE_2.pdf
+// Step 1 – Authorization: https://connect.garmin.com/oauth2Confirm
+// Step 2 – Token exchange: https://diauth.garmin.com/di-oauth2-service/oauth/token
+const GARMIN_AUTH_URL = 'https://connect.garmin.com/oauth2Confirm';
+const GARMIN_TOKEN_URL = 'https://diauth.garmin.com/di-oauth2-service/oauth/token';
 // Garmin Health API base (for wellness data - works with OAuth 2.0)
 const GARMIN_API_BASE = 'https://apis.garmin.com';
 // Garmin Connect proxy (for activity data if available)
