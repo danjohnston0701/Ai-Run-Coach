@@ -90,4 +90,13 @@ class ConnectedDevicesViewModel @Inject constructor(
             }
         }
     }
+
+    /**
+     * Refresh the Garmin connection status from the server.
+     * Call this when returning from OAuth flow or after a deep link callback.
+     */
+    fun refreshGarminStatus() {
+        Log.d(TAG, "Refreshing Garmin connection status...")
+        checkGarminConnection()
+    }
 }

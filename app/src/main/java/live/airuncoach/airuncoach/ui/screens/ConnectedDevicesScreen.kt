@@ -49,6 +49,11 @@ fun ConnectedDevicesScreen(
 ) {
     val garminConnectionStatus by viewModel.garminConnectionStatus.collectAsState()
     
+    // Refresh connection status whenever screen is shown (after OAuth callback)
+    LaunchedEffect(Unit) {
+        viewModel.refreshGarminStatus()
+    }
+    
     // Garmin - Available now
     val garminDevice = remember(garminConnectionStatus) {
         DeviceInfo(
