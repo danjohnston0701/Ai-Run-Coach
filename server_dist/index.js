@@ -8070,7 +8070,11 @@ import { eq as eq17, and as and13 } from "drizzle-orm";
 import axios3 from "axios";
 async function getCurrentPermissions(userId) {
   const device2 = await db.query.connectedDevices.findFirst({
-    where: eq17(connectedDevices.userId, userId)
+    where: and13(
+      eq17(connectedDevices.userId, userId),
+      eq17(connectedDevices.deviceType, "garmin"),
+      eq17(connectedDevices.isActive, true)
+    )
   });
   if (!device2) {
     return {
@@ -8198,8 +8202,8 @@ function getOptionalScopes() {
   return GARMIN_PERMISSIONS_LIST.filter((p) => p.optional).map((p) => p.scope);
 }
 function parseGrantedScopes(scopesString) {
-  if (!scopesString) return /* @__PURE__ */ new Set();
-  return new Set(scopesString.split(",").map((s) => s.trim()).filter((s) => s));
+  if (!scopesString) return [];
+  return scopesString.split(",").map((s) => s.trim()).filter((s) => s);
 }
 function formatDateRelative(date) {
   const now = /* @__PURE__ */ new Date();
@@ -17393,25 +17397,30 @@ ${contextJson}`;
       }
       const existingDevices = await storage.getConnectedDevices(userId);
       const existingGarmin = existingDevices.find((d) => d.deviceType === "garmin" && d.isActive);
+      const { GARMIN_PERMISSIONS_LIST: GARMIN_PERMISSIONS_LIST2 } = await Promise.resolve().then(() => (init_garmin_permissions_service(), garmin_permissions_service_exports));
+      const allGrantedScopes = GARMIN_PERMISSIONS_LIST2.map((p) => p.scope).join(",");
       if (existingGarmin) {
         await storage.updateConnectedDevice(existingGarmin.id, {
           accessToken: tokens.accessToken,
           refreshToken: tokens.refreshToken,
           tokenExpiresAt: new Date(Date.now() + tokens.expiresIn * 1e3),
           deviceId: garminUserId ?? existingGarmin.deviceId,
+          deviceName: "Garmin Connect",
           isActive: true,
+          grantedScopes: allGrantedScopes,
           lastSyncAt: /* @__PURE__ */ new Date()
         });
       } else {
         await storage.createConnectedDevice({
           userId,
           deviceType: "garmin",
-          deviceName: "Garmin Watch",
+          deviceName: "Garmin Connect",
           deviceId: garminUserId,
           accessToken: tokens.accessToken,
           refreshToken: tokens.refreshToken,
           tokenExpiresAt: new Date(Date.now() + tokens.expiresIn * 1e3),
           isActive: true,
+          grantedScopes: allGrantedScopes,
           lastSyncAt: /* @__PURE__ */ new Date()
         });
       }

@@ -3036,6 +3036,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const existingDevices = await storage.getConnectedDevices(userId);
       const existingGarmin = existingDevices.find(d => d.deviceType === 'garmin' && d.isActive);
       
+      // All scopes the app is approved for — mark all as granted after OAuth
+      const { GARMIN_PERMISSIONS_LIST } = await import('./garmin-permissions-service');
+      const allGrantedScopes = GARMIN_PERMISSIONS_LIST.map(p => p.scope).join(',');
+
       if (existingGarmin) {
         // Update existing device with new tokens
         await storage.updateConnectedDevice(existingGarmin.id, {
@@ -3043,7 +3047,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           refreshToken: tokens.refreshToken,
           tokenExpiresAt: new Date(Date.now() + tokens.expiresIn * 1000),
           deviceId: garminUserId ?? existingGarmin.deviceId,
+          deviceName: 'Garmin Connect',
           isActive: true,
+          grantedScopes: allGrantedScopes,
           lastSyncAt: new Date(),
         });
       } else {
@@ -3051,12 +3057,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.createConnectedDevice({
           userId,
           deviceType: 'garmin',
-          deviceName: 'Garmin Watch',
+          deviceName: 'Garmin Connect',
           deviceId: garminUserId,
           accessToken: tokens.accessToken,
           refreshToken: tokens.refreshToken,
           tokenExpiresAt: new Date(Date.now() + tokens.expiresIn * 1000),
           isActive: true,
+          grantedScopes: allGrantedScopes,
           lastSyncAt: new Date(),
         });
       }

@@ -235,7 +235,11 @@ export async function getCurrentPermissions(userId: string): Promise<{
   }>;
 }> {
   const device = await db.query.connectedDevices.findFirst({
-    where: eq(connectedDevices.userId, userId),
+    where: and(
+      eq(connectedDevices.userId, userId),
+      eq(connectedDevices.deviceType, 'garmin'),
+      eq(connectedDevices.isActive, true)
+    ),
   });
 
   if (!device) {
@@ -433,9 +437,9 @@ export function getOptionalScopes(): string[] {
 // HELPER FUNCTIONS
 // ============================================================================
 
-function parseGrantedScopes(scopesString: string): Set<string> {
-  if (!scopesString) return new Set();
-  return new Set(scopesString.split(',').map(s => s.trim()).filter(s => s));
+function parseGrantedScopes(scopesString: string): string[] {
+  if (!scopesString) return [];
+  return scopesString.split(',').map(s => s.trim()).filter(s => s);
 }
 
 function formatDateRelative(date: Date): string {
