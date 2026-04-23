@@ -76,23 +76,13 @@ class ConnectedDevicesViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 Log.d(TAG, "Disconnecting Garmin device...")
-                
-                // Get connected devices
-                val devices = apiService.getConnectedDevices()
-                val garminDevice = devices.find { it.deviceType == "garmin" && it.isActive == true }
-                
-                if (garminDevice != null) {
-                    // Call backend to disconnect the device
-                    apiService.disconnectDevice(garminDevice.id)
-                    Log.d(TAG, "Garmin device disconnected successfully")
-                    _garminConnectionStatus.value = "disconnected"
-                } else {
-                    Log.w(TAG, "No active Garmin device found to disconnect")
-                    _garminConnectionStatus.value = "disconnected"
-                }
+                // Single endpoint deactivates ALL garmin records for the user,
+                // preventing stale records from showing as connected on restart
+                apiService.disconnectGarminDevice()
+                Log.d(TAG, "Garmin disconnected successfully")
+                _garminConnectionStatus.value = "disconnected"
             } catch (e: Exception) {
                 Log.e(TAG, "Error disconnecting Garmin device", e)
-                // Still update status to allow retry
                 _garminConnectionStatus.value = "disconnected"
             }
         }

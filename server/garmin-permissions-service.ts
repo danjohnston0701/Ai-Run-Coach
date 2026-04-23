@@ -399,27 +399,22 @@ export async function handlePermissionChange(data: {
  * Disconnect Garmin device for user
  */
 export async function disconnectDevice(userId: string): Promise<void> {
-  const device = await db.query.connectedDevices.findFirst({
-    where: eq(connectedDevices.userId, userId),
-  });
-
-  if (!device) {
-    throw new Error('No Garmin device connected');
-  }
-
-  // Mark device as inactive
+  // Deactivate ALL garmin devices for this user — prevents stale records
+  // from showing as connected after a reconnect/disconnect cycle
   await db
     .update(connectedDevices)
     .set({
       isActive: false,
       updatedAt: new Date(),
     })
-    .where(eq(connectedDevices.id, device.id));
+    .where(
+      and(
+        eq(connectedDevices.userId, userId),
+        eq(connectedDevices.deviceType, 'garmin')
+      )
+    );
 
-  console.log('[Garmin] Device disconnected:', device.deviceName);
-
-  // Optionally call Garmin API to revoke token
-  // await revokeGarminToken(device.accessToken);
+  console.log('[Garmin] All Garmin devices disconnected for user:', userId);
 }
 
 /**

@@ -8183,17 +8183,16 @@ async function handlePermissionChange(data) {
   }
 }
 async function disconnectDevice(userId) {
-  const device2 = await db.query.connectedDevices.findFirst({
-    where: eq17(connectedDevices.userId, userId)
-  });
-  if (!device2) {
-    throw new Error("No Garmin device connected");
-  }
   await db.update(connectedDevices).set({
     isActive: false,
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq17(connectedDevices.id, device2.id));
-  console.log("[Garmin] Device disconnected:", device2.deviceName);
+  }).where(
+    and13(
+      eq17(connectedDevices.userId, userId),
+      eq17(connectedDevices.deviceType, "garmin")
+    )
+  );
+  console.log("[Garmin] All Garmin devices disconnected for user:", userId);
 }
 function getRequiredScopes() {
   return GARMIN_PERMISSIONS_LIST.filter((p) => !p.optional).map((p) => p.scope);
