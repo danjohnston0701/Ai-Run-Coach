@@ -28,6 +28,7 @@ import FriendProfile from "@/pages/FriendProfile";
 import Features from "@/pages/Features";
 import ForgotPassword from "@/pages/ForgotPassword";
 import ResetPassword from "@/pages/ResetPassword";
+import Support from "@/pages/Support";
 import { migrateLocalDataToDatabase } from "@/lib/dataMigration";
 
 function ScrollToTop() {
@@ -94,6 +95,7 @@ function Router() {
     <Switch>
       <Route path="/privacy" component={PrivacyPolicy} />
       <Route path="/terms" component={TermsOfUse} />
+      <Route path="/support" component={Support} />
       <Route path="/login" component={Login} />
       <Route path="/forgot-password" component={ForgotPassword} />
       <Route path="/reset-password" component={ResetPassword} />

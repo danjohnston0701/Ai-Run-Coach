@@ -268,6 +268,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/support/contact — public, no auth required
+  app.post("/api/support/contact", async (req: Request, res: Response) => {
+    try {
+      const { name, email, subject, message } = req.body;
+      if (!name?.trim() || !email?.trim() || !message?.trim()) {
+        return res.status(400).json({ error: "Name, email, and message are required" });
+      }
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({ error: "Invalid email address" });
+      }
+      const { sendSupportEmail } = await import("./email-service");
+      await sendSupportEmail({ name: name.trim(), email: email.trim(), subject: subject?.trim() || "", message: message.trim() });
+      res.json({ ok: true });
+    } catch (error: any) {
+      console.error("Support contact error:", error);
+      res.status(500).json({ error: "Failed to send support message" });
+    }
+  });
+
   // POST /api/auth/forgot-password
   app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
     try {

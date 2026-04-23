@@ -6309,7 +6309,8 @@ var init_notification_service = __esm({
 // server/email-service.ts
 var email_service_exports = {};
 __export(email_service_exports, {
-  sendPasswordResetEmail: () => sendPasswordResetEmail
+  sendPasswordResetEmail: () => sendPasswordResetEmail,
+  sendSupportEmail: () => sendSupportEmail
 });
 import { Resend } from "resend";
 async function getResendClient() {
@@ -6335,6 +6336,67 @@ async function getResendClient() {
     client: new Resend(settings.settings.api_key),
     fromEmail: settings.settings.from_email || "noreply@airuncoach.live"
   };
+}
+async function sendSupportEmail(opts) {
+  const { client, fromEmail } = await getResendClient();
+  const subjectLine = opts.subject?.trim() || "Support Request";
+  await client.emails.send({
+    from: `AI Run Coach <${fromEmail}>`,
+    to: "support@airuncoach.live",
+    replyTo: opts.email,
+    subject: `[Support] ${subjectLine}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; background: #0A0A1A; color: #ffffff; border-radius: 12px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #00D4FF 0%, #0099CC 100%); padding: 32px; text-align: center;">
+          <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #0A0A1A;">AI Run Coach \u2014 Support Request</h1>
+        </div>
+        <div style="padding: 40px 32px;">
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+            <tr><td style="padding: 8px 0; color: #94a3b8; font-size: 13px; width: 80px;">From</td><td style="padding: 8px 0; color: #ffffff;">${opts.name} &lt;${opts.email}&gt;</td></tr>
+            <tr><td style="padding: 8px 0; color: #94a3b8; font-size: 13px;">Subject</td><td style="padding: 8px 0; color: #ffffff;">${subjectLine}</td></tr>
+          </table>
+          <div style="background: #1a1a2e; border-radius: 8px; padding: 20px; border-left: 3px solid #00D4FF;">
+            <p style="margin: 0; color: #e2e8f0; line-height: 1.7; white-space: pre-wrap;">${opts.message}</p>
+          </div>
+          <p style="margin: 24px 0 0; color: #64748b; font-size: 12px;">Reply directly to this email to respond to ${opts.name}.</p>
+        </div>
+      </div>
+    `,
+    text: `Support request from ${opts.name} <${opts.email}>
+Subject: ${subjectLine}
+
+${opts.message}`
+  });
+  await client.emails.send({
+    from: `AI Run Coach <${fromEmail}>`,
+    to: opts.email,
+    subject: "We've received your support request \u2014 AI Run Coach",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; background: #0A0A1A; color: #ffffff; border-radius: 12px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #00D4FF 0%, #0099CC 100%); padding: 32px; text-align: center;">
+          <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #0A0A1A;">AI Run Coach</h1>
+        </div>
+        <div style="padding: 40px 32px;">
+          <h2 style="margin: 0 0 16px; font-size: 20px; color: #ffffff;">Hi ${opts.name},</h2>
+          <p style="margin: 0 0 16px; color: #94a3b8; line-height: 1.6;">Thanks for getting in touch! We've received your support request and our team will get back to you within 24 hours on business days.</p>
+          <div style="background: #1a1a2e; border-radius: 8px; padding: 16px 20px; margin-bottom: 24px;">
+            <p style="margin: 0 0 6px; color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Your message</p>
+            <p style="margin: 0; color: #e2e8f0; font-size: 14px; line-height: 1.6; white-space: pre-wrap;">${opts.message}</p>
+          </div>
+          <p style="margin: 0; color: #94a3b8; font-size: 14px; line-height: 1.6;">While you wait, you may find an answer in our <a href="https://airuncoach.live/support" style="color: #00D4FF;">Help Centre</a>.</p>
+          <p style="margin: 24px 0 0; color: #64748b; font-size: 13px;">The AI Run Coach Team</p>
+        </div>
+      </div>
+    `,
+    text: `Hi ${opts.name},
+
+Thanks for reaching out! We've received your support request and will get back to you within 24 hours.
+
+Your message:
+${opts.message}
+
+The AI Run Coach Team`
+  });
 }
 async function sendPasswordResetEmail(to, resetToken) {
   const { client, fromEmail } = await getResendClient();
@@ -15185,6 +15247,24 @@ async function registerRoutes(app2) {
     } catch (error) {
       console.error("Login error:", error);
       res.status(500).json({ error: "Failed to login" });
+    }
+  });
+  app2.post("/api/support/contact", async (req, res) => {
+    try {
+      const { name, email, subject, message } = req.body;
+      if (!name?.trim() || !email?.trim() || !message?.trim()) {
+        return res.status(400).json({ error: "Name, email, and message are required" });
+      }
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({ error: "Invalid email address" });
+      }
+      const { sendSupportEmail: sendSupportEmail2 } = await Promise.resolve().then(() => (init_email_service(), email_service_exports));
+      await sendSupportEmail2({ name: name.trim(), email: email.trim(), subject: subject?.trim() || "", message: message.trim() });
+      res.json({ ok: true });
+    } catch (error) {
+      console.error("Support contact error:", error);
+      res.status(500).json({ error: "Failed to send support message" });
     }
   });
   app2.post("/api/auth/forgot-password", async (req, res) => {

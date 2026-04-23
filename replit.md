@@ -58,6 +58,7 @@ The backend exposes RESTful endpoints. Key endpoint groups:
 | Category | Endpoints | Notes |
 |----------|-----------|-------|
 | Auth | `POST /api/auth/login`, `/register` | JWT-based authentication |
+| Support | `POST /api/support/contact` | Public — sends email via Resend, auto-replies to user |
 | Users | `GET/PUT /api/users/:id`, coach-settings, profile-picture | Profile management |
 | Runs | `POST /api/runs/upload`, `GET /api/users/:userId/runs` | Run data CRUD |
 | Goals | `GET /api/goals/user/:userId`, `POST /api/goals`, `DELETE /api/goals/:id` | Goal tracking |
