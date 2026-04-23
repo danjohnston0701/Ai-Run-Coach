@@ -31,6 +31,16 @@ fun GarminConnectScreen(
     onNavigateBack: () -> Unit,
     viewModel: ConnectedDevicesViewModel = hiltViewModel()
 ) {
+    val garminConnectionStatus by viewModel.garminConnectionStatus.collectAsState()
+
+    // When OAuth completes and the ViewModel refreshes to "connected", go back to
+    // Connected Devices screen automatically — so the user sees the Connected state
+    LaunchedEffect(garminConnectionStatus) {
+        if (garminConnectionStatus == "connected") {
+            onNavigateBack()
+        }
+    }
+
     var selectedHistoryOption by remember { mutableStateOf("30") }
     
     val historyOptions = listOf(
