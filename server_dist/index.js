@@ -2094,7 +2094,9 @@ var init_storage = __esm({
       }
       // Connected Devices
       async getConnectedDevices(userId) {
-        return db.select().from(connectedDevices).where(eq(connectedDevices.userId, userId));
+        return db.select().from(connectedDevices).where(
+          and(eq(connectedDevices.userId, userId), eq(connectedDevices.isActive, true))
+        );
       }
       async getConnectedDevice(id) {
         const [device2] = await db.select().from(connectedDevices).where(eq(connectedDevices.id, id));
@@ -7285,6 +7287,365 @@ var init_route_generation_ai = __esm({
   }
 });
 
+// server/garmin-permissions-service.ts
+var garmin_permissions_service_exports = {};
+__export(garmin_permissions_service_exports, {
+  GARMIN_PERMISSIONS_LIST: () => GARMIN_PERMISSIONS_LIST,
+  GARMIN_SCOPES: () => GARMIN_SCOPES,
+  disconnectDevice: () => disconnectDevice,
+  getCurrentPermissions: () => getCurrentPermissions,
+  getOptionalScopes: () => getOptionalScopes,
+  getReauthorizationUrl: () => getReauthorizationUrl,
+  getRequiredScopes: () => getRequiredScopes,
+  handlePermissionChange: () => handlePermissionChange
+});
+import { eq as eq17, and as and13 } from "drizzle-orm";
+import axios3 from "axios";
+async function getCurrentPermissions(userId) {
+  const device2 = await db.query.connectedDevices.findFirst({
+    where: and13(
+      eq17(connectedDevices.userId, userId),
+      eq17(connectedDevices.deviceType, "garmin"),
+      eq17(connectedDevices.isActive, true)
+    )
+  });
+  if (!device2) {
+    return {
+      deviceName: null,
+      connectedSince: null,
+      lastSyncAt: null,
+      permissions: GARMIN_PERMISSIONS_LIST.map((perm) => ({
+        id: perm.id,
+        name: perm.name,
+        description: perm.description,
+        icon: perm.icon,
+        isGranted: false,
+        category: perm.category
+      }))
+    };
+  }
+  const grantedScopes = parseGrantedScopes(device2.grantedScopes || "");
+  return {
+    deviceName: device2.deviceName || "Unknown Device",
+    connectedSince: device2.createdAt ? formatDateRelative(device2.createdAt) : null,
+    lastSyncAt: device2.lastSyncAt ? formatDateRelative(device2.lastSyncAt) : null,
+    permissions: GARMIN_PERMISSIONS_LIST.map((perm) => ({
+      id: perm.id,
+      name: perm.name,
+      description: perm.description,
+      icon: perm.icon,
+      isGranted: grantedScopes.includes(perm.scope),
+      category: perm.category
+    }))
+  };
+}
+async function getReauthorizationUrl(userId, baseUrl) {
+  const consumerKey = process.env.GARMIN_CONSUMER_KEY;
+  const consumerSecret = process.env.GARMIN_CONSUMER_SECRET;
+  if (!consumerKey || !consumerSecret) {
+    throw new Error("Garmin credentials not configured");
+  }
+  const requestTokenUrl = "https://auth.garmin.com/oauth-provider/oauth/requestToken";
+  const redirectUri = `${baseUrl}/api/auth/garmin/callback`;
+  try {
+    const response = await axios3.post(requestTokenUrl, null, {
+      params: {
+        oauth_consumer_key: consumerKey,
+        oauth_signature_method: "HMAC-SHA1",
+        oauth_signature: generateSignature(
+          "POST",
+          requestTokenUrl,
+          { oauth_consumer_key: consumerKey },
+          consumerSecret
+        ),
+        oauth_callback: redirectUri
+      }
+    });
+    const { oauth_token } = response.data;
+    const authUrl = `https://auth.garmin.com/oauth-provider/oauth/authorize?oauth_token=${oauth_token}&state=${userId}`;
+    return authUrl;
+  } catch (error) {
+    console.error("Failed to get authorization URL:", error.message);
+    throw new Error("Failed to initiate Garmin re-authorization");
+  }
+}
+async function handlePermissionChange(data) {
+  const { userAccessToken, userId: garminUserId, permissionsGranted = [], permissionsRevoked = [] } = data;
+  let device2 = null;
+  if (garminUserId) {
+    device2 = await db.query.connectedDevices.findFirst({
+      where: eq17(connectedDevices.deviceId, String(garminUserId))
+    });
+  }
+  if (!device2 && userAccessToken) {
+    device2 = await db.query.connectedDevices.findFirst({
+      where: eq17(connectedDevices.accessToken, userAccessToken)
+    });
+  }
+  if (!device2) {
+    const allDevices = await db.query.connectedDevices.findMany({
+      where: and13(
+        eq17(connectedDevices.deviceType, "garmin"),
+        eq17(connectedDevices.isActive, true)
+      )
+    });
+    if (allDevices.length === 1) {
+      device2 = allDevices[0];
+      console.log("[Garmin] Permission change: matched single active Garmin account");
+    } else {
+      console.warn("[Garmin] Permission change received but could not match to a user \u2014 no userId or token provided");
+      return;
+    }
+  }
+  const currentScopes = parseGrantedScopes(device2.grantedScopes || "");
+  const updatedScopes = new Set(currentScopes);
+  permissionsGranted.forEach((scope) => updatedScopes.add(scope));
+  permissionsRevoked.forEach((scope) => updatedScopes.delete(scope));
+  await db.update(connectedDevices).set({
+    grantedScopes: Array.from(updatedScopes).join(","),
+    updatedAt: /* @__PURE__ */ new Date()
+  }).where(eq17(connectedDevices.id, device2.id));
+  console.log("[Garmin] Permission change processed:", {
+    device: device2.deviceName,
+    granted: permissionsGranted,
+    revoked: permissionsRevoked,
+    totalScopes: updatedScopes.size
+  });
+  if (permissionsGranted.length > 0) {
+    await triggerDataSync(device2.userId, Array.from(updatedScopes));
+  }
+}
+async function disconnectDevice(userId) {
+  await db.update(connectedDevices).set({
+    isActive: false,
+    updatedAt: /* @__PURE__ */ new Date()
+  }).where(
+    and13(
+      eq17(connectedDevices.userId, userId),
+      eq17(connectedDevices.deviceType, "garmin")
+    )
+  );
+  console.log("[Garmin] All Garmin devices disconnected for user:", userId);
+}
+function getRequiredScopes() {
+  return GARMIN_PERMISSIONS_LIST.filter((p) => !p.optional).map((p) => p.scope);
+}
+function getOptionalScopes() {
+  return GARMIN_PERMISSIONS_LIST.filter((p) => p.optional).map((p) => p.scope);
+}
+function parseGrantedScopes(scopesString) {
+  if (!scopesString) return [];
+  return scopesString.split(",").map((s) => s.trim()).filter((s) => s);
+}
+function formatDateRelative(date) {
+  const now = /* @__PURE__ */ new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 6e4);
+  const diffHours = Math.floor(diffMs / 36e5);
+  const diffDays = Math.floor(diffMs / 864e5);
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
+}
+function generateSignature(method, url, params, consumerSecret) {
+  const paramsString = Object.entries(params).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("&");
+  const baseString = `${method}&${encodeURIComponent(url)}&${encodeURIComponent(paramsString)}`;
+  const signingKey = `${consumerSecret}&`;
+  const crypto3 = __require("crypto");
+  return crypto3.createHmac("sha1", signingKey).update(baseString).digest("base64");
+}
+async function triggerDataSync(userId, scopes) {
+  console.log("[Garmin] Triggering data sync for new scopes:", scopes);
+}
+var GARMIN_SCOPES, GARMIN_PERMISSIONS_LIST;
+var init_garmin_permissions_service = __esm({
+  "server/garmin-permissions-service.ts"() {
+    init_db();
+    init_schema();
+    GARMIN_SCOPES = {
+      // Activity Scopes
+      ACTIVITY_READ: "activity:read",
+      ACTIVITY_WRITE: "activity:write",
+      ACTIVITY_DETAILS_READ: "activity_details:read",
+      // Health Scopes
+      HEALTH_READ: "health:read",
+      HR_READ: "hr:read",
+      BP_READ: "bp:read",
+      SPO2_READ: "spo2:read",
+      RESPIRATION_READ: "respiration:read",
+      TEMPERATURE_READ: "temperature:read",
+      // Wellness Scopes
+      SLEEP_READ: "sleep:read",
+      STRESS_READ: "stress:read",
+      BODY_COMPOSITION_READ: "body_composition:read",
+      MENSTRUAL_READ: "menstrual:read",
+      // Advanced Scopes
+      VO2_READ: "vo2_max:read",
+      FITNESS_AGE_READ: "fitness_age:read",
+      EPOCHS_READ: "epochs:read"
+    };
+    GARMIN_PERMISSIONS_LIST = [
+      // ACTIVITIES
+      {
+        id: "activity_summary",
+        scope: GARMIN_SCOPES.ACTIVITY_READ,
+        name: "Activity Summaries",
+        description: "Access to activity summaries (runs, walks, etc)",
+        icon: "\u{1F3C3}",
+        category: "activities",
+        dataTypes: ["activities", "activity-details", "moveiq"],
+        optional: false
+        // Core feature
+      },
+      {
+        id: "activity_details",
+        scope: GARMIN_SCOPES.ACTIVITY_DETAILS_READ,
+        name: "Activity Details",
+        description: "GPS data, pace samples, elevation profiles",
+        icon: "\u{1F4CD}",
+        category: "activities",
+        dataTypes: ["activity-details", "samples"],
+        optional: true
+      },
+      // HEALTH
+      {
+        id: "heart_rate",
+        scope: GARMIN_SCOPES.HR_READ,
+        name: "Heart Rate",
+        description: "HR monitoring, heart rate zones, trends",
+        icon: "\u2764\uFE0F",
+        category: "health",
+        dataTypes: ["health-snapshot", "daily-summary"],
+        optional: true
+      },
+      {
+        id: "blood_pressure",
+        scope: GARMIN_SCOPES.BP_READ,
+        name: "Blood Pressure",
+        description: "Blood pressure readings and trends",
+        icon: "\u{1FA78}",
+        category: "health",
+        dataTypes: ["blood-pressure"],
+        optional: true
+      },
+      {
+        id: "spo2",
+        scope: GARMIN_SCOPES.SPO2_READ,
+        name: "Oxygen Levels (SpO2)",
+        description: "Blood oxygen saturation measurements",
+        icon: "\u{1FAC1}",
+        category: "health",
+        dataTypes: ["pulse-ox"],
+        optional: true
+      },
+      {
+        id: "respiration",
+        scope: GARMIN_SCOPES.RESPIRATION_READ,
+        name: "Breathing Rate",
+        description: "Breathing rate measurements and trends",
+        icon: "\u{1F4A8}",
+        category: "health",
+        dataTypes: ["respiration"],
+        optional: true
+      },
+      {
+        id: "skin_temperature",
+        scope: GARMIN_SCOPES.TEMPERATURE_READ,
+        name: "Skin Temperature",
+        description: "Body temperature monitoring",
+        icon: "\u{1F321}\uFE0F",
+        category: "health",
+        dataTypes: ["skin-temperature"],
+        optional: true
+      },
+      // WELLNESS
+      {
+        id: "sleep",
+        scope: GARMIN_SCOPES.SLEEP_READ,
+        name: "Sleep Data",
+        description: "Sleep duration, stages, quality scores",
+        icon: "\u{1F634}",
+        category: "wellness",
+        dataTypes: ["sleeps", "sleep-scores"],
+        optional: true
+      },
+      {
+        id: "stress",
+        scope: GARMIN_SCOPES.STRESS_READ,
+        name: "Stress & Body Battery",
+        description: "Stress levels, body battery, recovery data",
+        icon: "\u{1F50B}",
+        category: "wellness",
+        dataTypes: ["stress", "body-battery"],
+        optional: true
+      },
+      {
+        id: "hrv",
+        scope: GARMIN_SCOPES.HEALTH_READ,
+        name: "Heart Rate Variability (HRV)",
+        description: "HRV metrics for recovery monitoring",
+        icon: "\u{1F4C8}",
+        category: "wellness",
+        dataTypes: ["hrv"],
+        optional: true
+      },
+      {
+        id: "body_composition",
+        scope: GARMIN_SCOPES.BODY_COMPOSITION_READ,
+        name: "Body Composition",
+        description: "Weight, body fat %, BMI tracking",
+        icon: "\u2696\uFE0F",
+        category: "wellness",
+        dataTypes: ["body-compositions"],
+        optional: true
+      },
+      {
+        id: "menstrual",
+        scope: GARMIN_SCOPES.MENSTRUAL_READ,
+        name: "Menstrual Cycle",
+        description: "Women's health cycle tracking (if applicable)",
+        icon: "\u{1F469}",
+        category: "wellness",
+        dataTypes: ["menstrual-cycle"],
+        optional: true
+      },
+      // ADVANCED
+      {
+        id: "vo2_max",
+        scope: GARMIN_SCOPES.VO2_READ,
+        name: "VO2 Max",
+        description: "Aerobic fitness measurements",
+        icon: "\u{1FAC0}",
+        category: "advanced",
+        dataTypes: ["user-metrics"],
+        optional: true
+      },
+      {
+        id: "fitness_age",
+        scope: GARMIN_SCOPES.FITNESS_AGE_READ,
+        name: "Fitness Age",
+        description: "Biological fitness age calculations",
+        icon: "\u{1F382}",
+        category: "advanced",
+        dataTypes: ["user-metrics"],
+        optional: true
+      },
+      {
+        id: "epochs",
+        scope: GARMIN_SCOPES.EPOCHS_READ,
+        name: "Minute-by-Minute Data (Epochs)",
+        description: "High-resolution activity and wellness data",
+        icon: "\u{1F4CA}",
+        category: "advanced",
+        dataTypes: ["epochs"],
+        optional: true
+      }
+    ];
+  }
+});
+
 // server/garmin-service.ts
 var garmin_service_exports = {};
 __export(garmin_service_exports, {
@@ -8057,365 +8418,6 @@ var init_garmin_service = __esm({
       uploadActivityToGarmin,
       uploadRunToGarmin
     };
-  }
-});
-
-// server/garmin-permissions-service.ts
-var garmin_permissions_service_exports = {};
-__export(garmin_permissions_service_exports, {
-  GARMIN_PERMISSIONS_LIST: () => GARMIN_PERMISSIONS_LIST,
-  GARMIN_SCOPES: () => GARMIN_SCOPES,
-  disconnectDevice: () => disconnectDevice,
-  getCurrentPermissions: () => getCurrentPermissions,
-  getOptionalScopes: () => getOptionalScopes,
-  getReauthorizationUrl: () => getReauthorizationUrl,
-  getRequiredScopes: () => getRequiredScopes,
-  handlePermissionChange: () => handlePermissionChange
-});
-import { eq as eq17, and as and13 } from "drizzle-orm";
-import axios3 from "axios";
-async function getCurrentPermissions(userId) {
-  const device2 = await db.query.connectedDevices.findFirst({
-    where: and13(
-      eq17(connectedDevices.userId, userId),
-      eq17(connectedDevices.deviceType, "garmin"),
-      eq17(connectedDevices.isActive, true)
-    )
-  });
-  if (!device2) {
-    return {
-      deviceName: null,
-      connectedSince: null,
-      lastSyncAt: null,
-      permissions: GARMIN_PERMISSIONS_LIST.map((perm) => ({
-        id: perm.id,
-        name: perm.name,
-        description: perm.description,
-        icon: perm.icon,
-        isGranted: false,
-        category: perm.category
-      }))
-    };
-  }
-  const grantedScopes = parseGrantedScopes(device2.grantedScopes || "");
-  return {
-    deviceName: device2.deviceName || "Unknown Device",
-    connectedSince: device2.createdAt ? formatDateRelative(device2.createdAt) : null,
-    lastSyncAt: device2.lastSyncAt ? formatDateRelative(device2.lastSyncAt) : null,
-    permissions: GARMIN_PERMISSIONS_LIST.map((perm) => ({
-      id: perm.id,
-      name: perm.name,
-      description: perm.description,
-      icon: perm.icon,
-      isGranted: grantedScopes.includes(perm.scope),
-      category: perm.category
-    }))
-  };
-}
-async function getReauthorizationUrl(userId, baseUrl) {
-  const consumerKey = process.env.GARMIN_CONSUMER_KEY;
-  const consumerSecret = process.env.GARMIN_CONSUMER_SECRET;
-  if (!consumerKey || !consumerSecret) {
-    throw new Error("Garmin credentials not configured");
-  }
-  const requestTokenUrl = "https://auth.garmin.com/oauth-provider/oauth/requestToken";
-  const redirectUri = `${baseUrl}/api/auth/garmin/callback`;
-  try {
-    const response = await axios3.post(requestTokenUrl, null, {
-      params: {
-        oauth_consumer_key: consumerKey,
-        oauth_signature_method: "HMAC-SHA1",
-        oauth_signature: generateSignature(
-          "POST",
-          requestTokenUrl,
-          { oauth_consumer_key: consumerKey },
-          consumerSecret
-        ),
-        oauth_callback: redirectUri
-      }
-    });
-    const { oauth_token } = response.data;
-    const authUrl = `https://auth.garmin.com/oauth-provider/oauth/authorize?oauth_token=${oauth_token}&state=${userId}`;
-    return authUrl;
-  } catch (error) {
-    console.error("Failed to get authorization URL:", error.message);
-    throw new Error("Failed to initiate Garmin re-authorization");
-  }
-}
-async function handlePermissionChange(data) {
-  const { userAccessToken, userId: garminUserId, permissionsGranted = [], permissionsRevoked = [] } = data;
-  let device2 = null;
-  if (garminUserId) {
-    device2 = await db.query.connectedDevices.findFirst({
-      where: eq17(connectedDevices.deviceId, String(garminUserId))
-    });
-  }
-  if (!device2 && userAccessToken) {
-    device2 = await db.query.connectedDevices.findFirst({
-      where: eq17(connectedDevices.accessToken, userAccessToken)
-    });
-  }
-  if (!device2) {
-    const allDevices = await db.query.connectedDevices.findMany({
-      where: and13(
-        eq17(connectedDevices.deviceType, "garmin"),
-        eq17(connectedDevices.isActive, true)
-      )
-    });
-    if (allDevices.length === 1) {
-      device2 = allDevices[0];
-      console.log("[Garmin] Permission change: matched single active Garmin account");
-    } else {
-      console.warn("[Garmin] Permission change received but could not match to a user \u2014 no userId or token provided");
-      return;
-    }
-  }
-  const currentScopes = parseGrantedScopes(device2.grantedScopes || "");
-  const updatedScopes = new Set(currentScopes);
-  permissionsGranted.forEach((scope) => updatedScopes.add(scope));
-  permissionsRevoked.forEach((scope) => updatedScopes.delete(scope));
-  await db.update(connectedDevices).set({
-    grantedScopes: Array.from(updatedScopes).join(","),
-    updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq17(connectedDevices.id, device2.id));
-  console.log("[Garmin] Permission change processed:", {
-    device: device2.deviceName,
-    granted: permissionsGranted,
-    revoked: permissionsRevoked,
-    totalScopes: updatedScopes.size
-  });
-  if (permissionsGranted.length > 0) {
-    await triggerDataSync(device2.userId, Array.from(updatedScopes));
-  }
-}
-async function disconnectDevice(userId) {
-  await db.update(connectedDevices).set({
-    isActive: false,
-    updatedAt: /* @__PURE__ */ new Date()
-  }).where(
-    and13(
-      eq17(connectedDevices.userId, userId),
-      eq17(connectedDevices.deviceType, "garmin")
-    )
-  );
-  console.log("[Garmin] All Garmin devices disconnected for user:", userId);
-}
-function getRequiredScopes() {
-  return GARMIN_PERMISSIONS_LIST.filter((p) => !p.optional).map((p) => p.scope);
-}
-function getOptionalScopes() {
-  return GARMIN_PERMISSIONS_LIST.filter((p) => p.optional).map((p) => p.scope);
-}
-function parseGrantedScopes(scopesString) {
-  if (!scopesString) return [];
-  return scopesString.split(",").map((s) => s.trim()).filter((s) => s);
-}
-function formatDateRelative(date) {
-  const now = /* @__PURE__ */ new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 6e4);
-  const diffHours = Math.floor(diffMs / 36e5);
-  const diffDays = Math.floor(diffMs / 864e5);
-  if (diffMins < 1) return "just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
-}
-function generateSignature(method, url, params, consumerSecret) {
-  const paramsString = Object.entries(params).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("&");
-  const baseString = `${method}&${encodeURIComponent(url)}&${encodeURIComponent(paramsString)}`;
-  const signingKey = `${consumerSecret}&`;
-  const crypto3 = __require("crypto");
-  return crypto3.createHmac("sha1", signingKey).update(baseString).digest("base64");
-}
-async function triggerDataSync(userId, scopes) {
-  console.log("[Garmin] Triggering data sync for new scopes:", scopes);
-}
-var GARMIN_SCOPES, GARMIN_PERMISSIONS_LIST;
-var init_garmin_permissions_service = __esm({
-  "server/garmin-permissions-service.ts"() {
-    init_db();
-    init_schema();
-    GARMIN_SCOPES = {
-      // Activity Scopes
-      ACTIVITY_READ: "activity:read",
-      ACTIVITY_WRITE: "activity:write",
-      ACTIVITY_DETAILS_READ: "activity_details:read",
-      // Health Scopes
-      HEALTH_READ: "health:read",
-      HR_READ: "hr:read",
-      BP_READ: "bp:read",
-      SPO2_READ: "spo2:read",
-      RESPIRATION_READ: "respiration:read",
-      TEMPERATURE_READ: "temperature:read",
-      // Wellness Scopes
-      SLEEP_READ: "sleep:read",
-      STRESS_READ: "stress:read",
-      BODY_COMPOSITION_READ: "body_composition:read",
-      MENSTRUAL_READ: "menstrual:read",
-      // Advanced Scopes
-      VO2_READ: "vo2_max:read",
-      FITNESS_AGE_READ: "fitness_age:read",
-      EPOCHS_READ: "epochs:read"
-    };
-    GARMIN_PERMISSIONS_LIST = [
-      // ACTIVITIES
-      {
-        id: "activity_summary",
-        scope: GARMIN_SCOPES.ACTIVITY_READ,
-        name: "Activity Summaries",
-        description: "Access to activity summaries (runs, walks, etc)",
-        icon: "\u{1F3C3}",
-        category: "activities",
-        dataTypes: ["activities", "activity-details", "moveiq"],
-        optional: false
-        // Core feature
-      },
-      {
-        id: "activity_details",
-        scope: GARMIN_SCOPES.ACTIVITY_DETAILS_READ,
-        name: "Activity Details",
-        description: "GPS data, pace samples, elevation profiles",
-        icon: "\u{1F4CD}",
-        category: "activities",
-        dataTypes: ["activity-details", "samples"],
-        optional: true
-      },
-      // HEALTH
-      {
-        id: "heart_rate",
-        scope: GARMIN_SCOPES.HR_READ,
-        name: "Heart Rate",
-        description: "HR monitoring, heart rate zones, trends",
-        icon: "\u2764\uFE0F",
-        category: "health",
-        dataTypes: ["health-snapshot", "daily-summary"],
-        optional: true
-      },
-      {
-        id: "blood_pressure",
-        scope: GARMIN_SCOPES.BP_READ,
-        name: "Blood Pressure",
-        description: "Blood pressure readings and trends",
-        icon: "\u{1FA78}",
-        category: "health",
-        dataTypes: ["blood-pressure"],
-        optional: true
-      },
-      {
-        id: "spo2",
-        scope: GARMIN_SCOPES.SPO2_READ,
-        name: "Oxygen Levels (SpO2)",
-        description: "Blood oxygen saturation measurements",
-        icon: "\u{1FAC1}",
-        category: "health",
-        dataTypes: ["pulse-ox"],
-        optional: true
-      },
-      {
-        id: "respiration",
-        scope: GARMIN_SCOPES.RESPIRATION_READ,
-        name: "Breathing Rate",
-        description: "Breathing rate measurements and trends",
-        icon: "\u{1F4A8}",
-        category: "health",
-        dataTypes: ["respiration"],
-        optional: true
-      },
-      {
-        id: "skin_temperature",
-        scope: GARMIN_SCOPES.TEMPERATURE_READ,
-        name: "Skin Temperature",
-        description: "Body temperature monitoring",
-        icon: "\u{1F321}\uFE0F",
-        category: "health",
-        dataTypes: ["skin-temperature"],
-        optional: true
-      },
-      // WELLNESS
-      {
-        id: "sleep",
-        scope: GARMIN_SCOPES.SLEEP_READ,
-        name: "Sleep Data",
-        description: "Sleep duration, stages, quality scores",
-        icon: "\u{1F634}",
-        category: "wellness",
-        dataTypes: ["sleeps", "sleep-scores"],
-        optional: true
-      },
-      {
-        id: "stress",
-        scope: GARMIN_SCOPES.STRESS_READ,
-        name: "Stress & Body Battery",
-        description: "Stress levels, body battery, recovery data",
-        icon: "\u{1F50B}",
-        category: "wellness",
-        dataTypes: ["stress", "body-battery"],
-        optional: true
-      },
-      {
-        id: "hrv",
-        scope: GARMIN_SCOPES.HEALTH_READ,
-        name: "Heart Rate Variability (HRV)",
-        description: "HRV metrics for recovery monitoring",
-        icon: "\u{1F4C8}",
-        category: "wellness",
-        dataTypes: ["hrv"],
-        optional: true
-      },
-      {
-        id: "body_composition",
-        scope: GARMIN_SCOPES.BODY_COMPOSITION_READ,
-        name: "Body Composition",
-        description: "Weight, body fat %, BMI tracking",
-        icon: "\u2696\uFE0F",
-        category: "wellness",
-        dataTypes: ["body-compositions"],
-        optional: true
-      },
-      {
-        id: "menstrual",
-        scope: GARMIN_SCOPES.MENSTRUAL_READ,
-        name: "Menstrual Cycle",
-        description: "Women's health cycle tracking (if applicable)",
-        icon: "\u{1F469}",
-        category: "wellness",
-        dataTypes: ["menstrual-cycle"],
-        optional: true
-      },
-      // ADVANCED
-      {
-        id: "vo2_max",
-        scope: GARMIN_SCOPES.VO2_READ,
-        name: "VO2 Max",
-        description: "Aerobic fitness measurements",
-        icon: "\u{1FAC0}",
-        category: "advanced",
-        dataTypes: ["user-metrics"],
-        optional: true
-      },
-      {
-        id: "fitness_age",
-        scope: GARMIN_SCOPES.FITNESS_AGE_READ,
-        name: "Fitness Age",
-        description: "Biological fitness age calculations",
-        icon: "\u{1F382}",
-        category: "advanced",
-        dataTypes: ["user-metrics"],
-        optional: true
-      },
-      {
-        id: "epochs",
-        scope: GARMIN_SCOPES.EPOCHS_READ,
-        name: "Minute-by-Minute Data (Epochs)",
-        description: "High-resolution activity and wellness data",
-        icon: "\u{1F4CA}",
-        category: "advanced",
-        dataTypes: ["epochs"],
-        optional: true
-      }
-    ];
   }
 });
 
@@ -17150,6 +17152,10 @@ ${contextJson}`;
         return res.status(403).json({ error: "Not authorized" });
       }
       await storage.deleteConnectedDevice(String(device2.id));
+      if (device2.deviceType === "garmin") {
+        const { disconnectDevice: disconnectDevice2 } = await Promise.resolve().then(() => (init_garmin_permissions_service(), garmin_permissions_service_exports));
+        await disconnectDevice2(req.user.userId);
+      }
       console.log(`\u2705 Device ${device2.id} (${device2.deviceType}) disconnected for user ${req.user.userId}`);
       res.json({ success: true });
     } catch (error) {

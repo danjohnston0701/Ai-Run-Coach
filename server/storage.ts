@@ -740,7 +740,10 @@ export class DatabaseStorage implements IStorage {
 
   // Connected Devices
   async getConnectedDevices(userId: string): Promise<ConnectedDevice[]> {
-    return db.select().from(connectedDevices).where(eq(connectedDevices.userId, userId));
+    // Only return active devices — inactive (disconnected) records are never needed by the app
+    return db.select().from(connectedDevices).where(
+      and(eq(connectedDevices.userId, userId), eq(connectedDevices.isActive, true))
+    );
   }
 
   async getConnectedDevice(id: string): Promise<ConnectedDevice | undefined> {

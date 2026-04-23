@@ -2699,6 +2699,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Delete (deactivate) the device
       await storage.deleteConnectedDevice(String(device.id));
+
+      // If it's a Garmin device, deactivate ALL garmin records for this user (handles
+      // stale duplicate records where the app may have picked the wrong device ID)
+      if (device.deviceType === 'garmin') {
+        const { disconnectDevice } = await import('./garmin-permissions-service');
+        await disconnectDevice(req.user!.userId);
+      }
       
       console.log(`✅ Device ${device.id} (${device.deviceType}) disconnected for user ${req.user!.userId}`);
       res.json({ success: true });
