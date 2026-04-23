@@ -7830,34 +7830,7 @@ async function syncGarminActivities(userId, accessToken, startDateISO, endDateIS
   const { connectedDevices: connectedDevices2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
   const { eq: eq22, and: and18 } = await import("drizzle-orm");
   try {
-    const deviceRecords = await db2.select().from(connectedDevices2).where(
-      and18(
-        eq22(connectedDevices2.userId, userId),
-        eq22(connectedDevices2.deviceType, "garmin")
-      )
-    ).limit(1);
-    let currentAccessToken = accessToken;
-    if (deviceRecords.length > 0) {
-      const device2 = deviceRecords[0];
-      const expiresAt = device2.tokenExpiresAt;
-      const now = /* @__PURE__ */ new Date();
-      if (expiresAt && expiresAt <= new Date(now.getTime() + 5 * 60 * 1e3)) {
-        console.log("\u{1F504} Access token expired or expiring soon, refreshing...");
-        try {
-          const tokens = await refreshGarminToken(device2.refreshToken);
-          currentAccessToken = tokens.accessToken;
-          await db2.update(connectedDevices2).set({
-            accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken,
-            tokenExpiresAt: new Date(Date.now() + tokens.expiresIn * 1e3)
-          }).where(eq22(connectedDevices2.id, device2.id));
-          console.log("\u2705 Token refreshed successfully");
-        } catch (refreshError) {
-          console.error("\u274C Failed to refresh token:", refreshError.message);
-          throw new Error("Token expired and refresh failed. Please reconnect Garmin.");
-        }
-      }
-    }
+    const currentAccessToken = accessToken;
     const startDate = new Date(startDateISO);
     const endDate = new Date(endDateISO);
     console.log(`\u{1F4E4} Requesting Garmin backfill for ${startDate.toISOString().split("T")[0]} \u2192 ${endDate.toISOString().split("T")[0]}`);
@@ -17426,7 +17399,7 @@ ${contextJson}`;
           refreshToken: tokens.refreshToken,
           tokenExpiresAt: new Date(Date.now() + tokens.expiresIn * 1e3),
           deviceId: garminUserId ?? existingGarmin.deviceId,
-          // preserve existing if we can't resolve
+          isActive: true,
           lastSyncAt: /* @__PURE__ */ new Date()
         });
       } else {
@@ -17438,6 +17411,7 @@ ${contextJson}`;
           accessToken: tokens.accessToken,
           refreshToken: tokens.refreshToken,
           tokenExpiresAt: new Date(Date.now() + tokens.expiresIn * 1e3),
+          isActive: true,
           lastSyncAt: /* @__PURE__ */ new Date()
         });
       }

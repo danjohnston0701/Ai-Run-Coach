@@ -3042,7 +3042,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           accessToken: tokens.accessToken,
           refreshToken: tokens.refreshToken,
           tokenExpiresAt: new Date(Date.now() + tokens.expiresIn * 1000),
-          deviceId: garminUserId ?? existingGarmin.deviceId, // preserve existing if we can't resolve
+          deviceId: garminUserId ?? existingGarmin.deviceId,
+          isActive: true,
           lastSyncAt: new Date(),
         });
       } else {
@@ -3055,6 +3056,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           accessToken: tokens.accessToken,
           refreshToken: tokens.refreshToken,
           tokenExpiresAt: new Date(Date.now() + tokens.expiresIn * 1000),
+          isActive: true,
           lastSyncAt: new Date(),
         });
       }

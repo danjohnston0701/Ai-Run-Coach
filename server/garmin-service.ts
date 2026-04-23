@@ -894,49 +894,9 @@ export async function syncGarminActivities(
   const { eq, and } = await import('drizzle-orm');
 
   try {
-    // Check if token is expired and refresh if needed
-    const deviceRecords = await db
-      .select()
-      .from(connectedDevices)
-      .where(
-        and(
-          eq(connectedDevices.userId, userId),
-          eq(connectedDevices.deviceType, 'garmin')
-        )
-      )
-      .limit(1);
-    
-    let currentAccessToken = accessToken;
-    
-    if (deviceRecords.length > 0) {
-      const device = deviceRecords[0];
-      const expiresAt = device.tokenExpiresAt;
-      const now = new Date();
-      
-      // Refresh token if expired or expiring within 5 minutes
-      if (expiresAt && expiresAt <= new Date(now.getTime() + 5 * 60 * 1000)) {
-        console.log('🔄 Access token expired or expiring soon, refreshing...');
-        try {
-          const tokens = await refreshGarminToken(device.refreshToken!);
-          currentAccessToken = tokens.accessToken;
-          
-          // Update stored tokens
-          await db
-            .update(connectedDevices)
-            .set({
-              accessToken: tokens.accessToken,
-              refreshToken: tokens.refreshToken,
-              tokenExpiresAt: new Date(Date.now() + tokens.expiresIn * 1000),
-            })
-            .where(eq(connectedDevices.id, device.id));
-          
-          console.log('✅ Token refreshed successfully');
-        } catch (refreshError: any) {
-          console.error('❌ Failed to refresh token:', refreshError.message);
-          throw new Error('Token expired and refresh failed. Please reconnect Garmin.');
-        }
-      }
-    }
+    // Use the access token passed in — the caller is responsible for providing a valid token.
+    // (Token was just obtained from OAuth exchange, so no need to re-check expiry here.)
+    const currentAccessToken = accessToken;
     
     const startDate = new Date(startDateISO);
     const endDate = new Date(endDateISO);
