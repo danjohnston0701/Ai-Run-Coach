@@ -2869,23 +2869,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Generate a simple nonce for PKCE verifier lookup (avoids URL encoding issues)
       const nonce = Date.now().toString() + Math.random().toString(36).substring(2, 10);
       
-      // Calculate redirect URI BEFORE storing state
-      // Use dynamic redirect URI based on request host
-      let host = req.get('host') || '';
-      
-      // Only add port 5000 for local development
-      // Production: replit.app domains, airuncoach.live, or any host with explicit port
-      const isProduction = host.includes('replit.app') || 
-                          host.includes('airuncoach.live') || 
-                          host.includes(':');
-      
-      if (!isProduction) {
-        // Local development: add port 5000 if not already present
-        host = host + ':5000';
-      }
-      
-      const baseUrl = `https://${host}`;
-      const redirectUri = `${baseUrl}/api/auth/garmin/callback`;
+      // Build a consistent redirect URI using SITE_URL env var (set on Replit to https://airuncoach.live)
+      // This MUST match exactly what's registered in the Garmin Developer Portal
+      const siteUrl = (process.env.SITE_URL || 'https://airuncoach.live').replace(/\/$/, '');
+      const redirectUri = `${siteUrl}/api/auth/garmin/callback`;
       
       // Store state server-side with 10-minute expiration
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
@@ -2896,20 +2883,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         appRedirect,
         historyDays,
         nonce,
-        redirectUri, // Store the exact redirect_uri for use on callback
         expiresAt,
       });
       
-      console.log("=== GARMIN OAUTH DEBUG ===");
-      console.log("Request host:", req.get('host'));
-      console.log("Modified host:", host);
-      console.log("Base URL:", baseUrl);
-      console.log("Redirect URI being sent:", redirectUri);
-      console.log("App redirect (after auth):", appRedirect);
-      console.log("State (server-side stored):", state);
-      console.log("Nonce for PKCE:", nonce);
-      console.log("State expires at:", expiresAt.toISOString());
-      console.log("=========================");
+      console.log("[Garmin OAuth] Redirect URI:", redirectUri);
+      console.log("[Garmin OAuth] App redirect:", appRedirect);
 
       const authUrl = await garminService.getGarminAuthUrl(redirectUri, state, nonce);
       console.log("Full auth URL:", authUrl);
@@ -3026,12 +3004,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const garminService = await import("./garmin-service");
 
       // Exchange authorization code for tokens (OAuth 2.0 PKCE flow)
-      // CRITICAL: Use the exact redirect_uri that was sent in the authorization request
-      // Garmin will reject the token exchange if this doesn't match exactly
-      const storedRedirectUri = oauthStateRecord?.redirectUri || `${req.protocol}://${req.get('host')}/api/auth/garmin/callback`;
+      // CRITICAL: redirect_uri must match EXACTLY what was sent in the authorization request
+      const siteUrl = (process.env.SITE_URL || 'https://airuncoach.live').replace(/\/$/, '');
+      const redirectUri = `${siteUrl}/api/auth/garmin/callback`;
       const tokens = await garminService.exchangeGarminCode(
         code as string,
-        storedRedirectUri,
+        redirectUri,
         nonce
       );
       

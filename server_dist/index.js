@@ -1415,8 +1415,6 @@ var init_schema = __esm({
       // Days of history to sync
       nonce: varchar("nonce"),
       // PKCE nonce for verifier lookup
-      redirectUri: text("redirect_uri"),
-      // The exact redirect_uri sent in the authorization request (must match in token exchange)
       expiresAt: timestamp("expires_at").notNull(),
       // State expiration (10 minutes)
       createdAt: timestamp("created_at").defaultNow()
@@ -17309,13 +17307,8 @@ ${contextJson}`;
       const historyDays = parseInt(req.query.history_days || "30", 10);
       const state = `${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 15)}_${Math.random().toString(36).substring(2, 15)}`;
       const nonce = Date.now().toString() + Math.random().toString(36).substring(2, 10);
-      let host = req.get("host") || "";
-      const isProduction = host.includes("replit.app") || host.includes("airuncoach.live") || host.includes(":");
-      if (!isProduction) {
-        host = host + ":5000";
-      }
-      const baseUrl = `https://${host}`;
-      const redirectUri = `${baseUrl}/api/auth/garmin/callback`;
+      const siteUrl = (process.env.SITE_URL || "https://airuncoach.live").replace(/\/$/, "");
+      const redirectUri = `${siteUrl}/api/auth/garmin/callback`;
       const expiresAt = new Date(Date.now() + 10 * 60 * 1e3);
       await storage.createOauthState({
         state,
@@ -17324,20 +17317,10 @@ ${contextJson}`;
         appRedirect,
         historyDays,
         nonce,
-        redirectUri,
-        // Store the exact redirect_uri for use on callback
         expiresAt
       });
-      console.log("=== GARMIN OAUTH DEBUG ===");
-      console.log("Request host:", req.get("host"));
-      console.log("Modified host:", host);
-      console.log("Base URL:", baseUrl);
-      console.log("Redirect URI being sent:", redirectUri);
-      console.log("App redirect (after auth):", appRedirect);
-      console.log("State (server-side stored):", state);
-      console.log("Nonce for PKCE:", nonce);
-      console.log("State expires at:", expiresAt.toISOString());
-      console.log("=========================");
+      console.log("[Garmin OAuth] Redirect URI:", redirectUri);
+      console.log("[Garmin OAuth] App redirect:", appRedirect);
       const authUrl = await garminService.getGarminAuthUrl(redirectUri, state, nonce);
       console.log("Full auth URL:", authUrl);
       console.log("=========================");
@@ -17414,10 +17397,11 @@ ${contextJson}`;
         return res.redirect(errorUrl);
       }
       const garminService = await Promise.resolve().then(() => (init_garmin_service(), garmin_service_exports));
-      const storedRedirectUri = oauthStateRecord?.redirectUri || `${req.protocol}://${req.get("host")}/api/auth/garmin/callback`;
+      const siteUrl = (process.env.SITE_URL || "https://airuncoach.live").replace(/\/$/, "");
+      const redirectUri = `${siteUrl}/api/auth/garmin/callback`;
       const tokens = await garminService.exchangeGarminCode(
         code,
-        storedRedirectUri,
+        redirectUri,
         nonce
       );
       let garminUserId = tokens.athleteId ? String(tokens.athleteId) : void 0;

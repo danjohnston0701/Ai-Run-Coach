@@ -1301,7 +1301,6 @@ export const oauthStateStore = pgTable("oauth_state_store", {
   appRedirect: text("app_redirect"), // Deep link URL to redirect back to mobile app
   historyDays: integer("history_days").default(30), // Days of history to sync
   nonce: varchar("nonce"), // PKCE nonce for verifier lookup
-  redirectUri: text("redirect_uri"), // The exact redirect_uri sent in the authorization request (must match in token exchange)
   expiresAt: timestamp("expires_at").notNull(), // State expiration (10 minutes)
   createdAt: timestamp("created_at").defaultNow(),
 });
