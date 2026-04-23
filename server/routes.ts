@@ -2869,18 +2869,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Generate a simple nonce for PKCE verifier lookup (avoids URL encoding issues)
       const nonce = Date.now().toString() + Math.random().toString(36).substring(2, 10);
       
-      // Store state server-side with 10-minute expiration
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-      await storage.createOauthState({
-        state,
-        userId: req.user!.userId,
-        provider: 'garmin',
-        appRedirect,
-        historyDays,
-        nonce,
-        expiresAt,
-      });
-      
+      // Calculate redirect URI BEFORE storing state
       // Use dynamic redirect URI based on request host
       let host = req.get('host') || '';
       
@@ -2897,6 +2886,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const baseUrl = `https://${host}`;
       const redirectUri = `${baseUrl}/api/auth/garmin/callback`;
+      
+      // Store state server-side with 10-minute expiration
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+      await storage.createOauthState({
+        state,
+        userId: req.user!.userId,
+        provider: 'garmin',
+        appRedirect,
+        historyDays,
+        nonce,
+        redirectUri, // Store the exact redirect_uri for use on callback
+        expiresAt,
+      });
       
       console.log("=== GARMIN OAUTH DEBUG ===");
       console.log("Request host:", req.get('host'));
@@ -3024,10 +3026,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const garminService = await import("./garmin-service");
 
       // Exchange authorization code for tokens (OAuth 2.0 PKCE flow)
-      const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/garmin/callback`;
+      // CRITICAL: Use the exact redirect_uri that was sent in the authorization request
+      // Garmin will reject the token exchange if this doesn't match exactly
+      const storedRedirectUri = oauthStateRecord?.redirectUri || `${req.protocol}://${req.get('host')}/api/auth/garmin/callback`;
       const tokens = await garminService.exchangeGarminCode(
         code as string,
-        redirectUri,
+        storedRedirectUri,
         nonce
       );
       
