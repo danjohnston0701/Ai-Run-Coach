@@ -50,6 +50,15 @@ export async function runAutoMigrations(): Promise<void> {
       name: "idx_plan_adaptations_training_plan",
       sql: "CREATE INDEX IF NOT EXISTS idx_plan_adaptations_training_plan ON plan_adaptations(training_plan_id)",
     },
+    // ── connected_devices ─────────────────────────────────────────────────────
+    {
+      name: "connected_devices.granted_scopes",
+      sql: "ALTER TABLE connected_devices ADD COLUMN IF NOT EXISTS granted_scopes TEXT",
+    },
+    {
+      name: "connected_devices.updated_at",
+      sql: "ALTER TABLE connected_devices ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
+    },
   ];
 
   let succeeded = 0;
