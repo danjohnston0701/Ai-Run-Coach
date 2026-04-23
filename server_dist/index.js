@@ -17240,42 +17240,6 @@ ${contextJson}`;
       </html>
     `);
   });
-  app2.get("/api/admin/inject-garmin", async (req, res) => {
-    try {
-      const { email, secret } = req.query;
-      if (secret !== "airuncoach_admin_2024") {
-        return res.status(403).json({ error: "Forbidden" });
-      }
-      if (!email) {
-        return res.status(400).json({ error: "email query param required" });
-      }
-      const user = await storage.getUserByEmail(email);
-      if (!user) {
-        return res.status(404).json({ error: `No user found with email: ${email}` });
-      }
-      const existing = await storage.getConnectedDevices(user.id);
-      for (const dev of existing.filter((d) => d.deviceType === "garmin")) {
-        await storage.deleteConnectedDevice(dev.id);
-      }
-      const device2 = await storage.createConnectedDevice({
-        userId: user.id,
-        deviceType: "garmin",
-        deviceName: "Garmin Connect (Demo)",
-        deviceId: `demo_garmin_${user.id}`,
-        accessToken: `demo_access_token_${user.id}`,
-        refreshToken: `demo_refresh_token_${user.id}`,
-        tokenExpiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1e3),
-        // 1 year
-        isActive: true,
-        grantedScopes: "ACTIVITY_EXPORT,HEALTH_EXPORT,USER_INFO"
-      });
-      console.log(`[Admin] Injected Garmin device for user ${email} (id=${user.id})`);
-      res.json({ success: true, message: `Garmin connected for ${email}`, device: device2 });
-    } catch (error) {
-      console.error("[Admin] inject-garmin error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
   app2.get("/api/auth/garmin", authMiddleware, async (req, res) => {
     try {
       const garminService = await Promise.resolve().then(() => (init_garmin_service(), garmin_service_exports));
