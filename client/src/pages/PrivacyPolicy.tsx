@@ -28,6 +28,7 @@ export default function PrivacyPolicy() {
             <p className="text-sm italic">Last updated: 19 March 2026</p>
           </div>
 
+          {/* 1. Who We Are */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">1. Who We Are</h3>
             <p>
@@ -42,9 +43,18 @@ export default function PrivacyPolicy() {
             </ul>
           </div>
 
+          {/* 2. What Data We Collect */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">2. What Data We Collect</h3>
             <p>We collect only the data necessary to provide AI Run Coach functionality.</p>
+
+            <h4 className="font-bold text-foreground mt-4">How Data Is Collected</h4>
+            <p>We collect data in the following ways:</p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li>Directly from you when you create an account or enter profile information</li>
+              <li>Automatically from your device during workout sessions (e.g., GPS, sensors, device metrics)</li>
+              <li>From connected third-party services (such as Garmin Connect, Apple Health, Samsung Health, or Strava) when you choose to link your account</li>
+            </ul>
 
             <h4 className="font-bold text-foreground mt-4">Account Information</h4>
             <ul className="list-disc pl-5 space-y-2">
@@ -64,7 +74,7 @@ export default function PrivacyPolicy() {
             </ul>
 
             <h4 className="font-bold text-foreground mt-4">Connected Services Data</h4>
-            <p>When you connect third-party fitness services (such as Garmin Connect, Apple Health, Samsung Health, or Strava), we may receive:</p>
+            <p>When you connect third-party fitness services, we may receive:</p>
             <ul className="list-disc pl-5 space-y-2">
               <li>Historical and real-time activity data</li>
               <li>Device-generated metrics and activity identifiers</li>
@@ -89,6 +99,7 @@ export default function PrivacyPolicy() {
             </ul>
           </div>
 
+          {/* 3. Legal Basis */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">3. Legal Basis for Processing (GDPR)</h3>
 
@@ -96,30 +107,32 @@ export default function PrivacyPolicy() {
             <p>We process personal data based on:</p>
             <ul className="list-disc pl-5 space-y-2">
               <li><strong>Contract performance:</strong> To deliver the services you have requested</li>
-              <li><strong>Consent:</strong> For optional features such as connected services and notifications</li>
+              <li><strong>Consent:</strong> For optional features such as connected services, notifications, and AI coaching</li>
               <li><strong>Legitimate interests:</strong> To improve coaching accuracy, maintain system security, and prevent misuse</li>
             </ul>
             <p>We ensure these interests do not override your fundamental rights and freedoms.</p>
 
             <h4 className="font-bold text-foreground mt-4">Health and Fitness Data (Article 9)</h4>
-            <p>Health and fitness data is processed only with <strong>explicit consent</strong>, obtained through a clear affirmative action (such as selecting a checkbox or confirming within the app during account setup or feature activation).</p>
+            <p>Health and fitness data is processed only with <strong>explicit consent</strong>, obtained through a clear affirmative action (such as selecting a checkbox or enabling features within the app).</p>
             <p>You may withdraw your consent at any time.</p>
           </div>
 
+          {/* 4. How We Use Your Data */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">4. How We Use Your Data</h3>
             <p>We use your data only for specific, defined purposes:</p>
             <ul className="list-disc pl-5 space-y-2">
               <li>Analysing real-time workout data (such as pace, heart rate, and distance) to generate AI-driven coaching during active sessions</li>
-              <li>Analysing historical activity data and profile information to generate personalised training recommendations</li>
+              <li>Analysing historical activity data and profile information to generate personalised training recommendations and exercise plans</li>
               <li>Providing performance insights, summaries, and progress tracking</li>
               <li>Generating routes and navigation guidance</li>
               <li>Enabling optional sharing features</li>
               <li>Sending notifications (with your consent)</li>
               <li>Maintaining system performance, reliability, and security</li>
             </ul>
+            <p className="text-sm">Each use of your data is limited to what is necessary for the feature you choose to use.</p>
 
-            <h4 className="font-bold text-foreground mt-4">Data Use Breakdown</h4>
+            <h4 className="font-bold text-foreground mt-4">Data Use Breakdown (Transparency)</h4>
             <div className="overflow-x-auto rounded-xl border border-white/10">
               <table className="w-full text-sm">
                 <thead>
@@ -135,7 +148,7 @@ export default function PrivacyPolicy() {
                   <tr><td className="p-3">GPS location data</td><td className="p-3">Used for route generation and mapping; shared without personal identifiers</td><td className="p-3">Navigation, route planning, and post-run maps</td></tr>
                   <tr><td className="p-3">User profile data</td><td className="p-3">Combined with activity data to tailor recommendations</td><td className="p-3">Personalised coaching and training</td></tr>
                   <tr><td className="p-3">Device metrics (e.g. Garmin data)</td><td className="p-3">Integrated into performance analysis systems</td><td className="p-3">More accurate and adaptive coaching</td></tr>
-                  <tr><td className="p-3">AI processing data</td><td className="p-3">Sent as structured, anonymised workout data (no personal identifiers)</td><td className="p-3">AI-generated coaching insights and summaries</td></tr>
+                  <tr><td className="p-3">AI processing data</td><td className="p-3">Sent as structured, anonymised workout and training data</td><td className="p-3">AI-generated coaching insights, plans, and summaries</td></tr>
                   <tr><td className="p-3">Audio output data</td><td className="p-3">AI-generated text converted to audio</td><td className="p-3">Real-time voice coaching during runs</td></tr>
                   <tr><td className="p-3">Technical logs</td><td className="p-3">Used for debugging and system monitoring</td><td className="p-3">Improved stability and performance</td></tr>
                 </tbody>
@@ -148,18 +161,47 @@ export default function PrivacyPolicy() {
               <li>Processing is limited to the purpose for which the data was collected</li>
             </ul>
 
+            <h4 className="font-bold text-foreground mt-4">AI Processing (OpenAI)</h4>
+            <p>To provide AI-powered coaching features, we use OpenAI as a third-party data processor.</p>
+            <p>When AI features are used, we send structured workout and training data, which may include:</p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li>Real-time workout metrics (such as pace, distance, duration, cadence, and heart rate)</li>
+              <li>Historical activity data (such as past runs, performance trends, and training history)</li>
+              <li>Derived performance metrics (such as fitness level, training load, or activity intensity)</li>
+              <li>Session data (such as timestamps, splits, and workout structure)</li>
+              <li>Limited user profile context (such as age range, fitness level, goals, height, and weight) where necessary to personalise coaching</li>
+            </ul>
+            <p className="mt-2">We do <strong>not</strong> send personal identifiers such as:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Name</li>
+              <li>Email address</li>
+              <li>Phone number</li>
+              <li>Account credentials</li>
+              <li>Device identifiers</li>
+            </ul>
+            <p className="mt-2">Location data (such as GPS coordinates) is only shared with AI systems where required to provide specific features and is not linked to personally identifiable information.</p>
+            <p>All data is transmitted securely and used solely to generate coaching insights, recommendations, and audio feedback.</p>
+            <p>We use OpenAI under a <strong>zero data retention policy</strong>, and data sent to OpenAI is not used to train or improve OpenAI's models.</p>
+            <p>OpenAI processes this data under strict contractual obligations and provides a level of data protection consistent with applicable privacy laws.</p>
+
+            <h4 className="font-bold text-foreground mt-4">User Consent for AI Processing</h4>
+            <p>We will only send your data to OpenAI after obtaining your <strong>explicit consent</strong>.</p>
+            <p>This consent is requested within the app before AI-powered features (such as real-time coaching, personalised training plans, or AI-generated insights) are activated.</p>
+            <p>You may withdraw your consent at any time by disabling AI features or discontinuing use of the Service.</p>
+
             <h4 className="font-bold text-foreground mt-4">Automated Processing and Profiling</h4>
             <p>We use automated processing to analyse your fitness data and generate personalised coaching insights.</p>
             <ul className="list-disc pl-5 space-y-1">
               <li>This constitutes <strong>profiling</strong> under GDPR</li>
               <li>It does <strong>not produce legal or similarly significant effects</strong></li>
-              <li>You may opt out by discontinuing use of coaching features</li>
+              <li>You may opt out by disabling AI features</li>
             </ul>
 
             <h4 className="font-bold text-foreground mt-4">Real-Time Processing</h4>
             <p>During active sessions, data is processed temporarily to deliver immediate coaching feedback and is not used beyond its intended purpose.</p>
 
             <h4 className="font-bold text-foreground mt-4">What We Do NOT Do</h4>
+            <p>We do not:</p>
             <ul className="list-disc pl-5 space-y-1">
               <li>Sell personal or health data</li>
               <li>Use data for advertising or marketing profiling</li>
@@ -168,6 +210,7 @@ export default function PrivacyPolicy() {
             </ul>
           </div>
 
+          {/* 5. Data Sharing */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">5. Data Sharing</h3>
             <p>We share your data only where necessary:</p>
@@ -175,16 +218,17 @@ export default function PrivacyPolicy() {
             <h4 className="font-bold text-foreground mt-4">Service Providers</h4>
             <ul className="list-disc pl-5 space-y-2">
               <li>Neon (database hosting)</li>
-              <li>OpenAI (AI processing – anonymised data only)</li>
+              <li>OpenAI (AI processing)</li>
               <li>Google Maps Platform (mapping and routing)</li>
               <li>GraphHopper (route generation)</li>
               <li>Replit (application hosting and infrastructure)</li>
             </ul>
-            <p>All providers are contractually required to protect your data.</p>
-
-            <h4 className="font-bold text-foreground mt-4">AI Processing</h4>
-            <p>Only <strong>anonymised, structured workout data</strong> is shared with AI providers. No personal identifiers (such as name, email, or account details) are transmitted.</p>
-            <p>AI providers operate under strict data processing agreements and zero-retention configurations where applicable.</p>
+            <p>All providers are contractually required to:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Protect your data</li>
+              <li>Process data only for specified purposes</li>
+              <li>Provide a level of protection consistent with applicable privacy laws</li>
+            </ul>
 
             <h4 className="font-bold text-foreground mt-4">Garmin Data Restrictions</h4>
             <p>Data obtained from Garmin devices or Garmin Connect:</p>
@@ -196,12 +240,17 @@ export default function PrivacyPolicy() {
             </ul>
 
             <h4 className="font-bold text-foreground mt-4">Mapping and Location Services</h4>
-            <p>When generating routes or maps, only GPS coordinates are shared with mapping providers. No personal identifiers are included.</p>
+            <p>When generating routes or maps:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Only GPS coordinates are shared with mapping providers</li>
+              <li>No personal identifiers are included</li>
+            </ul>
 
             <h4 className="font-bold text-foreground mt-4">Legal Obligations</h4>
             <p>We may disclose data when required by law or to protect rights, safety, or security.</p>
           </div>
 
+          {/* 6. International Transfers */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">6. International Data Transfers</h3>
             <p>Your data may be processed outside the UK/EEA, including in the United States.</p>
@@ -213,6 +262,7 @@ export default function PrivacyPolicy() {
             </ul>
           </div>
 
+          {/* 7. Data Retention */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">7. Data Retention</h3>
             <p>We retain data only as long as necessary:</p>
@@ -225,6 +275,7 @@ export default function PrivacyPolicy() {
             <p>Retention periods are based on service delivery, legal obligations, and dispute resolution needs.</p>
           </div>
 
+          {/* 8. Your Rights */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">8. Your Rights</h3>
             <p>You have the right to:</p>
@@ -245,6 +296,7 @@ export default function PrivacyPolicy() {
             <p className="mt-2">You may also lodge a complaint with your local supervisory authority.</p>
           </div>
 
+          {/* 9. US State Privacy */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">9. US State Privacy Rights</h3>
             <p>If you are a resident of certain U.S. states (including California, Virginia, Colorado, Connecticut, and Utah), you may have rights to:</p>
@@ -262,6 +314,7 @@ export default function PrivacyPolicy() {
             <p className="mt-2">You may appeal decisions regarding your privacy requests by contacting us.</p>
           </div>
 
+          {/* 10. Security */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">10. Security</h3>
             <p>We implement:</p>
@@ -273,16 +326,19 @@ export default function PrivacyPolicy() {
             </ul>
           </div>
 
+          {/* 11. Data Breach */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">11. Data Breach Notification</h3>
             <p>We will notify authorities and affected users where required by law.</p>
           </div>
 
+          {/* 12. Children */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">12. Children's Privacy</h3>
             <p>AI Run Coach is not intended for users under 16 years of age.</p>
           </div>
 
+          {/* 13. Cookies */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">13. Cookies and Tracking</h3>
             <p>We use minimal tracking for:</p>
@@ -294,15 +350,19 @@ export default function PrivacyPolicy() {
             <p>We do not use advertising cookies or cross-site tracking.</p>
           </div>
 
+          {/* 14. Changes */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">14. Changes to This Policy</h3>
             <p>We will notify users of material changes at least 30 days before they take effect.</p>
           </div>
 
+          {/* 15. Contact */}
           <div className="space-y-4 pb-0">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">15. Contact Us</h3>
             <ul className="list-none pl-0 space-y-1">
               <li><span className="text-primary font-medium">support@airuncoach.live</span></li>
+              <li><span className="text-primary font-medium">privacy@airuncoach.live</span></li>
+              <li><span className="text-primary font-medium">security@airuncoach.live</span></li>
             </ul>
             <p className="mt-4 text-sm italic">
               This Privacy Policy is provided in English and prevails over any translated versions.

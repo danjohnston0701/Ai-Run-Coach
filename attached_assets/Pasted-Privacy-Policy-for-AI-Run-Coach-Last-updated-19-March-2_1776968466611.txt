@@ -1,0 +1,290 @@
+Privacy Policy for AI Run Coach
+
+Last updated: 19 March 2026
+
+1. Who We Are
+
+This Privacy Policy explains how airuncoach.live, trading as AI Run Coach ("we", "us", "our"), collects, uses, stores, and protects your personal information when you use the AI Run Coach application, website, and associated services, including the Garmin companion app (the "App").
+
+We act as the data controller for the personal data processed through AI Run Coach.
+
+Third-party services (such as Garmin Connect, Apple Health, Strava, and similar providers) act as independent data controllers for the data they collect and share with us.
+
+If you have questions or wish to exercise your rights, contact us at:
+
+Email: support@airuncoach.live
+Website: https://airuncoach.live
+2. What Data We Collect
+
+We collect only the data necessary to provide AI Run Coach functionality.
+
+How Data Is Collected
+
+We collect data in the following ways:
+
+Directly from you when you create an account or enter profile information
+Automatically from your device during workout sessions (e.g., GPS, sensors, device metrics)
+From connected third-party services (such as Garmin Connect, Apple Health, Samsung Health, or Strava) when you choose to link your account
+Account Information
+Email address and password (encrypted)
+Name, date of birth, gender
+Height and weight
+Fitness level and goals
+Coach voice preferences
+Health and Fitness Data (Special Category Data)
+Activity data: workout type, duration, distance, pace, cadence, laps
+Location data: GPS route points, elevation
+Physiological data: heart rate, heart-rate zones, calories burned
+Environmental data: temperature, humidity, wind speed
+Connected Services Data
+
+When you connect third-party fitness services, we may receive:
+
+Historical and real-time activity data
+Device-generated metrics and activity identifiers
+
+We do not receive your third-party account passwords or payment information.
+
+Garmin Device and Companion App Data
+
+When you use the AI Run Coach Garmin companion app or connect a Garmin device:
+
+Data is transmitted from your Garmin device via Garmin APIs and/or device communication
+This includes real-time and historical workout metrics such as pace, heart rate, cadence, and distance
+The companion app acts as a secure bridge between your Garmin device and our services
+
+We process only the minimum data necessary to provide coaching functionality.
+
+Technical Data
+Device type, operating system, and app version
+Usage patterns and performance data
+Error logs (no personal data retained)
+IP address (anonymised where possible)
+3. Legal Basis for Processing (GDPR)
+General Personal Data (Article 6)
+
+We process personal data based on:
+
+Contract performance: To deliver the services you have requested
+Consent: For optional features such as connected services, notifications, and AI coaching
+Legitimate interests: To improve coaching accuracy, maintain system security, and prevent misuse
+
+We ensure these interests do not override your fundamental rights and freedoms.
+
+Health and Fitness Data (Article 9)
+
+Health and fitness data is processed only with explicit consent, obtained through a clear affirmative action (such as selecting a checkbox or enabling features within the app).
+
+You may withdraw your consent at any time.
+
+4. How We Use Your Data
+
+We use your data only for specific, defined purposes:
+
+Analysing real-time workout data (such as pace, heart rate, and distance) to generate AI-driven coaching during active sessions
+Analysing historical activity data and profile information to generate personalised training recommendations and exercise plans
+Providing performance insights, summaries, and progress tracking
+Generating routes and navigation guidance
+Enabling optional sharing features
+Sending notifications (with your consent)
+Maintaining system performance, reliability, and security
+
+Each use of your data is limited to what is necessary for the feature you choose to use.
+
+Data Use Breakdown (Transparency)
+Data Type	How We Use It	Outcome
+Real-time workout data (pace, heart rate, cadence, distance)	Analysed during active sessions and sent (in anonymised form) to AI systems	Real-time coaching prompts and performance feedback
+Historical activity data	Analysed to identify trends and performance patterns	Personalised training plans and insights
+GPS location data	Used for route generation and mapping; shared without personal identifiers	Navigation, route planning, and post-run maps
+User profile data	Combined with activity data to tailor recommendations	Personalised coaching and training
+Device metrics (e.g. Garmin data)	Integrated into performance analysis systems	More accurate and adaptive coaching
+AI processing data	Sent as structured, anonymised workout and training data	AI-generated coaching insights, plans, and summaries
+Audio output data	AI-generated text converted to audio	Real-time voice coaching during runs
+Technical logs	Used for debugging and system monitoring	Improved stability and performance
+
+We ensure:
+
+Personal identifiers (name, email, account data) are never included in AI processing payloads
+Data shared with third parties is limited to what is strictly necessary
+Processing is limited to the purpose for which the data was collected
+AI Processing (OpenAI)
+
+To provide AI-powered coaching features, we use OpenAI as a third-party data processor.
+
+When AI features are used, we send structured workout and training data, which may include:
+
+Real-time workout metrics (such as pace, distance, duration, cadence, and heart rate)
+Historical activity data (such as past runs, performance trends, and training history)
+Derived performance metrics (such as fitness level, training load, or activity intensity)
+Session data (such as timestamps, splits, and workout structure)
+Limited user profile context (such as age range, fitness level, goals, height, and weight) where necessary to personalise coaching
+
+We do not send personal identifiers such as:
+
+Name
+Email address
+Phone number
+Account credentials
+Device identifiers
+
+Location data (such as GPS coordinates) is only shared with AI systems where required to provide specific features and is not linked to personally identifiable information.
+
+All data is transmitted securely and used solely to generate coaching insights, recommendations, and audio feedback.
+
+We use OpenAI under a zero data retention policy, and data sent to OpenAI is not used to train or improve OpenAI’s models.
+
+OpenAI processes this data under strict contractual obligations and provides a level of data protection consistent with applicable privacy laws.
+
+User Consent for AI Processing
+
+We will only send your data to OpenAI after obtaining your explicit consent.
+
+This consent is requested within the app before AI-powered features (such as real-time coaching, personalised training plans, or AI-generated insights) are activated.
+
+You may withdraw your consent at any time by disabling AI features or discontinuing use of the Service.
+
+Automated Processing and Profiling
+
+We use automated processing to analyse your fitness data and generate personalised coaching insights.
+
+This constitutes profiling under GDPR
+It does not produce legal or similarly significant effects
+You may opt out by disabling AI features
+Real-Time Processing
+
+During active sessions, data is processed temporarily to deliver immediate coaching feedback and is not used beyond its intended purpose.
+
+What We Do NOT Do
+
+We do not:
+
+Sell personal or health data
+Use data for advertising or marketing profiling
+Share data with advertisers
+Use Garmin or fitness data for unrelated purposes
+5. Data Sharing
+
+We share your data only where necessary:
+
+Service Providers
+Neon (database hosting)
+OpenAI (AI processing)
+Google Maps Platform (mapping and routing)
+GraphHopper (route generation)
+Replit (application hosting and infrastructure)
+
+All providers are contractually required to:
+
+Protect your data
+Process data only for specified purposes
+Provide a level of protection consistent with applicable privacy laws
+Garmin Data Restrictions
+
+Data obtained from Garmin devices or Garmin Connect:
+
+Is used solely to provide user-requested functionality
+Is not sold, rented, or shared for advertising or marketing
+Is not disclosed beyond what is necessary to deliver the service
+Is deleted when you disconnect your Garmin account
+Mapping and Location Services
+
+When generating routes or maps:
+
+Only GPS coordinates are shared with mapping providers
+No personal identifiers are included
+Legal Obligations
+
+We may disclose data when required by law or to protect rights, safety, or security.
+
+6. International Data Transfers
+
+Your data may be processed outside the UK/EEA, including in the United States.
+
+We ensure appropriate safeguards including:
+
+Standard Contractual Clauses (SCCs)
+Data Processing Agreements
+Encryption and secure transmission
+7. Data Retention
+
+We retain data only as long as necessary:
+
+Account and activity data: while your account is active
+Deleted within 30 days of account deletion
+Technical logs: up to 90 days
+Aggregated data: retained indefinitely in anonymised form
+
+Retention periods are based on service delivery, legal obligations, and dispute resolution needs.
+
+8. Your Rights
+
+You have the right to:
+
+Access your personal data
+Correct inaccuracies
+Delete your data
+Export your data
+Object to processing
+Restrict processing
+Withdraw consent
+
+To exercise your rights:
+
+Email: support@airuncoach.live
+Use in-app controls
+
+You may also lodge a complaint with your local supervisory authority.
+
+9. US State Privacy Rights
+
+If you are a resident of certain U.S. states (including California, Virginia, Colorado, Connecticut, and Utah), you may have rights to:
+
+Access, correct, or delete your data
+Obtain a copy of your data
+Opt out of certain processing
+
+Health and fitness data may be considered sensitive personal data, and we process it only with your consent.
+
+We do not:
+
+Sell personal data
+Share data for targeted advertising
+
+You may appeal decisions regarding your privacy requests by contacting us.
+
+10. Security
+
+We implement:
+
+Encryption (in transit and at rest)
+Secure password hashing
+Access controls
+System monitoring and updates
+11. Data Breach Notification
+
+We will notify authorities and affected users where required by law.
+
+12. Children's Privacy
+
+AI Run Coach is not intended for users under 16 years of age.
+
+13. Cookies and Tracking
+
+We use minimal tracking for:
+
+Authentication
+Preferences
+Performance analytics (anonymised)
+
+We do not use advertising cookies or cross-site tracking.
+
+14. Changes to This Policy
+
+We will notify users of material changes at least 30 days before they take effect.
+
+15. Contact Us
+support@airuncoach.live
+privacy@airuncoach.live
+security@airuncoach.live
+
+This Privacy Policy is provided in English and prevails over any translated versions.
