@@ -24,8 +24,8 @@ export default function PrivacyPolicy() {
 
         <section className="space-y-6 text-muted-foreground leading-relaxed">
           <div className="p-6 bg-card/50 border border-white/10 rounded-2xl">
-            <h2 className="text-foreground font-bold uppercase tracking-wider mb-2">Privacy Policy for AI Run Coach</h2>
-            <p className="text-sm italic">Last updated: 19 March 2026</p>
+            <h2 className="text-foreground font-bold uppercase tracking-wider mb-2">Privacy Policy for Ai Run Coach</h2>
+            <p className="text-sm italic">Last updated:24 April 2026</p>
           </div>
 
           {/* 1. Who We Are */}
@@ -165,11 +165,11 @@ export default function PrivacyPolicy() {
             <p>To provide AI-powered coaching features, we use OpenAI as a third-party data processor.</p>
             <p>When AI features are used, we send structured workout and training data, which may include:</p>
             <ul className="list-disc pl-5 space-y-2">
-              <li>Real-time workout metrics (such as pace, distance, duration, cadence, and heart rate)</li>
+              <li>Real-time workout metrics (such as pace, distance, duration, cadence, heart rate and elevation)</li>
               <li>Historical activity data (such as past runs, performance trends, and training history)</li>
               <li>Derived performance metrics (such as fitness level, training load, or activity intensity)</li>
               <li>Session data (such as timestamps, splits, and workout structure)</li>
-              <li>Limited user profile context (such as age range, fitness level, goals, height, and weight) where necessary to personalise coaching</li>
+              <li>Limited user profile context (such as first name, age range, fitness level, goals, height, and weight) where necessary to personalise coaching</li>
             </ul>
             <p className="mt-2">We do <strong>not</strong> send personal identifiers such as:</p>
             <ul className="list-disc pl-5 space-y-1">
@@ -179,8 +179,8 @@ export default function PrivacyPolicy() {
               <li>Account credentials</li>
               <li>Device identifiers</li>
             </ul>
-            <p className="mt-2">Location data (such as GPS coordinates) is only shared with AI systems where required to provide specific features and is not linked to personally identifiable information.</p>
-            <p>All data is transmitted securely and used solely to generate coaching insights, recommendations, and audio feedback.</p>
+            <p className="mt-2">Location data (such as GPS coordinates) is only shared with AI systems where required to provide specific features during run session activities and is not linked to personally identifiable information.</p>
+            <p>All data is transmitted securely and used solely to generate coaching insights, recommendations, audio feedback and AI generated training plans.</p>
             <p>We use OpenAI under a <strong>zero data retention policy</strong>, and data sent to OpenAI is not used to train or improve OpenAI's models.</p>
             <p>OpenAI processes this data under strict contractual obligations and provides a level of data protection consistent with applicable privacy laws.</p>
 
