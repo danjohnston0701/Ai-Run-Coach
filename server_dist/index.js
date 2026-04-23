@@ -2102,13 +2102,19 @@ var init_storage = __esm({
       }
       async getConnectedDeviceByGarminToken(userAccessToken) {
         const [device2] = await db.select().from(connectedDevices).where(
-          eq(connectedDevices.accessToken, userAccessToken)
+          and(
+            eq(connectedDevices.accessToken, userAccessToken),
+            eq(connectedDevices.isActive, true)
+          )
         );
         return device2 || void 0;
       }
       async getConnectedDevicesByGarminId(garminUserId) {
         return db.select().from(connectedDevices).where(
-          eq(connectedDevices.deviceId, garminUserId)
+          and(
+            eq(connectedDevices.deviceId, garminUserId),
+            eq(connectedDevices.isActive, true)
+          )
         );
       }
       async getConnectedDevicesByType(deviceType) {

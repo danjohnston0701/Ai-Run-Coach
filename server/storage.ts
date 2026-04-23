@@ -750,14 +750,20 @@ export class DatabaseStorage implements IStorage {
 
   async getConnectedDeviceByGarminToken(userAccessToken: string): Promise<ConnectedDevice | undefined> {
     const [device] = await db.select().from(connectedDevices).where(
-      eq(connectedDevices.accessToken, userAccessToken)
+      and(
+        eq(connectedDevices.accessToken, userAccessToken),
+        eq(connectedDevices.isActive, true)
+      )
     );
     return device || undefined;
   }
 
   async getConnectedDevicesByGarminId(garminUserId: string): Promise<ConnectedDevice[]> {
     return db.select().from(connectedDevices).where(
-      eq(connectedDevices.deviceId, garminUserId)
+      and(
+        eq(connectedDevices.deviceId, garminUserId),
+        eq(connectedDevices.isActive, true)
+      )
     );
   }
 
