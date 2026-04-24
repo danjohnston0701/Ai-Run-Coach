@@ -44,6 +44,9 @@ interface ApiService {
     @PUT("/api/users/{id}")
     suspend fun updateUser(@Path("id") userId: String, @Body request: UpdateUserRequest): User
 
+    @DELETE("/api/users/{id}")
+    suspend fun deleteUser(@Path("id") userId: String): retrofit2.Response<Unit>
+
     @PUT("/api/users/{id}/coach-settings")
     suspend fun updateCoachSettings(
         @Path("id") userId: String,

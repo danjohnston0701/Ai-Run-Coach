@@ -124,6 +124,11 @@ fun RunSummaryScreenFlagship(
     viewModel: RunSummaryViewModel = hiltViewModel(),
     lastRunForDelta: RunSession? = null, // optional: wire later from your VM/store
 ) {
+    val context = LocalContext.current
+    val consentManager = remember { live.airuncoach.airuncoach.data.AiConsentManager(context) }
+    var aiConsentGranted by remember { mutableStateOf(consentManager.isAiConsentGranted()) }
+    var showAiConsentSheet by remember { mutableStateOf(false) }
+
     val runSession by viewModel.runSession.collectAsState()
     val analysisState by viewModel.analysisState.collectAsState()
     val isLoadingRun by viewModel.isLoadingRun.collectAsState()
@@ -133,8 +138,6 @@ fun RunSummaryScreenFlagship(
     val isAdmin = viewModel.isAdminUser()
     val isGarminConnected by viewModel.isGarminConnected.collectAsState()
     val runPersonalBests by viewModel.runPersonalBests.collectAsState()
-
-    val context = LocalContext.current
 
     LaunchedEffect(runId) {
         // Always reload when runId changes (navigating back and reopening should refresh data including coaching notes)
@@ -226,7 +229,13 @@ fun RunSummaryScreenFlagship(
                             strugglePoints = strugglePoints,
                             comments = userPostRunComments,
                             onCommentsChange = viewModel::updatePostRunComments,
-                            onGenerateAi = { viewModel.generateAIAnalysis() },
+                            onGenerateAi = {
+                                if (aiConsentGranted) {
+                                    viewModel.generateAIAnalysis()
+                                } else {
+                                    showAiConsentSheet = true
+                                }
+                            },
                             onRetryAi = { viewModel.retryAIAnalysis() },
                             isGarminConnected = isGarminConnected,
                             onEnrichWithGarmin = { viewModel.enrichRunWithGarminData() },
@@ -246,6 +255,8 @@ fun RunSummaryScreenFlagship(
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it },
                             personalBests = runPersonalBests,
+                            aiConsentGranted = aiConsentGranted,
+                            onRequestAiConsent = { showAiConsentSheet = true },
                         )
 
                         1 -> SummaryTabContent(
@@ -430,6 +441,24 @@ fun RunSummaryScreenFlagship(
             }
         }
     }
+
+    // AI Consent sheet — shown when user taps "Generate AI Insights" without consent
+    if (showAiConsentSheet) {
+        AiConsentBottomSheet(
+            onAllow = {
+                consentManager.setConsent(granted = true)
+                aiConsentGranted = true
+                showAiConsentSheet = false
+                viewModel.generateAIAnalysis()
+            },
+            onDecline = {
+                consentManager.setConsent(granted = false)
+                aiConsentGranted = false
+                showAiConsentSheet = false
+            },
+            onDismiss = { showAiConsentSheet = false }
+        )
+    }
 }
 
 /* -------------------------------- TOP BAR -------------------------------- */
@@ -552,6 +581,8 @@ private fun AiInsightsTabContent(
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
     personalBests: List<String> = emptyList(),
+    aiConsentGranted: Boolean = true,
+    onRequestAiConsent: () -> Unit = {},
 ) {
     LazyColumn(
         modifier = Modifier
@@ -643,7 +674,7 @@ private fun AiInsightsTabContent(
             item { NoStrugglePointsBanner() }
         }
 
-        // AI Analysis — moved above map for visibility
+        // AI Analysis — gated on user's AI consent
         item {
             Text(
                 text = "AI Analysis",
@@ -652,19 +683,66 @@ private fun AiInsightsTabContent(
             )
         }
 
-        item {
-            AiSectionFlagship(
-                analysisState = analysisState,
-                comments = comments,
-                coachingNotes = coachingNotes,
-                onCommentsChange = onCommentsChange,
-                onGenerateAi = onGenerateAi,
-                onRetryAi = onRetryAi,
-                run = run,
-                isGarminConnected = isGarminConnected,
-                onEnrichWithGarmin = onEnrichWithGarmin,
-                isEnrichingWithGarmin = isEnrichingWithGarmin
-            )
+        if (!aiConsentGranted) {
+            // Consent not granted — show a prompt to enable AI
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+                    border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.7f))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.icon_ai_vector),
+                            contentDescription = null,
+                            tint = Colors.primary.copy(alpha = 0.6f),
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Text(
+                            text = "AI Analysis Disabled",
+                            style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.textPrimary,
+                            textAlign = TextAlign.Center
+                        )
+                        Text(
+                            text = "Enable AI coaching to get personalised insights from your run. Your data is processed securely with zero retention.",
+                            style = AppTextStyles.body,
+                            color = Colors.textSecondary,
+                            textAlign = TextAlign.Center
+                        )
+                        OutlinedButton(
+                            onClick = onRequestAiConsent,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary),
+                            border = BorderStroke(1.dp, Colors.primary),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Enable AI Coaching", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        } else {
+            item {
+                AiSectionFlagship(
+                    analysisState = analysisState,
+                    comments = comments,
+                    coachingNotes = coachingNotes,
+                    onCommentsChange = onCommentsChange,
+                    onGenerateAi = onGenerateAi,
+                    onRetryAi = onRetryAi,
+                    run = run,
+                    isGarminConnected = isGarminConnected,
+                    onEnrichWithGarmin = onEnrichWithGarmin,
+                    isEnrichingWithGarmin = isEnrichingWithGarmin
+                )
+            }
         }
 
         // Pace Consistency — moved here from Summary tab so it sits alongside the AI analysis

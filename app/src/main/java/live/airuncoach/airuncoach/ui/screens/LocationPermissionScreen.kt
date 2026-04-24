@@ -6,14 +6,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -30,9 +27,12 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 @Composable
 fun LocationPermissionScreen(onPermissionGranted: () -> Unit) {
     val context = LocalContext.current
-    var permissionDenied by remember { mutableStateOf(false) }
     var hasNavigated by remember { mutableStateOf(false) }
-    
+
+    // Tracks whether the system permission dialogs have been launched and returned.
+    // Once true, show "Continue to App" so the user can proceed regardless of grant/deny.
+    var dialogsCompleted by remember { mutableStateOf(false) }
+
     // Check current permission status
     fun checkPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
@@ -52,20 +52,13 @@ fun LocationPermissionScreen(onPermissionGranted: () -> Unit) {
                 Manifest.permission.ACTIVITY_RECOGNITION
             ) == PackageManager.PERMISSION_GRANTED
         } else {
-            true // Not needed on older versions
+            true
         }
     }
 
-    fun checkBodySensorsPermission(): Boolean {
-        return ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.BODY_SENSORS
-        ) == PackageManager.PERMISSION_GRANTED
-    }
-    
     var hasLocationPermission by remember { mutableStateOf(checkPermission()) }
-    
-    // Permission launcher for location
+
+    // Permission launcher — called after system dialogs complete
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -76,25 +69,27 @@ fun LocationPermissionScreen(onPermissionGranted: () -> Unit) {
         val activityRecognitionGranted = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             permissions[Manifest.permission.ACTIVITY_RECOGNITION] ?: false
         } else {
-            true // Not needed on older versions
+            true
         }
-        val bodySensorsGranted = permissions[Manifest.permission.BODY_SENSORS] ?: false
 
-        android.util.Log.d("LocationPermission", "Location: $fineLocationGranted/$coarseLocationGranted, ActivityRecognition: $activityRecognitionGranted, BodySensors: $bodySensorsGranted")
+        if (fineLocationGranted || coarseLocationGranted) {
+            hasLocationPermission = true
+        }
 
         if ((fineLocationGranted || coarseLocationGranted) && activityRecognitionGranted) {
+            // Core permissions granted — auto-proceed
             android.util.Log.d("LocationPermission", "Permissions GRANTED, navigating...")
-            hasLocationPermission = true
             if (!hasNavigated) {
                 hasNavigated = true
                 onPermissionGranted()
             }
         } else {
-            android.util.Log.d("LocationPermission", "Permission DENIED")
-            permissionDenied = true
+            // Dialogs completed but some permissions denied — show "Continue to App"
+            android.util.Log.d("LocationPermission", "Some permissions denied, showing continue button")
+            dialogsCompleted = true
         }
     }
-    
+
     // Auto-navigate if permission is already granted on first load
     LaunchedEffect(Unit) {
         if (checkPermission() && checkActivityRecognitionPermission() && !hasNavigated) {
@@ -131,119 +126,37 @@ fun LocationPermissionScreen(onPermissionGranted: () -> Unit) {
 
         Spacer(modifier = Modifier.height(Spacing.xxxxl))
 
-        // Feature List Card
+        // Feature list card
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(BorderRadius.lg),
-            colors = CardDefaults.cardColors(
-                containerColor = Colors.backgroundSecondary
-            )
+            colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
         ) {
-            Column(
-                modifier = Modifier.padding(Spacing.xl)
-            ) {
-                // Feature 1: Real-time GPS tracking
-                Row(
-                    verticalAlignment = Alignment.Top,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.icon_location_vector),
-                        contentDescription = "GPS Icon",
-                        tint = Colors.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(Spacing.md))
-                    Text(
-                        text = "Real-time GPS tracking during runs",
-                        style = AppTextStyles.body,
-                        color = Colors.textPrimary
-                    )
-                }
-
+            Column(modifier = Modifier.padding(Spacing.xl)) {
+                PermissionFeatureRow(
+                    icon = R.drawable.icon_location_vector,
+                    text = "Real-time GPS tracking during runs"
+                )
                 Spacer(modifier = Modifier.height(Spacing.lg))
-
-                // Feature 2: Accurate distance and pace
-                Row(
-                    verticalAlignment = Alignment.Top,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.icon_trending_vector),
-                        contentDescription = "Activity Icon",
-                        tint = Colors.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(Spacing.md))
-                    Text(
-                        text = "Accurate distance and pace\ncalculation",
-                        style = AppTextStyles.body,
-                        color = Colors.textPrimary
-                    )
-                }
-
+                PermissionFeatureRow(
+                    icon = R.drawable.icon_trending_vector,
+                    text = "Accurate distance and pace\ncalculation"
+                )
                 Spacer(modifier = Modifier.height(Spacing.lg))
-
-                // Feature 3: Route mapping
-                Row(
-                    verticalAlignment = Alignment.Top,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.icon_location_vector),
-                        contentDescription = "Map Icon",
-                        tint = Colors.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(Spacing.md))
-                    Text(
-                        text = "Route mapping and elevation data",
-                        style = AppTextStyles.body,
-                        color = Colors.textPrimary
-                    )
-                }
-
+                PermissionFeatureRow(
+                    icon = R.drawable.icon_location_vector,
+                    text = "Route mapping and elevation data"
+                )
                 Spacer(modifier = Modifier.height(Spacing.lg))
-
-                // Feature 4: Background tracking
-                Row(
-                    verticalAlignment = Alignment.Top,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.icon_timer_vector),
-                        contentDescription = "Background Icon",
-                        tint = Colors.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(Spacing.md))
-                    Text(
-                        text = "Background tracking (screen locked)",
-                        style = AppTextStyles.body,
-                        color = Colors.textPrimary
-                    )
-                }
-
+                PermissionFeatureRow(
+                    icon = R.drawable.icon_timer_vector,
+                    text = "Background tracking (screen locked)"
+                )
                 Spacer(modifier = Modifier.height(Spacing.lg))
-
-                // Feature 5: Heart rate and cadence
-                Row(
-                    verticalAlignment = Alignment.Top,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.icon_heart_vector),
-                        contentDescription = "Heart Rate Icon",
-                        tint = Colors.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(Spacing.md))
-                    Text(
-                        text = "Heart rate and cadence tracking",
-                        style = AppTextStyles.body,
-                        color = Colors.textPrimary
-                    )
-                }
+                PermissionFeatureRow(
+                    icon = R.drawable.icon_heart_vector,
+                    text = "Heart rate and cadence tracking"
+                )
             }
         }
 
@@ -256,7 +169,7 @@ fun LocationPermissionScreen(onPermissionGranted: () -> Unit) {
         ) {
             Icon(
                 painter = painterResource(id = R.drawable.icon_info_vector),
-                contentDescription = "Shield Icon",
+                contentDescription = null,
                 tint = Colors.textMuted,
                 modifier = Modifier.size(20.dp)
             )
@@ -271,87 +184,91 @@ fun LocationPermissionScreen(onPermissionGranted: () -> Unit) {
 
         Spacer(modifier = Modifier.height(Spacing.xxxxl))
 
-        // Show permission status for debugging
-        if (permissionDenied) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = Spacing.md),
-                colors = CardDefaults.cardColors(
-                    containerColor = Colors.error.copy(alpha = 0.2f)
-                )
-            ) {
-                Text(
-                    text = "⚠️ Permission denied. Please enable location in Settings.",
-                    style = AppTextStyles.small,
-                    color = Colors.error,
-                    modifier = Modifier.padding(Spacing.md),
-                    textAlign = TextAlign.Center
-                )
-            }
-        }
-
-        // Enable Location Access Button
-        Button(
-            onClick = {
-                android.util.Log.d("LocationPermission", "Button clicked. Current permission: $hasLocationPermission")
-
-                // Re-check permission status
-                hasLocationPermission = checkPermission()
-
-                if (hasLocationPermission) {
-                    // Already have permission, proceed
-                    android.util.Log.d("LocationPermission", "Has permission, navigating from button...")
+        if (dialogsCompleted) {
+            // System dialogs have completed — show "Continue to App" regardless of grant/deny
+            Button(
+                onClick = {
                     if (!hasNavigated) {
                         hasNavigated = true
                         onPermissionGranted()
                     }
-                } else {
-                    // Request permissions
-                    android.util.Log.d("LocationPermission", "Requesting permissions...")
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(Spacing.buttonHeight),
+                shape = RoundedCornerShape(BorderRadius.full),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Colors.primary,
+                    contentColor = Colors.buttonText
+                )
+            ) {
+                Text(
+                    text = "Continue to App",
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+        } else {
+            // Before dialogs — single "Continue" button that triggers system dialogs.
+            // No skip/exit buttons allowed at this stage.
+            Button(
+                onClick = {
+                    android.util.Log.d("LocationPermission", "Continue tapped")
+                    hasLocationPermission = checkPermission()
 
-                    // Build permissions array
-                    val permissions = mutableListOf(
-                        Manifest.permission.ACCESS_FINE_LOCATION,
-                        Manifest.permission.ACCESS_COARSE_LOCATION,
-                        Manifest.permission.BODY_SENSORS
-                    )
-
-                    // Add ACTIVITY_RECOGNITION for Android 10+
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                        permissions.add(Manifest.permission.ACTIVITY_RECOGNITION)
+                    if (hasLocationPermission && checkActivityRecognitionPermission()) {
+                        // Already granted — proceed directly
+                        if (!hasNavigated) {
+                            hasNavigated = true
+                            onPermissionGranted()
+                        }
+                    } else {
+                        // Launch system permission dialogs
+                        val permissions = mutableListOf(
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION,
+                            Manifest.permission.BODY_SENSORS
+                        )
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                            permissions.add(Manifest.permission.ACTIVITY_RECOGNITION)
+                        }
+                        locationPermissionLauncher.launch(permissions.toTypedArray())
                     }
-
-                    locationPermissionLauncher.launch(permissions.toTypedArray())
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(Spacing.buttonHeight),
-            shape = RoundedCornerShape(BorderRadius.full),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Colors.primary,
-                contentColor = Colors.buttonText
-            )
-        ) {
-            Text(
-                text = if (hasLocationPermission) "Continue to Dashboard" else "Enable Location Access",
-                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
-            )
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(Spacing.buttonHeight),
+                shape = RoundedCornerShape(BorderRadius.full),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Colors.primary,
+                    contentColor = Colors.buttonText
+                )
+            ) {
+                Text(
+                    text = "Continue",
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
+                )
+            }
         }
+    }
+}
 
-        Spacer(modifier = Modifier.height(Spacing.md))
-
-        // Skip for Now
-        TextButton(
-            onClick = onPermissionGranted,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(
-                text = "Skip for Now",
-                style = AppTextStyles.body,
-                color = Colors.primary
-            )
-        }
+@Composable
+private fun PermissionFeatureRow(icon: Int, text: String) {
+    Row(
+        verticalAlignment = Alignment.Top,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Icon(
+            painter = painterResource(id = icon),
+            contentDescription = null,
+            tint = Colors.primary,
+            modifier = Modifier.size(24.dp)
+        )
+        Spacer(modifier = Modifier.width(Spacing.md))
+        Text(
+            text = text,
+            style = AppTextStyles.body,
+            color = Colors.textPrimary
+        )
     }
 }

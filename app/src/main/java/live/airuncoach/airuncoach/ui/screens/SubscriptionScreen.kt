@@ -14,12 +14,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import live.airuncoach.airuncoach.R
@@ -27,25 +32,34 @@ import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
+import live.airuncoach.airuncoach.viewmodel.DeleteAccountState
 import live.airuncoach.airuncoach.viewmodel.Plan
 import live.airuncoach.airuncoach.viewmodel.SubscriptionViewModel
+import live.airuncoach.airuncoach.viewmodel.SubscriptionViewModelFactory
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SubscriptionScreen(onNavigateBack: () -> Unit) {
-    val viewModel: SubscriptionViewModel = viewModel()
+fun SubscriptionScreen(
+    onNavigateBack: () -> Unit,
+    onNavigateToLogin: () -> Unit = {}
+) {
+    val context = LocalContext.current
+    val viewModel: SubscriptionViewModel = viewModel(factory = SubscriptionViewModelFactory(context))
     val plans by viewModel.plans.collectAsState()
     val selectedPlan by viewModel.selectedPlan.collectAsState()
+    val deleteAccountState by viewModel.deleteAccountState.collectAsState()
+
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { 
+                title = {
                     Text(
-                        "Subscription",
+                        "Account Management",
                         style = AppTextStyles.h2,
                         color = Colors.textPrimary
-                    ) 
+                    )
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
@@ -112,7 +126,125 @@ fun SubscriptionScreen(onNavigateBack: () -> Unit) {
             item { Spacer(modifier = Modifier.height(Spacing.lg)) }
 
             item { CouponCodeSection() }
+
+            // ── Account Deletion ─────────────────────────────────────────────────
+            item { Spacer(modifier = Modifier.height(Spacing.xxxxl)) }
+
+            item {
+                HorizontalDivider(color = Colors.border.copy(alpha = 0.4f))
+                Spacer(modifier = Modifier.height(Spacing.xl))
+            }
+
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Danger Zone",
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.error,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                    Text(
+                        text = "Deleting your account permanently removes all your data including run history, training plans, and goals. This action cannot be undone.",
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.lg))
+
+                    // Show error if deletion failed
+                    if (deleteAccountState is DeleteAccountState.Error) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = Spacing.md),
+                            colors = CardDefaults.cardColors(
+                                containerColor = Colors.error.copy(alpha = 0.15f)
+                            )
+                        ) {
+                            Text(
+                                text = (deleteAccountState as DeleteAccountState.Error).message,
+                                style = AppTextStyles.small,
+                                color = Colors.error,
+                                modifier = Modifier.padding(Spacing.md),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = { showDeleteConfirmDialog = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp),
+                        shape = RoundedCornerShape(BorderRadius.lg),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.error),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Colors.error.copy(alpha = 0.6f)),
+                        enabled = deleteAccountState !is DeleteAccountState.Loading
+                    ) {
+                        if (deleteAccountState is DeleteAccountState.Loading) {
+                            CircularProgressIndicator(
+                                color = Colors.error,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        } else {
+                            Text(
+                                "Delete Account",
+                                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+            }
+
+            item { Spacer(modifier = Modifier.height(Spacing.xxxxl)) }
         }
+    }
+
+    // Delete account confirmation dialog
+    if (showDeleteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            containerColor = Colors.backgroundSecondary,
+            title = {
+                Text(
+                    "Delete Account?",
+                    style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.textPrimary
+                )
+            },
+            text = {
+                Text(
+                    "This will permanently delete your account and all associated data. This action cannot be reversed.",
+                    style = AppTextStyles.body,
+                    color = Colors.textSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirmDialog = false
+                        viewModel.deleteAccount(onAccountDeleted = onNavigateToLogin)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Colors.error,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(BorderRadius.md)
+                ) {
+                    Text("Yes, Delete My Account", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmDialog = false }) {
+                    Text("Cancel", color = Colors.textSecondary)
+                }
+            }
+        )
     }
 }
 

@@ -9,6 +9,7 @@ import com.google.gson.Gson
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import live.airuncoach.airuncoach.data.AiConsentManager
 import live.airuncoach.airuncoach.data.CoachingFeaturePreferences
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.User
@@ -24,6 +25,15 @@ class CoachSettingsViewModel(private val context: Context) : ViewModel() {
     private val sessionManager = SessionManager(context)
     private val apiService = RetrofitClient(context, sessionManager).instance
     private val featurePrefs = CoachingFeaturePreferences(context)
+    private val consentManager = AiConsentManager(context)
+
+    // Master AI Coach enabled toggle — reflects current AI consent state
+    private val _masterAiEnabled = MutableStateFlow(consentManager.isAiConsentGranted())
+    val masterAiEnabled: StateFlow<Boolean> = _masterAiEnabled.asStateFlow()
+
+    // Controls visibility of the AI consent bottom sheet in Coach Settings
+    private val _showConsentSheet = MutableStateFlow(false)
+    val showConsentSheet: StateFlow<Boolean> = _showConsentSheet.asStateFlow()
 
     private val _coachName = MutableStateFlow("AI Coach")
     val coachName: StateFlow<String> = _coachName.asStateFlow()
@@ -134,6 +144,46 @@ class CoachSettingsViewModel(private val context: Context) : ViewModel() {
 
     fun onCoachingToneChanged(tone: String) {
         _coachingTone.value = tone
+    }
+
+    // ── Master AI toggle ──────────────────────────────────────────────────────
+
+    /**
+     * Called when the user flips the master "AI Coach Enabled" switch.
+     *
+     * Turning ON: show the consent sheet so the user re-confirms.
+     * Turning OFF: revoke consent and disable all AI coaching immediately.
+     */
+    fun onMasterAiToggled(enabled: Boolean) {
+        if (enabled) {
+            // Require re-confirmation every time the master toggle is turned on
+            _showConsentSheet.value = true
+        } else {
+            _masterAiEnabled.value = false
+            consentManager.revokeConsent()
+        }
+    }
+
+    /** Called when the user taps "Allow" in the consent sheet from Coach Settings. */
+    fun onConsentGrantedFromSettings() {
+        consentManager.setConsent(granted = true)
+        _masterAiEnabled.value = true
+        _showConsentSheet.value = false
+    }
+
+    /** Called when the user declines in the consent sheet from Coach Settings. */
+    fun onConsentDeclinedFromSettings() {
+        consentManager.setConsent(granted = false)
+        _masterAiEnabled.value = false
+        _showConsentSheet.value = false
+    }
+
+    fun dismissConsentSheet() {
+        _showConsentSheet.value = false
+        // If consent not granted, revert master toggle to off
+        if (!consentManager.isAiConsentGranted()) {
+            _masterAiEnabled.value = false
+        }
     }
 
     // Coaching feature toggle handlers — save immediately to SharedPreferences

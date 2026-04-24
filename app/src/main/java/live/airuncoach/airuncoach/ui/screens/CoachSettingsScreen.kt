@@ -31,6 +31,7 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.CoachSettingsViewModel
 import live.airuncoach.airuncoach.viewmodel.CoachSettingsViewModelFactory
 import live.airuncoach.airuncoach.viewmodel.CoachingTone
+import androidx.compose.ui.text.style.TextAlign
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,6 +47,10 @@ fun CoachSettingsScreen(
     val accent by viewModel.accent.collectAsState()
     val coachingTone by viewModel.coachingTone.collectAsState()
     val coroutineScope = rememberCoroutineScope()
+
+    // Master AI toggle + consent sheet visibility
+    val masterAiEnabled by viewModel.masterAiEnabled.collectAsState()
+    val showConsentSheet by viewModel.showConsentSheet.collectAsState()
 
     // In-Run AI Coaching feature toggles
     val paceCoachingEnabled by viewModel.paceCoachingEnabled.collectAsState()
@@ -227,105 +232,194 @@ fun CoachSettingsScreen(
             // ==================== IN-RUN AI COACHING FEATURES ====================
             item {
                 SectionTitle(title = "In-Run AI Coaching")
-                Text(
-                    text = "Choose which coaching features are active during your runs. All features are enabled by default.",
-                    style = AppTextStyles.body,
-                    color = Colors.textSecondary,
-                    modifier = Modifier.padding(bottom = Spacing.md)
-                )
             }
 
+            // Master AI Coach toggle — must be ON for any coaching to work
             item {
-                CoachingFeatureToggle(
-                    title = "Pace Coaching",
-                    description = "Target pace guidance — warns when you're going too fast or slow",
-                    enabled = paceCoachingEnabled,
-                    onToggle = viewModel::onPaceCoachingToggled
+                MasterAiToggle(
+                    enabled = masterAiEnabled,
+                    onToggle = viewModel::onMasterAiToggled
                 )
+                Spacer(modifier = Modifier.height(Spacing.md))
             }
 
-            item {
-                CoachingFeatureToggle(
-                    title = "Route Navigation",
-                    description = "Turn-by-turn voice directions on mapped routes",
-                    enabled = routeNavigationEnabled,
-                    onToggle = viewModel::onRouteNavigationToggled
-                )
-            }
-
-            item {
-                CoachingFeatureToggle(
-                    title = "Elevation Coaching",
-                    description = "Hill and gradient advice — pacing tips on climbs and descents",
-                    enabled = elevationCoachingEnabled,
-                    onToggle = viewModel::onElevationCoachingToggled
-                )
-            }
-
-            item {
-                CoachingFeatureToggle(
-                    title = "Heart Rate Coaching",
-                    description = "Heart rate zone guidance during your run",
-                    enabled = heartRateCoachingEnabled,
-                    onToggle = viewModel::onHeartRateCoachingToggled
-                )
-            }
-
-            item {
-                CoachingFeatureToggle(
-                    title = "Cadence & Stride",
-                    description = "Running form analysis — stride length and cadence coaching",
-                    enabled = cadenceStrideEnabled,
-                    onToggle = viewModel::onCadenceStrideToggled
-                )
-            }
-
-            item {
-                CoachingFeatureToggle(
-                    title = "500m Check-In",
-                    description = "Initial pace assessment at 500 metres into your run",
-                    enabled = halfKmCheckInEnabled,
-                    onToggle = viewModel::onHalfKmCheckInToggled
-                )
-            }
-
-            item {
-                CoachingFeatureToggle(
-                    title = "Km Split Updates",
-                    description = "Pace and progress updates at each split interval",
-                    enabled = kmSplitsEnabled,
-                    onToggle = viewModel::onKmSplitsToggled
-                )
-            }
-
-            // Km Split Interval selector — only show when km splits are enabled
-            if (kmSplitsEnabled) {
+            // Individual toggles — only shown when master is ON
+            if (masterAiEnabled) {
                 item {
-                    KmSplitIntervalSelector(
-                        selectedInterval = kmSplitIntervalKm,
-                        availableIntervals = viewModel.availableKmSplitIntervals,
-                        onIntervalChanged = viewModel::onKmSplitIntervalChanged
+                    Text(
+                        text = "Choose which coaching features are active during your runs.",
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary,
+                        modifier = Modifier.padding(bottom = Spacing.md)
                     )
+                }
+
+                item {
+                    CoachingFeatureToggle(
+                        title = "Pace Coaching",
+                        description = "Target pace guidance — warns when you're going too fast or slow",
+                        enabled = paceCoachingEnabled,
+                        onToggle = viewModel::onPaceCoachingToggled
+                    )
+                }
+
+                item {
+                    CoachingFeatureToggle(
+                        title = "Route Navigation",
+                        description = "Turn-by-turn voice directions on mapped routes",
+                        enabled = routeNavigationEnabled,
+                        onToggle = viewModel::onRouteNavigationToggled
+                    )
+                }
+
+                item {
+                    CoachingFeatureToggle(
+                        title = "Elevation Coaching",
+                        description = "Hill and gradient advice — pacing tips on climbs and descents",
+                        enabled = elevationCoachingEnabled,
+                        onToggle = viewModel::onElevationCoachingToggled
+                    )
+                }
+
+                item {
+                    CoachingFeatureToggle(
+                        title = "Heart Rate Coaching",
+                        description = "Heart rate zone guidance during your run",
+                        enabled = heartRateCoachingEnabled,
+                        onToggle = viewModel::onHeartRateCoachingToggled
+                    )
+                }
+
+                item {
+                    CoachingFeatureToggle(
+                        title = "Cadence & Stride",
+                        description = "Running form analysis — stride length and cadence coaching",
+                        enabled = cadenceStrideEnabled,
+                        onToggle = viewModel::onCadenceStrideToggled
+                    )
+                }
+
+                item {
+                    CoachingFeatureToggle(
+                        title = "500m Check-In",
+                        description = "Initial pace assessment at 500 metres into your run",
+                        enabled = halfKmCheckInEnabled,
+                        onToggle = viewModel::onHalfKmCheckInToggled
+                    )
+                }
+
+                item {
+                    CoachingFeatureToggle(
+                        title = "Km Split Updates",
+                        description = "Pace and progress updates at each split interval",
+                        enabled = kmSplitsEnabled,
+                        onToggle = viewModel::onKmSplitsToggled
+                    )
+                }
+
+                // Km Split Interval selector — only show when km splits are enabled
+                if (kmSplitsEnabled) {
+                    item {
+                        KmSplitIntervalSelector(
+                            selectedInterval = kmSplitIntervalKm,
+                            availableIntervals = viewModel.availableKmSplitIntervals,
+                            onIntervalChanged = viewModel::onKmSplitIntervalChanged
+                        )
+                    }
+                }
+
+                item {
+                    CoachingFeatureToggle(
+                        title = "Struggle Detection",
+                        description = "Supportive coaching when your pace drops significantly",
+                        enabled = struggleDetectionEnabled,
+                        onToggle = viewModel::onStruggleDetectionToggled
+                    )
+                }
+
+                item {
+                    CoachingFeatureToggle(
+                        title = "Motivational Coaching",
+                        description = "Milestones, phase changes, technique tips, and encouragement",
+                        enabled = motivationalCoachingEnabled,
+                        onToggle = viewModel::onMotivationalCoachingToggled
+                    )
+                }
+            } else {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(BorderRadius.md),
+                        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
+                    ) {
+                        Text(
+                            text = "Enable AI Coaching above to configure individual coaching features.",
+                            style = AppTextStyles.body,
+                            color = Colors.textMuted,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(Spacing.xl)
+                        )
+                    }
                 }
             }
 
-            item {
-                CoachingFeatureToggle(
-                    title = "Struggle Detection",
-                    description = "Supportive coaching when your pace drops significantly",
-                    enabled = struggleDetectionEnabled,
-                    onToggle = viewModel::onStruggleDetectionToggled
-                )
-            }
+        }
+    }
 
-            item {
-                CoachingFeatureToggle(
-                    title = "Motivational Coaching",
-                    description = "Milestones, phase changes, technique tips, and encouragement",
-                    enabled = motivationalCoachingEnabled,
-                    onToggle = viewModel::onMotivationalCoachingToggled
+    // AI Consent bottom sheet — shown every time the master toggle is turned ON
+    if (showConsentSheet) {
+        AiConsentBottomSheet(
+            onAllow = viewModel::onConsentGrantedFromSettings,
+            onDecline = viewModel::onConsentDeclinedFromSettings,
+            onDismiss = viewModel::dismissConsentSheet
+        )
+    }
+}
+
+@Composable
+fun MasterAiToggle(enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(BorderRadius.md),
+        colors = CardDefaults.cardColors(
+            containerColor = if (enabled) Colors.primary.copy(alpha = 0.15f) else Colors.backgroundSecondary
+        ),
+        border = if (enabled) BorderStroke(1.dp, Colors.primary.copy(alpha = 0.4f)) else BorderStroke(1.dp, Color.Transparent)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.lg, vertical = Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f).padding(end = Spacing.md)) {
+                Text(
+                    text = "AI Coach Enabled",
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                    color = if (enabled) Colors.primary else Colors.textPrimary
+                )
+                Text(
+                    text = if (enabled)
+                        "AI coaching is active — workout data shared with OpenAI"
+                    else
+                        "AI coaching is off — no data shared with third parties",
+                    style = AppTextStyles.caption,
+                    color = Colors.textSecondary
                 )
             }
+            Switch(
+                checked = enabled,
+                onCheckedChange = onToggle,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Colors.primary,
+                    uncheckedThumbColor = Colors.textMuted,
+                    uncheckedTrackColor = Colors.backgroundRoot
+                )
+            )
         }
     }
 }

@@ -723,7 +723,12 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 // User can view which permissions are granted and re-authorize for new scopes
                 GarminPermissionsScreenWrapper(onNavigateBack = { navController.popBackStack() })
             }
-            composable("subscription") { SubscriptionScreen(onNavigateBack = { navController.popBackStack() }) }
+            composable("subscription") {
+                SubscriptionScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToLogin = onNavigateToLogin
+                )
+            }
         }
     }
 }

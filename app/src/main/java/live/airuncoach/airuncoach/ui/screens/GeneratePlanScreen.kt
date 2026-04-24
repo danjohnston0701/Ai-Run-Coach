@@ -11,12 +11,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -25,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.R
+import live.airuncoach.airuncoach.data.AiConsentManager
 import live.airuncoach.airuncoach.domain.model.Goal
 import live.airuncoach.airuncoach.domain.model.HeartRateZones
 import live.airuncoach.airuncoach.domain.model.Injury
@@ -47,6 +51,11 @@ fun GeneratePlanScreen(
     onNavigateBack: () -> Unit,
     onPlanCreated: (String) -> Unit  // planId
 ) {
+    val context = LocalContext.current
+    val consentManager = remember { AiConsentManager(context) }
+    var aiConsentGranted by remember { mutableStateOf(consentManager.isAiConsentGranted()) }
+    var showConsentSheet by remember { mutableStateOf(false) }
+
     val viewModel: GeneratePlanViewModel = hiltViewModel()
     val goalType by viewModel.goalType.collectAsState()
     val targetDistance by viewModel.targetDistance.collectAsState()
@@ -542,14 +551,56 @@ fun GeneratePlanScreen(
                         )
                     }
 
+                    // ── AI Consent note — shown when consent not yet granted ──────────
+                    if (!aiConsentGranted) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = Spacing.md),
+                            colors = CardDefaults.cardColors(
+                                containerColor = Colors.primary.copy(alpha = 0.1f)
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(Spacing.md),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    painterResource(R.drawable.icon_info_vector),
+                                    contentDescription = null,
+                                    tint = Colors.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(Spacing.sm))
+                                Text(
+                                    "AI consent required to generate your plan. Tap the button to review and allow.",
+                                    style = AppTextStyles.small,
+                                    color = Colors.primary
+                                )
+                            }
+                        }
+                    }
+
                     // ── Generate CTA ─────────────────────────────────────────────────────
                     Button(
-                        onClick = { viewModel.generatePlan() },
+                        onClick = {
+                            if (aiConsentGranted) {
+                                viewModel.generatePlan()
+                            } else {
+                                // Show consent sheet — form data is preserved
+                                showConsentSheet = true
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth().height(56.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Icon(painterResource(R.drawable.icon_ai_vector), null, modifier = Modifier.size(20.dp))
+                        if (!aiConsentGranted) {
+                            Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(20.dp))
+                        } else {
+                            Icon(painterResource(R.drawable.icon_ai_vector), null, modifier = Modifier.size(20.dp))
+                        }
                         Spacer(modifier = Modifier.width(Spacing.sm))
                         Text(
                             "Generate My ${durationWeeks}-Week Plan",
@@ -562,6 +613,29 @@ fun GeneratePlanScreen(
                 }
             }
         }
+    }
+
+    // ── AI Consent Sheet ─────────────────────────────────────────────────────
+    // Shown when user taps Generate without consent — form data is fully preserved
+    if (showConsentSheet) {
+        AiConsentBottomSheet(
+            onAllow = {
+                consentManager.setConsent(granted = true)
+                aiConsentGranted = true
+                showConsentSheet = false
+                // Immediately generate after consent — no form data lost
+                viewModel.generatePlan()
+            },
+            onDecline = {
+                consentManager.setConsent(granted = false)
+                aiConsentGranted = false
+                showConsentSheet = false
+                // Sheet closes, form data fully preserved
+            },
+            onDismiss = {
+                showConsentSheet = false
+            }
+        )
     }
 
     // ── Add Regular Session Dialog ────────────────────────────────────────────
