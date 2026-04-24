@@ -176,6 +176,181 @@ export class DatabaseStorage implements IStorage {
     return user || undefined;
   }
 
+  /**
+   * Permanently delete a user account and ALL associated data from every table.
+   *
+   * Executes deletions in FK-safe order using raw SQL so it stays resilient
+   * to schema migrations — missing tables/columns are skipped gracefully using
+   * the same tryCleanup pattern as deleteRun().
+   *
+   * IMPORTANT: Fetch and use the Garmin access token for deregistration BEFORE
+   * calling this function, as the token is deleted as part of this operation.
+   */
+  async deleteUser(userId: string): Promise<void> {
+    console.log(`[Storage] Deleting user ${userId} and all associated data`);
+
+    const tryCleanup = async (label: string, stmt: ReturnType<typeof sql>) => {
+      try {
+        await db.execute(stmt);
+        console.log(`[Storage] Cleaned up: ${label}`);
+      } catch (e: any) {
+        if (e?.code === '42703' || e?.code === '42P01') {
+          console.warn(`[Storage] Skipping ${label} (table/column not in DB): ${e.message}`);
+        } else {
+          console.error(`[Storage] Error cleaning up ${label}:`, e.message);
+          throw e;
+        }
+      }
+    };
+
+    // ── Phase 1: Null out FK references INTO runs we're about to delete ──────
+    await tryCleanup('group_run_participants.run_id → user runs',
+      sql`UPDATE group_run_participants SET run_id = NULL WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
+    await tryCleanup('garmin_move_iq.run_id → user runs',
+      sql`UPDATE garmin_move_iq SET run_id = NULL WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
+    await tryCleanup('garmin_realtime_data.run_id → user runs',
+      sql`UPDATE garmin_realtime_data SET run_id = NULL WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
+    await tryCleanup('garmin_companion_sessions.run_id → user runs',
+      sql`UPDATE garmin_companion_sessions SET run_id = NULL WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
+    await tryCleanup('planned_workouts.completed_run_id → user runs',
+      sql`UPDATE planned_workouts SET completed_run_id = NULL WHERE completed_run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
+    await tryCleanup('user_achievements.run_id → user runs',
+      sql`UPDATE user_achievements SET run_id = NULL WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
+
+    // ── Phase 2: User's own interactions on other people's content ────────────
+    await tryCleanup('comment_likes by user',
+      sql`DELETE FROM comment_likes WHERE user_id = ${userId}`);
+    await tryCleanup('activity_comments by user',
+      sql`DELETE FROM activity_comments WHERE user_id = ${userId}`);
+    await tryCleanup('reactions by user',
+      sql`DELETE FROM reactions WHERE user_id = ${userId}`);
+
+    // ── Phase 3: Other users' interactions on this user's feed activities ─────
+    await tryCleanup('comment_likes on user feed',
+      sql`DELETE FROM comment_likes WHERE comment_id IN (
+            SELECT id FROM activity_comments WHERE activity_id IN (
+              SELECT id FROM feed_activities WHERE user_id = ${userId}
+            )
+          )`);
+    await tryCleanup('activity_comments on user feed',
+      sql`DELETE FROM activity_comments WHERE activity_id IN (
+            SELECT id FROM feed_activities WHERE user_id = ${userId}
+          )`);
+    await tryCleanup('reactions on user feed',
+      sql`DELETE FROM reactions WHERE activity_id IN (
+            SELECT id FROM feed_activities WHERE user_id = ${userId}
+          )`);
+    await tryCleanup('feed_activities',
+      sql`DELETE FROM feed_activities WHERE user_id = ${userId}`);
+
+    // ── Phase 4: Run-linked data ──────────────────────────────────────────────
+    await tryCleanup('segment_efforts',
+      sql`DELETE FROM segment_efforts WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
+    await tryCleanup('shared_runs',
+      sql`DELETE FROM shared_runs WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
+    await tryCleanup('route_ratings (run-linked)',
+      sql`DELETE FROM route_ratings WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
+    await tryCleanup('garmin_activities',
+      sql`DELETE FROM garmin_activities WHERE user_id = ${userId}`);
+    await tryCleanup('activity_merge_log',
+      sql`DELETE FROM activity_merge_log WHERE ai_run_coach_run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
+    await tryCleanup('run_analyses',
+      sql`DELETE FROM run_analyses WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
+    await tryCleanup('device_data',
+      sql`DELETE FROM device_data WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
+    await tryCleanup('routes (source_run_id)',
+      sql`DELETE FROM routes WHERE source_run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
+    await tryCleanup('runs',
+      sql`DELETE FROM runs WHERE user_id = ${userId}`);
+
+    // ── Phase 5: Training plan data ───────────────────────────────────────────
+    await tryCleanup('plan_adaptations',
+      sql`DELETE FROM plan_adaptations WHERE plan_id IN (SELECT id FROM training_plans WHERE user_id = ${userId})`);
+    await tryCleanup('planned_workouts',
+      sql`DELETE FROM planned_workouts WHERE plan_id IN (SELECT id FROM training_plans WHERE user_id = ${userId})`);
+    await tryCleanup('weekly_plans',
+      sql`DELETE FROM weekly_plans WHERE plan_id IN (SELECT id FROM training_plans WHERE user_id = ${userId})`);
+    await tryCleanup('training_plans',
+      sql`DELETE FROM training_plans WHERE user_id = ${userId}`);
+
+    // ── Phase 6: Social / membership data ────────────────────────────────────
+    await tryCleanup('user_achievements',
+      sql`DELETE FROM user_achievements WHERE user_id = ${userId}`);
+    await tryCleanup('challenge_participants',
+      sql`DELETE FROM challenge_participants WHERE user_id = ${userId}`);
+    await tryCleanup('club_memberships',
+      sql`DELETE FROM club_memberships WHERE user_id = ${userId}`);
+    await tryCleanup('group_run_participants (by user)',
+      sql`DELETE FROM group_run_participants WHERE user_id = ${userId}`);
+    await tryCleanup('group_runs created by user',
+      sql`DELETE FROM group_runs WHERE creator_id = ${userId}`);
+    await tryCleanup('friends',
+      sql`DELETE FROM friends WHERE user_id = ${userId} OR friend_id = ${userId}`);
+    await tryCleanup('friend_requests',
+      sql`DELETE FROM friend_requests WHERE requester_id = ${userId} OR addressee_id = ${userId}`);
+    await tryCleanup('live_run_sessions',
+      sql`DELETE FROM live_run_sessions WHERE user_id = ${userId}`);
+    await tryCleanup('notifications',
+      sql`DELETE FROM notifications WHERE user_id = ${userId}`);
+    await tryCleanup('notification_preferences',
+      sql`DELETE FROM notification_preferences WHERE user_id = ${userId}`);
+    await tryCleanup('goals',
+      sql`DELETE FROM goals WHERE user_id = ${userId}`);
+    await tryCleanup('routes (user-owned)',
+      sql`DELETE FROM routes WHERE user_id = ${userId}`);
+    await tryCleanup('daily_fitness',
+      sql`DELETE FROM daily_fitness WHERE user_id = ${userId}`);
+    await tryCleanup('segment_stars',
+      sql`DELETE FROM segment_stars WHERE user_id = ${userId}`);
+    await tryCleanup('route_ratings (user-owned)',
+      sql`DELETE FROM route_ratings WHERE user_id = ${userId}`);
+
+    // ── Phase 7: Garmin wellness + device data ────────────────────────────────
+    await tryCleanup('garmin_wellness_metrics',
+      sql`DELETE FROM garmin_wellness_metrics WHERE user_id = ${userId}`);
+    await tryCleanup('garmin_skin_temperature',
+      sql`DELETE FROM garmin_skin_temperature WHERE user_id = ${userId}`);
+    await tryCleanup('garmin_body_composition',
+      sql`DELETE FROM garmin_body_composition WHERE user_id = ${userId}`);
+    await tryCleanup('garmin_blood_pressure',
+      sql`DELETE FROM garmin_blood_pressure WHERE user_id = ${userId}`);
+    await tryCleanup('garmin_health_snapshots',
+      sql`DELETE FROM garmin_health_snapshots WHERE user_id = ${userId}`);
+    await tryCleanup('garmin_epochs_raw',
+      sql`DELETE FROM garmin_epochs_raw WHERE user_id = ${userId}`);
+    await tryCleanup('garmin_epochs_aggregate',
+      sql`DELETE FROM garmin_epochs_aggregate WHERE user_id = ${userId}`);
+    await tryCleanup('garmin_realtime_data',
+      sql`DELETE FROM garmin_realtime_data WHERE user_id = ${userId}`);
+    await tryCleanup('garmin_move_iq',
+      sql`DELETE FROM garmin_move_iq WHERE user_id = ${userId}`);
+    await tryCleanup('garmin_companion_sessions',
+      sql`DELETE FROM garmin_companion_sessions WHERE user_id = ${userId}`);
+    await tryCleanup('connected_devices',
+      sql`DELETE FROM connected_devices WHERE user_id = ${userId}`);
+
+    // ── Phase 8: Auth / session tokens ───────────────────────────────────────
+    await tryCleanup('password_reset_tokens',
+      sql`DELETE FROM password_reset_tokens WHERE user_id = ${userId}`);
+    await tryCleanup('oauth_state_store',
+      sql`DELETE FROM oauth_state_store WHERE user_id = ${userId}`);
+    await tryCleanup('webhook_failure_queue',
+      sql`DELETE FROM webhook_failure_queue WHERE user_id = ${userId}`);
+
+    // ── Phase 9: user_stats (has cascade FK but be explicit) ─────────────────
+    await tryCleanup('user_stats',
+      sql`DELETE FROM user_stats WHERE user_id = ${userId}`);
+
+    // ── Phase 10: Delete the user row itself ──────────────────────────────────
+    try {
+      await db.execute(sql`DELETE FROM users WHERE id = ${userId}`);
+      console.log(`[Storage] Successfully deleted user ${userId} and all associated data`);
+    } catch (e) {
+      console.error(`[Storage] Error deleting user ${userId}:`, e);
+      throw new Error(`Failed to delete user: ${e}`);
+    }
+  }
+
   async searchUsers(query: string): Promise<User[]> {
     try {
       console.log(`[DB Search] Querying users table for: "${query}"`);

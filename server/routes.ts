@@ -597,6 +597,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /**
+   * DELETE /api/users/:id
+   *
+   * Permanently deletes a user account and all associated data.
+   *
+   * Steps:
+   *  1. Ownership check — only the authenticated user can delete their own account
+   *  2. Fetch Garmin access token BEFORE any deletion (needed for outbound deregister call)
+   *  3. Call Garmin Health API to deregister the user (stop future webhook delivery)
+   *  4. Delete all user data from every table via storage.deleteUser()
+   *  5. Respond 204 No Content
+   */
+  app.delete("/api/users/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    const userId = req.params.id;
+
+    // Ownership check — users can only delete their own account
+    if (req.user?.userId !== userId) {
+      return res.status(403).json({ error: "Not authorized to delete this account" });
+    }
+
+    try {
+      // ── Step 1: Fetch Garmin token BEFORE we delete anything ───────────────
+      // We need it to call Garmin's deregistration endpoint. Once connected_devices
+      // is deleted, the token is gone and we can no longer deregister.
+      let garminAccessToken: string | null = null;
+      try {
+        const [garminDevice] = await db
+          .select({ accessToken: connectedDevices.accessToken })
+          .from(connectedDevices)
+          .where(
+            and(
+              eq(connectedDevices.userId, userId),
+              eq(connectedDevices.deviceType, "garmin"),
+              eq(connectedDevices.isActive, true)
+            )
+          )
+          .limit(1);
+        garminAccessToken = garminDevice?.accessToken ?? null;
+      } catch (e) {
+        console.warn("[DeleteUser] Could not fetch Garmin token (non-fatal):", e);
+      }
+
+      // ── Step 2: Deregister from Garmin Health API ─────────────────────────
+      // Per Garmin developer terms, apps must call the deregistration endpoint
+      // when a user deletes their account so Garmin stops sending webhook data.
+      // Endpoint: DELETE https://apis.garmin.com/wellness-api/rest/user/registration
+      // Auth: Bearer <userAccessToken>
+      if (garminAccessToken) {
+        try {
+          const garminDeregisterRes = await fetch(
+            "https://apis.garmin.com/wellness-api/rest/user/registration",
+            {
+              method: "DELETE",
+              headers: {
+                Authorization: `Bearer ${garminAccessToken}`,
+              },
+            }
+          );
+
+          if (garminDeregisterRes.ok || garminDeregisterRes.status === 204) {
+            console.log(`[DeleteUser] Garmin deregistration successful for user ${userId}`);
+          } else {
+            // Log but do NOT block account deletion — Garmin deregister is best-effort
+            const body = await garminDeregisterRes.text().catch(() => "");
+            console.warn(
+              `[DeleteUser] Garmin deregistration returned ${garminDeregisterRes.status} (non-fatal): ${body.slice(0, 200)}`
+            );
+          }
+        } catch (e) {
+          // Network error calling Garmin — non-fatal, continue with deletion
+          console.warn("[DeleteUser] Garmin deregistration request failed (non-fatal):", e);
+        }
+      } else {
+        console.log(`[DeleteUser] No active Garmin connection for user ${userId} — skipping deregistration`);
+      }
+
+      // ── Step 3: Cascade delete all user data ─────────────────────────────
+      await storage.deleteUser(userId);
+
+      console.log(`[DeleteUser] Account deletion complete for user ${userId}`);
+      return res.status(204).send();
+
+    } catch (error: any) {
+      console.error(`[DeleteUser] Failed to delete user ${userId}:`, error);
+      return res.status(500).json({ error: "Failed to delete account. Please try again." });
+    }
+  });
+
   // Upload profile picture (base64)
   app.post("/api/users/:id/profile-picture", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
