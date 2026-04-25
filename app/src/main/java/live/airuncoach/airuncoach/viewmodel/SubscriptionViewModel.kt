@@ -16,6 +16,7 @@ import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.network.model.UpdateUserRequest
+import live.airuncoach.airuncoach.network.model.UsageResponse
 
 data class Plan(val name: String, val price: String, val discount: String? = null)
 
@@ -53,6 +54,9 @@ class SubscriptionViewModel(private val context: Context) : ViewModel() {
     private val _downgradeState = MutableStateFlow<DowngradeState>(DowngradeState.Idle)
     val downgradeState: StateFlow<DowngradeState> = _downgradeState.asStateFlow()
 
+    private val _usage = MutableStateFlow<UsageResponse?>(null)
+    val usage: StateFlow<UsageResponse?> = _usage.asStateFlow()
+
     /** True when the user's stored subscription tier is a paid plan. */
     val isOnPaidPlan: Boolean
         get() {
@@ -63,13 +67,24 @@ class SubscriptionViewModel(private val context: Context) : ViewModel() {
                 // Treat null / "free" / "none" as free; anything else (e.g. "premium",
                 // "monthly", "yearly", "pro") is considered a paid plan.
                 tier != null && tier != "free" && tier != "none"
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 false
             }
         }
 
     init {
         loadPlans()
+        loadUsage()
+    }
+
+    fun loadUsage() {
+        viewModelScope.launch {
+            try {
+                _usage.value = apiService.getCurrentUsage()
+            } catch (_: Exception) {
+                // Non-fatal: usage data is best-effort; silently swallow errors
+            }
+        }
     }
 
     private fun loadPlans() {
@@ -115,9 +130,9 @@ class SubscriptionViewModel(private val context: Context) : ViewModel() {
                         "Failed to delete account (${response.code()}). Please try again."
                     )
                 }
-            } catch (e: Exception) {
+            } catch (ex: Exception) {
                 _deleteAccountState.value = DeleteAccountState.Error(
-                    e.message ?: "An unexpected error occurred. Please check your connection."
+                    ex.message ?: "An unexpected error occurred. Please check your connection."
                 )
             }
         }

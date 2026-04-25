@@ -4,12 +4,14 @@ import {
   groupRuns, groupRunParticipants, events, routeRatings, runAnalyses,
   connectedDevices, deviceData, garminWellnessMetrics, activityMergeLog, garminActivities,
   oauthStateStore, webhookFailureQueue, garminWebhookEvents, passwordResetTokens,
+  monthlyUsage,
   type User, type InsertUser, type Run, type InsertRun,
   type Route, type InsertRoute, type Goal, type InsertGoal,
   type Friend, type FriendRequest, type Notification, type NotificationPreference,
   type LiveRunSession, type GroupRun, type GroupRunParticipant, type Event,
   type RouteRating, type RunAnalysis, type ConnectedDevice, type DeviceData,
-  type GarminWellnessMetric, type OauthStateStore, type GarminWebhookEvent, type PasswordResetToken
+  type GarminWellnessMetric, type OauthStateStore, type GarminWebhookEvent, type PasswordResetToken,
+  type MonthlyUsage
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, or, and, desc, asc, ilike, sql, inArray, gte, lte, isNotNull, count, sum, avg, max, min } from "drizzle-orm";
@@ -152,6 +154,10 @@ export interface IStorage {
   createGarminWellness(data: any): Promise<GarminWellnessMetric>;
   updateGarminWellness(id: string, data: Partial<GarminWellnessMetric>): Promise<GarminWellnessMetric | undefined>;
   getAllActiveGarminDevices(): Promise<ConnectedDevice[]>;
+
+  // Monthly Usage Tracking
+  getMonthlyUsage(userId: string, yearMonth: string): Promise<MonthlyUsage>;
+  incrementUsage(userId: string, yearMonth: string, updates: Partial<Pick<MonthlyUsage, 'aiCoachingKm' | 'trainingPlansGenerated' | 'routesGenerated' | 'postRunAnalyses'>>): Promise<MonthlyUsage>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1097,6 +1103,72 @@ export class DatabaseStorage implements IStorage {
 
   async deletePasswordResetToken(token: string): Promise<void> {
     await db.delete(passwordResetTokens).where(eq(passwordResetTokens.token, token));
+  }
+
+  // ── Monthly Usage Tracking ────────────────────────────────────────────────
+
+  /**
+   * Returns the monthly usage row for a user, creating it with zero counts if
+   * it doesn't exist yet (upsert pattern is safe for concurrent requests).
+   */
+  async getMonthlyUsage(userId: string, yearMonth: string): Promise<MonthlyUsage> {
+    // Try to read first (fast path — no write contention)
+    const [existing] = await db.select()
+      .from(monthlyUsage)
+      .where(and(eq(monthlyUsage.userId, userId), eq(monthlyUsage.yearMonth, yearMonth)));
+
+    if (existing) return existing;
+
+    // Create a fresh row for this month; if another request races us, return the winner.
+    const [created] = await db.insert(monthlyUsage)
+      .values({ userId, yearMonth })
+      .onConflictDoNothing()
+      .returning();
+
+    if (created) return created;
+
+    // Another concurrent request won the race — read back the winner's row.
+    const [row] = await db.select()
+      .from(monthlyUsage)
+      .where(and(eq(monthlyUsage.userId, userId), eq(monthlyUsage.yearMonth, yearMonth)));
+
+    return row!;
+  }
+
+  /**
+   * Atomically increments one or more usage counters for the current month.
+   * Uses SQL arithmetic (col + delta) so concurrent increments don't overwrite
+   * each other.
+   */
+  async incrementUsage(
+    userId: string,
+    yearMonth: string,
+    updates: Partial<Pick<MonthlyUsage, 'aiCoachingKm' | 'trainingPlansGenerated' | 'routesGenerated' | 'postRunAnalyses'>>
+  ): Promise<MonthlyUsage> {
+    // Ensure the row exists
+    await this.getMonthlyUsage(userId, yearMonth);
+
+    // Build atomic increment expressions
+    const setClause: Record<string, any> = { updatedAt: new Date() };
+    if (updates.aiCoachingKm !== undefined) {
+      setClause.aiCoachingKm = sql`${monthlyUsage.aiCoachingKm} + ${updates.aiCoachingKm}`;
+    }
+    if (updates.trainingPlansGenerated !== undefined) {
+      setClause.trainingPlansGenerated = sql`${monthlyUsage.trainingPlansGenerated} + ${updates.trainingPlansGenerated}`;
+    }
+    if (updates.routesGenerated !== undefined) {
+      setClause.routesGenerated = sql`${monthlyUsage.routesGenerated} + ${updates.routesGenerated}`;
+    }
+    if (updates.postRunAnalyses !== undefined) {
+      setClause.postRunAnalyses = sql`${monthlyUsage.postRunAnalyses} + ${updates.postRunAnalyses}`;
+    }
+
+    const [updated] = await db.update(monthlyUsage)
+      .set(setClause)
+      .where(and(eq(monthlyUsage.userId, userId), eq(monthlyUsage.yearMonth, yearMonth)))
+      .returning();
+
+    return updated;
   }
 }
 

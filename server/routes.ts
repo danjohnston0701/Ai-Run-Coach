@@ -55,6 +55,7 @@ import {
   sendActivityNotification,
   getUnreadNotificationCount
 } from "./notification-service";
+import { getUsageWithLimits, checkAndEnforceLimit, recordUsage } from "./usage-service";
 import {
   checkAchievementsAfterRun,
   getUserAchievements,
@@ -1301,6 +1302,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error('[UserStatsCache] onRunSaved failed:', err)
       );
 
+      // ── Track AI coaching km usage ─────────────────────────────────────────
+      // If AI coaching was active for this run, count its distance toward the
+      // user's monthly AI coaching quota. Fire-and-forget; never blocks the save.
+      if (run.aiCoachEnabled && (run.distance ?? 0) > 0) {
+        recordUsage(userId, "aiCoachingKm", run.distance ?? 0);
+      }
+
       // Update fitness metrics asynchronously (don't block response)
       if (run.completedAt && tss > 0) {
         const completedAtDate = typeof run.completedAt === 'number'
@@ -1417,7 +1425,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user!.userId;
       console.log(`[comprehensive-analysis] Starting analysis for run ${runId}, user ${userId}`);
       
-      // Check for existing analysis first — return cached if available
+      // Check for existing analysis first — return cached if available (no quota cost for cached results)
       const existingAnalysis = await storage.getRunAnalysis(runId);
       console.log(`[comprehensive-analysis] Checked cache, found: ${!!existingAnalysis?.analysis}`);
       if (existingAnalysis?.analysis) {
@@ -1437,6 +1445,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
       }
+
+      // ── Tier limit check (only for new analyses, not cached returns) ──────
+      const analysisUser = await storage.getUser(userId);
+      const analysisAllowed = await checkAndEnforceLimit(res, userId, analysisUser?.subscriptionTier, "postRunAnalyses");
+      if (!analysisAllowed) return;
       
       // Get the run data
       const run = await storage.getRun(runId);
@@ -1621,6 +1634,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } as any);
       
       console.log(`[comprehensive-analysis] Successfully returning analysis for run ${runId}`);
+      // Record usage AFTER successful analysis (fire and forget)
+      recordUsage(userId, "postRunAnalyses");
+
       res.json({
         success: true,
         analysis,
@@ -1903,6 +1919,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const userId = (req as AuthenticatedRequest).user?.userId;
+
+      // ── Tier limit check ─────────────────────────────────────────────────
+      if (userId) {
+        const routeUser = await storage.getUser(userId);
+        const routeAllowed = await checkAndEnforceLimit(res, userId, routeUser?.subscriptionTier, "routesGenerated");
+        if (!routeAllowed) return;
+      }
+
       const aiRunnerProfile = userId
         ? await getRunnerProfile(userId).catch(() => null)
         : null;
@@ -1940,6 +1964,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
       }));
       
+      // Record against monthly quota (fire and forget)
+      if (userId) recordUsage(userId, "routesGenerated");
+
       res.json({ routes: formattedRoutes });
     } catch (error: any) {
       console.error("Generate AI routes error:", error);
@@ -1957,6 +1984,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!startLat || !startLng || !distance) {
         return res.status(400).json({ error: "Missing required fields: startLat, startLng, distance" });
       }
+
+      // ── Tier limit check ─────────────────────────────────────────────────
+      const templateRouteUserId = req.user!.userId;
+      const templateRouteUser = await storage.getUser(templateRouteUserId);
+      const templateRouteAllowed = await checkAndEnforceLimit(res, templateRouteUserId, templateRouteUser?.subscriptionTier, "routesGenerated");
+      if (!templateRouteAllowed) return;
       
       const routeGenV1 = await import("./route-generation");
       const routes = await routeGenV1.generateRouteOptions(
@@ -1991,6 +2024,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
       }));
       
+      // Record against monthly quota (fire and forget)
+      recordUsage(templateRouteUserId, "routesGenerated");
+
       res.json({ routes: formattedRoutes });
     } catch (error: any) {
       console.error("Generate template routes error:", error);
@@ -2706,6 +2742,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Get subscription status error:", error);
       res.status(500).json({ error: "Failed to get subscription status" });
+    }
+  });
+
+  // ── Current month usage + tier limits ─────────────────────────────────────
+  // Returns how much of each capped feature the user has consumed this month,
+  // what their tier limits are, and how much remains.
+  app.get("/api/usage/current", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      const usageData = await getUsageWithLimits(req.user!.userId, user?.subscriptionTier);
+      res.json(usageData);
+    } catch (error: any) {
+      console.error("[Usage] GET /api/usage/current error:", error);
+      res.status(500).json({ error: "Failed to fetch usage data" });
     }
   });
 
@@ -9972,6 +10022,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         weight = null,
       } = req.body;
 
+      // ── Tier limit check ─────────────────────────────────────────────────
+      const planUser = await storage.getUser(userId);
+      const planAllowed = await checkAndEnforceLimit(res, userId, planUser?.subscriptionTier, "trainingPlansGenerated");
+      if (!planAllowed) return;
+
       // ── Deduplication guard ───────────────────────────────────────────────
       // 1. In-memory lock: reject if this user's plan is already being generated
       //    (handles rapid repeated taps within the same server process).
@@ -10046,6 +10101,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
+      // ── Record successful plan generation against monthly quota ──────────
+      recordUsage(userId, "trainingPlansGenerated");
+
       res.status(201).json({
         planId,
         message: "Training plan generated successfully"

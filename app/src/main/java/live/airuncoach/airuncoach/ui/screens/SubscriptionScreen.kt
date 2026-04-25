@@ -16,7 +16,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -30,6 +29,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import live.airuncoach.airuncoach.R
+import live.airuncoach.airuncoach.network.model.UsageResponse
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
@@ -52,6 +52,7 @@ fun SubscriptionScreen(
     val selectedPlan by viewModel.selectedPlan.collectAsState()
     val deleteAccountState by viewModel.deleteAccountState.collectAsState()
     val downgradeState by viewModel.downgradeState.collectAsState()
+    val usage by viewModel.usage.collectAsState()
 
     // Dialog state machine:
     //   Step 0 — no dialog
@@ -112,6 +113,12 @@ fun SubscriptionScreen(
                 PlanSelector(plan = plan, isSelected = plan == selectedPlan, onClick = { viewModel.selectPlan(plan) })
                 Spacer(modifier = Modifier.height(Spacing.sm))
             }
+
+            // ── Monthly Usage Meters ─────────────────────────────────────────
+            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+            item { SectionTitle(title = "This Month's Usage") }
+            item { Spacer(modifier = Modifier.height(Spacing.sm)) }
+            item { MonthlyUsageSection(usage = usage) }
 
             item { Spacer(modifier = Modifier.height(Spacing.lg)) }
 
@@ -399,6 +406,135 @@ fun SubscriptionScreen(
                 }
             }
         )
+    }
+}
+
+// ── Monthly Usage Meters ─────────────────────────────────────────────────────
+
+@Composable
+fun MonthlyUsageSection(usage: UsageResponse?) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(BorderRadius.lg),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
+    ) {
+        Column(
+            modifier = Modifier.padding(Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.lg)
+        ) {
+            if (usage == null) {
+                // Loading skeleton
+                repeat(4) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(14.dp)
+                            .clip(RoundedCornerShape(BorderRadius.sm))
+                            .background(Colors.border.copy(alpha = 0.3f))
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.xs))
+                }
+            } else {
+                UsageMeter(
+                    label = "AI Coaching",
+                    unit = "km",
+                    used = usage.usage.aiCoachingKm,
+                    limit = usage.limits.aiCoachingKm
+                )
+                UsageMeter(
+                    label = "Training Plans",
+                    unit = "plans",
+                    used = usage.usage.trainingPlansGenerated.toFloat(),
+                    limit = usage.limits.trainingPlansGenerated?.toFloat()
+                )
+                UsageMeter(
+                    label = "Route Generations",
+                    unit = "routes",
+                    used = usage.usage.routesGenerated.toFloat(),
+                    limit = usage.limits.routesGenerated?.toFloat()
+                )
+                UsageMeter(
+                    label = "Post-Run AI Analyses",
+                    unit = "analyses",
+                    used = usage.usage.postRunAnalyses.toFloat(),
+                    limit = usage.limits.postRunAnalyses?.toFloat()
+                )
+
+                val (yearStr, monthStr) = usage.yearMonth.split("-")
+                val nextMonth = monthStr.toInt() % 12 + 1
+                val nextYear = if (monthStr.toInt() == 12) yearStr.toInt() + 1 else yearStr.toInt()
+                val nextMonthName = java.time.Month.of(nextMonth)
+                    .getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault())
+
+                Text(
+                    text = "Resets 1 $nextMonthName $nextYear",
+                    style = AppTextStyles.caption,
+                    color = Colors.textMuted,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun UsageMeter(
+    label: String,
+    unit: String,
+    used: Float,
+    limit: Float?             // null = Unlimited
+) {
+    val isUnlimited = limit == null
+    val progress = if (isUnlimited || limit == 0f) 0f else (used / limit).coerceIn(0f, 1f)
+    val isNearLimit = !isUnlimited && progress >= 0.8f
+    val isAtLimit = !isUnlimited && progress >= 1f
+
+    val barColor = when {
+        isAtLimit -> Colors.error
+        isNearLimit -> Color(0xFFFFA000) // amber
+        else -> Colors.primary
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
+                color = Colors.textPrimary
+            )
+            if (isUnlimited) {
+                Text(
+                    text = "Unlimited",
+                    style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.success
+                )
+            } else {
+                val usedLabel = if (used == used.toLong().toFloat()) used.toInt().toString() else "%.1f".format(used)
+                val limitLabel = limit?.toInt()?.toString() ?: "0"
+                Text(
+                    text = "$usedLabel / $limitLabel $unit",
+                    style = AppTextStyles.caption,
+                    color = if (isAtLimit) Colors.error else Colors.textSecondary
+                )
+            }
+        }
+
+        if (!isUnlimited) {
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(BorderRadius.full)),
+                color = barColor,
+                trackColor = Colors.border.copy(alpha = 0.3f)
+            )
+        }
     }
 }
 

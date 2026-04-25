@@ -1561,3 +1561,25 @@ export const passwordResetTokens = pgTable("password_reset_tokens", {
 });
 
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+
+// Monthly Usage Tracking — one row per (user, calendar month).
+// Each gated feature increments its counter here; the server checks these
+// against tier limits before allowing each operation.
+//
+// yearMonth format: "YYYY-MM" e.g. "2026-04"  — resets automatically because
+// each month gets a fresh row via INSERT ... ON CONFLICT DO UPDATE.
+export const monthlyUsage = pgTable("monthly_usage", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  yearMonth: text("year_month").notNull(), // e.g. "2026-04"
+  // Feature usage counters
+  aiCoachingKm: real("ai_coaching_km").notNull().default(0),
+  trainingPlansGenerated: integer("training_plans_generated").notNull().default(0),
+  routesGenerated: integer("routes_generated").notNull().default(0),
+  postRunAnalyses: integer("post_run_analyses").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type MonthlyUsage = typeof monthlyUsage.$inferSelect;
+export type InsertMonthlyUsage = typeof monthlyUsage.$inferInsert;

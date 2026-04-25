@@ -462,6 +462,11 @@ interface ApiService {
     @POST("/api/share/generate")
     suspend fun generateShareImage(@Body request: ShareImageRequest): okhttp3.ResponseBody
 
+    // ========== USAGE & TIER LIMITS ==========
+
+    @GET("/api/usage/current")
+    suspend fun getCurrentUsage(): UsageResponse
+
     // ========== SESSION COACHING (Phase 1 — legacy) ==========
     
     @GET("/api/workouts/{workoutId}/session-instructions")
