@@ -39,16 +39,32 @@ export async function sendSupportEmail(opts: {
   email: string;
   subject: string;
   message: string;
+  screenshots?: Array<{ filename: string; base64: string; mimeType: string }>;
 }): Promise<void> {
   const { client, fromEmail } = await getResendClient();
   const subjectLine = opts.subject?.trim() || "Support Request";
 
+  // Use the real notification inbox; fall back to noreply (visible in logs) if not set
+  const notifyEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || fromEmail;
+
+  const screenshotCount = opts.screenshots?.length ?? 0;
+  const attachmentNote = screenshotCount > 0
+    ? `<p style="margin: 16px 0 0; color: #94a3b8; font-size: 13px;">📎 ${screenshotCount} screenshot${screenshotCount > 1 ? "s" : ""} attached.</p>`
+    : "";
+
+  const attachments = (opts.screenshots ?? []).map((s, i) => ({
+    filename: s.filename || `screenshot-${i + 1}.png`,
+    content: s.base64,
+    type: s.mimeType || "image/png",
+  }));
+
   // Notify the support team
   await client.emails.send({
     from: `AI Run Coach <${fromEmail}>`,
-    to: "support@airuncoach.live",
+    to: notifyEmail,
     replyTo: opts.email,
     subject: `[Support] ${subjectLine}`,
+    attachments,
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; background: #0A0A1A; color: #ffffff; border-radius: 12px; overflow: hidden;">
         <div style="background: linear-gradient(135deg, #00D4FF 0%, #0099CC 100%); padding: 32px; text-align: center;">
@@ -62,11 +78,12 @@ export async function sendSupportEmail(opts: {
           <div style="background: #1a1a2e; border-radius: 8px; padding: 20px; border-left: 3px solid #00D4FF;">
             <p style="margin: 0; color: #e2e8f0; line-height: 1.7; white-space: pre-wrap;">${opts.message}</p>
           </div>
+          ${attachmentNote}
           <p style="margin: 24px 0 0; color: #64748b; font-size: 12px;">Reply directly to this email to respond to ${opts.name}.</p>
         </div>
       </div>
     `,
-    text: `Support request from ${opts.name} <${opts.email}>\nSubject: ${subjectLine}\n\n${opts.message}`,
+    text: `Support request from ${opts.name} <${opts.email}>\nSubject: ${subjectLine}\n\n${opts.message}${screenshotCount > 0 ? `\n\n[${screenshotCount} screenshot(s) attached]` : ""}`,
   });
 
   // Auto-reply to the user

@@ -272,7 +272,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // POST /api/support/contact — public, no auth required
   app.post("/api/support/contact", async (req: Request, res: Response) => {
     try {
-      const { name, email, subject, message } = req.body;
+      const { name, email, subject, message, screenshots } = req.body;
       if (!name?.trim() || !email?.trim() || !message?.trim()) {
         return res.status(400).json({ error: "Name, email, and message are required" });
       }
@@ -280,8 +280,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!emailRegex.test(email)) {
         return res.status(400).json({ error: "Invalid email address" });
       }
+      // Validate screenshots: max 3, each base64 string max ~5MB
+      const MAX_SCREENSHOTS = 3;
+      const MAX_B64_LEN = 7 * 1024 * 1024; // ~5MB raw → ~7MB base64
+      if (screenshots && (!Array.isArray(screenshots) || screenshots.length > MAX_SCREENSHOTS)) {
+        return res.status(400).json({ error: `Maximum ${MAX_SCREENSHOTS} screenshots allowed` });
+      }
+      if (screenshots) {
+        for (const s of screenshots) {
+          if (typeof s.base64 !== "string" || s.base64.length > MAX_B64_LEN) {
+            return res.status(400).json({ error: "One or more screenshots exceed the 5MB size limit" });
+          }
+        }
+      }
       const { sendSupportEmail } = await import("./email-service");
-      await sendSupportEmail({ name: name.trim(), email: email.trim(), subject: subject?.trim() || "", message: message.trim() });
+      await sendSupportEmail({
+        name: name.trim(),
+        email: email.trim(),
+        subject: subject?.trim() || "",
+        message: message.trim(),
+        screenshots: screenshots ?? [],
+      });
       res.json({ ok: true });
     } catch (error: any) {
       console.error("Support contact error:", error);

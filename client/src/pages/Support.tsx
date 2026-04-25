@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, ChevronDown, CheckCircle2, Loader2, Mail, MessageSquare, HelpCircle } from "lucide-react";
+import {
+  ArrowLeft, ChevronDown, CheckCircle2, Loader2,
+  Mail, MessageSquare, HelpCircle, ImagePlus, X, AlertCircle,
+} from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -36,6 +39,16 @@ const FAQS = [
   },
 ];
 
+const MAX_SCREENSHOTS = 3;
+const MAX_FILE_MB = 5;
+
+interface Screenshot {
+  filename: string;
+  base64: string;
+  mimeType: string;
+  preview: string;
+}
+
 interface SupportFormData {
   name: string;
   email: string;
@@ -46,17 +59,70 @@ interface SupportFormData {
 export default function Support() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [form, setForm] = useState<SupportFormData>({ name: "", email: "", subject: "", message: "" });
+  const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+
+    const remaining = MAX_SCREENSHOTS - screenshots.length;
+    if (remaining <= 0) {
+      toast({ title: `Maximum ${MAX_SCREENSHOTS} screenshots allowed`, variant: "destructive" });
+      return;
+    }
+
+    const toAdd = files.slice(0, remaining);
+    toAdd.forEach(file => {
+      if (file.size > MAX_FILE_MB * 1024 * 1024) {
+        toast({ title: `${file.name} is too large`, description: `Maximum file size is ${MAX_FILE_MB}MB`, variant: "destructive" });
+        return;
+      }
+      if (!file.type.startsWith("image/")) {
+        toast({ title: "Only image files are supported", variant: "destructive" });
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = ev => {
+        const dataUrl = ev.target?.result as string;
+        const base64 = dataUrl.split(",")[1];
+        setScreenshots(prev => [
+          ...prev,
+          { filename: file.name, base64, mimeType: file.type, preview: dataUrl },
+        ]);
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // Reset input so same file can be re-added after removal
+    e.target.value = "";
+  };
+
+  const removeScreenshot = (i: number) => {
+    setScreenshots(prev => prev.filter((_, idx) => idx !== i));
+  };
 
   const submitMutation = useMutation({
-    mutationFn: (data: SupportFormData) => apiRequest("POST", "/api/support/contact", data),
-    onSuccess: () => {
-      setSubmitted(true);
-    },
-    onError: () => {
-      toast({ title: "Failed to send message", description: "Please try again or email us directly at support@airuncoach.live", variant: "destructive" });
+    mutationFn: (payload: SupportFormData & { screenshots: Screenshot[] }) =>
+      apiRequest("POST", "/api/support/contact", {
+        ...payload,
+        screenshots: payload.screenshots.map(s => ({
+          filename: s.filename,
+          base64: s.base64,
+          mimeType: s.mimeType,
+        })),
+      }),
+    onSuccess: () => setSubmitted(true),
+    onError: (err: any) => {
+      toast({
+        title: "Failed to send message",
+        description: err?.message || "Please try again or email us directly at support@airuncoach.live",
+        variant: "destructive",
+      });
     },
   });
 
@@ -66,7 +132,7 @@ export default function Support() {
       toast({ title: "Please fill in all required fields", variant: "destructive" });
       return;
     }
-    submitMutation.mutate(form);
+    submitMutation.mutate({ ...form, screenshots });
   };
 
   return (
@@ -145,7 +211,6 @@ export default function Support() {
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
                   </motion.div>
                 </button>
-
                 <AnimatePresence initial={false}>
                   {openFaq === i && (
                     <motion.div
@@ -189,7 +254,11 @@ export default function Support() {
                 <Button
                   variant="outline"
                   className="mt-4 border-white/10 hover:bg-white/10"
-                  onClick={() => { setSubmitted(false); setForm({ name: "", email: "", subject: "", message: "" }); }}
+                  onClick={() => {
+                    setSubmitted(false);
+                    setForm({ name: "", email: "", subject: "", message: "" });
+                    setScreenshots([]);
+                  }}
                   data-testid="button-send-another"
                 >
                   Send another message
@@ -254,6 +323,88 @@ export default function Support() {
                     className="bg-background/60 border-white/10 focus:border-primary/50 resize-none"
                     data-testid="input-support-message"
                   />
+                </div>
+
+                {/* Screenshot upload */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+                      Screenshots <span className="normal-case font-normal">(optional, max {MAX_SCREENSHOTS})</span>
+                    </label>
+                    {screenshots.length < MAX_SCREENSHOTS && (
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 transition-colors font-medium"
+                        data-testid="button-add-screenshot"
+                      >
+                        <ImagePlus className="w-4 h-4" />
+                        Add image
+                      </button>
+                    )}
+                  </div>
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={handleFileChange}
+                    data-testid="input-screenshot-file"
+                  />
+
+                  {screenshots.length === 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full border border-dashed border-white/15 rounded-xl p-6 flex flex-col items-center gap-2 hover:border-primary/40 hover:bg-primary/5 transition-all text-muted-foreground"
+                      data-testid="button-upload-drop-zone"
+                    >
+                      <ImagePlus className="w-7 h-7 opacity-40" />
+                      <span className="text-sm">Click to attach screenshots</span>
+                      <span className="text-xs opacity-60">PNG, JPG, WEBP up to {MAX_FILE_MB}MB each</span>
+                    </button>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-3">
+                      {screenshots.map((s, i) => (
+                        <div key={i} className="relative group rounded-xl overflow-hidden border border-white/10 aspect-video bg-black/30" data-testid={`img-screenshot-${i}`}>
+                          <img src={s.preview} alt={s.filename} className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <button
+                              type="button"
+                              onClick={() => removeScreenshot(i)}
+                              className="bg-red-500/90 hover:bg-red-500 rounded-full p-1.5 transition-colors"
+                              data-testid={`button-remove-screenshot-${i}`}
+                            >
+                              <X className="w-3.5 h-3.5 text-white" />
+                            </button>
+                          </div>
+                          <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-2 py-1">
+                            <p className="text-xs text-white/70 truncate">{s.filename}</p>
+                          </div>
+                        </div>
+                      ))}
+                      {screenshots.length < MAX_SCREENSHOTS && (
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="border border-dashed border-white/15 rounded-xl aspect-video flex flex-col items-center justify-center gap-1 hover:border-primary/40 hover:bg-primary/5 transition-all text-muted-foreground"
+                          data-testid="button-add-more-screenshot"
+                        >
+                          <ImagePlus className="w-5 h-5 opacity-40" />
+                          <span className="text-xs">Add more</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {screenshots.length > 0 && (
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      {screenshots.length} of {MAX_SCREENSHOTS} screenshots attached — hover a thumbnail to remove it
+                    </p>
+                  )}
                 </div>
 
                 <Button

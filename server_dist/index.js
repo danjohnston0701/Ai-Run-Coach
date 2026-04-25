@@ -1647,6 +1647,271 @@ var init_storage = __esm({
         const [user] = await db.update(users).set(data).where(eq(users.id, id)).returning();
         return user || void 0;
       }
+      /**
+       * Permanently delete a user account and ALL associated data from every table.
+       *
+       * Executes deletions in FK-safe order using raw SQL so it stays resilient
+       * to schema migrations — missing tables/columns are skipped gracefully using
+       * the same tryCleanup pattern as deleteRun().
+       *
+       * IMPORTANT: Fetch and use the Garmin access token for deregistration BEFORE
+       * calling this function, as the token is deleted as part of this operation.
+       */
+      async deleteUser(userId) {
+        console.log(`[Storage] Deleting user ${userId} and all associated data`);
+        const tryCleanup = async (label, stmt) => {
+          try {
+            await db.execute(stmt);
+            console.log(`[Storage] Cleaned up: ${label}`);
+          } catch (e) {
+            if (e?.code === "42703" || e?.code === "42P01") {
+              console.warn(`[Storage] Skipping ${label} (table/column not in DB): ${e.message}`);
+            } else {
+              console.error(`[Storage] Error cleaning up ${label}:`, e.message);
+              throw e;
+            }
+          }
+        };
+        await tryCleanup(
+          "group_run_participants.run_id \u2192 user runs",
+          sql2`UPDATE group_run_participants SET run_id = NULL WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`
+        );
+        await tryCleanup(
+          "garmin_move_iq.run_id \u2192 user runs",
+          sql2`UPDATE garmin_move_iq SET run_id = NULL WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`
+        );
+        await tryCleanup(
+          "garmin_realtime_data.run_id \u2192 user runs",
+          sql2`UPDATE garmin_realtime_data SET run_id = NULL WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`
+        );
+        await tryCleanup(
+          "garmin_companion_sessions.run_id \u2192 user runs",
+          sql2`UPDATE garmin_companion_sessions SET run_id = NULL WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`
+        );
+        await tryCleanup(
+          "planned_workouts.completed_run_id \u2192 user runs",
+          sql2`UPDATE planned_workouts SET completed_run_id = NULL WHERE completed_run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`
+        );
+        await tryCleanup(
+          "user_achievements.run_id \u2192 user runs",
+          sql2`UPDATE user_achievements SET run_id = NULL WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`
+        );
+        await tryCleanup(
+          "comment_likes by user",
+          sql2`DELETE FROM comment_likes WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "activity_comments by user",
+          sql2`DELETE FROM activity_comments WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "reactions by user",
+          sql2`DELETE FROM reactions WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "comment_likes on user feed",
+          sql2`DELETE FROM comment_likes WHERE comment_id IN (
+            SELECT id FROM activity_comments WHERE activity_id IN (
+              SELECT id FROM feed_activities WHERE user_id = ${userId}
+            )
+          )`
+        );
+        await tryCleanup(
+          "activity_comments on user feed",
+          sql2`DELETE FROM activity_comments WHERE activity_id IN (
+            SELECT id FROM feed_activities WHERE user_id = ${userId}
+          )`
+        );
+        await tryCleanup(
+          "reactions on user feed",
+          sql2`DELETE FROM reactions WHERE activity_id IN (
+            SELECT id FROM feed_activities WHERE user_id = ${userId}
+          )`
+        );
+        await tryCleanup(
+          "feed_activities",
+          sql2`DELETE FROM feed_activities WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "segment_efforts",
+          sql2`DELETE FROM segment_efforts WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`
+        );
+        await tryCleanup(
+          "shared_runs",
+          sql2`DELETE FROM shared_runs WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`
+        );
+        await tryCleanup(
+          "route_ratings (run-linked)",
+          sql2`DELETE FROM route_ratings WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`
+        );
+        await tryCleanup(
+          "garmin_activities",
+          sql2`DELETE FROM garmin_activities WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "activity_merge_log",
+          sql2`DELETE FROM activity_merge_log WHERE ai_run_coach_run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`
+        );
+        await tryCleanup(
+          "run_analyses",
+          sql2`DELETE FROM run_analyses WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`
+        );
+        await tryCleanup(
+          "device_data",
+          sql2`DELETE FROM device_data WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`
+        );
+        await tryCleanup(
+          "routes (source_run_id)",
+          sql2`DELETE FROM routes WHERE source_run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`
+        );
+        await tryCleanup(
+          "runs",
+          sql2`DELETE FROM runs WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "plan_adaptations",
+          sql2`DELETE FROM plan_adaptations WHERE plan_id IN (SELECT id FROM training_plans WHERE user_id = ${userId})`
+        );
+        await tryCleanup(
+          "planned_workouts",
+          sql2`DELETE FROM planned_workouts WHERE plan_id IN (SELECT id FROM training_plans WHERE user_id = ${userId})`
+        );
+        await tryCleanup(
+          "weekly_plans",
+          sql2`DELETE FROM weekly_plans WHERE plan_id IN (SELECT id FROM training_plans WHERE user_id = ${userId})`
+        );
+        await tryCleanup(
+          "training_plans",
+          sql2`DELETE FROM training_plans WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "user_achievements",
+          sql2`DELETE FROM user_achievements WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "challenge_participants",
+          sql2`DELETE FROM challenge_participants WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "club_memberships",
+          sql2`DELETE FROM club_memberships WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "group_run_participants (by user)",
+          sql2`DELETE FROM group_run_participants WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "group_runs created by user",
+          sql2`DELETE FROM group_runs WHERE creator_id = ${userId}`
+        );
+        await tryCleanup(
+          "friends",
+          sql2`DELETE FROM friends WHERE user_id = ${userId} OR friend_id = ${userId}`
+        );
+        await tryCleanup(
+          "friend_requests",
+          sql2`DELETE FROM friend_requests WHERE requester_id = ${userId} OR addressee_id = ${userId}`
+        );
+        await tryCleanup(
+          "live_run_sessions",
+          sql2`DELETE FROM live_run_sessions WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "notifications",
+          sql2`DELETE FROM notifications WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "notification_preferences",
+          sql2`DELETE FROM notification_preferences WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "goals",
+          sql2`DELETE FROM goals WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "routes (user-owned)",
+          sql2`DELETE FROM routes WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "daily_fitness",
+          sql2`DELETE FROM daily_fitness WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "segment_stars",
+          sql2`DELETE FROM segment_stars WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "route_ratings (user-owned)",
+          sql2`DELETE FROM route_ratings WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "garmin_wellness_metrics",
+          sql2`DELETE FROM garmin_wellness_metrics WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "garmin_skin_temperature",
+          sql2`DELETE FROM garmin_skin_temperature WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "garmin_body_composition",
+          sql2`DELETE FROM garmin_body_composition WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "garmin_blood_pressure",
+          sql2`DELETE FROM garmin_blood_pressure WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "garmin_health_snapshots",
+          sql2`DELETE FROM garmin_health_snapshots WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "garmin_epochs_raw",
+          sql2`DELETE FROM garmin_epochs_raw WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "garmin_epochs_aggregate",
+          sql2`DELETE FROM garmin_epochs_aggregate WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "garmin_realtime_data",
+          sql2`DELETE FROM garmin_realtime_data WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "garmin_move_iq",
+          sql2`DELETE FROM garmin_move_iq WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "garmin_companion_sessions",
+          sql2`DELETE FROM garmin_companion_sessions WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "connected_devices",
+          sql2`DELETE FROM connected_devices WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "password_reset_tokens",
+          sql2`DELETE FROM password_reset_tokens WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "oauth_state_store",
+          sql2`DELETE FROM oauth_state_store WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "webhook_failure_queue",
+          sql2`DELETE FROM webhook_failure_queue WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "user_stats",
+          sql2`DELETE FROM user_stats WHERE user_id = ${userId}`
+        );
+        try {
+          await db.execute(sql2`DELETE FROM users WHERE id = ${userId}`);
+          console.log(`[Storage] Successfully deleted user ${userId} and all associated data`);
+        } catch (e) {
+          console.error(`[Storage] Error deleting user ${userId}:`, e);
+          throw new Error(`Failed to delete user: ${e}`);
+        }
+      }
       async searchUsers(query) {
         try {
           console.log(`[DB Search] Querying users table for: "${query}"`);
@@ -6340,11 +6605,20 @@ async function getResendClient() {
 async function sendSupportEmail(opts) {
   const { client, fromEmail } = await getResendClient();
   const subjectLine = opts.subject?.trim() || "Support Request";
+  const notifyEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || fromEmail;
+  const screenshotCount = opts.screenshots?.length ?? 0;
+  const attachmentNote = screenshotCount > 0 ? `<p style="margin: 16px 0 0; color: #94a3b8; font-size: 13px;">\u{1F4CE} ${screenshotCount} screenshot${screenshotCount > 1 ? "s" : ""} attached.</p>` : "";
+  const attachments = (opts.screenshots ?? []).map((s, i) => ({
+    filename: s.filename || `screenshot-${i + 1}.png`,
+    content: s.base64,
+    type: s.mimeType || "image/png"
+  }));
   await client.emails.send({
     from: `AI Run Coach <${fromEmail}>`,
-    to: "support@airuncoach.live",
+    to: notifyEmail,
     replyTo: opts.email,
     subject: `[Support] ${subjectLine}`,
+    attachments,
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; background: #0A0A1A; color: #ffffff; border-radius: 12px; overflow: hidden;">
         <div style="background: linear-gradient(135deg, #00D4FF 0%, #0099CC 100%); padding: 32px; text-align: center;">
@@ -6358,6 +6632,7 @@ async function sendSupportEmail(opts) {
           <div style="background: #1a1a2e; border-radius: 8px; padding: 20px; border-left: 3px solid #00D4FF;">
             <p style="margin: 0; color: #e2e8f0; line-height: 1.7; white-space: pre-wrap;">${opts.message}</p>
           </div>
+          ${attachmentNote}
           <p style="margin: 24px 0 0; color: #64748b; font-size: 12px;">Reply directly to this email to respond to ${opts.name}.</p>
         </div>
       </div>
@@ -6365,7 +6640,9 @@ async function sendSupportEmail(opts) {
     text: `Support request from ${opts.name} <${opts.email}>
 Subject: ${subjectLine}
 
-${opts.message}`
+${opts.message}${screenshotCount > 0 ? `
+
+[${screenshotCount} screenshot(s) attached]` : ""}`
   });
   await client.emails.send({
     from: `AI Run Coach <${fromEmail}>`,
@@ -15251,7 +15528,7 @@ async function registerRoutes(app2) {
   });
   app2.post("/api/support/contact", async (req, res) => {
     try {
-      const { name, email, subject, message } = req.body;
+      const { name, email, subject, message, screenshots } = req.body;
       if (!name?.trim() || !email?.trim() || !message?.trim()) {
         return res.status(400).json({ error: "Name, email, and message are required" });
       }
@@ -15259,8 +15536,26 @@ async function registerRoutes(app2) {
       if (!emailRegex.test(email)) {
         return res.status(400).json({ error: "Invalid email address" });
       }
+      const MAX_SCREENSHOTS = 3;
+      const MAX_B64_LEN = 7 * 1024 * 1024;
+      if (screenshots && (!Array.isArray(screenshots) || screenshots.length > MAX_SCREENSHOTS)) {
+        return res.status(400).json({ error: `Maximum ${MAX_SCREENSHOTS} screenshots allowed` });
+      }
+      if (screenshots) {
+        for (const s of screenshots) {
+          if (typeof s.base64 !== "string" || s.base64.length > MAX_B64_LEN) {
+            return res.status(400).json({ error: "One or more screenshots exceed the 5MB size limit" });
+          }
+        }
+      }
       const { sendSupportEmail: sendSupportEmail2 } = await Promise.resolve().then(() => (init_email_service(), email_service_exports));
-      await sendSupportEmail2({ name: name.trim(), email: email.trim(), subject: subject?.trim() || "", message: message.trim() });
+      await sendSupportEmail2({
+        name: name.trim(),
+        email: email.trim(),
+        subject: subject?.trim() || "",
+        message: message.trim(),
+        screenshots: screenshots ?? []
+      });
       res.json({ ok: true });
     } catch (error) {
       console.error("Support contact error:", error);
@@ -15495,6 +15790,58 @@ async function registerRoutes(app2) {
     } catch (error) {
       console.error("Update user error:", error);
       res.status(500).json({ error: "Failed to update user" });
+    }
+  });
+  app2.delete("/api/users/:id", authMiddleware, async (req, res) => {
+    const userId = req.params.id;
+    if (req.user?.userId !== userId) {
+      return res.status(403).json({ error: "Not authorized to delete this account" });
+    }
+    try {
+      let garminAccessToken = null;
+      try {
+        const [garminDevice] = await db.select({ accessToken: connectedDevices.accessToken }).from(connectedDevices).where(
+          and16(
+            eq20(connectedDevices.userId, userId),
+            eq20(connectedDevices.deviceType, "garmin"),
+            eq20(connectedDevices.isActive, true)
+          )
+        ).limit(1);
+        garminAccessToken = garminDevice?.accessToken ?? null;
+      } catch (e) {
+        console.warn("[DeleteUser] Could not fetch Garmin token (non-fatal):", e);
+      }
+      if (garminAccessToken) {
+        try {
+          const garminDeregisterRes = await fetch(
+            "https://apis.garmin.com/wellness-api/rest/user/registration",
+            {
+              method: "DELETE",
+              headers: {
+                Authorization: `Bearer ${garminAccessToken}`
+              }
+            }
+          );
+          if (garminDeregisterRes.ok || garminDeregisterRes.status === 204) {
+            console.log(`[DeleteUser] Garmin deregistration successful for user ${userId}`);
+          } else {
+            const body = await garminDeregisterRes.text().catch(() => "");
+            console.warn(
+              `[DeleteUser] Garmin deregistration returned ${garminDeregisterRes.status} (non-fatal): ${body.slice(0, 200)}`
+            );
+          }
+        } catch (e) {
+          console.warn("[DeleteUser] Garmin deregistration request failed (non-fatal):", e);
+        }
+      } else {
+        console.log(`[DeleteUser] No active Garmin connection for user ${userId} \u2014 skipping deregistration`);
+      }
+      await storage.deleteUser(userId);
+      console.log(`[DeleteUser] Account deletion complete for user ${userId}`);
+      return res.status(204).send();
+    } catch (error) {
+      console.error(`[DeleteUser] Failed to delete user ${userId}:`, error);
+      return res.status(500).json({ error: "Failed to delete account. Please try again." });
     }
   });
   app2.post("/api/users/:id/profile-picture", authMiddleware, async (req, res) => {
