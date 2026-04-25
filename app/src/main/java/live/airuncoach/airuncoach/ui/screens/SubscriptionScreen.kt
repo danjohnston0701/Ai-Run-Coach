@@ -10,10 +10,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -33,6 +35,7 @@ import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.DeleteAccountState
+import live.airuncoach.airuncoach.viewmodel.DowngradeState
 import live.airuncoach.airuncoach.viewmodel.Plan
 import live.airuncoach.airuncoach.viewmodel.SubscriptionViewModel
 import live.airuncoach.airuncoach.viewmodel.SubscriptionViewModelFactory
@@ -48,8 +51,13 @@ fun SubscriptionScreen(
     val plans by viewModel.plans.collectAsState()
     val selectedPlan by viewModel.selectedPlan.collectAsState()
     val deleteAccountState by viewModel.deleteAccountState.collectAsState()
+    val downgradeState by viewModel.downgradeState.collectAsState()
 
-    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    // Dialog state machine:
+    //   Step 0 — no dialog
+    //   Step 1 — paid plan warning (downgrade vs delete choice)
+    //   Step 2 — final irreversible delete confirmation
+    var dialogStep by remember { mutableIntStateOf(0) }
 
     Scaffold(
         topBar = {
@@ -175,17 +183,45 @@ fun SubscriptionScreen(
                         }
                     }
 
+                    // Show error if downgrade failed
+                    if (downgradeState is DowngradeState.Error) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = Spacing.md),
+                            colors = CardDefaults.cardColors(
+                                containerColor = Colors.error.copy(alpha = 0.15f)
+                            )
+                        ) {
+                            Text(
+                                text = (downgradeState as DowngradeState.Error).message,
+                                style = AppTextStyles.small,
+                                color = Colors.error,
+                                modifier = Modifier.padding(Spacing.md),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+
+                    val isWorking = deleteAccountState is DeleteAccountState.Loading ||
+                            downgradeState is DowngradeState.Loading
+
                     OutlinedButton(
-                        onClick = { showDeleteConfirmDialog = true },
+                        onClick = {
+                            viewModel.resetDeleteState()
+                            viewModel.resetDowngradeState()
+                            // If user is on a paid plan, show the subscription warning first
+                            dialogStep = if (viewModel.isOnPaidPlan) 1 else 2
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(50.dp),
                         shape = RoundedCornerShape(BorderRadius.lg),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.error),
                         border = androidx.compose.foundation.BorderStroke(1.dp, Colors.error.copy(alpha = 0.6f)),
-                        enabled = deleteAccountState !is DeleteAccountState.Loading
+                        enabled = !isWorking
                     ) {
-                        if (deleteAccountState is DeleteAccountState.Loading) {
+                        if (isWorking) {
                             CircularProgressIndicator(
                                 color = Colors.error,
                                 strokeWidth = 2.dp,
@@ -205,42 +241,160 @@ fun SubscriptionScreen(
         }
     }
 
-    // Delete account confirmation dialog
-    if (showDeleteConfirmDialog) {
+    // ── Step 1: Paid subscription warning ────────────────────────────────────
+    // Shown when user has an active paid plan. Offers a "keep account / downgrade"
+    // path before they can proceed to delete.
+    if (dialogStep == 1) {
         AlertDialog(
-            onDismissRequest = { showDeleteConfirmDialog = false },
+            onDismissRequest = { dialogStep = 0 },
             containerColor = Colors.backgroundSecondary,
+            icon = {
+                Icon(
+                    Icons.Filled.Warning,
+                    contentDescription = null,
+                    tint = Color(0xFFFFD700),
+                    modifier = Modifier.size(36.dp)
+                )
+            },
             title = {
                 Text(
-                    "Delete Account?",
+                    "You Have an Active Subscription",
                     style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
-                    color = Colors.textPrimary
+                    color = Colors.textPrimary,
+                    textAlign = TextAlign.Center
                 )
             },
             text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    Text(
+                        "Deleting your account will immediately cancel your subscription with no refund for the remaining billing period.",
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.xs))
+                    Text(
+                        "You can keep your account and downgrade to the free tier instead — all your run history and data will be preserved.",
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            },
+            confirmButton = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+                ) {
+                    // Primary action: keep account, downgrade to free
+                    Button(
+                        onClick = {
+                            dialogStep = 0
+                            viewModel.downgradeToFree(onDowngraded = onNavigateBack)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Colors.primary,
+                            contentColor = Colors.buttonText
+                        ),
+                        shape = RoundedCornerShape(BorderRadius.md)
+                    ) {
+                        Text("Keep Account — Switch to Free", fontWeight = FontWeight.Bold)
+                    }
+
+                    // Secondary action: proceed to the irreversible confirmation
+                    OutlinedButton(
+                        onClick = { dialogStep = 2 },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.error),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Colors.error.copy(alpha = 0.6f)),
+                        shape = RoundedCornerShape(BorderRadius.md)
+                    ) {
+                        Text("Delete Account Anyway", fontWeight = FontWeight.Bold)
+                    }
+
+                    TextButton(
+                        onClick = { dialogStep = 0 },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Cancel", color = Colors.textSecondary)
+                    }
+                }
+            },
+            dismissButton = {}
+        )
+    }
+
+    // ── Step 2: Final irreversible delete confirmation ────────────────────────
+    if (dialogStep == 2) {
+        AlertDialog(
+            onDismissRequest = { dialogStep = 0 },
+            containerColor = Colors.backgroundSecondary,
+            title = {
                 Text(
-                    "This will permanently delete your account and all associated data. This action cannot be reversed.",
-                    style = AppTextStyles.body,
-                    color = Colors.textSecondary
+                    "Permanently Delete Account?",
+                    style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.error,
+                    textAlign = TextAlign.Center
                 )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    Text(
+                        "This will permanently and irreversibly delete your account and all associated data, including:",
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary
+                    )
+                    val items = listOf(
+                        "All run history and GPS data",
+                        "Training plans and goals",
+                        "Performance analytics and AI insights",
+                        "Friends, clubs, and social activity",
+                        "Any active subscription (no refund)"
+                    )
+                    items.forEach { item ->
+                        Row(
+                            verticalAlignment = Alignment.Top,
+                            modifier = Modifier.padding(start = Spacing.sm)
+                        ) {
+                            Text(
+                                "•  ",
+                                style = AppTextStyles.body,
+                                color = Colors.textSecondary
+                            )
+                            Text(
+                                item,
+                                style = AppTextStyles.body,
+                                color = Colors.textSecondary
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(Spacing.xs))
+                    Text(
+                        "This action cannot be undone. There is no recovery.",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.error
+                    )
+                }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        showDeleteConfirmDialog = false
+                        dialogStep = 0
                         viewModel.deleteAccount(onAccountDeleted = onNavigateToLogin)
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Colors.error,
                         contentColor = Color.White
                     ),
+                    modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(BorderRadius.md)
                 ) {
-                    Text("Yes, Delete My Account", fontWeight = FontWeight.Bold)
+                    Text("Yes, Delete Everything", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirmDialog = false }) {
+                TextButton(onClick = { dialogStep = 0 }) {
                     Text("Cancel", color = Colors.textSecondary)
                 }
             }
