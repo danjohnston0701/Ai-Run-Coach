@@ -282,7 +282,13 @@ class RunView extends Ui.View {
             if (wt   != null) { _prepWorkoutType = wt; }
             if (tp   != null) { _prepTargetPace  = tp; _coachTargetPace = tp; _coachTargetPaceSec = _parsePace(tp); _isCoached = true; }
             if (wd   != null) { _prepWorkoutDesc = wd; }
-            if (!_isRunning)  { _overlayState = OVERLAY_COACHED; }
+            // Only jump straight to COACHED if GPS is already locked.
+            // If GPS is still acquiring, stay on OVERLAY_GPS_WAIT so the user
+            // cannot press START until we have a usable fix.  onPosition() will
+            // transition to OVERLAY_COACHED automatically once the fix arrives.
+            if (!_isRunning) {
+                _overlayState = _gpsReady ? OVERLAY_COACHED : OVERLAY_GPS_WAIT;
+            }
             Ui.requestUpdate();
 
         } else if (t.equals("disconnect")) {
@@ -455,6 +461,11 @@ class RunView extends Ui.View {
         // ── Zone arc ──────────────────────────────────────────────────────────
         _drawZoneArc(dc, cx, cy, w, h);
 
+        // ── START button indicator (pre-run only) ─────────────────────────────
+        if (!_isRunning && (_overlayState == OVERLAY_READY || _overlayState == OVERLAY_COACHED)) {
+            _drawStartIndicator(dc, cx, cy, w, h);
+        }
+
         // ── Top: time / elapsed ───────────────────────────────────────────────
         _drawTimeRow(dc, cx, h);
 
@@ -596,6 +607,36 @@ class RunView extends Ui.View {
             "Open AI Run Coach", Gfx.TEXT_JUSTIFY_CENTER);
         dc.drawText(cx, (h * 0.74).toNumber(), Gfx.FONT_TINY,
             "on your phone", Gfx.TEXT_JUSTIFY_CENTER);
+    }
+
+    // ── START button indicator ───────────────────────────────────────────────
+    //
+    // Drawn pre-run (OVERLAY_READY / OVERLAY_COACHED, GPS locked) as a pulsing
+    // green arc along the right rim of the watch face — pointing directly at the
+    // physical START/SELECT button at 3 o'clock (0°).  Mirrors the native Garmin
+    // green-arc affordance so the gesture is immediately familiar to Garmin users.
+    //
+    // Geometry:
+    //   Sits in the 5 px gap between the zone arc outer edge (w/2-6) and the
+    //   screen rim.  Spans 325° → 35° CCW (70° centred on 0°).
+    //   Thickness pulses 2→5 px with the shared _ringPhase breath cycle.
+    //
+    private function _drawStartIndicator(dc, cx, cy, w, h) {
+        var breath = ((Math.sin(_ringPhase) + 1.0) * 0.5).toFloat();
+        var rimR   = (w / 2 - 1).toNumber();
+
+        // Backdrop shadow — full-width dark green so the glow has depth
+        dc.setColor(0x003D1C, Gfx.COLOR_TRANSPARENT);
+        for (var r = rimR - 5; r <= rimR; r++) {
+            dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, 325, 35);
+        }
+
+        // Bright layer — thickness pulses 2→5 px in sync with breathing ring
+        var thick = (2 + (breath * 3.0)).toNumber();
+        dc.setColor(0x00E676, Gfx.COLOR_TRANSPARENT);
+        for (var r = rimR - thick; r <= rimR; r++) {
+            dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, 325, 35);
+        }
     }
 
     // ── Zone Arc ──────────────────────────────────────────────────────────────

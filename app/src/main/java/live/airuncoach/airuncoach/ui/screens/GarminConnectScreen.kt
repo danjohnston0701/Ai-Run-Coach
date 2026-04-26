@@ -1,6 +1,5 @@
 package live.airuncoach.airuncoach.ui.screens
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -42,7 +41,7 @@ fun GarminConnectScreen(
     }
 
     var selectedHistoryOption by remember { mutableStateOf("30") }
-    
+
     val historyOptions = listOf(
         "30" to "Last 30 days",
         "14" to "Last 14 days",
@@ -53,12 +52,12 @@ fun GarminConnectScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { 
+                title = {
                     Text(
-                        "Connect to Garmin",
+                        "Garmin Connect",
                         style = AppTextStyles.h2,
                         color = Colors.textPrimary
-                    ) 
+                    )
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
@@ -83,9 +82,9 @@ fun GarminConnectScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            item { Spacer(modifier = Modifier.height(8.dp)) }
-            
-            // Garmin Logo/Header
+            item { Spacer(modifier = Modifier.height(4.dp)) }
+
+            // Garmin Connect logo + header
             item {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -98,32 +97,69 @@ fun GarminConnectScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            painter = painterResource(id = R.drawable.ic_garmin_logo),
+                            painter = painterResource(id = R.drawable.ic_garmin_connect_logo),
                             contentDescription = "Garmin Connect",
-                            tint = Color.Unspecified, // Don't tint the logo
-                            modifier = Modifier.size(48.dp)
+                            tint = Color.Unspecified,
+                            modifier = Modifier.size(52.dp)
                         )
                     }
-                    /*
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        "Connect to Garmin",
-                        style = AppTextStyles.h1,
-                        color = Colors.textPrimary
-                    )
-                     */
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "Sync your runs, heart rate data, and training metrics from Garmin Connect",
+                        "Connect your Garmin account to import completed run activities and historical training data.",
                         style = AppTextStyles.body,
                         color = Colors.textSecondary,
-                        modifier = Modifier.padding(horizontal = 24.dp)
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
                 }
             }
-            
-            // What you'll get section
+
+            // ── AI data policy notice ─────────────────────────────────────────
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color(0xFFFFA726).copy(alpha = 0.08f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Info,
+                                contentDescription = null,
+                                tint = Color(0xFFFFA726),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                "Data Usage Policy",
+                                style = AppTextStyles.h3,
+                                color = Colors.textPrimary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            "Garmin Connect data (activities, health metrics, sleep, body battery, HRV) is displayed in the app for your reference only. It is not included in any AI coaching analysis, run briefings, or OpenAI processing.",
+                            style = AppTextStyles.body,
+                            color = Colors.textSecondary,
+                            lineHeight = 20.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "For AI-powered live coaching, use the Garmin Watch App instead.",
+                            style = AppTextStyles.caption.copy(fontWeight = FontWeight.Medium),
+                            color = Color(0xFFFFA726)
+                        )
+                    }
+                }
+            }
+
+            // ── What you'll get ───────────────────────────────────────────────
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -138,36 +174,36 @@ fun GarminConnectScreen(
                             .padding(20.dp)
                     ) {
                         Text(
-                            "What you'll get:",
+                            "What Garmin Connect provides:",
                             style = AppTextStyles.h3,
                             color = Colors.textPrimary
                         )
                         Spacer(modifier = Modifier.height(16.dp))
-                        
+
                         BenefitRow(
                             icon = Icons.Default.Refresh,
-                            text = "Automatic activity sync after every run"
+                            text = "Import your past runs and training history"
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        BenefitRow(
+                            icon = Icons.Default.DateRange,
+                            text = "View completed activity data in your run history"
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         BenefitRow(
                             icon = Icons.Default.Favorite,
-                            text = "Heart rate and training load data"
+                            text = "See heart rate and performance data for past runs"
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         BenefitRow(
-                            icon = Icons.Default.DateRange,
-                            text = "Performance metrics and analytics"
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        BenefitRow(
-                            icon = Icons.Default.DateRange,
-                            text = "Import historical run data"
+                            icon = Icons.Default.Place,
+                            text = "Access route maps and split data from Garmin activities"
                         )
                     }
                 }
             }
-            
-            // Historical Run Import Options
+
+            // ── Historical Run Import ─────────────────────────────────────────
             item {
                 Column {
                     Text(
@@ -175,7 +211,7 @@ fun GarminConnectScreen(
                         style = AppTextStyles.h3,
                         color = Colors.textPrimary
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         "Choose how far back to retrieve your run history from Garmin Connect",
                         style = AppTextStyles.caption,
@@ -183,8 +219,7 @@ fun GarminConnectScreen(
                     )
                 }
             }
-            
-            // History options
+
             items(historyOptions.size) { index ->
                 val (value, label) = historyOptions[index]
                 HistoryOptionCard(
@@ -193,80 +228,11 @@ fun GarminConnectScreen(
                     onClick = { selectedHistoryOption = value }
                 )
             }
-            
-            // Garmin Connect IQ App Info
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFF2196F3).copy(alpha = 0.1f)
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(20.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.Info,
-                                contentDescription = null,
-                                tint = Color(0xFF2196F3),
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                "Garmin Connect IQ App",
-                                style = AppTextStyles.h3,
-                                color = Colors.textPrimary
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            "For real-time coaching during runs, download the Ai Run Coach companion app from the Garmin Connect IQ Store.",
-                            style = AppTextStyles.body,
-                            color = Colors.textSecondary
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        OutlinedButton(
-                            onClick = { /* TODO: Open Connect IQ Store link */ },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = Color(0xFF2196F3)
-                            ),
-                            border = BorderStroke(
-                                1.dp,
-                                Color(0xFF2196F3)
-                            ),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.ExitToApp,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                "Visit Connect IQ Store",
-                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "(Coming soon)",
-                            style = AppTextStyles.caption,
-                            color = Colors.textMuted,
-                            modifier = Modifier.align(Alignment.CenterHorizontally)
-                        )
-                    }
-                }
-            }
-            
-            // Connect Button
+
+            // ── Connect Button ────────────────────────────────────────────────
             item {
                 Button(
-                    onClick = { 
+                    onClick = {
                         viewModel.connectGarmin(historyDays = selectedHistoryOption.toInt())
                     },
                     modifier = Modifier
@@ -280,7 +246,7 @@ fun GarminConnectScreen(
                     Icon(
                         Icons.Default.Check,
                         contentDescription = null,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
@@ -290,17 +256,18 @@ fun GarminConnectScreen(
                     )
                 }
             }
-            
+
             // Privacy notice
             item {
                 Text(
-                    "By connecting, you authorize Ai Run Coach to access your Garmin Connect data. You can disconnect at any time from settings.",
+                    "By connecting, you authorise AI Run Coach to access your Garmin Connect activity data for display purposes only. Your Garmin data is never shared with AI models. You can disconnect at any time.",
                     style = AppTextStyles.caption,
                     color = Colors.textMuted,
-                    modifier = Modifier.padding(horizontal = 16.dp)
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
             }
-            
+
             item { Spacer(modifier = Modifier.height(16.dp)) }
         }
     }
@@ -308,9 +275,7 @@ fun GarminConnectScreen(
 
 @Composable
 fun BenefitRow(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             modifier = Modifier
                 .size(32.dp)
@@ -356,7 +321,7 @@ fun HistoryOptionCard(
             ),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) Colors.backgroundSecondary else Colors.backgroundSecondary
+            containerColor = Colors.backgroundSecondary
         )
     ) {
         Row(
@@ -376,7 +341,9 @@ fun HistoryOptionCard(
             Spacer(modifier = Modifier.width(12.dp))
             Text(
                 label,
-                style = AppTextStyles.body.copy(fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal),
+                style = AppTextStyles.body.copy(
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                ),
                 color = if (isSelected) Colors.textPrimary else Colors.textSecondary
             )
             Spacer(modifier = Modifier.weight(1f))

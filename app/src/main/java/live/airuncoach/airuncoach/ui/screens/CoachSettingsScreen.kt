@@ -198,15 +198,6 @@ fun CoachSettingsScreen(
                                         modifier = Modifier.padding(start = Spacing.lg, end = Spacing.md)
                                     )
                                 }
-                                accentName.equals("Indian", ignoreCase = true) -> {
-                                    Spacer(modifier = Modifier.height(Spacing.sm))
-                                    Text(
-                                        text = "ℹ️ Indian only has one voice (gender neutral)",
-                                        style = AppTextStyles.caption,
-                                        color = Colors.textSecondary,
-                                        modifier = Modifier.padding(start = Spacing.lg, end = Spacing.md)
-                                    )
-                                }
                             }
                         }
                     }

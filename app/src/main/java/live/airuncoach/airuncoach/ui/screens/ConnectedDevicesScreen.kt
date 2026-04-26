@@ -19,24 +19,24 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.R
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.ui.theme.*
 import live.airuncoach.airuncoach.viewmodel.ConnectedDevicesViewModel
 
+// Generic device info for the "Coming Soon" section
 data class DeviceInfo(
     val name: String,
     val description: String,
     val icon: ImageVector? = null,
-    val iconDrawable: Int? = null, // For custom logos like Garmin
+    val iconDrawable: Int? = null,
     val supportsRealtimeHR: Boolean,
     val supportsPostRunSync: Boolean,
     val isAvailableOnAndroid: Boolean,
     val requiresAppInstall: Boolean = false,
     val isConnected: Boolean = false,
     val onConnect: () -> Unit,
-    val onDisconnect: () -> Unit = {} // For disconnecting devices
+    val onDisconnect: () -> Unit = {}
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,28 +44,13 @@ data class DeviceInfo(
 fun ConnectedDevicesScreen(
     onNavigateBack: () -> Unit,
     onNavigateToGarminConnect: () -> Unit = {},
+    onNavigateToGarminWatchApp: () -> Unit = {},
     onNavigateToGarminPermissions: () -> Unit = {},
     viewModel: ConnectedDevicesViewModel = hiltViewModel()
 ) {
     val garminConnectionStatus by viewModel.garminConnectionStatus.collectAsState()
+    val isGarminConnectConnected = garminConnectionStatus == "connected"
 
-    // Garmin - Available now
-    val garminDevice = remember(garminConnectionStatus) {
-        DeviceInfo(
-            name = "Garmin",
-            description = "Connect via Garmin Connect for activity sync and health data",
-            iconDrawable = R.drawable.ic_garmin_logo, // Garmin Connect logo
-            supportsRealtimeHR = true, // Real-time data via Garmin Connect IQ app
-            supportsPostRunSync = true,
-            isAvailableOnAndroid = true,
-            requiresAppInstall = true, // Garmin Companion App recommended
-            isConnected = garminConnectionStatus == "connected",
-            onConnect = onNavigateToGarminConnect,
-            onDisconnect = { viewModel.disconnectGarmin() }
-        )
-    }
-    
-    // Coming Soon devices
     val comingSoonDevices = remember {
         listOf(
             DeviceInfo(
@@ -108,18 +93,16 @@ fun ConnectedDevicesScreen(
             )
         )
     }
-    
-    val devices = listOf(garminDevice) + comingSoonDevices
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { 
+                title = {
                     Text(
                         "Connected Devices",
                         style = AppTextStyles.h2,
                         color = Colors.textPrimary
-                    ) 
+                    )
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
@@ -136,7 +119,7 @@ fun ConnectedDevicesScreen(
             )
         },
         containerColor = Colors.backgroundRoot,
-        contentWindowInsets = WindowInsets(0) // outer Scaffold already applies nav bar insets
+        contentWindowInsets = WindowInsets(0)
     ) { paddingValues ->
         LazyColumn(
             modifier = Modifier
@@ -145,172 +128,59 @@ fun ConnectedDevicesScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header
-            item {
-                Column {
-                    /*
-                    Text(
-                        "Connected Devices",
-                        style = AppTextStyles.h1,
-                        color = Colors.textPrimary
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    */
-                    Text(
-                        "Connect your fitness watch to track heart rate during runs and sync health metrics",
-                        style = AppTextStyles.body,
-                        color = Colors.textSecondary
-                    )
-                }
-            }
-            
-            
-            // Garmin Section (Available or Connected)
+            // ── Page subtitle ─────────────────────────────────────────────────
             item {
                 Text(
-                    if (garminDevice.isConnected) "Connected" else "Available Now",
-                    style = AppTextStyles.h3,
-                    color = Colors.textPrimary,
-                    modifier = Modifier.padding(top = 8.dp)
+                    "Connect your Garmin watch for live AI coaching during runs, or link your Garmin account to sync activity history.",
+                    style = AppTextStyles.body,
+                    color = Colors.textSecondary,
+                    modifier = Modifier.padding(top = 4.dp)
                 )
             }
-            
+
+            // ── Section: Garmin Watch App ─────────────────────────────────────
             item {
-                DeviceCard(
-                    device = garminDevice,
-                    isConnected = garminDevice.isConnected
+                SectionHeader(
+                    title = "Garmin Watch App",
+                    subtitle = "Most popular integration",
+                    accentColor = Colors.primary
                 )
             }
 
-
-            // Garmin settings — shown when connected
-            if (garminDevice.isConnected) {
-                item {
-                    val context = androidx.compose.ui.platform.LocalContext.current
-                    val userPreferences = remember { live.airuncoach.airuncoach.data.UserPreferences(context) }
-                    val autoSyncToGarmin by userPreferences.autoSyncToGarmin.collectAsState(initial = true)
-                    val coroutineScope = rememberCoroutineScope()
-
-                    Column {
-                        /*
-                        // Auto-sync toggle
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
-                            shape = RoundedCornerShape(BorderRadius.lg)
-                        )  {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ic_garmin_logo),
-                                    contentDescription = null,
-                                    tint = Color.Unspecified,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        "Auto-sync to Garmin Connect",
-                                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
-                                        color = Colors.textPrimary
-                                    )
-                                    Text(
-                                        "Automatically upload runs to your Garmin account",
-                                        style = AppTextStyles.caption,
-                                        color = Colors.textSecondary
-                                    )
-                                }
-                                Switch(
-                                    checked = autoSyncToGarmin,
-                                    onCheckedChange = { enabled ->
-                                        coroutineScope.launch {
-                                            userPreferences.setAutoSyncToGarmin(enabled)
-                                        }
-                                    },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Colors.textPrimary,
-                                        checkedTrackColor = Colors.accent,
-                                        uncheckedThumbColor = Colors.textMuted,
-                                        uncheckedTrackColor = Colors.backgroundSecondary
-                                    )
-                                )
-                            }
-                        }
-                        */
-
-                        // Manage Permissions button
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Button(
-                            onClick = { onNavigateToGarminPermissions() },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF1A1A1A),
-                                contentColor = Color(0xFF00D4FF)
-                            ),
-                            shape = RoundedCornerShape(BorderRadius.md)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = "Manage",
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                "Manage Permissions",
-                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium)
-                            )
-                        }
-
-                        // "Health Data powered by Garmin" badge
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            androidx.compose.foundation.Image(
-                                painter = painterResource(id = R.drawable.ic_garmin_connect_logo),
-                                contentDescription = "Garmin Connect",
-                                modifier = Modifier.size(18.dp),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Health Data powered by Garmin",
-                                style = AppTextStyles.caption.copy(
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF8E9BAE),
-                                    letterSpacing = 0.3.sp
-                                )
-                            )
-                        }
-                    }
-                }
+            item {
+                GarminWatchAppCard(onSetUp = onNavigateToGarminWatchApp)
             }
 
-            // Coming Soon Section
+            // ── Section: Garmin Connect ───────────────────────────────────────
+            item {
+                SectionHeader(
+                    title = "Garmin Connect",
+                    subtitle = "Cloud account sync",
+                    accentColor = Color(0xFF8E9BAE)
+                )
+            }
+
+            item {
+                GarminConnectCard(
+                    isConnected = isGarminConnectConnected,
+                    onConnect = onNavigateToGarminConnect,
+                    onDisconnect = { viewModel.disconnectGarmin() },
+                    onManagePermissions = onNavigateToGarminPermissions
+                )
+            }
+
+            // ── Section: Coming Soon ──────────────────────────────────────────
             item {
                 Column {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "Coming Soon",
-                        style = AppTextStyles.h3,
-                        color = Colors.textPrimary
-                    )
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "Additional device integrations in development",
-                        style = AppTextStyles.caption,
-                        color = Colors.textSecondary
+                    SectionHeader(
+                        title = "Coming Soon",
+                        subtitle = "Additional device integrations in development",
+                        accentColor = Color(0xFF8E9BAE)
                     )
                 }
             }
-            
+
             items(comingSoonDevices) { device ->
                 DeviceCard(
                     device = device,
@@ -318,14 +188,45 @@ fun ConnectedDevicesScreen(
                     isComingSoon = true
                 )
             }
-            
+
             item { Spacer(modifier = Modifier.height(16.dp)) }
         }
     }
 }
 
+// ── Section header ────────────────────────────────────────────────────────────
+
 @Composable
-fun DeviceCard(device: DeviceInfo, isConnected: Boolean, isComingSoon: Boolean = false) {
+private fun SectionHeader(title: String, subtitle: String, accentColor: Color) {
+    Column(modifier = Modifier.padding(top = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(18.dp)
+                    .background(accentColor, RoundedCornerShape(2.dp))
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(title, style = AppTextStyles.h3, color = Colors.textPrimary)
+        }
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            subtitle,
+            style = AppTextStyles.caption,
+            color = Colors.textSecondary,
+            modifier = Modifier.padding(start = 11.dp)
+        )
+    }
+}
+
+// ── Garmin Watch App card ─────────────────────────────────────────────────────
+//
+// The primary integration — Garmin ConnectIQ companion app that streams
+// watch GPS, HR, cadence to the phone for live AI coaching. No Garmin
+// Connect account required.
+
+@Composable
+private fun GarminWatchAppCard(onSetUp: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -338,39 +239,196 @@ fun DeviceCard(device: DeviceInfo, isConnected: Boolean, isComingSoon: Boolean =
                 .fillMaxWidth()
                 .padding(20.dp)
         ) {
-            // Header with icon and title
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Garmin logo - no background, just the logo
-                if (device.iconDrawable != null) {
-                    Icon(
-                        painter = painterResource(id = device.iconDrawable),
-                        contentDescription = null,
-                        tint = Color.Unspecified, // Don't tint logos
-                        modifier = Modifier.size(56.dp) // Full size for logo
-                    )
-                } else if (device.icon != null) {
-                    // Other devices - circular background with icon
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .background(Colors.backgroundTertiary, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            device.icon,
-                            contentDescription = null,
-                            tint = Colors.textMuted,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.width(16.dp))
+            // Header row: logo + name + "FEATURED" badge
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_garmin_logo),
+                    contentDescription = "Garmin",
+                    tint = Color.Unspecified,
+                    modifier = Modifier.size(52.dp)
+                )
+                Spacer(modifier = Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            device.name,
+                            "Garmin Watch App",
+                            style = AppTextStyles.h3,
+                            color = Colors.textPrimary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = Colors.primary.copy(alpha = 0.18f)
+                        ) {
+                            Text(
+                                "★ FEATURED",
+                                style = AppTextStyles.caption.copy(
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = Colors.primary,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        "AI coaching directly on your Garmin watch",
+                        style = AppTextStyles.caption,
+                        color = Colors.textSecondary
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Description
+            Text(
+                "Install the AI Run Coach companion app on your Garmin watch. Your watch GPS, heart rate, and running metrics stream live to your phone for real-time coaching cues — no Garmin Connect account needed.",
+                style = AppTextStyles.caption,
+                color = Colors.textSecondary,
+                lineHeight = 18.sp
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Feature chips
+            WatchFeatureChips()
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // "No Garmin Connect needed" info badge
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Colors.primary.copy(alpha = 0.08f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = null,
+                        tint = Colors.primary,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(7.dp))
+                    Text(
+                        "No Garmin Connect account required to use the watch app",
+                        style = AppTextStyles.caption.copy(fontSize = 11.sp),
+                        color = Colors.primary
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // CTA button
+            Button(
+                onClick = onSetUp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Colors.primary,
+                    contentColor = Color.Black
+                ),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Icon(
+                    Icons.Default.Share,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "Get Watch App",
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WatchFeatureChips() {
+    val chips = listOf(
+        Pair(Icons.Default.LocationOn, "Watch GPS"),
+        Pair(Icons.Default.Favorite, "Heart Rate Zones"),
+        Pair(Icons.Default.Star, "Live AI Coaching"),
+        Pair(Icons.Default.Info, "Pace & Cadence")
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        chips.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { (icon, label) ->
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFF4CAF50).copy(alpha = 0.15f),
+                        modifier = Modifier.wrapContentWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                icon,
+                                contentDescription = null,
+                                tint = Color(0xFF4CAF50),
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                label,
+                                style = AppTextStyles.caption.copy(fontSize = 11.sp),
+                                color = Color(0xFF4CAF50)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Garmin Connect card ───────────────────────────────────────────────────────
+//
+// Secondary integration — Garmin Connect OAuth for cloud activity sync and
+// historical run import. Data is displayed only; NOT used in AI processing.
+
+@Composable
+private fun GarminConnectCard(
+    isConnected: Boolean,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onManagePermissions: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Colors.backgroundSecondary
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+        ) {
+            // Header row: logo + name + connected badge
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_garmin_connect_logo),
+                    contentDescription = "Garmin Connect",
+                    tint = Color.Unspecified,
+                    modifier = Modifier.size(52.dp)
+                )
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Garmin Connect",
                             style = AppTextStyles.h3,
                             color = Colors.textPrimary
                         )
@@ -389,7 +447,204 @@ fun DeviceCard(device: DeviceInfo, isConnected: Boolean, isComingSoon: Boolean =
                             }
                         }
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        "Cloud activity sync & run history",
+                        style = AppTextStyles.caption,
+                        color = Colors.textSecondary
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Description
+            Text(
+                "Link your Garmin Connect account to import past runs and sync activity data. Useful for viewing your training history in one place.",
+                style = AppTextStyles.caption,
+                color = Colors.textSecondary,
+                lineHeight = 18.sp
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Feature chips
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SmallChip(Icons.Default.Refresh, "Activity Sync", Color(0xFF4CAF50))
+                SmallChip(Icons.Default.DateRange, "Run History", Color(0xFF4CAF50))
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // AI exclusion notice — prominent and clear
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Color(0xFFFFA726).copy(alpha = 0.1f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        Icons.Default.Info,
+                        contentDescription = null,
+                        tint = Color(0xFFFFA726),
+                        modifier = Modifier
+                            .size(15.dp)
+                            .padding(top = 1.dp)
+                    )
+                    Spacer(modifier = Modifier.width(7.dp))
+                    Text(
+                        "Garmin Connect data is displayed for reference only and is not used in any AI coaching analysis or recommendations.",
+                        style = AppTextStyles.caption.copy(fontSize = 11.sp),
+                        color = Color(0xFFFFA726),
+                        lineHeight = 16.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            if (isConnected) {
+                // Connected: show manage + disconnect
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Button(
+                        onClick = onManagePermissions,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF1A1A1A),
+                            contentColor = Color(0xFF00D4FF)
+                        ),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Settings,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            "Manage",
+                            style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                    Button(
+                        onClick = onDisconnect,
+                        modifier = Modifier.height(46.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFEF5350),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            "Disconnect",
+                            style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                }
+            } else {
+                // Not connected: show connect button
+                Button(
+                    onClick = onConnect,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF2A2A2A),
+                        contentColor = Colors.textPrimary
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "Connect Account",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SmallChip(icon: ImageVector, label: String, color: Color) {
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = color.copy(alpha = 0.15f)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(13.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(label, style = AppTextStyles.caption.copy(fontSize = 11.sp), color = color)
+        }
+    }
+}
+
+// ── Generic DeviceCard (coming soon) ──────────────────────────────────────────
+
+@Suppress("UNUSED_PARAMETER")
+@Composable
+fun DeviceCard(device: DeviceInfo, isConnected: Boolean = false, isComingSoon: Boolean = false) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Colors.backgroundSecondary
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (device.iconDrawable != null) {
+                    Icon(
+                        painter = painterResource(id = device.iconDrawable),
+                        contentDescription = null,
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(52.dp)
+                    )
+                } else if (device.icon != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .background(Colors.backgroundTertiary, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            device.icon,
+                            contentDescription = null,
+                            tint = Colors.textMuted,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(device.name, style = AppTextStyles.h3, color = Colors.textPrimary)
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         device.description,
                         style = AppTextStyles.caption,
@@ -397,35 +652,7 @@ fun DeviceCard(device: DeviceInfo, isConnected: Boolean, isComingSoon: Boolean =
                     )
                 }
             }
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            // Feature badges
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FeatureBadge(
-                    text = if (device.name == "Garmin") "Real-time data" else "Real-time HR",
-                    isSupported = device.supportsRealtimeHR
-                )
-                FeatureBadge(
-                    text = "Post-run sync",
-                    isSupported = device.supportsPostRunSync
-                )
-            }
-            
-            // Additional info badges
-            if (device.requiresAppInstall) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    InfoBadge(
-                        text = if (device.name == "Garmin") "AI Run Coach watch app from Connect IQ Store recommended" else "Requires app install",
-                        color = Color(0xFFFFA726)
-                    )
-                }
-            }
-            
-            // Not available on Android notice
+
             if (!device.isAvailableOnAndroid) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -433,18 +660,19 @@ fun DeviceCard(device: DeviceInfo, isConnected: Boolean, isComingSoon: Boolean =
                         Icons.Default.Info,
                         contentDescription = null,
                         tint = Colors.textMuted,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(14.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
                     Text(
-                        "Not available on Android",
+                        "iOS only",
                         style = AppTextStyles.caption,
                         color = Colors.textMuted
                     )
                 }
-            } else if (isComingSoon) {
-                // Coming Soon badge for future integrations
-                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            if (isComingSoon) {
+                Spacer(modifier = Modifier.height(14.dp))
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = Colors.backgroundTertiary,
@@ -464,9 +692,9 @@ fun DeviceCard(device: DeviceInfo, isConnected: Boolean, isComingSoon: Boolean =
                                 Icons.Default.Info,
                                 contentDescription = null,
                                 tint = Colors.textMuted,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(16.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 "Coming Soon",
                                 style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
@@ -475,137 +703,10 @@ fun DeviceCard(device: DeviceInfo, isConnected: Boolean, isComingSoon: Boolean =
                         }
                     }
                 }
-            } else if (isConnected) {
-                // Connected - show disconnect button
-                Spacer(modifier = Modifier.height(16.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    // Connected status badge
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF4CAF50).copy(alpha = 0.15f),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier.padding(12.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Check,
-                                contentDescription = null,
-                                tint = Color(0xFF4CAF50),
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                "Connected",
-                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
-                                color = Color(0xFF4CAF50)
-                            )
-                        }
-                    }
-                    
-                    // Disconnect button
-                    Button(
-                        onClick = device.onDisconnect,
-                        modifier = Modifier.height(48.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFEF5350),
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Close,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            "Disconnect",
-                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
-                        )
-                    }
-                }
-            } else {
-                // Connect button for available devices
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(
-                    onClick = device.onConnect,
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Colors.primary,
-                        contentColor = Color.Black
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Add,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        "Connect",
-                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
-                    )
-                }
             }
         }
     }
 }
 
-@Composable
-fun FeatureBadge(text: String, isSupported: Boolean) {
-    Surface(
-        shape = RoundedCornerShape(6.dp),
-        color = if (isSupported) Color(0xFF4CAF50).copy(alpha = 0.2f) else Colors.backgroundTertiary
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                if (isSupported) Icons.Default.Check else Icons.Default.Close,
-                contentDescription = null,
-                tint = if (isSupported) Color(0xFF4CAF50) else Colors.textMuted,
-                modifier = Modifier.size(14.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-                text,
-                style = AppTextStyles.caption.copy(fontSize = 12.sp),
-                color = if (isSupported) Color(0xFF4CAF50) else Colors.textMuted
-            )
-        }
-    }
-}
+// ── Legacy badge composables (kept for any external usage) ────────────────────
 
-@Composable
-fun InfoBadge(text: String, color: Color) {
-    Surface(
-        shape = RoundedCornerShape(6.dp),
-        color = color.copy(alpha = 0.2f)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                Icons.Default.Info,
-                contentDescription = null,
-                tint = color,
-                modifier = Modifier.size(14.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-                text,
-                style = AppTextStyles.caption.copy(fontSize = 12.sp),
-                color = color
-            )
-        }
-    }
-}

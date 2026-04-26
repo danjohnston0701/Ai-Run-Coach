@@ -3,14 +3,14 @@
  * 
  * Provides high-quality neural TTS using AWS Polly with authentic
  * regional English accents (British, American, Australian, Irish,
- * South African, Indian, New Zealand)
+ * South African, New Zealand)
  */
 
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 
 // Regional availability of Neural voices (as of 2024):
 //   us-east-1      — ALL neural voices supported (default fallback)
-//   eu-west-1      — British, Irish, South African, Indian
+//   eu-west-1      — British, Irish, South African
 //   ap-southeast-2  — Australian (Olivia), New Zealand (Aria)
 //
 // We route each accent to its optimal region for best availability and latency
@@ -30,7 +30,6 @@ function getRegionForAccent(accent: string | undefined): string {
     british: process.env.AWS_REGION_BRITISH || "eu-west-1",
     irish: process.env.AWS_REGION_IRISH || "eu-west-1",
     south_african: process.env.AWS_REGION_SOUTH_AFRICAN || "eu-west-1",
-    indian: process.env.AWS_REGION_INDIAN || "eu-west-1",
     
     // AP accents → ap-southeast-2 (Sydney)
     australian: process.env.AWS_REGION_AUSTRALIAN || "ap-southeast-2",
@@ -89,10 +88,6 @@ export function mapAccentToPollyVoice(
       male: "Ayanda",     // en-ZA Neural (only one SA Neural voice)
       female: "Ayanda",   // en-ZA Neural female
     },
-    indian: {
-      male: "Kajal",      // en-IN Neural (only one IN Neural voice)
-      female: "Kajal",    // en-IN Neural female
-    },
     new_zealand: {
       male: "Aria",       // en-NZ — no male Neural voice exists, Aria is gender-neutral enough
       female: "Aria",     // en-NZ Neural female
@@ -115,7 +110,6 @@ function mapAccentToLanguageCode(accent: string | undefined): string {
     australian: "en-AU",
     irish: "en-IE",
     south_african: "en-ZA",
-    indian: "en-IN",
     new_zealand: "en-NZ",
   };
 
@@ -126,7 +120,7 @@ function mapAccentToLanguageCode(accent: string | undefined): string {
  * Generate speech audio using AWS Polly Neural TTS
  * 
  * @param text - Text to synthesize
- * @param accent - Coach accent (british, american, australian, irish, south_african, indian, new_zealand)
+ * @param accent - Coach accent (british, american, australian, irish, south_african, new_zealand)
  * @param gender - Voice gender (male or female)
  * @param tone - Optional tone instructions for speech (energetic, calm, professional, etc.)
  * @returns Buffer containing MP3 audio data

@@ -1,5 +1,5 @@
 export type CoachGender = 'male' | 'female';
-export type CoachAccent = 'british' | 'australian' | 'american' | 'irish' | 'south_african' | 'indian' | 'new_zealand';
+export type CoachAccent = 'british' | 'australian' | 'american' | 'irish' | 'south_african' | 'new_zealand';
 export type CoachTone = 'energetic' | 'motivational' | 'instructive' | 'factual' | 'abrupt';
 
 export interface AiCoachSettings {
@@ -103,7 +103,6 @@ export const accentLabels: Record<CoachAccent, string> = {
   american: 'American',
   irish: 'Irish',
   south_african: 'South African',
-  indian: 'Indian',
   new_zealand: 'New Zealand',
 };
 
@@ -134,7 +133,6 @@ export function getTTSVoice(settings: AiCoachSettings): TTSVoice {
     american: { male: 'onyx', female: 'alloy' },
     irish: { male: 'ash', female: 'coral' },
     south_african: { male: 'echo', female: 'shimmer' },
-    indian: { male: 'onyx', female: 'alloy' },
     new_zealand: { male: 'echo', female: 'shimmer' },
   };
   
@@ -155,7 +153,6 @@ export function getVoicePreferences(settings: AiCoachSettings): {
     american: ['Alex', 'Fred', 'Tom', 'Aaron', 'Google US English Male'],
     irish: ['Daniel', 'James', 'Google UK English Male'],
     south_african: ['Ayanda', 'Google African English Male'],
-    indian: ['Kajal', 'Google Indian English Male'],
     new_zealand: ['Lee', 'Google NZ English Male'],
   };
   
@@ -165,7 +162,6 @@ export function getVoicePreferences(settings: AiCoachSettings): {
     american: ['Samantha', 'Victoria', 'Allison', 'Susan', 'Ava', 'Google US English Female'],
     irish: ['Moira', 'Kate', 'Google UK English Female'],
     south_african: ['Ayanda', 'Google African English Female'],
-    indian: ['Kajal', 'Google Indian English Female'],
     new_zealand: ['Aria', 'Google NZ English Female'],
   };
   
@@ -175,7 +171,6 @@ export function getVoicePreferences(settings: AiCoachSettings): {
     american: 'en-US',
     irish: 'en-IE',
     south_african: 'en-ZA',
-    indian: 'en-IN',
     new_zealand: 'en-NZ',
   };
   

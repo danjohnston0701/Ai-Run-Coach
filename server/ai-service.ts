@@ -75,8 +75,6 @@ const accentDirective = (accent?: string): string => {
       return 'Write with Canadian English phrasing, using words like — "eh", "for sure", "beauty". Friendly and humble. Use "kilometres".';
     case 'welsh':
       return 'Write with Welsh English phrasing, using words like — "lovely", "tidy", "fair play", "cracking on". Passionate warmth. Use "kilometres".';
-    case 'indian':
-      return 'Write with Indian English phrasing, using words like  — "very good", "excellent", "superb". Articulate and warm. Use "kilometres".';
     case 'caribbean':
       return 'Write with Caribbean English phrasing, using words like — "wicked", "big up yourself", "nuff respect". Rhythmic and uplifting. Use "kilometres".';
     case 'scandinavian':
@@ -922,9 +920,6 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
       break;
     case 'welsh':
       runnerProfileContext += '\nWrite with natural Welsh English phrasing — use "lovely", "tidy", "fair play", "cracking on", "kilometres". Passionate and heartfelt with musical warmth.';
-      break;
-    case 'indian':
-      runnerProfileContext += '\nWrite with natural Indian English phrasing — use "very good", "excellent", "well done", "superb", "kilometres". Articulate, encouraging, and warm. Slightly formal but genuinely caring.';
       break;
     case 'caribbean':
       runnerProfileContext += '\nWrite with natural Caribbean English phrasing — use "wicked", "big up yourself", "nuff respect", "easy now", "kilometres". Rhythmic, confident, uplifting energy. Island warmth.';
@@ -1804,7 +1799,7 @@ Make it feel personal and genuine — reference something specific about their r
  * Generate TTS audio using AWS Polly Neural TTS (primary) with OpenAI fallback.
  * 
  * Polly provides authentic regional English accents with native speakers:
- * - British, American, Australian, Irish, South African, Indian, New Zealand
+ * - British, American, Australian, Irish, South African, New Zealand
  * 
  * Falls back to OpenAI gpt-4o-mini-tts if Polly is not configured or fails.
  */
@@ -1900,9 +1895,6 @@ export function buildTTSInstructions(
       break;
     case 'welsh':
       parts.push('Speak with a Welsh accent. Musical, lilting intonation with a warm sing-song quality. Rich vowels. Passionate and heartfelt delivery.');
-      break;
-    case 'indian':
-      parts.push('Speak with an Indian English accent. Clear, rhythmic cadence with distinctive intonation patterns. Articulate and precise. Warm and encouraging with natural Indian English flow.');
       break;
     case 'caribbean':
       parts.push('Speak with a Caribbean English accent. Rhythmic, melodic delivery with warm island energy. Relaxed but powerful. Think Jamaican-influenced — confident and uplifting.');
@@ -2450,32 +2442,22 @@ RUN (No planned route):
 - Target: Complete ${formatDistanceForTTS(distance)} in ${formatDurationForTTS(targetTime)} (target pace: ${formatPaceForTTS(targetPace)})`;
   }
 
-  // Build wellness context string
-  let wellnessContext = '';
-  if (wellness.sleepHours !== undefined) {
-    wellnessContext += `\n- Sleep: ${wellness.sleepHours.toFixed(1)} hours (${wellness.sleepQuality || 'N/A'})`;
-    if (wellness.sleepScore) wellnessContext += `, score: ${wellness.sleepScore}/100`;
-  }
-  if (wellness.bodyBattery !== undefined) {
-    wellnessContext += `\n- Body Battery: ${wellness.bodyBattery}/100`;
-  }
-  if (wellness.stressLevel !== undefined) {
-    wellnessContext += `\n- Stress: ${wellness.stressQualifier || 'N/A'} (${wellness.stressLevel}/100)`;
-  }
-  if (wellness.hrvStatus) {
-    wellnessContext += `\n- HRV Status: ${wellness.hrvStatus}`;
-    if (wellness.hrvFeedback) wellnessContext += ` - ${wellness.hrvFeedback}`;
-  }
-  if (wellness.restingHeartRate) {
-    wellnessContext += `\n- Resting HR: ${wellness.restingHeartRate} bpm`;
-  }
-  if (wellness.readinessScore !== undefined) {
-    wellnessContext += `\n- Overall Readiness: ${wellness.readinessScore}/100`;
-  }
-  
-  // Build readiness guidance based on score
+  // ── POLICY: Garmin Connect data excluded from AI processing ──────────────
+  // All Garmin Connect wellness fields (bodyBattery, sleepScore, HRV, stress,
+  // restingHeartRate, readinessScore) originate from the Garmin Connect cloud
+  // API and are intentionally NEVER sent to OpenAI.
+  //
+  // Garmin Connect data is used for display purposes only (run history, activity
+  // sync). Only Garmin companion watch app data — real-time GPS, HR, pace, and
+  // cadence streamed during a live run — may be processed by AI coaching functions.
+  //
+  // Do NOT remove this block or re-enable wellnessContext population without
+  // an explicit product decision to change this policy.
+  const wellnessContext = '';   // always empty — Garmin Connect data excluded
+
+  // Build readiness guidance based on score (kept for future non-Garmin sources)
   let readinessGuidance = '';
-  if (wellness.readinessScore !== undefined) {
+  if (false && wellness.readinessScore !== undefined) {  // disabled — Garmin Connect excluded
     const score = wellness.readinessScore;
     if (score >= 90) {
       readinessGuidance = `

@@ -180,8 +180,9 @@ fun GarminCompanionPromptScreen(
         Button(
             onClick = {
                 onInstall()
-                // Open Connect IQ Store
-                val connectIQUrl = "https://apps.garmin.com/en-US/apps/YOUR_APP_ID"
+                // Open Connect IQ Store — search for AI Run Coach
+                // TODO: Replace with the direct app URL once the app is published
+                val connectIQUrl = "https://apps.garmin.com/en-US/search?query=AI+Run+Coach"
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(connectIQUrl))
                 context.startActivity(intent)
             },

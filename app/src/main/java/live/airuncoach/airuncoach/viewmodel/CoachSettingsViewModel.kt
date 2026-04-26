@@ -82,7 +82,7 @@ class CoachSettingsViewModel(private val context: Context) : ViewModel() {
 
     val availableAccents = listOf(
         "British", "American", "Australian", "Irish",
-        "New Zealand", "South African", "Indian"
+        "New Zealand", "South African"
     )
     val availableTones = listOf(
         CoachingTone("Energetic", "High energy, upbeat encouragement"),

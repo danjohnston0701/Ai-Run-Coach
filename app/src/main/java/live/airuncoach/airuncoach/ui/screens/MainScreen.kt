@@ -712,11 +712,19 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 ConnectedDevicesScreen(
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToGarminConnect = { navController.navigate("garmin_connect") },
+                    onNavigateToGarminWatchApp = { navController.navigate("garmin_watch_app") },
                     onNavigateToGarminPermissions = { navController.navigate("garmin_permissions") }
                 )
             }
             composable("garmin_connect") { 
                 GarminConnectScreen(onNavigateBack = { navController.popBackStack() })
+            }
+            composable("garmin_watch_app") {
+                GarminCompanionPromptScreen(
+                    onDismiss = { navController.popBackStack() },
+                    onInstall = { /* URL opened inside GarminCompanionPromptScreen */ },
+                    onMaybeLater = { navController.popBackStack() }
+                )
             }
             composable("garmin_permissions") { 
                 // GarminPermissionsScreen - Manages Garmin data access permissions

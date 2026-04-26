@@ -8727,7 +8727,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validGenders = ['male', 'female'];
       const validAccents = [
         'British', 'American', 'Australian', 'Irish', 'Scottish', 'New Zealand',
-        'South African', 'Canadian', 'Welsh', 'Indian', 'Caribbean', 'Scandinavian'
+        'South African', 'Canadian', 'Welsh', 'Caribbean', 'Scandinavian'
       ];
       const validTones = [
         'Energetic', 'Motivational', 'Friendly', 'Instructive', 'Tough Love',
