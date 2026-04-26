@@ -168,6 +168,9 @@ fun ShareImageEditorScreen(
                         onToggleRings = { isRingsPanelExpanded = !isRingsPanelExpanded },
                         ringLayout = state.ringLayout,
                         onRingPositionClick = { position -> viewModel.openRingPicker(position) },
+                        // Caption
+                        customCaption = state.customCaption,
+                        onCaptionChange = { viewModel.setCustomCaption(it) },
                         // Actions
                         isSaving = state.isSaving,
                         isGenerating = state.isGenerating,
@@ -504,6 +507,9 @@ private fun ControlStrip(
     onToggleRings: () -> Unit,
     ringLayout: Map<String, String>,
     onRingPositionClick: (String) -> Unit,
+    // Caption (stats-grid only)
+    customCaption: String,
+    onCaptionChange: (String) -> Unit,
     // Actions
     isSaving: Boolean,
     isGenerating: Boolean,
@@ -750,6 +756,54 @@ private fun ControlStrip(
                     ) {
                         RingCustomizerPanel(ringLayout = ringLayout, onRingPositionClick = onRingPositionClick)
                     }
+                }
+            }
+
+            // Caption text field (stats-grid only)
+            if (isStatsGridTemplate) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        "Caption",
+                        style = AppTextStyles.caption.copy(fontSize = 11.sp),
+                        color = Colors.textMuted,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    OutlinedTextField(
+                        value = customCaption,
+                        onValueChange = onCaptionChange,
+                        placeholder = {
+                            Text(
+                                "Add a caption to your image...",
+                                style = AppTextStyles.body.copy(fontSize = 13.sp),
+                                color = Colors.textMuted
+                            )
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Colors.primary,
+                            unfocusedBorderColor = Colors.border,
+                            focusedTextColor = Colors.textPrimary,
+                            unfocusedTextColor = Colors.textPrimary,
+                            cursorColor = Colors.primary,
+                            focusedContainerColor = Color(0xFF0D1117),
+                            unfocusedContainerColor = Color(0xFF0D1117)
+                        ),
+                        textStyle = AppTextStyles.body.copy(fontSize = 13.sp),
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Edit,
+                                contentDescription = null,
+                                tint = Colors.textMuted,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    )
                 }
             }
 

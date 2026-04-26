@@ -11255,7 +11255,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
   app.post("/api/share/generate", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers, ringLayout } = req.body;
+      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers, ringLayout, customCaption } = req.body;
       if (!templateId || !runId) {
         return res.status(400).json({ error: "templateId and runId are required" });
       }
@@ -11288,6 +11288,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         backgroundBlur: backgroundBlur ?? undefined,
         customStickers: customStickers || undefined,
         ringLayout: ringLayout || undefined,
+        customCaption: customCaption || undefined,
       });
 
       res.set({
@@ -11305,7 +11306,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
   app.post("/api/share/preview", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers, ringLayout } = req.body;
+      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers, ringLayout, customCaption } = req.body;
       if (!templateId || !runId) {
         return res.status(400).json({ error: "templateId and runId are required" });
       }
@@ -11338,6 +11339,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         backgroundBlur: backgroundBlur ?? undefined,
         customStickers: customStickers || undefined,
         ringLayout: ringLayout || undefined,
+        customCaption: customCaption || undefined,
       });
 
       const base64 = imageBuffer.toString("base64");

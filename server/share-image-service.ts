@@ -61,6 +61,7 @@ export interface GenerateImageRequest {
   backgroundBlur?: number;
   customStickers?: CustomStickerData[];
   ringLayout?: { topLeft?: string; topRight?: string; bottomLeft?: string; bottomRight?: string };
+  customCaption?: string;
 }
 
 export interface RunDataForImage {
@@ -291,133 +292,174 @@ function metricRing(
   gradId: string, progress: number,
   trackColorHex: string
 ): string {
-  const strokeW = Math.round(r * 0.18);
+  const strokeW = Math.round(r * 0.15);
 
-  const labelFontSize = Math.min(Math.round(r * 0.25), 28);
-  const valueFontSize = Math.min(Math.round(r * 0.52), 60);
+  const labelFontSize = Math.min(Math.round(r * 0.19), 28);
+  const valueFontSize = Math.min(Math.round(r * 0.40), 72);
+  const unitFontSize  = Math.min(Math.round(r * 0.16), 22);
 
-  const labelY = cy - r * 0.22;
-  const valueY = cy + r * 0.2;
+  // Three-line layout: label (top) → value (centre) → unit (below)
+  const labelY = cy - r * 0.28;
+  const valueY = cy + r * 0.13;
+  const unitY  = cy + r * 0.38;
+
+  const unitText = unit
+    ? `<text x="${cx}" y="${unitY}" font-family="${FONT}" font-size="${unitFontSize}" font-weight="500" fill="${C.textMid}" text-anchor="middle" opacity="0.65">${esc(unit)}</text>`
+    : "";
 
   return `
     <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="url(#${gradId})" stroke-width="${strokeW}" filter="url(#ringGlow)"/>
-    <text x="${cx}" y="${labelY}" font-family="${FONT}" font-size="${labelFontSize}" font-weight="700" fill="${C.textDark}" text-anchor="middle" letter-spacing="0.3">${esc(label)}</text>
+    <text x="${cx}" y="${labelY}" font-family="${FONT}" font-size="${labelFontSize}" font-weight="700" fill="${C.textDark}" text-anchor="middle" letter-spacing="0.5">${esc(label)}</text>
     <text x="${cx}" y="${valueY}" font-family="${FONT}" font-size="${valueFontSize}" font-weight="800" fill="${C.textDark}" text-anchor="middle">${esc(value)}</text>
+    ${unitText}
   `;
 }
 
-type RingMetricData = { label: string; value: string; grad: string; prog: number; track: string };
+type RingMetricData = { label: string; unit: string; value: string; grad: string; prog: number; track: string };
 
 function getMetricData(metric: string, run: RunDataForImage): RingMetricData {
   switch (metric) {
     case "distance": {
       const d = run.distance || 0;
-      return { label: "Distance", value: run.distance?.toFixed(2) || "0", grad: "cyanRingGrad", prog: Math.min(0.3 + d / 10 * 0.6, 0.95), track: "#00E5FF" };
+      return { label: "Distance", unit: "km", value: run.distance?.toFixed(2) || "0", grad: "cyanRingGrad", prog: Math.min(0.3 + d / 10 * 0.6, 0.95), track: "#00E5FF" };
     }
     case "pace": {
       let p = 0.65;
       if (run.avgPace) { const s = paceToSeconds(run.avgPace); if (s > 0) p = Math.min(Math.max(0.35, 1 - (s - 180) / 480), 0.95); }
-      return { label: "Pace", value: run.avgPace || "--:--", grad: "blueRingGrad", prog: p, track: "#42A5F5" };
+      return { label: "Pace", unit: "min/km", value: run.avgPace || "--:--", grad: "blueRingGrad", prog: p, track: "#42A5F5" };
     }
     case "duration": {
       const sec = run.duration || 0;
-      return { label: "Duration", value: formatDuration(sec), grad: "yellowRingGrad", prog: Math.min(0.3 + sec / 3600 * 0.6, 0.95), track: "#FFD600" };
+      return { label: "Duration", unit: "", value: formatDuration(sec), grad: "yellowRingGrad", prog: Math.min(0.3 + sec / 3600 * 0.6, 0.95), track: "#FFD600" };
     }
     case "heartRate": {
       const hr = run.avgHeartRate || 0;
-      return { label: "Heart Rate", value: hr ? hr.toString() : "--", grad: "redRingGrad", prog: hr ? Math.min(0.3 + hr / 200 * 0.6, 0.95) : 0.5, track: "#FF5252" };
+      return { label: "Heart Rate", unit: "bpm", value: hr ? hr.toString() : "--", grad: "redRingGrad", prog: hr ? Math.min(0.3 + hr / 200 * 0.6, 0.95) : 0.5, track: "#FF5252" };
     }
     case "maxHeartRate": {
       const mhr = run.maxHeartRate || 0;
-      return { label: "Max HR", value: mhr ? mhr.toString() : "--", grad: "redRingGrad", prog: mhr ? Math.min(0.3 + mhr / 220 * 0.6, 0.95) : 0.5, track: "#FF5252" };
+      return { label: "Max HR", unit: "bpm", value: mhr ? mhr.toString() : "--", grad: "redRingGrad", prog: mhr ? Math.min(0.3 + mhr / 220 * 0.6, 0.95) : 0.5, track: "#FF5252" };
     }
     case "calories": {
       const cal = run.calories || 0;
-      return { label: "Calories", value: cal ? cal.toString() : "--", grad: "greenRingGrad", prog: cal ? Math.min(0.3 + cal / 600 * 0.6, 0.95) : 0.5, track: "#00E676" };
+      return { label: "Calories", unit: "kcal", value: cal ? cal.toString() : "--", grad: "greenRingGrad", prog: cal ? Math.min(0.3 + cal / 600 * 0.6, 0.95) : 0.5, track: "#00E676" };
     }
     case "elevationGain": {
       const eg = run.elevationGain || 0;
-      return { label: "Elev Gain", value: eg ? `${Math.round(eg)}m` : "--", grad: "orangeRingGrad", prog: eg ? Math.min(0.3 + eg / 200 * 0.6, 0.95) : 0.5, track: "#FF6B35" };
+      return { label: "Elev Gain", unit: "m", value: eg ? `${Math.round(eg)}` : "--", grad: "orangeRingGrad", prog: eg ? Math.min(0.3 + eg / 200 * 0.6, 0.95) : 0.5, track: "#FF6B35" };
     }
     case "elevationLoss": {
       const el = run.elevationLoss || 0;
-      return { label: "Elev Loss", value: el ? `${Math.round(el)}m` : "--", grad: "blueRingGrad", prog: el ? Math.min(0.3 + el / 200 * 0.6, 0.95) : 0.5, track: "#42A5F5" };
+      return { label: "Elev Loss", unit: "m", value: el ? `${Math.round(el)}` : "--", grad: "blueRingGrad", prog: el ? Math.min(0.3 + el / 200 * 0.6, 0.95) : 0.5, track: "#42A5F5" };
     }
     case "cadence": {
       const cad = run.cadence || 0;
-      return { label: "Cadence", value: cad ? cad.toString() : "--", grad: "greenRingGrad", prog: cad ? Math.min(0.3 + (cad - 140) / 50 * 0.6, 0.95) : 0.5, track: "#00E676" };
+      return { label: "Cadence", unit: "spm", value: cad ? cad.toString() : "--", grad: "greenRingGrad", prog: cad ? Math.min(0.3 + (cad - 140) / 50 * 0.6, 0.95) : 0.5, track: "#00E676" };
     }
     case "steps": {
       const steps = run.totalSteps || 0;
-      return { label: "Steps", value: steps ? steps.toLocaleString() : "--", grad: "cyanRingGrad", prog: steps ? Math.min(0.3 + steps / 10000 * 0.6, 0.95) : 0.5, track: "#00E5FF" };
+      return { label: "Steps", unit: "", value: steps ? steps.toLocaleString() : "--", grad: "cyanRingGrad", prog: steps ? Math.min(0.3 + steps / 10000 * 0.6, 0.95) : 0.5, track: "#00E5FF" };
     }
     default: {
       const d = run.distance || 0;
-      return { label: "Distance", value: run.distance?.toFixed(2) || "0", grad: "cyanRingGrad", prog: Math.min(0.3 + d / 10 * 0.6, 0.95), track: "#00E5FF" };
+      return { label: "Distance", unit: "km", value: run.distance?.toFixed(2) || "0", grad: "cyanRingGrad", prog: Math.min(0.3 + d / 10 * 0.6, 0.95), track: "#00E5FF" };
     }
   }
 }
 
-function buildStatsGridSvg(w: number, h: number, run: RunDataForImage, userName?: string, ringLayout?: { topLeft?: string; topRight?: string; bottomLeft?: string; bottomRight?: string }): string {
+function buildStatsGridSvg(
+  w: number, h: number,
+  run: RunDataForImage,
+  userName?: string,
+  ringLayout?: { topLeft?: string; topRight?: string; bottomLeft?: string; bottomRight?: string },
+  customCaption?: string
+): string {
   const cx = w / 2;
   const contentEndY = h - LOGO_ZONE_H;
-  const isVertical = h > w;
 
+  // ── Header ──────────────────────────────────────────────────────────
   const nameFontSize = 26;
   const metaFontSize = 22;
-
-  let headerY = isVertical ? 64 : 54;
+  let headerY = 56;
   let headerSvg = "";
 
   if (userName) {
     headerSvg += `<text x="${cx}" y="${headerY}" font-family="${FONT}" font-size="${nameFontSize}" font-weight="700" fill="${C.textDark}" text-anchor="middle">${esc(userName)}</text>`;
     headerY += nameFontSize + 8;
   }
-  // Date — same size as name but not bold
   headerSvg += `<text x="${cx}" y="${headerY}" font-family="${FONT}" font-size="${metaFontSize}" font-weight="400" fill="${C.textDark}" text-anchor="middle" letter-spacing="0.3">${esc(formatDate(run.completedAt, run.timezone))}</text>`;
   headerY += metaFontSize + 6;
-
-  // Run timestamp — same font, not bold, slightly muted
   const runTime = formatTime(run.completedAt, run.timezone);
   if (runTime) {
     headerSvg += `<text x="${cx}" y="${headerY}" font-family="${FONT}" font-size="${metaFontSize}" font-weight="400" fill="${C.textMid}" text-anchor="middle" letter-spacing="0.3">${esc(runTime)}</text>`;
     headerY += metaFontSize + 6;
   }
-
-  // Thin separator line
   headerSvg += `<line x1="${cx - 80}" y1="${headerY + 4}" x2="${cx + 80}" y2="${headerY + 4}" stroke="url(#fadeLine)" stroke-width="1.5"/>`;
-  headerY += 20;
+  headerY += 18;
+
+  // ── Ring sizing — fill the width, nearly touching ───────────────────
+  // Layout constants
+  const PAD_OUTSIDE = 22;   // from image edge to ring centre
+  const GAP_H = 16;         // horizontal gap between the two rings (edge-to-edge)
+  const GAP_V = 16;         // vertical gap between the two rows (edge-to-edge)
+  const CAPTION_H = 130;    // height reserved for caption text below rings
+  const CAPTION_GAP = 28;   // space between bottom ring edge and caption separator
 
   const ringAreaTop = headerY;
-  const ringAreaBot = contentEndY - 6;
-  const ringAreaH = ringAreaBot - ringAreaTop;
-  const ringAreaW = w;
+  const availableH = contentEndY - ringAreaTop;
 
-  const maxRingDiameter = Math.min(ringAreaW * 0.44, ringAreaH * 0.48);
-  const ringR = Math.min(maxRingDiameter / 2, 155);
+  // Solve for r given two constraints:
+  //   Width:  2*PAD_OUTSIDE + 4*r + GAP_H  ≤ w
+  //   Height: 4*r + GAP_V + CAPTION_GAP + CAPTION_H ≤ availableH
+  const rFromW = Math.floor((w - 2 * PAD_OUTSIDE - GAP_H) / 4);
+  const rFromH = Math.floor((availableH - GAP_V - CAPTION_GAP - CAPTION_H) / 4);
+  const ringR  = Math.max(40, Math.min(rFromW, rFromH));
 
-  const col1X = w * 0.28;
-  const col2X = w * 0.72;
-  const row1Y = ringAreaTop + ringAreaH * 0.27;
-  const row2Y = ringAreaTop + ringAreaH * 0.73;
+  // Column centres (nearly touching the edges)
+  const col1X = PAD_OUTSIDE + ringR;
+  const col2X = w - PAD_OUTSIDE - ringR;
 
+  // Vertically centre the ring block + caption in the available area
+  const ringBlockH   = 4 * ringR + GAP_V;
+  const totalBlockH  = ringBlockH + CAPTION_GAP + CAPTION_H;
+  const topPad       = Math.max(ringR * 0.1, Math.floor((availableH - totalBlockH) / 2));
+
+  const row1CY      = ringAreaTop + topPad + ringR;
+  const row2CY      = row1CY + 2 * ringR + GAP_V;
+  const captionAreaY = row2CY + ringR + CAPTION_GAP;
+
+  // ── Four rings ───────────────────────────────────────────────────────
   const rings = [
-    { cx: col1X, cy: row1Y, ...getMetricData(ringLayout?.topLeft     || "distance",      run) },
-    { cx: col2X, cy: row1Y, ...getMetricData(ringLayout?.topRight    || "pace",           run) },
-    { cx: col1X, cy: row2Y, ...getMetricData(ringLayout?.bottomLeft  || "duration",       run) },
-    { cx: col2X, cy: row2Y, ...getMetricData(ringLayout?.bottomRight || "elevationGain",  run) },
+    { cx: col1X, cy: row1CY, ...getMetricData(ringLayout?.topLeft     || "distance",      run) },
+    { cx: col2X, cy: row1CY, ...getMetricData(ringLayout?.topRight    || "pace",           run) },
+    { cx: col1X, cy: row2CY, ...getMetricData(ringLayout?.bottomLeft  || "duration",       run) },
+    { cx: col2X, cy: row2CY, ...getMetricData(ringLayout?.bottomRight || "elevationGain",  run) },
   ];
 
   let ringSvg = "";
   rings.forEach(r => {
-    ringSvg += metricRing(r.cx, r.cy, ringR, r.label, r.value, "", r.grad, r.prog, r.track);
+    ringSvg += metricRing(r.cx, r.cy, ringR, r.label, r.value, r.unit, r.grad, r.prog, r.track);
   });
+
+  // ── Caption area ─────────────────────────────────────────────────────
+  const captionFontSize = Math.min(Math.round(w * 0.030), 34);
+  const captionText = (customCaption || "").trim();
+  const captionLineY = captionAreaY + captionFontSize + 10;
+
+  const captionSvg = `
+    <line x1="${cx - 100}" y1="${captionAreaY}" x2="${cx + 100}" y2="${captionAreaY}" stroke="${C.border}" stroke-width="1.5" opacity="0.5"/>
+    ${captionText
+      ? `<text x="${cx}" y="${captionLineY}" font-family="${FONT}" font-size="${captionFontSize}" font-weight="500" fill="${C.textMid}" text-anchor="middle">${esc(captionText)}</text>`
+      : `<text x="${cx}" y="${captionLineY}" font-family="${FONT}" font-size="${captionFontSize}" font-weight="400" fill="${C.textMuted}" text-anchor="middle" opacity="0.4">Add a caption...</text>`
+    }
+  `;
 
   return `
     ${globalDefs(w, h)}
     <rect width="${w}" height="${h}" fill="${C.bg}"/>
     ${headerSvg}
     ${ringSvg}
+    ${captionSvg}
   `;
 }
 
@@ -1057,7 +1099,7 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
 
   switch (template.id) {
     case "stats-grid":
-      svgContent = buildStatsGridSvg(w, h, req.runData, req.userName, req.ringLayout);
+      svgContent = buildStatsGridSvg(w, h, req.runData, req.userName, req.ringLayout, req.customCaption);
       break;
     case "run-metrics":
       svgContent = buildRunMetricsSvg(w, h, req.runData, req.userName);
@@ -1075,7 +1117,7 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
       svgContent = buildMinimalSvg(w, h, req.runData, req.userName);
       break;
     default:
-      svgContent = buildStatsGridSvg(w, h, req.runData, req.userName, req.ringLayout);
+      svgContent = buildStatsGridSvg(w, h, req.runData, req.userName, req.ringLayout, req.customCaption);
   }
 
   let stickersSvg = "";

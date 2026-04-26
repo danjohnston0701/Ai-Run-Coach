@@ -57,6 +57,7 @@ __export(schema_exports, {
   insertRunSchema: () => insertRunSchema,
   insertUserSchema: () => insertUserSchema,
   liveRunSessions: () => liveRunSessions,
+  monthlyUsage: () => monthlyUsage,
   notificationPreferences: () => notificationPreferences,
   notifications: () => notifications,
   oauthStateStore: () => oauthStateStore,
@@ -85,7 +86,7 @@ __export(schema_exports, {
 import { sql } from "drizzle-orm";
 import { pgTable, text, varchar, boolean, real, integer, timestamp, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
-var users, friends, friendRequests, routes, events, runs, activityMergeLog, goals, notifications, notificationPreferences, liveRunSessions, groupRuns, groupRunParticipants, pushSubscriptions, routeRatings, runAnalyses, couponCodes, userCoupons, garminWellnessMetrics, garminActivities, garminSkinTemperature, garminBodyComposition, garminBloodPressure, garminHealthSnapshots, garminEpochsRaw, garminEpochsAggregate, deviceData, connectedDevices, garminRealtimeData, garminCompanionSessions, dailyFitness, segments, segmentEfforts, segmentStars, trainingPlans, weeklyPlans, plannedWorkouts, planAdaptations, sharedRuns, feedActivities, reactions, activityComments, commentLikes, clubs, clubMemberships, challenges, challengeParticipants, achievements, userAchievements, garminMoveIQ, oauthStateStore, webhookFailureQueue, garminWebhookEvents, insertUserSchema, insertRunSchema, insertRouteSchema, insertGoalSchema, insertFriendSchema, insertFriendRequestSchema, insertNotificationSchema, sessionInstructions, coachingSessionEvents2, userStats, passwordResetTokens;
+var users, friends, friendRequests, routes, events, runs, activityMergeLog, goals, notifications, notificationPreferences, liveRunSessions, groupRuns, groupRunParticipants, pushSubscriptions, routeRatings, runAnalyses, couponCodes, userCoupons, garminWellnessMetrics, garminActivities, garminSkinTemperature, garminBodyComposition, garminBloodPressure, garminHealthSnapshots, garminEpochsRaw, garminEpochsAggregate, deviceData, connectedDevices, garminRealtimeData, garminCompanionSessions, dailyFitness, segments, segmentEfforts, segmentStars, trainingPlans, weeklyPlans, plannedWorkouts, planAdaptations, sharedRuns, feedActivities, reactions, activityComments, commentLikes, clubs, clubMemberships, challenges, challengeParticipants, achievements, userAchievements, garminMoveIQ, oauthStateStore, webhookFailureQueue, garminWebhookEvents, insertUserSchema, insertRunSchema, insertRouteSchema, insertGoalSchema, insertFriendSchema, insertFriendRequestSchema, insertNotificationSchema, sessionInstructions, coachingSessionEvents2, userStats, passwordResetTokens, monthlyUsage;
 var init_schema = __esm({
   "shared/schema.ts"() {
     users = pgTable("users", {
@@ -1585,6 +1586,19 @@ var init_schema = __esm({
       expiresAt: timestamp("expires_at").notNull(),
       createdAt: timestamp("created_at").defaultNow()
     });
+    monthlyUsage = pgTable("monthly_usage", {
+      id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+      userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+      yearMonth: text("year_month").notNull(),
+      // e.g. "2026-04"
+      // Feature usage counters
+      aiCoachingKm: real("ai_coaching_km").notNull().default(0),
+      trainingPlansGenerated: integer("training_plans_generated").notNull().default(0),
+      routesGenerated: integer("routes_generated").notNull().default(0),
+      postRunAnalyses: integer("post_run_analyses").notNull().default(0),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
   }
 });
 
@@ -2493,6 +2507,42 @@ var init_storage = __esm({
       }
       async deletePasswordResetToken(token) {
         await db.delete(passwordResetTokens).where(eq(passwordResetTokens.token, token));
+      }
+      // ── Monthly Usage Tracking ────────────────────────────────────────────────
+      /**
+       * Returns the monthly usage row for a user, creating it with zero counts if
+       * it doesn't exist yet (upsert pattern is safe for concurrent requests).
+       */
+      async getMonthlyUsage(userId, yearMonth) {
+        const [existing] = await db.select().from(monthlyUsage).where(and(eq(monthlyUsage.userId, userId), eq(monthlyUsage.yearMonth, yearMonth)));
+        if (existing) return existing;
+        const [created] = await db.insert(monthlyUsage).values({ userId, yearMonth }).onConflictDoNothing().returning();
+        if (created) return created;
+        const [row] = await db.select().from(monthlyUsage).where(and(eq(monthlyUsage.userId, userId), eq(monthlyUsage.yearMonth, yearMonth)));
+        return row;
+      }
+      /**
+       * Atomically increments one or more usage counters for the current month.
+       * Uses SQL arithmetic (col + delta) so concurrent increments don't overwrite
+       * each other.
+       */
+      async incrementUsage(userId, yearMonth, updates) {
+        await this.getMonthlyUsage(userId, yearMonth);
+        const setClause = { updatedAt: /* @__PURE__ */ new Date() };
+        if (updates.aiCoachingKm !== void 0) {
+          setClause.aiCoachingKm = sql2`${monthlyUsage.aiCoachingKm} + ${updates.aiCoachingKm}`;
+        }
+        if (updates.trainingPlansGenerated !== void 0) {
+          setClause.trainingPlansGenerated = sql2`${monthlyUsage.trainingPlansGenerated} + ${updates.trainingPlansGenerated}`;
+        }
+        if (updates.routesGenerated !== void 0) {
+          setClause.routesGenerated = sql2`${monthlyUsage.routesGenerated} + ${updates.routesGenerated}`;
+        }
+        if (updates.postRunAnalyses !== void 0) {
+          setClause.postRunAnalyses = sql2`${monthlyUsage.postRunAnalyses} + ${updates.postRunAnalyses}`;
+        }
+        const [updated] = await db.update(monthlyUsage).set(setClause).where(and(eq(monthlyUsage.userId, userId), eq(monthlyUsage.yearMonth, yearMonth))).returning();
+        return updated;
       }
     };
     storage = new DatabaseStorage();
@@ -9048,22 +9098,26 @@ function globalDefs(w, h) {
   `;
 }
 function metricRing(cx, cy, r, label, value, unit, gradId, progress, trackColorHex) {
-  const strokeW = Math.round(r * 0.18);
-  const labelFontSize = Math.min(Math.round(r * 0.25), 28);
-  const valueFontSize = Math.min(Math.round(r * 0.52), 60);
-  const labelY = cy - r * 0.22;
-  const valueY = cy + r * 0.2;
+  const strokeW = Math.round(r * 0.15);
+  const labelFontSize = Math.min(Math.round(r * 0.19), 28);
+  const valueFontSize = Math.min(Math.round(r * 0.4), 72);
+  const unitFontSize = Math.min(Math.round(r * 0.16), 22);
+  const labelY = cy - r * 0.28;
+  const valueY = cy + r * 0.13;
+  const unitY = cy + r * 0.38;
+  const unitText = unit ? `<text x="${cx}" y="${unitY}" font-family="${FONT}" font-size="${unitFontSize}" font-weight="500" fill="${C.textMid}" text-anchor="middle" opacity="0.65">${esc(unit)}</text>` : "";
   return `
     <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="url(#${gradId})" stroke-width="${strokeW}" filter="url(#ringGlow)"/>
-    <text x="${cx}" y="${labelY}" font-family="${FONT}" font-size="${labelFontSize}" font-weight="700" fill="${C.textDark}" text-anchor="middle" letter-spacing="0.3">${esc(label)}</text>
+    <text x="${cx}" y="${labelY}" font-family="${FONT}" font-size="${labelFontSize}" font-weight="700" fill="${C.textDark}" text-anchor="middle" letter-spacing="0.5">${esc(label)}</text>
     <text x="${cx}" y="${valueY}" font-family="${FONT}" font-size="${valueFontSize}" font-weight="800" fill="${C.textDark}" text-anchor="middle">${esc(value)}</text>
+    ${unitText}
   `;
 }
 function getMetricData(metric, run) {
   switch (metric) {
     case "distance": {
       const d = run.distance || 0;
-      return { label: "Distance", value: run.distance?.toFixed(2) || "0", grad: "cyanRingGrad", prog: Math.min(0.3 + d / 10 * 0.6, 0.95), track: "#00E5FF" };
+      return { label: "Distance", unit: "km", value: run.distance?.toFixed(2) || "0", grad: "cyanRingGrad", prog: Math.min(0.3 + d / 10 * 0.6, 0.95), track: "#00E5FF" };
     }
     case "pace": {
       let p = 0.65;
@@ -9071,53 +9125,52 @@ function getMetricData(metric, run) {
         const s = paceToSeconds(run.avgPace);
         if (s > 0) p = Math.min(Math.max(0.35, 1 - (s - 180) / 480), 0.95);
       }
-      return { label: "Pace", value: run.avgPace || "--:--", grad: "blueRingGrad", prog: p, track: "#42A5F5" };
+      return { label: "Pace", unit: "min/km", value: run.avgPace || "--:--", grad: "blueRingGrad", prog: p, track: "#42A5F5" };
     }
     case "duration": {
       const sec = run.duration || 0;
-      return { label: "Duration", value: formatDuration(sec), grad: "yellowRingGrad", prog: Math.min(0.3 + sec / 3600 * 0.6, 0.95), track: "#FFD600" };
+      return { label: "Duration", unit: "", value: formatDuration(sec), grad: "yellowRingGrad", prog: Math.min(0.3 + sec / 3600 * 0.6, 0.95), track: "#FFD600" };
     }
     case "heartRate": {
       const hr = run.avgHeartRate || 0;
-      return { label: "Heart Rate", value: hr ? hr.toString() : "--", grad: "redRingGrad", prog: hr ? Math.min(0.3 + hr / 200 * 0.6, 0.95) : 0.5, track: "#FF5252" };
+      return { label: "Heart Rate", unit: "bpm", value: hr ? hr.toString() : "--", grad: "redRingGrad", prog: hr ? Math.min(0.3 + hr / 200 * 0.6, 0.95) : 0.5, track: "#FF5252" };
     }
     case "maxHeartRate": {
       const mhr = run.maxHeartRate || 0;
-      return { label: "Max HR", value: mhr ? mhr.toString() : "--", grad: "redRingGrad", prog: mhr ? Math.min(0.3 + mhr / 220 * 0.6, 0.95) : 0.5, track: "#FF5252" };
+      return { label: "Max HR", unit: "bpm", value: mhr ? mhr.toString() : "--", grad: "redRingGrad", prog: mhr ? Math.min(0.3 + mhr / 220 * 0.6, 0.95) : 0.5, track: "#FF5252" };
     }
     case "calories": {
       const cal = run.calories || 0;
-      return { label: "Calories", value: cal ? cal.toString() : "--", grad: "greenRingGrad", prog: cal ? Math.min(0.3 + cal / 600 * 0.6, 0.95) : 0.5, track: "#00E676" };
+      return { label: "Calories", unit: "kcal", value: cal ? cal.toString() : "--", grad: "greenRingGrad", prog: cal ? Math.min(0.3 + cal / 600 * 0.6, 0.95) : 0.5, track: "#00E676" };
     }
     case "elevationGain": {
       const eg = run.elevationGain || 0;
-      return { label: "Elev Gain", value: eg ? `${Math.round(eg)}m` : "--", grad: "orangeRingGrad", prog: eg ? Math.min(0.3 + eg / 200 * 0.6, 0.95) : 0.5, track: "#FF6B35" };
+      return { label: "Elev Gain", unit: "m", value: eg ? `${Math.round(eg)}` : "--", grad: "orangeRingGrad", prog: eg ? Math.min(0.3 + eg / 200 * 0.6, 0.95) : 0.5, track: "#FF6B35" };
     }
     case "elevationLoss": {
       const el = run.elevationLoss || 0;
-      return { label: "Elev Loss", value: el ? `${Math.round(el)}m` : "--", grad: "blueRingGrad", prog: el ? Math.min(0.3 + el / 200 * 0.6, 0.95) : 0.5, track: "#42A5F5" };
+      return { label: "Elev Loss", unit: "m", value: el ? `${Math.round(el)}` : "--", grad: "blueRingGrad", prog: el ? Math.min(0.3 + el / 200 * 0.6, 0.95) : 0.5, track: "#42A5F5" };
     }
     case "cadence": {
       const cad = run.cadence || 0;
-      return { label: "Cadence", value: cad ? cad.toString() : "--", grad: "greenRingGrad", prog: cad ? Math.min(0.3 + (cad - 140) / 50 * 0.6, 0.95) : 0.5, track: "#00E676" };
+      return { label: "Cadence", unit: "spm", value: cad ? cad.toString() : "--", grad: "greenRingGrad", prog: cad ? Math.min(0.3 + (cad - 140) / 50 * 0.6, 0.95) : 0.5, track: "#00E676" };
     }
     case "steps": {
       const steps = run.totalSteps || 0;
-      return { label: "Steps", value: steps ? steps.toLocaleString() : "--", grad: "cyanRingGrad", prog: steps ? Math.min(0.3 + steps / 1e4 * 0.6, 0.95) : 0.5, track: "#00E5FF" };
+      return { label: "Steps", unit: "", value: steps ? steps.toLocaleString() : "--", grad: "cyanRingGrad", prog: steps ? Math.min(0.3 + steps / 1e4 * 0.6, 0.95) : 0.5, track: "#00E5FF" };
     }
     default: {
       const d = run.distance || 0;
-      return { label: "Distance", value: run.distance?.toFixed(2) || "0", grad: "cyanRingGrad", prog: Math.min(0.3 + d / 10 * 0.6, 0.95), track: "#00E5FF" };
+      return { label: "Distance", unit: "km", value: run.distance?.toFixed(2) || "0", grad: "cyanRingGrad", prog: Math.min(0.3 + d / 10 * 0.6, 0.95), track: "#00E5FF" };
     }
   }
 }
-function buildStatsGridSvg(w, h, run, userName, ringLayout) {
+function buildStatsGridSvg(w, h, run, userName, ringLayout, customCaption) {
   const cx = w / 2;
   const contentEndY = h - LOGO_ZONE_H;
-  const isVertical = h > w;
   const nameFontSize = 26;
   const metaFontSize = 22;
-  let headerY = isVertical ? 64 : 54;
+  let headerY = 56;
   let headerSvg = "";
   if (userName) {
     headerSvg += `<text x="${cx}" y="${headerY}" font-family="${FONT}" font-size="${nameFontSize}" font-weight="700" fill="${C.textDark}" text-anchor="middle">${esc(userName)}</text>`;
@@ -9131,32 +9184,48 @@ function buildStatsGridSvg(w, h, run, userName, ringLayout) {
     headerY += metaFontSize + 6;
   }
   headerSvg += `<line x1="${cx - 80}" y1="${headerY + 4}" x2="${cx + 80}" y2="${headerY + 4}" stroke="url(#fadeLine)" stroke-width="1.5"/>`;
-  headerY += 20;
+  headerY += 18;
+  const PAD_OUTSIDE = 22;
+  const GAP_H = 16;
+  const GAP_V = 16;
+  const CAPTION_H = 130;
+  const CAPTION_GAP = 28;
   const ringAreaTop = headerY;
-  const ringAreaBot = contentEndY - 6;
-  const ringAreaH = ringAreaBot - ringAreaTop;
-  const ringAreaW = w;
-  const maxRingDiameter = Math.min(ringAreaW * 0.44, ringAreaH * 0.48);
-  const ringR = Math.min(maxRingDiameter / 2, 155);
-  const col1X = w * 0.28;
-  const col2X = w * 0.72;
-  const row1Y = ringAreaTop + ringAreaH * 0.27;
-  const row2Y = ringAreaTop + ringAreaH * 0.73;
+  const availableH = contentEndY - ringAreaTop;
+  const rFromW = Math.floor((w - 2 * PAD_OUTSIDE - GAP_H) / 4);
+  const rFromH = Math.floor((availableH - GAP_V - CAPTION_GAP - CAPTION_H) / 4);
+  const ringR = Math.max(40, Math.min(rFromW, rFromH));
+  const col1X = PAD_OUTSIDE + ringR;
+  const col2X = w - PAD_OUTSIDE - ringR;
+  const ringBlockH = 4 * ringR + GAP_V;
+  const totalBlockH = ringBlockH + CAPTION_GAP + CAPTION_H;
+  const topPad = Math.max(ringR * 0.1, Math.floor((availableH - totalBlockH) / 2));
+  const row1CY = ringAreaTop + topPad + ringR;
+  const row2CY = row1CY + 2 * ringR + GAP_V;
+  const captionAreaY = row2CY + ringR + CAPTION_GAP;
   const rings = [
-    { cx: col1X, cy: row1Y, ...getMetricData(ringLayout?.topLeft || "distance", run) },
-    { cx: col2X, cy: row1Y, ...getMetricData(ringLayout?.topRight || "pace", run) },
-    { cx: col1X, cy: row2Y, ...getMetricData(ringLayout?.bottomLeft || "duration", run) },
-    { cx: col2X, cy: row2Y, ...getMetricData(ringLayout?.bottomRight || "elevationGain", run) }
+    { cx: col1X, cy: row1CY, ...getMetricData(ringLayout?.topLeft || "distance", run) },
+    { cx: col2X, cy: row1CY, ...getMetricData(ringLayout?.topRight || "pace", run) },
+    { cx: col1X, cy: row2CY, ...getMetricData(ringLayout?.bottomLeft || "duration", run) },
+    { cx: col2X, cy: row2CY, ...getMetricData(ringLayout?.bottomRight || "elevationGain", run) }
   ];
   let ringSvg = "";
   rings.forEach((r) => {
-    ringSvg += metricRing(r.cx, r.cy, ringR, r.label, r.value, "", r.grad, r.prog, r.track);
+    ringSvg += metricRing(r.cx, r.cy, ringR, r.label, r.value, r.unit, r.grad, r.prog, r.track);
   });
+  const captionFontSize = Math.min(Math.round(w * 0.03), 34);
+  const captionText = (customCaption || "").trim();
+  const captionLineY = captionAreaY + captionFontSize + 10;
+  const captionSvg = `
+    <line x1="${cx - 100}" y1="${captionAreaY}" x2="${cx + 100}" y2="${captionAreaY}" stroke="${C.border}" stroke-width="1.5" opacity="0.5"/>
+    ${captionText ? `<text x="${cx}" y="${captionLineY}" font-family="${FONT}" font-size="${captionFontSize}" font-weight="500" fill="${C.textMid}" text-anchor="middle">${esc(captionText)}</text>` : `<text x="${cx}" y="${captionLineY}" font-family="${FONT}" font-size="${captionFontSize}" font-weight="400" fill="${C.textMuted}" text-anchor="middle" opacity="0.4">Add a caption...</text>`}
+  `;
   return `
     ${globalDefs(w, h)}
     <rect width="${w}" height="${h}" fill="${C.bg}"/>
     ${headerSvg}
     ${ringSvg}
+    ${captionSvg}
   `;
 }
 function buildRunMetricsSvg(w, h, run, userName) {
@@ -9729,7 +9798,7 @@ async function generateShareImage(req) {
   let svgContent;
   switch (template.id) {
     case "stats-grid":
-      svgContent = buildStatsGridSvg(w, h, req.runData, req.userName, req.ringLayout);
+      svgContent = buildStatsGridSvg(w, h, req.runData, req.userName, req.ringLayout, req.customCaption);
       break;
     case "run-metrics":
       svgContent = buildRunMetricsSvg(w, h, req.runData, req.userName);
@@ -9747,7 +9816,7 @@ async function generateShareImage(req) {
       svgContent = buildMinimalSvg(w, h, req.runData, req.userName);
       break;
     default:
-      svgContent = buildStatsGridSvg(w, h, req.runData, req.userName, req.ringLayout);
+      svgContent = buildStatsGridSvg(w, h, req.runData, req.userName, req.ringLayout, req.customCaption);
   }
   let stickersSvg = "";
   if (req.stickers && req.stickers.length > 0) {
@@ -12659,6 +12728,123 @@ Provide your assessment in JSON format:
 
 // server/routes.ts
 init_notification_service();
+
+// server/usage-service.ts
+init_storage();
+
+// server/tier-limits.ts
+var TIER_LIMITS = {
+  free: {
+    aiCoachingKm: 10,
+    trainingPlansGenerated: 1,
+    routesGenerated: 3,
+    postRunAnalyses: 5
+  },
+  lite: {
+    aiCoachingKm: 50,
+    trainingPlansGenerated: 3,
+    routesGenerated: 10,
+    postRunAnalyses: 15
+  },
+  standard: {
+    aiCoachingKm: 200,
+    trainingPlansGenerated: 10,
+    routesGenerated: 30,
+    postRunAnalyses: 50
+  },
+  premium: {
+    aiCoachingKm: Infinity,
+    trainingPlansGenerated: Infinity,
+    routesGenerated: Infinity,
+    postRunAnalyses: Infinity
+  },
+  pro: {
+    aiCoachingKm: Infinity,
+    trainingPlansGenerated: Infinity,
+    routesGenerated: Infinity,
+    postRunAnalyses: Infinity
+  }
+};
+var DEFAULT_TIER = "free";
+function getLimitsForTier(tier) {
+  const normalised = (tier ?? DEFAULT_TIER).toLowerCase().trim();
+  return TIER_LIMITS[normalised] ?? TIER_LIMITS[DEFAULT_TIER];
+}
+
+// server/usage-service.ts
+function currentYearMonth() {
+  const now = /* @__PURE__ */ new Date();
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+async function getUsageWithLimits(userId, tier) {
+  const yearMonth = currentYearMonth();
+  const row = await storage.getMonthlyUsage(userId, yearMonth);
+  const limits = getLimitsForTier(tier);
+  const toApiLimit = (v) => v === Infinity ? null : v;
+  const toRemaining = (used, limit) => limit === Infinity ? null : Math.max(0, limit - used);
+  return {
+    yearMonth,
+    tier: (tier ?? "free").toLowerCase(),
+    usage: {
+      aiCoachingKm: row.aiCoachingKm,
+      trainingPlansGenerated: row.trainingPlansGenerated,
+      routesGenerated: row.routesGenerated,
+      postRunAnalyses: row.postRunAnalyses
+    },
+    limits: {
+      aiCoachingKm: toApiLimit(limits.aiCoachingKm),
+      trainingPlansGenerated: toApiLimit(limits.trainingPlansGenerated),
+      routesGenerated: toApiLimit(limits.routesGenerated),
+      postRunAnalyses: toApiLimit(limits.postRunAnalyses)
+    },
+    remaining: {
+      aiCoachingKm: toRemaining(row.aiCoachingKm, limits.aiCoachingKm),
+      trainingPlansGenerated: toRemaining(row.trainingPlansGenerated, limits.trainingPlansGenerated),
+      routesGenerated: toRemaining(row.routesGenerated, limits.routesGenerated),
+      postRunAnalyses: toRemaining(row.postRunAnalyses, limits.postRunAnalyses)
+    }
+  };
+}
+async function checkAndEnforceLimit(res, userId, tier, feature, amount = 1) {
+  const limits = getLimitsForTier(tier);
+  const limit = limits[feature];
+  if (limit === Infinity) return true;
+  const yearMonth = currentYearMonth();
+  const row = await storage.getMonthlyUsage(userId, yearMonth);
+  const current = row[feature];
+  if (current + amount > limit) {
+    const featureLabel = {
+      aiCoachingKm: "AI coaching",
+      trainingPlansGenerated: "training plan generation",
+      routesGenerated: "route generation",
+      postRunAnalyses: "post-run AI analysis"
+    };
+    res.status(429).json({
+      error: "monthly_limit_reached",
+      feature,
+      message: `You've reached your monthly limit for ${featureLabel[feature]} on the ${tier ?? "free"} plan. Upgrade to continue.`,
+      limit,
+      used: current,
+      remaining: Math.max(0, limit - current),
+      resetMonth: nextMonthLabel(yearMonth)
+    });
+    return false;
+  }
+  return true;
+}
+function recordUsage(userId, feature, amount = 1) {
+  const yearMonth = currentYearMonth();
+  storage.incrementUsage(userId, yearMonth, { [feature]: amount }).catch((err) => {
+    console.error(`[UsageService] Failed to record usage for user=${userId} feature=${feature}:`, err);
+  });
+}
+function nextMonthLabel(yearMonth) {
+  const [year, month] = yearMonth.split("-").map(Number);
+  const next = new Date(Date.UTC(year, month, 1));
+  return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}`;
+}
 
 // server/achievements-service.ts
 init_db();
@@ -16314,6 +16500,9 @@ async function registerRoutes(app2) {
       onRunSaved(userId, run).catch(
         (err) => console.error("[UserStatsCache] onRunSaved failed:", err)
       );
+      if (run.aiCoachEnabled && (run.distance ?? 0) > 0) {
+        recordUsage(userId, "aiCoachingKm", run.distance ?? 0);
+      }
       if (run.completedAt && tss > 0) {
         const completedAtDate = typeof run.completedAt === "number" ? new Date(run.completedAt) : run.completedAt;
         const runDate = completedAtDate.toISOString().split("T")[0];
@@ -16426,6 +16615,9 @@ async function registerRoutes(app2) {
           });
         }
       }
+      const analysisUser = await storage.getUser(userId);
+      const analysisAllowed = await checkAndEnforceLimit(res, userId, analysisUser?.subscriptionTier, "postRunAnalyses");
+      if (!analysisAllowed) return;
       const run = await storage.getRun(runId);
       if (!run) {
         return res.status(404).json({ error: "Run not found" });
@@ -16576,6 +16768,7 @@ async function registerRoutes(app2) {
         })
       });
       console.log(`[comprehensive-analysis] Successfully returning analysis for run ${runId}`);
+      recordUsage(userId, "postRunAnalyses");
       res.json({
         success: true,
         analysis,
@@ -16817,6 +17010,11 @@ ${contextJson}`;
         return res.status(400).json({ error: "Missing required fields: startLat, startLng, distance" });
       }
       const userId = req.user?.userId;
+      if (userId) {
+        const routeUser = await storage.getUser(userId);
+        const routeAllowed = await checkAndEnforceLimit(res, userId, routeUser?.subscriptionTier, "routesGenerated");
+        if (!routeAllowed) return;
+      }
       const aiRunnerProfile = userId ? await getRunnerProfile(userId).catch(() => null) : null;
       const routeGenAI = await Promise.resolve().then(() => (init_route_generation_ai(), route_generation_ai_exports));
       const routes2 = await routeGenAI.generateAIRoutesWithGoogle(
@@ -16848,6 +17046,7 @@ ${contextJson}`;
           loopQuality: route.circuitQuality.loopQuality
         }
       }));
+      if (userId) recordUsage(userId, "routesGenerated");
       res.json({ routes: formattedRoutes });
     } catch (error) {
       console.error("Generate AI routes error:", error);
@@ -16861,6 +17060,10 @@ ${contextJson}`;
       if (!startLat || !startLng || !distance) {
         return res.status(400).json({ error: "Missing required fields: startLat, startLng, distance" });
       }
+      const templateRouteUserId = req.user.userId;
+      const templateRouteUser = await storage.getUser(templateRouteUserId);
+      const templateRouteAllowed = await checkAndEnforceLimit(res, templateRouteUserId, templateRouteUser?.subscriptionTier, "routesGenerated");
+      if (!templateRouteAllowed) return;
       const routeGenV1 = await Promise.resolve().then(() => (init_route_generation(), route_generation_exports));
       const routes2 = await routeGenV1.generateRouteOptions(
         parseFloat(startLat),
@@ -16893,6 +17096,7 @@ ${contextJson}`;
           angularSpread: route.angularSpread
         }
       }));
+      recordUsage(templateRouteUserId, "routesGenerated");
       res.json({ routes: formattedRoutes });
     } catch (error) {
       console.error("Generate template routes error:", error);
@@ -17509,6 +17713,16 @@ ${contextJson}`;
     } catch (error) {
       console.error("Get subscription status error:", error);
       res.status(500).json({ error: "Failed to get subscription status" });
+    }
+  });
+  app2.get("/api/usage/current", authMiddleware, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.user.userId);
+      const usageData = await getUsageWithLimits(req.user.userId, user?.subscriptionTier);
+      res.json(usageData);
+    } catch (error) {
+      console.error("[Usage] GET /api/usage/current error:", error);
+      res.status(500).json({ error: "Failed to fetch usage data" });
     }
   });
   app2.post("/api/push-subscriptions", authMiddleware, async (req, res) => {
@@ -23011,6 +23225,9 @@ ${contextJson}`;
         height = null,
         weight = null
       } = req.body;
+      const planUser = await storage.getUser(userId);
+      const planAllowed = await checkAndEnforceLimit(res, userId, planUser?.subscriptionTier, "trainingPlansGenerated");
+      if (!planAllowed) return;
       if (planGenerationInProgress.has(userId)) {
         console.warn(`[Training Plan] Duplicate request rejected for user ${userId} \u2014 already generating`);
         return res.status(429).json({
@@ -23064,6 +23281,7 @@ ${contextJson}`;
           console.warn(`[Training Plan] Could not link plan ${planId} to goal ${goalId}:`, linkErr);
         }
       }
+      recordUsage(userId, "trainingPlansGenerated");
       res.status(201).json({
         planId,
         message: "Training plan generated successfully"
@@ -23862,7 +24080,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   });
   app2.post("/api/share/generate", authMiddleware, async (req, res) => {
     try {
-      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers, ringLayout } = req.body;
+      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers, ringLayout, customCaption } = req.body;
       if (!templateId || !runId) {
         return res.status(400).json({ error: "templateId and runId are required" });
       }
@@ -23889,7 +24107,8 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         backgroundOpacity: backgroundOpacity ?? void 0,
         backgroundBlur: backgroundBlur ?? void 0,
         customStickers: customStickers || void 0,
-        ringLayout: ringLayout || void 0
+        ringLayout: ringLayout || void 0,
+        customCaption: customCaption || void 0
       });
       res.set({
         "Content-Type": "image/png",
@@ -23905,7 +24124,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   });
   app2.post("/api/share/preview", authMiddleware, async (req, res) => {
     try {
-      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers, ringLayout } = req.body;
+      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers, ringLayout, customCaption } = req.body;
       if (!templateId || !runId) {
         return res.status(400).json({ error: "templateId and runId are required" });
       }
@@ -23932,7 +24151,8 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         backgroundOpacity: backgroundOpacity ?? void 0,
         backgroundBlur: backgroundBlur ?? void 0,
         customStickers: customStickers || void 0,
-        ringLayout: ringLayout || void 0
+        ringLayout: ringLayout || void 0,
+        customCaption: customCaption || void 0
       });
       const base64 = imageBuffer.toString("base64");
       res.json({ image: `data:image/png;base64,${base64}` });

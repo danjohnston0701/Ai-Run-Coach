@@ -30,7 +30,8 @@ data class ShareImageRequest(
     val backgroundOpacity: Float? = null,
     val backgroundBlur: Int? = null,
     val customStickers: List<CustomSticker>? = null,
-    val ringLayout: Map<String, String>? = null
+    val ringLayout: Map<String, String>? = null,
+    val customCaption: String? = null
 )
 
 data class PlacedSticker(
