@@ -2627,8 +2627,13 @@ private fun ChartsSectionFlagship(run: RunSession) {
         }
 
         // Cadence Chart
+        // Anchor the time axis to the overall GPS run start so minute labels
+        // are consistent with elevation / HR charts.
+        val runStartTs = remember(run.routePoints) {
+            run.routePoints.firstOrNull { it.latitude != 0.0 && it.longitude != 0.0 }?.timestamp ?: 0L
+        }
         val cadenceSeries = remember(run.routePoints, mode) {
-            buildCadenceSeries(run.routePoints, mode)
+            buildCadenceSeries(run.routePoints, mode, runStartTs)
         }
 
         if (cadenceSeries.y.size >= 2) {
@@ -2928,18 +2933,24 @@ private fun calculateYAxisBounds(
             Pair(minBound, maxBound)
         }
         isElevation -> {
-            // Elevation: minimum 100m variance on Y-axis
+            // Elevation: minimum 100m variance on Y-axis.
+            // IMPORTANT: the upper bound must always exceed actualMax — without this
+            // the chart line renders above the top axis label (e.g. max elev = 110 m
+            // but axis was hardcoded to 100 when dataRange < 100).
             if (dataRange < 100.0) {
-                // Range too small: use 0 to 100m
-                Pair(0.0, 100.0)
+                // Small variation run: anchor axis to at least 100 m of range,
+                // but raise the ceiling so actualMax always fits with headroom.
+                val maxBound = (actualMax + 20.0).coerceAtLeast(100.0)
+                val minBound = (maxBound - 100.0).coerceAtLeast(0.0)
+                Pair(minBound, maxBound)
             } else if (actualMax >= 100.0) {
-                // Elevation > 100m: use (min - 100m) to (max + 10%)
+                // Elevation > 100 m: use (min − 100 m) to (max + 12%)
                 val minBound = (actualMin - 100.0).coerceAtLeast(0.0)
-                val maxBound = actualMax * 1.10  // +10% buffer on top
+                val maxBound = actualMax * 1.12  // +12% headroom on top
                 Pair(minBound, maxBound)
             } else {
                 // Fallback for edge cases
-                Pair(actualMin - 100.0, actualMax + (dataRange * 0.10))
+                Pair(actualMin - 100.0, actualMax + (dataRange * 0.15))
             }
         }
         isCadence -> {
@@ -3476,7 +3487,13 @@ private fun hrFromRoutePoints(points: List<LocationPoint>, mode: ChartMode): Lab
     return LabeledSeries(xOut, smoothY(yOut, 11), labels)
 }
 
-private fun buildCadenceSeries(points: List<LocationPoint>, mode: ChartMode): LabeledSeries {
+private fun buildCadenceSeries(
+    points: List<LocationPoint>,
+    mode: ChartMode,
+    // Overall GPS run start timestamp — passed in so the time axis matches the
+    // elevation / HR charts even when cadence data begins mid-run (sensor warmup).
+    runStartTs: Long = 0L
+): LabeledSeries {
     val valid = points.filter { it.cadence != null && it.cadence > 0 && it.latitude != 0.0 }
     if (valid.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
 
@@ -3487,28 +3504,44 @@ private fun buildCadenceSeries(points: List<LocationPoint>, mode: ChartMode): La
                 haversineMeters(valid[j - 1].latitude, valid[j - 1].longitude,
                     valid[j].latitude, valid[j].longitude)
     }
+    val totalDist = cumulativeDist.last()
+
+    // Exclude the first and last 10 m of the run from cadence.
+    // The cadence sensor spikes wildly at the very start (not yet at running speed)
+    // and drops sharply at the finish — trimming 10 m each end removes these artefacts.
+    val trimStart = 10.0
+    val trimEnd = (totalDist - 10.0).coerceAtLeast(trimStart)
+    val keepIndices = valid.indices.filter {
+        cumulativeDist[it] >= trimStart && cumulativeDist[it] <= trimEnd
+    }
+    if (keepIndices.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
+
+    // Use the overall GPS run start if provided; fall back to first kept cadence point.
+    // This ensures cadence chart shows the same minute-scale as elevation/HR even when
+    // cadence data starts mid-run.
+    val startTs = if (runStartTs > 0L) runStartTs else valid[keepIndices.first()].timestamp
 
     val xOut = mutableListOf<Double>()
     val yOut = mutableListOf<Double>()
     val labels = mutableListOf<String>()
-    val startTs = valid.first().timestamp
-    val step = (valid.size / 200f).coerceAtLeast(1f).toInt()
+    val step = (keepIndices.size / 200f).coerceAtLeast(1f).toInt()
 
-    var i = 0
-    while (i < valid.size) {
-        val curr = valid[i]
+    var k = 0
+    while (k < keepIndices.size) {
+        val idx = keepIndices[k]
+        val curr = valid[idx]
 
         val xLabel = if (mode == ChartMode.Time) {
             String.format(java.util.Locale.US, "%.0f", (curr.timestamp - startTs) / 60000.0)
         } else {
-            String.format(java.util.Locale.US, "%.1f", cumulativeDist[i] / 1000.0)
+            String.format(java.util.Locale.US, "%.1f", cumulativeDist[idx] / 1000.0)
         }
 
         xOut.add(xOut.size.toDouble())
         yOut.add(curr.cadence!!.toDouble())
         labels.add(xLabel)
 
-        i += step
+        k += step
     }
 
     return LabeledSeries(xOut, smoothY(yOut, 11), labels)
@@ -3596,26 +3629,36 @@ private fun buildCadenceElevationDualSeries(
                 haversineMeters(valid[j - 1].latitude, valid[j - 1].longitude,
                     valid[j].latitude, valid[j].longitude)
     }
+    val totalDist = cumulativeDist.last()
+
+    // Exclude the first and last 10 m to remove cadence start/stop spikes
+    val trimStart = 10.0
+    val trimEnd = (totalDist - 10.0).coerceAtLeast(trimStart)
+    val keepIndices = valid.indices.filter {
+        cumulativeDist[it] >= trimStart && cumulativeDist[it] <= trimEnd
+    }
+    if (keepIndices.size < 4) return DualSeriesData(emptyList(), emptyList(), emptyList())
 
     val cadOut = mutableListOf<Double>()
     val elevOut = mutableListOf<Double>()
     val labels = mutableListOf<String>()
 
-    val step = (valid.size / 200f).coerceAtLeast(1f).toInt()
+    val step = (keepIndices.size / 200f).coerceAtLeast(1f).toInt()
 
-    var i = 0
-    while (i < valid.size) {
-        val curr = valid[i]
+    var k = 0
+    while (k < keepIndices.size) {
+        val idx = keepIndices[k]
+        val curr = valid[idx]
 
-        val alt = curr.altitude ?: run { i += step; continue }
-        val cad = curr.cadence ?: run { i += step; continue }
+        val alt = curr.altitude ?: run { k += step; continue }
+        val cad = curr.cadence ?: run { k += step; continue }
 
-        val km = cumulativeDist[i] / 1000.0
+        val km = cumulativeDist[idx] / 1000.0
         labels.add(String.format(java.util.Locale.US, "%.1f", km))
         cadOut.add(cad.toDouble())
         elevOut.add(alt.toDouble())
 
-        i += step
+        k += step
     }
 
     if (cadOut.size < 2) return DualSeriesData(emptyList(), emptyList(), emptyList())

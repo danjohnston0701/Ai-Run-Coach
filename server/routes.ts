@@ -18,6 +18,7 @@ import {
   friendRequests
 } from "@shared/schema";
 import { DateTime } from "luxon";
+import polylineCodec from "@mapbox/polyline";
 import { sql } from "drizzle-orm";
 import { 
   generateToken, 
@@ -980,19 +981,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       cadence: run.cadence || 0,
       maxCadence: run.maxCadence || null,
       heartRate: run.avgHeartRate || 0,
-      routePoints: Array.isArray(run.gpsTrack) ? run.gpsTrack.map((pt: any) => ({
-        // Garmin-sourced points use 'lat'/'lng'; native app uses 'latitude'/'longitude'.
-        // Always normalise to 'latitude'/'longitude' so the Android LocationPoint model
-        // can deserialise the non-null fields without crashing.
-        latitude:  pt.latitude  ?? pt.lat  ?? 0,
-        longitude: pt.longitude ?? pt.lng  ?? 0,
-        timestamp: pt.timestamp ?? pt.time ?? 0,
-        speed:     pt.speed     ?? pt.pace ?? null,
-        altitude:  pt.altitude  ?? null,
-        heartRate: pt.heartRate ?? pt.hr   ?? null,
-        bearing:   pt.bearing   ?? null,
-        cadence:   pt.cadence   ?? null,
-      })) : [],
+      routePoints: (() => {
+        // Normalise gpsTrack to a routePoints array regardless of storage format.
+        // Three formats can exist in the DB:
+        //   1. Array of {latitude,longitude,...} — phone-recorded (canonical)
+        //   2. Array of {lat,lng,...}            — Garmin sample points
+        //   3. { polyline: "encoded_string" }    — legacy corrupt format from Garmin
+        //                                           enrichment bug; decode on read
+        //                                           so existing runs render correctly.
+        if (Array.isArray(run.gpsTrack)) {
+          return run.gpsTrack.map((pt: any) => ({
+            latitude:  pt.latitude  ?? pt.lat  ?? 0,
+            longitude: pt.longitude ?? pt.lng  ?? 0,
+            timestamp: pt.timestamp ?? pt.time ?? 0,
+            speed:     pt.speed     ?? pt.pace ?? null,
+            altitude:  pt.altitude  ?? null,
+            heartRate: pt.heartRate ?? pt.hr   ?? null,
+            bearing:   pt.bearing   ?? null,
+            cadence:   pt.cadence   ?? null,
+          }));
+        }
+        // Recovery path: decode legacy { polyline: "..." } stored by old enrichment code
+        if (run.gpsTrack && typeof run.gpsTrack === 'object' && (run.gpsTrack as any).polyline) {
+          try {
+            const decoded = polylineCodec.decode((run.gpsTrack as any).polyline);
+            return decoded.map(([lat, lng]: [number, number]) => ({
+              latitude: lat, longitude: lng,
+              timestamp: 0, speed: null, altitude: null,
+              heartRate: null, bearing: null, cadence: null,
+            }));
+          } catch {
+            // Polyline decode failed — return empty rather than crash
+          }
+        }
+        return [];
+      })(),
       kmSplits: Array.isArray(run.kmSplits) ? run.kmSplits : [],
       heartRateData: normalizeNumericSeries(run.heartRateData),
       paceData: normalizeNumericSeries(run.paceData),
@@ -1172,29 +1195,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.params.userId;
 
-      // ⚡ Pass sinceDate to getUserRunStats — date filter pushed to SQL, not JS
-      // Only fetch last 30 days of runs instead of entire run history
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const recentRuns = await storage.getUserRuns(userId, {
-        limit: 100,  // Cap at 100 — more than enough for 30-day weather analysis
+      // Fetch the 200 most recent runs — we'll date-window in JS with progressive expansion
+      const allRecentRuns = await storage.getUserRuns(userId, {
+        limit: 200,
         offset: 0,
       });
 
-      // Filter in JS only for the date window (since getUserRuns doesn't accept date filter yet)
-      // Still much better than loading ALL runs — capped at 100 most recent
-      const windowedRuns = recentRuns.filter(r =>
-        r.completedAt &&
-        new Date(r.completedAt) > thirtyDaysAgo &&
-        (r.distance ?? 0) > 0.5
-      );
+      // Minimum runs needed for meaningful weather buckets
+      const MIN_RUNS = 5;
+
+      // Progressive date-range expansion: 60d → 120d → 180d → all available
+      const windows = [
+        { label: "60d",  days: 60  },
+        { label: "120d", days: 120 },
+        { label: "180d", days: 180 },
+        { label: "all",  days: null },
+      ];
+
+      let windowedRuns: typeof allRecentRuns = [];
+      let usedWindow = windows[0].label;
+
+      for (const win of windows) {
+        const cutoff = win.days
+          ? new Date(Date.now() - win.days * 24 * 60 * 60 * 1000)
+          : null;
+
+        windowedRuns = allRecentRuns.filter(r =>
+          r.completedAt &&
+          (cutoff === null || new Date(r.completedAt) > cutoff) &&
+          (r.distance ?? 0) > 0.5
+        );
+
+        usedWindow = win.label;
+
+        // Stop expanding once we have enough runs
+        if (windowedRuns.length >= MIN_RUNS) break;
+      }
 
       const runsWithWeather = windowedRuns.filter(r => !!r.weatherData).length;
 
       // Use the existing calculateWeatherImpact function
       const weatherImpact = await calculateWeatherImpact(userId, windowedRuns);
-      console.log(`[Weather Impact] Analysis: ${windowedRuns.length} runs in 30d, ${runsWithWeather} with weather, hasEnoughData=${weatherImpact.hasEnoughData}`);
+      console.log(`[Weather Impact] Analysis: ${windowedRuns.length} runs in ${usedWindow} window, ${runsWithWeather} with weather, hasEnoughData=${weatherImpact.hasEnoughData}`);
 
-      res.json(weatherImpact);
+      res.json({ ...weatherImpact, dateRangeUsed: usedWindow });
     } catch (error: any) {
       console.error("Weather impact analysis error:", error);
       res.status(500).json({ error: "Failed to compute weather impact analysis", details: error.message });
@@ -1601,7 +1645,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           avgSpO2: wellness.avgSpO2 || undefined,
           avgWakingRespirationValue: wellness.avgWakingRespirationValue || undefined,
         } : undefined,
-        previousRuns: previousRuns.filter(r => r.id !== runId).slice(0, 5),
+        previousRuns: previousRuns.filter(r => r.id !== runId).slice(0, 10),
         userProfile: user ? {
           fitnessLevel: user.fitnessLevel || undefined,
           age: user.dob ? Math.floor((Date.now() - new Date(user.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : undefined,
@@ -3672,8 +3716,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         minElevation: raw.minElevationInMeters,
         maxElevation: raw.maxElevationInMeters,
 
-        // GPS track
-        gpsTrack: activityDetail.polyline ? { polyline: activityDetail.polyline } : run.gpsTrack,
+        // GPS track — always preserve the existing phone-recorded GPS array.
+        // Garmin's encoded polyline is stored in a separate field on activityDetail
+        // and cannot be directly used by Android (it expects a lat/lng array).
+        // Overwriting a good array with { polyline: "..." } was the root cause of
+        // GPS data appearing to vanish after linking Garmin Connect.
+        gpsTrack: run.gpsTrack,
 
         // Garmin tracking fields
         hasGarminData: true,
@@ -7199,7 +7247,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Helper function to calculate weather impact from runs
   async function calculateWeatherImpact(userId: string, runs: any[]) {
-    if (runs.length < 3) {
+    if (runs.length < 2) {
       return { hasEnoughData: false, runsAnalyzed: runs.length, overallAvgPace: null };
     }
 
@@ -9633,7 +9681,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const aiService = await import("./ai-service");
         ai = await aiService.generateComprehensiveRunAnalysis({
           runData: runDataForAi,
-          previousRuns: previousRuns.filter(r => r.id !== runId).slice(0, 5),
+          previousRuns: previousRuns.filter(r => r.id !== runId).slice(0, 10),
           weatherImpactAnalysis: weatherImpactAnalysis || undefined,
           userProfile: body.userProfile || (user ? {
             fitnessLevel: user.fitnessLevel || undefined,

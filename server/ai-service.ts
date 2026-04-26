@@ -3127,10 +3127,10 @@ Acknowledge how weather conditions impacted performance in your analysis.
   // Add historical context if available
   if (previousRuns && previousRuns.length > 0) {
     prompt += `
-## RECENT RUN HISTORY (last ${previousRuns.length} runs):
+## RECENT RUN HISTORY (last ${Math.min(previousRuns.length, 10)} runs):
 Use this to identify patterns in their running - pace trends, consistency, pacing strategy, heart rate patterns, etc.
 `;
-    previousRuns.slice(0, 5).forEach((run, i) => {
+    previousRuns.slice(0, 10).forEach((run, i) => {
       prompt += `${i + 1}. ${run.distance?.toFixed(1) || '?'}km at ${run.avgPace || 'N/A'}/km`;
       if (run.avgHeartRate) prompt += `, ${run.avgHeartRate}bpm`;
       if (run.wasChallenging) prompt += ` [challenging]`;

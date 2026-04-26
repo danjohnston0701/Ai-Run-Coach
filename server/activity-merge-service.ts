@@ -243,7 +243,10 @@ export async function mergeGarminActivityWithAiRunCoachRun(
       paceData: detailedMetrics.paceData,
       heartRateData: detailedMetrics.heartRateData,
       kmSplits: detailedMetrics.kmSplits,
-      gpsTrack: detailedMetrics.gpsTrack,
+      // Only overwrite GPS if Garmin actually provided GPS samples.
+      // If undefined (Garmin had no GPS data for this activity), preserve the
+      // phone-recorded GPS so the route doesn't disappear after a merge.
+      ...(detailedMetrics.gpsTrack != null ? { gpsTrack: detailedMetrics.gpsTrack } : {}),
       elevationProfile: detailedMetrics.elevationProfile,
 
       // Merge tracking

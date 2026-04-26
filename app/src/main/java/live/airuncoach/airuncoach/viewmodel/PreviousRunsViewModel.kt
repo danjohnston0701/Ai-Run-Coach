@@ -79,7 +79,7 @@ class PreviousRunsViewModel @Inject constructor(
     private val _weatherImpactData = MutableStateFlow<WeatherImpactData?>(null)
     val weatherImpactData: StateFlow<WeatherImpactData?> = _weatherImpactData.asStateFlow()
     
-    private val _selectedFilter = MutableStateFlow("Last 7 Days")
+    private val _selectedFilter = MutableStateFlow("Last 30 Days")
     val selectedFilter: StateFlow<String> = _selectedFilter.asStateFlow()
 
     // Garmin connection flag — drives attribution badge visibility
