@@ -2777,6 +2777,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Alias for iOS app compatibility: GET /api/weather redirects to /api/weather/current
+  app.get("/api/weather", async (req: Request, res: Response) => {
+    try {
+      const { lat, lng } = req.query;
+      if (!lat || !lng) {
+        return res.status(400).json({ error: "lat and lng are required" });
+      }
+      
+      // Forward to the /api/weather/current endpoint
+      const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m&timezone=auto`);
+      if (!response.ok) {
+        throw new Error(`Open-Meteo API error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      const current = data.current;
+      
+      const weatherCodeToCondition = (code: number): string => {
+        if (code === 0) return "Clear";
+        if (code <= 3) return "Partly Cloudy";
+        if (code <= 49) return "Foggy";
+        if (code <= 59) return "Drizzle";
+        if (code <= 69) return "Rain";
+        if (code <= 79) return "Snow";
+        if (code <= 84) return "Showers";
+        if (code <= 94) return "Thunderstorm";
+        return "Unknown";
+      };
+      
+      res.json({
+        temp: current.temperature_2m,
+        feelsLike: current.apparent_temperature,
+        humidity: current.relative_humidity_2m,
+        windSpeed: Math.round(current.wind_speed_10m),
+        windDirection: current.wind_direction_10m,
+        condition: weatherCodeToCondition(current.weather_code),
+        weatherCode: current.weather_code,
+      });
+    } catch (error: any) {
+      console.error("Weather error:", error);
+      res.status(500).json({ error: "Failed to get weather" });
+    }
+  });
+
   // ==================== GEOCODING (Proxy) ====================
   
   app.get("/api/geocode/reverse", async (req: Request, res: Response) => {
@@ -3423,6 +3467,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get Garmin health summary for coaching context
+  // Check Garmin connection status (for iOS app compatibility)
+  app.get("/api/garmin/status", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const devices = await storage.getConnectedDevices(req.user!.userId);
+      const garminDevice = devices.find(d => d.deviceType === 'garmin' && d.isActive);
+      
+      res.json({
+        connected: !!garminDevice,
+        hasAccessToken: !!garminDevice?.accessToken,
+        lastSyncAt: garminDevice?.lastSyncAt || null,
+        deviceInfo: garminDevice ? {
+          id: garminDevice.id,
+          displayName: garminDevice.displayName,
+        } : null,
+      });
+    } catch (error: any) {
+      console.error("Garmin status check error:", error);
+      res.status(500).json({ error: "Failed to check Garmin status" });
+    }
+  });
+
   app.get("/api/garmin/health-summary", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const devices = await storage.getConnectedDevices(req.user!.userId);
@@ -10797,6 +10862,42 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     } catch (error: any) {
       console.error("Get plan progress error:", error);
       res.status(500).json({ error: "Failed to get plan progress" });
+    }
+  });
+
+  // Get pending/completed adaptations for a training plan (for iOS app compatibility)
+  app.get("/api/training-plans/:planId/adaptations", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { planId } = req.params;
+
+      // Verify plan exists and belongs to user
+      const [plan] = await db.select().from(trainingPlans).where(eq(trainingPlans.id, planId));
+      if (!plan) return res.status(404).json({ error: "Plan not found" });
+      if (plan.userId !== req.user!.userId) {
+        return res.status(403).json({ error: "Unauthorized" });
+      }
+
+      // Fetch all adaptations for this plan
+      const adaptations = await db.select().from(planAdaptations).where(
+        eq(planAdaptations.trainingPlanId, planId)
+      ).orderBy(desc(planAdaptations.createdAt));
+
+      res.json({
+        planId,
+        count: adaptations.length,
+        adaptations: adaptations.map(a => ({
+          id: a.id,
+          trainingPlanId: a.trainingPlanId,
+          adaptationDate: a.createdAt,
+          reason: a.reason,
+          changes: a.changes,
+          aiSuggestion: a.aiSuggestion,
+          userAccepted: a.userAccepted,
+        })),
+      });
+    } catch (error: any) {
+      console.error("Get plan adaptations error:", error);
+      res.status(500).json({ error: "Failed to get plan adaptations" });
     }
   });
 
