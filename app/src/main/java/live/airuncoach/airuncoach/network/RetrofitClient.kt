@@ -166,22 +166,13 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
             
             val response = chain.proceed(newRequest)
             
-            // Handle 401 Unauthorized responses
-            // Only clear the token for auth-critical endpoints, NOT for data endpoints.
-            // Data endpoints can return 401 temporarily (e.g. during a backend deploy)
-            // and we don't want to log the user out in those cases.
+            // Handle 401 Unauthorized responses — ALWAYS clear session and force re-login.
+            // An expired/invalid token means the user must re-authenticate, even if it's
+            // a data endpoint. This prevents using the app with a stale token.
             if (response.code == 401) {
                 val path = request.url.encodedPath
-                val isAuthEndpoint = path.contains("/login") ||
-                        path.contains("/logout") ||
-                        path.contains("/auth/me") ||
-                        path.contains("/users/me")
-                if (isAuthEndpoint) {
-                    android.util.Log.e("RetrofitClient", "❌ 401 on auth endpoint - clearing session")
-                    sessionManager.clearAuthToken()
-                } else {
-                    android.util.Log.w("RetrofitClient", "⚠️ 401 on data endpoint $path - keeping session")
-                }
+                android.util.Log.e("RetrofitClient", "❌ 401 Unauthorized on $path - clearing session and forcing re-login")
+                sessionManager.clearAuthToken()
             }
             
             // Log response details for debugging

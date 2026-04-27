@@ -173,6 +173,29 @@ fun RunSessionScreen(
     )
 
     LaunchedEffect(Unit) {
+        // CRITICAL: Validate auth token before starting a run. If expired, clear session and navigate to login.
+        try {
+            val sessionManager = live.airuncoach.airuncoach.data.SessionManager(context)
+            val token = sessionManager.getAuthToken()
+            
+            if (token.isNullOrBlank()) {
+                Log.e("RunSessionScreen", "❌ No auth token found - user must login before running")
+                // Clear everything and navigate back (the navigation will eventually reach login)
+                onCancel()
+                return@LaunchedEffect
+            }
+            
+            // Make a simple API call to validate the token is actually valid.
+            // If the token is expired, the RetrofitClient interceptor will clear it and
+            // subsequent API calls will fail with clear errors.
+            Log.d("RunSessionScreen", "Validating auth token before run...")
+            viewModel.validateAuthToken()
+        } catch (e: Exception) {
+            Log.e("RunSessionScreen", "❌ Auth validation failed: ${e.message} - aborting run start")
+            onCancel()
+            return@LaunchedEffect
+        }
+
         val config = RunConfigHolder.getConfig()
         val isCoachedWorkout = config?.trainingPlanId != null
 

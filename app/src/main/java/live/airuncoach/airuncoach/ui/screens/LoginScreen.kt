@@ -75,7 +75,7 @@ fun LoginScreen(
         }
     )
 
-    // Check if already logged in on first load
+    // Check if already logged in on first load and validate token
     LaunchedEffect(Unit) {
         try {
             val sessionManager = SessionManager(context)
@@ -85,24 +85,34 @@ fun LoginScreen(
             
             // Only auto-navigate if we have a valid non-empty token
             if (!token.isNullOrBlank() && token.length > 10) {
-                android.util.Log.d("LoginScreen", "Valid token found, checking permissions...")
+                android.util.Log.d("LoginScreen", "Token found, validating with server...")
                 
-                // User appears to be logged in, check if location permission is granted
-                val hasLocationPermission = ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.ACCESS_FINE_LOCATION
-                ) == PackageManager.PERMISSION_GRANTED
-                
-                if (hasLocationPermission) {
-                    // Already logged in and has permission, go to main
-                    android.util.Log.d("LoginScreen", "Has location permission, navigating to main")
-                    onNavigateToMain()
-                } else {
-                    // Logged in but needs location permission
-                    android.util.Log.d("LoginScreen", "No location permission, showing permission screen")
-                    onNavigateToLocationPermission()
+                try {
+                    // Validate the token by making an API call to a protected endpoint.
+                    // If token is expired/invalid, this will return 401 and the
+                    // RetrofitClient interceptor will clear the token.
+                    viewModel.validateToken()
+                    
+                    // Token is valid, check location permission
+                    val hasLocationPermission = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_FINE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED
+                    
+                    if (hasLocationPermission) {
+                        android.util.Log.d("LoginScreen", "Token valid, has location permission → MainScreen")
+                        onNavigateToMain()
+                    } else {
+                        android.util.Log.d("LoginScreen", "Token valid, needs location permission → PermissionScreen")
+                        onNavigateToLocationPermission()
+                    }
+                    return@LaunchedEffect
+                } catch (e: Exception) {
+                    // Token validation failed (401 or network error).
+                    // The RetrofitClient will have already cleared the token if it was 401.
+                    android.util.Log.w("LoginScreen", "Token validation failed: ${e.message}")
+                    // Fall through to show login screen
                 }
-                return@LaunchedEffect
             } else {
                 android.util.Log.d("LoginScreen", "No valid token, showing login screen")
             }

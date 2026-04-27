@@ -1044,6 +1044,24 @@ class RunSessionViewModel @Inject constructor(
         isBriefingAudioPlaying = false
     }
 
+    /**
+     * Validate the current auth token by calling a simple protected API endpoint.
+     * This ensures the token is still valid before the run starts.
+     * If the token is invalid/expired, the RetrofitClient interceptor will clear it.
+     *
+     * Throws an exception if validation fails.
+     */
+    suspend fun validateAuthToken() {
+        Log.d("RunSessionViewModel", "Validating auth token before run start...")
+        try {
+            apiService.getCurrentUser()
+            Log.d("RunSessionViewModel", "✅ Auth token validated successfully")
+        } catch (e: Exception) {
+            Log.e("RunSessionViewModel", "❌ Auth token validation failed: ${e.message}")
+            throw e
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         textToSpeechHelper.destroy()

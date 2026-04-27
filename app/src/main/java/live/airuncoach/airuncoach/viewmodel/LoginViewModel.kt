@@ -359,4 +359,24 @@ class LoginViewModel @Inject constructor(
             }
         }
     }
+
+    /**
+     * Validate the current auth token by making a simple API call to a protected endpoint.
+     * If the token is expired or invalid, the RetrofitClient interceptor will receive a 401
+     * and clear the token from storage.
+     *
+     * Throws an exception if validation fails (401, network error, etc.) so the caller
+     * knows the token was invalid.
+     */
+    suspend fun validateToken() {
+        android.util.Log.d("LoginViewModel", "Validating auth token with server...")
+        try {
+            // Call a simple protected endpoint to validate the token
+            apiService.getCurrentUser()
+            android.util.Log.d("LoginViewModel", "✅ Token validation successful")
+        } catch (e: Exception) {
+            android.util.Log.e("LoginViewModel", "❌ Token validation failed: ${e.message}")
+            throw e
+        }
+    }
 }
