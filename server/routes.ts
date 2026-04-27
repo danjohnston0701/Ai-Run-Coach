@@ -7740,8 +7740,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             startLocation.lng,
             distance || 5
           );
-        } catch (e) {
-          console.log('Weather impact analysis failed');
+        } catch (e: any) {
+          console.warn('[Pre-run briefing] Weather impact analysis failed (non-fatal):', e?.message || e);
+          // Continue without weather impact - briefing still works without it
         }
       }
       

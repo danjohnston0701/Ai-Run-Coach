@@ -835,6 +835,9 @@ STOP nagging about the target. Switch to: acknowledge the effort they ARE puttin
     }
 
     const paceVarietySeed = getVarietySeed();
+    
+    // Declare runnerFirstName early so it can be used in prompt templates
+    const runnerFirstName = runnerName ? runnerName.split(' ')[0] : null;
 
     const pacePrompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.
 
@@ -872,7 +875,7 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
   }
 
   // Runner profile context — name, fitness level, physical stats
-  const runnerFirstName = runnerName ? runnerName.split(' ')[0] : null;
+  // runnerFirstName is already declared earlier (line 839) before the pace coaching templates
   let runnerProfileContext = '';
   if (runnerFirstName) {
     runnerProfileContext += `\nThe runner's name is ${runnerFirstName}. Use their name naturally (not every sentence, but occasionally to personalise).`;
