@@ -65,7 +65,7 @@ fun SubscriptionScreen(
             TopAppBar(
                 title = {
                     Text(
-                        "Account Management",
+                        "My Account",
                         style = AppTextStyles.h2,
                         color = Colors.textPrimary
                     )
