@@ -4128,7 +4128,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/garmin/permissions", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { getCurrentPermissions } = await import('./garmin-permissions-service');
-      const permissions = await getCurrentPermissions(req.user!.id);
+      const permissions = await getCurrentPermissions(req.user!.userId);
       res.json(permissions);
     } catch (error: any) {
       console.error('Get permissions error:', error);
@@ -4144,7 +4144,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { getReauthorizationUrl } = await import('./garmin-permissions-service');
       const baseUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
-      const authUrl = await getReauthorizationUrl(req.user!.id, baseUrl);
+      const authUrl = await getReauthorizationUrl(req.user!.userId, baseUrl);
       res.json({ authUrl });
     } catch (error: any) {
       console.error('Reauthorize error:', error);
@@ -4159,7 +4159,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/garmin/disconnect", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { disconnectDevice } = await import('./garmin-permissions-service');
-      await disconnectDevice(req.user!.id);
+      await disconnectDevice(req.user!.userId);
       res.json({ success: true, message: 'Device disconnected' });
     } catch (error: any) {
       console.error('Disconnect error:', error);

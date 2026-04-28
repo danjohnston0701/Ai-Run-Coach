@@ -267,6 +267,21 @@ export async function requestGarminBackfill(
 
   const responseText = await response.text();
   if (!response.ok) {
+    if (response.status === 412) {
+      // 412 means the Garmin API credentials are missing the HISTORICAL_DATA_EXPORT
+      // permission in the Garmin Developer Portal. This is a portal configuration issue —
+      // the OAuth connection itself succeeds; real-time webhook pushes still work fine.
+      // Log a clear warning but do NOT throw so the OAuth flow completes successfully.
+      console.warn(
+        `⚠️  Garmin backfill skipped: HISTORICAL_DATA_EXPORT permission not enabled for this API key.\n` +
+        `   To enable historical sync, go to the Garmin Developer Portal → your app → Permissions and enable "Historical Data Export".\n` +
+        `   Real-time activity webhooks are unaffected and will continue to work.`
+      );
+      return {
+        requested: false,
+        message: 'Garmin backfill skipped — HISTORICAL_DATA_EXPORT permission not enabled. Real-time webhooks will still deliver new activities.',
+      };
+    }
     console.error(`❌ Garmin backfill request failed: HTTP ${response.status}`, responseText.substring(0, 300));
     throw new Error(`Garmin backfill request failed: ${response.status}`);
   }
@@ -904,8 +919,6 @@ export async function syncGarminActivities(
     // Garmin does NOT support direct pull of historical activities.
     // Instead we request a backfill — Garmin will push the data to our
     // /api/garmin/webhooks/activities endpoint, same as real-time webhooks.
-    console.log(`📤 Requesting Garmin backfill for ${startDate.toISOString().split('T')[0]} → ${endDate.toISOString().split('T')[0]}`);
-
     await requestGarminBackfill(currentAccessToken, startDate, endDate);
 
     console.log('✅ Garmin backfill requested — activities will arrive via webhook and be processed automatically');
