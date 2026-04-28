@@ -418,6 +418,7 @@ interface ApiService {
     // ========== CONNECTED DEVICES & GARMIN ==========
     
     @GET("/api/connected-devices")
+    @Headers("Cache-Control: no-cache")
     suspend fun getConnectedDevices(): List<ConnectedDevice>
 
     @POST("/api/connected-devices")

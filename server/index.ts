@@ -90,6 +90,7 @@ function setupCacheHeaders(app: express.Application) {
         "/api/users/me",
         "/api/auth",
         "/api/garmin",
+        "/api/connected-devices", // Connection state changes immediately on connect/disconnect
       ];
       const isNoCache = noCachePaths.some((p) => path.startsWith(p));
 
