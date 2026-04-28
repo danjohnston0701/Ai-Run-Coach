@@ -200,4 +200,47 @@ class SessionManager(context: Context) {
             remove("needs_coach_setup")
         }
     }
+
+    // ===== Local JWT Token Validation =====
+
+    /**
+     * Checks whether the stored JWT token has expired, using only the local
+     * token payload — no network call required.
+     *
+     * JWTs are signed by the server and contain an `exp` (expiry) claim in
+     * the payload. We can safely trust this value for the purpose of deciding
+     * whether to send the user to the login screen; the server will still
+     * reject an invalid/tampered token with 401 if someone forges an `exp`.
+     *
+     * @return true if no token exists OR the token's exp is in the past.
+     */
+    fun isTokenExpired(): Boolean {
+        val token = getAuthToken() ?: return true
+        return try {
+            // JWT format: header.payload.signature (all base64url-encoded)
+            val parts = token.split(".")
+            if (parts.size != 3) return true
+
+            // Pad to a valid base64 length and convert base64url → base64
+            val padded = parts[1]
+                .replace('-', '+')
+                .replace('_', '/')
+                .let { it.padEnd((it.length + 3) / 4 * 4, '=') }
+
+            val payloadJson = String(android.util.Base64.decode(padded, android.util.Base64.DEFAULT))
+            val exp = org.json.JSONObject(payloadJson).getLong("exp")
+            val nowSeconds = System.currentTimeMillis() / 1000
+
+            exp < nowSeconds
+        } catch (e: Exception) {
+            Log.w("SessionManager", "Could not parse JWT exp — treating as expired: ${e.message}")
+            true
+        }
+    }
+
+    /**
+     * Returns true if the session is valid: a token exists and has not expired.
+     * Use this on app startup to decide whether to skip the login screen.
+     */
+    fun isSessionValid(): Boolean = !isTokenExpired()
 }
