@@ -2,11 +2,14 @@ package live.airuncoach.airuncoach.viewmodel
 
 import live.airuncoach.airuncoach.domain.model.RunSession
 import live.airuncoach.airuncoach.network.model.GarminDataSummary
+import live.airuncoach.airuncoach.network.model.UserProfileForAI
+import live.airuncoach.airuncoach.service.BaselineComputationService
 import kotlin.math.roundToInt
 
 /**
  * Helper functions for building AI analysis requests with Garmin data.
  * Ensures null safety: only non-null data is included in prompts.
+ * Includes 4-week baseline computation for personalized coaching.
  */
 
 /**
@@ -272,4 +275,44 @@ fun updateWhatIKnowAboutYou(
     } else {
         baseProfile
     }
+}
+
+/**
+ * Build user profile context with 4-week baselines for elite personalized coaching.
+ * 
+ * This ensures AI coaching is personalized to THIS runner's patterns, not generic.
+ * Each runner has unique metrics - what's "normal" for one isn't for another.
+ */
+fun buildUserProfileContextWithBaselines(
+    userId: String,
+    whatIKnowAboutYou: String,
+    recentRuns: List<RunSession>
+): UserProfileForAI {
+    // Compute 4-week rolling baselines
+    val baseline = BaselineComputationService.computeBaseline(recentRuns)
+    
+    // Build context string with baseline info and delta comparisons
+    val baselineContext = if (baseline.sampleCount > 0) {
+        """
+        
+        ## RUNNER'S 4-WEEK BASELINES (from ${baseline.sampleCount} runs)
+        ${BaselineComputationService.generateBaselineContext(baseline)}
+        
+        These are this runner's typical metrics. Use these as reference points.
+        Deviations from these baselines indicate real changes in performance.
+        """.trimIndent()
+    } else {
+        "\n\n## NO BASELINE AVAILABLE\nThis is the runner's early running data. No 4-week average yet."
+    }
+    
+    // Return populated profile with real baselines
+    return UserProfileForAI(
+        userId = userId,
+        whatIKnowAboutYou = whatIKnowAboutYou + baselineContext,
+        garminInsights = "",
+        baselineGCT = baseline.groundContactTime?.toFloat(),
+        baselineVO = baseline.verticalOscillation?.toFloat(),
+        baselineStride = baseline.strideLength?.toFloat(),
+        baselineCadence = baseline.cadence
+    )
 }
