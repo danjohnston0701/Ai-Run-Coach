@@ -26,6 +26,9 @@ class ConnectedDevicesViewModel @Inject constructor(
     private val _garminConnectionStatus = MutableStateFlow("disconnected")
     val garminConnectionStatus: StateFlow<String> = _garminConnectionStatus
 
+    private val _garminDeviceName = MutableStateFlow("")
+    val garminDeviceName: StateFlow<String> = _garminDeviceName
+
     companion object {
         private const val TAG = "ConnectedDevicesVM"
     }
@@ -45,11 +48,13 @@ class ConnectedDevicesViewModel @Inject constructor(
             try {
                 // Check if connected via API
                 val devices = apiService.getConnectedDevices()
-                val hasGarmin = devices.any { it.deviceType == "garmin" && it.isActive == true }
-                _garminConnectionStatus.value = if (hasGarmin) "connected" else "disconnected"
+                val garminDevice = devices.find { it.deviceType == "garmin" && it.isActive == true }
+                _garminConnectionStatus.value = if (garminDevice != null) "connected" else "disconnected"
+                _garminDeviceName.value = garminDevice?.deviceName ?: ""
             } catch (e: Exception) {
                 Log.e(TAG, "Error checking Garmin connection", e)
                 _garminConnectionStatus.value = "disconnected"
+                _garminDeviceName.value = ""
             }
         }
     }
@@ -81,9 +86,11 @@ class ConnectedDevicesViewModel @Inject constructor(
                 apiService.disconnectGarminDevice()
                 Log.d(TAG, "Garmin disconnected successfully")
                 _garminConnectionStatus.value = "disconnected"
+                _garminDeviceName.value = ""
             } catch (e: Exception) {
                 Log.e(TAG, "Error disconnecting Garmin device", e)
                 _garminConnectionStatus.value = "disconnected"
+                _garminDeviceName.value = ""
             }
         }
     }

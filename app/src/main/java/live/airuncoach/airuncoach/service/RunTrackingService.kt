@@ -147,6 +147,23 @@ class RunTrackingService : Service(), SensorEventListener {
     private var cadenceSum: Long = 0
     private var cadenceCount: Int = 0
     private var maxCadenceValue: Int = 0
+
+    // ── Watch Running Dynamics accumulators (reset at run start) ──────────────
+    // Accumulated each 2-second frame from the watch; averaged at run end.
+    private var watchGctSum: Float = 0f;    private var watchGctCount: Int = 0     // Ground Contact Time (ms)
+    private var watchGcbSum: Float = 0f;    private var watchGcbCount: Int = 0     // Ground Contact Balance (%)
+    private var watchVoSum:  Float = 0f;    private var watchVoCount:  Int = 0     // Vertical Oscillation (cm)
+    private var watchMaxVo:  Float = 0f                                            // Peak VO during run
+    private var watchVrSum:  Float = 0f;    private var watchVrCount:  Int = 0     // Vertical Ratio (%)
+    private var watchSlSum:  Float = 0f;    private var watchSlCount:  Int = 0     // Stride Length (m)
+    private var watchMinSl:  Float = 0f;    private var watchMaxSl:  Float = 0f   // Min / max stride
+    // Latest single-value watch metrics (no averaging — keep most recent non-zero)
+    private var watchLatestAte:          Float = 0f   // Aerobic Training Effect
+    private var watchLatestAnAte:        Float = 0f   // Anaerobic Training Effect
+    private var watchLatestRecoveryMins: Int   = 0    // Recovery time (minutes)
+    private var watchLatestVo2Max:       Float = 0f   // VO2 Max estimate
+    private var watchLatestPressure:     Float = 0f   // Ambient pressure (Pa)
+    private var watchLatestBearing:      Float = 0f   // GPS bearing (degrees)
     
     // Struggle detection - baseline is session average pace, updated every 500m
     private var baselinePace: Float = 0f
@@ -543,6 +560,11 @@ class RunTrackingService : Service(), SensorEventListener {
             garminWatchManager?.onWatchGpsUpdate = { lat, lng, altM, speedMs ->
                 injectWatchLocation(lat, lng, altM, speedMs)
             }
+
+            // Full biometric frame from watch — 23+ metrics every ~2 s
+            garminWatchManager?.onWatchSensorData = { frame ->
+                updateWatchSensorData(frame)
+            }
         } catch (e: Exception) {
             Log.w("RunTrackingService", "GarminWatchManager init failed (non-fatal): ${e.message}")
             garminWatchManager = null
@@ -686,6 +708,14 @@ class RunTrackingService : Service(), SensorEventListener {
         maxHeartRate = 0
         heartRateSum = 0L
         heartRateSampleCount = 0
+        // Reset watch dynamics accumulators
+        watchGctSum = 0f;    watchGctCount = 0
+        watchGcbSum = 0f;    watchGcbCount = 0
+        watchVoSum  = 0f;    watchVoCount  = 0;  watchMaxVo  = 0f
+        watchVrSum  = 0f;    watchVrCount  = 0
+        watchSlSum  = 0f;    watchSlCount  = 0;  watchMinSl  = 0f;  watchMaxSl = 0f
+        watchLatestAte = 0f; watchLatestAnAte = 0f; watchLatestRecoveryMins = 0
+        watchLatestVo2Max = 0f; watchLatestPressure = 0f; watchLatestBearing = 0f
         initialStepCount = -1
         lastStepTimestamp = 0
         stepDetectorSteps = 0
@@ -1660,6 +1690,96 @@ class RunTrackingService : Service(), SensorEventListener {
         onNewLocation(loc)
     }
 
+    /**
+     * Update heart rate and cadence from watch sensor data stream during the run.
+     * Called every ~2 seconds when watch is connected and streaming sensor data.
+     * These real-time values are used immediately for live coaching and AI insights.
+     */
+    /**
+     * Processes a full biometric frame streamed from the Garmin companion watch every ~2 s.
+     * Updates all live metrics (HR, cadence, running dynamics, training effect, etc.)
+     * and queues a [WatchBiometricFrame] sample for storage in watch_biometric_samples.
+     */
+    private fun updateWatchSensorData(frame: WatchBiometricFrame) {
+        if (!isTracking) return
+
+        Log.d("RunTrackingService",
+            "Watch frame: hr=${frame.heartRate} cad=${frame.cadence} " +
+            "gct=${frame.groundContactTime}ms vo=${frame.verticalOscillation}cm " +
+            "stride=${frame.strideLength}m te=${frame.aerobicTrainingEffect}")
+
+        // ── Heart Rate ────────────────────────────────────────────────────────
+        if (frame.heartRate > 20) {
+            val prevHr = currentHeartRate
+            currentHeartRate = frame.heartRate
+            heartRateSum += frame.heartRate
+            heartRateSampleCount++
+            maxHeartRate = maxOf(maxHeartRate, frame.heartRate)
+            if (kotlin.math.abs(frame.heartRate - prevHr) > 10) {
+                Log.d("RunTrackingService", "HR change: $prevHr → ${frame.heartRate} bpm")
+            }
+        }
+
+        // ── Cadence ───────────────────────────────────────────────────────────
+        if (frame.cadence > 0) {
+            currentCadence = frame.cadence
+            cadenceSum += frame.cadence
+            cadenceCount++
+            maxCadenceValue = maxOf(maxCadenceValue, frame.cadence)
+        }
+
+        // ── Running Dynamics (accumulate for averages at run end) ─────────────
+        if (frame.groundContactTime > 0f) {
+            watchGctSum += frame.groundContactTime
+            watchGctCount++
+        }
+        if (frame.groundContactBalance in 30f..70f) {
+            watchGcbSum += frame.groundContactBalance
+            watchGcbCount++
+        }
+        if (frame.verticalOscillation > 0f) {
+            watchVoSum += frame.verticalOscillation
+            watchVoCount++
+            watchMaxVo = maxOf(watchMaxVo, frame.verticalOscillation)
+        }
+        if (frame.verticalRatio > 0f) {
+            watchVrSum += frame.verticalRatio
+            watchVrCount++
+        }
+        if (frame.strideLength > 0.1f) {
+            watchSlSum += frame.strideLength
+            watchSlCount++
+            watchMinSl = if (watchMinSl == 0f) frame.strideLength else minOf(watchMinSl, frame.strideLength)
+            watchMaxSl = maxOf(watchMaxSl, frame.strideLength)
+        }
+
+        // ── Training Effect & Recovery (keep latest non-zero values) ──────────
+        if (frame.aerobicTrainingEffect > 0f) watchLatestAte = frame.aerobicTrainingEffect
+        if (frame.anaerobicTrainingEffect > 0f) watchLatestAnAte = frame.anaerobicTrainingEffect
+        if (frame.recoveryTimeMinutes > 0) watchLatestRecoveryMins = frame.recoveryTimeMinutes
+        if (frame.vo2MaxEstimate > 0f) watchLatestVo2Max = frame.vo2MaxEstimate
+
+        // ── Environmental ─────────────────────────────────────────────────────
+        if (frame.ambientPressure > 0f) watchLatestPressure = frame.ambientPressure
+        if (frame.bearingDeg != null && frame.bearingDeg >= 0f) watchLatestBearing = frame.bearingDeg
+
+        // ── Update live RunSession ─────────────────────────────────────────────
+        _currentRunSession.value = _currentRunSession.value?.copy(
+            heartRate           = frame.heartRate.takeIf { it > 0 } ?: (_currentRunSession.value?.heartRate ?: 0),
+            cadence             = frame.cadence.takeIf { it > 0 } ?: (_currentRunSession.value?.cadence ?: 0),
+            avgGroundContactTime    = if (watchGctCount > 0) watchGctSum / watchGctCount else null,
+            avgGroundContactBalance = if (watchGcbCount > 0) watchGcbSum / watchGcbCount else null,
+            avgVerticalOscillation  = if (watchVoCount > 0) watchVoSum / watchVoCount else null,
+            maxVerticalOscillation  = if (watchMaxVo > 0f) watchMaxVo else null,
+            avgVerticalRatio        = if (watchVrCount > 0) watchVrSum / watchVrCount else null,
+            avgStrideLength         = if (watchSlCount > 0) watchSlSum / watchSlCount else (_currentRunSession.value?.avgStrideLength),
+            aerobicTrainingEffect   = if (watchLatestAte > 0f) watchLatestAte else null,
+            anaerobicTrainingEffect = if (watchLatestAnAte > 0f) watchLatestAnAte else null,
+            recoveryTimeMinutes     = if (watchLatestRecoveryMins > 0) watchLatestRecoveryMins else null,
+            vo2MaxEstimate          = if (watchLatestVo2Max > 0f) watchLatestVo2Max else null,
+        )
+    }
+
     private fun requestLocationUpdates() {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             Log.e("RunTrackingService", "Location permission not granted - stopping service")
@@ -2359,6 +2479,10 @@ class RunTrackingService : Service(), SensorEventListener {
         else if (runSession.heartRate > 0) runSession.heartRate  // Fallback to last reading
         else null
 
+        // Detect if run was completed on the Garmin watch (watch was connected)
+        val isWatchRun = garminWatchManager?.isWatchConnected?.value == true
+        val deviceName = if (isWatchRun) garminWatchManager?.getConnectedDeviceName() else null
+
         val uploadRequest = UploadRunRequest(
             routeId = null, // TODO: Add if user selected a saved route
             startTime = runSession.startTime,
@@ -2419,7 +2543,28 @@ class RunTrackingService : Service(), SensorEventListener {
             planProgressWeeks = runSession.planProgressWeeks,
             workoutType = runSession.workoutType,
             workoutIntensity = runSession.workoutIntensity,
-            workoutDescription = runSession.workoutDescription
+            workoutDescription = runSession.workoutDescription,
+            // Mark as Garmin data if run was completed on the watch
+            hasGarminData = isWatchRun,
+            garminDeviceName = deviceName,
+            // ── Running Dynamics (averaged over the full run from watch frames) ──
+            avgGroundContactTime     = if (watchGctCount > 0) watchGctSum / watchGctCount else null,
+            minGroundContactTime     = null, // tracked per-frame; server derives min from time-series
+            maxGroundContactTime     = null,
+            avgGroundContactBalance  = if (watchGcbCount > 0) watchGcbSum / watchGcbCount else null,
+            avgVerticalOscillation   = if (watchVoCount > 0) watchVoSum / watchVoCount else null,
+            maxVerticalOscillation   = if (watchMaxVo > 0f) watchMaxVo else null,
+            avgVerticalRatio         = if (watchVrCount > 0) watchVrSum / watchVrCount else null,
+            minStrideLength          = if (watchMinSl > 0f) watchMinSl else null,
+            maxStrideLength          = if (watchMaxSl > 0f) watchMaxSl else null,
+            // ── Training Effect & Recovery ─────────────────────────────────────
+            aerobicTrainingEffect    = if (watchLatestAte > 0f) watchLatestAte else null,
+            anaerobicTrainingEffect  = if (watchLatestAnAte > 0f) watchLatestAnAte else null,
+            recoveryTimeMinutes      = if (watchLatestRecoveryMins > 0) watchLatestRecoveryMins else null,
+            vo2MaxEstimate           = if (watchLatestVo2Max > 0f) watchLatestVo2Max else null,
+            // ── Environmental ──────────────────────────────────────────────────
+            avgAmbientPressure       = if (watchLatestPressure > 0f) watchLatestPressure else null,
+            avgBearing               = if (watchLatestBearing > 0f) watchLatestBearing else null,
         )
 
         // Retry up to 3 times with exponential backoff for server errors

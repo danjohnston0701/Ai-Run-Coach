@@ -63,7 +63,7 @@ fun PrepareRunOnWatchButton(
                     onClick = onPrepare,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp),
+                        .height(56.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFF0A1628)
                     ),
@@ -72,19 +72,25 @@ fun PrepareRunOnWatchButton(
                         1.5.dp, Color(0xFF00E5FF)
                     )
                 ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_garmin_logo),
-                        contentDescription = null,
-                        tint = Color(0xFF00E5FF),
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        "Prepare Run on Watch",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF00E5FF)
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_garmin_logo),
+                            contentDescription = null,
+                            tint = Color(0xFF00E5FF),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            "Watch",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF00E5FF)
+                        )
+                    }
                 }
             }
 
@@ -98,15 +104,15 @@ fun PrepareRunOnWatchButton(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp)
+                        .height(56.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(Color(0xFF0A1628))
                         .border(1.5.dp, Color(0xFF00E5FF).copy(alpha = pulse), RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "Sending to watch…",
-                        fontSize = 15.sp,
+                        "Sending…",
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color(0xFF00E5FF).copy(alpha = pulse)
                     )
@@ -117,20 +123,22 @@ fun PrepareRunOnWatchButton(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp)
+                        .height(56.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(Color(0xFF0D2B1A))
                         .border(1.5.dp, Color(0xFF00FF88), RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxSize()
                     ) {
-                        Text("✓", fontSize = 18.sp, color = Color(0xFF00FF88), fontWeight = FontWeight.Bold)
+                        Text("✓", fontSize = 16.sp, color = Color(0xFF00FF88), fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            "Watch Ready — press START on watch",
-                            fontSize = 14.sp,
+                            "Ready",
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color(0xFF00FF88)
                         )

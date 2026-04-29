@@ -1,0 +1,48 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="100dp"
+    android:height="24dp"
+    android:viewportWidth="100"
+    android:viewportHeight="24">
+
+    <!-- Black background rectangle -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M2,2 L98,2 L98,22 L2,22 Z" />
+
+    <!-- "GARMIN." text (white) -->
+    <!-- G -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M8,7 L8,17 L15,17 L15,13 L11,13 L11,7 Z" />
+
+    <!-- A -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M18,7 L22,17 L20,17 L19.5,15 L16.5,15 L16,17 L14,17 L18,7 M16.8,13 L19.2,13 L18,9.5 Z" />
+
+    <!-- R -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M24,7 L24,13 L26,13 L28,17 L26,17 L24,13 L24,17 L22,17 L22,7 L24,7" />
+
+    <!-- M -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M30,7 L30,17 L32,17 L34,11 L36,17 L38,17 L38,7 L36,7 L36,13 L34,9 L32,13 L32,7 Z" />
+
+    <!-- I -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M40,7 L40,17 L42,17 L42,7 Z" />
+
+    <!-- N -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M44,7 L44,17 L46,17 L52,9 L52,17 L54,17 L54,7 L52,7 L46,15 L46,7 Z" />
+
+    <!-- Period -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M56,15 L58,15 L58,17 L56,17 Z" />
+
+</vector>

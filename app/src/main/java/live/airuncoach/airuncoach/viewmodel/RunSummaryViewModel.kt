@@ -328,9 +328,27 @@ class RunSummaryViewModel @Inject constructor(
 
                 // Use the comprehensive analysis endpoint (provides structured insights)
                 try {
-                    Log.d("RunSummaryViewModel", "Calling comprehensive analysis for run ${session.id}...")
+                    Log.d("RunSummaryViewModel", "Building AI analysis request..." +
+                        (if (session.hasGarminData) " [WITH Garmin data]" else " [NO Garmin data]"))
+                    
+                    // Build Garmin data summary (only if we have data)
+                    val terrainSummary = computeTerrainSummary(session)
+                    val garminDataSummary = session.buildGarminDataSummary(terrainSummary)
+                    
+                    // Get user profile (currently no backend call for this, use defaults)
+                    // TODO: Add call to apiService.getUserProfile(session.userId) once endpoint exists
+                    val userProfile = null  // Will be populated once backend endpoint is ready
+                    
+                    // Build request with all context
+                    val analysisRequest = ComprehensiveAnalysisRequest(
+                        runId = session.id,
+                        garminDataSummary = garminDataSummary,
+                        userProfile = userProfile
+                    )
+                    
+                    Log.d("RunSummaryViewModel", "Requesting comprehensive analysis for run ${session.id}...")
                     val response = withTimeout(60_000L) {
-                        apiService.getComprehensiveRunAnalysis(session.id)
+                        apiService.getComprehensiveRunAnalysis(session.id, analysisRequest)
                     }
                     Log.d("RunSummaryViewModel", "Comprehensive analysis received")
                     _analysisState.value = AiAnalysisState.Comprehensive(response.analysis)
@@ -341,6 +359,12 @@ class RunSummaryViewModel @Inject constructor(
                         "analysis" to response.analysis
                     ))
                     try { apiService.saveRunAnalysis(session.id, SaveRunAnalysisRequest(saveJson)) } catch (_: Exception) {}
+                    
+                    // TODO: Extract Garmin insights from response and update user profile
+                    // val garminInsights = extractGarminInsights(response.analysis, session.hasGarminData)
+                    // if (garminInsights.isNotEmpty()) {
+                    //     // Update user profile with new insights
+                    // }
                 } catch (analysisError: Exception) {
                     Log.w("RunSummaryViewModel", "Comprehensive analysis failed: ${analysisError.message}", analysisError)
                     _analysisState.value = AiAnalysisState.Error(

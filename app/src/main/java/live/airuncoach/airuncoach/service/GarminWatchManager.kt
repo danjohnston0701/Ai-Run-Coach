@@ -32,6 +32,44 @@ import kotlinx.coroutines.flow.StateFlow
  *
  * Prerequisite: user's phone must have Garmin Connect app installed.
  */
+/**
+ * A single ~2-second biometric frame streamed from the Garmin companion watch.
+ * Every field maps directly to a key in the "watchData" ConnectIQ message.
+ * Fields are nullable — older watch models may not provide all of them.
+ */
+data class WatchBiometricFrame(
+    val elapsedSeconds: Int,
+
+    // GPS
+    val lat: Double?,
+    val lng: Double?,
+    val altMetres: Double?,
+    val speedMs: Float?,
+    val bearingDeg: Float?,           // 0-360, 0 = North
+    val gpsAccuracy: Float?,          // Garmin Pos.Quality 0-4 (4 = best)
+
+    // Biometrics
+    val heartRate: Int,               // bpm
+    val heartRateZone: Int,           // 1-5
+    val cadence: Int,                 // steps per minute
+
+    // Running Dynamics (from Activity.Info — may be 0.0 if unsupported)
+    val groundContactTime: Float,     // ms   (200-300 ms normal)
+    val groundContactBalance: Float,  // %    (50 = perfect symmetry)
+    val verticalOscillation: Float,   // cm   (6-8 cm efficient)
+    val verticalRatio: Float,         // %    (8-10 % efficient)
+    val strideLength: Float,          // m    per stride
+
+    // Training Effect (updated periodically by watch firmware)
+    val aerobicTrainingEffect: Float, // 0-5
+    val anaerobicTrainingEffect: Float, // 0-5
+    val recoveryTimeMinutes: Int,     // minutes until fully recovered
+    val vo2MaxEstimate: Float,        // ml/kg/min
+
+    // Environmental
+    val ambientPressure: Float,       // Pa (~101325 at sea level)
+)
+
 class GarminWatchManager(private val context: Context) {
 
     companion object {
@@ -66,6 +104,12 @@ class GarminWatchManager(private val context: Context) {
      * Callback args: (latDeg, lngDeg, altMetres?, speedMetresPerSec?)
      */
     var onWatchGpsUpdate: ((Double, Double, Double?, Float?) -> Unit)? = null
+
+    /**
+     * Invoked when the watch sends the full biometric + dynamics frame (~2 s).
+     * Contains all 23+ metrics from the watch sensors, Activity.Info, and GPS.
+     */
+    var onWatchSensorData: ((WatchBiometricFrame) -> Unit)? = null
 
     /**
      * Invoked when the watch companion app is resolved and ready to receive messages.
@@ -103,6 +147,19 @@ class GarminWatchManager(private val context: Context) {
         _isWatchConnected.value = false
         connectedDevice = null
         iqApp = null
+    }
+
+    /**
+     * Get the display name of the currently connected Garmin device
+     * @return Device name (e.g., "VivoActive 4") or null if no device connected
+     */
+    fun getConnectedDeviceName(): String? {
+        return try {
+            connectedDevice?.friendlyName
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get device name: ${e.message}")
+            null
+        }
     }
 
     // ── Phone → Watch ─────────────────────────────────────────────────────────
@@ -275,15 +332,65 @@ class GarminWatchManager(private val context: Context) {
                     onWatchCommand?.invoke(action)
                 }
                 "watchData" -> {
-                    // Watch GPS fix streamed from phone-controlled run
+                    // Full biometric frame streamed from the watch every ~2 s.
+                    // GPS fields
                     val lat   = (map["lat"]   as? Number)?.toDouble()
                     val lng   = (map["lng"]   as? Number)?.toDouble()
                     val altM  = (map["alt"]   as? Number)?.toDouble()
                     val speed = (map["speed"] as? Number)?.toFloat()
-                    Log.d(TAG, "Watch GPS: lat=$lat lng=$lng alt=$altM speed=${speed}m/s")
+                    val bear  = (map["bear"]  as? Number)?.toFloat()
+                    val acc   = (map["acc"]   as? Number)?.toFloat()
+                    // Biometrics
+                    val hr    = (map["hr"]    as? Number)?.toInt() ?: 0
+                    val hrz   = (map["hrz"]   as? Number)?.toInt() ?: 1
+                    val cad   = (map["cad"]   as? Number)?.toInt() ?: 0
+                    // Running Dynamics
+                    val gct   = (map["gct"]   as? Number)?.toFloat() ?: 0f
+                    val gcb   = (map["gcb"]   as? Number)?.toFloat() ?: 50f
+                    val vo    = (map["vo"]    as? Number)?.toFloat() ?: 0f
+                    val vr    = (map["vr"]    as? Number)?.toFloat() ?: 0f
+                    val sl    = (map["sl"]    as? Number)?.toFloat() ?: 0f
+                    // Training Effect
+                    val te    = (map["te"]    as? Number)?.toFloat() ?: 0f
+                    val ate   = (map["ate"]   as? Number)?.toFloat() ?: 0f
+                    val rt    = (map["rt"]    as? Number)?.toInt() ?: 0
+                    val vo2   = (map["vo2"]   as? Number)?.toFloat() ?: 0f
+                    // Environmental
+                    val pres  = (map["pres"]  as? Number)?.toFloat() ?: 0f
+                    val elap  = (map["elap"]  as? Number)?.toInt() ?: 0
+
+                    Log.d(TAG, "Watch frame: hr=$hr cad=$cad gct=$gct vo=$vo stride=$sl te=$te")
+
+                    val frame = WatchBiometricFrame(
+                        elapsedSeconds          = elap,
+                        lat                     = lat,
+                        lng                     = lng,
+                        altMetres               = altM,
+                        speedMs                 = speed,
+                        bearingDeg              = bear,
+                        gpsAccuracy             = acc,
+                        heartRate               = hr,
+                        heartRateZone           = hrz,
+                        cadence                 = cad,
+                        groundContactTime       = gct,
+                        groundContactBalance    = gcb,
+                        verticalOscillation     = vo,
+                        verticalRatio           = vr,
+                        strideLength            = sl,
+                        aerobicTrainingEffect   = te,
+                        anaerobicTrainingEffect = ate,
+                        recoveryTimeMinutes     = rt,
+                        vo2MaxEstimate          = vo2,
+                        ambientPressure         = pres,
+                    )
+
+                    // GPS callback for location tracking
                     if (lat != null && lng != null) {
                         onWatchGpsUpdate?.invoke(lat, lng, altM, speed)
                     }
+
+                    // Full biometric frame for coaching & storage
+                    onWatchSensorData?.invoke(frame)
                 }
             }
         } catch (e: Exception) {

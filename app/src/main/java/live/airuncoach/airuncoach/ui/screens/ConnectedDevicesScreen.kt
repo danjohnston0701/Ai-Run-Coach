@@ -49,6 +49,7 @@ fun ConnectedDevicesScreen(
     viewModel: ConnectedDevicesViewModel = hiltViewModel()
 ) {
     val garminConnectionStatus by viewModel.garminConnectionStatus.collectAsState()
+    val garminDeviceName by viewModel.garminDeviceName.collectAsState()
     val isGarminConnectConnected = garminConnectionStatus == "connected"
 
     val comingSoonDevices = remember {
@@ -163,6 +164,7 @@ fun ConnectedDevicesScreen(
             item {
                 GarminConnectCard(
                     isConnected = isGarminConnectConnected,
+                    deviceName = garminDeviceName,
                     onConnect = onNavigateToGarminConnect,
                     onDisconnect = { viewModel.disconnectGarmin() },
                     onManagePermissions = onNavigateToGarminPermissions
@@ -237,46 +239,42 @@ private fun GarminWatchAppCard(onSetUp: () -> Unit) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp)
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header row: logo + name + "FEATURED" badge
+            // Top row: Garmin IQ asset logo (full width)
+            Icon(
+                painter = painterResource(id = R.drawable.ic_garmin_tag),
+                contentDescription = "Garmin Connect IQ",
+                tint = Color.Unspecified,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp)
+            )
+
+            // Header: "Garmin Watch App" title + "Premium" badge
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    painter = painterResource(id = R.drawable.ic_garmin_logo),
-                    contentDescription = "Garmin",
-                    tint = Color.Unspecified,
-                    modifier = Modifier.size(52.dp)
-                )
-                Spacer(modifier = Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "Garmin Watch App",
-                            style = AppTextStyles.h3,
-                            color = Colors.textPrimary
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = Colors.primary.copy(alpha = 0.18f)
-                        ) {
-                            Text(
-                                "★ FEATURED",
-                                style = AppTextStyles.caption.copy(
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = Colors.primary,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
-                        "AI coaching directly on your Garmin watch",
-                        style = AppTextStyles.caption,
-                        color = Colors.textSecondary
+                        "Garmin Watch App",
+                        style = AppTextStyles.h3,
+                        color = Colors.textPrimary
                     )
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = Colors.primary.copy(alpha = 0.18f)
+                    ) {
+                        Text(
+                            "★ PREMIUM",
+                            style = AppTextStyles.caption.copy(
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = Colors.primary,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                 }
             }
 
@@ -284,7 +282,7 @@ private fun GarminWatchAppCard(onSetUp: () -> Unit) {
 
             // Description
             Text(
-                "Install the AI Run Coach companion app on your Garmin watch. Your watch GPS, heart rate, and running metrics stream live to your phone for real-time coaching cues — no Garmin Connect account needed.",
+                "Install the Ai Run Coach companion app on your Garmin watch. Your watch GPS, heart rate, and running metrics stream live to your phone for real-time coaching cues — for a totally elite experience.",
                 style = AppTextStyles.caption,
                 color = Colors.textSecondary,
                 lineHeight = 18.sp
@@ -315,7 +313,7 @@ private fun GarminWatchAppCard(onSetUp: () -> Unit) {
                     )
                     Spacer(modifier = Modifier.width(7.dp))
                     Text(
-                        "No Garmin Connect account required to use the watch app",
+                        "Automatically syncs your run activity to Garmin Connect.",
                         style = AppTextStyles.caption.copy(fontSize = 11.sp),
                         color = Colors.primary
                     )
@@ -354,10 +352,10 @@ private fun GarminWatchAppCard(onSetUp: () -> Unit) {
 @Composable
 private fun WatchFeatureChips() {
     val chips = listOf(
-        Pair(Icons.Default.LocationOn, "Watch GPS"),
-        Pair(Icons.Default.Favorite, "Heart Rate Zones"),
-        Pair(Icons.Default.Star, "Live AI Coaching"),
-        Pair(Icons.Default.Info, "Pace & Cadence")
+        Pair(Icons.Default.LocationOn, "23+ Biometric Metrics"),     // Ground contact, vertical oscillation, training effect, etc.
+        Pair(Icons.Default.Favorite, "Personal HR Zones"),            // Based on user's actual max HR
+        Pair(Icons.Default.Star, "Form Analysis"),                    // GCT, stride, bounce tracking
+        Pair(Icons.Default.Info, "Real-Time Coaching")                // AI-powered form & pacing cues
     )
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         chips.chunked(2).forEach { row ->
@@ -400,6 +398,7 @@ private fun WatchFeatureChips() {
 @Composable
 private fun GarminConnectCard(
     isConnected: Boolean,
+    deviceName: String = "",
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onManagePermissions: () -> Unit
@@ -416,7 +415,7 @@ private fun GarminConnectCard(
                 .fillMaxWidth()
                 .padding(20.dp)
         ) {
-            // Header row: logo + name + connected badge
+            // Header row: logo + name
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     painter = painterResource(id = R.drawable.ic_garmin_connect_logo),
@@ -426,32 +425,33 @@ private fun GarminConnectCard(
                 )
                 Spacer(modifier = Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "Garmin Connect",
-                            style = AppTextStyles.h3,
-                            color = Colors.textPrimary
-                        )
-                        if (isConnected) {
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = Color(0xFF4CAF50).copy(alpha = 0.2f)
-                            ) {
-                                Text(
-                                    "Connected",
-                                    style = AppTextStyles.caption.copy(fontSize = 10.sp),
-                                    color = Color(0xFF4CAF50),
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-                    }
+                    Text(
+                        "Garmin Connect",
+                        style = AppTextStyles.h3,
+                        color = Colors.textPrimary
+                    )
                     Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         "Cloud activity sync & run history",
                         style = AppTextStyles.caption,
                         color = Colors.textSecondary
+                    )
+                }
+            }
+
+            // Connected badge below the header (only when connected)
+            if (isConnected) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = Color(0xFF4CAF50).copy(alpha = 0.2f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "Connected - ${deviceName.ifEmpty { "Garmin Device" }}",
+                        style = AppTextStyles.caption.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                        color = Color(0xFF4CAF50),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                     )
                 }
             }

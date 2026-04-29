@@ -61,5 +61,36 @@ data class UploadRunRequest(
     val planProgressWeeks: Int? = null,
     val workoutType: String? = null,
     val workoutIntensity: String? = null,
-    val workoutDescription: String? = null
+    val workoutDescription: String? = null,
+    // Garmin device info — set to true if run was completed on Garmin companion watch
+    val hasGarminData: Boolean = false,
+    val garminDeviceName: String? = null,
+    // ── Running Dynamics (averaged over the run) ──────────────────────────────
+    val avgGroundContactTime: Float? = null,
+    val minGroundContactTime: Float? = null,
+    val maxGroundContactTime: Float? = null,
+    val avgGroundContactBalance: Float? = null,
+    val avgVerticalOscillation: Float? = null,
+    val maxVerticalOscillation: Float? = null,
+    val avgVerticalRatio: Float? = null,
+    val minStrideLength: Float? = null,
+    val maxStrideLength: Float? = null,
+    // ── Training Effect & Recovery ────────────────────────────────────────────
+    val aerobicTrainingEffect: Float? = null,
+    val anaerobicTrainingEffect: Float? = null,
+    val trainingEffectLabel: String? = null,
+    val recoveryTimeMinutes: Int? = null,
+    val vo2MaxEstimate: Float? = null,
+    // ── Environmental ─────────────────────────────────────────────────────────
+    val avgAmbientPressure: Float? = null,
+    val avgBearing: Float? = null,
+    // ── Time-series data for graphs ───────────────────────────────────────────
+    val groundContactTimeData: List<Float>? = null,
+    val groundContactBalanceData: List<Float>? = null,
+    val verticalOscillationData: List<Float>? = null,
+    val verticalRatioData: List<Float>? = null,
+    val strideLengthData: List<Float>? = null,
+    val cadenceData: List<Int>? = null,
+    val altitudeData: List<Float>? = null,
+    val bearingData: List<Float>? = null
 )

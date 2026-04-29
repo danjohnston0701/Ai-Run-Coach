@@ -216,12 +216,24 @@ fun RunSummaryScreenFlagship(
             isLoadingRun -> CenterLoading(padding)
             loadError != null -> ErrorViewFlagship(loadError!!, onNavigateBack, onNavigateToLogin)
             runSession != null -> {
-                Box(
+                Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
                 ) {
-                    when (selectedTab) {
+                    // Pinned Garmin attribution header (always visible)
+                    if (runSession.hasGarminData && !runSession.garminDeviceName.isNullOrBlank()) {
+                        GarminAttributionHeader(
+                            deviceName = runSession.garminDeviceName ?: "Garmin Device"
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .weight(1f)
+                    ) {
+                        when (selectedTab) {
                         0 -> AiInsightsTabContent(
                             run = runSession!!,
                             lastRunForDelta = lastRunForDelta,
@@ -290,7 +302,8 @@ fun RunSummaryScreenFlagship(
                             onTabSelected = { selectedTab = it }
                         )
                     }
-                }
+                        }
+                    }
                 
                 // Goal Achieved Celebration Dialog
                 if (showGoalCelebration && selectedGoalForCompletion != null && runSession != null) {
@@ -496,6 +509,69 @@ private fun RunSummaryTopBarFlagship(
     }
 }
 
+/**
+ * Pinned Garmin attribution header that stays visible while scrolling
+ */
+@Composable
+private fun GarminAttributionHeader(deviceName: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Colors.backgroundSecondary)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.ic_garmin_tag),
+            contentDescription = "Garmin",
+            modifier = Modifier.height(22.dp),
+            contentScale = ContentScale.FitHeight
+        )
+        Text(
+            text = deviceName,
+            style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+            color = Colors.textPrimary
+        )
+    }
+}
+
+/**
+ * Garmin data disclosure message shown under insights/graphs that use Garmin-provided data
+ */
+@Composable
+private fun GarminDataDisclosure(
+    disclosureType: String = "chart" // "chart" or "insights"
+) {
+    val disclosureText = when (disclosureType) {
+        "chart" -> "This chart was created using data provided by Garmin devices."
+        "insights" -> "Insights derived in part from Garmin device-sourced data."
+        else -> "This data was provided by Garmin devices."
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Colors.backgroundSecondary, RoundedCornerShape(8.dp))
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Icon(
+            painter = painterResource(id = R.drawable.ic_garmin_logo),
+            contentDescription = null,
+            tint = Color(0xFF8E9BAE),
+            modifier = Modifier.size(16.dp)
+        )
+        Text(
+            text = disclosureText,
+            style = AppTextStyles.caption.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic),
+            color = Colors.textSecondary,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
 /** Format terrain label for display */
 private fun formatTerrainLabel(terrain: String): String {
     return when (terrain.lowercase()) {
@@ -681,6 +757,13 @@ private fun AiInsightsTabContent(
                 style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
                 color = Colors.textPrimary
             )
+        }
+
+        // Show Garmin data disclosure when insights are derived from Garmin data
+        if (run.hasGarminData && aiConsentGranted) {
+            item {
+                GarminDataDisclosure(disclosureType = "insights")
+            }
         }
 
         if (!aiConsentGranted) {
@@ -898,6 +981,11 @@ private fun GraphsTabContent(
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
 ) {
+    // State for collapsible sections
+    var heartRateExpanded by remember { mutableStateOf(true) }
+    var dynamicsExpanded by remember { mutableStateOf(true) }
+    var multiMetricExpanded by remember { mutableStateOf(false) }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -910,33 +998,97 @@ private fun GraphsTabContent(
             RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected)
         }
 
-        item { ChartsSectionFlagship(run = run) }
+        // ═══════════════════════════════════════════════════════════════════════
+        // HEART RATE ANALYSIS SECTION
+        // ═══════════════════════════════════════════════════════════════════════
+        
+        stickyHeader {
+            GraphSectionHeader(
+                title = "Heart Rate Analysis",
+                expanded = heartRateExpanded,
+                onToggle = { heartRateExpanded = !heartRateExpanded }
+            )
+        }
 
-        item { HeartRateZonesVisualCard(heartRateData = run.heartRateData) }
+        if (heartRateExpanded) {
+            item { ChartsSectionFlagship(run = run) }
 
-        // Intensity Distribution Donut
-        item { IntensityDistributionCard(run = run) }
+            // Show disclosure if heart rate data is from Garmin
+            if (run.hasGarminData && run.heartRateData != null) {
+                item { GarminDataDisclosure(disclosureType = "chart") }
+            }
 
-        // ===== UNIQUE DIFFERENTIATING FEATURES =====
+            item { HeartRateZonesVisualCard(heartRateData = run.heartRateData) }
 
-        // (AI Coaching Replay Timeline - hidden for all users)
+            // Intensity Distribution Donut
+            item { IntensityDistributionCard(run = run) }
+        }
 
-        // Pace Decay / Fatigue Curve
-        item { FatigueCurveCard(run = run) }
+        // ═══════════════════════════════════════════════════════════════════════
+        // RUNNING DYNAMICS SECTION (when Garmin data available)
+        // ═══════════════════════════════════════════════════════════════════════
+        
+        if (run.hasGarminData) {
+            stickyHeader {
+                GraphSectionHeader(
+                    title = "Running Dynamics",
+                    expanded = dynamicsExpanded,
+                    onToggle = { dynamicsExpanded = !dynamicsExpanded }
+                )
+            }
 
-        // Aerobic Decoupling
-        item { AerobicDecouplingCard(run = run) }
+            if (dynamicsExpanded) {
+                // Running dynamics cards will be added here in Phase 2
+                // Placeholder for now
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Colors.backgroundSecondary
+                        )
+                    ) {
+                        Text(
+                            "Ground Contact Time, Vertical Oscillation, and Stride data will appear here",
+                            modifier = Modifier.padding(Spacing.md),
+                            style = AppTextStyles.body,
+                            color = Colors.textSecondary
+                        )
+                    }
+                }
+            }
+        }
 
-        // Running Economy (Pace vs HR)
-        item { RunningEconomyCard(run = run) }
+        // ═══════════════════════════════════════════════════════════════════════
+        // MULTI-METRIC ANALYSIS SECTION
+        // ═══════════════════════════════════════════════════════════════════════
+        
+        stickyHeader {
+            GraphSectionHeader(
+                title = "Multi-Metric Analysis",
+                expanded = multiMetricExpanded,
+                onToggle = { multiMetricExpanded = !multiMetricExpanded }
+            )
+        }
 
-        // Race Time Predictor
-        item { RaceTimePredictorCard(run = run) }
+        if (multiMetricExpanded) {
 
-        // Weather Performance Index
-        item {
-            if (run.weatherAtStart != null) {
-                WeatherPerformanceCard(weather = run.weatherAtStart!!)
+            // Pace Decay / Fatigue Curve
+            item { FatigueCurveCard(run = run) }
+
+            // Aerobic Decoupling
+            item { AerobicDecouplingCard(run = run) }
+
+            // Running Economy (Pace vs HR)
+            item { RunningEconomyCard(run = run) }
+
+            // Race Time Predictor
+            item { RaceTimePredictorCard(run = run) }
+
+            // Weather Performance Index
+            item {
+                if (run.weatherAtStart != null) {
+                    WeatherPerformanceCard(weather = run.weatherAtStart!!)
+                }
             }
         }
 
@@ -5688,6 +5840,13 @@ private fun DataTabFlagship(
         }
 
         // ==================== RUNNING DYNAMICS SECTION ====================
+        // Show disclosure if running dynamics data is from Garmin
+        if (run.hasGarminData && (run.cadence > 0 || run.maxCadence != null || run.avgStrideLength != null)) {
+            item {
+                GarminDataDisclosure(disclosureType = "chart")
+            }
+        }
+
         item {
             DataSectionCard(
                 title = "Running Dynamics",
@@ -5701,6 +5860,13 @@ private fun DataTabFlagship(
         }
 
         // ==================== HEART RATE SECTION ====================
+        // Show disclosure if heart rate data is from Garmin
+        if (run.hasGarminData && (run.heartRate > 0 || run.minHeartRate != null)) {
+            item {
+                GarminDataDisclosure(disclosureType = "chart")
+            }
+        }
+
         item {
             DataSectionCard(
                 title = "Heart Rate",
@@ -5713,6 +5879,13 @@ private fun DataTabFlagship(
         }
 
         // ==================== ELEVATION SECTION ====================
+        // Show disclosure if elevation data is from Garmin
+        if (run.hasGarminData && (run.totalElevationGain > 0 || run.totalElevationLoss > 0 || run.minElevation != null)) {
+            item {
+                GarminDataDisclosure(disclosureType = "chart")
+            }
+        }
+
         item {
             DataSectionCard(
                 title = "Elevation",
@@ -6999,6 +7172,49 @@ private fun DismissedStrugglePointRow(
                 "Restore",
                 style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
                 color = Colors.primary
+            )
+        }
+    }
+}
+
+/**
+ * Collapsible section header for graph categories.
+ * Used to organize graphs into logical groupings (Heart Rate, Running Dynamics, etc.)
+ */
+@Composable
+private fun GraphSectionHeader(
+    title: String,
+    expanded: Boolean,
+    onToggle: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onToggle() },
+        colors = CardDefaults.cardColors(
+            containerColor = Colors.backgroundSecondary
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                title,
+                style = AppTextStyles.subtitle2.copy(fontWeight = FontWeight.Bold),
+                color = Colors.textPrimary,
+                modifier = Modifier.weight(1f)
+            )
+            
+            Icon(
+                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = if (expanded) "Collapse $title" else "Expand $title",
+                tint = Colors.textSecondary,
+                modifier = Modifier.size(24.dp)
             )
         }
     }

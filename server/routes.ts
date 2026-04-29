@@ -1486,7 +1486,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const runId = req.params.id;
       const userId = req.user!.userId;
-      console.log(`[comprehensive-analysis] Starting analysis for run ${runId}, user ${userId}`);
+      
+      // Extract Garmin data summary and user profile from request body (if provided)
+      const garminDataSummary = req.body?.garminDataSummary || null;
+      const userProfileFromRequest = req.body?.userProfile || null;
+      
+      console.log(`[comprehensive-analysis] Starting analysis for run ${runId}, user ${userId}` +
+        (garminDataSummary?.hasGarminData ? ` [WITH Garmin data from ${garminDataSummary.deviceName}]` : ` [NO Garmin data]`));
       
       // Check for existing analysis first — return cached if available (no quota cost for cached results)
       const existingAnalysis = await storage.getRunAnalysis(runId);
@@ -1601,6 +1607,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const analysisStartTime = Date.now();
       const analysis = await aiService.generateComprehensiveRunAnalysis({
         runData: run,
+        
+        // NEW: Rich Garmin watch data from client (from ComprehensiveAnalysisRequest)
+        garminDataFromWatch: garminDataSummary,
+        userProfileContext: userProfileFromRequest,
+        
         garminActivity: garminActivity ? {
           activityType: garminActivity.activityType || undefined,
           durationInSeconds: garminActivity.durationInSeconds || undefined,
@@ -10199,13 +10210,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!goalType || !targetDistance) {
         return res.status(400).json({ error: "goalType and targetDistance are required" });
       }
+      
+      // Validate duration inputs
+      if (!durationWeeks && !targetDate) {
+        return res.status(400).json({ 
+          error: "Either durationWeeks or targetDate must be provided" 
+        });
+      }
+      
+      // Validate durationWeeks if provided
+      if (durationWeeks && (!Number.isInteger(durationWeeks) || durationWeeks <= 0)) {
+        return res.status(400).json({ 
+          error: "durationWeeks must be a positive integer" 
+        });
+      }
+      
+      // Validate and parse targetDate
+      let parsedTargetDate: Date | undefined;
+      if (targetDate) {
+        parsedTargetDate = new Date(targetDate);
+        if (isNaN(parsedTargetDate.getTime())) {
+          return res.status(400).json({ 
+            error: "targetDate must be a valid date (ISO 8601 format)" 
+          });
+        }
+        // Ensure target date is in the future
+        if (parsedTargetDate.getTime() <= Date.now()) {
+          return res.status(400).json({ 
+            error: "targetDate must be in the future" 
+          });
+        }
+      }
 
       const planId = await generateTrainingPlan(
         userId,
         goalType,
         targetDistance,
         targetTime,
-        targetDate ? new Date(targetDate) : undefined,
+        parsedTargetDate,
         experienceLevel || "intermediate",
         daysPerWeek || 4,
         regularSessions,

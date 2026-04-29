@@ -210,10 +210,111 @@ export const runs = pgTable("runs", {
   startedAt: timestamp("started_at"),              // Actual start of the run (from device clock)
   // Step count for the run (calculated from cadence × duration if step counter unavailable)
   totalSteps: integer("total_steps"),              // Total steps taken during the run
-  
+
+  // ── Running Dynamics (from Garmin companion watch) ────────────────────────
+  // These biomechanical metrics are streamed in real-time from the watch
+  // and stored as averages for run summary analysis and graphs
+  avgGroundContactTime: real("avg_ground_contact_time"),    // ms – avg foot contact per step (200-300ms normal)
+  minGroundContactTime: real("min_ground_contact_time"),    // ms – best (lowest) GCT during run
+  maxGroundContactTime: real("max_ground_contact_time"),    // ms – worst (highest) GCT during run
+  avgGroundContactBalance: real("avg_ground_contact_balance"), // % – left/right symmetry (50% = perfect)
+  avgVerticalOscillation: real("avg_vertical_oscillation"), // cm – avg torso bounce per step (6-8cm efficient)
+  maxVerticalOscillation: real("max_vertical_oscillation"), // cm – worst bounce reading
+  avgVerticalRatio: real("avg_vertical_ratio"),             // % – oscillation / stride ratio (8-10% efficient)
+  avgStrideLength: real("avg_stride_length"),               // m  – already exists, confirmed retained
+  minStrideLength: real("min_stride_length"),               // m  – shortest stride (e.g. steep uphill)
+  maxStrideLength: real("max_stride_length"),               // m  – longest stride
+
+  // ── Training Effect & Recovery (from Garmin) ──────────────────────────────
+  aerobicTrainingEffect: real("aerobic_training_effect"),   // 0-5 (aerobic load)
+  anaerobicTrainingEffect: real("anaerobic_training_effect"),// 0-5 (anaerobic load)
+  trainingEffectLabel: text("training_effect_label"),        // "Recovery" | "Base" | "Tempo" | "Threshold" | "VO2 Max"
+  recoveryTimeMinutes: integer("recovery_time_minutes"),     // minutes until fully recovered
+  vo2MaxEstimate: real("vo2_max_estimate"),                  // ml/kg/min estimated from this run
+
+  // ── Environmental (from Garmin GPS) ──────────────────────────────────────
+  avgAmbientPressure: real("avg_ambient_pressure"),         // Pa – used for altitude verification & weather
+  avgBearing: real("avg_bearing"),                          // degrees – overall direction of run
+  garminDeviceName: text("garmin_device_name"),             // e.g. "Fenix 7X", "VivoActive 4"
+
+  // ── Time-series data from watch ───────────────────────────────────────────
+  // Stored as JSONB arrays — one value per 2-second sample during the run.
+  // Used to render graphs (GCT over time, VO over time, stride length trends, etc.)
+  groundContactTimeData: jsonb("ground_contact_time_data"),   // number[] – GCT per sample
+  groundContactBalanceData: jsonb("ground_contact_balance_data"), // number[] – balance per sample
+  verticalOscillationData: jsonb("vertical_oscillation_data"), // number[] – VO per sample
+  verticalRatioData: jsonb("vertical_ratio_data"),            // number[] – VR per sample
+  strideLengthData: jsonb("stride_length_data"),              // number[] – stride per sample
+  cadenceData: jsonb("cadence_data"),                         // number[] – cadence per sample (fine-grained)
+  altitudeData: jsonb("altitude_data"),                       // number[] – altitude per GPS sample
+  bearingData: jsonb("bearing_data"),                         // number[] – bearing per sample
+
   createdAt: timestamp("created_at").defaultNow(), // When record was created in database
   updatedAt: timestamp("updated_at").defaultNow(), // When record was last updated
 });
+
+// Watch Biometric Samples table
+// Stores every 2-second biometric sample streamed from the Garmin companion watch
+// during a run. Used for fine-grained time-series graphs and AI coaching analysis.
+// Each row = one 2-second window of data from the watch.
+export const watchBiometricSamples = pgTable("watch_biometric_samples", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull().references(() => runs.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id),
+
+  // When this sample was recorded (ms since run start)
+  elapsedMs: integer("elapsed_ms").notNull(),            // ms from run start
+  sampledAt: timestamp("sampled_at").defaultNow(),       // wall-clock timestamp
+
+  // ── Location ─────────────────────────────────────────────────────────────
+  latitude: real("latitude"),
+  longitude: real("longitude"),
+  altitude: real("altitude"),                            // meters
+  bearing: real("bearing"),                              // degrees 0-360
+  gpsAccuracy: real("gps_accuracy"),                    // meters CEP
+
+  // ── Pace & Speed ──────────────────────────────────────────────────────────
+  pace: real("pace"),                                    // min/km
+  speed: real("speed"),                                  // m/s
+  distanceSoFar: real("distance_so_far"),                // meters
+
+  // ── Heart Rate ────────────────────────────────────────────────────────────
+  heartRate: integer("heart_rate"),                      // bpm
+  heartRateZone: integer("heart_rate_zone"),             // 1-5
+
+  // ── Cadence & Stride ─────────────────────────────────────────────────────
+  cadence: integer("cadence"),                           // spm
+  strideLength: real("stride_length"),                   // meters
+
+  // ── Running Dynamics ─────────────────────────────────────────────────────
+  groundContactTime: real("ground_contact_time"),        // ms
+  groundContactBalance: real("ground_contact_balance"),  // %
+  verticalOscillation: real("vertical_oscillation"),     // cm
+  verticalRatio: real("vertical_ratio"),                 // %
+
+  // ── Training Metrics (updated periodically) ───────────────────────────────
+  trainingEffect: real("training_effect"),               // 0-5
+  vo2Max: real("vo2_max"),                               // ml/kg/min
+
+  // ── Environmental ─────────────────────────────────────────────────────────
+  ambientPressure: real("ambient_pressure"),             // Pa
+
+  // ── Computed Contextual Fields ────────────────────────────────────────────
+  // Terrain grade computed server-side from adjacent altitude samples
+  terrainGrade: real("terrain_grade"),                   // % (negative = downhill)
+  // Fatigue estimate computed server-side
+  estimatedFatigue: integer("estimated_fatigue"),        // 0-100
+
+  // ── Coaching ──────────────────────────────────────────────────────────────
+  // If AI coaching was generated for this moment, store it
+  coachingCue: text("coaching_cue"),
+  coachingCategory: text("coaching_category"),           // form|pacing|effort|fatigue|etc.
+}, (table) => ({
+  // Index for fast queries by run (all samples for a run, ordered by time)
+  runIdx: index("watch_biometric_samples_run_idx").on(table.runId),
+  // Index for user-level queries
+  userIdx: index("watch_biometric_samples_user_idx").on(table.userId),
+}));
 
 // Activity Merge Log table - tracks merged runs from different sources
 export const activityMergeLog = pgTable("activity_merge_log", {
@@ -1359,6 +1460,8 @@ export type InsertUser = z.infer<typeof insertUserSchema>;
 export type Run = typeof runs.$inferSelect;
 export type InsertRun = z.infer<typeof insertRunSchema>;
 export type ActivityMergeLog = typeof activityMergeLog.$inferSelect;
+export type WatchBiometricSample = typeof watchBiometricSamples.$inferSelect;
+export type InsertWatchBiometricSample = typeof watchBiometricSamples.$inferInsert;
 export type Route = typeof routes.$inferSelect;
 export type InsertRoute = z.infer<typeof insertRouteSchema>;
 export type Goal = typeof goals.$inferSelect;

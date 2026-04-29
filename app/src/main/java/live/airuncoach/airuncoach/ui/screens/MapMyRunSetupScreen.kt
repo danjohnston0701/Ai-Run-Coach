@@ -319,62 +319,106 @@ fun MapMyRunSetupScreen(
                         }
                     )
                 } else {
-                    // no_route mode: Prepare on Watch (if installed) + Start Run
-                    PrepareRunOnWatchButton(
-                        companionInstalled = companionInstalled,
-                        sendState = watchSendState,
-                        onPrepare = {
-                            watchSendState = WatchSendState.SENDING
-                            runSessionViewModel.prepareRunOnWatch(
-                                distanceKm = targetDistance,
-                                runType = "free"
-                            )
-                            watchSendState = WatchSendState.SENT
+                    // no_route mode: Prepare on Watch (left) + Prepare Run (right) side-by-side
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                    ) {
+                        // Left: Prepare on Watch button (if installed)
+                        if (companionInstalled) {
+                            Box(modifier = Modifier.weight(1f)) {
+                                PrepareRunOnWatchButton(
+                                    companionInstalled = companionInstalled,
+                                    sendState = watchSendState,
+                                    onPrepare = {
+                                        watchSendState = WatchSendState.SENDING
+                                        // Prepare watch
+                                        runSessionViewModel.prepareRunOnWatch(
+                                            distanceKm = targetDistance,
+                                            runType = "free"
+                                        )
+                                        watchSendState = WatchSendState.SENT
+                                        
+                                        // Also setup and navigate to run session (same as Prepare Run)
+                                        val config = RunSetupConfig(
+                                            activityType = if (activityMode == ActivityMode.WALK) {
+                                                PhysicalActivityType.WALK
+                                            } else {
+                                                PhysicalActivityType.RUN
+                                            },
+                                            targetDistance = targetDistance,
+                                            hasTargetTime = isTargetTimeEnabled,
+                                            targetHours = hoursInt,
+                                            targetMinutes = minutesInt,
+                                            targetSeconds = secondsInt,
+                                            liveTrackingEnabled = isLiveTrackingEnabled,
+                                            liveTrackingObservers = emptyList(),
+                                            isGroupRun = isGroupRunEnabled,
+                                            groupRunParticipants = emptyList()
+                                        )
+                                        runSessionViewModel.setRunConfig(config)
+                                        runSessionViewModel.fetchWellnessData()
+                                        
+                                        // Navigate to run session UI
+                                        onStartRunWithoutRoute(
+                                            targetDistance,
+                                            isTargetTimeEnabled,
+                                            hoursInt,
+                                            minutesInt,
+                                            secondsInt
+                                        )
+                                    }
+                                )
+                            }
                         }
-                    )
-                    PrimaryCtaButton(
-                        text = when {
-                            !hasLocationPermission -> "GRANT LOCATION"
-                            isGettingLocation -> "ACQUIRING GPS…"
-                            currentLocation == null -> "WAITING FOR GPS SIGNAL"
-                            else -> "PREPARE RUN"
-                        },
-                        leadingIconRes = if (hasLocationPermission && currentLocation != null && !isGettingLocation)
-                            R.drawable.icon_navigation_vector else null,
-                        enabled = canProceed && !runState.isStopping,
-                        onClick = {
-                            // Fire-and-forget prep (no gating). Run session UI should show loading/coach status.
-                            val config = RunSetupConfig(
-                                activityType = if (activityMode == ActivityMode.WALK) {
-                                    PhysicalActivityType.WALK
-                                } else {
-                                    PhysicalActivityType.RUN
-                                },
-                                targetDistance = targetDistance,
-                                hasTargetTime = isTargetTimeEnabled,
-                                targetHours = hoursInt,
-                                targetMinutes = minutesInt,
-                                targetSeconds = secondsInt,
-                                liveTrackingEnabled = isLiveTrackingEnabled,
-                                liveTrackingObservers = emptyList(),
-                                isGroupRun = isGroupRunEnabled,
-                                groupRunParticipants = emptyList()
-                            )
-                            runSessionViewModel.setRunConfig(config)
-                            runSessionViewModel.fetchWellnessData()
-                            // NOTE: prepareRun() is now called in RunSessionScreen when it loads
-                            // to avoid duplicate API calls
 
-                            // Navigate immediately
-                            onStartRunWithoutRoute(
-                                targetDistance,
-                                isTargetTimeEnabled,
-                                hoursInt,
-                                minutesInt,
-                                secondsInt
+                        // Right: Prepare Run button (takes up remaining space)
+                        Box(modifier = Modifier.weight(1f)) {
+                            PrimaryCtaButton(
+                                text = when {
+                                    !hasLocationPermission -> "GRANT"
+                                    isGettingLocation -> "GPS…"
+                                    currentLocation == null -> "WAITING"
+                                    else -> "PREPARE RUN"
+                                },
+                                leadingIconRes = if (hasLocationPermission && currentLocation != null && !isGettingLocation)
+                                    R.drawable.icon_navigation_vector else null,
+                                enabled = canProceed && !runState.isStopping,
+                                onClick = {
+                                    // Fire-and-forget prep (no gating). Run session UI should show loading/coach status.
+                                    val config = RunSetupConfig(
+                                        activityType = if (activityMode == ActivityMode.WALK) {
+                                            PhysicalActivityType.WALK
+                                        } else {
+                                            PhysicalActivityType.RUN
+                                        },
+                                        targetDistance = targetDistance,
+                                        hasTargetTime = isTargetTimeEnabled,
+                                        targetHours = hoursInt,
+                                        targetMinutes = minutesInt,
+                                        targetSeconds = secondsInt,
+                                        liveTrackingEnabled = isLiveTrackingEnabled,
+                                        liveTrackingObservers = emptyList(),
+                                        isGroupRun = isGroupRunEnabled,
+                                        groupRunParticipants = emptyList()
+                                    )
+                                    runSessionViewModel.setRunConfig(config)
+                                    runSessionViewModel.fetchWellnessData()
+                                    // NOTE: prepareRun() is now called in RunSessionScreen when it loads
+                                    // to avoid duplicate API calls
+
+                                    // Navigate immediately
+                                    onStartRunWithoutRoute(
+                                        targetDistance,
+                                        isTargetTimeEnabled,
+                                        hoursInt,
+                                        minutesInt,
+                                        secondsInt
+                                    )
+                                }
                             )
                         }
-                    )
+                    }
                 }
 
                 Text(

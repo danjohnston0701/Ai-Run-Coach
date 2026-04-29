@@ -47,6 +47,9 @@ data class RunSession(
     val uploadedToGarmin: Boolean? = null,
     val garminActivityId: String? = null,
     
+    // Garmin device information (if run was from or enriched with Garmin data)
+    val garminDeviceName: String? = null,
+    
     // TRUE if run was enriched with Garmin data (HR, cadence, elevation, etc.)
     val hasGarminData: Boolean = false,
 
@@ -95,7 +98,38 @@ data class RunSession(
     val restingCalories: Int? = null, // kcal
     val estSweatLoss: Float? = null, // liters
     val minHeartRate: Int? = null, // bpm
-    
+
+    // ── Running Dynamics (from Garmin companion watch) ────────────────────────
+    val avgGroundContactTime: Float? = null,     // ms – avg foot contact per step (200-300ms normal)
+    val minGroundContactTime: Float? = null,     // ms – best GCT during run
+    val maxGroundContactTime: Float? = null,     // ms – worst GCT during run
+    val avgGroundContactBalance: Float? = null,  // % – left/right symmetry (50% = perfect)
+    val avgVerticalOscillation: Float? = null,   // cm – avg torso bounce (6-8cm efficient)
+    val maxVerticalOscillation: Float? = null,   // cm – worst bounce reading
+    val avgVerticalRatio: Float? = null,         // % – oscillation / stride ratio (8-10% efficient)
+    val minStrideLength: Float? = null,          // m – shortest stride (e.g. steep uphill)
+    val maxStrideLength: Float? = null,          // m – longest stride
+
+    // ── Training Effect & Recovery ────────────────────────────────────────────
+    val aerobicTrainingEffect: Float? = null,    // 0-5
+    val anaerobicTrainingEffect: Float? = null,  // 0-5
+    val trainingEffectLabel: String? = null,     // "Recovery"|"Base"|"Tempo"|"Threshold"|"VO2 Max"
+    val recoveryTimeMinutes: Int? = null,        // minutes until fully recovered
+    val vo2MaxEstimate: Float? = null,           // ml/kg/min estimated from this run
+
+    // ── Environmental (from Garmin GPS) ──────────────────────────────────────
+    val avgAmbientPressure: Float? = null,       // Pa – barometric pressure
+
+    // ── Time-series data from watch (for graphs) ──────────────────────────────
+    val groundContactTimeData: List<Float>? = null,    // GCT per 2s sample
+    val groundContactBalanceData: List<Float>? = null, // balance per 2s sample
+    val verticalOscillationData: List<Float>? = null,  // VO per 2s sample
+    val verticalRatioData: List<Float>? = null,        // VR per 2s sample
+    val strideLengthData: List<Float>? = null,         // stride per 2s sample
+    val cadenceData: List<Int>? = null,                // cadence per 2s sample
+    val altitudeData: List<Float>? = null,             // altitude per GPS sample
+    val bearingData: List<Float>? = null,              // bearing per sample
+
     // Run achievements and milestones
     val achievements: List<RunAchievement> = emptyList() // Personal bests and milestone badges
 ) {

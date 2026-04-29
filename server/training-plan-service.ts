@@ -236,10 +236,23 @@ export async function generateTrainingPlan(
 
     // Calculate plan duration
     // Priority: durationWeeks (user-selected) > targetDate > default based on goal/experience
-    const weeksUntilTarget = (durationWeeks && durationWeeks > 0) ? durationWeeks : (targetDate ? 
-      Math.ceil((targetDate.getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000)) : 
-      getPlanDuration(goalType, experienceLevel));
-    console.log(`[Training Plan] Duration: durationWeeks=${durationWeeks}, weeksUntilTarget=${weeksUntilTarget}`);
+    let weeksUntilTarget = 0;
+    if (durationWeeks && durationWeeks > 0) {
+      weeksUntilTarget = durationWeeks;
+    } else if (targetDate && targetDate instanceof Date && !isNaN(targetDate.getTime())) {
+      const calculatedWeeks = Math.ceil((targetDate.getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000));
+      // Ensure result is a valid positive number, fallback to default if calculation failed
+      weeksUntilTarget = (calculatedWeeks && calculatedWeeks > 0) ? calculatedWeeks : getPlanDuration(goalType, experienceLevel);
+    } else {
+      weeksUntilTarget = getPlanDuration(goalType, experienceLevel);
+    }
+    
+    // Safety check: ensure weeksUntilTarget is a valid positive integer
+    if (!Number.isInteger(weeksUntilTarget) || weeksUntilTarget <= 0) {
+      weeksUntilTarget = getPlanDuration(goalType, experienceLevel);
+    }
+    
+    console.log(`[Training Plan] Duration: durationWeeks=${durationWeeks}, targetDate=${targetDate}, calculated weeksUntilTarget=${weeksUntilTarget}`);
 
     // Calculate user age for HR zone calculations — fall back to Android-sent override if DOB not set
     const userAge = user[0]?.dob

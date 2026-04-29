@@ -2867,6 +2867,11 @@ export interface ComprehensiveRunAnalysis {
 
 export async function generateComprehensiveRunAnalysis(params: {
   runData: any;
+  
+  // NEW: Rich Garmin watch data from client (Android app sends this)
+  garminDataFromWatch?: any;  // { hasGarminData, deviceName, avgGCT, avgVO, etc. }
+  userProfileContext?: any;   // { userId, whatIKnowAboutYou, garminInsights, baselines }
+  
   garminActivity?: GarminActivityData;
   wellness?: GarminWellnessData;
   weatherImpactAnalysis?: string; // Weather impact analysis from historical data
@@ -2902,7 +2907,7 @@ export async function generateComprehensiveRunAnalysis(params: {
   expectedSessionGoal?: string;
   runnerProfile?: string | null;
 }): Promise<ComprehensiveRunAnalysis> {
-  const { runData, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent, linkedPlanId, planGoalType, planProgressWeek, planProgressWeeks, workoutType, workoutIntensity, workoutDescription, sessionInstructions, coachingEvents, expectedSessionGoal } = params;
+  const { runData, garminDataFromWatch, userProfileContext, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent, linkedPlanId, planGoalType, planProgressWeek, planProgressWeeks, workoutType, workoutIntensity, workoutDescription, sessionInstructions, coachingEvents, expectedSessionGoal } = params;
   
   // Build comprehensive prompt with all available data
   let prompt = `You are ${coachName}, an expert running coach with a ${coachTone} coaching style.
@@ -2954,6 +2959,133 @@ Think of yourself analyzing a training session you coached in person - you'd und
     }
     prompt += `Tailor your analysis depth, pacing expectations, and recommendations to this runner's fitness level. `;
     prompt += `For example, a "Newcomer" needs simple encouragement and basic form tips, while a "Competitive" or "Elite" runner expects detailed training load analysis and race-specific insights.\n`;
+  }
+
+  // NEW: Add personalization from user profile context (what we know about this runner)
+  if (userProfileContext?.whatIKnowAboutYou) {
+    prompt += `
+## ABOUT THIS RUNNER:
+${userProfileContext.whatIKnowAboutYou}`;
+    
+    if (userProfileContext.garminInsights) {
+      prompt += `
+
+### Recent Garmin Data Patterns:
+${userProfileContext.garminInsights}`;
+    }
+  }
+
+  // NEW: Add Garmin watch data from companion app (Sprint 1 Enhancement)
+  // This is data streamed directly from the watch during the run
+  if (garminDataFromWatch?.hasGarminData) {
+    prompt += `
+## GARMIN WATCH METRICS (Device: ${garminDataFromWatch.deviceName || 'Garmin Device'})
+
+### Running Dynamics`;
+    
+    if (garminDataFromWatch.avgGroundContactTime !== null && garminDataFromWatch.avgGroundContactTime !== undefined) {
+      prompt += `
+- Ground Contact Time: ${garminDataFromWatch.avgGroundContactTime.toFixed(1)}ms`;
+      if (garminDataFromWatch.minGroundContactTime && garminDataFromWatch.maxGroundContactTime) {
+        prompt += ` (range: ${garminDataFromWatch.minGroundContactTime.toFixed(1)}-${garminDataFromWatch.maxGroundContactTime.toFixed(1)}ms)`;
+      }
+      if (userProfileContext?.baselineGCT) {
+        const diff = garminDataFromWatch.avgGroundContactTime - userProfileContext.baselineGCT;
+        const percentChange = ((diff / userProfileContext.baselineGCT) * 100).toFixed(0);
+        prompt += ` — baseline: ${userProfileContext.baselineGCT.toFixed(1)}ms (${percentChange > 0 ? '+' : ''}${percentChange}%)`;
+      }
+    }
+    
+    if (garminDataFromWatch.avgVerticalOscillation !== null && garminDataFromWatch.avgVerticalOscillation !== undefined) {
+      prompt += `
+- Vertical Oscillation: ${garminDataFromWatch.avgVerticalOscillation.toFixed(1)}cm`;
+      if (garminDataFromWatch.maxVerticalOscillation) {
+        prompt += ` (peak: ${garminDataFromWatch.maxVerticalOscillation.toFixed(1)}cm)`;
+      }
+      if (userProfileContext?.baselineVO) {
+        const diff = garminDataFromWatch.avgVerticalOscillation - userProfileContext.baselineVO;
+        const percentChange = ((diff / userProfileContext.baselineVO) * 100).toFixed(0);
+        prompt += ` — baseline: ${userProfileContext.baselineVO.toFixed(1)}cm (${percentChange > 0 ? '+' : ''}${percentChange}%)`;
+      }
+    }
+    
+    if (garminDataFromWatch.avgGroundContactBalance !== null && garminDataFromWatch.avgGroundContactBalance !== undefined) {
+      const balance = garminDataFromWatch.avgGroundContactBalance;
+      const symmetry = balance >= 48 && balance <= 52 ? "balanced" : balance < 48 ? "left-heavy" : "right-heavy";
+      prompt += `
+- Ground Contact Balance: ${balance.toFixed(1)}% (${symmetry})`;
+    }
+    
+    if (garminDataFromWatch.avgVerticalRatio !== null && garminDataFromWatch.avgVerticalRatio !== undefined) {
+      prompt += `
+- Vertical Ratio: ${garminDataFromWatch.avgVerticalRatio.toFixed(1)}% (oscillation/stride efficiency)`;
+    }
+    
+    if (garminDataFromWatch.avgStrideLength !== null && garminDataFromWatch.avgStrideLength !== undefined) {
+      prompt += `
+- Average Stride: ${garminDataFromWatch.avgStrideLength.toFixed(2)}m`;
+      if (garminDataFromWatch.minStrideLength && garminDataFromWatch.maxStrideLength) {
+        prompt += ` (range: ${garminDataFromWatch.minStrideLength.toFixed(2)}-${garminDataFromWatch.maxStrideLength.toFixed(2)}m)`;
+      }
+      if (userProfileContext?.baselineStride) {
+        const diff = garminDataFromWatch.avgStrideLength - userProfileContext.baselineStride;
+        const percentChange = ((diff / userProfileContext.baselineStride) * 100).toFixed(0);
+        prompt += ` — baseline: ${userProfileContext.baselineStride.toFixed(2)}m (${percentChange > 0 ? '+' : ''}${percentChange}%)`;
+      }
+    }
+
+    // Training metrics
+    if (garminDataFromWatch.aerobicTrainingEffect !== null || garminDataFromWatch.anaerobicTrainingEffect !== null || garminDataFromWatch.recoveryTimeMinutes !== null || garminDataFromWatch.vo2MaxEstimate !== null) {
+      prompt += `
+
+### Training Load`;
+      
+      if (garminDataFromWatch.aerobicTrainingEffect !== null && garminDataFromWatch.aerobicTrainingEffect !== undefined) {
+        prompt += `
+- Aerobic Training Effect: ${garminDataFromWatch.aerobicTrainingEffect.toFixed(1)}/5.0`;
+      }
+      if (garminDataFromWatch.anaerobicTrainingEffect !== null && garminDataFromWatch.anaerobicTrainingEffect !== undefined) {
+        prompt += `
+- Anaerobic Training Effect: ${garminDataFromWatch.anaerobicTrainingEffect.toFixed(1)}/5.0`;
+      }
+      if (garminDataFromWatch.recoveryTimeMinutes !== null && garminDataFromWatch.recoveryTimeMinutes !== undefined) {
+        prompt += `
+- Recovery Time: ${garminDataFromWatch.recoveryTimeMinutes} hours`;
+      }
+      if (garminDataFromWatch.vo2MaxEstimate !== null && garminDataFromWatch.vo2MaxEstimate !== undefined) {
+        prompt += `
+- VO2 Max Estimate: ${garminDataFromWatch.vo2MaxEstimate.toFixed(1)}ml/kg/min`;
+        if (userProfileContext?.baselineVO2Max) {
+          const diff = garminDataFromWatch.vo2MaxEstimate - userProfileContext.baselineVO2Max;
+          prompt += ` (baseline: ${userProfileContext.baselineVO2Max.toFixed(1)}ml/kg/min, change: ${diff > 0 ? '+' : ''}${diff.toFixed(1)})`;
+        }
+      }
+    }
+
+    // Fatigue context
+    if (garminDataFromWatch.estimatedFatigue !== null && garminDataFromWatch.estimatedFatigue !== undefined) {
+      prompt += `
+
+### Fatigue & Recovery Context
+Estimated fatigue level: ${garminDataFromWatch.estimatedFatigue}%`;
+      if (garminDataFromWatch.estimatedFatigue >= 60) {
+        prompt += ` (HIGH — expect form degradation and need for recovery)`;
+      } else if (garminDataFromWatch.estimatedFatigue >= 30) {
+        prompt += ` (MODERATE — some form compromise expected due to accumulated effort)`;
+      } else {
+        prompt += ` (LOW — strong form expected)`;
+      }
+      prompt += `\nConsider fatigue level when evaluating form metrics and pacing decisions.`;
+    }
+
+    // Terrain context
+    if (garminDataFromWatch.terrainSummary) {
+      prompt += `
+
+### Course Profile
+Terrain: ${garminDataFromWatch.terrainSummary}
+Consider how terrain affects reasonable pacing and form expectations.`;
+    }
   }
 
   // Add training plan context if available
