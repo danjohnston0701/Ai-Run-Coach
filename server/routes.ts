@@ -10278,14 +10278,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // Sanitise all numeric inputs before passing to the plan generator.
+      // iOS / Android may send floats, strings, or omit optional fields entirely.
+      // Postgres integer columns reject NaN and non-integer floats with code 22P02.
+      const safeTargetTime = (() => {
+        const v = Number(targetTime);
+        return (!isNaN(v) && v > 0) ? Math.round(v) : undefined;
+      })();
+      const safeDaysPerWeek = (() => {
+        const v = Number(daysPerWeek);
+        return (!isNaN(v) && v >= 1 && v <= 7) ? Math.round(v) : 4;
+      })();
+      const safeTargetDistance = (() => {
+        const v = Number(targetDistance);
+        return (!isNaN(v) && v > 0) ? v : undefined;
+      })();
+      const safeAge    = (() => { const v = Number(age);    return (!isNaN(v) && v > 0 && v < 120) ? Math.round(v) : null; })();
+      const safeHeight = (() => { const v = Number(height); return (!isNaN(v) && v > 0) ? v : null; })();
+      const safeWeight = (() => { const v = Number(weight); return (!isNaN(v) && v > 0) ? v : null; })();
+
       const planId = await generateTrainingPlan(
         userId,
         goalType,
-        targetDistance,
-        targetTime,
+        safeTargetDistance ?? targetDistance,
+        safeTargetTime,
         parsedTargetDate,
         experienceLevel || "intermediate",
-        daysPerWeek || 4,
+        safeDaysPerWeek,
         regularSessions,
         firstSessionStart,
         durationWeeks,
@@ -10293,10 +10312,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userTimezone || null,
         goalId || null,
         // Pass demographics as overrides — used when user's DB profile is missing values
-        age ? Number(age) : null,
+        safeAge,
         gender || null,
-        height ? Number(height) : null,
-        weight ? Number(weight) : null,
+        safeHeight,
+        safeWeight,
       );
       
       // Link plan to goal if goalId was provided

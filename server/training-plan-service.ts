@@ -217,9 +217,12 @@ export async function generateTrainingPlan(
       }
     }
 
-    // ── Calculate BMI from user profile — fall back to Android-sent overrides if DB is empty ──
-    const userHeight = user[0]?.height || overrideHeight || 170; // cm
-    const userWeight = user[0]?.weight || overrideWeight || 70; // kg
+    // ── Calculate BMI from user profile — fall back to Android/iOS-sent overrides if DB is empty ──
+    // Guard against NaN from bad override strings (e.g. Number("") = 0, Number("abc") = NaN)
+    const rawHeight = user[0]?.height || overrideHeight;
+    const rawWeight = user[0]?.weight || overrideWeight;
+    const userHeight = (rawHeight != null && !isNaN(Number(rawHeight)) && Number(rawHeight) > 0) ? Number(rawHeight) : 170;
+    const userWeight = (rawWeight != null && !isNaN(Number(rawWeight)) && Number(rawWeight) > 0) ? Number(rawWeight) : 70;
     const bmi = userWeight / ((userHeight / 100) ** 2);
     const bmiCategory = bmi < 18.5 ? 'underweight' : bmi < 25 ? 'normal' : bmi < 30 ? 'overweight' : 'obese';
 
@@ -659,6 +662,11 @@ If runner has NO previous runs:
       planData.weeks = planData.weeks.slice(0, weeksUntilTarget);
     }
 
+    // Sanitise numeric fields before DB insert — Postgres rejects NaN for integer/real columns
+    const safeTargetTime   = (targetTime != null && !isNaN(targetTime) && targetTime > 0) ? Math.round(targetTime) : null;
+    const safeWeeklyMileage = (!isNaN(weeklyMileageBase) && weeklyMileageBase > 0) ? weeklyMileageBase : 20;
+    const safeDaysPerWeek   = (!isNaN(daysPerWeek) && daysPerWeek >= 1) ? Math.round(daysPerWeek) : 4;
+
     // Create training plan in database
     const plan = await db
       .insert(trainingPlans)
@@ -666,12 +674,12 @@ If runner has NO previous runs:
         userId,
         goalType,
         targetDistance,
-        targetTime,
+        targetTime: safeTargetTime,
         targetDate,
         totalWeeks: weeksUntilTarget,
         experienceLevel,
-        weeklyMileageBase,
-        daysPerWeek,
+        weeklyMileageBase: safeWeeklyMileage,
+        daysPerWeek: safeDaysPerWeek,
         includeSpeedWork: true,
         includeHillWork: true,
         includeLongRuns: true,
@@ -696,13 +704,18 @@ If runner has NO previous runs:
 
     // Create weekly plans and workouts
     for (const week of planData.weeks) {
+      // weekNumber is NOT NULL integer — guard against AI returning undefined/NaN
+      const safeWeekNumber = (typeof week.weekNumber === 'number' && !isNaN(week.weekNumber) && week.weekNumber > 0)
+        ? Math.round(week.weekNumber)
+        : planData.weeks.indexOf(week) + 1; // fallback: position in array
+
       const weeklyPlan = await db
         .insert(weeklyPlans)
         .values({
           trainingPlanId: planId,
-          weekNumber: week.weekNumber,
+          weekNumber: safeWeekNumber,
           weekDescription: week.weekDescription,
-          totalDistance: week.totalDistance,
+          totalDistance: (week.totalDistance != null && !isNaN(week.totalDistance)) ? week.totalDistance : null,
           focusArea: week.focusArea,
           intensityLevel: week.intensityLevel,
         })
@@ -782,6 +795,11 @@ If runner has NO previous runs:
           ? workout.dayOfWeek
           : 1;
 
+        // Guard workout.distance — real column, rejects NaN; use null if AI omits it
+        const safeDistance = (workout.distance != null && !isNaN(Number(workout.distance)) && Number(workout.distance) > 0)
+          ? Number(workout.distance)
+          : null;
+
         const plannedWorkoutResult = await db
           .insert(plannedWorkouts)
           .values({
@@ -790,7 +808,7 @@ If runner has NO previous runs:
             dayOfWeek: safeDay,
             scheduledDate,
             workoutType: workout.workoutType,
-            distance: workout.distance,
+            distance: safeDistance,
             targetPace: workout.targetPace,
             intensity: workout.intensity,
             hrZoneNumber,
