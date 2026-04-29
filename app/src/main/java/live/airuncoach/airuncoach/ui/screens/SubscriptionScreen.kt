@@ -666,12 +666,18 @@ fun PlanSelector(plan: Plan, isSelected: Boolean, onClick: () -> Unit) {
     }
 }
 
+sealed class PromoCodeState {
+    object Idle : PromoCodeState()
+    object Loading : PromoCodeState()
+    data class Error(val message: String = "Promo Code is not valid.") : PromoCodeState()
+    data class Success(val validUntil: String) : PromoCodeState()
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CouponCodeSection() {
     var couponCode by remember { mutableStateOf("") }
-    var isRedeeming by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf("") }
+    var promoState by remember { mutableStateOf<PromoCodeState>(PromoCodeState.Idle) }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -685,7 +691,7 @@ fun CouponCodeSection() {
         )
 
         // Error message if redemption failed
-        if (errorMessage.isNotBlank()) {
+        if (promoState is PromoCodeState.Error) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -694,12 +700,44 @@ fun CouponCodeSection() {
                 shape = RoundedCornerShape(BorderRadius.md)
             ) {
                 Text(
-                    text = errorMessage,
+                    text = (promoState as PromoCodeState.Error).message,
                     style = AppTextStyles.caption,
                     color = Colors.error,
                     modifier = Modifier.padding(Spacing.sm),
                     textAlign = TextAlign.Center
                 )
+            }
+        }
+
+        // Success message if code was applied
+        if (promoState is PromoCodeState.Success) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = Colors.success.copy(alpha = 0.15f)
+                ),
+                shape = RoundedCornerShape(BorderRadius.md)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(Spacing.sm),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+                ) {
+                    Text(
+                        text = "Promo Code has been applied to your account",
+                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.success,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = "Valid until ${(promoState as PromoCodeState.Success).validUntil}",
+                        style = AppTextStyles.caption,
+                        color = Colors.success,
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
         }
 
@@ -711,7 +749,9 @@ fun CouponCodeSection() {
                 value = couponCode,
                 onValueChange = {
                     couponCode = it
-                    errorMessage = "" // Clear error when user starts typing again
+                    if (promoState !is PromoCodeState.Success) {
+                        promoState = PromoCodeState.Idle // Clear error when user starts typing again
+                    }
                 },
                 label = { Text("Enter code") },
                 modifier = Modifier.weight(1f),
@@ -719,28 +759,29 @@ fun CouponCodeSection() {
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = Colors.textPrimary,
                     cursorColor = Colors.primary,
-                    focusedBorderColor = if (errorMessage.isNotBlank()) Colors.error else Colors.primary,
-                    unfocusedBorderColor = if (errorMessage.isNotBlank()) Colors.error else Colors.textMuted,
+                    focusedBorderColor = if (promoState is PromoCodeState.Error) Colors.error else Colors.primary,
+                    unfocusedBorderColor = if (promoState is PromoCodeState.Error) Colors.error else Colors.textMuted,
                     disabledBorderColor = Colors.textMuted
                 ),
-                enabled = !isRedeeming,
-                isError = errorMessage.isNotBlank()
+                enabled = promoState !is PromoCodeState.Loading && promoState !is PromoCodeState.Success,
+                isError = promoState is PromoCodeState.Error
             )
             Spacer(modifier = Modifier.width(Spacing.sm))
             Button(
                 onClick = {
                     if (couponCode.isNotBlank()) {
-                        isRedeeming = true
-                        errorMessage = ""
+                        promoState = PromoCodeState.Loading
                         
                         // TODO: Call API endpoint to validate and apply coupon
-                        // apiService.redeemCoupon(couponCode).onSuccess { ... }.onError { error ->
-                        //     errorMessage = error.message
+                        // apiService.redeemCoupon(couponCode).onSuccess { response ->
+                        //     promoState = PromoCodeState.Success(validUntil = response.expiresAt)
+                        //     couponCode = ""
+                        // }.onError { error ->
+                        //     promoState = PromoCodeState.Error("Promo Code is not valid.")
                         // }
                         
-                        // Placeholder: always show "invalid code" error for now
-                        errorMessage = "Invalid or expired code"
-                        isRedeeming = false
+                        // Placeholder: always show error for now
+                        promoState = PromoCodeState.Error("Promo Code is not valid.")
                     }
                 },
                 shape = RoundedCornerShape(BorderRadius.lg),
@@ -748,9 +789,9 @@ fun CouponCodeSection() {
                     containerColor = Colors.primary.copy(alpha = 0.5f),
                     contentColor = Colors.buttonText
                 ),
-                enabled = couponCode.isNotBlank() && !isRedeeming
+                enabled = couponCode.isNotBlank() && promoState !is PromoCodeState.Loading && promoState !is PromoCodeState.Success
             ) {
-                if (isRedeeming) {
+                if (promoState is PromoCodeState.Loading) {
                     CircularProgressIndicator(
                         color = Colors.buttonText,
                         strokeWidth = 2.dp,
