@@ -459,6 +459,8 @@ class RunTrackingService : Service(), SensorEventListener {
         const val EXTRA_PLAN_TOTAL_WEEKS = "EXTRA_PLAN_TOTAL_WEEKS"
         // Session coaching: full AI-generated instructions passed as JSON string
         const val EXTRA_SESSION_INSTRUCTIONS_JSON = "EXTRA_SESSION_INSTRUCTIONS_JSON"
+        // Dynamic coaching plan (rich model from prepare-coaching) — primary coaching source during coached runs
+        const val EXTRA_DYNAMIC_COACHING_PLAN_JSON = "EXTRA_DYNAMIC_COACHING_PLAN_JSON"
         
         private val _currentRunSession = MutableStateFlow<RunSession?>(null)
         val currentRunSession: StateFlow<RunSession?> = _currentRunSession
@@ -590,6 +592,28 @@ class RunTrackingService : Service(), SensorEventListener {
     private var sessionCoachingTone: String? = null
     private var sessionCoachingIntensity: String? = null
 
+    // ─── Dynamic Coaching Plan (rich model from prepare-coaching) ───────────
+    // This is the PRIMARY coaching source for coached runs — supersedes sessionInstructions
+    // for reactive/condition triggers. Contains HR targets, pace targets, and condition triggers.
+    private var dynamicCoachingPlan: live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan? = null
+
+    // Per-trigger state tracking for the dynamic plan evaluator
+    // triggerLastFiredMs: when each trigger last fired (keyed by trigger.id)
+    // triggerFiredOnce: set of trigger IDs that have already fired (for frequency == "once")
+    // triggerAltMessageIndex: rotation index for alternativeMessages per trigger
+    private val triggerLastFiredMs: MutableMap<String, Long> = mutableMapOf()
+    private val triggerFiredOnce: MutableSet<String> = mutableSetOf()
+    private val triggerAltMessageIndex: MutableMap<String, Int> = mutableMapOf()
+
+    // Current active phase from the dynamic plan (updated by evaluateDynamicPhase())
+    private var dynamicCurrentPhaseIndex: Int = 0
+    private var dynamicCurrentPhaseName: String? = null
+    private var dynamicPhaseDistanceStartKm: Double = 0.0
+
+    // Whether there is an active coaching plan (either system) — used to suppress generic prompts
+    private val isCoachingPlanActive: Boolean
+        get() = dynamicCoachingPlan != null || sessionInstructions != null
+
     // Phase engine state — tracks position within the AI-designed session structure
     private var currentPhaseIndex: Int = 0      // Index into sessionInstructions.phases
     private var currentPhaseName: String? = null // e.g. "warmup", "interval_1_of_6"
@@ -622,7 +646,7 @@ class RunTrackingService : Service(), SensorEventListener {
         planGoalType = intent?.getStringExtra(EXTRA_PLAN_GOAL_TYPE)
         planWeekNumber = intent?.getIntExtra(EXTRA_PLAN_WEEK_NUMBER, 0)?.takeIf { it > 0 }
         planTotalWeeks = intent?.getIntExtra(EXTRA_PLAN_TOTAL_WEEKS, 0)?.takeIf { it > 0 }
-        // Deserialize AI-generated session instructions from JSON if present
+        // Deserialize AI-generated session instructions from JSON if present (legacy plan)
         val sessionJson = intent?.getStringExtra(EXTRA_SESSION_INSTRUCTIONS_JSON)
         if (sessionJson != null) {
             try {
@@ -633,6 +657,17 @@ class RunTrackingService : Service(), SensorEventListener {
             } catch (e: Exception) {
                 Log.w("RunTrackingService", "Failed to deserialize session instructions: ${e.message}")
                 sessionInstructions = null
+            }
+        }
+        // Deserialize rich dynamic coaching plan (prepare-coaching) — primary reactive trigger source
+        val dynamicPlanJson = intent?.getStringExtra(EXTRA_DYNAMIC_COACHING_PLAN_JSON)
+        if (dynamicPlanJson != null) {
+            try {
+                dynamicCoachingPlan = gson.fromJson(dynamicPlanJson, live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan::class.java)
+                Log.d("RunTrackingService", "✅ Dynamic coaching plan loaded: strategy=${dynamicCoachingPlan?.cueingStrategy}, phases=${dynamicCoachingPlan?.phases?.size}, triggers=${dynamicCoachingPlan?.triggers?.size}")
+            } catch (e: Exception) {
+                Log.w("RunTrackingService", "Failed to deserialize dynamic coaching plan: ${e.message}")
+                dynamicCoachingPlan = null
             }
         }
 
@@ -2124,9 +2159,18 @@ class RunTrackingService : Service(), SensorEventListener {
         // Reset per-tick flag - only one coaching trigger fires per location update
         hasCoachingFiredThisTick = false
 
-        // ── SESSION PHASE ENGINE ──
-        // Check if runner has entered a new session phase and fire coaching triggers
-        if (sessionInstructions != null && !hasCoachingFiredThisTick) {
+        // ── DYNAMIC COACHING PLAN ENGINE (PRIMARY — rich reactive triggers) ──
+        // Evaluates live HR/pace conditions against the AI-generated coaching plan.
+        // Fires immediately when conditions are met — not on a timer.
+        // Takes priority over all other coaching paths during coached sessions.
+        if (dynamicCoachingPlan != null && !hasCoachingFiredThisTick) {
+            evaluateSessionConditionTriggers(displayDistanceKm)
+        }
+
+        // ── SESSION PHASE ENGINE (LEGACY — fires at_start / rep_start / rep_end) ──
+        // Check if runner has entered a new session phase and fire coaching triggers.
+        // Only runs when no dynamic plan is loaded (graceful fallback).
+        if (sessionInstructions != null && dynamicCoachingPlan == null && !hasCoachingFiredThisTick) {
             checkSessionPhaseTransitions(displayDistanceKm)
         }
 
@@ -2136,40 +2180,45 @@ class RunTrackingService : Service(), SensorEventListener {
         val inFinalStretch = isInFinalStretch()
         
         if (!inFinalStretch) {
-            // Check for phase changes and trigger coaching (includes 500m check-in)
-            // Phase changes use the global gate internally
-            checkPhaseChange(phase)
+            // ── GENERIC PROMPTS GATE ──
+            // During a coached session (dynamic plan OR legacy session instructions), suppress
+            // generic free-run prompts (phase changes, 500m check-ins, HR timer, elite motivation).
+            // Cadence coaching is preserved — technique matters in ALL sessions.
+            if (!isCoachingPlanActive) {
+                // Free run — all generic prompts active
+                checkPhaseChange(phase)
 
-            // Check for 500m milestones — initial 500m check-in is special (only requires time gate, not distance)
-            // This ensures runners get their initial assessment right at 500m, not delayed until 650m
-            if (!hasCoachingFiredThisTick) {
-                val now = System.currentTimeMillis()
-                val isInitial500m = last500mMilestone == 0
-                val timeSinceLastCoaching = now - lastGlobalCoachingTime
-                val hasTimeElapsed = timeSinceLastCoaching >= GLOBAL_COACHING_MIN_GAP_MS
-                
-                // Initial 500m check-in: only requires time gap (lenient gate for early assessment)
-                // Subsequent milestones: require full coaching gate (time + distance)
-                if ((isInitial500m && hasTimeElapsed) || (!isInitial500m && canFireCoaching())) {
-                    check500mMilestones()
+                if (!hasCoachingFiredThisTick) {
+                    val now = System.currentTimeMillis()
+                    val isInitial500m = last500mMilestone == 0
+                    val timeSinceLastCoaching = now - lastGlobalCoachingTime
+                    val hasTimeElapsed = timeSinceLastCoaching >= GLOBAL_COACHING_MIN_GAP_MS
+                    if ((isInitial500m && hasTimeElapsed) || (!isInitial500m && canFireCoaching())) {
+                        check500mMilestones()
+                    }
+                }
+
+                // HR coaching timer — free run only (coached sessions use reactive hr_zone triggers)
+                if (!hasCoachingFiredThisTick && canFireCoaching()) {
+                    maybeTriggerHeartRateCoaching()
                 }
             }
 
-            // Check for heart rate coaching (respects global cooldown)
-            if (!hasCoachingFiredThisTick && canFireCoaching()) {
-                maybeTriggerHeartRateCoaching()
-            }
-
-            // Check for cadence/stride coaching (respects global cooldown)
+            // Cadence/stride coaching fires in ALL sessions — technique matters everywhere
             if (!hasCoachingFiredThisTick && canFireCoaching()) {
                 maybeTriggerCadenceCoaching()
             }
         }
 
-        // Elite coaching triggers — always checked because it handles final 500m/100m motivation
-        // The elite coaching function itself decides whether to fire motivation or analysis
+        // Elite coaching final-stretch triggers — preserved for coached sessions (final 500m/100m)
+        // Generic milestone/pace-trend/technique elite triggers are suppressed during coached sessions
         if (!hasCoachingFiredThisTick && canFireCoaching()) {
-            maybeFireEliteCoaching(displayDistance, duration, avgSpeed, phase)
+            if (isCoachingPlanActive) {
+                // Coached session: only fire final 500m / 100m motivation, skip all other elite cues
+                maybeFinalStretchCoaching(displayDistance, duration, avgSpeed)
+            } else {
+                maybeFireEliteCoaching(displayDistance, duration, avgSpeed, phase)
+            }
         }
         
         _currentRunSession.value = RunSession(
@@ -2937,37 +2986,47 @@ class RunTrackingService : Service(), SensorEventListener {
             val rawRepIndex = (positionInMainSet / repKm).toInt()
             val repNumber = (rawRepIndex + 1).coerceAtMost(reps)
             val positionInRep = positionInMainSet - (rawRepIndex * repKm)
-            val isWorkRep = true  // All reps in main_set are work reps
+            // Determine if this is a work rep or recovery jog based on phase name
+            // Phases named "recovery*", "jog*", "rest*", "float*" are recovery phases
+            val phaseNameLower = phase.name.lowercase()
+            val isWorkRep = !phaseNameLower.contains("recovery") &&
+                            !phaseNameLower.contains("jog") &&
+                            !phaseNameLower.contains("rest") &&
+                            !phaseNameLower.contains("float")
 
-            // Detect start of a new rep
+            // Detect start of a new rep / recovery jog
             if (repNumber != lastRepTriggerFiredAtRep && positionInRep < 0.05 && !hasCoachingFiredThisTick) {
                 lastRepTriggerFiredAtRep = repNumber
+                currentRepIsWorkPhase = isWorkRep
+                val triggerType = if (isWorkRep) "rep_start" else "recovery_start"
                 val trigger = instructions.sessionStructure?.coachingTriggers?.firstOrNull { t ->
-                    t.phase == phase.name && t.trigger == "rep_start"
+                    t.phase == phase.name && (t.trigger == triggerType || t.trigger == "rep_start")
                 }
                 if (trigger?.message != null && canFireCoaching()) {
                     val repMsg = trigger.message!!
                         .replace("{rep}", "$repNumber")
                         .replace("{total}", "$reps")
+                    val prefix = if (isWorkRep) "Rep $repNumber of $reps: " else ""
                     fireSessionPhaseTrigger(
-                        message = "Rep $repNumber of $reps: $repMsg",
-                        eventType = "rep_start",
+                        message = "$prefix$repMsg",
+                        eventType = triggerType,
                         eventPhase = "rep_${repNumber}_of_$reps"
                     )
                 }
             }
 
-            // Detect end of a rep (within 50m of end of rep distance)
+            // Detect end of a rep / recovery jog (within 50m of end of phase distance)
             val repEndKm = rawRepIndex * repKm + repKm
             val distanceToRepEnd = repEndKm - positionInMainSet
             if (distanceToRepEnd in 0.0..0.05 && lastRepTriggerFiredAtRep == repNumber && !hasCoachingFiredThisTick) {
+                val triggerType = if (isWorkRep) "rep_end" else "recovery_end"
                 val trigger = instructions.sessionStructure?.coachingTriggers?.firstOrNull { t ->
-                    t.phase == phase.name && t.trigger == "rep_end"
+                    t.phase == phase.name && (t.trigger == triggerType || t.trigger == "rep_end")
                 }
                 if (trigger?.message != null && canFireCoaching()) {
                     fireSessionPhaseTrigger(
                         message = trigger.message!!,
-                        eventType = "rep_end",
+                        eventType = triggerType,
                         eventPhase = "rep_${repNumber}_of_$reps"
                     )
                 }
@@ -3026,6 +3085,241 @@ class RunTrackingService : Service(), SensorEventListener {
                 )
             } catch (e: Exception) {
                 Log.w("RunTrackingService", "Session trigger delivery failed (non-fatal): ${e.message}")
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // DYNAMIC COACHING PLAN EVALUATOR
+    // Evaluates reactive triggers from the rich DynamicSessionCoachingPlan every
+    // GPS tick. Fires immediately when a condition is met (HR out of zone, pace
+    // deviating) rather than waiting for a scheduled timer.
+    //
+    // Trigger types handled:
+    //   hr_zone_high / hr_zone_low  — fired when HR exits target zone for current phase
+    //   pace_too_fast / pace_too_slow — fired when pace deviates from phase target
+    //   milestone                    — fired at key distance percentages
+    //   phase_start / phase_end      — fired at phase transitions (distance-based)
+    //   rep_start / rep_end          — fired at interval rep boundaries
+    //   recovery_start               — fired at the start of each recovery jog phase
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** Minimum gap between reactive trigger re-fires (90 seconds for on_condition triggers) */
+    private val REACTIVE_TRIGGER_COOLDOWN_MS = 90_000L
+
+    /**
+     * Evaluate all dynamic plan triggers against live metrics each GPS tick.
+     * Called in the main location-update loop before generic prompts.
+     */
+    private fun evaluateSessionConditionTriggers(currentDistanceKm: Double) {
+        val plan = dynamicCoachingPlan ?: return
+        if (hasCoachingFiredThisTick) return
+        if (!coachingFeaturePrefs.motivationalCoachingEnabled) return
+
+        // First: update which phase we're in (distance-based, same logic as legacy engine)
+        evaluateDynamicPhase(currentDistanceKm, plan)
+
+        val now = System.currentTimeMillis()
+        val currentPhase = plan.phases.getOrNull(dynamicCurrentPhaseIndex)
+
+        // Resolve per-phase HR / pace targets — fall back to plan-level targets if phase has none
+        val phaseHRMax = currentPhase?.targetHRMax ?: plan.targetMetrics.mainEffortHRMax
+        val phaseHRMin = currentPhase?.targetHRMin ?: plan.targetMetrics.mainEffortHRMin
+        val phasePaceMax = currentPhase?.targetPaceMax ?: plan.targetMetrics.mainEffortPaceMax  // sec/km
+        val phasePaceMin = currentPhase?.targetPaceMin ?: plan.targetMetrics.mainEffortPaceMin  // sec/km
+        val currentPaceSecPerKm = parsePaceToSeconds(currentPace)
+
+        for (trigger in plan.triggers) {
+            if (hasCoachingFiredThisTick) return
+
+            // Skip triggers whose IDs have already fired for "once" frequency
+            if (trigger.frequency == "once" && triggerFiredOnce.contains(trigger.id)) continue
+
+            // Respect per-trigger cooldown for reactive triggers
+            val lastFiredMs = triggerLastFiredMs[trigger.id] ?: 0L
+            val cooldown = if (trigger.frequency == "once") 0L else REACTIVE_TRIGGER_COOLDOWN_MS
+            if ((now - lastFiredMs) < cooldown) continue
+
+            // Evaluate the trigger condition
+            val conditionMet = when (trigger.type) {
+                "hr_zone_high" -> {
+                    currentHeartRate > 0 && phaseHRMax != null && currentHeartRate > phaseHRMax
+                }
+                "hr_zone_low" -> {
+                    currentHeartRate > 0 && phaseHRMin != null && currentHeartRate < phaseHRMin &&
+                    getActiveRunDuration() > 120_000L // Only after 2 min — ignore warmup lag
+                }
+                "pace_too_fast" -> {
+                    currentPaceSecPerKm > 0 && phasePaceMin != null &&
+                    currentPaceSecPerKm < (phasePaceMin - 15)
+                }
+                "pace_too_slow" -> {
+                    currentPaceSecPerKm > 0 && phasePaceMax != null &&
+                    currentPaceSecPerKm > (phasePaceMax + 15)
+                }
+                "milestone" -> {
+                    val td = targetDistance ?: 0.0
+                    if (td <= 0) false
+                    else evaluateMilestoneCondition(trigger.condition, currentDistanceKm, td / 1000.0)
+                }
+                "phase_start", "phase_end", "rep_start", "rep_end", "recovery_start" -> {
+                    // These are fired by evaluateDynamicPhase() directly — skip here
+                    false
+                }
+                else -> false
+            }
+
+            if (!conditionMet) continue
+
+            // Pick the message — rotate through alternativeMessages for variety
+            val message = pickTriggerMessage(trigger)
+
+            // Fire it
+            triggerLastFiredMs[trigger.id] = now
+            if (trigger.frequency == "once") triggerFiredOnce.add(trigger.id)
+
+            Log.d("RunTrackingService", "🔔 Reactive trigger [${trigger.type}] ${trigger.id}: $message")
+            fireDynamicTrigger(message, trigger.type, dynamicCurrentPhaseName ?: "unknown")
+        }
+    }
+
+    /**
+     * Evaluate which phase the runner is in (distance-based) and fire phase_start /
+     * phase_end / rep_start / rep_end / recovery_start triggers when phase boundaries are crossed.
+     */
+    private fun evaluateDynamicPhase(currentDistanceKm: Double, plan: live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan) {
+        val phases = plan.phases.sortedBy { it.order }
+        if (phases.isEmpty()) return
+
+        var cumulativeKm = 0.0
+        var resolvedIndex = phases.size - 1
+
+        for ((idx, phase) in phases.withIndex()) {
+            val phaseKm = phase.distanceKm ?: ((phase.durationMinutes ?: 5.0) * 0.1) // rough estimate
+            if (currentDistanceKm < cumulativeKm + phaseKm) {
+                resolvedIndex = idx
+                break
+            }
+            cumulativeKm += phaseKm
+        }
+
+        val resolvedPhase = phases[resolvedIndex]
+        val isNewPhase = resolvedIndex != dynamicCurrentPhaseIndex || dynamicCurrentPhaseName == null
+
+        if (isNewPhase) {
+            val previousPhaseName = dynamicCurrentPhaseName
+            dynamicCurrentPhaseIndex = resolvedIndex
+            dynamicCurrentPhaseName = resolvedPhase.name
+            dynamicPhaseDistanceStartKm = currentDistanceKm
+
+            Log.d("RunTrackingService", "🏃 Dynamic phase: $previousPhaseName → ${resolvedPhase.name}")
+
+            // Fire phase_start trigger for this phase
+            val phaseStartTrigger = plan.triggers.firstOrNull { t ->
+                (t.type == "phase_start" || t.type == "recovery_start") &&
+                (t.condition.contains(resolvedPhase.name) || t.id.startsWith(resolvedPhase.name)) &&
+                !triggerFiredOnce.contains(t.id)
+            }
+            if (phaseStartTrigger != null && !hasCoachingFiredThisTick && canFireCoaching()) {
+                val msg = pickTriggerMessage(phaseStartTrigger)
+                triggerFiredOnce.add(phaseStartTrigger.id)
+                triggerLastFiredMs[phaseStartTrigger.id] = System.currentTimeMillis()
+                fireDynamicTrigger(msg, phaseStartTrigger.type, resolvedPhase.name)
+            }
+        }
+
+        // Detect "phase_end" proximity — fire warning 80-100m before phase ends
+        if (!hasCoachingFiredThisTick) {
+            val phaseKm = resolvedPhase.distanceKm ?: 0.0
+            if (phaseKm > 0) {
+                val posInPhase = currentDistanceKm - cumulativeKm
+                val distToPhaseEnd = phaseKm - posInPhase
+                if (distToPhaseEnd in 0.05..0.10) {  // 50-100m from end
+                    val phaseEndTrigger = plan.triggers.firstOrNull { t ->
+                        t.type == "phase_end" &&
+                        (t.condition.contains(resolvedPhase.name) || t.id.startsWith(resolvedPhase.name)) &&
+                        !triggerFiredOnce.contains(t.id)
+                    }
+                    if (phaseEndTrigger != null && canFireCoaching()) {
+                        val msg = pickTriggerMessage(phaseEndTrigger)
+                        triggerFiredOnce.add(phaseEndTrigger.id)
+                        fireDynamicTrigger(msg, "phase_end", resolvedPhase.name)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Evaluate a milestone trigger condition (e.g. "distance_pct > 50")
+     */
+    private fun evaluateMilestoneCondition(condition: String, currentKm: Double, totalKm: Double): Boolean {
+        if (totalKm <= 0) return false
+        val pct = (currentKm / totalKm * 100).toInt()
+        val match = Regex("""distance_pct\s*[>>=]+\s*(\d+)""").find(condition)
+        val threshold = match?.groupValues?.get(1)?.toIntOrNull() ?: return false
+        return pct >= threshold
+    }
+
+    /**
+     * Pick the best message for a trigger — rotates through alternativeMessages
+     * so the runner doesn't hear the exact same phrase every time.
+     */
+    private fun pickTriggerMessage(trigger: live.airuncoach.airuncoach.network.model.DynamicCoachingTrigger): String {
+        val alts = trigger.alternativeMessages
+        if (alts.isNullOrEmpty()) return trigger.message
+
+        val allMessages = listOf(trigger.message) + alts
+        val idx = triggerAltMessageIndex.getOrDefault(trigger.id, 0)
+        val message = allMessages[idx % allMessages.size]
+        triggerAltMessageIndex[trigger.id] = (idx + 1) % allMessages.size
+        return message
+    }
+
+    /**
+     * Fire a dynamic trigger message — delivers audio/TTS and logs the event.
+     */
+    private fun fireDynamicTrigger(message: String, triggerType: String, phaseName: String) {
+        if (hasCoachingFiredThisTick) return
+        hasCoachingFiredThisTick = true
+        recordCoachingFired()
+
+        Log.d("RunTrackingService", "🎯 Dynamic trigger [$triggerType] phase=$phaseName: $message")
+        _latestCoachingText.value = message
+
+        serviceScope.launch {
+            try {
+                if (!isMuted) {
+                    CoachingAudioQueue.enqueue(
+                        context = this@RunTrackingService,
+                        base64Audio = null,
+                        format = null,
+                        fallbackText = message,
+                        accent = currentUser?.coachAccent,
+                        onComplete = { _latestCoachingText.value = null }
+                    )
+                }
+                val runId = _currentRunSession.value?.id ?: "unknown"
+                apiService.logCoachingEvent(
+                    CoachingSessionEvent(
+                        runId = runId,
+                        plannedWorkoutId = planWorkoutId,
+                        eventType = triggerType,
+                        eventPhase = phaseName,
+                        coachingMessage = message,
+                        coachingAudioUrl = null,
+                        userMetrics = mapOf(
+                            "distance_km" to totalDistance / 1000.0,
+                            "pace" to currentPace,
+                            "heart_rate" to currentHeartRate,
+                            "dynamic_trigger" to true
+                        ),
+                        toneUsed = dynamicCoachingPlan?.coachingTone ?: sessionCoachingTone,
+                        userEngagement = null
+                    )
+                )
+            } catch (e: Exception) {
+                Log.w("RunTrackingService", "Dynamic trigger delivery failed (non-fatal): ${e.message}")
             }
         }
     }
@@ -3379,6 +3673,34 @@ class RunTrackingService : Service(), SensorEventListener {
     // ================================================================
     // ELITE COACHING — additional real-time coaching triggers
     // ================================================================
+
+    /**
+     * Final-stretch-only coaching for coached sessions.
+     * During a coaching plan run, all generic milestone/technique/ETA elite cues are
+     * suppressed — the dynamic plan handles all in-session motivation.
+     * Only the final 500m and final 100m "push" cues are preserved as they are
+     * universal to every session regardless of type.
+     */
+    private fun maybeFinalStretchCoaching(displayDistance: Double, duration: Long, avgSpeed: Float) {
+        if (!coachingFeaturePrefs.motivationalCoachingEnabled) return
+        val now = System.currentTimeMillis()
+        val td = targetDistance
+        val remainingMeters = if (td != null && td > 0) (td - displayDistance) else null
+
+        // FINAL 100m — highest priority, bypasses cooldowns (fires once)
+        if (!hasFinal100mFired && remainingMeters != null && remainingMeters in 0.0..120.0) {
+            hasFinal100mFired = true
+            fireFinalCoaching("final_100m", displayDistance / 1000.0, duration, avgSpeed, remainingMeters)
+            return
+        }
+
+        // FINAL 500m — very high priority (fires once)
+        if (!hasFinal500mFired && remainingMeters != null && remainingMeters in 0.0..550.0) {
+            if ((now - lastCoachingTime) < 10_000L) return
+            hasFinal500mFired = true
+            fireFinalCoaching("final_500m", displayDistance / 1000.0, duration, avgSpeed, remainingMeters)
+        }
+    }
 
     private fun maybeFireEliteCoaching(displayDistance: Double, duration: Long, avgSpeed: Float, phase: CoachingPhase) {
         if (!coachingFeaturePrefs.motivationalCoachingEnabled) return

@@ -15,16 +15,18 @@ import { eq, and, gt, isNull, or } from "drizzle-orm";
 import { PlanAdaptation, PlannedWorkout } from "@shared/schema";
 
 interface AdaptationChanges {
-  intensity?: "lower" | "higher";
-  volume?: "reduce" | "increase";
-  frequency?: "skip_day" | "add_easy_day";
+  // Each adjustment targets a specific workout by its database ID
+  // This is precise and avoids the fragile weekOffset/dayOffset approach
   upcoming_workout_adjustments?: Array<{
-    weekOffset: number;
-    dayOffset: number;
-    newIntensity?: string;
-    newDescription?: string;
-    skip?: boolean;
+    workoutId: string;           // Direct DB ID of the planned workout to modify
+    newIntensity?: string;       // e.g. "z1", "z2", "z3"
+    newWorkoutType?: string;     // e.g. "easy", "recovery", "rest"
+    newDescription?: string;     // Updated description for the workout
+    newDistance?: number;        // New distance in km
+    skip?: boolean;              // If true, convert to rest day
   }>;
+  summary: string;               // Human-readable explanation shown to the user
+  changeCount: number;           // How many workouts will be modified
 }
 
 /**
@@ -85,40 +87,45 @@ export async function acceptAndApplyAdaptation(
 
     if (changes.upcoming_workout_adjustments && Array.isArray(changes.upcoming_workout_adjustments)) {
       for (const adjustment of changes.upcoming_workout_adjustments) {
+        if (!adjustment.workoutId) continue; // Safety guard
+
         if (adjustment.skip) {
-          // Mark workout as skipped (set intensity to "rest")
-          const updated = await db
+          // Convert workout to a rest day
+          await db
             .update(plannedWorkouts)
             .set({
-              intensity: "rest",
-              description: "Rest day (adapted)",
+              workoutType: "rest",
+              intensity: "z1",
+              description: "Rest day — adapted by AI coach based on recent session performance",
+              distance: 0,
             })
             .where(
               and(
-                eq(plannedWorkouts.trainingPlanId, trainingPlanId),
-                eq(plannedWorkouts.weekNumber, adjustment.weekOffset + 1),
-                eq(plannedWorkouts.dayOfWeek, adjustment.dayOffset)
+                eq(plannedWorkouts.id, adjustment.workoutId),
+                eq(plannedWorkouts.trainingPlanId, trainingPlanId) // Security: verify same plan
               )
             );
           workoutsUpdated += 1;
-        } else if (adjustment.newIntensity || adjustment.newDescription) {
-          // Update workout intensity and/or description
-          const updates: any = {};
-          if (adjustment.newIntensity) updates.intensity = adjustment.newIntensity;
-          if (adjustment.newDescription)
-            updates.description = adjustment.newDescription;
+        } else {
+          // Build the update object from whichever fields the AI provided
+          const updates: Record<string, any> = {};
+          if (adjustment.newIntensity)    updates.intensity    = adjustment.newIntensity;
+          if (adjustment.newWorkoutType)  updates.workoutType  = adjustment.newWorkoutType;
+          if (adjustment.newDescription)  updates.description  = adjustment.newDescription;
+          if (adjustment.newDistance != null) updates.distance = adjustment.newDistance;
 
-          const updated = await db
-            .update(plannedWorkouts)
-            .set(updates)
-            .where(
-              and(
-                eq(plannedWorkouts.trainingPlanId, trainingPlanId),
-                eq(plannedWorkouts.weekNumber, adjustment.weekOffset + 1),
-                eq(plannedWorkouts.dayOfWeek, adjustment.dayOffset)
-              )
-            );
-          workoutsUpdated += 1;
+          if (Object.keys(updates).length > 0) {
+            await db
+              .update(plannedWorkouts)
+              .set(updates)
+              .where(
+                and(
+                  eq(plannedWorkouts.id, adjustment.workoutId),
+                  eq(plannedWorkouts.trainingPlanId, trainingPlanId)
+                )
+              );
+            workoutsUpdated += 1;
+          }
         }
       }
     }

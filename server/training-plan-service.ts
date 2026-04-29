@@ -6,7 +6,7 @@
  */
 
 import { db } from "./db";
-import { trainingPlans, weeklyPlans, plannedWorkouts, users, runs, goals, connectedDevices, planAdaptations, sessionInstructions } from "@shared/schema";
+import { trainingPlans, weeklyPlans, plannedWorkouts, users, runs, goals, connectedDevices, planAdaptations, sessionInstructions, coachingSessionEvents } from "@shared/schema";
 import { eq, and, desc, gte } from "drizzle-orm";
 import { getCurrentFitness } from "./fitness-service";
 import { HeartRateZones } from "./heart-rate-zones"; // Assuming we create this utility
@@ -924,8 +924,23 @@ function getPlanDuration(goalType: string, experienceLevel: string): number {
  */
 export async function adaptTrainingPlan(
   planId: string,
-  reason: string, // missed_workout, injury, over_training, ahead_of_schedule
-  userId: string
+  reason: string,
+  userId: string,
+  options?: {
+    sessionCompliance?: {
+      sessionType?: string;
+      hrZoneHighAlerts: number;   // how many times HR went above zone
+      hrZoneLowAlerts: number;    // how many times HR dropped below zone
+      paceDeviationAlerts: number;// how many pace deviation alerts fired
+      intervalsCompleted?: number;
+      intervalsFailed?: number;
+      overallAdherence: "good" | "moderate" | "poor";
+    };
+    fullAssessment?: {
+      adjustmentType?: string;
+      recommendation?: string;
+    };
+  }
 ): Promise<void> {
   try {
     // Get plan
@@ -953,33 +968,98 @@ export async function adaptTrainingPlan(
         )
       );
 
-    // Generate adaptation recommendation with AI
-    const prompt = `As a running coach, adapt this training plan due to: ${reason}
+    // Fetch the next 7 upcoming incomplete workouts — the AI needs these IDs to generate
+    // specific, actionable adjustments. Without real workout IDs, changes can't be applied.
+    const upcomingWorkouts = await db
+      .select({
+        id: plannedWorkouts.id,
+        dayOfWeek: plannedWorkouts.dayOfWeek,
+        scheduledDate: plannedWorkouts.scheduledDate,
+        workoutType: plannedWorkouts.workoutType,
+        distance: plannedWorkouts.distance,
+        intensity: plannedWorkouts.intensity,
+        description: plannedWorkouts.description,
+        intervalCount: plannedWorkouts.intervalCount,
+        intervalDistanceMeters: plannedWorkouts.intervalDistanceMeters,
+      })
+      .from(plannedWorkouts)
+      .where(
+        and(
+          eq(plannedWorkouts.trainingPlanId, planId),
+          eq(plannedWorkouts.isCompleted, false)
+        )
+      )
+      .orderBy(plannedWorkouts.scheduledDate)
+      .limit(7);
 
-Current Status:
-- Current week: ${plan[0].currentWeek}/${plan[0].totalWeeks}
-- Completed workouts: ${completedWorkouts.length}
-- Current fitness (CTL): ${fitness?.ctl || 'N/A'}
-- Training status: ${fitness?.status || 'N/A'}
+    // Build session compliance section if available
+    const complianceSection = options?.sessionCompliance
+      ? `
+SESSION PERFORMANCE DETAILS:
+- Session type: ${options.sessionCompliance.sessionType || "run"}
+- HR above zone alerts fired: ${options.sessionCompliance.hrZoneHighAlerts} times
+- HR below zone alerts fired: ${options.sessionCompliance.hrZoneLowAlerts} times
+- Pace deviation alerts fired: ${options.sessionCompliance.paceDeviationAlerts} times
+${options.sessionCompliance.intervalsCompleted != null ? `- Intervals completed: ${options.sessionCompliance.intervalsCompleted}` : ""}
+${options.sessionCompliance.intervalsFailed != null ? `- Intervals failed/cut short: ${options.sessionCompliance.intervalsFailed}` : ""}
+- Overall session adherence: ${options.sessionCompliance.overallAdherence}`
+      : "";
 
-Recommend adaptations in JSON format:
-{
-  "recommendation": "Brief explanation of changes",
-  "adjustments": [
-    "Reduce next week volume by 20%",
-    "Add extra rest day"
-  ],
-  "continueAsIs": false
-}`;
+    // Build upcoming workouts section so AI can generate specific workout IDs in its response
+    const upcomingSection = upcomingWorkouts.length > 0
+      ? `
+UPCOMING WORKOUTS (next ${upcomingWorkouts.length} sessions):
+${upcomingWorkouts.map((w, i) => `${i + 1}. ID="${w.id}" | ${w.workoutType} | ${w.distance ?? "?"}km | intensity=${w.intensity ?? "?"} | ${w.scheduledDate ? new Date(w.scheduledDate).toDateString() : "unscheduled"}`).join("\n")}`
+      : "\nNo upcoming workouts found.";
 
     const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
+
+    const prompt = `As an expert running coach, adapt this training plan based on real session performance data.
+
+REASON FOR ADAPTATION: ${reason}
+${options?.fullAssessment?.recommendation ? `INITIAL ASSESSMENT: ${options.fullAssessment.recommendation}` : ""}
+
+TRAINING PLAN:
+- Goal: ${plan[0].goalType}
+- Current Week: ${plan[0].currentWeek}/${plan[0].totalWeeks}
+- Experience Level: ${plan[0].experienceLevel}
+- Current Fitness (CTL): ${fitness?.ctl || "N/A"}
+- Training Status: ${fitness?.status || "N/A"}
+- Completed workouts so far: ${completedWorkouts.length}
+${complianceSection}
+${upcomingSection}
+
+INSTRUCTIONS:
+- Only adjust workouts that genuinely need it — not every session requires a change
+- Use the exact workout IDs from the UPCOMING WORKOUTS list above in your response
+- For HR zone adherence issues (many hr_zone_high alerts): reduce intensity of next hard session
+- For poor interval completion: reduce interval count or distance for next interval session
+- For overtraining signals: add rest, reduce volume
+- For underperformance: encourage consistency, don't increase load yet
+- Keep changes minimal and targeted — 1-3 workouts maximum
+
+Respond with ONLY valid JSON in this exact format:
+{
+  "summary": "2-3 sentence explanation of what you're changing and why, written directly to the runner",
+  "changeCount": 2,
+  "upcoming_workout_adjustments": [
+    {
+      "workoutId": "exact-id-from-list-above",
+      "newIntensity": "z2",
+      "newWorkoutType": "easy",
+      "newDescription": "Easy recovery run — keep heart rate in zone 2 the whole way",
+      "newDistance": 6.0,
+      "skip": false
+    }
+  ]
+}`;
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: `You are an expert running coach providing training plan adaptations. Respond with JSON only.${runnerProfileBlock(aiRunnerProfile)}`
+          content: `You are an expert running coach adapting a training plan based on session performance data. You have access to specific upcoming workout IDs and must reference them exactly. Respond with JSON only.${runnerProfileBlock(aiRunnerProfile)}`
         },
         {
           role: "user",
@@ -987,22 +1067,22 @@ Recommend adaptations in JSON format:
         }
       ],
       response_format: { type: "json_object" },
-      temperature: 0.7,
-      max_tokens: 500,
+      temperature: 0.6,
+      max_tokens: 800,
     });
 
     const adaptation = JSON.parse(response.choices[0].message.content || "{}");
 
-    // Save adaptation
+    // Save adaptation — `changes` is now in the correct format for acceptAndApplyAdaptation
     await db.insert(planAdaptations).values({
       trainingPlanId: planId,
       reason,
       changes: adaptation,
-      aiSuggestion: adaptation.recommendation,
+      aiSuggestion: adaptation.summary,
       userAccepted: false,
     });
 
-    console.log(`✅ Plan adaptation created for ${reason}`);
+    console.log(`✅ Plan adaptation created for ${reason} (${adaptation.changeCount ?? 0} workout(s) targeted)`);
   } catch (error) {
     console.error("Error adapting training plan:", error);
     throw error;
@@ -1100,8 +1180,55 @@ export async function reassessTrainingPlansWithRunData(
             )
           );
 
+        // ── NEW: Fetch coaching events from this session to compute compliance ──
+        // These events were logged by the live coaching engine during the run.
+        // They tell us exactly how often the runner deviated from targets.
+        const sessionEvents = await db
+          .select()
+          .from(coachingSessionEvents)
+          .where(eq(coachingSessionEvents.runId, runId));
+
+        // Compute session compliance from coaching events
+        const hrZoneHighAlerts  = sessionEvents.filter(e => e.eventType === "hr_zone_high").length;
+        const hrZoneLowAlerts   = sessionEvents.filter(e => e.eventType === "hr_zone_low").length;
+        const paceTooFastAlerts = sessionEvents.filter(e => e.eventType === "pace_too_fast").length;
+        const paceTooSlowAlerts = sessionEvents.filter(e => e.eventType === "pace_too_slow").length;
+        const paceDeviationAlerts = paceTooFastAlerts + paceTooSlowAlerts;
+        const intervalsCompleted = sessionEvents.filter(e => e.eventType === "rep_end").length;
+        const repStarts = sessionEvents.filter(e => e.eventType === "rep_start").length;
+        const intervalsFailed = Math.max(0, repStarts - intervalsCompleted);
+
+        // Overall adherence: poor if many HR zone violations, moderate if some, good otherwise
+        const totalDeviations = hrZoneHighAlerts + paceDeviationAlerts;
+        const overallAdherence: "good" | "moderate" | "poor" =
+          totalDeviations >= 6 ? "poor" :
+          totalDeviations >= 3 ? "moderate" : "good";
+
+        // Session compliance object (passed to adaptTrainingPlan if adjustment needed)
+        const sessionCompliance = {
+          sessionType: run.workoutType || undefined,
+          hrZoneHighAlerts,
+          hrZoneLowAlerts,
+          paceDeviationAlerts,
+          intervalsCompleted,
+          intervalsFailed,
+          overallAdherence,
+        };
+
+        // Build session compliance string for the reassessment prompt
+        const complianceText = sessionEvents.length > 0
+          ? `
+SESSION COACHING DATA (from live AI coaching during the run):
+- HR above zone alerts: ${hrZoneHighAlerts} times${hrZoneHighAlerts > 3 ? " ⚠️ SIGNIFICANT — runner consistently above target zone" : ""}
+- HR below zone alerts: ${hrZoneLowAlerts} times
+- Pace deviation alerts: ${paceDeviationAlerts} times
+- Intervals completed: ${intervalsCompleted} (started: ${repStarts})
+- Overall session adherence: ${overallAdherence.toUpperCase()}
+- Total coaching cues delivered: ${sessionEvents.length}`
+          : "\nNo in-session coaching data available for this run.";
+
         // Build AI prompt for plan reassessment
-        const prompt = `As an expert running coach, reassess this training plan based on recent run data.
+        const prompt = `As an expert running coach, reassess this training plan based on real session performance data including live coaching signals from the run.
 
 TRAINING PLAN DETAILS:
 - Goal: ${plan.goalType}
@@ -1118,33 +1245,31 @@ RUNNER PROFILE:
 - Training Status: ${fitness?.status || 'N/A'}
 
 RECENT RUN (Just Completed):
+- Workout Type: ${run.workoutType || 'general run'}
 - Distance: ${(run.distance / 1000).toFixed(2)} km
 - Duration: ${(run.duration / 60).toFixed(0)} minutes
 - Pace: ${run.avgPace || 'N/A'}
-- Calories: ${run.calories || 'N/A'}
 - Avg Heart Rate: ${run.avgHeartRate || 'N/A'} bpm
 - Max Heart Rate: ${run.maxHeartRate || 'N/A'} bpm
 - Elevation Gain: ${run.elevationGain || 0} m
+${complianceText}
 
-PROGRESS:
-- Completed Workouts in Plan: ${completedWorkouts.length}
-- Recent Run Count (last 10): ${recentRuns.length}
+PLAN PROGRESS:
+- Completed workouts in plan: ${completedWorkouts.length}
+- Recent runs in last 10: ${recentRuns.length}
 
-Based on this runner's progress and the recent run, assess if the plan needs adjustment. Consider:
-1. Is the runner progressing well or struggling?
-2. Should we adjust weekly mileage or intensity?
-3. Are there any red flags (overtraining, undertraining)?
-4. Is the runner on pace to achieve their goal?
+KEY QUESTIONS TO ANSWER:
+1. Was the session completed as intended? (check adherence + HR/pace deviation alerts)
+2. Does the HR zone data suggest the runner is struggling (consistently above zone) or coasting (consistently below)?
+3. Are intervals being completed fully? (check intervalsCompleted vs repStarts)
+4. Does the training load need to change based on this run?
 
 Provide your assessment in JSON format:
 {
   "needsAdjustment": true/false,
-  "reason": "Brief explanation of why plan needs/doesn't need adjustment",
+  "reason": "Specific explanation referencing the actual coaching data (e.g. HR alerts, interval completion)",
   "adjustmentType": "none" | "volume_reduction" | "volume_increase" | "intensity_adjustment" | "recovery_addition",
-  "recommendation": "Specific coaching recommendation",
-  "adjustments": [
-    "List of specific changes to implement"
-  ]
+  "recommendation": "Specific coaching recommendation for the runner"
 }`;
 
         const aiRunnerProfileForReassess = await getRunnerProfile(userId).catch(() => null);
@@ -1176,6 +1301,7 @@ Provide your assessment in JSON format:
         );
 
         // If adjustments are needed, trigger plan adaptation
+        // Pass session compliance + assessment context so the AI can generate specific, targeted changes
         if (assessment.needsAdjustment) {
           console.log(
             `[Plan Reassessment] Triggering adaptation for plan ${plan.id}: ${assessment.reason}`
@@ -1183,7 +1309,14 @@ Provide your assessment in JSON format:
           await adaptTrainingPlan(
             plan.id,
             `run_data_feedback: ${assessment.reason}`,
-            userId
+            userId,
+            {
+              sessionCompliance,
+              fullAssessment: {
+                adjustmentType: assessment.adjustmentType,
+                recommendation: assessment.recommendation,
+              },
+            }
           );
         } else {
           console.log(

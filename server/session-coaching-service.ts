@@ -342,21 +342,25 @@ Return ONLY valid JSON in this exact format:
     "coachingTriggers": [
       {
         "phase": "phase_name",
-        "trigger": "at_start|at_end|rep_start|rep_end|every_km|pace_deviation|hr_alert",
-        "message": "Specific coaching message for this trigger (1-2 sentences, active voice)"
+        "trigger": "at_start|at_end|rep_start|rep_end|recovery_start|recovery_end|hr_alert|pace_deviation",
+        "message": "Specific coaching message for this trigger (under 20 words, active voice, like a coach talking in your ear)"
       }
     ]
   }
 }
 
 PHASE DESIGN RULES:
-- For intervals/hill_repeats: warmup (1-2km) + N repetitions of work + recovery between each + cooldown (0.5-1km)
-- For tempo runs: warmup (1km) + tempo block + cooldown (0.5km)
-- For easy/zone2/recovery: single easy_run phase covering the full distance
+- For intervals/hill_repeats: warmup (1-2km) + ALTERNATING work phases AND recovery phases (e.g. work_rep_1, recovery_jog_1, work_rep_2, recovery_jog_2...) + cooldown
+  * Name recovery phases starting with "recovery_" so the runtime detects them as recovery phases
+  * Each recovery phase needs its own at_start trigger with the recovery pace and distance (e.g. "Rep done — easy jog for 400m at 7 min/km, next interval soon")
+  * Each work phase needs rep_start and rep_end triggers with specific pace targets
+- For tempo runs: warmup (1km) + tempo block + cooldown (0.5km). Include hr_alert and pace_deviation triggers.
+- For easy/zone2/recovery: single easy_run phase covering the full distance with hr_alert triggers to keep runner in zone
 - For long runs: easy_run phase with milestone coaching triggers at 25%, 50%, 75%, final_stretch
-- durationKm should be the distance of that phase. For repeating intervals, set repetitions and durationKm = distance per rep.
-- For each interval rep, the coachingTriggers must have rep_start and rep_end triggers with specific messages.
-- Coaching trigger messages must be SHORT (under 20 words), direct, and actionable.`;
+- durationKm should be the distance of that phase. For repeating intervals, set repetitions > 1 and durationKm = distance per rep.
+- ALWAYS include at_start triggers for EVERY phase.
+- Coaching trigger messages must be SHORT (under 20 words), direct, and actionable.
+- For hr_alert and pace_deviation triggers: these fire reactively when conditions are met, so messages must address the real-time situation.`;
 
   try {
     const response = await openai.chat.completions.create({

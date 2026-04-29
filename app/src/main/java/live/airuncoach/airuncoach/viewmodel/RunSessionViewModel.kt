@@ -877,7 +877,7 @@ class RunSessionViewModel @Inject constructor(
                     it.planWeekNumber?.let { w -> putExtra(RunTrackingService.EXTRA_PLAN_WEEK_NUMBER, w) }
                     it.planTotalWeeks?.let { total -> putExtra(RunTrackingService.EXTRA_PLAN_TOTAL_WEEKS, total) }
                 }
-                // Pass AI session instructions as JSON so RunTrackingService can use them
+                // Pass AI session instructions as JSON so RunTrackingService can use them (legacy plan)
                 sessionInstructions?.let { instructions ->
                     try {
                         val instructionsJson = gson.toJson(instructions)
@@ -885,6 +885,16 @@ class RunSessionViewModel @Inject constructor(
                         Log.d("RunSessionViewModel", "Passed session instructions to service (tone=${instructions.aiDeterminedTone})")
                     } catch (e: Exception) {
                         Log.w("RunSessionViewModel", "Failed to serialize session instructions: ${e.message}")
+                    }
+                }
+                // Pass rich dynamic coaching plan (prepare-coaching) — enables reactive trigger evaluation
+                activeSessionCoachingPlan?.let { plan ->
+                    try {
+                        val planJson = gson.toJson(plan)
+                        putExtra(RunTrackingService.EXTRA_DYNAMIC_COACHING_PLAN_JSON, planJson)
+                        Log.d("RunSessionViewModel", "Passed dynamic coaching plan to service (strategy=${plan.cueingStrategy}, triggers=${plan.triggers.size})")
+                    } catch (e: Exception) {
+                        Log.w("RunSessionViewModel", "Failed to serialize dynamic coaching plan: ${e.message}")
                     }
                 }
             }
