@@ -512,9 +512,11 @@ class RunView extends Ui.View {
     //   Bottom     : "Cannot start until GPS ready"
     //
     private function _drawGpsWaitScreen(dc, cx, cy, w, h) {
-        // Outer accent ring
-        dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
+        // Gold bezel ring
+        dc.setColor(0xB8960C, Gfx.COLOR_TRANSPARENT);
         dc.drawCircle(cx, cy, (w / 2) - 4);
+        dc.setColor(0x3A2E00, Gfx.COLOR_TRANSPARENT);
+        dc.drawCircle(cx, cy, (w / 2) - 6);
 
         // App title
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
@@ -591,9 +593,11 @@ class RunView extends Ui.View {
         var dots = "";
         for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
 
-        // Outer accent ring
-        dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
+        // Gold bezel ring
+        dc.setColor(0xB8960C, Gfx.COLOR_TRANSPARENT);
         dc.drawCircle(cx, cy, (w / 2) - 4);
+        dc.setColor(0x3A2E00, Gfx.COLOR_TRANSPARENT);
+        dc.drawCircle(cx, cy, (w / 2) - 6);
 
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         dc.drawText(cx, (h * 0.10).toNumber(), Gfx.FONT_TINY,
@@ -719,18 +723,17 @@ class RunView extends Ui.View {
                         dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, sa, ea);
                     }
                 }
-                // Z3 centre segment (z==2): cyan breath pulse — brand signature
+                // Z3 centre segment (z==2): gold breath pulse — brand signature
                 if (z == 2) {
-                    var cyanA = (0x003344 + (breath * 0x006699).toNumber()).toNumber();
-                    // cheap two-level approach: pulse inner band in brand cyan
+                    // Two-level pulse: mid-gold at 55% breath, bright gold at 85%
                     if (breath > 0.55) {
-                        dc.setColor(0x005566, Gfx.COLOR_TRANSPARENT);
+                        dc.setColor(0x3A2E00, Gfx.COLOR_TRANSPARENT);
                         for (var r = innerR + 2; r <= outerR - 2; r++) {
                             dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, sa, ea);
                         }
                     }
                     if (breath > 0.85) {
-                        dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
+                        dc.setColor(0xB8960C, Gfx.COLOR_TRANSPARENT);
                         for (var r = innerR + 4; r <= outerR - 4; r++) {
                             dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, sa, ea);
                         }
@@ -761,22 +764,6 @@ class RunView extends Ui.View {
         }
     }
 
-    // ── Zone + HR badge (only while running) ──────────────────────────────────
-
-    private function _drawZoneBadge(dc, cx, h) {
-        if (!_isRunning) { return; }
-        var y  = (h * 0.23).toNumber();
-        var zn = _heartRateZone;
-        var zc = _zoneColors[zn - 1];
-
-        // "Z3  •  148 bpm"
-        var hrStr = _dispHR > 0 ? _dispHR.format("%d") : "--";
-        dc.setColor(zc, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, y, Gfx.FONT_XTINY,
-            "Z" + zn.format("%d") + "  \u2022  " + hrStr + " bpm",
-            Gfx.TEXT_JUSTIFY_CENTER);
-    }
-
     // ── Primary metric: PACE ──────────────────────────────────────────────────
     //
     // Layout (label ABOVE value — standard data-field convention):
@@ -805,8 +792,8 @@ class RunView extends Ui.View {
             font = Gfx.FONT_LARGE;
         }
 
-        // "MIN / KM" label — drawn ABOVE the value
-        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        // "MIN / KM" label — gold, clearly secondary to pace value
+        dc.setColor(0x7A6400, Gfx.COLOR_TRANSPARENT);
         dc.drawText(cx, lblY, Gfx.FONT_XTINY, "MIN / KM", Gfx.TEXT_JUSTIFY_CENTER);
 
         // Pace value
@@ -816,9 +803,10 @@ class RunView extends Ui.View {
         // Coached target badge — sits just below the pace value
         if (_isCoached && _coachTargetPace.length() > 0) {
             var tY = (h * 0.535).toNumber();
-            dc.setColor(0x00263A, Gfx.COLOR_TRANSPARENT);
-            dc.fillRectangle(cx - 50, tY - 1, 100, 15);
-            dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
+            dc.setColor(0x1A1200, Gfx.COLOR_TRANSPARENT);
+            dc.fillRectangle(cx - 52, tY - 1, 104, 15);
+            dc.setColor(0xD4AF37, Gfx.COLOR_TRANSPARENT);
+            dc.drawRectangle(cx - 52, tY - 1, 104, 15);
             dc.drawText(cx, tY, Gfx.FONT_XTINY,
                 "TARGET  " + _coachTargetPace + " /KM",
                 Gfx.TEXT_JUSTIFY_CENTER);
@@ -843,14 +831,14 @@ class RunView extends Ui.View {
         dc.drawLine(cx, lblY - 2, cx, y + 20);
 
         // Distance (left) — label above, value below
-        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        dc.setColor(0x7A6400, Gfx.COLOR_TRANSPARENT);
         dc.drawText(lx, lblY, Gfx.FONT_XTINY, "KM", Gfx.TEXT_JUSTIFY_CENTER);
         var distStr = (_dispDistance / 1000.0).format("%.2f");
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         dc.drawText(lx, y, Gfx.FONT_SMALL, distStr, Gfx.TEXT_JUSTIFY_CENTER);
 
         // Heart rate (right) — label above, value below
-        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        dc.setColor(0x7A6400, Gfx.COLOR_TRANSPARENT);
         dc.drawText(rx, lblY, Gfx.FONT_XTINY, "BPM", Gfx.TEXT_JUSTIFY_CENTER);
         var hrStr = _dispHR > 0 ? _dispHR.format("%d") : "--";
         var hrCol = _isRunning ? _zoneColors[_heartRateZone - 1] : 0x383838;
@@ -898,7 +886,7 @@ class RunView extends Ui.View {
 
         } else if (_overlayState == OVERLAY_COACHED) {
             var lbl = _runTypeLabel();
-            dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
+            dc.setColor(0xD4AF37, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, y1, Gfx.FONT_XTINY, lbl, Gfx.TEXT_JUSTIFY_CENTER);
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, y2, Gfx.FONT_XTINY, "START to run", Gfx.TEXT_JUSTIFY_CENTER);

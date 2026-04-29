@@ -134,18 +134,21 @@ class StartView extends Ui.View {
         var centerX = width / 2;
         var centerY = height / 2;
 
-        // Outer accent ring
-        dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
+        // Outer gold bezel ring (double-stroke for depth)
+        dc.setColor(0xB8960C, Gfx.COLOR_TRANSPARENT);
         dc.drawCircle(centerX, centerY, (width / 2) - 4);
+        dc.setColor(0x3A2E00, Gfx.COLOR_TRANSPARENT);
+        dc.drawCircle(centerX, centerY, (width / 2) - 6);
 
-        // App title
-        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(centerX, height * 0.14, Gfx.FONT_TINY,
+        // App wordmark in champagne gold
+        dc.setColor(0xD4AF37, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(centerX, (height * 0.14).toNumber(), Gfx.FONT_TINY,
             "AI RUN COACH", Gfx.TEXT_JUSTIFY_CENTER);
 
-        // Divider
-        dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
-        dc.drawLine(width * 0.2, height * 0.26, width * 0.8, height * 0.26);
+        // Gold divider
+        dc.setColor(0x3A2E00, Gfx.COLOR_TRANSPARENT);
+        dc.drawLine((width * 0.2).toNumber(), (height * 0.26).toNumber(),
+                    (width * 0.8).toNumber(), (height * 0.26).toNumber());
 
         // Connection dot (top-right)
         if (_isConnected) {
@@ -182,68 +185,78 @@ class StartView extends Ui.View {
 
     // -- BASIC mode (authenticated, no prepared run) -------------------------
     private function _drawBasicMode(dc, width, height, centerX, centerY) {
-        // Breathing pulse ring
+        // Gold breathing pulse ring
         var pulseR = 38 + (_pulseScale / 5);
-        dc.setColor(0x004466, Gfx.COLOR_TRANSPARENT);
+        dc.setColor(0x3A2E00, Gfx.COLOR_TRANSPARENT);
+        dc.drawCircle(centerX, centerY, pulseR + 1);
+        dc.setColor(0x7A6400, Gfx.COLOR_TRANSPARENT);
         dc.drawCircle(centerX, centerY, pulseR);
+        if (_pulseScale > 14) {
+            dc.setColor(0xB8960C, Gfx.COLOR_TRANSPARENT);
+            dc.drawCircle(centerX, centerY, pulseR - 2);
+        }
 
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         dc.drawText(centerX, centerY - 14, Gfx.FONT_MEDIUM,
-            "Ready", Gfx.TEXT_JUSTIFY_CENTER);
+            "READY", Gfx.TEXT_JUSTIFY_CENTER);
 
         if (_runnerName.length() > 0) {
-            dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(centerX, centerY + 10, Gfx.FONT_TINY,
+            dc.setColor(0xD4AF37, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(centerX, centerY + 12, Gfx.FONT_TINY,
                 _runnerName, Gfx.TEXT_JUSTIFY_CENTER);
         }
 
-        dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(centerX, height * 0.74, Gfx.FONT_SMALL,
+        dc.setColor(0xFFD700, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(centerX, (height * 0.74).toNumber(), Gfx.FONT_SMALL,
             "Press START", Gfx.TEXT_JUSTIFY_CENTER);
     }
 
     // -- COACHED mode (prepared run received) --------------------------------
     private function _drawCoachedMode(dc, width, height, centerX, centerY) {
-        // Mode label
-        dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(centerX, height * 0.28, Gfx.FONT_TINY,
+        // "COACHED RUN" gold pill badge
+        var badgeY = (height * 0.28).toNumber();
+        dc.setColor(0x1A1200, Gfx.COLOR_TRANSPARENT);
+        dc.fillRectangle(width / 2 - 46, badgeY - 2, 92, 16);
+        dc.setColor(0xB8960C, Gfx.COLOR_TRANSPARENT);
+        dc.drawRectangle(width / 2 - 46, badgeY - 2, 92, 16);
+        dc.setColor(0xD4AF37, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(width / 2, badgeY, Gfx.FONT_XTINY,
             "COACHED RUN", Gfx.TEXT_JUSTIFY_CENTER);
 
-        // Workout type / run type
+        // Workout type — white, primary
         var typeLabel = _formatRunTypeLabel();
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(centerX, height * 0.38, Gfx.FONT_MEDIUM,
+        dc.drawText(width / 2, (height * 0.38).toNumber(), Gfx.FONT_MEDIUM,
             typeLabel, Gfx.TEXT_JUSTIFY_CENTER);
 
-        // Workout description (if available)
+        // Workout description — mid-gold secondary
         if (_prepWorkoutDesc.length() > 0) {
-            dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(centerX, height * 0.50, Gfx.FONT_TINY,
+            dc.setColor(0x7A6400, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(width / 2, (height * 0.50).toNumber(), Gfx.FONT_TINY,
                 _prepWorkoutDesc, Gfx.TEXT_JUSTIFY_CENTER);
         }
 
-        // Target pace badge (if available)
-        var infoY = height * 0.58;
+        // Target pace badge — gold border
+        var infoY = (height * 0.58).toNumber();
         if (_prepTargetPace.length() > 0) {
-            dc.setColor(0x003A4F, Gfx.COLOR_TRANSPARENT);
-            dc.fillRectangle(centerX - 50, infoY - 2, 100, 22);
-            dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
-            dc.drawRectangle(centerX - 50, infoY - 2, 100, 22);
-            dc.drawText(centerX, infoY, Gfx.FONT_TINY,
+            dc.setColor(0x1A1200, Gfx.COLOR_TRANSPARENT);
+            dc.fillRectangle(width / 2 - 52, infoY - 2, 104, 22);
+            dc.setColor(0xD4AF37, Gfx.COLOR_TRANSPARENT);
+            dc.drawRectangle(width / 2 - 52, infoY - 2, 104, 22);
+            dc.drawText(width / 2, infoY, Gfx.FONT_TINY,
                 _prepTargetPace + " /km", Gfx.TEXT_JUSTIFY_CENTER);
         }
 
-        // Distance target
-        var distY = height * 0.68;
+        // Distance — mid-gold
         if (_prepRunDist > 0.0) {
-            dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(centerX, distY, Gfx.FONT_TINY,
+            dc.setColor(0x7A6400, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(width / 2, (height * 0.68).toNumber(), Gfx.FONT_TINY,
                 _prepRunDist.format("%.1f") + " km", Gfx.TEXT_JUSTIFY_CENTER);
         }
 
-        // CTA
-        dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(centerX, height * 0.78, Gfx.FONT_SMALL,
+        // CTA — bright gold
+        dc.setColor(0xFFD700, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(width / 2, (height * 0.78).toNumber(), Gfx.FONT_SMALL,
             "Press START", Gfx.TEXT_JUSTIFY_CENTER);
     }
 
