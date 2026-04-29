@@ -5,7 +5,8 @@
  * to specific features (training plans, routes, analyses, etc.)
  */
 
-import { storage } from "./storage";
+import { sql } from "drizzle-orm";
+import { db } from "./db";
 
 export interface PromoCodeRedemption {
   success: boolean;
@@ -26,19 +27,18 @@ export async function redeemPromoCode(
     const normalizedCode = code.trim().toUpperCase();
 
     // Fetch the coupon from database
-    const coupon = await storage.db.query(
-      `SELECT * FROM coupon_codes WHERE UPPER(code) = $1 AND is_active = true`,
-      [normalizedCode]
+    const couponResult = await db.execute(
+      sql`SELECT * FROM coupon_codes WHERE UPPER(code) = ${normalizedCode} AND is_active = true`
     );
 
-    if (!coupon.rows.length) {
+    if (!couponResult.length) {
       return {
         success: false,
         message: "Invalid or expired promo code. Please check and try again.",
       };
     }
 
-    const couponRecord = coupon.rows[0];
+    const couponRecord = couponResult[0];
 
     // Check if expired
     if (couponRecord.expires_at && new Date(couponRecord.expires_at) < new Date()) {
@@ -60,12 +60,11 @@ export async function redeemPromoCode(
     }
 
     // Check if user already redeemed this coupon
-    const existingUse = await storage.db.query(
-      `SELECT * FROM user_coupons WHERE user_id = $1 AND coupon_id = $2`,
-      [userId, couponRecord.id]
+    const existingUse = await db.execute(
+      sql`SELECT * FROM user_coupons WHERE user_id = ${userId} AND coupon_id = ${couponRecord.id}`
     );
 
-    if (existingUse.rows.length) {
+    if (existingUse.length) {
       return {
         success: false,
         message: "You have already redeemed this promo code.",
@@ -78,15 +77,13 @@ export async function redeemPromoCode(
     expiresAt.setDate(expiresAt.getDate() + durationDays);
 
     // Create user coupon record
-    await storage.db.query(
-      `INSERT INTO user_coupons (user_id, coupon_id, expires_at) VALUES ($1, $2, $3)`,
-      [userId, couponRecord.id, expiresAt.toISOString()]
+    await db.execute(
+      sql`INSERT INTO user_coupons (user_id, coupon_id, expires_at) VALUES (${userId}, ${couponRecord.id}, ${expiresAt.toISOString()})`
     );
 
     // Increment coupon usage
-    await storage.db.query(
-      `UPDATE coupon_codes SET current_uses = current_uses + 1 WHERE id = $1`,
-      [couponRecord.id]
+    await db.execute(
+      sql`UPDATE coupon_codes SET current_uses = current_uses + 1 WHERE id = ${couponRecord.id}`
     );
 
     // Determine which features this code grants
@@ -124,18 +121,17 @@ export async function hasUnlimitedGrant(
   feature: string
 ): Promise<boolean> {
   try {
-    const result = await storage.db.query(
-      `
+    const result = await db.execute(
+      sql`
       SELECT COUNT(*) as count FROM user_coupons uc
       JOIN coupon_codes cc ON uc.coupon_id = cc.id
-      WHERE uc.user_id = $1
+      WHERE uc.user_id = ${userId}
         AND uc.expires_at > NOW()
         AND cc.is_active = true
-      `,
-      [userId]
+      `
     );
 
-    return result.rows[0].count > 0;
+    return parseInt(result[0]?.count || "0") > 0;
   } catch (err) {
     console.error("[CouponService] Error checking unlimited grant:", err);
     return false;
@@ -155,17 +151,16 @@ export async function getUserActiveGrants(
   }>
 > {
   try {
-    const result = await storage.db.query(
-      `
+    const result = await db.execute(
+      sql`
       SELECT cc.code, uc.expires_at, cc.type FROM user_coupons uc
       JOIN coupon_codes cc ON uc.coupon_id = cc.id
-      WHERE uc.user_id = $1 AND uc.expires_at > NOW()
+      WHERE uc.user_id = ${userId} AND uc.expires_at > NOW()
       ORDER BY uc.expires_at DESC
-      `,
-      [userId]
+      `
     );
 
-    return result.rows.map((row) => ({
+    return result.map((row) => ({
       code: row.code,
       expiresAt: row.expires_at,
       features:
