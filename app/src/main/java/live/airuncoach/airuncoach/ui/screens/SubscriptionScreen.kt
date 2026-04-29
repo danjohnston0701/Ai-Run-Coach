@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -668,13 +669,15 @@ fun PlanSelector(plan: Plan, isSelected: Boolean, onClick: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CouponCodeSection() {
+    var couponCode by remember { mutableStateOf("") }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         Text(
-            text = "Have a coupon code?",
+            text = "Have a promo code?",
             style = AppTextStyles.body,
             color = Colors.textSecondary
         )
@@ -683,8 +686,8 @@ fun CouponCodeSection() {
             verticalAlignment = Alignment.CenterVertically
         ) {
             OutlinedTextField(
-                value = "",
-                onValueChange = {},
+                value = couponCode,
+                onValueChange = { couponCode = it },
                 label = { Text("Enter code") },
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(BorderRadius.lg),
