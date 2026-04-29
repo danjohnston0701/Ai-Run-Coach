@@ -18,6 +18,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,6 +32,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.network.model.UsageResponse
+import live.airuncoach.airuncoach.network.model.PromoCodeRedemptionResponse
+import live.airuncoach.airuncoach.network.RetrofitClient
+import live.airuncoach.airuncoach.data.SessionManager
+import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
@@ -676,6 +681,11 @@ sealed class PromoCodeState {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CouponCodeSection() {
+    val context = LocalContext.current
+    val sessionManager = remember { SessionManager(context) }
+    val apiService = remember { RetrofitClient(context, sessionManager).instance }
+    val coroutineScope = rememberCoroutineScope()
+
     var couponCode by remember { mutableStateOf("") }
     var promoState by remember { mutableStateOf<PromoCodeState>(PromoCodeState.Idle) }
 
@@ -711,6 +721,17 @@ fun CouponCodeSection() {
 
         // Success message if code was applied
         if (promoState is PromoCodeState.Success) {
+            val successState = promoState as PromoCodeState.Success
+            val expirationDate = try {
+                val calendar = java.util.Calendar.getInstance()
+                val dateFormat = java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.getDefault())
+                val instant = java.time.Instant.parse(successState.validUntil)
+                calendar.timeInMillis = instant.toEpochMilli()
+                dateFormat.format(calendar.time)
+            } catch (_: Exception) {
+                successState.validUntil
+            }
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -732,7 +753,7 @@ fun CouponCodeSection() {
                         textAlign = TextAlign.Center
                     )
                     Text(
-                        text = "Valid until ${(promoState as PromoCodeState.Success).validUntil}",
+                        text = "Valid until $expirationDate",
                         style = AppTextStyles.caption,
                         color = Colors.success,
                         textAlign = TextAlign.Center
@@ -771,17 +792,26 @@ fun CouponCodeSection() {
                 onClick = {
                     if (couponCode.isNotBlank()) {
                         promoState = PromoCodeState.Loading
-                        
-                        // TODO: Call API endpoint to validate and apply coupon
-                        // apiService.redeemCoupon(couponCode).onSuccess { response ->
-                        //     promoState = PromoCodeState.Success(validUntil = response.expiresAt)
-                        //     couponCode = ""
-                        // }.onError { error ->
-                        //     promoState = PromoCodeState.Error("Promo Code is not valid.")
-                        // }
-                        
-                        // Placeholder: always show error for now
-                        promoState = PromoCodeState.Error("Promo Code is not valid.")
+
+                        // Call the real API endpoint
+                        coroutineScope.launch {
+                            try {
+                                val response = apiService.redeemPromoCode(
+                                    mapOf("code" to couponCode)
+                                )
+
+                                if (response.success && response.grantedUntil != null) {
+                                    promoState = PromoCodeState.Success(validUntil = response.grantedUntil)
+                                    couponCode = ""
+                                } else {
+                                    promoState = PromoCodeState.Error(
+                                        response.message.ifBlank { "Promo Code is not valid." }
+                                    )
+                                }
+                            } catch (e: Exception) {
+                                promoState = PromoCodeState.Error("Promo Code is not valid.")
+                            }
+                        }
                     }
                 },
                 shape = RoundedCornerShape(BorderRadius.lg),
