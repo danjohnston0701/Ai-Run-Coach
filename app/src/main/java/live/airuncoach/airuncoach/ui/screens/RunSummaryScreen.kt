@@ -216,15 +216,17 @@ fun RunSummaryScreenFlagship(
             isLoadingRun -> CenterLoading(padding)
             loadError != null -> ErrorViewFlagship(loadError!!, onNavigateBack, onNavigateToLogin)
             runSession != null -> {
+                // Store in local variable to avoid delegated property smart cast issue
+                val session = runSession
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
                 ) {
                     // Pinned Garmin attribution header (always visible)
-                    if (runSession.hasGarminData && !runSession.garminDeviceName.isNullOrBlank()) {
+                    if (session?.hasGarminData == true && !session.garminDeviceName.isNullOrBlank()) {
                         GarminAttributionHeader(
-                            deviceName = runSession.garminDeviceName ?: "Garmin Device"
+                            deviceName = session.garminDeviceName ?: "Garmin Device"
                         )
                     }
 
@@ -235,7 +237,7 @@ fun RunSummaryScreenFlagship(
                     ) {
                         when (selectedTab) {
                         0 -> AiInsightsTabContent(
-                            run = runSession!!,
+                            run = session!!,
                             lastRunForDelta = lastRunForDelta,
                             analysisState = analysisState,
                             strugglePoints = strugglePoints,
@@ -253,7 +255,7 @@ fun RunSummaryScreenFlagship(
                             onEnrichWithGarmin = { viewModel.enrichRunWithGarminData() },
                             isEnrichingWithGarmin = viewModel.isEnrichingWithGarmin.collectAsState().value,
                             isWaitingForGarminSync = viewModel.isWaitingForGarminSync.collectAsState().value,
-                            coachingNotes = runSession!!.aiCoachingNotes,
+                            coachingNotes = session!!.aiCoachingNotes,
                             onShareCard = {
                                 // share a “summary card” (text now; optional bitmap helper included below)
                                 viewModel.shareRunWithLink(context)
@@ -262,7 +264,7 @@ fun RunSummaryScreenFlagship(
                             onStruggleComment = viewModel::updateStrugglePointComment,
                             onStruggleDismiss = viewModel::dismissStrugglePoint,
                             onStruggleRestore = viewModel::restoreStrugglePoint,
-                            difficultyLabel = runSession?.let { formatTerrainLabel(it.getDifficultyLevel()) },
+                            difficultyLabel = session?.let { formatTerrainLabel(it.getDifficultyLevel()) },
                             onCreateShareImage = { onNavigateToShareImage(runId) },
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it },
@@ -272,7 +274,7 @@ fun RunSummaryScreenFlagship(
                         )
 
                         1 -> SummaryTabContent(
-                            run = runSession!!,
+                            run = session!!,
                             lastRunForDelta = lastRunForDelta,
                             strugglePoints = strugglePoints,
                             onDelete = { showDeleteConfirm = true },
@@ -282,20 +284,20 @@ fun RunSummaryScreenFlagship(
                         )
 
                         2 -> GraphsTabContent(
-                            run = runSession!!,
+                            run = session!!,
                             onDelete = { showDeleteConfirm = true },
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it }
                         )
 
                         3 -> DataTabFlagship(
-                            run = runSession!!,
+                            run = session!!,
                             onDelete = { showDeleteConfirm = true },
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it }
                         )
                         4 -> AchievementsTabFlagship(
-                            run = runSession!!,
+                            run = session!!,
                             analysisState = analysisState,
                             onDelete = { showDeleteConfirm = true },
                             selectedTab = selectedTab,
@@ -306,12 +308,12 @@ fun RunSummaryScreenFlagship(
                     }
                 
                 // Goal Achieved Celebration Dialog
-                if (showGoalCelebration && selectedGoalForCompletion != null && runSession != null) {
-                    val runDistance = runSession!!.getDistanceInKm()
+                if (showGoalCelebration && selectedGoalForCompletion != null && session != null) {
+                    val runDistance = session!!.getDistanceInKm()
                     val formattedDistance = if (runDistance >= 1) {
                         String.format(Locale.US, "%.2f km", runDistance)
                     } else {
-                        String.format(Locale.US, "%.0f m", runSession!!.distance)
+                        String.format(Locale.US, "%.0f m", session!!.distance)
                     }
                     
                     GoalAchievedCelebrationDialog(
