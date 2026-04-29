@@ -33,7 +33,7 @@ fun PromoCodeDialog(
         title = {
             Text(
                 "Promo Code",
-                style = AppTextStyles.headlineLarge,
+                style = AppTextStyles.h2,
                 color = Colors.textPrimary
             )
         },
@@ -46,7 +46,7 @@ fun PromoCodeDialog(
             ) {
                 Text(
                     "Enter your promo code to unlock unlimited access",
-                    style = AppTextStyles.bodyMedium,
+                    style = AppTextStyles.body,
                     color = Colors.textSecondary
                 )
 
@@ -56,7 +56,7 @@ fun PromoCodeDialog(
                     label = {
                         Text(
                             "Promo Code",
-                            style = AppTextStyles.bodySmall,
+                            style = AppTextStyles.small,
                             color = Colors.textSecondary
                         )
                     },
@@ -75,7 +75,7 @@ fun PromoCodeDialog(
                             }
                         }
                     ),
-                    textStyle = AppTextStyles.bodyMedium.copy(color = Colors.textPrimary),
+                    textStyle = AppTextStyles.body.copy(color = Colors.textPrimary),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Colors.primary,
                         unfocusedBorderColor = Colors.backgroundSecondary,
