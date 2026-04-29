@@ -221,7 +221,6 @@ export const runs = pgTable("runs", {
   avgVerticalOscillation: real("avg_vertical_oscillation"), // cm – avg torso bounce per step (6-8cm efficient)
   maxVerticalOscillation: real("max_vertical_oscillation"), // cm – worst bounce reading
   avgVerticalRatio: real("avg_vertical_ratio"),             // % – oscillation / stride ratio (8-10% efficient)
-  avgStrideLength: real("avg_stride_length"),               // m  – already exists, confirmed retained
   minStrideLength: real("min_stride_length"),               // m  – shortest stride (e.g. steep uphill)
   maxStrideLength: real("max_stride_length"),               // m  – longest stride
 
