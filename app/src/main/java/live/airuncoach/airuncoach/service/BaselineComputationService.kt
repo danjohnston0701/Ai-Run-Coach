@@ -1,3 +1,5 @@
+@file:Suppress("UNUSED")
+
 package live.airuncoach.airuncoach.service
 
 import live.airuncoach.airuncoach.domain.model.RunSession
@@ -130,34 +132,42 @@ object BaselineComputationService {
             currentRun.heartRate?.let { currentHR ->
                 val delta = computeDelta(currentHR.toDouble(), baselineHR.toDouble())
                 if (delta != null) {
-                    instructions.append("- Heart Rate: baseline $baselineHR bpm, current $currentHR bpm (${String.format(Locale.US, "%.1f", delta)}% ${if (delta > 0) "higher" else "lower"})\n")
+                    val deltaPct = String.format(Locale.US, "%.1f", delta)
+                    instructions.append("- Heart Rate: baseline $baselineHR bpm, current $currentHR bpm ($deltaPct% ${if (delta > 0) "higher" else "lower"})\n")
                 }
             }
         }
 
         baseline.groundContactTime?.let { baselineGCT ->
             currentRun.avgGroundContactTime?.let { currentGCT ->
-                val delta = computeDelta(currentGCT, baselineGCT)
+                val delta = computeDelta(currentGCT.toDouble(), baselineGCT)
                 if (delta != null) {
-                    instructions.append("- Ground Contact Time: baseline ${baselineGCT.roundToInt()}ms, current ${currentGCT.roundToInt()}ms (${String.format(Locale.US, "%.1f", delta)}% ${if (delta > 0) "slower" else "faster"})\n")
+                    val deltaPct = String.format(Locale.US, "%.1f", delta)
+                    instructions.append("- Ground Contact Time: baseline ${baselineGCT.roundToInt()}ms, current ${currentGCT.roundToInt()}ms ($deltaPct% ${if (delta > 0) "slower" else "faster"})\n")
                 }
             }
         }
 
         baseline.verticalOscillation?.let { baselineVO ->
             currentRun.avgVerticalOscillation?.let { currentVO ->
-                val delta = computeDelta(currentVO, baselineVO)
+                val delta = computeDelta(currentVO.toDouble(), baselineVO)
                 if (delta != null) {
-                    instructions.append("- Vertical Oscillation: baseline ${String.format(Locale.US, "%.1f", baselineVO)}cm, current ${String.format(Locale.US, "%.1f", currentVO)}cm (${String.format(Locale.US, "%.1f", delta)}% ${if (delta > 0) "higher" else "lower"})\n")
+                    val baselineStr = String.format(Locale.US, "%.1f", baselineVO)
+                    val currentStr = String.format(Locale.US, "%.1f", currentVO)
+                    val deltaPct = String.format(Locale.US, "%.1f", delta)
+                    instructions.append("- Vertical Oscillation: baseline ${baselineStr}cm, current ${currentStr}cm ($deltaPct% ${if (delta > 0) "higher" else "lower"})\n")
                 }
             }
         }
 
         baseline.strideLength?.let { baselineStride ->
             currentRun.avgStrideLength?.let { currentStride ->
-                val delta = computeDelta(currentStride, baselineStride)
+                val delta = computeDelta(currentStride.toDouble(), baselineStride)
                 if (delta != null) {
-                    instructions.append("- Stride Length: baseline ${String.format(Locale.US, "%.2f", baselineStride)}m, current ${String.format(Locale.US, "%.2f", currentStride)}m (${String.format(Locale.US, "%.1f", delta)}%)\n")
+                    val baselineStr = String.format(Locale.US, "%.2f", baselineStride)
+                    val currentStr = String.format(Locale.US, "%.2f", currentStride)
+                    val deltaPct = String.format(Locale.US, "%.1f", delta)
+                    instructions.append("- Stride Length: baseline ${baselineStr}m, current ${currentStr}m ($deltaPct%)\n")
                 }
             }
         }
