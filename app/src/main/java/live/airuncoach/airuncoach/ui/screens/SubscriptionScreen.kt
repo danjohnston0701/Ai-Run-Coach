@@ -32,10 +32,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.network.model.UsageResponse
-import live.airuncoach.airuncoach.network.model.PromoCodeRedemptionResponse
+import live.airuncoach.airuncoach.network.model.PromoCodeRequest
 import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.data.SessionManager
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
@@ -797,9 +798,8 @@ fun CouponCodeSection() {
                         coroutineScope.launch {
                             try {
                                 val response = apiService.redeemPromoCode(
-                                    mapOf("code" to couponCode)
+                                    PromoCodeRequest(code = couponCode)
                                 )
-
                                 if (response.success && response.grantedUntil != null) {
                                     promoState = PromoCodeState.Success(validUntil = response.grantedUntil)
                                     couponCode = ""
@@ -808,7 +808,17 @@ fun CouponCodeSection() {
                                         response.message.ifBlank { "Promo Code is not valid." }
                                     )
                                 }
-                            } catch (e: Exception) {
+                            } catch (e: HttpException) {
+                                // Server returned 4xx/5xx — try to parse the error body
+                                val serverMsg = try {
+                                    val body = e.response()?.errorBody()?.string() ?: ""
+                                    com.google.gson.JsonParser.parseString(body)
+                                        .asJsonObject.get("message")?.asString
+                                } catch (_: Exception) { null }
+                                promoState = PromoCodeState.Error(
+                                    serverMsg ?: "Promo Code is not valid."
+                                )
+                            } catch (_: Exception) {
                                 promoState = PromoCodeState.Error("Promo Code is not valid.")
                             }
                         }

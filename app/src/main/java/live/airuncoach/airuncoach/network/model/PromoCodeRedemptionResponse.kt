@@ -1,11 +1,7 @@
 package live.airuncoach.airuncoach.network.model
 
 /**
- * Response from POST /api/promo-codes/redeem
+ * Alias retained for source compatibility.
+ * The canonical model is [PromoCodeResponse] in PromoCodeModels.kt.
  */
-data class PromoCodeRedemptionResponse(
-    val success: Boolean,
-    val message: String,
-    val grantedUntil: String? = null,  // ISO timestamp
-    val features: List<String>? = null  // e.g. ["trainingPlansGenerated", "routesGenerated"]
-)
+typealias PromoCodeRedemptionResponse = PromoCodeResponse

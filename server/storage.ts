@@ -335,7 +335,13 @@ export class DatabaseStorage implements IStorage {
     await tryCleanup('connected_devices',
       sql`DELETE FROM connected_devices WHERE user_id = ${userId}`);
 
-    // ── Phase 8: Auth / session tokens ───────────────────────────────────────
+    // ── Phase 8: Usage tracking + promo redemptions ───────────────────────────
+    await tryCleanup('monthly_usage',
+      sql`DELETE FROM monthly_usage WHERE user_id = ${userId}`);
+    await tryCleanup('user_coupons',
+      sql`DELETE FROM user_coupons WHERE user_id = ${userId}`);
+
+    // ── Phase 9: Auth / session tokens ───────────────────────────────────────
     await tryCleanup('password_reset_tokens',
       sql`DELETE FROM password_reset_tokens WHERE user_id = ${userId}`);
     await tryCleanup('oauth_state_store',

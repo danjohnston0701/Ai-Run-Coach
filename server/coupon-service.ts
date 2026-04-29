@@ -114,13 +114,32 @@ export async function redeemPromoCode(
 }
 
 /**
- * Check if a user has an active unlimited grant for a specific feature
+ * Map from internal feature keys to the coupon types that grant unlimited access to them.
+ * "unlimited_all" always grants access to every feature.
+ */
+const FEATURE_TO_COUPON_TYPES: Record<string, string[]> = {
+  aiCoachingKm:            ["unlimited_all", "unlimited_coaching"],
+  trainingPlansGenerated:  ["unlimited_all", "unlimited_plans"],
+  routesGenerated:         ["unlimited_all", "unlimited_routes"],
+  postRunAnalyses:         ["unlimited_all", "unlimited_analyses"],
+};
+
+/**
+ * Check if a user has an active unlimited grant for a specific feature.
+ * Only returns true if the user's active coupon type covers the requested feature.
  */
 export async function hasUnlimitedGrant(
   userId: string,
   feature: string
 ): Promise<boolean> {
   try {
+    const allowedTypes = FEATURE_TO_COUPON_TYPES[feature];
+    // Unknown feature key — don't grant unlimited access
+    if (!allowedTypes || allowedTypes.length === 0) return false;
+
+    // Build a parameterised IN list
+    const typeList = allowedTypes.map((t) => `'${t}'`).join(", ");
+
     const result = await db.execute(
       sql`
       SELECT COUNT(*) as count FROM user_coupons uc
@@ -128,10 +147,11 @@ export async function hasUnlimitedGrant(
       WHERE uc.user_id = ${userId}
         AND uc.expires_at > NOW()
         AND cc.is_active = true
+        AND cc.type IN (${sql.raw(typeList)})
       `
     );
 
-    return parseInt(result[0]?.count || "0") > 0;
+    return parseInt(String(result[0]?.count ?? "0")) > 0;
   } catch (err) {
     console.error("[CouponService] Error checking unlimited grant:", err);
     return false;

@@ -474,11 +474,6 @@ interface ApiService {
     // ========== PROMO CODES ==========
 
     @POST("/api/promo-codes/redeem")
-    suspend fun redeemPromoCode(@Body request: Map<String, String>): PromoCodeRedemptionResponse
-
-    // ========== PROMO CODES ==========
-
-    @POST("/api/promo-codes/redeem")
     suspend fun redeemPromoCode(@Body request: PromoCodeRequest): PromoCodeResponse
 
     @GET("/api/promo-codes/active-grants")
