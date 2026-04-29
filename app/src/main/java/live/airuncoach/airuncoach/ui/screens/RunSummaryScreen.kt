@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 
 package live.airuncoach.airuncoach.ui.screens
 
@@ -12,8 +12,10 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.platform.LocalDensity
@@ -976,7 +978,6 @@ private fun SummaryTabContent(
 
 /* ------------------------------- TAB: GRAPHS ------------------------------ */
 
-@Suppress("EXPERIMENTAL_API_USAGE")
 @Composable
 private fun GraphsTabContent(
     run: RunSession,
