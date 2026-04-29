@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import live.airuncoach.airuncoach.domain.model.RunSession
+import live.airuncoach.airuncoach.ui.extensions.getHeartRateZoneDistribution
 import live.airuncoach.airuncoach.ui.theme.*
 
 /**
@@ -37,11 +38,38 @@ fun HeartRateZonePaceChart(
     run: RunSession,
     modifier: Modifier = Modifier
 ) {
-    // Extract pace and HR data from run
+    // Build (pace min/km, heartRate, zone) triples by interleaving paceData + heartRateData.
+    // Both lists are uniformly sampled so we align them by index ratio.
     val data = remember(run) {
-        // Build list of (pace, heartRate, zone) from run data
-        // This would typically come from LocationPoint time-series or watch biometric samples
-        emptyList<Triple<Float, Float, Int>>()  // TODO: Extract from run data
+        val hrList   = run.heartRateData
+        val paceList = run.paceData
+        if (hrList.isNullOrEmpty()) return@remember emptyList()
+
+        // Determine HR zone boundaries from the observed max in this run
+        val maxHr = hrList.maxOrNull() ?: 180
+        fun hrToZone(hr: Int): Int = when {
+            hr <= maxHr * 0.50f -> 1
+            hr <= maxHr * 0.60f -> 2
+            hr <= maxHr * 0.75f -> 3
+            hr <= maxHr * 0.85f -> 4
+            else                -> 5
+        }
+
+        hrList.mapIndexed { idx, hr ->
+            // Map pace sample by ratio (pace list may be shorter/longer than HR list)
+            val paceSecPerKm = if (!paceList.isNullOrEmpty()) {
+                val paceIdx = (idx.toFloat() / hrList.size * paceList.size)
+                    .toInt().coerceIn(0, paceList.size - 1)
+                paceList[paceIdx].toFloat()
+            } else {
+                // Fall back: derive pace from overall average
+                val avgPaceSec = run.elapsedTime?.let { t ->
+                    if (run.distance > 0) (t / (run.distance / 1000.0)).toFloat() else 360f
+                } ?: 360f
+                avgPaceSec
+            }
+            Triple(paceSecPerKm / 60f, hr.toFloat(), hrToZone(hr))
+        }
     }
     
     if (data.isEmpty()) {
@@ -253,11 +281,23 @@ private fun getZoneColor(zone: Int): Color {
  * Insight card for HR vs Pace analysis
  */
 @Composable
-@Suppress("UNUSED_PARAMETER")
 private fun HRZonePaceInsight(
     run: RunSession,
     modifier: Modifier = Modifier
 ) {
+    // Real zone distribution derived from heartRateData
+    val zones = remember(run) { run.getHeartRateZoneDistribution() }
+    // Dominant zone by time
+    val dominantZone = zones.maxByOrNull { it.value }?.key ?: "Z3"
+    val dominantPct  = zones[dominantZone]?.toInt() ?: 0
+    val efficiencyText = when (dominantZone) {
+        "Z1", "Z2" -> "Easy effort run — good for recovery and aerobic base building."
+        "Z3"       -> "Aerobic effort — solid steady-state training, efficient pacing."
+        "Z4"       -> "Threshold effort — pushing hard, great for race fitness."
+        "Z5"       -> "Max effort — high intensity, monitor recovery carefully."
+        else       -> "Mixed effort across heart rate zones."
+    }
+
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -283,27 +323,28 @@ private fun HRZonePaceInsight(
                     color = Colors.textPrimary
                 )
             }
-            
+
             Spacer(modifier = Modifier.height(Spacing.md))
-            
-            // Zone breakdown
+
+            // Real zone breakdown
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = Spacing.sm),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                ZoneBreakdownItem(zone = "Z1", percentage = 0f, color = Color(0xFF4A90E2))
-                ZoneBreakdownItem(zone = "Z2", percentage = 15f, color = Color(0xFF7ED321))
-                ZoneBreakdownItem(zone = "Z3", percentage = 65f, color = Color(0xFFF5A623))
-                ZoneBreakdownItem(zone = "Z4", percentage = 20f, color = Color(0xFFFF6B35))
-                ZoneBreakdownItem(zone = "Z5", percentage = 0f, color = Color(0xFFD0021B))
+                ZoneBreakdownItem("Z1", zones["Z1"] ?: 0f, Color(0xFF4A90E2))
+                ZoneBreakdownItem("Z2", zones["Z2"] ?: 0f, Color(0xFF7ED321))
+                ZoneBreakdownItem("Z3", zones["Z3"] ?: 0f, Color(0xFFF5A623))
+                ZoneBreakdownItem("Z4", zones["Z4"] ?: 0f, Color(0xFFFF6B35))
+                ZoneBreakdownItem("Z5", zones["Z5"] ?: 0f, Color(0xFFD0021B))
             }
-            
+
             Spacer(modifier = Modifier.height(Spacing.md))
-            
+
             Text(
-                "You maintained excellent pace discipline, staying in Zone 3 for the entire run. This consistent effort level shows great pacing strategy.",
+                if (dominantPct > 0) "$dominantPct% in $dominantZone — $efficiencyText"
+                else efficiencyText,
                 style = AppTextStyles.caption,
                 color = Colors.textSecondary
             )

@@ -216,6 +216,11 @@ class RunView extends Ui.View {
     function onShow() {
         _phoneLink.register(method(:onPhoneMessage));
         Comm.registerForPhoneAppMessages(method(:onPhoneAppMessage));
+
+        // Notify the phone that the watch is ready to receive auth + run state.
+        // Triggers phone to push auth token (and any prepared run) to the watch.
+        _phoneLink.sendCommand("watchReady");
+
         if (!_phoneControlled && _isRunning) {
             _startSession();
             Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));

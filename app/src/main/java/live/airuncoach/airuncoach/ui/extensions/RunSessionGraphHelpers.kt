@@ -131,29 +131,74 @@ fun RunSession.getHeartRateVsElevation(): List<Triple<Double, Int, Double>> {
 
 /**
  * Get ground contact time data over distance.
+ * Uses groundContactTimeData time-series from Garmin watch (2s samples).
  * @return List of (distanceKm, gctMs) pairs
  */
 fun RunSession.getGroundContactTimeOverDistance(): List<Pair<Double, Int>> {
-    // Note: This requires GCT time-series data from watch
-    // Until implemented in RunSession, return empty
-    return emptyList()
+    val gctSamples = groundContactTimeData
+    if (gctSamples.isNullOrEmpty()) return emptyList()
+    val distanceKm = distance / 1000.0
+    if (distanceKm <= 0) return emptyList()
+    val distancePerSample = distanceKm / gctSamples.size
+    return gctSamples.mapIndexed { index, gct ->
+        Pair(index * distancePerSample, gct.toInt())
+    }
 }
 
 /**
  * Get vertical oscillation data over distance.
+ * Uses verticalOscillationData time-series from Garmin watch (2s samples).
  * @return List of (distanceKm, voCm) pairs
  */
 fun RunSession.getVerticalOscillationOverDistance(): List<Pair<Double, Double>> {
-    // Note: This requires VO time-series data from watch
-    return emptyList()
+    val voSamples = verticalOscillationData
+    if (voSamples.isNullOrEmpty()) return emptyList()
+    val distanceKm = distance / 1000.0
+    if (distanceKm <= 0) return emptyList()
+    val distancePerSample = distanceKm / voSamples.size
+    return voSamples.mapIndexed { index, vo ->
+        Pair(index * distancePerSample, vo.toDouble())
+    }
 }
 
 /**
  * Get stride length data over distance.
+ * Derives stride length from cadence and pace: strideLength = speed / (cadence / 60).
+ * Uses cadenceData time-series from Garmin watch (2s samples).
+ * Falls back to avgStrideLength if no time-series data.
  * @return List of (distanceKm, strideM) pairs
  */
 fun RunSession.getStrideLengthOverDistance(): List<Pair<Double, Double>> {
-    // Note: This requires stride time-series data from watch
+    val cadenceSamples = cadenceData
+    // If we have time-series cadence, derive stride length from cadence + pace samples
+    if (!cadenceSamples.isNullOrEmpty()) {
+        val distanceKm = distance / 1000.0
+        if (distanceKm <= 0) return emptyList()
+        val totalSeconds = elapsedTime ?: return emptyList()
+        if (totalSeconds <= 0) return emptyList()
+        val speedMs = (distance / totalSeconds.toDouble()) // metres/sec
+        val distancePerSample = distanceKm / cadenceSamples.size
+        return cadenceSamples.mapIndexed { index, cadence ->
+            // stride length = speed / (steps per second)
+            // cadence is steps/min; each stride = 2 steps so stepsPerSec = cadence/60/2
+            val strideM = if (cadence > 0) {
+                val stepsPerSec = cadence / 60.0
+                speedMs / stepsPerSec  // distance per step
+            } else {
+                avgStrideLength?.toDouble() ?: 0.0
+            }
+            Pair(index * distancePerSample, strideM)
+        }
+    }
+    // Fall back: flat line using average stride length if available
+    val avgStride = avgStrideLength?.toDouble()
+    if (avgStride != null && avgStride > 0 && distance > 0) {
+        val distanceKm = distance / 1000.0
+        // Create 10 evenly-spaced points showing the average
+        return (0..9).map { i ->
+            Pair(i * distanceKm / 9.0, avgStride)
+        }
+    }
     return emptyList()
 }
 

@@ -334,11 +334,11 @@ class RunSummaryViewModel @Inject constructor(
                     // Build Garmin data summary (only if we have data)
                     val terrainSummary = computeTerrainSummary(session)
                     val garminDataSummary = session.buildGarminDataSummary(terrainSummary)
-                    
-                    // Get user profile (currently no backend call for this, use defaults)
-                    // TODO: Add call to apiService.getUserProfile(session.userId) once endpoint exists
-                    val userProfile = null  // Will be populated once backend endpoint is ready
-                    
+
+                    // Build user profile from local user object + recent runs for baselines
+                    val userId = sharedPrefs.getString("userId", null)
+                    val userProfile = buildUserProfile(userId, session)
+
                     // Build request with all context
                     val analysisRequest = ComprehensiveAnalysisRequest(
                         runId = session.id,
@@ -359,12 +359,26 @@ class RunSummaryViewModel @Inject constructor(
                         "analysis" to response.analysis
                     ))
                     try { apiService.saveRunAnalysis(session.id, SaveRunAnalysisRequest(saveJson)) } catch (_: Exception) {}
-                    
-                    // TODO: Extract Garmin insights from response and update user profile
-                    // val garminInsights = extractGarminInsights(response.analysis, session.hasGarminData)
-                    // if (garminInsights.isNotEmpty()) {
-                    //     // Update user profile with new insights
-                    // }
+
+                    // Persist updated garmin insights to SharedPreferences for future runs
+                    if (userId != null && session.hasGarminData) {
+                        val analysisText = listOfNotNull(
+                            response.analysis.technicalAnalysis?.runningDynamics,
+                            response.analysis.garminInsights?.trainingEffect,
+                            response.analysis.garminInsights?.vo2MaxTrend
+                        ).joinToString(". ")
+                        val newInsights = extractGarminInsights(analysisText, hasGarminData = true)
+                        if (newInsights.isNotEmpty()) {
+                            val prevInsights = sharedPrefs.getString("garmin_insights_$userId", null)
+                            val existingProfile = sharedPrefs.getString("what_i_know_$userId", "") ?: ""
+                            val updatedProfile = updateWhatIKnowAboutYou(existingProfile, newInsights, prevInsights)
+                            sharedPrefs.edit()
+                                .putString("what_i_know_$userId", updatedProfile)
+                                .putString("garmin_insights_$userId", newInsights)
+                                .apply()
+                            Log.d("RunSummaryViewModel", "Garmin insights saved to profile")
+                        }
+                    }
                 } catch (analysisError: Exception) {
                     Log.w("RunSummaryViewModel", "Comprehensive analysis failed: ${analysisError.message}", analysisError)
                     _analysisState.value = AiAnalysisState.Error(
@@ -587,7 +601,12 @@ class RunSummaryViewModel @Inject constructor(
             coachAccent = user?.coachAccent,
             coachTone = user?.coachTone,
 
-            lastSimilarRun = null, // TODO: fetch last similar run from backend
+            lastSimilarRun = run {
+                try {
+                    val uid = sharedPrefs.getString("userId", null) ?: user?.id
+                    if (uid != null) fetchLastSimilarRun(uid, session) else null
+                } catch (_: Exception) { null }
+            },
             isGarminConnected = _isGarminConnected.value,
             aiCoachingNotes = session.aiCoachingNotes.takeIf { it.isNotEmpty() }
                 ?.joinToString("\n") { it.message }
@@ -832,13 +851,83 @@ class RunSummaryViewModel @Inject constructor(
     }
     
     /**
-     * Get historical runs on similar routes for comparison
-     * TODO: Implement actual historical data fetching from backend
+     * Fetch the most recent run with similar distance (±20%) for delta comparisons.
+     * Excludes the current run itself.
+     */
+    private suspend fun fetchLastSimilarRun(userId: String, currentRun: RunSession): LastSimilarRunData? {
+        val allRuns = apiService.getRunsForUser(userId)
+        val minDist = currentRun.distance * 0.80
+        val maxDist = currentRun.distance * 1.20
+        return allRuns
+            .filter { run -> run.id != currentRun.id && run.distance in minDist..maxDist }
+            .maxByOrNull { it.startTime }
+            ?.let { run ->
+                LastSimilarRunData(
+                    date = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+                        .format(java.util.Date(run.startTime)),
+                    distance = run.distance,
+                    duration = run.duration,
+                    averagePace = run.averagePace
+                )
+            }
+    }
+
+    /**
+     * Get historical runs on similar routes for comparison (used by the analysis request).
      */
     private suspend fun getHistoricalSimilarRuns(currentRun: RunSession): List<HistoricalRunData> {
-        // Placeholder - in production, fetch from backend
-        // Filter runs by route similarity score > 0.7
-        return emptyList()
+        return try {
+            val userId = sharedPrefs.getString("userId", null) ?: return emptyList()
+            val allRuns = apiService.getRunsForUser(userId)
+            val minDist = currentRun.distance * 0.80
+            val maxDist = currentRun.distance * 1.20
+            val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            allRuns
+                .filter { r -> r.id != currentRun.id && r.distance in minDist..maxDist }
+                .sortedByDescending { it.startTime }
+                .take(3)
+                .map { r ->
+                    HistoricalRunData(
+                        date = dateFormat.format(java.util.Date(r.startTime)),
+                        distance = r.distance,
+                        duration = r.duration / 1000L,
+                        averagePace = r.averagePace ?: "",
+                        elevationGain = r.totalElevationGain,
+                        weatherTemperature = r.weatherAtStart?.temperature,
+                        weatherCondition = r.weatherAtStart?.condition,
+                        routeSimilarity = if (r.routeHash != null && currentRun.routeHash != null &&
+                            r.routeHash == currentRun.routeHash) 1.0f else 0.7f
+                    )
+                }
+        } catch (e: Exception) {
+            Log.w("RunSummaryViewModel", "Failed to load historical similar runs", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * Build a UserProfileForAI from SharedPreferences + recent runs for baselines.
+     * Uses the stored "what I know about you" text and 4-week Garmin baselines.
+     */
+    private suspend fun buildUserProfile(userId: String?, currentRun: RunSession): UserProfileForAI? {
+        if (userId == null) return null
+        return try {
+            val whatIKnow = sharedPrefs.getString("what_i_know_$userId", "") ?: ""
+            val garminInsightsCached = sharedPrefs.getString("garmin_insights_$userId", null)
+            // Fetch recent runs for baseline computation (last 4 weeks, max 30 runs)
+            val recentRuns = try {
+                apiService.getRunsForUser(userId)
+                    .filter { r -> r.id != currentRun.id }
+                    .sortedByDescending { it.startTime }
+                    .take(30)
+            } catch (_: Exception) { emptyList() }
+
+            val profile = buildUserProfileContextWithBaselines(userId, whatIKnow, recentRuns)
+            profile.copy(garminInsights = garminInsightsCached)
+        } catch (e: Exception) {
+            Log.w("RunSummaryViewModel", "Failed to build user profile — sending minimal context", e)
+            UserProfileForAI(userId = userId)
+        }
     }
 
     /**
