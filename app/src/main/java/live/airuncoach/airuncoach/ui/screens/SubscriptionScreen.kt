@@ -671,6 +671,7 @@ fun PlanSelector(plan: Plan, isSelected: Boolean, onClick: () -> Unit) {
 fun CouponCodeSection() {
     var couponCode by remember { mutableStateOf("") }
     var isRedeeming by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -682,34 +683,63 @@ fun CouponCodeSection() {
             style = AppTextStyles.body,
             color = Colors.textSecondary
         )
+
+        // Error message if redemption failed
+        if (errorMessage.isNotBlank()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = Colors.error.copy(alpha = 0.15f)
+                ),
+                shape = RoundedCornerShape(BorderRadius.md)
+            ) {
+                Text(
+                    text = errorMessage,
+                    style = AppTextStyles.caption,
+                    color = Colors.error,
+                    modifier = Modifier.padding(Spacing.sm),
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
             OutlinedTextField(
                 value = couponCode,
-                onValueChange = { couponCode = it },
+                onValueChange = {
+                    couponCode = it
+                    errorMessage = "" // Clear error when user starts typing again
+                },
                 label = { Text("Enter code") },
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(BorderRadius.lg),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = Colors.textPrimary,
                     cursorColor = Colors.primary,
-                    focusedBorderColor = Colors.primary,
-                    unfocusedBorderColor = Colors.textMuted,
+                    focusedBorderColor = if (errorMessage.isNotBlank()) Colors.error else Colors.primary,
+                    unfocusedBorderColor = if (errorMessage.isNotBlank()) Colors.error else Colors.textMuted,
                     disabledBorderColor = Colors.textMuted
                 ),
-                enabled = !isRedeeming
+                enabled = !isRedeeming,
+                isError = errorMessage.isNotBlank()
             )
             Spacer(modifier = Modifier.width(Spacing.sm))
             Button(
                 onClick = {
                     if (couponCode.isNotBlank()) {
-                        // TODO: Call API endpoint to validate and apply coupon
-                        // For now, just show a placeholder success state
                         isRedeeming = true
-                        // Simulate API call
-                        couponCode = ""
+                        errorMessage = ""
+                        
+                        // TODO: Call API endpoint to validate and apply coupon
+                        // apiService.redeemCoupon(couponCode).onSuccess { ... }.onError { error ->
+                        //     errorMessage = error.message
+                        // }
+                        
+                        // Placeholder: always show "invalid code" error for now
+                        errorMessage = "Invalid or expired code"
                         isRedeeming = false
                     }
                 },
