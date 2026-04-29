@@ -36,6 +36,7 @@ import live.airuncoach.airuncoach.domain.model.InjuryStatus
 import live.airuncoach.airuncoach.domain.model.RegularSession
 import live.airuncoach.airuncoach.domain.model.Zone2PaceDetector
 import live.airuncoach.airuncoach.domain.model.RunSession
+import live.airuncoach.airuncoach.ui.components.PromoCodeDialog
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
@@ -77,6 +78,10 @@ fun GeneratePlanScreen(
     // Dialog state for adding an injury
     var showAddInjuryDialog by remember { mutableStateOf(false) }
     var editingInjury by remember { mutableStateOf<Injury?>(null) }
+
+    // Dialog state for promo codes
+    val promoRedeemState by viewModel.promoRedeemState.collectAsState()
+    var showPromoDialog by remember { mutableStateOf(false) }
 
     // Check if goal already has a linked plan
     LaunchedEffect(prefilledGoal) {
@@ -541,14 +546,70 @@ fun GeneratePlanScreen(
 
                     Spacer(modifier = Modifier.height(Spacing.xl))
 
-                    // ── Error ────────────────────────────────────────────────────────────
-                    if (generateState is GeneratePlanState.Error) {
-                        Text(
-                            (generateState as GeneratePlanState.Error).message,
-                            style = AppTextStyles.small,
-                            color = Colors.error,
-                            modifier = Modifier.padding(bottom = Spacing.md)
-                        )
+                    // ── Error / Limit Reached ────────────────────────────────────────────────────────────
+                    when (generateState) {
+                        is GeneratePlanState.Error -> {
+                            Text(
+                                (generateState as GeneratePlanState.Error).message,
+                                style = AppTextStyles.small,
+                                color = Colors.error,
+                                modifier = Modifier.padding(bottom = Spacing.md)
+                            )
+                        }
+                        is GeneratePlanState.LimitReached -> {
+                            val limit = generateState as GeneratePlanState.LimitReached
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = Spacing.md),
+                                colors = CardDefaults.cardColors(containerColor = Colors.error.copy(alpha = 0.1f))
+                            ) {
+                                Column(modifier = Modifier.padding(Spacing.md)) {
+                                    Text(
+                                        limit.message,
+                                        style = AppTextStyles.body,
+                                        color = Colors.textPrimary,
+                                        modifier = Modifier.padding(bottom = Spacing.sm)
+                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = Spacing.sm),
+                                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                                    ) {
+                                        Button(
+                                            onClick = { showPromoDialog = true },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(40.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text(
+                                                "Have a promo code?",
+                                                style = AppTextStyles.body,
+                                                color = Colors.buttonText
+                                            )
+                                        }
+                                        Button(
+                                            onClick = { /* Navigate to upgrade */ },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(40.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = Colors.backgroundSecondary),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text(
+                                                "Upgrade",
+                                                style = AppTextStyles.body,
+                                                color = Colors.textPrimary
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        else -> {}
                     }
 
                     // ── AI Consent note — shown when consent not yet granted ──────────
@@ -667,6 +728,32 @@ fun GeneratePlanScreen(
                 editingInjury = null
             }
         )
+    }
+
+    // Promo Code Dialog
+    PromoCodeDialog(
+        isVisible = showPromoDialog,
+        onDismiss = { showPromoDialog = false },
+        onRedeem = { code ->
+            viewModel.redeemPromoCode(code)
+            showPromoDialog = false
+        },
+        isLoading = promoRedeemState is live.airuncoach.airuncoach.viewmodel.PromoRedeemState.Redeeming
+    )
+
+    // Show success/error message for promo redemption
+    LaunchedEffect(promoRedeemState) {
+        when (promoRedeemState) {
+            is live.airuncoach.airuncoach.viewmodel.PromoRedeemState.Success -> {
+                // Success! User can now retry
+                viewModel.resetPromoState()
+            }
+            is live.airuncoach.airuncoach.viewmodel.PromoRedeemState.Error -> {
+                // Error will be shown in an alert
+                viewModel.resetPromoState()
+            }
+            else -> {}
+        }
     }
 }
 
