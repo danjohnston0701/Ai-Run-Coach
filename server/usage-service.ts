@@ -109,6 +109,17 @@ export async function checkAndEnforceLimit(
   // Unlimited tier — skip the DB read entirely
   if (limit === Infinity) return true;
 
+  // Check if user has an active promo code grant (unlimited for this feature)
+  try {
+    const { hasUnlimitedGrant } = await import("./coupon-service");
+    if (await hasUnlimitedGrant(userId, feature)) {
+      return true; // User has unlimited access via promo code
+    }
+  } catch (err) {
+    // If coupon check fails, continue with regular limit enforcement
+    console.error(`[UsageService] Error checking unlimited grant: ${err}`);
+  }
+
   const yearMonth = currentYearMonth();
   const row = await storage.getMonthlyUsage(userId, yearMonth);
   const current = row[feature] as number;
@@ -116,19 +127,30 @@ export async function checkAndEnforceLimit(
   if (current + amount > limit) {
     const featureLabel: Record<GatedFeature, string> = {
       aiCoachingKm: "AI coaching",
-      trainingPlansGenerated: "training plan generation",
-      routesGenerated: "route generation",
+      trainingPlansGenerated: "Plans",
+      routesGenerated: "Routes",
       postRunAnalyses: "post-run AI analysis",
     };
+
+    const nextMonth = nextMonthLabel(yearMonth);
+    const isFreeUser = tier === "free" || !tier;
+    
+    let message = `You have reached the limit of ${featureLabel[feature]} this month for your ${tier ?? "free"} plan. `;
+    if (isFreeUser) {
+      message += `Upgrade to unlock unlimited ${featureLabel[feature]}, or wait until ${nextMonth} to try again.`;
+    } else {
+      message += `Upgrade to a higher tier, or wait until ${nextMonth} to try again.`;
+    }
 
     res.status(429).json({
       error: "monthly_limit_reached",
       feature,
-      message: `You've reached your monthly limit for ${featureLabel[feature]} on the ${(tier ?? "free")} plan. Upgrade to continue.`,
+      message,
       limit,
       used: current,
       remaining: Math.max(0, limit - current),
-      resetMonth: nextMonthLabel(yearMonth),
+      resetMonth: nextMonth,
+      isFreeUser,
     });
     return false;
   }

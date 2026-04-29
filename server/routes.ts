@@ -2877,6 +2877,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==================== PROMO CODES ====================
+
+  app.post("/api/promo-codes/redeem", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { code } = req.body;
+      if (!code || typeof code !== "string") {
+        return res.status(400).json({ error: "Promo code is required" });
+      }
+
+      const { redeemPromoCode } = await import("./coupon-service");
+      const result = await redeemPromoCode(req.user!.userId, code);
+      
+      if (result.success) {
+        res.json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error: any) {
+      console.error("[PromoCode] POST /api/promo-codes/redeem error:", error);
+      res.status(500).json({ error: "Failed to redeem promo code" });
+    }
+  });
+
+  app.get("/api/promo-codes/active-grants", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { getUserActiveGrants } = await import("./coupon-service");
+      const grants = await getUserActiveGrants(req.user!.userId);
+      res.json({ grants });
+    } catch (error: any) {
+      console.error("[PromoCode] GET /api/promo-codes/active-grants error:", error);
+      res.status(500).json({ error: "Failed to fetch active grants" });
+    }
+  });
+
   // ==================== PUSH SUBSCRIPTIONS ====================
   
   app.post("/api/push-subscriptions", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
