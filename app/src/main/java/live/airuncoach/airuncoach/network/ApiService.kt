@@ -471,6 +471,14 @@ interface ApiService {
     @GET("/api/usage/current")
     suspend fun getCurrentUsage(): UsageResponse
 
+    // ========== PROMO CODES ==========
+
+    @POST("/api/promo-codes/redeem")
+    suspend fun redeemPromoCode(@Body request: PromoCodeRequest): PromoCodeResponse
+
+    @GET("/api/promo-codes/active-grants")
+    suspend fun getActiveGrants(): Map<String, List<PromoGrant>>
+
     // ========== SESSION COACHING (Phase 1 — legacy) ==========
     
     @GET("/api/workouts/{workoutId}/session-instructions")

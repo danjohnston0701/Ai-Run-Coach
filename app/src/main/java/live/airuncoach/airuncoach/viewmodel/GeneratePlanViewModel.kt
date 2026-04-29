@@ -28,6 +28,21 @@ sealed class GeneratePlanState {
     object Generating : GeneratePlanState()
     data class Success(val planId: String) : GeneratePlanState()
     data class Error(val message: String) : GeneratePlanState()
+    data class LimitReached(
+        val message: String,
+        val feature: String,
+        val resetMonth: String,
+        val used: Int,
+        val limit: Int,
+        val remaining: Int
+    ) : GeneratePlanState()
+}
+
+sealed class PromoRedeemState {
+    object Idle : PromoRedeemState()
+    object Redeeming : PromoRedeemState()
+    data class Success(val message: String, val grantedUntil: String) : PromoRedeemState()
+    data class Error(val message: String) : PromoRedeemState()
 }
 
 /** Canonical fitness levels — matches the user profile exactly */
@@ -116,6 +131,9 @@ class GeneratePlanViewModel @Inject constructor(
 
     private val _generateState = MutableStateFlow<GeneratePlanState>(GeneratePlanState.Idle)
     val generateState: StateFlow<GeneratePlanState> = _generateState.asStateFlow()
+
+    private val _promoRedeemState = MutableStateFlow<PromoRedeemState>(PromoRedeemState.Idle)
+    val promoRedeemState: StateFlow<PromoRedeemState> = _promoRedeemState.asStateFlow()
 
     init {
         loadFitnessLevelFromProfile()
@@ -292,13 +310,34 @@ class GeneratePlanViewModel @Inject constructor(
                 val response = apiService.generateTrainingPlan(request)
                 _generateState.value = GeneratePlanState.Success(response.planId)
             } catch (e: retrofit2.HttpException) {
-                val friendlyMessage = when (e.code()) {
-                    409 -> "An active Coaching Plan already exists. Unable to generate a duplicate plan."
-                    429 -> "A plan is already being generated. Please wait for it to complete."
-                    else -> "Failed to generate plan (${e.code()})"
+                when (e.code()) {
+                    429 -> {
+                        // Try to parse as monthly_limit_reached error
+                        try {
+                            val errorBody = e.response()?.errorBody()?.string()
+                            val errorJson = gson.fromJson(errorBody, Map::class.java)
+                            
+                            if (errorJson["error"] == "monthly_limit_reached") {
+                                _generateState.value = GeneratePlanState.LimitReached(
+                                    message = errorJson["message"]?.toString() ?: "Monthly limit reached",
+                                    feature = errorJson["feature"]?.toString() ?: "trainingPlansGenerated",
+                                    resetMonth = errorJson["resetMonth"]?.toString() ?: "",
+                                    used = (errorJson["used"] as? Number)?.toInt() ?: 0,
+                                    limit = (errorJson["limit"] as? Number)?.toInt() ?: 1,
+                                    remaining = (errorJson["remaining"] as? Number)?.toInt() ?: 0
+                                )
+                            } else {
+                                _generateState.value = GeneratePlanState.Error("A plan is already being generated. Please wait for it to complete.")
+                            }
+                        } catch (parseErr: Exception) {
+                            Log.e("GeneratePlanVM", "Could not parse 429 error", parseErr)
+                            _generateState.value = GeneratePlanState.Error("A plan is already being generated. Please wait for it to complete.")
+                        }
+                    }
+                    409 -> _generateState.value = GeneratePlanState.Error("An active Coaching Plan already exists. Unable to generate a duplicate plan.")
+                    else -> _generateState.value = GeneratePlanState.Error("Failed to generate plan (${e.code()})")
                 }
                 Log.e("GeneratePlanVM", "HTTP ${e.code()} generating plan", e)
-                _generateState.value = GeneratePlanState.Error(friendlyMessage)
             } catch (e: Exception) {
                 Log.e("GeneratePlanVM", "Failed to generate plan: ${e.message}", e)
                 _generateState.value = GeneratePlanState.Error(e.message ?: "Failed to generate plan")
@@ -388,5 +427,37 @@ class GeneratePlanViewModel @Inject constructor(
 
     fun resetState() {
         _generateState.value = GeneratePlanState.Idle
+    }
+
+    /**
+     * Redeem a promo code for unlimited access
+     */
+    fun redeemPromoCode(code: String) {
+        viewModelScope.launch {
+            _promoRedeemState.value = PromoRedeemState.Redeeming
+            try {
+                val request = live.airuncoach.airuncoach.network.model.PromoCodeRequest(code)
+                val response = apiService.redeemPromoCode(request)
+                if (response.success) {
+                    _promoRedeemState.value = PromoRedeemState.Success(
+                        message = response.message,
+                        grantedUntil = response.grantedUntil ?: ""
+                    )
+                    // Reset generate state to allow retry
+                    _generateState.value = GeneratePlanState.Idle
+                } else {
+                    _promoRedeemState.value = PromoRedeemState.Error(response.message)
+                }
+            } catch (e: Exception) {
+                Log.e("GeneratePlanVM", "Error redeeming promo code: ${e.message}", e)
+                _promoRedeemState.value = PromoRedeemState.Error(
+                    e.message ?: "Failed to redeem promo code"
+                )
+            }
+        }
+    }
+
+    fun resetPromoState() {
+        _promoRedeemState.value = PromoRedeemState.Idle
     }
 }
