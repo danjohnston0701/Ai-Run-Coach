@@ -976,6 +976,7 @@ private fun SummaryTabContent(
 
 /* ------------------------------- TAB: GRAPHS ------------------------------ */
 
+@Suppress("EXPERIMENTAL_API_USAGE")
 @Composable
 private fun GraphsTabContent(
     run: RunSession,
