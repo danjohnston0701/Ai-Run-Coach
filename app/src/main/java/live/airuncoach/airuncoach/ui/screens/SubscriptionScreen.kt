@@ -670,6 +670,7 @@ fun PlanSelector(plan: Plan, isSelected: Boolean, onClick: () -> Unit) {
 @Composable
 fun CouponCodeSection() {
     var couponCode by remember { mutableStateOf("") }
+    var isRedeeming by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -697,18 +698,37 @@ fun CouponCodeSection() {
                     focusedBorderColor = Colors.primary,
                     unfocusedBorderColor = Colors.textMuted,
                     disabledBorderColor = Colors.textMuted
-                )
+                ),
+                enabled = !isRedeeming
             )
             Spacer(modifier = Modifier.width(Spacing.sm))
             Button(
-                onClick = { /* TODO: Redeem code */ },
+                onClick = {
+                    if (couponCode.isNotBlank()) {
+                        // TODO: Call API endpoint to validate and apply coupon
+                        // For now, just show a placeholder success state
+                        isRedeeming = true
+                        // Simulate API call
+                        couponCode = ""
+                        isRedeeming = false
+                    }
+                },
                 shape = RoundedCornerShape(BorderRadius.lg),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Colors.primary.copy(alpha = 0.5f),
                     contentColor = Colors.buttonText
-                )
+                ),
+                enabled = couponCode.isNotBlank() && !isRedeeming
             ) {
-                Text("Redeem")
+                if (isRedeeming) {
+                    CircularProgressIndicator(
+                        color = Colors.buttonText,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(16.dp)
+                    )
+                } else {
+                    Text("Redeem")
+                }
             }
         }
     }
