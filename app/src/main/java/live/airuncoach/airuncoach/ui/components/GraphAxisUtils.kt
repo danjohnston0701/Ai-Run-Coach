@@ -168,6 +168,8 @@ fun scaleToCanvas(
     canvasStart: Float,
     canvasSize: Float
 ): Float {
+    // Guard against zero range (single-value data or equal min/max) to avoid NaN/Inf
+    if (axisConfig.range == 0f) return canvasStart + canvasSize / 2f
     return canvasStart + ((value - axisConfig.visualMin) / axisConfig.range) * canvasSize
 }
 

@@ -2231,7 +2231,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 val paceSeconds = parsePaceToSeconds(session.currentPace ?: "0:00")
                 garminWatchManager?.sendRunUpdate(
                     paceSecPerKm   = paceSeconds,
-                    distanceMetres = session.distance * 1000.0,
+                    distanceMetres = session.distance, // already in metres
                     heartRate      = session.heartRate ?: 0,
                     elapsedSeconds = (session.duration / 1000L),
                     cadence        = session.cadence ?: 0,

@@ -73,6 +73,7 @@ import {
 import adaptationRouter from "./routes-adaptation";
 import myDataRouter from "./routes-my-data";
 import achievementsRouter from "./routes-achievements";
+import realtimeCoachingRouter from "./real-time-coaching-integration";
 import { registerSessionCoachingRoutes } from "./routes-session-coaching";
 import { registerSamsungCompanionRoutes } from "./routes-samsung-companion";
 import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-resolver";
@@ -92,6 +93,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(garminOAuthRouter);
   app.use("/api", adaptationRouter);
   app.use("/api/my-data", myDataRouter);
+  app.use("/api/coaching", realtimeCoachingRouter); // Real-time biomechanical coaching
   app.use("/api", achievementsRouter);
   registerSessionCoachingRoutes(app);
   await registerSamsungCompanionRoutes(app);

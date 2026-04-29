@@ -103,6 +103,7 @@ fun estimateFatigue(session: RunSession): Int {
     // Vertical oscillation increase — form breakdown indicator
     session.avgVerticalOscillation?.let { avgVo ->
         session.maxVerticalOscillation?.let { maxVo ->
+            if (avgVo == 0f) return@let
             val voIncrease = ((maxVo - avgVo) / avgVo) * 100
             when {
                 voIncrease < 10 -> fatigueScore += 15
@@ -116,6 +117,7 @@ fun estimateFatigue(session: RunSession): Int {
     // Ground contact time increase — heavy legs indicator
     session.avgGroundContactTime?.let { avgGct ->
         session.maxGroundContactTime?.let { maxGct ->
+            if (avgGct == 0f) return@let
             val gctIncrease = ((maxGct - avgGct) / avgGct) * 100
             when {
                 gctIncrease < 10 -> fatigueScore += 20
@@ -129,6 +131,7 @@ fun estimateFatigue(session: RunSession): Int {
     // Stride length decrease — energy depletion
     session.avgStrideLength?.let { avgStride ->
         session.minStrideLength?.let { minStride ->
+            if (avgStride == 0f) return@let
             val strideDecrease = ((avgStride - minStride) / avgStride) * 100
             when {
                 strideDecrease < 5 -> fatigueScore += 15

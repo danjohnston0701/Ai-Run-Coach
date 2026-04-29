@@ -3050,7 +3050,7 @@ ${userProfileContext.garminInsights}`;
       }
       if (garminDataFromWatch.recoveryTimeMinutes !== null && garminDataFromWatch.recoveryTimeMinutes !== undefined) {
         prompt += `
-- Recovery Time: ${garminDataFromWatch.recoveryTimeMinutes} hours`;
+- Recovery Time: ${Math.round(garminDataFromWatch.recoveryTimeMinutes / 60)} hours (${garminDataFromWatch.recoveryTimeMinutes} min)`;
       }
       if (garminDataFromWatch.vo2MaxEstimate !== null && garminDataFromWatch.vo2MaxEstimate !== undefined) {
         prompt += `

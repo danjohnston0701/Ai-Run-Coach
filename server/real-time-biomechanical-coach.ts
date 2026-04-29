@@ -605,7 +605,14 @@ Format as JSON:
       throw new Error("Unexpected response type");
     }
 
-    const result = JSON.parse(content.text);
+    let result: any;
+    try {
+      result = JSON.parse(content.text);
+    } catch {
+      // Strip markdown fences if the model wrapped the JSON
+      const cleaned = content.text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+      result = JSON.parse(cleaned);
+    }
 
     return {
       message: result.message,
@@ -721,7 +728,13 @@ Generate JSON response:
       throw new Error("Unexpected response type");
     }
 
-    const result = JSON.parse(content.text);
+    let result: any;
+    try {
+      result = JSON.parse(content.text);
+    } catch {
+      const cleaned = content.text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+      result = JSON.parse(cleaned);
+    }
 
     return {
       message: result.message,

@@ -1,6 +1,6 @@
 /**
  * Real-Time Coaching Integration
- * 
+ *
  * Integrates the smart biomechanical coach with the session coaching pipeline.
  * Handles:
  * - Receiving real-time biometric data from watch
@@ -11,6 +11,7 @@
  */
 
 import { Router, Request, Response } from "express";
+import { and, eq, gt, isNotNull } from "drizzle-orm";
 import { db } from "./db";
 import { runs } from "@shared/schema";
 import RealTimeBiomechanicalCoach, {
@@ -28,13 +29,13 @@ export const realtimeCoachingRouter = Router();
 
 /**
  * POST /api/coaching/biometric-data
- * 
+ *
  * Receive real-time biometric data from the watch during a run.
  * Generate and return coaching feedback.
  *
  * Request Body:
  * {
- *   sessionId: string,
+ *   userId: string,         ← caller must supply their own userId
  *   biometrics: BiometricDataPoint,
  *   distanceRemaining?: number,
  *   targetPace?: number
@@ -44,16 +45,16 @@ realtimeCoachingRouter.post(
   "/biometric-data",
   async (req: Request, res: Response) => {
     try {
-      const { sessionId, biometrics, distanceRemaining, targetPace } = req.body;
+      const { userId, biometrics, distanceRemaining, targetPace } = req.body;
 
-      if (!sessionId || !biometrics) {
+      if (!userId || !biometrics) {
         return res
           .status(400)
-          .json({ error: "Missing sessionId or biometrics" });
+          .json({ error: "Missing userId or biometrics" });
       }
 
       // 1. Get runner's baseline from historical data
-      const baseline = await getRunnerBaseline(sessionId);
+      const baseline = await getRunnerBaseline(userId);
       if (!baseline) {
         return res.status(404).json({ error: "Runner profile not found" });
       }
@@ -116,7 +117,7 @@ realtimeCoachingRouter.post(
 
 /**
  * GET /api/coaching/runner-baseline
- * 
+ *
  * Get the runner's baseline metrics from recent runs.
  * Used for understanding normal performance.
  */
@@ -147,11 +148,26 @@ realtimeCoachingRouter.get(
 // ============================================================================
 
 /**
- * Get runner's baseline metrics from their last 4 weeks of running
+ * Parse a pace string "M:SS" into total seconds per km.
+ * e.g. "5:30" → 330, "6:00" → 360.
+ * Falls back to 360 (6 min/km) on any parse failure.
+ */
+function parsePaceToSeconds(pace: string | null | undefined): number {
+  if (!pace) return 360;
+  const parts = pace.split(":");
+  if (parts.length !== 2) return 360;
+  const mins = parseInt(parts[0], 10);
+  const secs = parseInt(parts[1], 10);
+  if (isNaN(mins) || isNaN(secs)) return 360;
+  return mins * 60 + secs;
+}
+
+/**
+ * Get runner's baseline metrics from their last 4 weeks of running.
+ * Uses Drizzle ORM with proper camelCase column references.
  */
 async function getRunnerBaseline(userId: string): Promise<RunnerBaseline | null> {
   try {
-    // Query last 4 weeks of completed runs
     const fourWeeksAgo = new Date();
     fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
 
@@ -159,81 +175,89 @@ async function getRunnerBaseline(userId: string): Promise<RunnerBaseline | null>
       .select()
       .from(runs)
       .where(
-        `user_id = $1 AND completed_at > $2 AND is_active = false`,
-        [userId, fourWeeksAgo.toISOString()]
+        and(
+          eq(runs.userId, userId),
+          gt(runs.completedAt, fourWeeksAgo),
+          isNotNull(runs.completedAt)
+        )
       )
-      .limit(20); // Last ~20 runs in 4 weeks
+      .limit(20);
 
     if (recentRuns.length === 0) {
-      return null; // No historical data, use defaults
+      return null; // No historical data — caller decides how to handle
     }
 
-    // Extract numeric metrics and compute ranges
+    // Extract numeric metrics and compute ranges, filtering out missing/zero values
     const heartRates = recentRuns
-      .map((r) => r.average_heart_rate)
-      .filter((hr) => hr && hr > 0);
+      .map((r) => r.avgHeartRate)
+      .filter((hr): hr is number => hr != null && hr > 0);
     const cadences = recentRuns
       .map((r) => r.cadence)
-      .filter((c) => c && c > 0);
+      .filter((c): c is number => c != null && c > 0);
+    // Pace stored as "M:SS" string — convert to seconds per km for arithmetic
     const paces = recentRuns
-      .map((r) => parseFloat(r.average_pace || "6:00"))
-      .filter((p) => !isNaN(p) && p > 0);
+      .map((r) => parsePaceToSeconds(r.avgPace))
+      .filter((p) => p > 0 && p < 3600); // Sanity range: 0–60 min/km
     const strideLengths = recentRuns
-      .map((r) => r.avg_stride_length)
-      .filter((s) => s && s > 0);
+      .map((r) => r.avgStrideLength)
+      .filter((s): s is number => s != null && s > 0);
     const gcts = recentRuns
-      .map((r) => r.ground_contact_time)
-      .filter((g) => g && g > 0);
+      .map((r) => r.groundContactTime)
+      .filter((g): g is number => g != null && g > 0);
     const vos = recentRuns
-      .map((r) => r.vertical_oscillation)
-      .filter((v) => v && v > 0);
+      .map((r) => r.verticalOscillation)
+      .filter((v): v is number => v != null && v > 0);
+
+    const avg = (arr: number[], fallback: number) =>
+      arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : fallback;
 
     const baseline: RunnerBaseline = {
       userId,
-      
+
       normalHeartRate: {
-        min: Math.min(...heartRates),
-        max: Math.max(...heartRates),
-        avg: heartRates.reduce((a, b) => a + b, 0) / heartRates.length || 150,
-      },
-      
-      normalCadence: {
-        min: Math.min(...cadences),
-        max: Math.max(...cadences),
-        avg: cadences.reduce((a, b) => a + b, 0) / cadences.length || 175,
-      },
-      
-      normalPace: {
-        min: Math.max(...paces), // Higher number = slower pace
-        max: Math.min(...paces), // Lower number = faster pace
-        avg: paces.reduce((a, b) => a + b, 0) / paces.length || 6.0,
-      },
-      
-      normalGroundContactTime: {
-        min: Math.min(...gcts),
-        max: Math.max(...gcts),
-        avg: gcts.reduce((a, b) => a + b, 0) / gcts.length || 250,
-      },
-      
-      normalVerticalOscillation: {
-        min: Math.min(...vos),
-        max: Math.max(...vos),
-        avg: vos.reduce((a, b) => a + b, 0) / vos.length || 7.5,
-      },
-      
-      normalStrideLength: {
-        min: Math.min(...strideLengths),
-        max: Math.max(...strideLengths),
-        avg: strideLengths.reduce((a, b) => a + b, 0) / strideLengths.length || 1.4,
+        min: heartRates.length > 0 ? Math.min(...heartRates) : 120,
+        max: heartRates.length > 0 ? Math.max(...heartRates) : 180,
+        avg: avg(heartRates, 150),
       },
 
-      maxHeartRate: Math.max(...heartRates) + 5, // Add buffer
-      restingHeartRate: Math.min(...heartRates),
-      lactateThreshold: Math.max(...heartRates) * 0.85,
-      preferredCadence: cadences.reduce((a, b) => a + b, 0) / cadences.length || 175,
-      typicalStrideLength: strideLengths.reduce((a, b) => a + b, 0) / strideLengths.length || 1.4,
-      typicalGroundContactTime: gcts.reduce((a, b) => a + b, 0) / gcts.length || 250,
-      typicalVerticalOscillation: vos.reduce((a, b) => a + b, 0) / vos.length || 7.5,
+      normalCadence: {
+        min: cadences.length > 0 ? Math.min(...cadences) : 160,
+        max: cadences.length > 0 ? Math.max(...cadences) : 190,
+        avg: avg(cadences, 175),
+      },
+
+      normalPace: {
+        // Pace stored as seconds/km: higher = slower, lower = faster
+        min: paces.length > 0 ? Math.min(...paces) : 300,  // fastest
+        max: paces.length > 0 ? Math.max(...paces) : 420,  // slowest
+        avg: avg(paces, 360),                               // ~6:00 /km
+      },
+
+      normalGroundContactTime: {
+        min: gcts.length > 0 ? Math.min(...gcts) : 220,
+        max: gcts.length > 0 ? Math.max(...gcts) : 290,
+        avg: avg(gcts, 250),
+      },
+
+      normalVerticalOscillation: {
+        min: vos.length > 0 ? Math.min(...vos) : 6.0,
+        max: vos.length > 0 ? Math.max(...vos) : 10.0,
+        avg: avg(vos, 7.5),
+      },
+
+      normalStrideLength: {
+        min: strideLengths.length > 0 ? Math.min(...strideLengths) : 1.1,
+        max: strideLengths.length > 0 ? Math.max(...strideLengths) : 1.7,
+        avg: avg(strideLengths, 1.4),
+      },
+
+      maxHeartRate: heartRates.length > 0 ? Math.max(...heartRates) + 5 : 185,
+      restingHeartRate: heartRates.length > 0 ? Math.min(...heartRates) : 60,
+      lactateThreshold: heartRates.length > 0 ? Math.max(...heartRates) * 0.85 : 157,
+      preferredCadence: avg(cadences, 175),
+      typicalStrideLength: avg(strideLengths, 1.4),
+      typicalGroundContactTime: avg(gcts, 250),
+      typicalVerticalOscillation: avg(vos, 7.5),
     };
 
     return baseline;
@@ -244,7 +268,8 @@ async function getRunnerBaseline(userId: string): Promise<RunnerBaseline | null>
 }
 
 /**
- * Compute terrain context (grade, course type) from GPS coordinates
+ * Compute terrain context from GPS coordinates.
+ * Currently uses heuristics; production would query a DEM/elevation API.
  */
 async function computeTerrainContext(
   lat: number,
@@ -252,20 +277,12 @@ async function computeTerrainContext(
   altitude: number,
   totalDistance: number
 ): Promise<TerrainContext> {
-  // TODO: In production, would query elevation database or DEM (Digital Elevation Model)
-  // For now, use simple heuristics based on recent altitude changes
+  // TODO: Query elevation database / DEM for accurate grade computation
+  const currentGrade = 0; // Placeholder — requires elevation API
 
-  // Estimate current grade based on altitude progression
-  // This would be much more accurate with full route history
-  const currentGrade = 0; // Placeholder
-
-  // Determine overall course type from elevation gain/loss progression
   let courseType: "flat" | "rolling" | "hilly" | "mountainous" = "flat";
-  
-  // TODO: Compute from actual elevation data
   if (totalDistance > 5000) {
-    // Based on elevation gain in first 5km
-    courseType = "rolling"; // Placeholder
+    courseType = "rolling"; // Conservative default for longer runs
   }
 
   return {
@@ -278,13 +295,8 @@ async function computeTerrainContext(
 }
 
 /**
- * Estimate current fatigue level (0-100) based on biometric changes
- * 
- * Fatigue indicators:
- * - Rising HR at same pace (HR drift)
- * - Increased vertical oscillation
- * - Decreased cadence
- * - Longer run duration
+ * Estimate current fatigue level (0–100) based on biometric changes.
+ * Guards against zero/null denominators.
  */
 function estimateFatigue(
   currentHR: number,
@@ -296,18 +308,22 @@ function estimateFatigue(
   let fatigue = 0;
 
   // HR as percent of max increases with fatigue
-  const hrPercent = (currentHR / maxHR) * 100;
-  if (hrPercent > 85) fatigue += 30;
-  else if (hrPercent > 75) fatigue += 20;
-  else if (hrPercent > 65) fatigue += 10;
+  if (maxHR > 0) {
+    const hrPercent = (currentHR / maxHR) * 100;
+    if (hrPercent > 85) fatigue += 30;
+    else if (hrPercent > 75) fatigue += 20;
+    else if (hrPercent > 65) fatigue += 10;
+  }
 
   // Vertical oscillation increases with fatigue (form breakdown)
-  const voRatio = currentVO / normalVO;
-  if (voRatio > 1.15) fatigue += 25;
-  else if (voRatio > 1.08) fatigue += 12;
-  else if (voRatio > 1.00) fatigue += 5;
+  if (normalVO > 0 && currentVO > 0) {
+    const voRatio = currentVO / normalVO;
+    if (voRatio > 1.15) fatigue += 25;
+    else if (voRatio > 1.08) fatigue += 12;
+    else if (voRatio > 1.00) fatigue += 5;
+  }
 
-  // Time in activity - fatigue accumulates
+  // Time in activity — fatigue accumulates
   const minutesElapsed = elapsedSeconds / 60;
   if (minutesElapsed > 60) fatigue += Math.min(25, (minutesElapsed - 60) * 0.25);
   else if (minutesElapsed > 45) fatigue += 10;
@@ -317,7 +333,7 @@ function estimateFatigue(
 }
 
 /**
- * Determine current workout phase based on time and effort
+ * Determine current workout phase based on time and effort.
  */
 function determineWorkoutPhase(
   hrZone: number,
@@ -326,16 +342,10 @@ function determineWorkoutPhase(
 ): string {
   const minutes = elapsedSeconds / 60;
 
-  // First 10 minutes = warmup
   if (minutes < 10) return "warmup";
-
-  // Last 10 minutes = cooldown
-  // (Would need total distance/time target to know this accurately)
   if (minutes > 50 && hrZone <= 2) return "cooldown";
 
-  // By HR zone
-  if (hrZone === 1) return "easy";
-  if (hrZone === 2) return "easy";
+  if (hrZone <= 2) return "easy";
   if (hrZone === 3) return "tempo";
   if (hrZone === 4) return "threshold";
   if (hrZone === 5) return "max";

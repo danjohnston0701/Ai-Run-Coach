@@ -421,7 +421,11 @@ class RunSummaryViewModel @Inject constructor(
                     when {
                         response.isSuccessful && response.code() == 200 -> {
                             // ✅ Data arrived
-                            val enrichedRun = response.body()!!
+                            val enrichedRun = response.body() ?: run {
+                                Log.w("RunSummaryViewModel", "Garmin enrich returned 200 but empty body — keeping existing session")
+                                _isEnrichingWithGarmin.value = false
+                                return@launch
+                            }
                             _runSession.value = enrichedRun
                             _isEnrichingWithGarmin.value = false
                             _isWaitingForGarminSync.value = false
