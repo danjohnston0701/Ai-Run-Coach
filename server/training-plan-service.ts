@@ -254,10 +254,22 @@ export async function generateTrainingPlan(
     
     console.log(`[Training Plan] Duration: durationWeeks=${durationWeeks}, targetDate=${targetDate}, calculated weeksUntilTarget=${weeksUntilTarget}`);
 
-    // Calculate user age for HR zone calculations — fall back to Android-sent override if DOB not set
-    const userAge = user[0]?.dob
-      ? Math.floor((Date.now() - new Date(user[0].dob).getTime()) / 31557600000)
-      : (overrideAge || 30);
+    // Calculate user age for HR zone calculations — fall back to Android/iOS-sent override if DOB not set.
+    // Guard against NaN: an invalid DOB string (e.g. empty string, malformed date) causes
+    // Math.floor(NaN) = NaN which propagates into maxHR → hrZoneMinBpm/hrZoneMaxBpm → Postgres
+    // throws "invalid input syntax for type integer: NaN".
+    const userAge = (() => {
+      if (user[0]?.dob) {
+        const ms = new Date(user[0].dob).getTime();
+        if (!isNaN(ms)) {
+          const calculated = Math.floor((Date.now() - ms) / 31557600000);
+          if (calculated > 0 && calculated < 120) return calculated;
+        }
+      }
+      // Fall back to client-sent age, then safe default
+      const fallback = overrideAge && !isNaN(overrideAge) && overrideAge > 0 ? overrideAge : 30;
+      return fallback;
+    })();
     const maxHR = HeartRateZones.getMaxHeartRate(userAge);
 
     // Build context for AI
@@ -753,8 +765,10 @@ If runner has NO previous runs:
 
         if (hrZoneNumber && hrZoneNumber >= 1 && hrZoneNumber <= 5) {
           const zoneRange = HeartRateZones.getZoneRange(hrZoneNumber, maxHR);
-          hrZoneMinBpm = zoneRange.min;
-          hrZoneMaxBpm = zoneRange.max;
+          // Guard: if maxHR was NaN (bad DOB), zone calculations also return NaN.
+          // Postgres integer columns reject NaN — store null instead.
+          hrZoneMinBpm = (zoneRange.min != null && !isNaN(zoneRange.min)) ? Math.round(zoneRange.min) : null;
+          hrZoneMaxBpm = (zoneRange.max != null && !isNaN(zoneRange.max)) ? Math.round(zoneRange.max) : null;
 
           // Set effort description based on scenario
           if (hrZoneScenario === 'effort') {
@@ -763,12 +777,17 @@ If runner has NO previous runs:
           }
         }
 
+        // Guard dayOfWeek: if AI returns a non-numeric value, default to Monday (1)
+        const safeDay = (typeof workout.dayOfWeek === 'number' && !isNaN(workout.dayOfWeek))
+          ? workout.dayOfWeek
+          : 1;
+
         const plannedWorkoutResult = await db
           .insert(plannedWorkouts)
           .values({
             weeklyPlanId,
             trainingPlanId: planId,
-            dayOfWeek: workout.dayOfWeek,
+            dayOfWeek: safeDay,
             scheduledDate,
             workoutType: workout.workoutType,
             distance: workout.distance,
