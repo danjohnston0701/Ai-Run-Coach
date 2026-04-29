@@ -528,7 +528,7 @@ private fun GarminAttributionHeader(deviceName: String) {
             painter = painterResource(id = R.drawable.ic_garmin_tag),
             contentDescription = "Garmin",
             modifier = Modifier.height(22.dp),
-            contentScale = ContentScale.FitHeight
+            contentScale = ContentScale.Fit
         )
         Text(
             text = deviceName,
@@ -7207,7 +7207,7 @@ private fun GraphSectionHeader(
         ) {
             Text(
                 title,
-                style = AppTextStyles.subtitle2.copy(fontWeight = FontWeight.Bold),
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
                 color = Colors.textPrimary,
                 modifier = Modifier.weight(1f)
             )
