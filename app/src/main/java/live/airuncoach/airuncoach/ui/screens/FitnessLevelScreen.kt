@@ -25,9 +25,22 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.FitnessLevelViewModel
 import live.airuncoach.airuncoach.viewmodel.FitnessLevelViewModelFactory
 
+/**
+ * Fitness level selection screen.
+ *
+ * @param onNavigateBack  Called when the back arrow is tapped (or when saving in settings mode).
+ * @param onNavigateNext  Called after saving when [isOnboarding] is true — navigates forward in the
+ *                        onboarding flow instead of popping the back stack.
+ * @param isOnboarding    When true the screen shows an onboarding header and a "Continue" CTA
+ *                        instead of "Save Changes", and calls [onNavigateNext] on confirm.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FitnessLevelScreen(onNavigateBack: () -> Unit) {
+fun FitnessLevelScreen(
+    onNavigateBack: () -> Unit,
+    onNavigateNext: (() -> Unit)? = null,
+    isOnboarding: Boolean = false
+) {
     val context = LocalContext.current
     val viewModel: FitnessLevelViewModel = viewModel(factory = FitnessLevelViewModelFactory(context))
     val fitnessLevel by viewModel.fitnessLevel.collectAsState()
@@ -54,7 +67,25 @@ fun FitnessLevelScreen(onNavigateBack: () -> Unit) {
                 .padding(Spacing.lg)
         ) {
             item {
-                SectionTitle(title = "Select Your Fitness Level")
+                if (isOnboarding) {
+                    Text(
+                        "Almost there!",
+                        style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.xs))
+                    Text(
+                        "This is one of the most important inputs for your AI coach. " +
+                        "Knowing your current fitness level helps us set realistic training " +
+                        "paces and volumes from day one — especially if you haven't synced " +
+                        "any runs yet.",
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.lg))
+                } else {
+                    SectionTitle(title = "Select Your Fitness Level")
+                }
                 Spacer(modifier = Modifier.height(Spacing.md))
             }
             items(viewModel.fitnessLevels.size) { index ->
@@ -73,15 +104,35 @@ fun FitnessLevelScreen(onNavigateBack: () -> Unit) {
                 Button(
                     onClick = {
                         viewModel.saveFitnessLevel()
-                        onNavigateBack()
+                        if (isOnboarding && onNavigateNext != null) {
+                            onNavigateNext()
+                        } else {
+                            onNavigateBack()
+                        }
                     },
+                    enabled = fitnessLevel.isNotBlank(),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp),
                     shape = RoundedCornerShape(BorderRadius.lg),
                     colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
                 ) {
-                    Text("Save Changes", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold))
+                    Text(
+                        if (isOnboarding) "Continue" else "Save Changes",
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+                if (isOnboarding) {
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            // Allow skipping — profile remains blank, plan screen will surface a reminder
+                            if (onNavigateNext != null) onNavigateNext() else onNavigateBack()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Skip for now", style = AppTextStyles.body, color = Colors.textMuted)
+                    }
                 }
             }
         }

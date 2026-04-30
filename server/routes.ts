@@ -10195,6 +10195,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         injuries = [],  // [{ bodyPart, status, notes }]
         goalId = null,  // optional: goal ID to link this plan to
         userTimezone = null,  // IANA timezone name, e.g. "Pacific/Auckland"
+        isPreEventPlan = false,  // true = pre-race sharpening block, not a build-up plan
         // User demographics — used as override if DB profile is incomplete
         age = null,
         gender = null,
@@ -10316,6 +10317,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         gender || null,
         safeHeight,
         safeWeight,
+        // Plan intent: pre-event sharpening vs building up
+        isPreEventPlan === true,
       );
       
       // Link plan to goal if goalId was provided

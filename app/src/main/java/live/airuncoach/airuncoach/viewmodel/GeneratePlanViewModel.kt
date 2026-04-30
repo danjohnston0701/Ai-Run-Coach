@@ -113,6 +113,22 @@ class GeneratePlanViewModel @Inject constructor(
     private val _experienceLevel = MutableStateFlow("Regular")
     val experienceLevel: StateFlow<String> = _experienceLevel.asStateFlow()
 
+    /**
+     * True when the fitness level was actually read from the saved user profile.
+     * False means we're showing the hardcoded "Regular" default — the profile was never set.
+     * Used by the UI to surface a "please confirm your fitness level" reminder.
+     */
+    private val _fitnessLevelFromProfile = MutableStateFlow(false)
+    val fitnessLevelFromProfile: StateFlow<Boolean> = _fitnessLevelFromProfile.asStateFlow()
+
+    /**
+     * When true the user has indicated this is a pre-event sharpening block (they are already
+     * capable of the event distance) rather than a build-up plan. This flips the AI prompt from
+     * "start conservatively" to "assume race-ready fitness".
+     */
+    private val _isPreEventPlan = MutableStateFlow(false)
+    val isPreEventPlan: StateFlow<Boolean> = _isPreEventPlan.asStateFlow()
+
     // "today" | "tomorrow" | "flexible"
     private val _firstSessionStart = MutableStateFlow("flexible")
     val firstSessionStart: StateFlow<String> = _firstSessionStart.asStateFlow()
@@ -155,7 +171,8 @@ class GeneratePlanViewModel @Inject constructor(
 
     /**
      * Reads the user's profile fitness level from SharedPreferences and pre-selects it.
-     * Falls back to "Regular" if not set.
+     * Falls back to "Regular" if not set, but tracks whether the value came from the profile
+     * so the UI can surface a reminder when it was never actually configured.
      */
     private fun loadFitnessLevelFromProfile() {
         val userJson = sharedPrefs.getString("user", null) ?: return
@@ -165,9 +182,14 @@ class GeneratePlanViewModel @Inject constructor(
             if (!profileLevel.isNullOrBlank()) {
                 // Normalise: the profile stores title-case ("Regular"), the plan uses same values
                 _experienceLevel.value = profileLevel
+                _fitnessLevelFromProfile.value = true
+            } else {
+                // Profile was never set — keep the "Regular" default but flag it
+                _fitnessLevelFromProfile.value = false
             }
         } catch (e: Exception) {
             Log.w("GeneratePlanVM", "Could not read profile fitness level", e)
+            _fitnessLevelFromProfile.value = false
         }
     }
 
@@ -204,12 +226,17 @@ class GeneratePlanViewModel @Inject constructor(
     fun setDaysPerWeek(days: Int) { _daysPerWeek.value = days }
     fun setDurationWeeks(weeks: Int) { _durationWeeks.value = weeks }
     fun setFirstSessionStart(value: String) { _firstSessionStart.value = value }
+    /** Records whether this is a pre-event sharpening block vs a build-up plan. */
+    fun setIsPreEventPlan(value: Boolean) { _isPreEventPlan.value = value }
 
     /**
      * Sets the experience level locally and immediately saves it back to the user profile in Neon.
+     * Calling this from the UI means the user explicitly confirmed their level, so we mark it as
+     * coming from profile (no longer showing the "unset" reminder).
      */
     fun setExperienceLevel(level: String) {
         _experienceLevel.value = level
+        _fitnessLevelFromProfile.value = true
         saveExperienceLevelToProfile(level)
     }
 
@@ -287,6 +314,7 @@ class GeneratePlanViewModel @Inject constructor(
                     daysPerWeek = _daysPerWeek.value,
                     goalId = _linkedGoal.value?.id,
                     firstSessionStart = _firstSessionStart.value,
+                    isPreEventPlan = _isPreEventPlan.value,
                     regularSessions = _regularSessions.value.map { s ->
                         RegularSessionRequest(
                             name = s.name,

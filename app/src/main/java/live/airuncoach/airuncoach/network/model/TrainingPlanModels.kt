@@ -44,7 +44,10 @@ data class GeneratePlanRequest(
     // User injuries for AI to design appropriate training (avoid aggravating recovering injuries)
     @SerializedName("injuries") val injuries: List<InjuryRequest> = emptyList(),
     // User's IANA timezone name (e.g. "Pacific/Auckland") so the server anchors week 1 to the correct calendar day
-    @SerializedName("userTimezone") val userTimezone: String? = null
+    @SerializedName("userTimezone") val userTimezone: String? = null,
+    // When true, the runner is already capable of the event distance and wants a pre-race sharpening
+    // block rather than a build-up plan. Flips the AI prompt away from "start conservatively".
+    @SerializedName("isPreEventPlan") val isPreEventPlan: Boolean = false
 )
 
 /** Response from generate */

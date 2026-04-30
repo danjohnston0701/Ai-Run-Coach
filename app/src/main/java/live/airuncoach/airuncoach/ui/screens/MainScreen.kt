@@ -690,10 +690,23 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 PersonalDetailsScreen(
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToCoachSettings = {
-                        navController.navigate("coach_settings") {
+                        // During onboarding, insert fitness level step before coach settings
+                        navController.navigate("fitness_level_onboarding") {
                             popUpTo("personal_details") { inclusive = true }
                         }
                     }
+                )
+            }
+            // Onboarding-specific fitness level screen — continues to coach settings on save
+            composable("fitness_level_onboarding") {
+                FitnessLevelScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateNext = {
+                        navController.navigate("coach_settings") {
+                            popUpTo("fitness_level_onboarding") { inclusive = true }
+                        }
+                    },
+                    isOnboarding = true
                 )
             }
             composable("fitness_level") { FitnessLevelScreen(onNavigateBack = { navController.popBackStack() }) }

@@ -71,6 +71,8 @@ fun GeneratePlanScreen(
     val regularSessions by viewModel.regularSessions.collectAsState()
     val firstSessionStart by viewModel.firstSessionStart.collectAsState()
     val injuries by viewModel.injuries.collectAsState()
+    val fitnessLevelFromProfile by viewModel.fitnessLevelFromProfile.collectAsState()
+    val isPreEventPlan by viewModel.isPreEventPlan.collectAsState()
 
     // Dialog state for adding a regular session
     var showAddSessionDialog by remember { mutableStateOf(false) }
@@ -187,6 +189,37 @@ fun GeneratePlanScreen(
                     // ── Section 2: Time Goal ─────────────────────────────────────────────
                     SectionHeader(title = "Do you have a time target?", icon = R.drawable.icon_timer_vector)
                     Spacer(modifier = Modifier.height(Spacing.sm))
+
+                    // Show a "Recommended" nudge for distance events — target time unlocks full pace prescription
+                    val isDistanceEvent = goalType in listOf("half_marathon", "marathon", "10k")
+                    if (isDistanceEvent && !hasTimeGoal) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = Spacing.sm),
+                            colors = CardDefaults.cardColors(containerColor = Colors.primary.copy(alpha = 0.08f)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    painterResource(R.drawable.icon_info_vector),
+                                    contentDescription = null,
+                                    tint = Colors.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(Spacing.sm))
+                                Text(
+                                    "Recommended for ${if (goalType == "half_marathon") "half marathon" else goalType.uppercase()} plans — a target time lets your AI coach set precise training paces for every session.",
+                                    style = AppTextStyles.small,
+                                    color = Colors.primary
+                                )
+                            }
+                        }
+                    }
+
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth(),
@@ -267,10 +300,40 @@ fun GeneratePlanScreen(
                     SectionHeader(title = "Your current fitness level", icon = R.drawable.icon_trending_vector)
                     Spacer(modifier = Modifier.height(Spacing.xs))
                     Text(
-                        "Pre-filled from your profile — any change here updates your profile too.",
+                        if (fitnessLevelFromProfile)
+                            "Pre-filled from your profile — any change here updates your profile too."
+                        else
+                            "Please select your fitness level — this hasn't been set on your profile yet and is critical for an accurate plan.",
                         style = AppTextStyles.small,
-                        color = Colors.textMuted
+                        color = if (fitnessLevelFromProfile) Colors.textMuted else Colors.warning
                     )
+                    // Highlight the unset state with a warning card
+                    if (!fitnessLevelFromProfile) {
+                        Spacer(modifier = Modifier.height(Spacing.sm))
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = Colors.warning.copy(alpha = 0.10f)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(Spacing.md),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    painterResource(R.drawable.icon_info_vector),
+                                    contentDescription = null,
+                                    tint = Colors.warning,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(Spacing.sm))
+                                Text(
+                                    "Without this, your AI coach will estimate your fitness from defaults. Tap the level that best describes you now.",
+                                    style = AppTextStyles.small,
+                                    color = Colors.warning
+                                )
+                            }
+                        }
+                    }
                     Spacer(modifier = Modifier.height(Spacing.md))
 
                     val levelIcons = listOf(
@@ -318,26 +381,150 @@ fun GeneratePlanScreen(
 
                     Spacer(modifier = Modifier.height(Spacing.lg))
 
-                    // Programme duration
-                    Text("Programme length: $durationWeeks weeks", style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium), color = Colors.textPrimary)
-                    val maxWeeks = when (goalType) {
-                        "marathon" -> 20
-                        "half_marathon" -> 14
-                        "10k" -> 12
-                        "5k" -> 12
-                        else -> 12
+                    // Programme duration — min and max adapt to the goal type
+                    val minWeeks = when (goalType) {
+                        "5k" -> 2
+                        "10k" -> 2
+                        "half_marathon" -> 4
+                        "marathon" -> 4
+                        else -> 2
                     }
+                    val maxWeeks = 20
+                    // Recommended minimum for a full build-up plan (used to show the pre-event nudge)
+                    val recommendedMinWeeks = when (goalType) {
+                        "5k" -> 6
+                        "10k" -> 8
+                        "half_marathon" -> 10
+                        "marathon" -> 14
+                        else -> 6
+                    }
+
+                    Text("Programme length: $durationWeeks weeks", style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium), color = Colors.textPrimary)
                     Slider(
                         value = durationWeeks.toFloat(),
                         onValueChange = { viewModel.setDurationWeeks(it.toInt()) },
-                        valueRange = 2f..maxWeeks.toFloat(),
-                        steps = maxWeeks - 3,
+                        valueRange = minWeeks.toFloat()..maxWeeks.toFloat(),
+                        steps = maxWeeks - minWeeks - 1,
                         colors = SliderDefaults.colors(thumbColor = Colors.primary, activeTrackColor = Colors.primary),
                         modifier = Modifier.fillMaxWidth()
                     )
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("2 weeks", style = AppTextStyles.small, color = Colors.textMuted)
+                        Text("$minWeeks weeks", style = AppTextStyles.small, color = Colors.textMuted)
                         Text("$maxWeeks weeks", style = AppTextStyles.small, color = Colors.textMuted)
+                    }
+
+                    // Pre-event intent question — shown when duration is shorter than recommended build-up
+                    val showPreEventQuestion = goalType in listOf("half_marathon", "marathon", "10k", "5k") &&
+                        durationWeeks < recommendedMinWeeks
+                    AnimatedVisibility(visible = showPreEventQuestion) {
+                        Column {
+                            Spacer(modifier = Modifier.height(Spacing.md))
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isPreEventPlan)
+                                        Colors.primary.copy(alpha = 0.10f)
+                                    else
+                                        Colors.backgroundSecondary
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(Spacing.md)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            painterResource(R.drawable.icon_trophy_vector),
+                                            contentDescription = null,
+                                            tint = Colors.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(Spacing.sm))
+                                        Text(
+                                            "Short plan — what's your situation?",
+                                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                                            color = Colors.textPrimary
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(Spacing.sm))
+                                    Text(
+                                        "$durationWeeks weeks is shorter than the recommended build-up for a ${
+                                            when (goalType) {
+                                                "half_marathon" -> "half marathon"
+                                                "marathon" -> "marathon"
+                                                "10k" -> "10K"
+                                                else -> "5K"
+                                            }
+                                        }. Is this a pre-race sharpening block, or are you building up from scratch?",
+                                        style = AppTextStyles.small,
+                                        color = Colors.textSecondary
+                                    )
+                                    Spacer(modifier = Modifier.height(Spacing.md))
+                                    // Two intent options
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                                    ) {
+                                        // Pre-event option
+                                        val preEventSelected = isPreEventPlan
+                                        Card(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clickable { viewModel.setIsPreEventPlan(true) }
+                                                .border(
+                                                    width = if (preEventSelected) 2.dp else 1.dp,
+                                                    color = if (preEventSelected) Colors.primary else Colors.backgroundTertiary,
+                                                    shape = RoundedCornerShape(8.dp)
+                                                ),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = if (preEventSelected) Colors.primary.copy(alpha = 0.12f)
+                                                else Colors.backgroundTertiary
+                                            )
+                                        ) {
+                                            Column(modifier = Modifier.padding(Spacing.sm)) {
+                                                Text(
+                                                    "Pre-race sharpening",
+                                                    style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+                                                    color = if (preEventSelected) Colors.primary else Colors.textPrimary
+                                                )
+                                                Text(
+                                                    "I'm already capable of the distance — final tune-up before race day",
+                                                    style = AppTextStyles.caption,
+                                                    color = Colors.textMuted
+                                                )
+                                            }
+                                        }
+                                        // Building up option
+                                        val buildingSelected = !isPreEventPlan
+                                        Card(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clickable { viewModel.setIsPreEventPlan(false) }
+                                                .border(
+                                                    width = if (buildingSelected) 2.dp else 1.dp,
+                                                    color = if (buildingSelected) Colors.primary else Colors.backgroundTertiary,
+                                                    shape = RoundedCornerShape(8.dp)
+                                                ),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = if (buildingSelected) Colors.primary.copy(alpha = 0.12f)
+                                                else Colors.backgroundTertiary
+                                            )
+                                        ) {
+                                            Column(modifier = Modifier.padding(Spacing.sm)) {
+                                                Text(
+                                                    "Building up",
+                                                    style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+                                                    color = if (buildingSelected) Colors.primary else Colors.textPrimary
+                                                )
+                                                Text(
+                                                    "Training from my current fitness toward this goal",
+                                                    style = AppTextStyles.caption,
+                                                    color = Colors.textMuted
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(Spacing.xl))

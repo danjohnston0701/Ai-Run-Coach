@@ -69,7 +69,8 @@ export async function generateTrainingPlan(
   overrideAge: number | null = null,  // demographics from Android (used if DB profile is missing)
   overrideGender: string | null = null,
   overrideHeight: number | null = null,  // cm
-  overrideWeight: number | null = null   // kg
+  overrideWeight: number | null = null,  // kg
+  isPreEventPlan: boolean = false  // true = experienced runner doing a pre-race sharpening block
 ): Promise<string> {
   try {
     // Get user profile
@@ -371,15 +372,24 @@ Last 3 Run Sessions Snapshot:
 - Average pace: ${last3AvgData ? Math.floor(last3AvgData.avgPace / 60) + ':' + String(Math.round(last3AvgData.avgPace % 60)).padStart(2, '0') : 'N/A'}/km
 - Time span between sessions: ${last3AvgData?.daysSpan || 0} days
 
-Pace Trend: ${paceTrend || 'Not enough data yet'}` : `IMPORTANT: This runner has NO previous run data recorded. 
-We will use their stated fitness level (${experienceLevel}) to estimate baseline pace and mileage. 
-Create a plan that starts conservatively and includes baseline-building runs in the first week to establish their actual current fitness. 
-Then adjust subsequent weeks based on performance.`}
+Pace Trend: ${paceTrend || 'Not enough data yet'}` : isPreEventPlan ? `IMPORTANT: This runner has NO previous run data recorded in this app — they are a NEW USER.
+However, they have explicitly indicated this is a PRE-EVENT SHARPENING BLOCK, meaning they are already fully capable of the event distance and are using this app for the first time in the weeks leading up to their race.
+DO NOT treat the absence of run data as evidence of low fitness. Instead:
+- Assume the runner is race-ready and capable of the event distance right now
+- Start at full training volume appropriate for their stated fitness level (${experienceLevel})
+- Focus on race-pace conditioning, sharpening speed, and taper strategy
+- Do NOT include baseline-building or "establish current fitness" sessions — they are already fit
+- Use their stated fitness level (${experienceLevel}) and target time (if provided) to set all paces` : `IMPORTANT: This runner has NO previous run data recorded in this app — they may be new to running or simply new to this app.
+We will use their stated fitness level (${experienceLevel}) to estimate baseline pace and mileage.
+Create a plan that starts conservatively and includes easier runs in the first week to allow the AI to calibrate to their fitness.
+Then build progressively through the plan.`}
 `;
 
     // Generate plan with OpenAI
     const prompt = `You are an expert running coach. Generate a tailored ${weeksUntilTarget}-week training plan for a ${experienceLevel} runner preparing for a ${goalType} (${targetDistance}km).
-
+${isPreEventPlan ? `
+⚡ PRE-EVENT SHARPENING PLAN: This is NOT a build-up plan. The runner is already capable of the event distance and has ${weeksUntilTarget} weeks until race day. Design a race-preparation block: race-pace work, taper, confidence sessions. Do NOT start conservatively or include baseline-building runs.
+` : ''}
 ${runnerProfileSection}
 
 Runner Profile:
@@ -485,12 +495,18 @@ Requirements:
    c) Interval sessions: use the TRAINING PACE PRESCRIPTION above (~goal pace - 20s/km). Reps must be faster than race pace.
    d) Race pace sessions: use the exact GOAL PACE derived from the target time. These sessions exist to make the runner comfortable at their race pace.
    e) Hill repeats: specify effort (e.g. "Zone 4 effort / hard") not exact pace, since gradient makes pace unreliable.
-2. Build gradually from current ${weeklyMileageBase.toFixed(1)}km/week base
+2. ${isPreEventPlan
+  ? `Start at RACE-READY volume appropriate for a ${experienceLevel} runner — do NOT ramp up slowly. This is a ${weeksUntilTarget}-week pre-race block, not a build-up plan.`
+  : `Build gradually from current ${weeklyMileageBase.toFixed(1)}km/week base`}
 3. Include easy runs, tempo runs, intervals, and long runs across each week
 4. Follow 80/20 rule (80% easy effort, 20% quality/hard sessions)
-5. Build for 3 weeks, recover 1 week pattern
-6. Taper for final 2 weeks before race
-7. Increase weekly volume by max 10% per week
+5. ${isPreEventPlan
+  ? `Race-sharpening structure: emphasise race pace, speed, and confidence. Taper the final ${Math.min(2, Math.floor(weeksUntilTarget / 2))} week(s) for peak performance.`
+  : `Build for 3 weeks, recover 1 week pattern`}
+6. Taper for final ${isPreEventPlan ? Math.min(2, Math.floor(weeksUntilTarget / 2)) : 2} week(s) before race
+7. ${isPreEventPlan
+  ? `Maintain current fitness volume — no need to cap volume increases at 10% since this is not a build-up plan`
+  : `Increase weekly volume by max 10% per week`}
 8. Reference the runner's current performance AND goal in workout descriptions (e.g. "your current 5km is around ${avgTimeAtGoalDistanceStr || 'estimated from pace data'}. Today's tempo at [X:XX/km] is building your lactate threshold toward your [goal time] goal")
 
 Return JSON with this exact structure:
@@ -941,6 +957,10 @@ function getPlanDuration(goalType: string, experienceLevel: string): number {
 
   // Normalize fitness level to beginner/intermediate/advanced
   // The app sends values like "Regular", "Casual", "Committed", etc.
+  // Guard against null/undefined/empty string before calling .toLowerCase()
+  if (!experienceLevel || experienceLevel.trim() === '') {
+    return durations[goalType]?.['intermediate'] ?? 8;
+  }
   const level = experienceLevel.toLowerCase();
   let normalizedLevel: string;
   if (['newcomer', 'beginner', 'casual'].includes(level)) {
