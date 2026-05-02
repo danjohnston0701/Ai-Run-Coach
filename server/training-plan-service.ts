@@ -470,13 +470,19 @@ IMPORTANT scheduling rules for regular sessions:
 1. Sessions that COUNT towards the weekly total: Integrate them into the ${daysPerWeek} AI-generated sessions per week by choosing to perform that regular session on its scheduled day instead of a coached session (prefer replacing sessions that match its intensity/goal).
 2. Sessions that DON'T count (marked "EXTRA"): These are BLOCKED DAYS. Do NOT schedule ANY coached workouts on the same days as EXTRA sessions. Schedule your ${daysPerWeek} coached workouts exclusively on other days. This prevents double-running on the same day.
 ` : ""}
-${injuries.length > 0 ? `
+${injuries && injuries.length > 0 ? `
 INJURIES & LIMITATIONS:
-${injuries.map(i => `- ${i.bodyPart}: ${i.status}${i.notes ? ` — ${i.notes}` : ''}`).join("\n")}
+${injuries.map(i => {
+  const statusLabel = i.status === 'recovering' || i.status === 'RECOVERING' ? 'Recovering' :
+                     i.status === 'healed' || i.status === 'HEALED' ? 'Healed' :
+                     i.status === 'chronic' || i.status === 'CHRONIC' ? 'Chronic' :
+                     i.status === 'active' || i.status === 'ACTIVE' ? 'Active' : i.status;
+  return `- ${i.bodyPart}: ${statusLabel}${i.notes ? ` — ${i.notes}` : ''}`;
+}).join("\n")}
 
 CRITICAL INJURY GUIDELINES:
-- For "active" injuries: AVOID all exercises that stress the affected area. Replace with cross-training or rest days.
-- For "recovering" injuries: REDUCE intensity and impact. No speed work, hill repeats, or long runs that stress the affected body part. Favor easy runs on flat terrain.
+- For "recovering" or "active" injuries: AVOID all exercises that stress the affected area. Replace with cross-training or rest days.
+- For "chronic" injuries: REDUCE intensity and impact. No speed work, hill repeats, or long runs that stress the affected body part. Favor easy runs on flat terrain.
 - For "healed" injuries: Gradually reintroduce normal training but note the history — avoid sudden volume increases.
 - Always err on the side of caution. A conservative plan that keeps the runner healthy is better than an aggressive plan that causes re-injury.
 ` : ''}
@@ -1300,6 +1306,7 @@ RUNNER PROFILE:
 - Fitness Level: ${userProfile?.fitnessLevel || 'Not specified'}
 - Current CTL (Fitness): ${fitness?.ctl || 'N/A'}
 - Training Status: ${fitness?.status || 'N/A'}
+${userProfile?.injuryHistory ? `- Injury History: ${JSON.stringify(userProfile.injuryHistory)}` : ''}
 
 RECENT RUN (Just Completed):
 - Workout Type: ${run.workoutType || 'general run'}

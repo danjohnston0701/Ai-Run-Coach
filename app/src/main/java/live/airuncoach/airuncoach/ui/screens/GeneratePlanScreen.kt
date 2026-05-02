@@ -529,76 +529,6 @@ fun GeneratePlanScreen(
 
                     Spacer(modifier = Modifier.height(Spacing.xl))
 
-                    // ── Section 6: Injuries ──────────────────────────────────────────────
-                    SectionHeader(title = "Injuries & Conditions", icon = R.drawable.icon_heart_vector)
-                    Spacer(modifier = Modifier.height(Spacing.sm))
-                    Text(
-                        "Add any injuries or conditions we're aware of so the AI can design a safe training plan.",
-                        style = AppTextStyles.small,
-                        color = Colors.textMuted
-                    )
-                    Spacer(modifier = Modifier.height(Spacing.md))
-
-                    // Show existing injuries
-                    if (injuries.isNotEmpty()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                            injuries.forEach { injury ->
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(Spacing.md),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                injury.bodyPart,
-                                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
-                                                color = Colors.textPrimary
-                                            )
-                                            Text(
-                                                when (injury.status) {
-                                                    InjuryStatus.RECOVERING -> "Recovering"
-                                                    InjuryStatus.HEALED -> "Healed"
-                                                    InjuryStatus.CHRONIC -> "Chronic"
-                                                },
-                                                style = AppTextStyles.small,
-                                                color = if (injury.status == InjuryStatus.RECOVERING) Colors.warning else Colors.textMuted
-                                            )
-                                            injury.notes?.let { notes ->
-                                                Text(notes, style = AppTextStyles.small, color = Colors.textMuted)
-                                            }
-                                        }
-                                        IconButton(onClick = { viewModel.removeInjury(injury.id!!) }) {
-                                            Icon(painterResource(R.drawable.icon_trash_vector), "Remove", tint = Colors.error)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(Spacing.md))
-                    }
-
-                    // Add injury button
-                    OutlinedButton(
-                        onClick = { 
-                            editingInjury = null
-                            showAddInjuryDialog = true 
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
-                    ) {
-                        Icon(painterResource(R.drawable.icon_plus_vector), null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(Spacing.sm))
-                        Text(if (injuries.isEmpty()) "Add an injury or condition" else "Add another")
-                    }
-
-                    Spacer(modifier = Modifier.height(Spacing.xl))
-
                     // ── Section 5: First Session Start ───────────────────────────────────
                     SectionHeader(title = "When do you want to start?", icon = R.drawable.icon_calendar_vector)
                     Spacer(modifier = Modifier.height(Spacing.sm))
@@ -729,6 +659,76 @@ fun GeneratePlanScreen(
                         Icon(painterResource(R.drawable.icon_plus_vector), null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(Spacing.sm))
                         Text("Add regular session", style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium))
+                    }
+
+                    Spacer(modifier = Modifier.height(Spacing.xl))
+
+                    // ── Section 7: Injuries & Conditions ─────────────────────────────────
+                    SectionHeader(title = "Injuries & Conditions", icon = R.drawable.icon_heart_vector)
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                    Text(
+                        "Add any injuries or conditions so the AI can design a safe training plan that avoids aggravating recovery.",
+                        style = AppTextStyles.small,
+                        color = Colors.textMuted
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.md))
+
+                    // Show existing injuries
+                    if (injuries.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                            injuries.forEach { injury ->
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(Spacing.md),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                injury.bodyPart,
+                                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
+                                                color = Colors.textPrimary
+                                            )
+                                            Text(
+                                                when (injury.status) {
+                                                    InjuryStatus.RECOVERING -> "Recovering"
+                                                    InjuryStatus.HEALED -> "Healed"
+                                                    InjuryStatus.CHRONIC -> "Chronic"
+                                                },
+                                                style = AppTextStyles.small,
+                                                color = if (injury.status == InjuryStatus.RECOVERING) Colors.warning else Colors.textMuted
+                                            )
+                                            injury.notes?.let { notes ->
+                                                Text(notes, style = AppTextStyles.small, color = Colors.textMuted)
+                                            }
+                                        }
+                                        IconButton(onClick = { viewModel.removeInjury(injury.id!!) }) {
+                                            Icon(painterResource(R.drawable.icon_trash_vector), "Remove", tint = Colors.error)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(Spacing.md))
+                    }
+
+                    // Add injury button
+                    OutlinedButton(
+                        onClick = { 
+                            editingInjury = null
+                            showAddInjuryDialog = true 
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
+                    ) {
+                        Icon(painterResource(R.drawable.icon_plus_vector), null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(Spacing.sm))
+                        Text(if (injuries.isEmpty()) "Add an injury or condition" else "Add another")
                     }
 
                     Spacer(modifier = Modifier.height(Spacing.xl))
