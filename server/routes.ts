@@ -4701,6 +4701,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
               .set({ runId, isProcessed: true })
               .where(eq(garminActivities.id, garminActivity.id));
             
+            // Update user stats cache (personal bests, all-time stats)
+            // This triggers a full recompute of PBs including any new splits from Garmin data
+            try {
+              const runForCache = await db.query.runs.findFirst({
+                where: (r, { eq }) => eq(r.id, runId),
+              });
+              if (runForCache) {
+                onRunSaved(device.userId, runForCache).catch(err =>
+                  console.error('[Garmin Webhook] onRunSaved failed:', err)
+                );
+              }
+            } catch (cacheErr) {
+              console.error('[Garmin Webhook] Error updating stats cache:', cacheErr);
+            }
+            
             // Send notification to user
             if (notificationType) {
               try {

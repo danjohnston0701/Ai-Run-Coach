@@ -276,6 +276,22 @@ export async function mergeGarminActivityWithAiRunCoachRun(
       `   Reasons: ${mergeCandidate.matchReasons.join(", ")}`
     );
 
+    // Update user stats cache (personal bests, all-time stats)
+    // This triggers a full recompute of PBs including any new splits from merged Garmin data
+    try {
+      const { onRunSaved } = await import('./user-stats-cache');
+      const mergedRun = await db.query.runs.findFirst({
+        where: (r, { eq }) => eq(r.id, aiRunCoachRunId),
+      });
+      if (mergedRun) {
+        onRunSaved(userId, mergedRun).catch(err =>
+          console.error('[Merge] onRunSaved failed:', err)
+        );
+      }
+    } catch (cacheErr) {
+      console.error('[Merge] Error updating stats cache:', cacheErr);
+    }
+
   } catch (error) {
     console.error("❌ Error merging Garmin activity with run:", error);
     throw error;

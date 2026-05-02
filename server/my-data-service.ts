@@ -41,13 +41,17 @@ export async function getPersonalBests(userId: string) {
 /**
  * Live PB query — fetches runs and calculates PBs for both distance-based
  * and split-based (fastest km/mile) personal bests.
+ * 
+ * For distance-based PBs (5K, 10K, Half Marathon, Marathon), we check:
+ * 1. Dedicated runs in that distance band
+ * 2. Splits from longer runs (e.g., 5K split from a 10K run)
  */
 async function getPersonalBestsLive(userId: string) {
   const distancePBs = [
-    { min: 0.95, max: 1.1,   label: '5K',           target: 5.0 },
-    { min: 9.95, max: 10.1,  label: '10K',          target: 10.0 },
-    { min: 21.05, max: 21.2, label: 'Half Marathon', target: 21.1 },
-    { min: 42.15, max: 42.3, label: 'Marathon',      target: 42.2 },
+    { min: 4.9, max: 5.2,   label: '5K',           target: 5.0 },
+    { min: 9.9, max: 10.2,  label: '10K',          target: 10.0 },
+    { min: 21.0, max: 21.6, label: 'Half Marathon', target: 21.1 },
+    { min: 42.0, max: 42.5, label: 'Marathon',      target: 42.2 },
   ];
 
   const personalBests: any[] = [];
@@ -60,10 +64,12 @@ async function getPersonalBestsLive(userId: string) {
     .orderBy(asc(runs.completedAt));
 
   // Calculate distance-based personal bests (5K, 10K, Half Marathon, Marathon)
+  // Check both dedicated runs AND splits from longer runs
   for (const dist of distancePBs) {
     let bestRun: typeof userRuns[0] | null = null;
     let bestPace: number | null = null;
 
+    // ── Check dedicated runs in this distance band ──────────────────────────
     for (const run of userRuns) {
       if (!run.avgPace || run.distance === null) continue;
       
@@ -78,6 +84,18 @@ async function getPersonalBestsLive(userId: string) {
       if (bestPace === null || pace < bestPace) {
         bestPace = pace;
         bestRun = run;
+      }
+    }
+
+    // ── Check splits from all runs (fastest segment of this distance) ───────
+    const bestSplit = findFastestSplitFromRuns(userRuns, dist.target);
+    if (bestSplit) {
+      // Parse the split's pace to compare
+      const splitPace = parseFloat(bestSplit.pace.split('/')[0]);
+      if (!isNaN(splitPace) && (bestPace === null || splitPace < bestPace)) {
+        // Split is faster, use it
+        bestRun = userRuns.find(r => r.id === bestSplit.runId) || bestRun;
+        bestPace = splitPace;
       }
     }
 
