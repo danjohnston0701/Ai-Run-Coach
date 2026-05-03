@@ -1,13 +1,10 @@
-// RunView.mc — Arc Dashboard
-// Premium redesign: coloured zone arc, large pace, clean data hierarchy.
-//
-// Zone arc spans 240° over the watch top (12 o'clock).
-// Segment map (CCW from lower-right through top to lower-left):
-//   Z5 red    336°→ 20°   (lower-right)
-//   Z4 orange  22°→ 66°
-//   Z3 amber   68°→112°   (centred on 90° = 12 o'clock)
-//   Z2 green  114°→158°
-//   Z1 blue   160°→204°   (lower-left)
+// RunView.mc — Elite Diamond Grid Dashboard
+// Redesign: 4 coloured metric rings in a diamond layout.
+//   TOP    = Time/Duration  (Green Ring)
+//   LEFT   = Pace           (Blue/Cyan Ring, 5-sec smoothed, 1 decimal)
+//   RIGHT  = Heart Rate     (Red/Orange Ring)
+//   BOTTOM = Cadence        (Yellow Ring)
+// Light grey background, black text.
 //
 // Button mapping:
 //   START / SELECT  → start run | pause | resume
@@ -33,7 +30,6 @@ class RunView extends Ui.View {
     // Auth & app state
     private var _isAuthenticated = false;
     private var _isConnected     = false;
-    private var _runnerName      = "";
     private var _overlayState    = OVERLAY_READY;
     private var _dotCount        = 0;
 
@@ -57,12 +53,12 @@ class RunView extends Ui.View {
     private var _isPaused        = false;
     private var _phoneControlled = false;
 
-    // Coaching
+    // Coaching / status
     private var _isCoached          = false;
     private var _coachTargetPace    = "";
     private var _coachTargetPaceSec = 0.0;
-    private var _coachingCue        = "";
-    private var _coachingCueTicks   = 0;
+    private var _statusMessage      = "";
+    private var _statusTicks        = 0;
 
     // Infrastructure
     private var _timer        = null;
@@ -70,20 +66,23 @@ class RunView extends Ui.View {
     private var _phoneLink    = null;
     private var _session      = null;
 
-    // Watch GPS cache — populated by onPosition(), streamed to phone every 2 s
-    // in phone-controlled mode so the phone can use the superior Garmin GPS.
+    // Watch GPS cache
     private var _lastGpsLat    = null;
     private var _lastGpsLng    = null;
     private var _lastGpsAlt    = null;
     private var _lastGpsSpeed  = 0.0;
-    private var _gpsStreamTick = 0;   // increments every 250 ms tick; flush at 8 (= 2 s)
+    private var _gpsStreamTick = 0;
+
+    // GPS distance accumulation
+    private var _prevGpsLat = null;
+    private var _prevGpsLng = null;
 
     // GPS acquisition state
-    private var _gpsReady     = false;   // true once quality >= QUALITY_USABLE (3)
-    private var _gpsQuality   = 0;       // last Pos.Quality value (0-4)
-    private var _gpsListening = false;   // true while location events are active
+    private var _gpsReady     = false;
+    private var _gpsQuality   = 0;
+    private var _gpsListening = false;
 
-    // Animation
+    // Smoothed display values
     private var _elapsedMs     = 0;
     private var _tickMs        = 250;
     private var _streamAccumMs = 0;
@@ -91,21 +90,10 @@ class RunView extends Ui.View {
     private var _dispDistance  = 0.0;
     private var _dispHR        = 0;
     private var _dispCadence   = 0;
-    private var _ringPhase     = 0.0;
-    private var _pulseBoost    = 0.0;
 
-    // ── Zone colour palette ────────────────────────────────────────────────────
-    // Index 0 = Z1 (lowest), index 4 = Z5 (highest)
-    private var _zoneColors    = [0x2979FF, 0x00E676, 0xFFD740, 0xFF6D00, 0xF44336];
-    // Dim tints for inactive segments while running
-    private var _zoneDimColors = [0x0A1628, 0x00200E, 0x201800, 0x1A0800, 0x1A0404];
-
-    // ── Segment start/end angles (CCW = Gfx.ARC_COUNTER_CLOCKWISE) ────────────
-    // Z5 straddles 0°; drawn in two parts.  All others are contiguous.
-    // segA[z][0] = startAngle, segA[z][1] = endAngle (CCW direction)
-    // z index:  0=Z5(red)  1=Z4(orange)  2=Z3(amber)  3=Z2(green)  4=Z1(blue)
-    private var _segStart = [336, 22, 68, 114, 160];
-    private var _segEnd   = [ 20, 66,112, 158, 204];
+    // 5-second pace smoothing buffer (20 ticks x 250ms = 5s)
+    private var _paceHistory    = [];
+    private var _paceHistoryMax = 20;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -115,18 +103,53 @@ class RunView extends Ui.View {
         _dataStreamer = new DataStreamer();
         var tok = App.Storage.getValue("authToken");
         _isAuthenticated = (tok != null && tok.length() > 0);
-        var nm  = App.Storage.getValue("runnerName");
-        _runnerName = (nm != null) ? nm : "";
-        // If already authenticated, show GPS wait; else wait for phone auth
         _overlayState = _isAuthenticated ? OVERLAY_GPS_WAIT : OVERLAY_WAITING;
+        _paceHistory = [];
+        _initSimulatorMode();   // no-op in release, seeds preview data in simulator
+    }
+
+    // ── Simulator preview mode ────────────────────────────────────────────────
+    // (:debug) version: skip phone auth + GPS wait, seed metrics for UI preview.
+    // (:release) version: empty — stripped entirely by monkeyc when building .iq
+
+    (:debug)
+    private function _initSimulatorMode() {
+        _isAuthenticated = true;
+        _gpsReady        = true;
+        _isRunning       = true;
+        _overlayState    = OVERLAY_NONE;
+        // Seed realistic running metrics for visual preview
+        _heartRate       = 158;
+        _heartRateZone   = 3;
+        _cadence         = 172;
+        _distance        = 3420.0;   // 3.42 km
+        _elapsedTime     = 1523;     // 25:23
+        _pace            = 335.0;    // ~5.6 min/km
+        _dispHR          = 158;
+        _dispCadence     = 172;
+        _dispDistance    = 3420.0;
+        _dispPace        = 335.0;
+        // Seed pace history so smoothed pace shows correctly
+        for (var i = 0; i < 20; i++) { _paceHistory.add(335.0); }
+    }
+
+    (:release)
+    private function _initSimulatorMode() {
+        // Stripped from production build — do not add code here
     }
 
     function setPhoneControlled(v) { _phoneControlled = v; }
 
-    // Called by AiRunCoachApp.onCoachingCue when a cue arrives from the backend response
+    function setStatusMessage(msg) {
+        _statusMessage = msg;
+        _statusTicks   = 20;
+    }
+
+    // Keep setCoachingCue for backward compat — maps to status only
     function setCoachingCue(cueText) {
-        _coachingCue      = cueText;
-        _coachingCueTicks = 20;   // ~5 seconds at 250 ms ticks
+        // Status-only on watch: show a brief prompt, no coaching text
+        _statusMessage = "Coach update";
+        _statusTicks   = 20;
     }
 
     function setCoachingMode(data) {
@@ -149,32 +172,28 @@ class RunView extends Ui.View {
 
     function startRun() {
         if (_isRunning) { return; }
-        // Block start until we have at least a usable GPS fix
-        if (!_gpsReady) {
-            _vibeShort();   // haptic cue: "not ready yet"
-            return;
-        }
+        if (!_gpsReady) { _vibeShort(); return; }
         _isRunning     = true;
         _isPaused      = false;
         _elapsedMs     = 0;
         _elapsedTime   = 0;
         _overlayState  = OVERLAY_NONE;
         _gpsStreamTick = 0;
+        _distance = 0.0;
+        _dispDistance = 0.0;
+        _prevGpsLat = null;
+        _prevGpsLng = null;
+        _pace = 0.0;
+        _dispPace = 0.0;
+        _paceHistory = [];
 
-        // Always enable watch GPS and HR sensor regardless of mode.
-        // In phone-controlled mode coordinates are streamed back every 2 s so
-        // the phone can use the superior Garmin multi-band GPS for tracking.
         Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
         _gpsListening = true;
         Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE]);
         Sensor.enableSensorEvents(method(:onSensor));
 
-        if (!_phoneControlled) {
-            _startSession();
-        } else {
-            _phoneLink.sendCommand("start");
-        }
-        _pulseBoost = 1.0;
+        if (!_phoneControlled) { _startSession(); }
+        else { _phoneLink.sendCommand("start"); }
         _vibeShort();
         Ui.requestUpdate();
     }
@@ -182,6 +201,8 @@ class RunView extends Ui.View {
     function pauseRun() {
         if (_isPaused || !_isRunning) { return; }
         _isPaused = true;
+        _prevGpsLat = null;
+        _prevGpsLng = null;
         if (_phoneControlled) { _phoneLink.sendCommand("pause"); }
         else if (_session != null && _session.isRecording()) { _session.stop(); }
         _vibeShort();
@@ -201,11 +222,8 @@ class RunView extends Ui.View {
         _isRunning    = false;
         _isPaused     = false;
         _overlayState = OVERLAY_READY;
-        // Disable GPS and sensors for all modes
         Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
         _gpsListening = false;
-        // _gpsReady remains true — the satellite fix was valid during the run
-        // so the user can start another run immediately without re-acquiring.
         Sensor.enableSensorEvents(null);
         if (_phoneControlled) { _phoneLink.sendCommand("stop"); }
         else { _stopSession(); }
@@ -215,12 +233,7 @@ class RunView extends Ui.View {
 
     function onShow() {
         _phoneLink.register(method(:onPhoneMessage));
-        Comm.registerForPhoneAppMessages(method(:onPhoneAppMessage));
-
-        // Notify the phone that the watch is ready to receive auth + run state.
-        // Triggers phone to push auth token (and any prepared run) to the watch.
         _phoneLink.sendCommand("watchReady");
-
         if (!_phoneControlled && _isRunning) {
             _startSession();
             Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
@@ -228,8 +241,6 @@ class RunView extends Ui.View {
             Sensor.enableSensorEvents(method(:onSensor));
             _gpsListening = true;
         } else if (_isAuthenticated && !_gpsListening) {
-            // Start GPS pre-acquisition so the user can see signal strength
-            // and the START button is gated until a usable fix is obtained.
             Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
             _gpsListening = true;
         }
@@ -239,19 +250,17 @@ class RunView extends Ui.View {
 
     function onHide() {
         if (_timer != null) { _timer.stop(); _timer = null; }
-        // Disable GPS if we started it (running OR pre-run acquisition)
         if (_gpsListening) {
             Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
             _gpsListening = false;
         }
-        if (_isRunning) {
-            Sensor.enableSensorEvents(null);
-        }
+        if (_isRunning) { Sensor.enableSensorEvents(null); }
     }
 
     // ── Phone messages ────────────────────────────────────────────────────────
 
     function onPhoneAppMessage(msg as Comm.PhoneAppMessage) as Void {
+        try {
         if (msg == null || msg.data == null) { return; }
         var d = msg.data;
         var t = d["type"];
@@ -259,13 +268,11 @@ class RunView extends Ui.View {
 
         if (t.equals("auth")) {
             var tok = d["authToken"];
-            var nm  = d["runnerName"];
             if (tok != null && tok.length() > 0) {
                 App.Storage.setValue("authToken", tok);
                 _isAuthenticated = true;
                 _isConnected     = true;
                 if (!_isRunning) {
-                    // Begin GPS acquisition and show the GPS wait screen
                     if (!_gpsListening) {
                         Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
                         _gpsListening = true;
@@ -273,7 +280,6 @@ class RunView extends Ui.View {
                     _overlayState = _gpsReady ? OVERLAY_READY : OVERLAY_GPS_WAIT;
                 }
             }
-            if (nm != null) { App.Storage.setValue("runnerName", nm); _runnerName = nm; }
             Ui.requestUpdate();
 
         } else if (t.equals("preparedRun")) {
@@ -282,15 +288,11 @@ class RunView extends Ui.View {
             var wt   = d["workoutType"];
             var tp   = d["targetPace"];
             var wd   = d["workoutDesc"];
-            if (dist != null) { _prepRunDist     = dist.toFloat(); }
-            if (rt   != null) { _prepRunType     = rt; }
+            if (dist != null) { _prepRunDist    = dist.toFloat(); }
+            if (rt   != null) { _prepRunType    = rt; }
             if (wt   != null) { _prepWorkoutType = wt; }
-            if (tp   != null) { _prepTargetPace  = tp; _coachTargetPace = tp; _coachTargetPaceSec = _parsePace(tp); _isCoached = true; }
+            if (tp   != null) { _prepTargetPace = tp; _coachTargetPace = tp; _coachTargetPaceSec = _parsePace(tp); _isCoached = true; }
             if (wd   != null) { _prepWorkoutDesc = wd; }
-            // Only jump straight to COACHED if GPS is already locked.
-            // If GPS is still acquiring, stay on OVERLAY_GPS_WAIT so the user
-            // cannot press START until we have a usable fix.  onPosition() will
-            // transition to OVERLAY_COACHED automatically once the fix arrives.
             if (!_isRunning) {
                 _overlayState = _gpsReady ? OVERLAY_COACHED : OVERLAY_GPS_WAIT;
             }
@@ -300,6 +302,7 @@ class RunView extends Ui.View {
             _isConnected = false;
             Ui.requestUpdate();
         }
+        } catch (e) { Sys.println("onPhoneAppMessage err: " + e.getErrorMessage()); }
     }
 
     function onPhoneMessage(data) {
@@ -308,19 +311,26 @@ class RunView extends Ui.View {
         if (t == null) { return; }
 
         if (t.equals("runUpdate")) {
-            var pv = data.get("pace");       if (pv != null) { _pace        = pv.toFloat(); }
-            var dv = data.get("distance");   if (dv != null) { _distance    = dv.toFloat(); }
-            var hv = data.get("hr");         if (hv != null) { _heartRate   = hv.toNumber(); _heartRateZone = _hrZone(_heartRate); }
+            var pv = data.get("pace");        if (pv != null) { _pace        = pv.toFloat(); }
+            var dv = data.get("distance");    if (dv != null) { _distance    = dv.toFloat(); }
+            var hv = data.get("hr");          if (hv != null) { _heartRate   = hv.toNumber(); _heartRateZone = _hrZone(_heartRate); }
             var tv = data.get("elapsedTime"); if (tv != null) { _elapsedTime = tv.toNumber(); _elapsedMs = _elapsedTime * 1000; }
-            var cv = data.get("cadence");    if (cv != null) { _cadence     = cv.toNumber(); }
-            var rv = data.get("isRunning");  if (rv != null) { _isRunning   = rv; }
-            var uv = data.get("isPaused");   if (uv != null) { _isPaused    = uv; }
+            var cv = data.get("cadence");     if (cv != null) { _cadence     = cv.toNumber(); }
+            var rv = data.get("isRunning");   if (rv != null) { _isRunning   = rv; }
+            var uv = data.get("isPaused");    if (uv != null) { _isPaused    = uv; }
             if (_isRunning) { _overlayState = OVERLAY_NONE; }
             Ui.requestUpdate();
 
+        } else if (t.equals("statusMessage")) {
+            var msg = data.get("message");
+            if (msg != null) { setStatusMessage(msg); _vibeShort(); Ui.requestUpdate(); }
+
         } else if (t.equals("coachingCue")) {
-            var cue = data.get("cue");
-            if (cue != null) { _coachingCue = cue; _coachingCueTicks = 20; _vibeShort(); Ui.requestUpdate(); }
+            // Only show a brief status prompt — no coaching text on watch
+            _statusMessage = "Coach update";
+            _statusTicks   = 20;
+            _vibeShort();
+            Ui.requestUpdate();
 
         } else if (t.equals("sessionEnded")) {
             _isRunning = false; _isPaused = false; _overlayState = OVERLAY_READY;
@@ -338,22 +348,23 @@ class RunView extends Ui.View {
             _elapsedTime = _elapsedMs / 1000;
         }
 
-        var e = 0.15;
-        _dispPace     = _pace > 0 && _pace < 1200
-            ? _dispPace + (_pace - _dispPace) * e
-            : _dispPace + (0.0 - _dispPace) * 0.08;
-        _dispDistance = _dispDistance + (_distance  - _dispDistance) * e;
+        // ── 5-second pace smoothing ────────────────────────────────────────────
+        if (_pace > 0 && _pace < 1200) {
+            _paceHistory.add(_pace);
+            if (_paceHistory.size() > _paceHistoryMax) {
+                _paceHistory.remove(0);
+            }
+        }
+        var smoothed = _smoothedPace();
+        var e = 0.20;
+        _dispPace     = smoothed > 0 ? _dispPace + (smoothed - _dispPace) * e : _dispPace * 0.92;
+        _dispDistance = _dispDistance + (_distance - _dispDistance) * 0.15;
         _dispHR       = (_dispHR + (_heartRate - _dispHR) * 0.30).toNumber();
         _dispCadence  = (_dispCadence + (_cadence  - _dispCadence) * 0.30).toNumber();
 
-        _ringPhase += 0.10;   // ~0.6 rad/s = ~10-second breath cycle
-        if (_ringPhase > 6.283) { _ringPhase -= 6.283; }
-        _pulseBoost  *= 0.82;
-        if (_pulseBoost < 0.01) { _pulseBoost = 0.0; }
-
-        if (_coachingCueTicks > 0) {
-            _coachingCueTicks -= 1;
-            if (_coachingCueTicks <= 0) { _coachingCue = ""; }
+        if (_statusTicks > 0) {
+            _statusTicks -= 1;
+            if (_statusTicks <= 0) { _statusMessage = ""; }
         }
 
         if (!_phoneControlled && _isRunning && !_isPaused) {
@@ -373,8 +384,6 @@ class RunView extends Ui.View {
             }
         }
 
-        // Phone-controlled mode: stream watch GPS to phone every 2 s (8 × 250 ms ticks).
-        // The phone will prefer these higher-accuracy Garmin coordinates over its own GPS.
         if (_phoneControlled && _isRunning && !_isPaused) {
             _gpsStreamTick += 1;
             if (_gpsStreamTick >= 8 && _lastGpsLat != null && _lastGpsLng != null) {
@@ -393,41 +402,52 @@ class RunView extends Ui.View {
         Ui.requestUpdate();
     }
 
+    private function _smoothedPace() {
+        if (_paceHistory.size() == 0) { return 0.0; }
+        var sum = 0.0;
+        for (var i = 0; i < _paceHistory.size(); i++) { sum += _paceHistory[i]; }
+        return sum / _paceHistory.size();
+    }
+
     // ── Sensors / GPS ─────────────────────────────────────────────────────────
 
     function onPosition(info as Pos.Info) as Void {
-        // Track GPS quality for the pre-run acquisition gate
-        // Pos.Quality values: 0=NOT_AVAILABLE, 1=LAST_KNOWN, 2=POOR, 3=USABLE, 4=GOOD
         if (info.accuracy != null) {
             _gpsQuality = info.accuracy;
             var wasReady = _gpsReady;
-            _gpsReady = (_gpsQuality >= 3);   // QUALITY_USABLE or better
-            // Transition overlay from GPS_WAIT → READY / COACHED once lock acquired
+            _gpsReady = (_gpsQuality >= 3);
             if (_gpsReady && !wasReady && !_isRunning) {
                 if (_overlayState == OVERLAY_GPS_WAIT) {
                     _overlayState = (_isCoached || _prepRunType.length() > 0)
-                        ? OVERLAY_COACHED
-                        : OVERLAY_READY;
+                        ? OVERLAY_COACHED : OVERLAY_READY;
                 }
-                _vibeShort();   // haptic confirmation of GPS lock
+                _vibeShort();
             }
         }
-
         if (info.position != null) {
             var deg = info.position.toDegrees();
-            // Always cache the latest fix — used for phone streaming in phone-controlled mode
-            _lastGpsLat = deg[0];
-            _lastGpsLng = deg[1];
+            var lat = deg[0];
+            var lng = deg[1];
+            _lastGpsLat = lat;
+            _lastGpsLng = lng;
             _lastGpsAlt = info.altitude;
-            if (info.speed != null && info.speed > 0.1) {
+            if (info.speed != null && info.speed > 0.3) {
                 _lastGpsSpeed = info.speed;
-                if (_isRunning) {
-                    _pace = 1000.0 / (info.speed * 60.0);
-                }
+                if (_isRunning && !_isPaused) { _pace = 1000.0 / info.speed; }
+            } else if (_isRunning && !_isPaused) {
+                _pace = 0.0;
             }
-            // Standalone mode: also push to DataStreamer for backend HTTP stream
+            // Accumulate distance via haversine between consecutive GPS fixes
+            if (_isRunning && !_isPaused && _gpsQuality >= 3 && _prevGpsLat != null && _prevGpsLng != null) {
+                var d = _haversineMeters(_prevGpsLat, _prevGpsLng, lat, lng);
+                if (d >= 2.0 && d <= 100.0) { _distance += d; }
+            }
+            if (_isRunning && !_isPaused && _gpsQuality >= 3) {
+                _prevGpsLat = lat;
+                _prevGpsLng = lng;
+            }
             if (!_phoneControlled && info.altitude != null && _dataStreamer != null) {
-                _dataStreamer.updateGPS(deg[0], deg[1], info.altitude);
+                _dataStreamer.updateGPS(lat, lng, info.altitude);
             }
         }
     }
@@ -438,7 +458,7 @@ class RunView extends Ui.View {
     }
 
     // ==========================================================================
-    // DRAWING — Arc Dashboard
+    // DRAWING — Elite Diamond Grid
     // ==========================================================================
 
     function onUpdate(dc) {
@@ -447,459 +467,190 @@ class RunView extends Ui.View {
         var cx = w / 2;
         var cy = h / 2;
 
-        // ── Background ────────────────────────────────────────────────────────
+        // ── Light grey background ──────────────────────────────────────────────
         dc.setColor(Gfx.COLOR_BLACK, Gfx.COLOR_BLACK);
         dc.clear();
+        // Smooth anti-aliased rendering (SDK 3.2+, supported on Fenix 7)
+        if (dc has :setAntiAlias) { dc.setAntiAlias(true); }
 
-        // ── GPS acquisition screen (blocks dashboard until fix obtained) ───────
-        if (_overlayState == OVERLAY_GPS_WAIT) {
-            _drawGpsWaitScreen(dc, cx, cy, w, h);
-            return;
-        }
+        if (_overlayState == OVERLAY_GPS_WAIT) { _drawGpsWait(dc, cx, cy, w, h); return; }
+        if (_overlayState == OVERLAY_WAITING)  { _drawWaiting(dc, cx, cy, w, h); return; }
 
-        // ── Waiting-for-phone screen ───────────────────────────────────────────
-        if (_overlayState == OVERLAY_WAITING) {
-            _drawWaitingForPhoneScreen(dc, cx, cy, w, h);
-            return;
-        }
+        if (!_isRunning && !_isPaused) { _drawStartHint(dc, cx, cy, w); }
+        _drawTimeTop(dc, cx, w, h);
+        var ringR = (w * 0.255).toNumber();
+        var circR = (w * 0.168).toNumber();
+        _drawRing(dc, cx - ringR, cy, circR, 0x00BFA8, "KM",   (_dispDistance / 1000.0).format("%.2f"));
+        _drawRing(dc, cx + ringR, cy, circR, 0xFFDD00, "PACE", _fmtPaceDec(_dispPace));
+        _drawRing(dc, cx, cy + ringR, circR, 0xFF3355, "HR",   _dispHR > 0 ? _dispHR.format("%d") : "--");
+        _drawBattery(dc, cx, cy, ringR, circR);
+        _drawStatusBar(dc, cx, w, h);
 
-        // ── Zone arc ──────────────────────────────────────────────────────────
-        _drawZoneArc(dc, cx, cy, w, h);
-
-        // ── START button indicator (pre-run only) ─────────────────────────────
-        if (!_isRunning && (_overlayState == OVERLAY_READY || _overlayState == OVERLAY_COACHED)) {
-            _drawStartIndicator(dc, cx, cy, w, h);
-        }
-
-        // ── Top: time / elapsed ───────────────────────────────────────────────
-        _drawTimeRow(dc, cx, h);
-
-        // ── Zone + HR badge (running only) ────────────────────────────────────
-        // Zone badge removed — HR already shown in secondary row
-
-        // ── Primary metric: PACE ──────────────────────────────────────────────
-        _drawPace(dc, cx, w, h);
-
-        // ── Secondary row: Distance | HR ─────────────────────────────────────
-        _drawSecondary(dc, cx, w, h);
-
-        // ── Cadence ───────────────────────────────────────────────────────────
-        _drawCadence(dc, cx, h);
-
-        // ── Status / prompt ───────────────────────────────────────────────────
-        _drawStatus(dc, cx, h);
-
-        // ── Coaching cue (top overlay, always on top) ─────────────────────────
-        if (_coachingCue.length() > 0) {
-            _drawCoachingCue(dc, cx, w);
-        }
-
-        // ── Paused banner ─────────────────────────────────────────────────────
+        // ── Paused banner ──────────────────────────────────────────────────────
         if (_isPaused) {
-            dc.setColor(Gfx.COLOR_ORANGE, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, (h * 0.03).toNumber(), Gfx.FONT_TINY,
-                "— PAUSED —", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.setColor(0xFF6600, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, (h * 0.04).toNumber(), Gfx.FONT_TINY,
+                "PAUSED", Gfx.TEXT_JUSTIFY_CENTER);
         }
     }
 
-    // ── GPS Acquisition Screen ────────────────────────────────────────────────
-    //
-    // Shown from app launch until Pos.Quality >= QUALITY_USABLE (3).
-    // Draws a full-screen UI so the user clearly understands they must wait.
-    //   Top area   : app title + thin accent ring
-    //   Centre     : large "GPS" label with signal-bar indicator
-    //   Lower half : animated "Acquiring..." text + quality description
-    //   Bottom     : "Cannot start until GPS ready"
-    //
-    private function _drawGpsWaitScreen(dc, cx, cy, w, h) {
-        // Gold bezel ring
-        dc.setColor(0xB8960C, Gfx.COLOR_TRANSPARENT);
-        dc.drawCircle(cx, cy, (w / 2) - 4);
-        dc.setColor(0x3A2E00, Gfx.COLOR_TRANSPARENT);
-        dc.drawCircle(cx, cy, (w / 2) - 6);
+    private function _drawTimeTop(dc, cx, w, h) {
+        if (_isRunning || _isPaused) {
+            // Active run: show DURATION label + elapsed time
+            dc.setColor(0x00CC66, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, (h * 0.08).toNumber(), Gfx.FONT_XTINY, "DURATION", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, (h * 0.14).toNumber(), Gfx.FONT_LARGE, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
+        } else {
+            // Idle: show current clock time (24h), no label
+            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, (h * 0.09).toNumber(), Gfx.FONT_LARGE, _fmtClock(), Gfx.TEXT_JUSTIFY_CENTER);
+        }
+    }
 
-        // App title
+    private function _drawRing(dc, x, y, r, color, label, value) {
+        dc.setColor(color, Gfx.COLOR_TRANSPARENT);
+        dc.drawCircle(x, y, r - 1);
+        dc.drawCircle(x, y, r);
+        dc.drawCircle(x, y, r + 1);
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, (h * 0.10).toNumber(), Gfx.FONT_TINY,
-            "AI RUN COACH", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(x, y - 21, Gfx.FONT_XTINY, label, Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(x, y - 7,  Gfx.FONT_MEDIUM, value, Gfx.TEXT_JUSTIFY_CENTER);
+    }
 
-        // Thin divider
-        dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
-        dc.drawLine((w * 0.2).toNumber(), (h * 0.22).toNumber(),
-                    (w * 0.8).toNumber(), (h * 0.22).toNumber());
+    private function _drawBattery(dc, cx, cy, ringR, circR) {
+        if (!(Sys has :getSystemStats)) { return; }
+        var bat = Sys.getSystemStats().battery.toNumber();
+        if (bat < 0)   { bat = 0; }
+        if (bat > 100) { bat = 100; }
 
-        // Large GPS label
-        dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, (h * 0.27).toNumber(), Gfx.FONT_MEDIUM,
-            "GPS", Gfx.TEXT_JUSTIFY_CENTER);
+        // Position: right of bottom HR ring
+        var bx  = (cx + circR + 8).toNumber();
+        var by  = (cy + ringR - 6).toNumber();
+        var bw  = 22;   // body width
+        var bh  = 12;   // body height
+        var tw  = 3;    // terminal width
+        var th  = 6;    // terminal height
 
-        // Signal-bar indicator (4 bars, coloured by quality 0-4)
-        // Bars grow left-to-right; lit bars use a colour ramp (grey→green)
-        var barColors = [0x333333, 0xF44336, 0xFFD740, 0x00E676, 0x00E676];
-        var barW = 10;
-        var barGap = 5;
-        var totalW = 4 * barW + 3 * barGap;
-        var bx0 = cx - totalW / 2;
-        var baseY = (h * 0.52).toNumber();
-        for (var b = 0; b < 4; b++) {
-            var barH = 6 + b * 6;           // bars get taller left→right
-            var bx   = bx0 + b * (barW + barGap);
-            var by   = baseY - barH;
-            // Lit if quality > b  (quality 0 = no bars, quality 4 = all bars)
-            var lit  = (_gpsQuality > b);
-            var col  = lit ? barColors[b + 1] : 0x222222;
+        // Colour: green normal, amber <50%, red <20%
+        var col = 0x00CC66;
+        if (bat < 50) { col = 0xFFAA00; }
+        if (bat < 20) { col = 0xFF4444; }
+
+        // Battery body outline
+        dc.setColor(0x888888, Gfx.COLOR_TRANSPARENT);
+        dc.drawRectangle(bx, by, bw, bh);
+
+        // Terminal nub (right side, centred vertically)
+        dc.setColor(0x888888, Gfx.COLOR_TRANSPARENT);
+        dc.fillRectangle(bx + bw, by + (bh - th) / 2, tw, th);
+
+        // Charge fill
+        var fillW = ((bw - 2) * bat / 100).toNumber();
+        if (fillW > 0) {
             dc.setColor(col, Gfx.COLOR_TRANSPARENT);
-            dc.fillRectangle(bx, by, barW, barH);
-            // Outline on lit bars
-            if (lit) {
-                dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-                dc.drawRectangle(bx, by, barW, barH);
-            }
+            dc.fillRectangle(bx + 1, by + 1, fillW, bh - 2);
         }
-
-        // Quality label
-        var qualLabels = ["No signal", "Last known", "Poor", "Usable", "Good"];
-        var qLabel = (_gpsQuality >= 0 && _gpsQuality <= 4)
-            ? qualLabels[_gpsQuality]
-            : "Searching";
-        var qColor = (_gpsQuality >= 3) ? 0x00E676 : Gfx.COLOR_LT_GRAY;
-        dc.setColor(qColor, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, (h * 0.57).toNumber(), Gfx.FONT_XTINY,
-            qLabel, Gfx.TEXT_JUSTIFY_CENTER);
-
-        // Animated "Acquiring..." text
-        var dots = "";
-        for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
-        dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, (h * 0.66).toNumber(), Gfx.FONT_TINY,
-            "Acquiring" + dots, Gfx.TEXT_JUSTIFY_CENTER);
-
-        // "Stand still outdoors" hint
-        dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, (h * 0.75).toNumber(), Gfx.FONT_XTINY,
-            "Stand still outdoors", Gfx.TEXT_JUSTIFY_CENTER);
-
-        // Cannot-start warning at bottom
-        dc.setColor(Gfx.COLOR_ORANGE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, (h * 0.84).toNumber(), Gfx.FONT_XTINY,
-            "START disabled", Gfx.TEXT_JUSTIFY_CENTER);
+        // Percentage text below icon
+        dc.setColor(0x888888, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(bx + bw / 2, by + bh + 2, Gfx.FONT_XTINY, bat.format("%d") + "%", Gfx.TEXT_JUSTIFY_CENTER);
     }
 
-    // ── Waiting-for-phone screen ──────────────────────────────────────────────
-    //
-    // Shown when the auth token has not yet arrived from the phone app.
-    //
-    private function _drawWaitingForPhoneScreen(dc, cx, cy, w, h) {
-        var dots = "";
-        for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
 
-        // Gold bezel ring
-        dc.setColor(0xB8960C, Gfx.COLOR_TRANSPARENT);
+    private function _drawStatusBar(dc, cx, w, h) {
+        var y = (h * 0.82).toNumber();
+        if (_statusMessage.length() > 0) {
+            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, y, Gfx.FONT_XTINY, _statusMessage, Gfx.TEXT_JUSTIFY_CENTER);
+        } else if (!_isRunning) {
+            dc.setColor(0x555555, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, y, Gfx.FONT_XTINY, "PRESS START", Gfx.TEXT_JUSTIFY_CENTER);
+        }
+    }
+
+    // ── GPS Wait Screen ──────────────────────────────────────────────────────
+    private function _drawGpsWait(dc, cx, cy, w, h) {
+        // Green outer ring
+        dc.setColor(0x00AA55, Gfx.COLOR_TRANSPARENT);
         dc.drawCircle(cx, cy, (w / 2) - 4);
-        dc.setColor(0x3A2E00, Gfx.COLOR_TRANSPARENT);
-        dc.drawCircle(cx, cy, (w / 2) - 6);
+        dc.drawCircle(cx, cy, (w / 2) - 5);
 
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, (h * 0.10).toNumber(), Gfx.FONT_TINY,
-            "AI RUN COACH", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, (h * 0.10).toNumber(), Gfx.FONT_TINY, "AI RUN COACH", Gfx.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
-        dc.drawLine((w * 0.2).toNumber(), (h * 0.22).toNumber(),
-                    (w * 0.8).toNumber(), (h * 0.22).toNumber());
+        dc.drawLine((w * 0.2).toNumber(), (h * 0.22).toNumber(), (w * 0.8).toNumber(), (h * 0.22).toNumber());
 
-        dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, cy - 20, Gfx.FONT_SMALL,
-            "Waiting" + dots, Gfx.TEXT_JUSTIFY_CENTER);
+        dc.setColor(0x0088CC, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, (h * 0.27).toNumber(), Gfx.FONT_MEDIUM, "GPS", Gfx.TEXT_JUSTIFY_CENTER);
+
+        // Signal bars
+        var barW = 10; var barGap = 5;
+        var bx0 = cx - (4 * barW + 3 * barGap) / 2;
+        var baseY = (h * 0.52).toNumber();
+        var barCols = [0xF44336, 0xFFD740, 0x00E676, 0x00E676];
+        for (var b = 0; b < 4; b++) {
+            var barH = 6 + b * 6;
+            var bx = bx0 + b * (barW + barGap);
+            var lit = (_gpsQuality > b);
+            dc.setColor(lit ? barCols[b] : 0xBBBBBB, Gfx.COLOR_TRANSPARENT);
+            dc.fillRectangle(bx, baseY - barH, barW, barH);
+            if (lit) { dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT); dc.drawRectangle(bx, baseY - barH, barW, barH); }
+        }
+
+        var qLabels = ["No signal", "Last known", "Poor", "Usable", "Good"];
+        dc.setColor(_gpsQuality >= 3 ? 0x00AA55 : Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, (h * 0.57).toNumber(), Gfx.FONT_XTINY, (_gpsQuality <= 4) ? qLabels[_gpsQuality] : "Searching", Gfx.TEXT_JUSTIFY_CENTER);
+
+        var dots = ""; for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
+        dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, (h * 0.66).toNumber(), Gfx.FONT_TINY, "Acquiring" + dots, Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, (h * 0.75).toNumber(), Gfx.FONT_XTINY, "Stand still outdoors", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.setColor(0xFF6600, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, (h * 0.84).toNumber(), Gfx.FONT_XTINY, "START disabled", Gfx.TEXT_JUSTIFY_CENTER);
+    }
+
+    // ── Waiting for Phone Screen ──────────────────────────────────────────────
+    private function _drawWaiting(dc, cx, cy, w, h) {
+        dc.setColor(0x00AA55, Gfx.COLOR_TRANSPARENT);
+        dc.drawCircle(cx, cy, (w / 2) - 4);
+        dc.drawCircle(cx, cy, (w / 2) - 5);
+
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, (h * 0.10).toNumber(), Gfx.FONT_TINY, "AI RUN COACH", Gfx.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, cy + 10, Gfx.FONT_TINY,
-            "Open AI Run Coach", Gfx.TEXT_JUSTIFY_CENTER);
-        dc.drawText(cx, (h * 0.74).toNumber(), Gfx.FONT_TINY,
-            "on your phone", Gfx.TEXT_JUSTIFY_CENTER);
-    }
+        dc.drawLine((w * 0.2).toNumber(), (h * 0.22).toNumber(), (w * 0.8).toNumber(), (h * 0.22).toNumber());
 
-    // ── START button indicator ───────────────────────────────────────────────
-    //
-    // Drawn pre-run (OVERLAY_READY / OVERLAY_COACHED, GPS locked) as a pulsing
-    // green arc along the right rim of the watch face — pointing directly at the
-    // physical START/SELECT button at 3 o'clock (0°).  Mirrors the native Garmin
-    // green-arc affordance so the gesture is immediately familiar to Garmin users.
-    //
-    // Geometry:
-    //   Sits in the 5 px gap between the zone arc outer edge (w/2-6) and the
-    //   screen rim.  Spans 325° → 35° CCW (70° centred on 0°).
-    //   Thickness pulses 2→5 px with the shared _ringPhase breath cycle.
-    //
-    private function _drawStartIndicator(dc, cx, cy, w, h) {
-        var breath = ((Math.sin(_ringPhase) + 1.0) * 0.5).toFloat();
-        var rimR   = (w / 2 - 1).toNumber();
-
-        // Backdrop shadow — full-width dark green so the glow has depth
-        dc.setColor(0x003D1C, Gfx.COLOR_TRANSPARENT);
-        for (var r = rimR - 5; r <= rimR; r++) {
-            dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, 325, 35);
-        }
-
-        // Bright layer — thickness pulses 2→5 px in sync with breathing ring
-        var thick = (2 + (breath * 3.0)).toNumber();
-        dc.setColor(0x00E676, Gfx.COLOR_TRANSPARENT);
-        for (var r = rimR - thick; r <= rimR; r++) {
-            dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, 325, 35);
-        }
-    }
-
-    // ── Zone Arc ──────────────────────────────────────────────────────────────
-    //
-    // 11-pixel-thick arc of 5 coloured segments, 240° over the watch top.
-    // CCW angles: 0°=right(3-o'clock), 90°=top(12-o'clock), 180°=left, 270°=bottom.
-    // Arc goes CCW from 330° (lower-right) → 90° (top) → 210° (lower-left).
-    //
-    private function _drawZoneArc(dc, cx, cy, w, h) {
-        var outerR = (w / 2 - 6).toNumber();
-        var innerR = outerR - 11;
-
-        var breath = ((Math.sin(_ringPhase) + 1.0) * 0.5).toFloat();
-        var pulse  = _pulseBoost;
-
-        // ── Background: dark ring ─────────────────────────────────────────────
-        dc.setColor(0x141414, Gfx.COLOR_TRANSPARENT);
-        for (var r = innerR; r <= outerR; r++) {
-            dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, 330, 210);
-        }
-
-        // ── Five zone segments ─────────────────────────────────────────────────
-        // z index 0 = Z5 (red, lower-right)  …  z index 4 = Z1 (blue, lower-left)
-        // zone number 1-5:  _heartRateZone == 1 → z index 4, etc.
-        for (var z = 0; z < 5; z++) {
-            var zoneNum = 5 - z;   // z=0 → zone5, z=4 → zone1
-            var isActive = (_heartRateZone == zoneNum);
-            var sa = _segStart[z];
-            var ea = _segEnd[z];
-            var crossesZero = (sa > ea);   // only Z5 (z=0) wraps through 0°
-
-            var color;
-            var rInner;
-            var rOuter;
-
-            if (isActive && _isRunning) {
-                // ── ACTIVE (running): full brightness + glow ─────────────────
-                color  = _zoneColors[zoneNum - 1];
-                rInner = innerR - 1;
-                var glow = (breath * 2.5 + pulse * 3.0).toNumber();
-                rOuter = outerR + 1 + glow;
-
-                dc.setColor(color, Gfx.COLOR_TRANSPARENT);
-                for (var r = rInner; r <= rOuter; r++) {
-                    if (crossesZero) {
-                        dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, sa, 359);
-                        dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, 1, ea);
-                    } else {
-                        dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, sa, ea);
-                    }
-                }
-
-            } else if (_isRunning) {
-                // ── INACTIVE (running): dim tint ─────────────────────────────
-                color = _zoneDimColors[zoneNum - 1];
-                dc.setColor(color, Gfx.COLOR_TRANSPARENT);
-                for (var r = innerR; r <= outerR; r++) {
-                    if (crossesZero) {
-                        dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, sa, 359);
-                        dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, 1, ea);
-                    } else {
-                        dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, sa, ea);
-                    }
-                }
-
-            } else {
-                // ── IDLE (pre-run): dim tint, Z3 centre pulses cyan ──────────
-                color = _zoneDimColors[zoneNum - 1];
-                dc.setColor(color, Gfx.COLOR_TRANSPARENT);
-                for (var r = innerR; r <= outerR; r++) {
-                    if (crossesZero) {
-                        dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, sa, 359);
-                        dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, 1, ea);
-                    } else {
-                        dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, sa, ea);
-                    }
-                }
-                // Z3 centre segment (z==2): gold breath pulse — brand signature
-                if (z == 2) {
-                    // Two-level pulse: mid-gold at 55% breath, bright gold at 85%
-                    if (breath > 0.55) {
-                        dc.setColor(0x3A2E00, Gfx.COLOR_TRANSPARENT);
-                        for (var r = innerR + 2; r <= outerR - 2; r++) {
-                            dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, sa, ea);
-                        }
-                    }
-                    if (breath > 0.85) {
-                        dc.setColor(0xB8960C, Gfx.COLOR_TRANSPARENT);
-                        for (var r = innerR + 4; r <= outerR - 4; r++) {
-                            dc.drawArc(cx, cy, r, Gfx.ARC_COUNTER_CLOCKWISE, sa, ea);
-                        }
-                    }
-                }
-            }
-        }
-
-        // ── Thin inner separator ring (brand cyan, very subtle) ───────────────
-        dc.setColor(0x002233, Gfx.COLOR_TRANSPARENT);
-        dc.drawArc(cx, cy, innerR - 2, Gfx.ARC_COUNTER_CLOCKWISE, 330, 210);
-        dc.drawArc(cx, cy, innerR - 3, Gfx.ARC_COUNTER_CLOCKWISE, 330, 210);
-    }
-
-    // ── Time row ──────────────────────────────────────────────────────────────
-
-    private function _drawTimeRow(dc, cx, h) {
-        if (_isRunning) {
-            // Elapsed time — no label, slightly larger font so it reads at a glance
-            var y = (h * 0.13).toNumber();
-            dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, y, Gfx.FONT_MEDIUM, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
-        } else {
-            // Local clock — white, centred top
-            var y = (h * 0.10).toNumber();
-            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, y, Gfx.FONT_SMALL, _fmtClock(), Gfx.TEXT_JUSTIFY_CENTER);
-        }
-    }
-
-    // ── Primary metric: PACE ──────────────────────────────────────────────────
-    //
-    // Layout (label ABOVE value — standard data-field convention):
-    //   h*0.27  "MIN / KM"  (XTINY, dim)
-    //   h*0.31  PACE value  (NUMBER_MILD — smaller than HOT, leaves room below)
-    //   h*0.52  TARGET badge (coached only)
-
-    private function _drawPace(dc, cx, w, h) {
-        var paceStr = _fmtPace(_dispPace);
-        var lblY    = (h * 0.26).toNumber();
-        var y       = (h * 0.32).toNumber();
-
-        // Pace colour
-        var paceColor;
-        if (_isCoached && _coachTargetPaceSec > 0 && _dispPace > 0) {
-            paceColor = _paceDeviationColor();
-        } else if (_isRunning && _dispPace > 0) {
-            paceColor = Gfx.COLOR_WHITE;
-        } else {
-            paceColor = 0x404040;   // dim grey pre-run
-        }
-
-        // Font: NUMBER_MILD as primary (smaller than HOT — leaves room for 3 metrics below)
-        var font = Gfx.FONT_NUMBER_MILD;
-        if (dc.getTextWidthInPixels(paceStr, font) > w - 36) {
-            font = Gfx.FONT_LARGE;
-        }
-
-        // "MIN / KM" label — gold, clearly secondary to pace value
-        dc.setColor(0x7A6400, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, lblY, Gfx.FONT_XTINY, "MIN / KM", Gfx.TEXT_JUSTIFY_CENTER);
-
-        // Pace value
-        dc.setColor(paceColor, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, y, font, paceStr, Gfx.TEXT_JUSTIFY_CENTER);
-
-        // Coached target badge — sits just below the pace value
-        if (_isCoached && _coachTargetPace.length() > 0) {
-            var tY = (h * 0.535).toNumber();
-            dc.setColor(0x1A1200, Gfx.COLOR_TRANSPARENT);
-            dc.fillRectangle(cx - 52, tY - 1, 104, 15);
-            dc.setColor(0xD4AF37, Gfx.COLOR_TRANSPARENT);
-            dc.drawRectangle(cx - 52, tY - 1, 104, 15);
-            dc.drawText(cx, tY, Gfx.FONT_XTINY,
-                "TARGET  " + _coachTargetPace + " /KM",
-                Gfx.TEXT_JUSTIFY_CENTER);
-        }
-    }
-
-    // ── Secondary row: Distance | HR ──────────────────────────────────────────
-    //
-    // Layout (label ABOVE value):
-    //   h*0.575  "KM"  (left)  |  "BPM" (right)   — XTINY dim labels
-    //   h*0.615  value          |  value            — FONT_SMALL
-    //   Divider: thin vertical line between the two columns
-
-    private function _drawSecondary(dc, cx, w, h) {
-        var lblY  = (h * 0.555).toNumber();
-        var y     = (h * 0.625).toNumber();
-        var lx    = (w * 0.27).toNumber();
-        var rx    = (w * 0.73).toNumber();
-
-        // Thin vertical divider
-        dc.setColor(0x242424, Gfx.COLOR_TRANSPARENT);
-        dc.drawLine(cx, lblY - 2, cx, y + 20);
-
-        // Distance (left) — label above, value below
-        dc.setColor(0x7A6400, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(lx, lblY, Gfx.FONT_XTINY, "KM", Gfx.TEXT_JUSTIFY_CENTER);
-        var distStr = (_dispDistance / 1000.0).format("%.2f");
+        var dots = ""; for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(lx, y, Gfx.FONT_SMALL, distStr, Gfx.TEXT_JUSTIFY_CENTER);
-
-        // Heart rate (right) — label above, value below
-        dc.setColor(0x7A6400, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, lblY, Gfx.FONT_XTINY, "BPM", Gfx.TEXT_JUSTIFY_CENTER);
-        var hrStr = _dispHR > 0 ? _dispHR.format("%d") : "--";
-        var hrCol = _isRunning ? _zoneColors[_heartRateZone - 1] : 0x383838;
-        dc.setColor(hrCol, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, y, Gfx.FONT_SMALL, hrStr, Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, cy - 20, Gfx.FONT_SMALL, "Waiting" + dots, Gfx.TEXT_JUSTIFY_CENTER);
+        dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, cy + 10, Gfx.FONT_TINY, "Open AI Run Coach app", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, cy + 28, Gfx.FONT_TINY, "on your phone to", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, (h * 0.74).toNumber(), Gfx.FONT_TINY, "connect your account", Gfx.TEXT_JUSTIFY_CENTER);
     }
 
-    // ── Cadence ───────────────────────────────────────────────────────────────
+    // ── Start hint: green half-moon at top-right button + play icon ──────────
+    // Button is at ~1 o'clock position (Garmin angle ~60°, counter-clockwise from 3 o'clock)
+    private function _drawStartHint(dc, cx, cy, w) {
+        var rimR = (w / 2 - 1).toNumber();
 
-    private function _drawCadence(dc, cx, h) {
-        var y   = (h * 0.765).toNumber();
-        var str = _dispCadence > 0 ? _dispCadence.format("%d") + " spm" : "-- spm";
-        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, y, Gfx.FONT_XTINY, str, Gfx.TEXT_JUSTIFY_CENTER);
-    }
-
-    // ── Status / prompt ───────────────────────────────────────────────────────
-    //
-    // Two lines at h*0.840 and h*0.878 — both safely inside the circular safe zone
-    // (for a 260px fenix7 that's ~218px and ~228px; bezel intrudes at ~240px).
-
-    private function _drawStatus(dc, cx, h) {
-        if (_overlayState == OVERLAY_NONE) {
-            // Running — small COACHED badge
-            if (_isCoached) {
-                var y = (h * 0.855).toNumber();
-                dc.setColor(0x003344, Gfx.COLOR_TRANSPARENT);
-                dc.fillRectangle(cx - 32, y, 64, 13);
-                dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
-                dc.drawText(cx, y + 1, Gfx.FONT_XTINY, "COACHED", Gfx.TEXT_JUSTIFY_CENTER);
-            }
-            return;
-        }
-
-        var y1 = (h * 0.840).toNumber();
-        var y2 = (h * 0.878).toNumber();
-
-        if (_overlayState == OVERLAY_READY) {
-            if (_runnerName.length() > 0) {
-                dc.setColor(0x00CFFF, Gfx.COLOR_TRANSPARENT);
-                dc.drawText(cx, y1, Gfx.FONT_XTINY, _runnerName, Gfx.TEXT_JUSTIFY_CENTER);
-            }
-            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, y2, Gfx.FONT_XTINY, "START to run", Gfx.TEXT_JUSTIFY_CENTER);
-
-        } else if (_overlayState == OVERLAY_COACHED) {
-            var lbl = _runTypeLabel();
-            dc.setColor(0xD4AF37, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, y1, Gfx.FONT_XTINY, lbl, Gfx.TEXT_JUSTIFY_CENTER);
-            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, y2, Gfx.FONT_XTINY, "START to run", Gfx.TEXT_JUSTIFY_CENTER);
-        }
-    }
-
-    // ── Coaching cue overlay ──────────────────────────────────────────────────
-
-    private function _drawCoachingCue(dc, cx, w) {
-        dc.setColor(0x001A0D, Gfx.COLOR_TRANSPARENT);
-        dc.fillRectangle(0, 0, w, 24);
+        // Thick green crescent arc from 32° to 88° (upper-right, around the START button)
         dc.setColor(0x00E676, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, 3, Gfx.FONT_TINY, _coachingCue, Gfx.TEXT_JUSTIFY_CENTER);
+        for (var i = 0; i < 6; i++) {
+            dc.drawArc(cx, cy, rimR - i, Gfx.ARC_COUNTER_CLOCKWISE, 32, 88);
+        }
+
+        // Play triangle inset from the arc midpoint (60°)
+        var ang  = 60.0 * Math.PI / 180.0;
+        var inR  = (rimR - 16).toNumber();
+        var px   = cx + (inR.toFloat() * Math.cos(ang)).toNumber();
+        var py   = cy - (inR.toFloat() * Math.sin(ang)).toNumber();
+        var ts   = 7;
+        // Right-pointing triangle: tip at (px+ts, py), base on left
+        dc.setColor(0x00E676, Gfx.COLOR_TRANSPARENT);
+        dc.fillPolygon([[px - ts/2, py - ts], [px + ts, py], [px - ts/2, py + ts]]);
     }
 
     // ==========================================================================
@@ -912,17 +663,17 @@ class RunView extends Ui.View {
     }
 
     private function _fmtTime(secs) {
-        var h = (secs / 3600).toNumber();
-        var m = ((secs % 3600) / 60).toNumber();
-        var s = (secs % 60).toNumber();
-        if (h > 0) { return h.format("%d") + ":" + m.format("%02d") + ":" + s.format("%02d"); }
-        return m.format("%02d") + ":" + s.format("%02d");
+        var hh = (secs / 3600).toNumber();
+        var mm = ((secs % 3600) / 60).toNumber();
+        var ss = (secs % 60).toNumber();
+        if (hh > 0) { return hh.format("%d") + ":" + mm.format("%02d") + ":" + ss.format("%02d"); }
+        return mm.format("%02d") + ":" + ss.format("%02d");
     }
 
-    private function _fmtPace(secPerKm) {
-        if (secPerKm <= 0 || secPerKm > 1200) { return "--:--"; }
-        var total = secPerKm.toNumber();
-        return (total / 60).toNumber().format("%d") + ":" + (total % 60).toNumber().format("%02d");
+    // Format pace as M.D min/km (1 decimal place)
+    private function _fmtPaceDec(secPerKm) {
+        if (secPerKm <= 0 || secPerKm > 1200) { return "--" ; }
+        return (secPerKm / 60.0).format("%.2f");
     }
 
     private function _parsePace(str) {
@@ -944,25 +695,19 @@ class RunView extends Ui.View {
         return 5;
     }
 
-    private function _paceDeviationColor() {
-        if (_coachTargetPaceSec <= 0 || _dispPace <= 0) { return Gfx.COLOR_WHITE; }
-        var diff = _dispPace - _coachTargetPaceSec;
-        if (diff < 0) { diff = -diff; }
-        var pct  = (diff / _coachTargetPaceSec) * 100.0;
-        if (pct <= 5.0)  { return 0x00E676; }   // bright green — on target
-        if (pct <= 12.0) { return 0xFFD740; }   // amber — slightly off
-        return 0xF44336;                          // red — significantly off
-    }
-
-    private function _runTypeLabel() {
-        if (_prepWorkoutType.length() > 0) {
-            var f = _prepWorkoutType.substring(0, 1).toUpper();
-            var r = _prepWorkoutType.substring(1, _prepWorkoutType.length());
-            return f + r + " Run";
-        }
-        if (_prepRunType.equals("route"))    { return "Route Run"; }
-        if (_prepRunType.equals("training")) { return "Training Session"; }
-        return "Coached Run";
+    private function _haversineMeters(lat1, lon1, lat2, lon2) {
+        var R = 6371000.0;
+        var dLat = (lat2 - lat1) * Math.PI / 180.0;
+        var dLon = (lon2 - lon1) * Math.PI / 180.0;
+        var lat1R = lat1 * Math.PI / 180.0;
+        var lat2R = lat2 * Math.PI / 180.0;
+        var sinDLat = Math.sin(dLat / 2.0);
+        var sinDLon = Math.sin(dLon / 2.0);
+        var a = sinDLat * sinDLat + Math.cos(lat1R) * Math.cos(lat2R) * sinDLon * sinDLon;
+        if (a < 0.0) { a = 0.0; }
+        if (a > 1.0) { a = 1.0; }
+        var c = 2.0 * Math.atan2(Math.sqrt(a), Math.sqrt(1.0 - a));
+        return R * c;
     }
 
     private function _startSession() {
@@ -1004,16 +749,14 @@ class RunDelegate extends Ui.BehaviorDelegate {
     function initialize()      { BehaviorDelegate.initialize(); }
     function setView(v)        { _view = v; }
 
-    // START / SELECT → start | pause | resume
     function onSelect() {
         if (_view == null) { return true; }
-        if (!_view.isRunning())      { _view.startRun();  }
-        else if (_view.isPaused())   { _view.resumeRun(); }
-        else                         { _view.pauseRun();  }
+        if (!_view.isRunning())     { _view.startRun();  }
+        else if (_view.isPaused())  { _view.resumeRun(); }
+        else                        { _view.pauseRun();  }
         return true;
     }
 
-    // BACK → exit (idle) | pause (running) | finish confirm (paused)
     function onBack() {
         if (_view == null) { return true; }
         if (!_view.isRunning()) {
@@ -1033,8 +776,8 @@ class RunDelegate extends Ui.BehaviorDelegate {
 
 class FinishConfirmDelegate extends Ui.ConfirmationDelegate {
     private var _view;
-    function initialize(v)  { ConfirmationDelegate.initialize(); _view = v; }
-    function onResponse(r)  {
+    function initialize(v) { ConfirmationDelegate.initialize(); _view = v; }
+    function onResponse(r) {
         if (r == Ui.CONFIRM_YES && _view != null) { _view.finishRun(); }
         return true;
     }

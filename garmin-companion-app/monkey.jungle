@@ -5,6 +5,7 @@ project.manifest = manifest.xml
 base.sourcePath = source
 base.resourcePath = resources
 base.lang = eng
+base.excludeAnnotations = debug
 
 # All supported devices — must match manifest.xml product list exactly
 fenix6.sourcePath = $(base.sourcePath)
