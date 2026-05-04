@@ -62,12 +62,14 @@ fun CoachingProgrammeScreen(
     // observer in Compose Navigation — it fires every time the value flips true
     // (i.e. when we pop back from training_plan or any child screen).
     // Reload whichever tab is currently selected so the user sees fresh data
-    // after a delete/abandon action (not always the "active" tab).
-    val tabStatusMap = mapOf(0 to "active", 1 to "completed", 2 to "abandoned")
+    // after a cancel action (not always the "active" tab).
+    // When returning from a newly created plan, always show the active tab first
+    val tabStatusMap = mapOf(0 to "active", 1 to "completed", 2 to "cancelled")
     LaunchedEffect(isActiveDestination) {
         if (isActiveDestination) {
-            val currentStatus = tabStatusMap[selectedTab] ?: "active"
-            viewModel.loadUserPlans(currentStatus)
+            // Always select the "active" tab (tab 0) when returning to this screen
+            // This ensures newly created plans are shown immediately
+            viewModel.selectTab(0)
         }
     }
 
@@ -118,7 +120,7 @@ fun CoachingProgrammeScreen(
                 },
                 divider = { HorizontalDivider(color = Colors.backgroundSecondary, thickness = 1.dp) }
             ) {
-                val tabs = listOf("Active", "Completed", "Abandoned")
+                val tabs = listOf("Active", "Completed", "Cancelled")
                 tabs.forEachIndexed { index, title ->
                     Tab(
                         selected = selectedTab == index,
@@ -312,7 +314,6 @@ fun TrainingPlanDashboardScreen(
     val planActionSuccess by viewModel.planActionSuccess.collectAsState()
 
     var showAbandonDialog by remember { mutableStateOf(false) }
-    var showDeleteDialog by remember { mutableStateOf(false) }
     var showAddInjuryDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(planId) { viewModel.loadPlanDetail(planId) }
@@ -375,7 +376,6 @@ fun TrainingPlanDashboardScreen(
                 onCompleteWorkout = { workout -> viewModel.completeWorkout(workout.id, null, planId) },
                 onClearError = { viewModel.clearActionError() },
                 onShowAbandonDialog = { showAbandonDialog = true },
-                onShowDeleteDialog = { showDeleteDialog = true },
                 onAddInjury = { showAddInjuryDialog = true },
                 onViewAdaptations = { onViewAdaptations(planId) },
                 modifier = Modifier.fillMaxSize().padding(padding),
@@ -386,14 +386,14 @@ fun TrainingPlanDashboardScreen(
         }
     }
 
-    // Abandon Plan Dialog
+    // Cancel Plan Dialog
     if (showAbandonDialog && state is PlanDetailState.Success) {
         AlertDialog(
             onDismissRequest = { showAbandonDialog = false },
-            title = { Text("Abandon Plan?", style = AppTextStyles.h3) },
+            title = { Text("Cancel Plan?", style = AppTextStyles.h3) },
             text = {
                 Text(
-                    "Are you sure you want to abandon this plan? Your progress will be saved, and the plan will move to the Abandoned tab.",
+                    "Are you sure you want to cancel this plan? Your progress will be saved, and the plan will move to the Cancelled tab.",
                     style = AppTextStyles.body,
                     color = Colors.textSecondary
                 )
@@ -409,52 +409,19 @@ fun TrainingPlanDashboardScreen(
                     enabled = !actionLoading
                 ) {
                     if (actionLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Colors.buttonText, strokeWidth = 2.dp)
-                    else Text("Abandon")
+                    else Text("Cancel Plan")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showAbandonDialog = false }) {
-                    Text("Cancel", color = Colors.textPrimary)
+                    Text("Keep Plan", color = Colors.textPrimary)
                 }
             },
             containerColor = Colors.backgroundSecondary
         )
     }
 
-    // Delete Plan Dialog
-    if (showDeleteDialog && state is PlanDetailState.Success) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Delete Plan?", style = AppTextStyles.h3) },
-            text = {
-                Text(
-                    "Are you sure you want to permanently delete this plan? This action cannot be undone.",
-                    style = AppTextStyles.body,
-                    color = Colors.textSecondary
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showDeleteDialog = false
-                        viewModel.deletePlan(planId)
-                        // onNavigateBack() is called via LaunchedEffect(planActionSuccess)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Colors.error),
-                    enabled = !actionLoading
-                ) {
-                    if (actionLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Colors.buttonText, strokeWidth = 2.dp)
-                    else Text("Delete")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) {
-                    Text("Cancel", color = Colors.textPrimary)
-                }
-            },
-            containerColor = Colors.backgroundSecondary
-        )
-    }
+
 
     // Add Injury Dialog with Re-assessment option
     if (showAddInjuryDialog && state is PlanDetailState.Success) {
@@ -603,7 +570,6 @@ fun PlanDashboardContent(
     onCompleteWorkout: (WorkoutDetails) -> Unit,
     onClearError: () -> Unit,
     onShowAbandonDialog: () -> Unit,
-    onShowDeleteDialog: () -> Unit,
     onAddInjury: () -> Unit,
     onViewAdaptations: () -> Unit,
     modifier: Modifier = Modifier,
@@ -863,25 +829,13 @@ fun PlanDashboardContent(
             
             Spacer(modifier = Modifier.height(Spacing.md))
             
-            Row(
+            OutlinedButton(
+                onClick = onShowAbandonDialog,
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.textSecondary),
+                border = ButtonDefaults.outlinedButtonBorder.copy(brush = SolidColor(Colors.textSecondary))
             ) {
-                OutlinedButton(
-                    onClick = onShowAbandonDialog,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.textSecondary),
-                    border = ButtonDefaults.outlinedButtonBorder.copy(brush = SolidColor(Colors.textSecondary))
-                ) {
-                    Text("Abandon")
-                }
-                Button(
-                    onClick = onShowDeleteDialog,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Colors.error)
-                ) {
-                    Text("Delete")
-                }
+                Text("Cancel Plan")
             }
         }
     }

@@ -556,7 +556,11 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 val planId = backStackEntry.arguments?.getString("planId") ?: return@composable
                 TrainingPlanDashboardScreen(
                     planId = planId,
-                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateBack = { 
+                        // Reset to active tab when returning from plan detail
+                        // This ensures newly created plans appear in the active tab
+                        navController.popBackStack()
+                    },
                     onStartWorkout = { workout ->
                         WorkoutHolder.currentWorkout = workout
                         navController.navigate("workout_detail")
