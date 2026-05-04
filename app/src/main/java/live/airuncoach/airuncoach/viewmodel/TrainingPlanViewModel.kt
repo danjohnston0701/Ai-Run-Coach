@@ -56,15 +56,14 @@ class TrainingPlanViewModel @Inject constructor(
     private val _actionError = MutableStateFlow<String?>(null)
     val actionError: StateFlow<String?> = _actionError.asStateFlow()
 
-    // Emits true when a delete/abandon completes successfully — the screen observes
+    // Emits true when a cancel action completes successfully — the screen observes
     // this to trigger onNavigateBack() only after the list has been refreshed.
     private val _planActionSuccess = MutableStateFlow(false)
     val planActionSuccess: StateFlow<Boolean> = _planActionSuccess.asStateFlow()
 
     fun clearPlanActionSuccess() { _planActionSuccess.value = false }
 
-    // Tab selection: 0=Active, 1=Completed, 2=Abandoned
-    // Tab selection: 0=Active, 1=Completed, 2=Abandoned
+    // Tab selection: 0=Active, 1=Completed, 2=Cancelled
     private val _selectedTab = MutableStateFlow(0)
     val selectedTab: StateFlow<Int> = _selectedTab.asStateFlow()
 
@@ -78,7 +77,7 @@ class TrainingPlanViewModel @Inject constructor(
 
     fun selectTab(index: Int) {
         _selectedTab.value = index
-        val statusMap = mapOf(0 to "active", 1 to "completed", 2 to "abandoned")
+        val statusMap = mapOf(0 to "active", 1 to "completed", 2 to "cancelled")
         loadUserPlans(statusMap[index] ?: "active")
     }
 
@@ -268,10 +267,20 @@ class TrainingPlanViewModel @Inject constructor(
                 if (!response.isSuccessful) {
                     throw Exception("Server returned ${response.code()}: ${response.errorBody()?.string()}")
                 }
-                // Signal success — CoachingProgrammeScreen's LaunchedEffect(isActiveDestination)
-                // will reload the list when we navigate back, so no pre-fetch needed here.
+                // ⚡ Immediately reload the plans list to reflect the cancellation
+                // This ensures the UI updates before navigation back
+                Log.d("TrainingPlanVM", "✅ Plan abandoned successfully. Reloading plans list...")
+                val currentStatus = when (_selectedTab.value) {
+                    0 -> "active"
+                    1 -> "completed"
+                    2 -> "cancelled"
+                    else -> "active"
+                }
+                loadUserPlans(currentStatus)
+                // Signal success after list is reloaded
                 _planActionSuccess.value = true
             } catch (e: Exception) {
+                Log.e("TrainingPlanVM", "❌ Failed to abandon plan: ${e.message}", e)
                 _actionError.value = "Failed to abandon plan: ${e.message}"
             } finally {
                 _actionLoading.value = false
@@ -287,10 +296,20 @@ class TrainingPlanViewModel @Inject constructor(
                 if (!response.isSuccessful) {
                     throw Exception("Server returned ${response.code()}: ${response.errorBody()?.string()}")
                 }
-                // Signal success — CoachingProgrammeScreen's LaunchedEffect(isActiveDestination)
-                // will reload the list when we navigate back, so no pre-fetch needed here.
+                // ⚡ Immediately reload the plans list to reflect the deletion
+                // This ensures the UI updates before navigation back
+                Log.d("TrainingPlanVM", "✅ Plan deleted successfully. Reloading plans list...")
+                val currentStatus = when (_selectedTab.value) {
+                    0 -> "active"
+                    1 -> "completed"
+                    2 -> "cancelled"
+                    else -> "active"
+                }
+                loadUserPlans(currentStatus)
+                // Signal success after list is reloaded
                 _planActionSuccess.value = true
             } catch (e: Exception) {
+                Log.e("TrainingPlanVM", "❌ Failed to delete plan: ${e.message}", e)
                 _actionError.value = "Failed to delete plan: ${e.message}"
             } finally {
                 _actionLoading.value = false
