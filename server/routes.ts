@@ -1197,50 +1197,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.params.userId;
 
-      // Fetch the 200 most recent runs — we'll date-window in JS with progressive expansion
+      // Fetch all runs from the last 90 days with weather data
+      const ninetyDaysAgo = new Date();
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+      
       const allRecentRuns = await storage.getUserRuns(userId, {
-        limit: 200,
+        limit: 500,
         offset: 0,
       });
 
-      // Minimum runs needed for meaningful weather buckets
-      const MIN_RUNS = 5;
+      // Filter for runs within 90 days with weather data
+      // IMPORTANT: Exclude ALL Garmin-synced activities (externalSource === 'garmin')
+      // These have significantly less data and taint the analysis
+      const windowedRuns = allRecentRuns.filter(r =>
+        r.completedAt &&
+        new Date(r.completedAt) >= ninetyDaysAgo &&
+        (r.distance ?? 0) > 0.5 &&
+        !!r.weatherData &&  // Only include runs with weather data
+        (!r.externalSource || r.externalSource === 'airuncoach')  // Exclude Garmin-synced activities
+      );
 
-      // Progressive date-range expansion: 60d → 120d → 180d → all available
-      const windows = [
-        { label: "60d",  days: 60  },
-        { label: "120d", days: 120 },
-        { label: "180d", days: 180 },
-        { label: "all",  days: null },
-      ];
-
-      let windowedRuns: typeof allRecentRuns = [];
-      let usedWindow = windows[0].label;
-
-      for (const win of windows) {
-        const cutoff = win.days
-          ? new Date(Date.now() - win.days * 24 * 60 * 60 * 1000)
-          : null;
-
-        windowedRuns = allRecentRuns.filter(r =>
-          r.completedAt &&
-          (cutoff === null || new Date(r.completedAt) > cutoff) &&
-          (r.distance ?? 0) > 0.5
-        );
-
-        usedWindow = win.label;
-
-        // Stop expanding once we have enough runs
-        if (windowedRuns.length >= MIN_RUNS) break;
-      }
-
-      const runsWithWeather = windowedRuns.filter(r => !!r.weatherData).length;
+      const runsWithWeather = windowedRuns.length;
 
       // Use the existing calculateWeatherImpact function
       const weatherImpact = await calculateWeatherImpact(userId, windowedRuns);
-      console.log(`[Weather Impact] Analysis: ${windowedRuns.length} runs in ${usedWindow} window, ${runsWithWeather} with weather, hasEnoughData=${weatherImpact.hasEnoughData}`);
+      console.log(`[Weather Impact] Analysis: ${windowedRuns.length} AI app runs in 90d window with weather data, hasEnoughData=${weatherImpact.hasEnoughData}`);
 
-      res.json({ ...weatherImpact, dateRangeUsed: usedWindow });
+      res.json({ ...weatherImpact, dateRangeUsed: "90d" });
     } catch (error: any) {
       console.error("Weather impact analysis error:", error);
       res.status(500).json({ error: "Failed to compute weather impact analysis", details: error.message });
@@ -7539,14 +7522,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Find best and worst conditions
     const validTimeAnalysis = timeOfDayAnalysis.filter(t => t.paceVsAvg !== null);
     const validConditionAnalysis = conditionAnalysis.filter(c => c.paceVsAvg !== null);
+    const validTemperatureAnalysis = temperatureAnalysis.filter(t => t.paceVsAvg !== null);
     const validHumidityAnalysis = humidityAnalysis.filter(h => h.paceVsAvg !== null);
     
+    // Find best (negative paceVsAvg = faster) and worst (positive paceVsAvg = slower)
     const bestTime = validTimeAnalysis.find(t => t.paceVsAvg! < 0);
     const worstTime = validTimeAnalysis.find(t => t.paceVsAvg! > 0);
     const bestCondition = validConditionAnalysis.find(c => c.paceVsAvg < 0);
     const worstCondition = validConditionAnalysis.find(c => c.paceVsAvg > 0);
+    const bestTemperature = validTemperatureAnalysis.find(t => t.paceVsAvg! < 0);
+    const worstTemperature = validTemperatureAnalysis.find(t => t.paceVsAvg! > 0);
     const bestHumidity = validHumidityAnalysis.find(h => h.paceVsAvg! < 0);
     const worstHumidity = validHumidityAnalysis.find(h => h.paceVsAvg! > 0);
+
+    // Build strengths array (showing where the runner performs BEST)
+    const strengths = [];
+    if (bestTime) {
+      strengths.push({
+        label: bestTime.label,
+        type: 'time_of_day',
+        improvement: Math.abs(bestTime.paceVsAvg).toFixed(1),
+      });
+    }
+    if (bestCondition) {
+      strengths.push({
+        label: bestCondition.condition,
+        type: 'condition',
+        improvement: Math.abs(bestCondition.paceVsAvg).toFixed(0),
+      });
+    }
+    if (bestTemperature) {
+      strengths.push({
+        label: bestTemperature.label,
+        type: 'temperature',
+        improvement: Math.abs(bestTemperature.paceVsAvg).toFixed(1),
+      });
+    }
+    if (bestHumidity) {
+      strengths.push({
+        label: bestHumidity.label,
+        type: 'humidity',
+        improvement: Math.abs(bestHumidity.paceVsAvg).toFixed(1),
+      });
+    }
 
     return {
       hasEnoughData: true,
@@ -7557,6 +7575,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       humidityAnalysis,
       timeOfDayAnalysis,
       insights: {
+        strengths: strengths.length > 0 ? strengths : undefined,
+        bestTime: bestTime ? {
+          label: bestTime.label,
+          type: 'time_of_day',
+          improvement: Math.abs(bestTime.paceVsAvg).toFixed(1),
+        } : undefined,
+        worstTime: worstTime ? {
+          label: worstTime.label,
+          type: 'time_of_day',
+          slowdown: Math.abs(worstTime.paceVsAvg).toFixed(1),
+        } : undefined,
         bestCondition: bestCondition ? {
           label: bestCondition.condition,
           type: 'condition',
@@ -7566,6 +7595,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           label: worstCondition.condition,
           type: 'condition',
           slowdown: Math.abs(worstCondition.paceVsAvg).toFixed(0),
+        } : undefined,
+        bestTemperature: bestTemperature ? {
+          label: bestTemperature.label,
+          type: 'temperature',
+          improvement: Math.abs(bestTemperature.paceVsAvg).toFixed(1),
+        } : undefined,
+        worstTemperature: worstTemperature ? {
+          label: worstTemperature.label,
+          type: 'temperature',
+          slowdown: Math.abs(worstTemperature.paceVsAvg).toFixed(1),
         } : undefined,
         bestHumidity: bestHumidity ? {
           label: bestHumidity.label,

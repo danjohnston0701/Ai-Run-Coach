@@ -353,11 +353,18 @@ class RunSessionViewModel @Inject constructor(
     }
 
     private var isPrepareRunInProgress = false // Guard against multiple prepareRun calls
+    private var isSetupCancelled = false       // Flag to prevent state updates after cancel
 
     fun prepareRun() {
         // Prevent multiple simultaneous calls
         if (isPrepareRunInProgress) {
             Log.d("RunSessionViewModel", "prepareRun already in progress, skipping duplicate call")
+            return
+        }
+        
+        // Prevent prepareRun if already cancelled
+        if (runConfig == null || isSetupCancelled) {
+            Log.d("RunSessionViewModel", "prepareRun called but run setup was cancelled - aborting")
             return
         }
         
@@ -370,6 +377,13 @@ class RunSessionViewModel @Inject constructor(
         
         isPrepareRunInProgress = true
         viewModelScope.launch {
+            // Check if setup was cancelled before proceeding
+            if (isSetupCancelled) {
+                Log.d("RunSessionViewModel", "prepareRun coroutine: setup was cancelled, aborting")
+                isPrepareRunInProgress = false
+                return@launch
+            }
+            
             // Skip AI coaching if disabled
             if (!_runState.value.isCoachEnabled) {
                 _runState.update {
@@ -545,11 +559,14 @@ class RunSessionViewModel @Inject constructor(
                 Log.w("RunSessionViewModel", "Pre-run briefing timed out")
                 isBriefingAudioPlaying = false
                 isPrepareRunInProgress = false
-                _runState.update { 
-                    it.copy(
-                        coachText = "Ready to run! Tap Start when you're ready.",
-                        isLoadingBriefing = false
-                    )
+                // Only update UI if the run was not cancelled
+                if (!isSetupCancelled) {
+                    _runState.update { 
+                        it.copy(
+                            coachText = "Ready to run! Tap Start when you're ready.",
+                            isLoadingBriefing = false
+                        )
+                    }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 // Screen was popped or ViewModel was cleared - don't log as error
@@ -557,21 +574,27 @@ class RunSessionViewModel @Inject constructor(
                 isBriefingAudioPlaying = false
                 isPrepareRunInProgress = false
                 // Don't update UI state - screen is already gone
+                throw e  // Re-throw to propagate cancellation
             } catch (e: Exception) {
-                Log.e("RunSessionViewModel", "Failed to get pre-run briefing", e)
+                Log.e("RunSessionViewModel", "Failed to get pre-run briefing: ${e.message}", e)
                 isBriefingAudioPlaying = false
                 isPrepareRunInProgress = false
-                _runState.update { 
-                    it.copy(
-                        coachText = "Ready to run! Tap Start when you're ready.",
-                        isLoadingBriefing = false
-                    )
+                // Only update UI if the run was not cancelled
+                if (!isSetupCancelled && runConfig != null) {
+                    _runState.update { 
+                        it.copy(
+                            coachText = "Ready to run! Tap Start when you're ready.",
+                            isLoadingBriefing = false
+                        )
+                    }
                 }
             }
         }
     }
 
     fun setRunConfig(config: RunSetupConfig) {
+        // Reset the cancelled flag when setting a new config - allows a new run attempt
+        isSetupCancelled = false
         runConfig = config
         // Only update coachText if we don't already have a briefing loaded
         // This prevents overwriting the AI briefing when config is set
@@ -1041,30 +1064,41 @@ class RunSessionViewModel @Inject constructor(
 
     /**
      * Cancel the run setup. Stops all AI audio, clears the coaching message,
-     * and resets state ready for a new run. Called when user taps Cancel
-     * before starting a run.
+     * resets state ready for a new run, and cancels any ongoing prepareRun operations.
+     * Called when user taps Cancel before starting a run, or when auth validation fails.
      */
     fun cancelRunSetup() {
-        Log.d("RunSessionViewModel", "Cancelling run setup - stopping all audio")
+        Log.d("RunSessionViewModel", "Cancelling run setup - stopping all audio and clearing pending operations")
+        // Set flag FIRST to prevent any pending coroutines from updating UI
+        isSetupCancelled = true
         // Stop all AI audio playback
         CoachingAudioQueue.stopAll()
         // Clear the coach message so UI hides the panel
-        _runState.update { it.copy(latestCoachMessage = null) }
+        _runState.update { it.copy(latestCoachMessage = null, coachText = "") }
         // Reset briefing audio flag
         isBriefingAudioPlaying = false
+        // Reset the prepare run flag to allow cleanup
+        isPrepareRunInProgress = false
+        // Clear any pending run configuration
+        runConfig = null
     }
 
     /**
-     * Validate the current auth token by calling a simple protected API endpoint.
-     * This ensures the token is still valid before the run starts.
-     * If the token is invalid/expired, the RetrofitClient interceptor will clear it.
+     * Validate the current auth token by calling a protected API endpoint.
+     * Uses GET /api/users/{id} (which is known-good) rather than /api/users/me
+     * which has a backend bug returning 404 for valid users.
      *
-     * Throws an exception if validation fails.
+     * Throws an exception if the token is expired/invalid (401/403).
      */
     suspend fun validateAuthToken() {
         Log.d("RunSessionViewModel", "Validating auth token before run start...")
+        val userId = sessionManager.getUserId()
+        if (userId.isNullOrBlank()) {
+            Log.e("RunSessionViewModel", "❌ No user ID in session — cannot validate token")
+            throw IllegalStateException("No user ID in session")
+        }
         try {
-            apiService.getCurrentUser()
+            apiService.getUser(userId)
             Log.d("RunSessionViewModel", "✅ Auth token validated successfully")
         } catch (e: Exception) {
             Log.e("RunSessionViewModel", "❌ Auth token validation failed: ${e.message}")

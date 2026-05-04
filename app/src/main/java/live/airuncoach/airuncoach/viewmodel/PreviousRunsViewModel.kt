@@ -67,6 +67,10 @@ class PreviousRunsViewModel @Inject constructor(
         }
     }
 
+    private val _allRuns = MutableStateFlow<List<RunSession>>(emptyList())
+    val allRuns: StateFlow<List<RunSession>> = _allRuns.asStateFlow()
+    
+    // Filtered runs based on toggle state
     private val _runs = MutableStateFlow<List<RunSession>>(emptyList())
     val runs: StateFlow<List<RunSession>> = _runs.asStateFlow()
 
@@ -82,9 +86,13 @@ class PreviousRunsViewModel @Inject constructor(
     private val _selectedFilter = MutableStateFlow("Last 30 Days")
     val selectedFilter: StateFlow<String> = _selectedFilter.asStateFlow()
 
-    // Garmin connection flag — drives attribution badge visibility
-    private val _isGarminConnected = MutableStateFlow(false)
-    val isGarminConnected: StateFlow<Boolean> = _isGarminConnected.asStateFlow()
+    // Garmin Connect authentication flag — drives toggle visibility (must have ACTIVE authentication)
+    private val _hasGarminConnectAuth = MutableStateFlow(false)
+    val hasGarminConnectAuth: StateFlow<Boolean> = _hasGarminConnectAuth.asStateFlow()
+
+    // Toggle to show/hide Garmin-synced activities
+    private val _showGarminSyncedActivities = MutableStateFlow(false)
+    val showGarminSyncedActivities: StateFlow<Boolean> = _showGarminSyncedActivities.asStateFlow()
 
     // Set of run IDs that hold at least one personal best — drives 🏆 badge on run cards
     private val _personalBestRunIds = MutableStateFlow<Set<String>>(emptySet())
@@ -100,11 +108,10 @@ class PreviousRunsViewModel @Inject constructor(
                 if (userId != null) {
                     android.util.Log.d("PreviousRunsViewModel", "✅ Fetching runs for user: $userId")
                     val allRuns = runRepository.getRunsForUser(userId)  // ⚡ Use repository (cached)
-                    _runs.value = filterRunsByTimeRange(allRuns)
-                    // Derive Garmin connection status from run history
-                    _isGarminConnected.value = allRuns.any {
-                        it.externalSource == "garmin" || it.hasGarminData == true
-                    }
+                    _allRuns.value = allRuns
+                    applyRunFilters()
+                    // Check for active Garmin Connect authentication
+                    checkGarminConnectAuth()
                     android.util.Log.d("PreviousRunsViewModel", "✅ Fetched ${allRuns.size} total runs, filtered to ${_runs.value.size}")
                     // Fetch PBs in parallel — non-fatal if it fails
                     fetchPersonalBestRunIds()
@@ -188,21 +195,33 @@ class PreviousRunsViewModel @Inject constructor(
 
     fun setTimeFilter(filter: String) {
         _selectedFilter.value = filter
-        viewModelScope.launch {
-            val userId = getUserId()
-            if (userId != null) {
-                try {
-                    val allRuns = runRepository.getRunsForUser(userId)  // ⚡ Use repository (cached)
-                    _runs.value = filterRunsByTimeRange(allRuns)
-                    calculateWeatherImpact()
-                } catch (e: Exception) {
-                    android.util.Log.e("PreviousRunsViewModel", "Failed to filter runs: ${e.message}", e)
-                    _error.value = e.message
-                }
-            } else {
-                _error.value = "User not logged in"
+        applyRunFilters()
+        calculateWeatherImpact()
+    }
+    
+    fun toggleGarminSyncedActivities(show: Boolean) {
+        _showGarminSyncedActivities.value = show
+        applyRunFilters()
+        calculateWeatherImpact()
+    }
+    
+    /**
+     * Apply all filters (time range + Garmin synced toggle) to the runs
+     */
+    private fun applyRunFilters() {
+        var filtered = filterRunsByTimeRange(_allRuns.value)
+        
+        // Filter out Garmin-synced activities if toggle is OFF
+        if (!_showGarminSyncedActivities.value) {
+            filtered = filtered.filter { run ->
+                // Show only AI Run Coach app runs (externalSource is null or 'airuncoach')
+                // Hide Garmin-synced activities (externalSource == 'garmin')
+                run.externalSource != "garmin"
             }
+            android.util.Log.d("PreviousRunsViewModel", "🔍 Filtered out Garmin-synced activities: ${_allRuns.value.size} total -> ${filtered.size} AI app runs")
         }
+        
+        _runs.value = filtered
     }
     
     private fun filterRunsByTimeRange(runs: List<RunSession>): List<RunSession> {
@@ -242,6 +261,28 @@ class PreviousRunsViewModel @Inject constructor(
         }
         android.util.Log.d("PreviousRunsViewModel", "Filter result: ${runs.size} total -> ${filtered.size} after '${_selectedFilter.value}' filter (cutoff=$cutoff, now=$now)")
         return filtered
+    }
+    
+    /**
+     * Check if user has active Garmin Connect authentication
+     * This determines if the "Show Garmin Synced Activities" toggle is visible
+     */
+    private fun checkGarminConnectAuth() {
+        viewModelScope.launch {
+            try {
+                val connectedDevices = apiService.getConnectedDevices()
+                // User has active Garmin auth if they have any connected Garmin device
+                val hasGarminAuth = connectedDevices.any { device ->
+                    device.deviceType?.contains("Garmin", ignoreCase = true) == true ||
+                    device.deviceModel?.contains("Garmin", ignoreCase = true) == true
+                }
+                _hasGarminConnectAuth.value = hasGarminAuth
+                Log.d("PreviousRunsViewModel", "✅ Garmin Connect auth check: $hasGarminAuth (found ${connectedDevices.size} connected devices)")
+            } catch (e: Exception) {
+                Log.w("PreviousRunsViewModel", "Failed to check Garmin Connect auth: ${e.message}")
+                _hasGarminConnectAuth.value = false
+            }
+        }
     }
     
     fun calculateWeatherImpact() {

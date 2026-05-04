@@ -987,6 +987,14 @@ class RunSummaryViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 apiService.deleteRun(session.id)
+                
+                // ⚡ Invalidate the cached runs for this user so dashboard refreshes immediately
+                val userId = sharedPrefs.getString("user_id", null)
+                if (userId != null) {
+                    runRepository.invalidateRunsForUser(userId)
+                    Log.d("RunSummaryViewModel", "🔄 Invalidated run cache for user $userId after deletion")
+                }
+                
                 onSuccess()
             } catch (e: Exception) {
                 onError(e.message ?: "Failed to delete run")

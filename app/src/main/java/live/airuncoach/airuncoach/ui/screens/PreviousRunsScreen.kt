@@ -58,8 +58,9 @@ fun PreviousRunsScreen(
     val error by viewModel.error.collectAsState()
     val weatherImpact by viewModel.weatherImpactData.collectAsState()
     val selectedFilter by viewModel.selectedFilter.collectAsState()
-    val isGarminConnected by viewModel.isGarminConnected.collectAsState()
+    val hasGarminConnectAuth by viewModel.hasGarminConnectAuth.collectAsState()
     val personalBestRunIds by viewModel.personalBestRunIds.collectAsState()
+    val showGarminSyncedActivities by viewModel.showGarminSyncedActivities.collectAsState()
     
     var isWeatherImpactExpanded by remember { mutableStateOf(false) }
 
@@ -104,10 +105,10 @@ fun PreviousRunsScreen(
                 )
                 // ── Garmin attribution (Garmin API Brand Guidelines) ───────────
                 // Required directly beneath the primary heading when Garmin data
-                // is present. Show whenever the user has a Garmin device connected
+                // is present. Show when user has active Garmin Connect authentication
                 // or any run in history originated from Garmin.
                 val hasGarminRuns = runs.any { it.externalSource == "garmin" || it.hasGarminData }
-                if (isGarminConnected || hasGarminRuns) {
+                if (hasGarminConnectAuth || hasGarminRuns) {
                     Spacer(modifier = Modifier.height(4.dp))
                     GarminAttributionBadge(style = GarminBadgeStyle.INLINE)
                 }
@@ -158,7 +159,18 @@ fun PreviousRunsScreen(
                         selectedFilter = selectedFilter,
                         onFilterSelected = viewModel::setTimeFilter
                     )
-                    Spacer(modifier = Modifier.height(Spacing.lg))
+                    Spacer(modifier = Modifier.height(Spacing.md))
+                }
+
+                // Garmin Synced Activities Toggle — only show if user has active Garmin Connect authentication
+                if (hasGarminConnectAuth) {
+                    item {
+                        GarminSyncedActivitiesToggle(
+                            isEnabled = showGarminSyncedActivities,
+                            onToggle = { viewModel.toggleGarminSyncedActivities(it) }
+                        )
+                        Spacer(modifier = Modifier.height(Spacing.lg))
+                    }
                 }
 
                 // Summary Stats — always visible (shows 0s when no runs in period)
@@ -286,6 +298,62 @@ fun TimeFilterDropdown(
                     }
                 )
             }
+        }
+    }
+}
+
+@Composable
+fun GarminSyncedActivitiesToggle(
+    isEnabled: Boolean,
+    onToggle: (Boolean) -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onToggle(!isEnabled) },
+        shape = RoundedCornerShape(BorderRadius.md),
+        colors = CardDefaults.cardColors(
+            containerColor = Colors.backgroundSecondary.copy(alpha = 0.6f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.md),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.PhoneAndroid,
+                        contentDescription = "Garmin",
+                        tint = Colors.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(Spacing.sm))
+                    Text(
+                        text = "Garmin Synced Activities",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                        color = Colors.textPrimary
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = if (isEnabled) "Showing Garmin activities (walks, etc.)" else "Hidden to reduce clutter",
+                    style = AppTextStyles.caption,
+                    color = Colors.textMuted
+                )
+            }
+            
+            Switch(
+                checked = isEnabled,
+                onCheckedChange = onToggle,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Colors.primary,
+                    checkedTrackColor = Colors.primary.copy(alpha = 0.3f)
+                )
+            )
         }
     }
 }

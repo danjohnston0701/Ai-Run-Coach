@@ -95,7 +95,7 @@ export async function generateTrainingPlan(
     const ninetyDaysAgo = new Date();
     ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
 
-    const recentRuns = await db
+    const allRecentRuns = await db
       .select()
       .from(runs)
       .where(
@@ -105,7 +105,21 @@ export async function generateTrainingPlan(
         )
       )
       .orderBy(desc(runs.completedAt))
-      .limit(30);
+      .limit(100); // Fetch more to filter for GPS data
+    
+    // Filter: ONLY use runs from AI Run Coach app (exclude all Garmin-synced activities)
+    // Garmin synced runs have significantly less data and taint the AI analysis
+    // We only use them for personal best tracking in My Data
+    const aiRunCoachRuns = allRecentRuns.filter(r => {
+      // Include runs that:
+      // 1. Have NO externalSource (native AI Run Coach runs)
+      // 2. Have externalSource === 'airuncoach' (explicit AI Run Coach source)
+      // Exclude ALL runs where externalSource === 'garmin' (even with GPS data)
+      return !r.externalSource || r.externalSource === 'airuncoach';
+    });
+    
+    // Limit to maximum 30 runs for AI coaching plan analysis (within 90-day window)
+    const recentRuns = aiRunCoachRuns.slice(0, 30);
 
     // ── Check if user has HR data in recent runs ──
     const runsWithHRData = recentRuns.filter(r => r.heartRate && r.heartRate > 0);
