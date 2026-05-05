@@ -1,6 +1,6 @@
 # Feature Limit Upsell - Implementation Progress
 
-## Status: ✅ 4 of 5 Phases Complete
+## Status: ✅ 5 of 5 Phases Complete - FULLY IMPLEMENTED!
 
 ---
 
@@ -95,16 +95,19 @@ Added new endpoint in `routes.ts`:
 
 ---
 
-## 📋 Remaining Phase
+### **Phase 5: ✅ Run Route Integration**
+**Commit**: `d96b12a`
 
-### **Phase 5: Run Route Integration** (Next)
-Integrate with RouteGenerationViewModel and MapMyRunScreen:
-- Add pre-check before showing route generation form
-- Navigate to `check_route_availability` if limit reached
-- Show `RunRouteLimitUpsellScreen` with route-specific messaging
-- Same flow as AI Plans
+Created route generation parameter holder and integrated with navigation:
+- Store params in `RouteGenerationParamsHolder` before checking availability
+- Navigate to new `check_route_availability` route
+- Check availability before calling `generateIntelligentRoutes()`
+- Show `RunRouteLimitUpsellScreen` if limit reached
+- Same flow as AI Plans for consistency
 
-**Estimated Time**: 1 hour
+**Files Created/Modified**:
+- `app/src/main/java/live/airuncoach/airuncoach/util/RouteGenerationParamsHolder.kt` (NEW)
+- `app/src/main/java/live/airuncoach/airuncoach/ui/screens/MainScreen.kt` (UPDATED)
 
 ---
 
@@ -145,7 +148,7 @@ Integrate with RouteGenerationViewModel and MapMyRunScreen:
 | Feature | Phase 1 | Phase 2 | Phase 3 | Phase 4 | Phase 5 |
 |---------|---------|---------|---------|---------|---------|
 | **AI Plan** | ✅ | ✅ | ✅ | ✅ | - |
-| **Run Route** | ✅ | ✅ | - | ✅ | ⏳ |
+| **Run Route** | ✅ | ✅ | - | ✅ | ✅ |
 | **Post-Run Analysis** | ✅ | ✅ | - | ✅ | - |
 | **AI Coaching KM** | ✅ | ✅ | - | ✅ | - |
 
@@ -301,5 +304,5 @@ Integrate with RouteGenerationViewModel and MapMyRunScreen:
 ---
 
 **Last Updated**: 2026-05-06
-**Status**: 80% Complete (4 of 5 phases)
-**Next Phase**: Run Route Integration
+**Status**: ✅ 100% Complete (5 of 5 phases)
+**All Features**: AI Plans ✅ | Run Routes ✅ | Backend ✅
