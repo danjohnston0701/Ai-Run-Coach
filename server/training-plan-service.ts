@@ -273,11 +273,28 @@ export async function generateTrainingPlan(
     
     console.log(`[Training Plan] Duration: durationWeeks=${durationWeeks}, targetDate=${targetDate}, calculated weeksUntilTarget=${weeksUntilTarget}`);
 
+    // Calculate user age for HR zone calculations — fall back to Android/iOS-sent override if DOB not set.
+    // Guard against NaN: an invalid DOB string (e.g. empty string, malformed date) causes
+    // Math.floor(NaN) = NaN which propagates into maxHR → hrZoneMinBpm/hrZoneMaxBpm → Postgres
+    // throws "invalid input syntax for type integer: NaN".
+    const userAge = (() => {
+      if (user[0]?.dob) {
+        const ms = new Date(user[0].dob).getTime();
+        if (!isNaN(ms)) {
+          const calculated = Math.floor((Date.now() - ms) / 31557600000);
+          if (calculated > 0 && calculated < 120) return calculated;
+        }
+      }
+      // Fall back to client-sent age, then safe default
+      const fallback = overrideAge && !isNaN(overrideAge) && overrideAge > 0 ? overrideAge : 30;
+      return fallback;
+    })();
+
     // ========== PHASE 1-3: ORIENTATION SESSION ASSESSMENT ==========
     // Check if user needs an orientation session to gauge fitness before generating main plan
     let orientationAssessment: OrientationAssessment | null = null;
     const userDemographics = {
-      age: overrideAge || (user[0]?.dob ? userAge : undefined),
+      age: userAge,
       gender: user[0]?.gender || overrideGender,
       height: userHeight,
       weight: userWeight,
@@ -303,23 +320,6 @@ export async function generateTrainingPlan(
       console.warn(`[Orientation] Error assessing orientation need, continuing without orientation:`, orientationErr);
       orientationAssessment = { needsOrientation: false, recommendedDistance: 0 };
     }
-
-    // Calculate user age for HR zone calculations — fall back to Android/iOS-sent override if DOB not set.
-    // Guard against NaN: an invalid DOB string (e.g. empty string, malformed date) causes
-    // Math.floor(NaN) = NaN which propagates into maxHR → hrZoneMinBpm/hrZoneMaxBpm → Postgres
-    // throws "invalid input syntax for type integer: NaN".
-    const userAge = (() => {
-      if (user[0]?.dob) {
-        const ms = new Date(user[0].dob).getTime();
-        if (!isNaN(ms)) {
-          const calculated = Math.floor((Date.now() - ms) / 31557600000);
-          if (calculated > 0 && calculated < 120) return calculated;
-        }
-      }
-      // Fall back to client-sent age, then safe default
-      const fallback = overrideAge && !isNaN(overrideAge) && overrideAge > 0 ? overrideAge : 30;
-      return fallback;
-    })();
     const maxHR = HeartRateZones.getMaxHeartRate(userAge);
 
     // Build context for AI
