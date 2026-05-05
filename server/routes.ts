@@ -2862,6 +2862,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Feature Availability Check ──────────────────────────────────────────
+  // Used by mobile app to determine if user can access a feature before showing setup screens
+  
+  app.get("/api/features/:featureName/available", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { featureName } = req.params;
+      const user = await storage.getUser(req.user!.userId);
+      
+      // Validate feature name
+      const validFeatures = ["trainingPlansGenerated", "routesGenerated", "postRunAnalyses", "aiCoachingKm"];
+      if (!validFeatures.includes(featureName)) {
+        return res.status(400).json({ 
+          error: "Invalid feature name",
+          isAvailable: true // Default to allowing if invalid
+        });
+      }
+      
+      // Get current usage
+      const usageData = await getUsageWithLimits(req.user!.userId, user?.subscriptionTier);
+      
+      // Extract relevant data for this feature
+      const used = usageData.usage[featureName as keyof typeof usageData.usage] || 0;
+      const limit = usageData.limits[featureName as keyof typeof usageData.limits];
+      const remaining = usageData.remaining[featureName as keyof typeof usageData.remaining];
+      
+      // Determine if available
+      const isUnlimited = limit === null;
+      const isAvailable = isUnlimited || (remaining !== null && remaining > 0);
+      
+      // Get renewal date (start of next month)
+      const [year, month] = usageData.yearMonth.split("-");
+      const nextMonth = parseInt(month) === 12 ? 1 : parseInt(month) + 1;
+      const nextYear = parseInt(month) === 12 ? parseInt(year) + 1 : parseInt(year);
+      const renewalDate = new Date(nextYear, nextMonth - 1, 1).toISOString();
+      
+      res.json({
+        isAvailable,
+        remaining: remaining === null ? null : Math.max(0, remaining),
+        limit: limit === null ? null : limit,
+        used,
+        renewalDate,
+        isUnlimited,
+        message: isUnlimited 
+          ? `You have unlimited ${featureName}`
+          : isAvailable
+          ? `You have ${remaining} of ${limit} ${featureName} remaining this month`
+          : `You've reached your limit of ${limit} ${featureName} this month`
+      });
+    } catch (error: any) {
+      console.error("[Features] GET /api/features/:featureName/available error:", error);
+      // On error, default to allowing access (don't block users)
+      res.json({
+        isAvailable: true,
+        remaining: null,
+        limit: null,
+        used: 0,
+        isUnlimited: true,
+        message: "Unable to verify limits, access granted"
+      });
+    }
+  });
+
   // ==================== PROMO CODES ====================
 
   app.post("/api/promo-codes/redeem", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
