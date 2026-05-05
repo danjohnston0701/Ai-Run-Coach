@@ -532,6 +532,13 @@ interface ApiService {
     suspend fun getMyDataCoachingSummary(
         @Query("days") days: Int = 90
     ): Response<MyDataResponse>
+
+    // ── Feature Availability ────────────────────────────────────────────────
+    
+    @GET("/api/features/{featureName}/available")
+    suspend fun checkFeatureAvailability(
+        @Path("featureName") featureName: String
+    ): live.airuncoach.airuncoach.viewmodel.FeatureAvailabilityResponse
 }
 
 /**
