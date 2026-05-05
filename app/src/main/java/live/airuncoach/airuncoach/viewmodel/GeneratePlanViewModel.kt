@@ -106,7 +106,7 @@ class GeneratePlanViewModel @Inject constructor(
     private val _daysPerWeek = MutableStateFlow(4)
     val daysPerWeek: StateFlow<Int> = _daysPerWeek.asStateFlow()
 
-    private val _durationWeeks = MutableStateFlow(4)
+    private val _durationWeeks = MutableStateFlow(10)
     val durationWeeks: StateFlow<Int> = _durationWeeks.asStateFlow()
 
     // Loaded from the user's profile on init
@@ -130,7 +130,7 @@ class GeneratePlanViewModel @Inject constructor(
     val isPreEventPlan: StateFlow<Boolean> = _isPreEventPlan.asStateFlow()
 
     // "today" | "tomorrow" | "flexible"
-    private val _firstSessionStart = MutableStateFlow("flexible")
+    private val _firstSessionStart = MutableStateFlow("today")
     val firstSessionStart: StateFlow<String> = _firstSessionStart.asStateFlow()
 
     // Regular sessions the user does each week (e.g. Parkrun, running club)
