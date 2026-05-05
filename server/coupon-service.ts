@@ -5,8 +5,9 @@
  * to specific features (training plans, routes, analyses, etc.)
  */
 
-import { sql } from "drizzle-orm";
+import { sql, eq, and, gt } from "drizzle-orm";
 import { db } from "./db";
+import { couponCodes, userCoupons } from "@shared/schema";
 
 export interface PromoCodeRedemption {
   success: boolean;
@@ -23,25 +24,32 @@ export async function redeemPromoCode(
   code: string
 ): Promise<PromoCodeRedemption> {
   try {
-    // Trim and uppercase the code
-    const normalizedCode = code.trim().toUpperCase();
+    // Trim the code (don't uppercase - database stores original case)
+    const normalizedCode = code.trim();
 
-    // Fetch the coupon from database
-    const couponResult = await db.execute(
-      sql`SELECT * FROM coupon_codes WHERE UPPER(code) = ${normalizedCode} AND is_active = true`
-    );
+    // Fetch the coupon using Drizzle ORM (case-insensitive using ILIKE or exact match)
+    const couponRecords = await db
+      .select()
+      .from(couponCodes)
+      .where(
+        and(
+          sql`LOWER(${couponCodes.code}) = LOWER(${normalizedCode})`,
+          eq(couponCodes.isActive, true)
+        )
+      )
+      .limit(1);
 
-    if (!couponResult.length) {
+    if (couponRecords.length === 0) {
       return {
         success: false,
         message: "Invalid or expired promo code. Please check and try again.",
       };
     }
 
-    const couponRecord = couponResult[0];
+    const couponRecord = couponRecords[0];
 
     // Check if expired
-    if (couponRecord.expires_at && new Date(couponRecord.expires_at) < new Date()) {
+    if (couponRecord.expiresAt && new Date(couponRecord.expiresAt) < new Date()) {
       return {
         success: false,
         message: "This promo code has expired.",
@@ -50,8 +58,8 @@ export async function redeemPromoCode(
 
     // Check max uses
     if (
-      couponRecord.max_uses &&
-      couponRecord.current_uses >= couponRecord.max_uses
+      couponRecord.maxUses &&
+      couponRecord.currentUses >= couponRecord.maxUses
     ) {
       return {
         success: false,
@@ -60,11 +68,18 @@ export async function redeemPromoCode(
     }
 
     // Check if user already redeemed this coupon
-    const existingUse = await db.execute(
-      sql`SELECT * FROM user_coupons WHERE user_id = ${userId} AND coupon_id = ${couponRecord.id}`
-    );
+    const existingUses = await db
+      .select()
+      .from(userCoupons)
+      .where(
+        and(
+          eq(userCoupons.userId, userId),
+          eq(userCoupons.couponId, couponRecord.id)
+        )
+      )
+      .limit(1);
 
-    if (existingUse.length) {
+    if (existingUses.length > 0) {
       return {
         success: false,
         message: "You have already redeemed this promo code.",
@@ -72,19 +87,24 @@ export async function redeemPromoCode(
     }
 
     // Calculate expiration date (default: 30 days from now, or override from coupon)
-    const durationDays = couponRecord.duration_days || 30;
+    const durationDays = couponRecord.durationDays || 30;
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + durationDays);
 
-    // Create user coupon record
-    await db.execute(
-      sql`INSERT INTO user_coupons (user_id, coupon_id, expires_at) VALUES (${userId}, ${couponRecord.id}, ${expiresAt.toISOString()})`
-    );
+    // Create user coupon record using Drizzle ORM
+    await db
+      .insert(userCoupons)
+      .values({
+        userId,
+        couponId: couponRecord.id,
+        expiresAt,
+      });
 
-    // Increment coupon usage
-    await db.execute(
-      sql`UPDATE coupon_codes SET current_uses = current_uses + 1 WHERE id = ${couponRecord.id}`
-    );
+    // Increment coupon usage using Drizzle ORM
+    await db
+      .update(couponCodes)
+      .set({ currentUses: sql`${couponCodes.currentUses} + 1` })
+      .where(eq(couponCodes.id, couponRecord.id));
 
     // Determine which features this code grants
     const features = ["trainingPlansGenerated", "routesGenerated", "postRunAnalyses"];
@@ -137,21 +157,22 @@ export async function hasUnlimitedGrant(
     // Unknown feature key — don't grant unlimited access
     if (!allowedTypes || allowedTypes.length === 0) return false;
 
-    // Build a parameterised IN list
-    const typeList = allowedTypes.map((t) => `'${t}'`).join(", ");
+    // Check if user has an active coupon that grants this feature
+    const activeCoupons = await db
+      .select({ id: userCoupons.id })
+      .from(userCoupons)
+      .innerJoin(couponCodes, eq(userCoupons.couponId, couponCodes.id))
+      .where(
+        and(
+          eq(userCoupons.userId, userId),
+          gt(userCoupons.expiresAt, new Date()),
+          eq(couponCodes.isActive, true),
+          sql`${couponCodes.type} = ANY(${allowedTypes})`
+        )
+      )
+      .limit(1);
 
-    const result = await db.execute(
-      sql`
-      SELECT COUNT(*) as count FROM user_coupons uc
-      JOIN coupon_codes cc ON uc.coupon_id = cc.id
-      WHERE uc.user_id = ${userId}
-        AND uc.expires_at > NOW()
-        AND cc.is_active = true
-        AND cc.type IN (${sql.raw(typeList)})
-      `
-    );
-
-    return parseInt(String(result[0]?.count ?? "0")) > 0;
+    return activeCoupons.length > 0;
   } catch (err) {
     console.error("[CouponService] Error checking unlimited grant:", err);
     return false;
@@ -171,24 +192,30 @@ export async function getUserActiveGrants(
   }>
 > {
   try {
-    const result = await db.execute(
-      sql`
-      SELECT cc.code, uc.expires_at, cc.type FROM user_coupons uc
-      JOIN coupon_codes cc ON uc.coupon_id = cc.id
-      WHERE uc.user_id = ${userId} AND uc.expires_at > NOW()
-      ORDER BY uc.expires_at DESC
-      `
-    );
+    const grants = await db
+      .select({
+        code: couponCodes.code,
+        expiresAt: userCoupons.expiresAt,
+        type: couponCodes.type,
+      })
+      .from(userCoupons)
+      .innerJoin(couponCodes, eq(userCoupons.couponId, couponCodes.id))
+      .where(
+        and(
+          eq(userCoupons.userId, userId),
+          gt(userCoupons.expiresAt, new Date())
+        )
+      );
 
-    return result.map((row) => ({
-      code: row.code,
-      expiresAt: row.expires_at,
+    return grants.map((grant) => ({
+      code: grant.code,
+      expiresAt: grant.expiresAt?.toISOString() ?? "",
       features:
-        row.type === "unlimited_all"
+        grant.type === "unlimited_all"
           ? ["training plans", "routes", "analyses"]
-          : row.type === "unlimited_plans"
+          : grant.type === "unlimited_plans"
             ? ["training plans"]
-            : row.type === "unlimited_routes"
+            : grant.type === "unlimited_routes"
               ? ["routes"]
               : ["analyses"],
     }));
