@@ -12,6 +12,7 @@ import { getCurrentFitness } from "./fitness-service";
 import { HeartRateZones } from "./heart-rate-zones"; // Assuming we create this utility
 import { generateSessionInstructions } from "./session-coaching-service";
 import { getRunnerProfile, runnerProfileBlock } from "./runner-profile-service";
+import { assessOrientationNeed, generateOrientationCoachingPrompt, type OrientationAssessment } from "./orientation-session-service";
 import OpenAI from "openai";
 
 const openai = new OpenAI({
@@ -271,6 +272,37 @@ export async function generateTrainingPlan(
     }
     
     console.log(`[Training Plan] Duration: durationWeeks=${durationWeeks}, targetDate=${targetDate}, calculated weeksUntilTarget=${weeksUntilTarget}`);
+
+    // ========== PHASE 1-3: ORIENTATION SESSION ASSESSMENT ==========
+    // Check if user needs an orientation session to gauge fitness before generating main plan
+    let orientationAssessment: OrientationAssessment | null = null;
+    const userDemographics = {
+      age: overrideAge || (user[0]?.dob ? userAge : undefined),
+      gender: user[0]?.gender || overrideGender,
+      height: userHeight,
+      weight: userWeight,
+    };
+    
+    try {
+      orientationAssessment = await assessOrientationNeed(
+        userId,
+        userDemographics,
+        experienceLevel,
+        goalType
+      );
+      
+      if (orientationAssessment.needsOrientation) {
+        console.log(`[Orientation] User requires orientation session:`, {
+          reason: orientationAssessment.reason,
+          distance: orientationAssessment.recommendedDistance,
+          pace: orientationAssessment.recommendedPace,
+          riskFactors: orientationAssessment.riskFactors,
+        });
+      }
+    } catch (orientationErr) {
+      console.warn(`[Orientation] Error assessing orientation need, continuing without orientation:`, orientationErr);
+      orientationAssessment = { needsOrientation: false, recommendedDistance: 0 };
+    }
 
     // Calculate user age for HR zone calculations — fall back to Android/iOS-sent override if DOB not set.
     // Guard against NaN: an invalid DOB string (e.g. empty string, malformed date) causes
@@ -738,12 +770,82 @@ If runner has NO previous runs:
       duration?: number | null;
     }> = [];
 
+    // ========== PHASE 3: INSERT ORIENTATION SESSION IF NEEDED ==========
+    // If user needs orientation, insert it as the very first workout (Week 1, Day 1)
+    let weekOneInsertionIndex = 0; // Track if we inserted orientation
+    if (orientationAssessment?.needsOrientation) {
+      console.log(`[Orientation] Inserting orientation session as Week 1, Day 1...`);
+      
+      try {
+        // Create Week 1 weekly plan for orientation
+        const orientationWeek = await db
+          .insert(weeklyPlans)
+          .values({
+            trainingPlanId: planId,
+            weekNumber: 1,
+            weekDescription: "Orientation & Fitness Assessment",
+            totalDistance: orientationAssessment.recommendedDistance,
+            focusArea: "Fitness Assessment",
+            intensityLevel: "Assessment",
+          })
+          .returning();
+
+        const weeklyPlanId = orientationWeek[0].id;
+
+        // Calculate today's date for the orientation workout
+        const todayInUserTz = userTimezone
+          ? new Date(new Date().toLocaleDateString('en-CA', { timeZone: userTimezone }) + 'T00:00:00')
+          : new Date();
+        if (!userTimezone) todayInUserTz.setHours(0, 0, 0, 0);
+
+        // Create orientation workout
+        const orientationWorkout = await db
+          .insert(plannedWorkouts)
+          .values({
+            weeklyPlanId: weeklyPlanId,
+            dayOfWeek: todayInUserTz.getDay(),
+            scheduledDate: todayInUserTz,
+            workoutType: "orientation",
+            distance: orientationAssessment.recommendedDistance,
+            targetPace: orientationAssessment.recommendedPace,
+            intensity: "z2", // Zone 2 (conversational)
+            description: "Orientation Run: Establish Your Baseline Fitness",
+            instructions: orientationAssessment.orientationBrief,
+            effortDescription: "Conversational effort - Zone 2",
+            sessionGoal: "assess_fitness",
+            sessionIntent: "orientation_run",
+            hrZoneNumber: 2,
+            hrZoneMinBpm: orientationAssessment.targetHeartRateZone?.min,
+            hrZoneMaxBpm: orientationAssessment.targetHeartRateZone?.max,
+            hrZoneScenario: hrZoneScenario,
+          })
+          .returning();
+
+        const orientationWorkoutId = orientationWorkout[0].id;
+        console.log(`[Orientation] ✅ Orientation workout created: ${orientationWorkoutId}`);
+
+        // Schedule session instructions generation for orientation
+        pendingSessionInstructions.push({
+          workoutId: orientationWorkoutId,
+          workoutType: "orientation",
+          intensity: "z2",
+          sessionGoal: "assess_fitness",
+          sessionIntent: "orientation_run",
+          distance: orientationAssessment.recommendedDistance,
+        });
+
+        weekOneInsertionIndex = 1; // Shift week numbering by 1
+      } catch (orientationInsertErr) {
+        console.error(`[Orientation] ❌ Error inserting orientation session, continuing without it:`, orientationInsertErr);
+      }
+    }
+
     // Create weekly plans and workouts
     for (const week of planData.weeks) {
       // weekNumber is NOT NULL integer — guard against AI returning undefined/NaN
       const safeWeekNumber = (typeof week.weekNumber === 'number' && !isNaN(week.weekNumber) && week.weekNumber > 0)
-        ? Math.round(week.weekNumber)
-        : planData.weeks.indexOf(week) + 1; // fallback: position in array
+        ? Math.round(week.weekNumber) + weekOneInsertionIndex  // Shift week number if orientation was inserted
+        : planData.weeks.indexOf(week) + 1 + weekOneInsertionIndex; // fallback: position in array + offset
 
       const weeklyPlan = await db
         .insert(weeklyPlans)
@@ -920,17 +1022,81 @@ async function generateSessionInstructionsInBackground(
     await Promise.allSettled(
       batch.map(async (w) => {
         try {
-          const coaching = await generateSessionInstructions(userId, w.workoutId, {
-            userId,
-            plannedWorkoutId: w.workoutId,
-            workoutType: w.workoutType,
-            intensity: w.intensity,
-            sessionGoal: w.sessionGoal ?? undefined,
-            sessionIntent: w.sessionIntent ?? undefined,
-            intervalCount: w.intervalCount ?? undefined,
-            distance: w.distance ?? undefined,
-            duration: w.duration ?? undefined,
-          });
+          let coaching;
+          
+          // ========== PHASE 3: SPECIAL HANDLING FOR ORIENTATION SESSIONS ==========
+          if (w.workoutType === "orientation" && w.sessionIntent === "orientation_run") {
+            console.log(`[SessionInstructions] Generating orientation-specific coaching for workout ${w.workoutId}...`);
+            
+            // For orientation sessions, use the specialized coaching prompt
+            // that emphasizes assessment, confidence, and learning over performance
+            const orientationCoachingPrompt = generateOrientationCoachingPrompt(
+              {
+                age: undefined,
+                gender: undefined,
+                height: undefined,
+                weight: undefined,
+                bmi: undefined,
+                experienceLevel: "intermediate",
+                recentRunCount: 0,
+                hasGpsData: false,
+                averagePace: undefined,
+                maxHeartRate: undefined,
+                restingHeartRate: undefined,
+              },
+              {
+                needsOrientation: true,
+                recommendedDistance: w.distance || 5,
+                recommendedPace: undefined,
+                targetHeartRateZone: { min: 120, max: 140, label: "Zone 2" },
+                orientationBrief: "Fitness assessment run",
+                postOrientationPlan: "Results will personalize your plan",
+              },
+              "5k" // Default goal type for orientation
+            );
+            
+            // For orientation, create a simplified briefing that includes the special prompt
+            coaching = {
+              preRunBrief: orientationCoachingPrompt.substring(0, 500), // Use first part as brief
+              sessionStructure: {
+                phases: [
+                  {
+                    name: "Warm-up",
+                    duration: "5 min",
+                    description: "Easy jog to get body ready"
+                  },
+                  {
+                    name: "Main Run",
+                    duration: `${Math.round((w.distance || 5) / 6)} minutes`,
+                    description: "Steady, conversational pace"
+                  },
+                  {
+                    name: "Cool-down",
+                    duration: "5 min",
+                    description: "Easy jog to finish"
+                  }
+                ]
+              },
+              aiDeterminedTone: "encouraging",
+              aiDeterminedIntensity: "comfortable",
+              coachingStyle: "assessment",
+              insightFilters: ["form_check", "effort_feedback", "encouragement"],
+              toneReasoning: "Orientation session - focus on confidence and learning"
+            };
+          } else {
+            // Standard workout coaching generation
+            coaching = await generateSessionInstructions(userId, w.workoutId, {
+              userId,
+              plannedWorkoutId: w.workoutId,
+              workoutType: w.workoutType,
+              intensity: w.intensity,
+              sessionGoal: w.sessionGoal ?? undefined,
+              sessionIntent: w.sessionIntent ?? undefined,
+              intervalCount: w.intervalCount ?? undefined,
+              distance: w.distance ?? undefined,
+              duration: w.duration ?? undefined,
+            });
+          }
 
           const instructionResult = await db
             .insert(sessionInstructions)
