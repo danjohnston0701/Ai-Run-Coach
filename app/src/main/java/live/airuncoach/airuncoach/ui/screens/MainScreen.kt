@@ -281,28 +281,21 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     initialMinutes = m,
                     initialSeconds = s,
                     onNavigateBack = { navController.popBackStack() },
-                    onGenerateRoute = { distance, hasTime, hours, minutes, seconds, liveTracking, groupRun, latitude, longitude ->
-                        // Store target time + distance so it persists through route generation → selection → run session
-                        viewModel.setTargetTime(hasTime, hours, minutes, seconds, distance.toDouble())
-                        
-                        // Generate routes with GPS location from setup screen
-                        val targetTimeMinutes = if (hasTime) hours * 60 + minutes else null
-                        
-                        viewModel.generateIntelligentRoutes(
+                    onGenerateRoute = { distance, hasTime, hours, minutes, seconds, _, _, latitude, longitude ->
+                        // Store route generation params to RouteGenerationParamsHolder for later use
+                        live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.setParams(
+                            distance = distance,
+                            hasTime = hasTime,
+                            hours = hours,
+                            minutes = minutes,
+                            seconds = seconds,
                             latitude = latitude,
-                            longitude = longitude,
-                            distanceKm = distance.toDouble(),
-                            activityType = "run",
-                            preferTrails = true,
-                            avoidHills = false,
-                            targetTime = targetTimeMinutes,
-                            aiCoachEnabled = true
+                            longitude = longitude
                         )
                         
-                        // Navigate to loading screen
-                        navController.navigate("route_generating/${distance.toInt()}") {
-                            popUpTo("map_my_run_setup") { inclusive = true }
-                        }
+                        // Navigate to check route availability
+                        // The check will be done in that composable route
+                        navController.navigate("check_route_availability")
                     },
                     onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds ->
                         // Create RunSetupConfig and start run without route
@@ -601,6 +594,113 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         featureLimitViewModel.resetAiPlanAvailability()
                         navController.navigate("generate_plan") {
                             popUpTo("check_plan_availability") { inclusive = true }
+                        }
+                    }
+                }
+            }
+            // ── Run Route Availability Check ─────────────────────────────────
+            composable("check_route_availability") {
+                val featureLimitViewModel: live.airuncoach.airuncoach.viewmodel.FeatureLimitViewModel = hiltViewModel()
+                val routeViewMod: RouteGenerationViewModel = hiltViewModel()
+                val availability by featureLimitViewModel.runRouteAvailability.collectAsState()
+                val isLoading by featureLimitViewModel.runRouteLoading.collectAsState()
+                
+                // Trigger availability check when this route first loads
+                LaunchedEffect(Unit) {
+                    featureLimitViewModel.checkRunRouteAvailability()
+                }
+
+                if (isLoading) {
+                    // Show loading while we check
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else if (availability != null) {
+                    if (availability!!.isAvailable) {
+                        // User can create route - proceed with generation
+                        val params = live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.consume()
+                        if (params != null) {
+                            LaunchedEffect(Unit) {
+                                featureLimitViewModel.resetRunRouteAvailability()
+                                
+                                // Store target time + distance so it persists through route generation → selection → run session
+                                routeViewMod.setTargetTime(params.hasTime, params.hours, params.minutes, params.seconds, params.distance.toDouble())
+                                
+                                // Generate routes with GPS location
+                                val targetTimeMinutes = if (params.hasTime) params.hours * 60 + params.minutes else null
+                                
+                                routeViewMod.generateIntelligentRoutes(
+                                    latitude = params.latitude,
+                                    longitude = params.longitude,
+                                    distanceKm = params.distance.toDouble(),
+                                    activityType = "run",
+                                    preferTrails = true,
+                                    avoidHills = false,
+                                    targetTime = targetTimeMinutes,
+                                    aiCoachEnabled = true
+                                )
+                                
+                                // Navigate to loading screen
+                                navController.navigate("route_generating/${params.distance.toInt()}") {
+                                    popUpTo("check_route_availability") { inclusive = true }
+                                }
+                            }
+                        } else {
+                            // No params - go back
+                            LaunchedEffect(Unit) {
+                                navController.popBackStack()
+                            }
+                        }
+                    } else {
+                        // Limit reached - show upsell screen
+                        live.airuncoach.airuncoach.ui.components.RunRouteLimitUpsellScreen(
+                            nextRenewalDate = availability!!.renewalDate,
+                            usedCount = availability!!.used,
+                            limitCount = availability!!.limit,
+                            onUpgradeClick = {
+                                // Navigate to subscription screen
+                                navController.navigate(Screen.Profile.route) {
+                                    popUpTo("check_route_availability") { inclusive = true }
+                                }
+                            },
+                            onPromoCodeClick = {
+                                // Show promo code dialog or navigate to settings
+                                navController.popBackStack()
+                            },
+                            onBackClick = {
+                                navController.popBackStack()
+                            }
+                        )
+                    }
+                } else {
+                    // Default: allow access (error case)
+                    val params = live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.consume()
+                    if (params != null) {
+                        LaunchedEffect(Unit) {
+                            featureLimitViewModel.resetRunRouteAvailability()
+                            
+                            // Proceed with route generation
+                            routeViewMod.setTargetTime(params.hasTime, params.hours, params.minutes, params.seconds, params.distance.toDouble())
+                            val targetTimeMinutes = if (params.hasTime) params.hours * 60 + params.minutes else null
+                            
+                            routeViewMod.generateIntelligentRoutes(
+                                latitude = params.latitude,
+                                longitude = params.longitude,
+                                distanceKm = params.distance.toDouble(),
+                                activityType = "run",
+                                preferTrails = true,
+                                avoidHills = false,
+                                targetTime = targetTimeMinutes,
+                                aiCoachEnabled = true
+                            )
+                            
+                            navController.navigate("route_generating/${params.distance.toInt()}") {
+                                popUpTo("check_route_availability") { inclusive = true }
+                            }
+                        }
+                    } else {
+                        LaunchedEffect(Unit) {
+                            navController.popBackStack()
                         }
                     }
                 }
