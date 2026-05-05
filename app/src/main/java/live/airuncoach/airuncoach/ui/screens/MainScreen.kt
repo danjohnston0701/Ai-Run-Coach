@@ -10,6 +10,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -17,6 +19,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -24,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -520,9 +524,15 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             // ── Coaching Programme routes ───────────────────────────────────────
             composable(Screen.AiPlans.route) {
                 val currentBackStack by navController.currentBackStackEntryAsState()
+                val featureLimitViewModel: live.airuncoach.airuncoach.viewmodel.FeatureLimitViewModel = hiltViewModel()
+                
                 CoachingProgrammeScreen(
                     onNavigateBack = { navController.popBackStack() },
-                    onCreatePlan = { navController.navigate("generate_plan") },
+                    onCreatePlan = {
+                        // Check feature availability before navigating
+                        featureLimitViewModel.checkAiPlanAvailability()
+                        navController.navigate("check_plan_availability")
+                    },
                     onOpenPlan = { planId -> navController.navigate("training_plan/$planId") },
                     isActiveDestination = currentBackStack?.destination?.route == Screen.AiPlans.route
                 )
@@ -530,12 +540,70 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             // Keep legacy route for backwards compatibility with ProfileScreen
             composable("coaching_programme") {
                 val currentBackStack by navController.currentBackStackEntryAsState()
+                val featureLimitViewModel: live.airuncoach.airuncoach.viewmodel.FeatureLimitViewModel = hiltViewModel()
+                
                 CoachingProgrammeScreen(
                     onNavigateBack = { navController.popBackStack() },
-                    onCreatePlan = { navController.navigate("generate_plan") },
+                    onCreatePlan = {
+                        // Check feature availability before navigating
+                        featureLimitViewModel.checkAiPlanAvailability()
+                        navController.navigate("check_plan_availability")
+                    },
                     onOpenPlan = { planId -> navController.navigate("training_plan/$planId") },
                     isActiveDestination = currentBackStack?.destination?.route == "coaching_programme"
                 )
+            }
+            // ── AI Plan Availability Check ──────────────────────────────────
+            composable("check_plan_availability") {
+                val featureLimitViewModel: live.airuncoach.airuncoach.viewmodel.FeatureLimitViewModel = hiltViewModel()
+                val availability by featureLimitViewModel.aiPlanAvailability.collectAsState()
+                val isLoading by featureLimitViewModel.aiPlanLoading.collectAsState()
+
+                if (isLoading) {
+                    // Show loading while we check
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else if (availability != null) {
+                    if (availability!!.isAvailable) {
+                        // User can create plan - navigate and cleanup
+                        LaunchedEffect(Unit) {
+                            featureLimitViewModel.resetAiPlanAvailability()
+                            navController.navigate("generate_plan") {
+                                popUpTo("check_plan_availability") { inclusive = true }
+                            }
+                        }
+                    } else {
+                        // Limit reached - show upsell screen
+                        live.airuncoach.airuncoach.ui.components.AiPlanLimitUpsellScreen(
+                            nextRenewalDate = availability!!.renewalDate,
+                            usedCount = availability!!.used,
+                            limitCount = availability!!.limit,
+                            onUpgradeClick = {
+                                // Navigate to subscription screen
+                                navController.navigate(Screen.Profile.route) {
+                                    popUpTo("check_plan_availability") { inclusive = true }
+                                }
+                            },
+                            onPromoCodeClick = {
+                                // Show promo code dialog or navigate to settings
+                                // For now, just navigate back
+                                navController.popBackStack()
+                            },
+                            onBackClick = {
+                                navController.popBackStack()
+                            }
+                        )
+                    }
+                } else {
+                    // Default: allow access (error case)
+                    LaunchedEffect(Unit) {
+                        featureLimitViewModel.resetAiPlanAvailability()
+                        navController.navigate("generate_plan") {
+                            popUpTo("check_plan_availability") { inclusive = true }
+                        }
+                    }
+                }
             }
             composable("generate_plan") {
                 val goal = live.airuncoach.airuncoach.util.GoalPlanHolder.consume()
