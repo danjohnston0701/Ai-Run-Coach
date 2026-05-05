@@ -272,6 +272,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     navController.getBackStackEntry(navController.graph.id)
                 }
                 val viewModel: RouteGenerationViewModel = hiltViewModel(parentEntry)
+                val featureLimitViewModel: live.airuncoach.airuncoach.viewmodel.FeatureLimitViewModel = hiltViewModel()
 
                 MapMyRunSetupScreen(
                     mode = mode,
@@ -293,8 +294,8 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                             longitude = longitude
                         )
                         
-                        // Navigate to check route availability
-                        // The check will be done in that composable route
+                        // Check route availability before generating
+                        featureLimitViewModel.checkRunRouteAvailability()
                         navController.navigate("check_route_availability")
                     },
                     onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds ->
@@ -317,6 +318,90 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         }
                     }
                 )
+            }
+            
+            // ── Run Route Availability Check ──────────────────────────────────
+            composable("check_route_availability") { backStackEntry ->
+                val featureLimitViewModel: live.airuncoach.airuncoach.viewmodel.FeatureLimitViewModel = hiltViewModel()
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry(navController.graph.id)
+                }
+                val routeGenViewModel: RouteGenerationViewModel = hiltViewModel(parentEntry)
+                val availability by featureLimitViewModel.runRouteAvailability.collectAsState()
+                val isLoading by featureLimitViewModel.runRouteLoading.collectAsState()
+
+                if (isLoading) {
+                    // Show loading while we check
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else if (availability != null) {
+                    if (availability!!.isAvailable) {
+                        // User can create route - navigate and cleanup
+                        LaunchedEffect(Unit) {
+                            featureLimitViewModel.resetRunRouteAvailability()
+                            // Get stored params from holder
+                            val params = live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.peek()
+                            if (params != null) {
+                                // Call the API to generate routes
+                                routeGenViewModel.generateIntelligentRoutes(
+                                    latitude = params.latitude,
+                                    longitude = params.longitude,
+                                    distanceKm = params.distance.toDouble()
+                                )
+                                // Navigate to loading screen
+                                navController.navigate("route_generating/${params.distance.toInt()}") {
+                                    popUpTo("check_route_availability") { inclusive = true }
+                                }
+                            } else {
+                                // No params - go back
+                                navController.popBackStack()
+                            }
+                        }
+                    } else {
+                        // Limit reached - show upsell screen
+                        live.airuncoach.airuncoach.ui.components.RunRouteLimitUpsellScreen(
+                            nextRenewalDate = availability!!.renewalDate,
+                            usedCount = availability!!.used,
+                            limitCount = availability!!.limit,
+                            onUpgradeClick = {
+                                // Navigate to subscription screen
+                                navController.navigate(Screen.Profile.route) {
+                                    popUpTo("check_route_availability") { inclusive = true }
+                                }
+                            },
+                            onPromoCodeClick = {
+                                // Go back
+                                navController.popBackStack()
+                            },
+                            onBackClick = {
+                                navController.popBackStack()
+                            }
+                        )
+                    }
+                } else {
+                    // Default: allow access (error case)
+                    LaunchedEffect(Unit) {
+                        featureLimitViewModel.resetRunRouteAvailability()
+                        // Get stored params from holder
+                        val params = live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.peek()
+                        if (params != null) {
+                            // Call the API to generate routes
+                            routeGenViewModel.generateIntelligentRoutes(
+                                latitude = params.latitude,
+                                longitude = params.longitude,
+                                distanceKm = params.distance.toDouble()
+                            )
+                            // Navigate to loading screen
+                            navController.navigate("route_generating/${params.distance.toInt()}") {
+                                popUpTo("check_route_availability") { inclusive = true }
+                            }
+                        } else {
+                            // No params - go back
+                            navController.popBackStack()
+                        }
+                    }
+                }
             }
             
             // NEW: Route Generating Loading Screen
