@@ -301,6 +301,91 @@ Be encouraging, specific to the conditions, and give one actionable tip. Speak n
   return completion.choices[0].message.content || "Take it easy at the start and find your rhythm. Good luck!";
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ROUTE INTELLIGENCE CONTEXT
+//
+// When the Route Memory Engine matches a known route, this packet is injected
+// into split coaching prompts to enable:
+//   - "Km 2 — 8 seconds faster than last week"
+//   - "You're 15 seconds up on your average"
+//   - "The hill is coming in 400m — brace now"
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface RouteIntelligenceContext {
+  routeName: string;
+  confidence: number;           // 0.0–1.0
+  personalBestFormatted?: string;
+  lastRunFormatted?: string;
+  lastRunDate?: string;
+  /** per-km comparisons — populated as the run progresses */
+  splitComparisons?: Array<{
+    km: number;
+    lastRunSecPerKm?: number;
+    avgSecPerKm?: number;
+  }>;
+  /** upcoming notable terrain segments */
+  notableSegments?: Array<{
+    name: string;
+    startPct: number;
+    endPct: number;
+    gradient: number;
+    severity: string;
+    coachingNote: string;
+  }>;
+  typicalDistanceKm?: number;
+}
+
+/** Build a concise context block from the Route Intelligence packet for coaching prompts. */
+function buildRouteIntelligenceContext(
+  routeCtx: RouteIntelligenceContext,
+  currentDistanceKm: number,
+  totalDistanceKm: number,
+  currentKmSplitSec?: number,   // seconds taken for the most recently completed km
+  splitKm?: number              // which km was just completed (1-indexed)
+): string {
+  const lines: string[] = [];
+  lines.push(`ROUTE MEMORY: ${routeCtx.routeName} (${Math.round(routeCtx.confidence * 100)}% confidence)`);
+
+  if (routeCtx.personalBestFormatted) {
+    lines.push(`PB on this route: ${routeCtx.personalBestFormatted}`);
+  }
+  if (routeCtx.lastRunFormatted) {
+    lines.push(`Last run: ${routeCtx.lastRunFormatted} (${routeCtx.lastRunDate ?? "recent"})`);
+  }
+
+  // Split comparison for the km just completed
+  if (splitKm && currentKmSplitSec && routeCtx.splitComparisons) {
+    const cmp = routeCtx.splitComparisons.find((s) => s.km === splitKm);
+    if (cmp) {
+      if (cmp.lastRunSecPerKm) {
+        const deltaLast = cmp.lastRunSecPerKm - currentKmSplitSec; // positive = runner is faster
+        const label = deltaLast > 0 ? `${Math.abs(Math.round(deltaLast))}s FASTER than last run` : `${Math.abs(Math.round(deltaLast))}s SLOWER than last run`;
+        lines.push(`Km ${splitKm} vs last run: ${label}`);
+      }
+      if (cmp.avgSecPerKm) {
+        const deltaAvg = cmp.avgSecPerKm - currentKmSplitSec;
+        const label = deltaAvg > 0 ? `${Math.abs(Math.round(deltaAvg))}s FASTER than their average` : `${Math.abs(Math.round(deltaAvg))}s SLOWER than their average`;
+        lines.push(`Km ${splitKm} vs average: ${label}`);
+      }
+    }
+  }
+
+  // Upcoming terrain warning (within next 600m of route)
+  if (routeCtx.notableSegments && routeCtx.typicalDistanceKm && routeCtx.typicalDistanceKm > 0) {
+    const progressPct = currentDistanceKm / routeCtx.typicalDistanceKm;
+    const lookaheadPct = 0.6 / routeCtx.typicalDistanceKm; // 600m lookahead
+    const approaching = routeCtx.notableSegments.find((seg) =>
+      seg.startPct >= progressPct && seg.startPct <= progressPct + lookaheadPct
+    );
+    if (approaching) {
+      const distanceToSegM = Math.round((approaching.startPct - progressPct) * routeCtx.typicalDistanceKm * 1000);
+      lines.push(`⚠️ TERRAIN ALERT: "${approaching.name}" in ~${distanceToSegM}m — ${approaching.coachingNote} MENTION THIS FIRST.`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 /**
  * Historical run statistics passed from the Android app at run-start.
  * Calculated from the user's last 3-5 completed runs of similar distance.
@@ -380,6 +465,10 @@ export async function generatePaceUpdate(params: {
   // Historical context
   runHistory?: RunHistoryStats;
   runnerProfile?: string | null;
+  // Route Memory Engine context (optional — injected when a known route is matched)
+  routeIntelligence?: RouteIntelligenceContext;
+  // Seconds taken for the most recently completed km (for split delta comparison)
+  lastKmSplitSeconds?: number;
 }): Promise<string> {
   const { distance, targetDistance, currentPace, elapsedTime, coachName, coachTone, isSplit, splitKm, splitPace, currentGrade, totalElevationGain, isOnHill, kmSplits, hasRoute, fitnessLevel, runnerName, runHistory } = params;
   const accentRule = accentDirective((params as any).coachAccent);
@@ -464,6 +553,17 @@ CRITICAL: No GPS elevation data available for this run. Do NOT mention hills, te
 
   const varietySeed = getVarietySeed();
 
+  // Build Route Intelligence context block (when known route is matched)
+  const routeCtxBlock = params.routeIntelligence
+    ? buildRouteIntelligenceContext(
+        params.routeIntelligence,
+        distance,
+        targetDistance,
+        params.lastKmSplitSeconds,
+        isSplit ? splitKm : undefined
+      )
+    : '';
+
   let prompt: string;
   if (isSplit && splitKm && splitPace) {
     prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
@@ -474,11 +574,12 @@ The runner just completed kilometer ${splitKm} with a split pace of ${spokenSpli
 - Overall average pace: ${spokenCurrentPace}
 - This split pace: ${spokenSplitPace}${targetPaceParam ? `\n- Target pace: ${spokenTargetPace}` : ''}
 ${splitTargetVerdict ? `\nPACE ASSESSMENT: ${splitTargetVerdict}` : ''}
+${routeCtxBlock ? `\n${routeCtxBlock}` : ''}
 ${terrainContext}${paceTrend}
 ${noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${varietySeed}
-Give a brief (1-2 sentences) split update. You MUST mention their SPLIT pace (${spokenSplitPace}) and${splitTargetVerdict ? ' whether they are on track for their target pace (CRITICAL — do NOT praise a slow split if they are behind target).' : ' at least one other data point (progress, time, or pace trend).'} ${hasRoute === true && isOnHill ? 'Acknowledge the hill effort. ' : ''}${paceTrend ? 'Comment on their pace trend.' : ''}`;
+Give a brief (1-2 sentences) split update. ${routeCtxBlock ? 'PRIORITISE the route memory data — mention the split delta vs last run or average (faster/slower by X seconds) as this is the most impactful insight. If a terrain alert is present, mention that first. ' : ''}You MUST mention their SPLIT pace (${spokenSplitPace}) and${splitTargetVerdict ? ' whether they are on track for their target pace (CRITICAL — do NOT praise a slow split if they are behind target).' : ' at least one other data point (progress, time, or pace trend).'} ${hasRoute === true && isOnHill ? 'Acknowledge the hill effort. ' : ''}${paceTrend ? 'Comment on their pace trend.' : ''}`;
   } else {
     prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
 ${runnerContext ? `\nRunner context: ${runnerContext}` : ''}

@@ -42,5 +42,8 @@ data class PaceUpdate(
     // ========== Session Coaching Context (Phase 1) ==========
     @SerializedName("linked_workout_id") val linkedWorkoutId: String? = null,
     @SerializedName("session_coaching_tone") val sessionCoachingTone: String? = null,
-    @SerializedName("current_session_phase") val currentSessionPhase: String? = null
+    @SerializedName("current_session_phase") val currentSessionPhase: String? = null,
+    // ========== Route Memory Engine ==========
+    @SerializedName("routeIntelligence") val routeIntelligence: RouteIntelligenceContext? = null,
+    @SerializedName("lastKmSplitSeconds") val lastKmSplitSeconds: Int? = null
 )

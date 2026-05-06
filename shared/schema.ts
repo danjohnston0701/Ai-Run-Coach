@@ -197,6 +197,10 @@ export const runs = pgTable("runs", {
   restingCalories: integer("resting_calories"), // kcal
   estSweatLoss: real("est_sweat_loss"), // liters
   
+  // Route Memory Engine — matched known route at run start
+  knownRouteId: varchar("known_route_id"),        // FK to known_routes.id (set after route recognition)
+  routeConfidence: real("route_confidence"),       // 0.0–1.0 confidence score at run start
+
   // Training plan context (if this run is part of a coached plan)
   linkedWorkoutId: varchar("linked_workout_id"), // ID of the planned workout this run executes
   linkedPlanId: varchar("linked_plan_id"), // ID of the training plan this run belongs to
@@ -1575,6 +1579,59 @@ export const coachingSessionEvents = pgTable("coaching_session_events", {
 
 export type CoachingSessionEvent = typeof coachingSessionEvents.$inferSelect;
 export type InsertCoachingSessionEvent = typeof coachingSessionEvents.$inferInsert;
+
+// ==================== KNOWN ROUTES (Route Memory Engine) ====================
+
+/**
+ * Stores fingerprints of recurring routes for each user.
+ * Auto-created after a user runs from the same GPS location 2+ times.
+ * Powers the Route Memory Engine — enables split comparisons, elevation
+ * anticipation, and personalised coaching on familiar runs.
+ */
+export const knownRoutes = pgTable("known_routes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+
+  // Human-readable names
+  name: text("name"),                  // Auto-generated (e.g. "Saturday Morning Loop")
+  displayName: text("display_name"),   // User-editable friendly name
+
+  // Location fingerprint — centroid of all observed start points
+  startLat: real("start_lat").notNull(),
+  startLng: real("start_lng").notNull(),
+  startRadiusM: real("start_radius_m").default(75), // Adaptive match radius in metres
+
+  // Route characteristics
+  typicalDistanceKm: real("typical_distance_km"),
+  elevationProfile: jsonb("elevation_profile"),    // [{pct: 0.0, altM: 45}, ...] normalised 0–1
+  notableSegments: jsonb("notable_segments"),      // [{name, startPct, endPct, gradient, severity, coachingNote}]
+  terrainType: text("terrain_type"),               // "road" | "trail" | "track" | "mixed"
+
+  // Temporal fingerprint — when does the user typically run this route?
+  typicalDaysOfWeek: jsonb("typical_days_of_week"), // [6] = Saturday, [1,3] = Mon+Wed
+  typicalStartHour: integer("typical_start_hour"),  // 8 = 8am
+  typicalStartMinute: integer("typical_start_minute"), // 0 = on the hour
+
+  // Run history summary
+  runCount: integer("run_count").default(0).notNull(),
+  firstRunAt: timestamp("first_run_at"),
+  lastRunAt: timestamp("last_run_at"),
+  constituentRunIds: jsonb("constituent_run_ids"), // string[] — IDs of runs that built this fingerprint
+
+  // All-time stats for this route
+  bestTimeMs: integer("best_time_ms"),             // Personal best duration in milliseconds
+  avgTimeMs: integer("avg_time_ms"),
+  avgPaceSecPerKm: real("avg_pace_sec_per_km"),
+
+  // km-by-km split profiles — averages across all runs on this route
+  splitProfiles: jsonb("split_profiles"),          // [{km, avgSecPerKm, bestSecPerKm, worstSecPerKm, runCount}]
+
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type KnownRoute = typeof knownRoutes.$inferSelect;
+export type InsertKnownRoute = typeof knownRoutes.$inferInsert;
 
 // ==================== USER STATS CACHE ====================
 

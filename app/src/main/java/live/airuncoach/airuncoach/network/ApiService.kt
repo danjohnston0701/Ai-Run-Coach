@@ -237,6 +237,20 @@ interface ApiService {
     @GET("/api/users/{userId}/runs")
     suspend fun getRunsForUser(@Path("userId") userId: String): List<RunSession>
 
+    // ========== ROUTE MEMORY ENGINE ==========
+
+    /**
+     * Called at run start (first stable GPS fix) to detect known recurring routes.
+     * Returns a Route Intelligence Packet if confidence ≥ 40%.
+     * Non-blocking — failures are handled silently in the ViewModel.
+     */
+    @POST("/api/runs/recognize-route")
+    suspend fun recognizeRoute(@Body request: RouteRecognitionRequest): RouteRecognitionResponse
+
+    /** Returns all known (recurring) routes for the authenticated user. */
+    @GET("/api/runs/known-routes")
+    suspend fun getKnownRoutes(): List<Any>
+
     @GET("/api/users/{userId}/run-history-stats")
     suspend fun getRunHistoryStats(
         @Path("userId") userId: String,

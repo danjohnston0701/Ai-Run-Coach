@@ -474,6 +474,20 @@ class RunTrackingService : Service(), SensorEventListener {
         // Coaching text broadcast to UI (set when coaching plays, cleared when audio finishes)
         private val _latestCoachingText = MutableStateFlow<String?>(null)
         val latestCoachingText: StateFlow<String?> = _latestCoachingText
+
+        // Route Memory Engine — emits (lat, lng) on the first GPS fix once a run is active.
+        // Observed by RunSessionViewModel to trigger route recognition asynchronously.
+        // Reset to null at the start of each new run.
+        private val _firstGpsPoint = MutableStateFlow<Pair<Double, Double>?>(null)
+        val firstGpsPoint: StateFlow<Pair<Double, Double>?> = _firstGpsPoint
+
+        /**
+         * Route intelligence context injected by [RunSessionViewModel] after a known route is matched.
+         * Picked up by the Service when building PaceUpdate requests for km-split coaching.
+         * Nullable — when null, standard coaching applies without route context.
+         */
+        @Volatile
+        var routeIntelligenceContext: live.airuncoach.airuncoach.network.model.RouteIntelligenceContext? = null
     }
 
     override fun onCreate() {
@@ -537,35 +551,41 @@ class RunTrackingService : Service(), SensorEventListener {
         // Initialise Garmin watch bridge — wraps ConnectIQ SDK, no-ops gracefully if unavailable
         try {
             garminWatchManager = GarminWatchManager(this)
-            garminWatchManager?.initialize()
-            garminWatchManager?.onWatchCommand = { action ->
-                Log.d("RunTrackingService", "Watch command received: $action")
-                when (action) {
-                    "start"      -> startForegroundService(Intent(this, RunTrackingService::class.java).apply { this.action = ACTION_START_TRACKING })
-                    "pause"      -> pauseTracking()
-                    "resume"     -> resumeTracking()
-                    "stop"       -> stopTracking()
-                    "watchReady" -> {
-                        // Push auth + current run state to watch now that it's ready
-                        serviceScope.launch {
-                            val token = sessionManager.getAuthToken()
-                    val name  = currentUser?.name ?: ""
-                    if (token != null) garminWatchManager?.sendAuth(token, name)
+            // Set up handlers BEFORE initialization to prevent race condition
+            // where SDK fires callbacks before handlers are assigned
+            garminWatchManager?.let { manager ->
+                manager.onWatchCommand = { action ->
+                    Log.d("RunTrackingService", "Watch command received: $action")
+                    when (action) {
+                        "start"      -> startForegroundService(Intent(this, RunTrackingService::class.java).apply { this.action = ACTION_START_TRACKING })
+                        "pause"      -> pauseTracking()
+                        "resume"     -> resumeTracking()
+                        "stop"       -> stopTracking()
+                        "watchReady" -> {
+                            // Push auth + current run state to watch now that it's ready
+                            serviceScope.launch {
+                                val token = sessionManager.getAuthToken()
+                                val name  = currentUser?.name ?: ""
+                                if (token != null) garminWatchManager?.sendAuth(token, name)
+                            }
                         }
                     }
                 }
-            }
+                
+                // Watch GPS stream — inject Garmin coordinates into the tracking pipeline.
+                // The watch enables its own GPS during phone-controlled runs and streams
+                // fixes every ~2 s.  These are preferred over phone GPS (3 m vs 10–25 m).
+                manager.onWatchGpsUpdate = { lat, lng, altM, speedMs ->
+                    injectWatchLocation(lat, lng, altM, speedMs)
+                }
 
-            // Watch GPS stream — inject Garmin coordinates into the tracking pipeline.
-            // The watch enables its own GPS during phone-controlled runs and streams
-            // fixes every ~2 s.  These are preferred over phone GPS (3 m vs 10–25 m).
-            garminWatchManager?.onWatchGpsUpdate = { lat, lng, altM, speedMs ->
-                injectWatchLocation(lat, lng, altM, speedMs)
-            }
-
-            // Full biometric frame from watch — 23+ metrics every ~2 s
-            garminWatchManager?.onWatchSensorData = { frame ->
-                updateWatchSensorData(frame)
+                // Full biometric frame from watch — 23+ metrics every ~2 s
+                manager.onWatchSensorData = { frame ->
+                    updateWatchSensorData(frame)
+                }
+                
+                // NOW initialize the SDK (after handlers are set up)
+                manager.initialize()
             }
         } catch (e: Exception) {
             Log.w("RunTrackingService", "GarminWatchManager init failed (non-fatal): ${e.message}")
@@ -716,6 +736,7 @@ class RunTrackingService : Service(), SensorEventListener {
         _currentRunSession.value = null  // Clear stale data from previous run
         _uploadComplete.value = null
         _isServiceRunning.value = true
+        _firstGpsPoint.value = null      // Reset route recognition for new run
         startTime = System.currentTimeMillis()
         lastSplitTime = startTime
         totalPausedMs = 0      // Reset pause tracking for new run
@@ -1711,7 +1732,11 @@ class RunTrackingService : Service(), SensorEventListener {
      * Called by [GarminWatchManager.onWatchGpsUpdate] during phone-controlled runs.
      */
     fun injectWatchLocation(lat: Double, lng: Double, altM: Double?, speedMs: Float?) {
-        if (!isTracking) return
+        // Guard: only process if run session is active and tracking
+        if (!isTracking || _currentRunSession.value == null) {
+            Log.d("RunTrackingService", "Ignoring watch GPS injection: isTracking=$isTracking, sessionExists=${_currentRunSession.value != null}")
+            return
+        }
         val loc = android.location.Location("garmin").apply {
             latitude  = lat
             longitude = lng
@@ -1736,7 +1761,11 @@ class RunTrackingService : Service(), SensorEventListener {
      * and queues a [WatchBiometricFrame] sample for storage in watch_biometric_samples.
      */
     private fun updateWatchSensorData(frame: WatchBiometricFrame) {
-        if (!isTracking) return
+        // Guard: only process if run session is active and tracking
+        if (!isTracking || _currentRunSession.value == null) {
+            Log.d("RunTrackingService", "Ignoring watch sensor data: isTracking=$isTracking, sessionExists=${_currentRunSession.value != null}")
+            return
+        }
 
         Log.d("RunTrackingService",
             "Watch frame: hr=${frame.heartRate} cad=${frame.cadence} " +
@@ -2000,7 +2029,12 @@ class RunTrackingService : Service(), SensorEventListener {
                 }
                 routePoints.add(newPoint)
                 if (location.speed > maxSpeed) maxSpeed = location.speed
-                
+
+                // Route Memory Engine — emit first GPS fix so ViewModel can call recognize-route
+                if (routePoints.size == 1 && _firstGpsPoint.value == null) {
+                    _firstGpsPoint.value = Pair(newPoint.latitude, newPoint.longitude)
+                }
+
                 updatePaceAndStruggle(smoothedPaceSeconds)
                 checkForKmSplit()
                 // Pace coaching — smart interval checks against target pace
@@ -2529,8 +2563,16 @@ class RunTrackingService : Service(), SensorEventListener {
         else null
 
         // Detect if run was completed on the Garmin watch (watch was connected)
+        // NOTE: Snapshot the state atomically to avoid TOCTOU race condition where watch disconnects between checks
         val isWatchRun = garminWatchManager?.isWatchConnected?.value == true
-        val deviceName = if (isWatchRun) garminWatchManager?.getConnectedDeviceName() else null
+        val deviceName = if (isWatchRun) {
+            try {
+                garminWatchManager?.getConnectedDeviceName()
+            } catch (e: Exception) {
+                Log.w("RunTrackingService", "Failed to get connected device name (watch may have disconnected): ${e.message}")
+                null
+            }
+        } else null
 
         val uploadRequest = UploadRunRequest(
             routeId = null, // TODO: Add if user selected a saved route
@@ -2753,11 +2795,16 @@ class RunTrackingService : Service(), SensorEventListener {
         CoachingAudioQueue.stopAll() // Stop any queued coaching audio
         _latestCoachingText.value = null
         // Notify watch the session has ended, then shut down ConnectIQ bridge
+        // NOTE: May race with ongoing upload, but sendSessionEnded() is idempotent
         try {
-            garminWatchManager?.sendSessionEnded()
+            if (garminWatchManager?.isWatchConnected?.value == true) {
+                Log.d("RunTrackingService", "Notifying watch of session end...")
+                garminWatchManager?.sendSessionEnded()
+            }
             garminWatchManager?.shutdown()
+            Log.d("RunTrackingService", "GarminWatchManager shutdown complete")
         } catch (e: Exception) {
-            Log.w("RunTrackingService", "GarminWatchManager shutdown: ${e.message}")
+            Log.w("RunTrackingService", "GarminWatchManager shutdown error (non-fatal): ${e.message}")
         }
         serviceScope.cancel()
         Log.d("RunTrackingService", "Service destroyed")
@@ -3526,7 +3573,10 @@ class RunTrackingService : Service(), SensorEventListener {
                     // ========== NEW: Session Coaching Context ==========
                     linkedWorkoutId = planWorkoutId,
                     sessionCoachingTone = sessionCoachingTone,
-                    currentSessionPhase = null  // Phase detection can be added later if needed
+                    currentSessionPhase = null,  // Phase detection can be added later if needed
+                    // ========== Route Memory Engine ==========
+                    routeIntelligence = routeIntelligenceContext,
+                    lastKmSplitSeconds = (split.time / 1000).toInt()
                 )
                 val response = apiService.getPaceUpdate(update)
                 coachingHistory.add(AiCoachingNote(

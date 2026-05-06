@@ -134,6 +134,7 @@ fun RunSessionScreen(
     val runState by viewModel.runState.collectAsState()
     val runSession by viewModel.runSession.collectAsState()
     val pendingSyncCount by viewModel.pendingSyncCount.collectAsState()
+    val knownRouteMatch by viewModel.knownRouteMatch.collectAsState()
 
     var showMap by remember { mutableStateOf(hasRoute) }
     var routePolyline by remember { mutableStateOf<String?>(null) }
@@ -180,7 +181,8 @@ fun RunSessionScreen(
             
             if (token.isNullOrBlank()) {
                 Log.e("RunSessionScreen", "❌ No auth token found - user must login before running")
-                // Clear everything and navigate back (the navigation will eventually reach login)
+                // Cancel any setup and navigate back
+                viewModel.cancelRunSetup()
                 onCancel()
                 return@LaunchedEffect
             }
@@ -192,6 +194,8 @@ fun RunSessionScreen(
             viewModel.validateAuthToken()
         } catch (e: Exception) {
             Log.e("RunSessionScreen", "❌ Auth validation failed: ${e.message} - aborting run start")
+            // Cancel any setup and navigate back
+            viewModel.cancelRunSetup()
             onCancel()
             return@LaunchedEffect
         }
@@ -306,6 +310,30 @@ fun RunSessionScreen(
                         pendingCount = pendingSyncCount,
                         isSyncing = runState.isStopping
                     )
+                }
+            }
+
+            item {
+                // ── Route Memory Engine Banner ──────────────────────────────────────────
+                // Shown for ~10 seconds when a known route is detected at run start.
+                // Fades in with route name, confidence, PB and last run time.
+                AnimatedVisibility(
+                    visible = knownRouteMatch != null && knownRouteMatch!!.matched && runState.isRunning,
+                    enter = fadeIn(tween(600)) + expandVertically(tween(600)),
+                    exit = fadeOut(tween(800)) + shrinkVertically(tween(800))
+                ) {
+                    knownRouteMatch?.let { match ->
+                        RouteRecognitionBanner(
+                            routeName = match.knownRoute?.name ?: "Known Route",
+                            confidence = match.confidence,
+                            confidenceLabel = match.confidenceLabel,
+                            personalBest = match.routeIntelligence?.personalBest?.formatted,
+                            lastRun = match.routeIntelligence?.lastRunStats?.let {
+                                "${it.formatted} (${it.date})"
+                            },
+                            modifier = Modifier.padding(horizontal = Spacing.md).padding(bottom = Spacing.sm)
+                        )
+                    }
                 }
             }
 
@@ -1340,6 +1368,110 @@ fun MetricRing(
 
 
 
+
+/* =====================================================================================
+   ROUTE RECOGNITION BANNER
+   Shown at run start when a known recurring route is detected.
+   Displays route name, confidence, PB and last run time.
+===================================================================================== */
+
+@Composable
+fun RouteRecognitionBanner(
+    routeName: String,
+    confidence: Double,
+    confidenceLabel: String,
+    personalBest: String?,
+    lastRun: String?,
+    modifier: Modifier = Modifier
+) {
+    val confidencePct = (confidence * 100).toInt()
+    val accentColor = when (confidenceLabel) {
+        "certain"   -> Color(0xFF00E676)  // Green
+        "confident" -> Color(0xFF69F0AE)  // Light green
+        else        -> Color(0xFFFFD740)  // Amber for tentative
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.horizontalGradient(
+                    listOf(Color(0xFF1A2340), Color(0xFF0D1A2E))
+                )
+            )
+            .drawBehind {
+                // Subtle left accent line
+                drawRect(
+                    color = accentColor,
+                    topLeft = Offset(0f, 0f),
+                    size = Size(4.dp.toPx(), size.height)
+                )
+            }
+            .padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("📍", fontSize = 22.sp, modifier = Modifier.padding(end = 10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = routeName,
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    // Confidence badge
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(accentColor.copy(alpha = 0.2f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "$confidencePct%",
+                            color = accentColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Row {
+                    if (personalBest != null) {
+                        Text(
+                            text = "PB $personalBest",
+                            color = Color(0xFF69F0AE),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    if (personalBest != null && lastRun != null) {
+                        Text(
+                            text = "  ·  ",
+                            color = Color.White.copy(alpha = 0.4f),
+                            fontSize = 12.sp
+                        )
+                    }
+                    if (lastRun != null) {
+                        Text(
+                            text = "Last: $lastRun",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 12.sp
+                        )
+                    }
+                    if (personalBest == null && lastRun == null) {
+                        Text(
+                            text = "Route recognised — split coaching active",
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
 
 /* =====================================================================================
    AI PANEL (shows only while speaking/loading, disappears when latestCoachMessage=null)

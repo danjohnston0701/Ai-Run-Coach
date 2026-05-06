@@ -96,6 +96,96 @@ class RunSessionViewModel @Inject constructor(
     private val _runState = MutableStateFlow(RunState())
     val runState: StateFlow<RunState> = _runState.asStateFlow()
 
+    // ── Route Memory Engine ───────────────────────────────────────────────────
+    /**
+     * Populated asynchronously when the first GPS fix is obtained at run start
+     * and the backend returns a match with confidence ≥ 40%.
+     * Observed by RunSessionScreen to show the route recognition banner and drive
+     * richer split coaching via [routeIntelligenceContext].
+     */
+    private val _knownRouteMatch =
+        MutableStateFlow<live.airuncoach.airuncoach.network.model.RouteRecognitionResponse?>(null)
+    val knownRouteMatch: StateFlow<live.airuncoach.airuncoach.network.model.RouteRecognitionResponse?> =
+        _knownRouteMatch.asStateFlow()
+
+    /**
+     * Distilled context for injection into every PaceUpdate API call once a known route is matched.
+     * Built once from [knownRouteMatch] and carried for the duration of the run.
+     */
+    var routeIntelligenceContext: live.airuncoach.airuncoach.network.model.RouteIntelligenceContext? = null
+        private set
+
+    /** Intended distance for the upcoming run — used as a hint for route recognition. */
+    var intendedDistanceKm: Double? = null
+
+    init {
+        // Observe the first GPS fix from RunTrackingService and trigger route recognition
+        viewModelScope.launch {
+            RunTrackingService.firstGpsPoint.collect { gpsPoint ->
+                if (gpsPoint != null && _knownRouteMatch.value == null) {
+                    checkForKnownRoute(gpsPoint.first, gpsPoint.second)
+                }
+            }
+        }
+    }
+
+    /**
+     * Called when the first GPS fix arrives during an active run.
+     * Calls the backend asynchronously — never blocks the run start.
+     * On match, populates [knownRouteMatch] and [routeIntelligenceContext].
+     */
+    private fun checkForKnownRoute(lat: Double, lng: Double) {
+        viewModelScope.launch {
+            try {
+                Log.d("RouteMemory", "Checking route recognition at ($lat, $lng)...")
+                val response = apiService.recognizeRoute(
+                    live.airuncoach.airuncoach.network.model.RouteRecognitionRequest(
+                        latitude = lat,
+                        longitude = lng,
+                        timestamp = System.currentTimeMillis(),
+                        intendedDistanceKm = intendedDistanceKm
+                    )
+                )
+                if (response.matched) {
+                    _knownRouteMatch.value = response
+                    // Build the route intelligence context for injection into pace updates
+                    routeIntelligenceContext = buildRouteIntelligenceContext(response)
+                    // Push into Service companion so km-split coaching can use it immediately
+                    RunTrackingService.routeIntelligenceContext = routeIntelligenceContext
+                    Log.d("RouteMemory", "Route matched: ${response.knownRoute?.name} (${(response.confidence * 100).toInt()}%)")
+                } else {
+                    Log.d("RouteMemory", "No route match (confidence ${(response.confidence * 100).toInt()}%)")
+                }
+            } catch (e: Exception) {
+                // Intentionally silent — route recognition failure never affects the run
+                Log.w("RouteMemory", "Route recognition failed (non-fatal): ${e.message}")
+            }
+        }
+    }
+
+    private fun buildRouteIntelligenceContext(
+        response: live.airuncoach.airuncoach.network.model.RouteRecognitionResponse
+    ): live.airuncoach.airuncoach.network.model.RouteIntelligenceContext? {
+        val route = response.knownRoute ?: return null
+        val intel = response.routeIntelligence ?: return null
+        return live.airuncoach.airuncoach.network.model.RouteIntelligenceContext(
+            routeName = route.name,
+            confidence = response.confidence,
+            personalBestFormatted = intel.personalBest?.formatted,
+            lastRunFormatted = intel.lastRunStats?.formatted,
+            lastRunDate = intel.lastRunStats?.date,
+            splitComparisons = intel.averageSplits.map { cmp ->
+                live.airuncoach.airuncoach.network.model.SplitComparisonContext(
+                    km = cmp.km,
+                    lastRunSecPerKm = cmp.lastRunSecPerKm,
+                    avgSecPerKm = cmp.avgSecPerKm
+                )
+            },
+            notableSegments = route.notableSegments,
+            typicalDistanceKm = route.typicalDistanceKm
+        )
+    }
+
     // ── Garmin watch companion ────────────────────────────────────────────────
     /** True when the AI Run Coach app is confirmed installed on the paired watch. */
     val isWatchCompanionInstalled: StateFlow<Boolean> =
@@ -860,6 +950,11 @@ class RunSessionViewModel @Inject constructor(
     }
 
     fun startRun() {
+        // Reset route recognition state for this new run
+        _knownRouteMatch.value = null
+        routeIntelligenceContext = null
+        RunTrackingService.routeIntelligenceContext = null
+
         // Only clear coach state if no briefing audio is currently playing
         // This allows the pre-run briefing to finish naturally if still playing
         // But prevents any new coaching triggers when starting the run

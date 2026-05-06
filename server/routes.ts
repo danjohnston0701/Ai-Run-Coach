@@ -75,6 +75,7 @@ import myDataRouter from "./routes-my-data";
 import achievementsRouter from "./routes-achievements";
 import realtimeCoachingRouter from "./real-time-coaching-integration";
 import { registerSessionCoachingRoutes } from "./routes-session-coaching";
+import { recognizeRoute, updateKnownRoutes } from "./route-recognition-service";
 import { registerSamsungCompanionRoutes } from "./routes-samsung-companion";
 import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-resolver";
 import {
@@ -1420,10 +1421,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })();
       });
 
+      // Route Memory Engine — update/create known route fingerprint (non-blocking)
+      setImmediate(() => {
+        (async () => {
+          try {
+            if (run.startLat && run.startLng) {
+              await updateKnownRoutes(userId, {
+                id: run.id,
+                startLat: run.startLat,
+                startLng: run.startLng,
+                distance: run.distance,
+                duration: run.duration,
+                completedAt: run.completedAt ?? new Date(),
+                kmSplits: run.kmSplits,
+                gpsTrack: run.gpsTrack,
+                terrainType: run.terrainType ?? null,
+              });
+            }
+          } catch (err) {
+            console.error("[RouteMemory] updateKnownRoutes failed (non-fatal):", err);
+          }
+        })();
+      });
+
       res.status(201).json(run);
     } catch (error: any) {
       console.error("Create run error:", error);
       res.status(500).json({ error: "Failed to create run" });
+    }
+  });
+
+  // ─── Route Memory Engine ──────────────────────────────────────────────────────
+  // POST /api/runs/recognize-route
+  // Called by the Android app when the first stable GPS fix is received at run start.
+  // Returns a Route Intelligence Packet if a known recurring route is matched.
+  // Non-blocking — any failure falls back to standard coaching gracefully.
+  app.post("/api/runs/recognize-route", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const { latitude, longitude, timestamp, intendedDistanceKm } = req.body;
+
+      if (typeof latitude !== "number" || typeof longitude !== "number") {
+        return res.status(400).json({ error: "latitude and longitude are required numbers" });
+      }
+
+      const ts = timestamp ? new Date(timestamp) : new Date();
+      const result = await recognizeRoute(userId, latitude, longitude, ts, intendedDistanceKm ?? undefined);
+      res.json(result);
+    } catch (error: any) {
+      console.error("[Route Recognition] Error:", error?.message ?? error);
+      // Return a safe no-match response so the client never gets a hard error
+      res.json({ matched: false, confidence: 0, confidenceLabel: "none", knownRoute: null, routeIntelligence: null, confidenceBreakdown: null });
+    }
+  });
+
+  // GET /api/runs/known-routes — returns all known routes for the authenticated user
+  app.get("/api/runs/known-routes", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const { knownRoutes: knownRoutesTable } = await import("../shared/schema");
+      const { eq: eqFn } = await import("drizzle-orm");
+      const routes = await db.select().from(knownRoutesTable).where(eqFn(knownRoutesTable.userId, userId));
+      res.json(routes);
+    } catch (error: any) {
+      console.error("[Known Routes] Error:", error?.message ?? error);
+      res.status(500).json({ error: "Failed to fetch known routes" });
     }
   });
 
