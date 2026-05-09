@@ -435,69 +435,39 @@ DO NOT treat the absence of run data as evidence of low fitness. Instead:
 - Focus on race-pace conditioning, sharpening speed, and taper strategy
 - Do NOT include baseline-building or "establish current fitness" sessions — they are already fit
 - Use their stated fitness level (${experienceLevel}) and target time (if provided) to set all paces` : (() => {
-  // Determine how conservative to be based on stated fitness level.
-  // "New to app" does NOT mean "new to running" — a Committed or Competitive runner
-  // who just downloaded the app should NOT receive a beginner plan.
-  const level = (experienceLevel || '').toLowerCase();
-  const isExperiencedLevel = ['committed', 'competitive', 'advanced', 'elite', 'professional'].some(l => level.includes(l));
-  const isIntermediateLevel = ['regular', 'intermediate'].some(l => level.includes(l));
+  const isLongDistanceGoal = targetDistance > 10 || ['ultra', 'marathon', 'half_marathon', '10k'].includes(goalType);
 
-  if (isExperiencedLevel) {
-    return `IMPORTANT: This runner has NO previous run data recorded in this app — they are a NEW USER to this app only.
-Their self-assessed fitness level is "${experienceLevel}" which indicates they are an experienced, active runner.
-DO NOT treat the absence of run data as evidence of low fitness — they simply haven't synced runs yet.
-Instead:
-- Trust their stated fitness level (${experienceLevel}) and design a plan appropriate for that level
-- Start at a training volume consistent with an experienced ${experienceLevel} runner: ~${Math.round(weeklyMileageBase * 1.2)}–${Math.round(weeklyMileageBase * 1.5)}km/week
-- Include structured sessions (tempo, intervals, long runs) from week 1 — do NOT spend weeks on "easy base-building only"
-- Use their target time (if provided) or estimate reasonable goal paces for a ${experienceLevel} runner at this distance`;
-  } else if (isIntermediateLevel) {
-    return `IMPORTANT: This runner has NO previous run data recorded in this app — they are a NEW USER to this app only.
-Their self-assessed fitness level is "${experienceLevel}" — a regular recreational runner with an established habit.
-Start at a moderate, consistent training volume (~${Math.round(weeklyMileageBase)}km/week) appropriate for a ${experienceLevel} runner.
-Introduce structured sessions from week 2 onwards. Week 1 can be used to establish rhythm, but do NOT default to beginner-level distances.`;
+  if (isLongDistanceGoal) {
+    // For any goal over 10km, build the optimal plan for the goal — fitness level informs PACE only.
+    // Anyone targeting >10km is not a beginner runner. The adaptive coaching system handles
+    // session-level pullbacks if the runner struggles in practice.
+    return `IMPORTANT: This runner has NO previous run data recorded in this app — they are NEW to this app only.
+Build the OPTIMAL plan for this ${targetDistance}km goal. Key principle: fitness level (${experienceLevel}) informs training PACES and session intensity only — it does NOT cap session distances or weekly volume.
+- Session distances and weekly volume must be built to genuinely achieve the ${targetDistance}km goal within ${weeksUntilTarget} weeks — do NOT water down distances based on fitness level
+- Start at ~${Math.round(weeklyMileageBase)}km/week and build to meet the event requirements
+- Paces: estimate appropriate training paces for a ${experienceLevel} runner — adjust effort levels to match the stated level, but keep distances true to the goal
+- The adaptive coaching system will adjust individual sessions based on actual performance — build the plan for the goal, not a conservative version of it`;
   } else {
-    const isUltraOrLong = goalType === 'ultra' || targetDistance > 42.2;
-    if (isUltraOrLong) {
-      return `IMPORTANT: This runner has NO previous run data recorded in this app — they may be new to running or simply new to this app.
-Their self-assessed fitness level is "${experienceLevel}" — a less experienced runner setting an ambitious ultra/long-distance goal.
-This is a challenging combination. Apply the following approach:
-- Distances and long runs MUST follow the ULTRA LONG-DISTANCE TRAINING REQUIREMENTS below — the event distance is the priority constraint, not the fitness level
-- Intensity and pace: be conservative — keep easy runs genuinely easy, avoid aggressive speed work early
-- Recovery: build in more rest/easy days than you would for a higher-fitness runner
-- Session descriptions should acknowledge the ambitious nature of this goal and encourage the runner to listen to their body
-- Start at ~${Math.round(weeklyMileageBase)}km/week and build as directed by the ultra requirements below`;
-    }
-    return `IMPORTANT: This runner has NO previous run data recorded in this app — they may be new to running or simply new to this app.
-Their self-assessed fitness level is "${experienceLevel}". We will use this alongside their profile to estimate baseline pace and mileage.
-Start conservatively and include easier runs in the first week to allow calibration.
-Then build progressively through the plan.`;
+    // For ≤10km goals, fitness level can influence starting volume as well as paces
+    return `IMPORTANT: This runner has NO previous run data recorded in this app.
+Use their stated fitness level (${experienceLevel}) and the ${weeklyMileageBase.toFixed(0)}km/week baseline to set appropriate starting volume and paces.
+Build progressively toward the ${targetDistance}km goal.`;
   }
 })()}
 `;
 
     // Generate plan with OpenAI
-    // Determine if this is a high-risk combination: lower fitness + long distance + short duration
-    const normalizedLevelForRisk = (experienceLevel || '').toLowerCase();
-    const isLowerFitnessLevel = ['newcomer', 'beginner', 'casual'].some(l => normalizedLevelForRisk.includes(l));
-    const isLongEventDistance = goalType === 'ultra' || goalType === 'marathon' || targetDistance > 30;
-    const defaultPlanDuration = getPlanDuration(goalType, experienceLevel);
-    const isSignificantlyUnderduration = weeksUntilTarget < defaultPlanDuration * 0.6;
-    const isAmbitiousCombination = isLowerFitnessLevel && isLongEventDistance && !isPreEventPlan;
-
     const prompt = `You are an expert running coach. Generate a tailored ${weeksUntilTarget}-week training plan for a ${experienceLevel} runner preparing for a ${goalType} (${targetDistance}km).
 ${isPreEventPlan ? `
 ⚡ PRE-EVENT SHARPENING PLAN: This is NOT a build-up plan. The runner is already capable of the event distance and has ${weeksUntilTarget} weeks until race day. Design a race-preparation block: race-pace work, taper, confidence sessions. Do NOT start conservatively or include baseline-building runs.
 ` : ''}
-${isAmbitiousCombination ? `
-⚠️ COACH ADVISORY — AMBITIOUS GOAL COMBINATION:
-This runner has self-assessed as "${experienceLevel}" (less experienced) but is targeting a ${targetDistance}km event over ${weeksUntilTarget} weeks.${isSignificantlyUnderduration ? ` The recommended duration for this goal is ${defaultPlanDuration} weeks — this plan is ${defaultPlanDuration - weeksUntilTarget} weeks shorter than recommended.` : ''}
-Your responsibilities as coach:
-- Generate the plan as requested — the runner has chosen this goal
-- Include genuine safety cues in session descriptions: warn about injury risk from rapid volume increases, encourage listening to the body, flag the importance of rest days
-- Be honest in the coachingProgrammeSummary comment about the challenge of this combination
-- Prioritise injury prevention and consistent training over hitting arbitrary pace targets
-- Despite the lower fitness level, session distances MUST still follow the event-specific requirements below — watering down distances to "beginner" levels would not prepare them for the event
+${targetDistance > 10 ? `
+COACHING PHILOSOPHY FOR THIS PLAN:
+Build the optimal plan to achieve the goal. The runner has chosen this goal — honour it with a realistic, well-structured plan that gives them the best chance of success.
+- Fitness level (${experienceLevel}) informs training paces and effort levels only — it does NOT reduce session distances or weekly volume targets
+- Anyone targeting >10km is a distance runner — build the plan accordingly
+- If the runner struggles with sessions in practice, the adaptive coaching system will adjust individual sessions based on their real performance data
+- Your job here is to build the best possible plan for the goal, not a pre-emptively watered-down version
 ` : ''}
 ${runnerProfileSection}
 
@@ -653,24 +623,23 @@ Requirements:
 4. Follow 80/20 rule (80% easy effort, 20% quality/hard sessions)
 5. ${isPreEventPlan
   ? `Race-sharpening structure: emphasise race pace, speed, and confidence. Taper the final ${Math.min(2, Math.floor(weeksUntilTarget / 2))} week(s) for peak performance.`
-  : `Build for 3 weeks, recover 1 week pattern`}
+  : `Build for 3 weeks (up to 20% volume increase each build week), recover 1 week (reduce volume by ~20%)`}
 6. Taper for final ${isPreEventPlan ? Math.min(2, Math.floor(weeksUntilTarget / 2)) : 2} week(s) before race
 7. ${isPreEventPlan
-  ? `Maintain current fitness volume — no need to cap volume increases at 10% since this is not a build-up plan`
+  ? `Maintain current fitness volume — this is a pre-race block, not a build-up plan`
   : (goalType === 'ultra' || targetDistance > 42.2)
     ? (() => {
-        // Check whether 10%/week from the base can realistically reach the required ultra peak volume
-        // within the available build weeks (total weeks minus 2 taper weeks)
+        // Check whether 20%/week from the base can realistically reach the required ultra peak volume
         const buildWeeks = Math.max(weeksUntilTarget - 2, 1);
-        const projectedPeakAtTenPct = weeklyMileageBase * Math.pow(1.1, buildWeeks);
+        const projectedPeakAt20Pct = weeklyMileageBase * Math.pow(1.2, buildWeeks);
         const requiredPeak = targetDistance * 1.6;
         const rateNeeded = Math.pow(requiredPeak / weeklyMileageBase, 1 / buildWeeks) - 1;
-        if (projectedPeakAtTenPct < requiredPeak) {
-          return `Weekly volume must reach ${Math.round(requiredPeak)}–${Math.round(targetDistance * 2.0)}km/week at peak (starting from ${weeklyMileageBase.toFixed(0)}km/week over ${buildWeeks} build weeks). This requires approximately ${Math.round(rateNeeded * 100)}%/week average growth — higher than the standard 10% guideline. Use a 3-weeks-build / 1-week-recovery pattern but increase build weeks at ~${Math.round(rateNeeded * 100)}% to hit the required peak. LONG RUN DISTANCES must follow the ULTRA LONG RUN TARGETS above — do not cap them at arbitrary small values.`;
+        if (projectedPeakAt20Pct < requiredPeak) {
+          return `Weekly volume must reach ${Math.round(requiredPeak)}–${Math.round(targetDistance * 2.0)}km/week at peak (from ${weeklyMileageBase.toFixed(0)}km/week over ${buildWeeks} build weeks — ~${Math.round(rateNeeded * 100)}%/week average growth required). Use 3-week build / 1-week recovery pattern. LONG RUN DISTANCES must follow the ULTRA LONG RUN TARGETS above.`;
         }
-        return `Increase weekly volume by max 10% per week — but CRITICALLY: your long runs must follow the ULTRA LONG RUN TARGETS above. Do NOT let the 10% rule prevent long runs from reaching the required peak of ${Math.round(targetDistance * 0.55)}–${Math.round(targetDistance * 0.65)}km.`;
+        return `Increase weekly volume by up to 20% per week — LONG RUN DISTANCES must follow the ULTRA LONG RUN TARGETS above. Do NOT let the volume rule prevent long runs from reaching the required peak of ${Math.round(targetDistance * 0.55)}–${Math.round(targetDistance * 0.65)}km.`;
       })()
-    : `Increase weekly volume by max 10% per week`}
+    : `Increase weekly volume by up to 20% per week`}
 8. Reference the runner's current performance AND goal in workout descriptions (e.g. "your current 5km is around ${avgTimeAtGoalDistanceStr || 'estimated from pace data'}. Today's tempo at [X:XX/km] is building your lactate threshold toward your [goal time] goal")
 
 Return JSON with this exact structure (distances shown below are ILLUSTRATIVE FORMAT EXAMPLES ONLY for a 5k plan — your actual distances MUST reflect the goal event of ${targetDistance}km and the requirements above):
@@ -744,11 +713,11 @@ COACHING PROGRAMME SUMMARY REQUIREMENTS:
 - keyMetrics.focusAreas: Array of 3-4 focus areas for this specific runner (e.g. "build aerobic base", "improve speed", "injury prevention")
 
 If runner has NO previous runs:
-- aiDeterminedFitnessLevel: base on their stated fitness level (${experienceLevel}) first — only be conservative if the stated level is Newcomer/Beginner/Casual. For Committed/Competitive/Advanced/Elite/Professional, reflect their stated level accurately.
-- comment: "No previous running history recorded. Starting from estimated baseline for their fitness level and goal event."
-- estimatedAveragePace: estimate based on their profile metrics and goal event
-- estimatedWeeklyMileage: appropriate starting volume for their goal event — for ultra/long distance events this must be ${goalType === 'ultra' || targetDistance > 42.2 ? `at least ${Math.round(weeklyMileageBase)}km/week` : 'proportional to the event'}, NOT a generic beginner road-running volume
-- focusAreas: should reflect the actual event demands — for ultra include "build time-on-feet", "back-to-back long runs", "fatigue resistance"`;
+- aiDeterminedFitnessLevel: use their stated fitness level (${experienceLevel}) as the primary signal. For goals over 10km, treat them as a distance runner — not a beginner.
+- comment: Summarise what this runner is working toward and how the plan is structured for their goal. For >10km goals, do NOT default to "starting conservatively" language — acknowledge the goal and how the plan will build toward it.
+- estimatedAveragePace: estimate appropriate training paces for a ${experienceLevel} runner at this distance
+- estimatedWeeklyMileage: the weekly volume this plan builds toward at peak — must be proportional to the event (not a generic low starting point)
+- focusAreas: reflect the actual event demands and the runner's fitness level — for ultra include "build time-on-feet", "back-to-back long runs", "fatigue resistance"`;
 
     // Fetch AI runner profile for richer personalisation
     const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
