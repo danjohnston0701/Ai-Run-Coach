@@ -192,7 +192,7 @@ fun GeneratePlanScreen(
                     Spacer(modifier = Modifier.height(Spacing.sm))
 
                     // Show a "Recommended" nudge for distance events — target time unlocks full pace prescription
-                    val isDistanceEvent = goalType in listOf("half_marathon", "marathon", "10k", "ultra")
+                    val isDistanceEvent = goalType in listOf("half_marathon", "marathon", "10k", "ultra") || isUltraDistance || isMarathonDistance || isHalfMarathonDistance
                     if (isDistanceEvent && !hasTimeGoal) {
                         Card(
                             modifier = Modifier
@@ -382,27 +382,34 @@ fun GeneratePlanScreen(
 
                     Spacer(modifier = Modifier.height(Spacing.lg))
 
-                    // Programme duration — min and max adapt to the goal type
-                    val minWeeks = when (goalType) {
-                        "5k" -> 2
-                        "10k" -> 2
-                        "half_marathon" -> 4
-                        "marathon" -> 4
-                        "ultra" -> 8
+                    // Programme duration — min and max adapt to the goal type.
+                    // For custom distances, also check the entered km value so a 50km custom entry
+                    // gets ultra-appropriate bounds, not generic ones.
+                    val customDistanceKm = if (goalType == "custom") targetDistance.toDoubleOrNull() ?: 0.0 else 0.0
+                    val isUltraDistance = goalType == "ultra" || (goalType == "custom" && customDistanceKm > 42.2)
+                    val isMarathonDistance = goalType == "marathon" || (goalType == "custom" && customDistanceKm in 40.0..42.2)
+                    val isHalfMarathonDistance = goalType == "half_marathon" || (goalType == "custom" && customDistanceKm in 18.0..22.0)
+
+                    val minWeeks = when {
+                        isUltraDistance -> 8
+                        goalType == "marathon" || isMarathonDistance -> 4
+                        goalType == "half_marathon" || isHalfMarathonDistance -> 4
+                        goalType == "10k" -> 2
+                        goalType == "5k" -> 2
                         else -> 2
                     }
-                    val maxWeeks = when (goalType) {
-                        "ultra" -> 24
+                    val maxWeeks = when {
+                        isUltraDistance -> 24
                         else -> 20
                     }
                     // Recommended minimum for a full build-up plan (used to show the pre-event nudge)
-                    val recommendedMinWeeks = when (goalType) {
-                        "5k" -> 6
-                        "10k" -> 8
-                        "half_marathon" -> 10
-                        "marathon" -> 14
-                        "ultra" -> 16
-                        else -> 6
+                    val recommendedMinWeeks = when {
+                        isUltraDistance -> 16
+                        goalType == "marathon" || isMarathonDistance -> 14
+                        goalType == "half_marathon" || isHalfMarathonDistance -> 10
+                        goalType == "10k" -> 8
+                        goalType == "5k" -> 6
+                        else -> if (customDistanceKm > 0) (customDistanceKm / 3).toInt().coerceIn(4, 16) else 6
                     }
 
                     Text("Programme length: $durationWeeks weeks", style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium), color = Colors.textPrimary)
@@ -419,8 +426,9 @@ fun GeneratePlanScreen(
                         Text("$maxWeeks weeks", style = AppTextStyles.small, color = Colors.textMuted)
                     }
 
-                    // Pre-event intent question — shown when duration is shorter than recommended build-up
-                    val showPreEventQuestion = goalType in listOf("half_marathon", "marathon", "10k", "5k", "ultra") &&
+                    // Pre-event intent question — shown when duration is shorter than recommended build-up.
+                    // Also fires for custom distances that are effectively ultra/marathon-scale.
+                    val showPreEventQuestion = (goalType in listOf("half_marathon", "marathon", "10k", "5k", "ultra") || isUltraDistance || isMarathonDistance) &&
                         durationWeeks < recommendedMinWeeks
                     AnimatedVisibility(visible = showPreEventQuestion) {
                         Column {
@@ -453,11 +461,14 @@ fun GeneratePlanScreen(
                                     Spacer(modifier = Modifier.height(Spacing.sm))
                                     Text(
                                         "$durationWeeks weeks is shorter than the recommended build-up for a ${
-                                            when (goalType) {
-                                                "half_marathon" -> "half marathon"
-                                                "marathon" -> "marathon"
-                                                "ultra" -> "ultra marathon"
-                                                "10k" -> "10K"
+                                            when {
+                                                isUltraDistance -> "ultra / long distance event"
+                                                isMarathonDistance -> "marathon"
+                                                isHalfMarathonDistance -> "half marathon"
+                                                goalType == "ultra" -> "ultra marathon"
+                                                goalType == "marathon" -> "marathon"
+                                                goalType == "half_marathon" -> "half marathon"
+                                                goalType == "10k" -> "10K"
                                                 else -> "5K"
                                             }
                                         }. Is this a pre-race sharpening block, or are you building up from scratch?",

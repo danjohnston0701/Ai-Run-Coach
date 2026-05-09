@@ -434,10 +434,35 @@ DO NOT treat the absence of run data as evidence of low fitness. Instead:
 - Start at full training volume appropriate for their stated fitness level (${experienceLevel})
 - Focus on race-pace conditioning, sharpening speed, and taper strategy
 - Do NOT include baseline-building or "establish current fitness" sessions — they are already fit
-- Use their stated fitness level (${experienceLevel}) and target time (if provided) to set all paces` : `IMPORTANT: This runner has NO previous run data recorded in this app — they may be new to running or simply new to this app.
-We will use their stated fitness level (${experienceLevel}) to estimate baseline pace and mileage.
-Create a plan that starts conservatively and includes easier runs in the first week to allow the AI to calibrate to their fitness.
-Then build progressively through the plan.`}
+- Use their stated fitness level (${experienceLevel}) and target time (if provided) to set all paces` : (() => {
+  // Determine how conservative to be based on stated fitness level.
+  // "New to app" does NOT mean "new to running" — a Committed or Competitive runner
+  // who just downloaded the app should NOT receive a beginner plan.
+  const level = (experienceLevel || '').toLowerCase();
+  const isExperiencedLevel = ['committed', 'competitive', 'advanced', 'elite', 'professional'].some(l => level.includes(l));
+  const isIntermediateLevel = ['regular', 'intermediate'].some(l => level.includes(l));
+
+  if (isExperiencedLevel) {
+    return `IMPORTANT: This runner has NO previous run data recorded in this app — they are a NEW USER to this app only.
+Their self-assessed fitness level is "${experienceLevel}" which indicates they are an experienced, active runner.
+DO NOT treat the absence of run data as evidence of low fitness — they simply haven't synced runs yet.
+Instead:
+- Trust their stated fitness level (${experienceLevel}) and design a plan appropriate for that level
+- Start at a training volume consistent with an experienced ${experienceLevel} runner: ~${Math.round(weeklyMileageBase * 1.2)}–${Math.round(weeklyMileageBase * 1.5)}km/week
+- Include structured sessions (tempo, intervals, long runs) from week 1 — do NOT spend weeks on "easy base-building only"
+- Use their target time (if provided) or estimate reasonable goal paces for a ${experienceLevel} runner at this distance`;
+  } else if (isIntermediateLevel) {
+    return `IMPORTANT: This runner has NO previous run data recorded in this app — they are a NEW USER to this app only.
+Their self-assessed fitness level is "${experienceLevel}" — a regular recreational runner with an established habit.
+Start at a moderate, consistent training volume (~${Math.round(weeklyMileageBase)}km/week) appropriate for a ${experienceLevel} runner.
+Introduce structured sessions from week 2 onwards. Week 1 can be used to establish rhythm, but do NOT default to beginner-level distances.`;
+  } else {
+    return `IMPORTANT: This runner has NO previous run data recorded in this app — they may be new to running or simply new to this app.
+Their self-assessed fitness level is "${experienceLevel}". We will use this alongside their profile to estimate baseline pace and mileage.
+Start conservatively and include easier runs in the first week to allow calibration.
+Then build progressively through the plan.`;
+  }
+})()}
 `;
 
     // Generate plan with OpenAI
@@ -670,7 +695,7 @@ COACHING PROGRAMME SUMMARY REQUIREMENTS:
 - keyMetrics.focusAreas: Array of 3-4 focus areas for this specific runner (e.g. "build aerobic base", "improve speed", "injury prevention")
 
 If runner has NO previous runs:
-- aiDeterminedFitnessLevel: base on their age, height, weight, BMI and stated level - be conservative
+- aiDeterminedFitnessLevel: base on their stated fitness level (${experienceLevel}) first — only be conservative if the stated level is Newcomer/Beginner/Casual. For Committed/Competitive/Advanced/Elite/Professional, reflect their stated level accurately.
 - comment: "No previous running history recorded. Starting from estimated baseline for their fitness level and goal event."
 - estimatedAveragePace: estimate based on their profile metrics and goal event
 - estimatedWeeklyMileage: appropriate starting volume for their goal event — for ultra/long distance events this must be ${goalType === 'ultra' || targetDistance > 42.2 ? `at least ${Math.round(weeklyMileageBase)}km/week` : 'proportional to the event'}, NOT a generic beginner road-running volume
