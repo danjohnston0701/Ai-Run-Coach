@@ -209,14 +209,59 @@ function isBrowserRequest(req: Request): boolean {
   const platform = req.header("expo-platform");
   if (platform) return false;
 
+  const ua = (req.header("user-agent") || "").toLowerCase();
+  
+  // Mobile app indicators — if present, it's definitely NOT a browser
+  if (ua.includes("okhttp") || ua.includes("expo") || ua.includes("react-native")) {
+    return false;
+  }
+  
+  // iOS WebView used by native apps contains these patterns
+  // If it has iPhone/iPad/iOS but NOT a specific browser (like Safari with version info typical of desktop)
+  // it's likely a native app WebView, not a browser
+  if (ua.includes("iphone") || ua.includes("ipad") || ua.includes("ipod")) {
+    // Native iOS apps wrapped in WebView typically have "AppleWebKit" but minimal version strings
+    // Real Safari browsers have detailed version strings like "Version/14.1.1"
+    // If it doesn't look like a full Safari browser UA, it's a native app
+    if (!ua.includes("version/") || ua.includes("mobile")) {
+      // Mobile Safari always includes "Mobile", but we need to be careful
+      // Check if this looks like a real browser by looking at structure
+      if (!ua.match(/version\/[\d.]+.*safari/)) {
+        return false; // Likely a native app
+      }
+    }
+  }
+
   const accept = req.header("accept") || "";
+  // If explicitly requesting JSON, it's an API client not a browser
+  if (accept.includes("application/json")) return false;
+  // If explicitly requesting HTML, it's a browser
   if (accept.includes("text/html")) return true;
 
-  const ua = (req.header("user-agent") || "").toLowerCase();
-  if (ua.includes("mozilla") || ua.includes("chrome") || ua.includes("safari") || ua.includes("firefox") || ua.includes("edge")) {
-    if (!ua.includes("okhttp") && !ua.includes("expo") && !ua.includes("react-native")) {
+  // For browsers, check typical browser user agents
+  // But exclude mobile Safari patterns unless they look like actual desktop Safari
+  if (ua.includes("firefox") || ua.includes("edge") || ua.includes("chrome")) {
+    // These are less ambiguous — if it says it's Chrome/Firefox/Edge, trust it
+    return true;
+  }
+  
+  // Safari is trickier because iOS WebView also claims Safari
+  // Only treat as browser if it has clear desktop indicators
+  if (ua.includes("safari")) {
+    // Desktop Safari has "Macintosh" and typically "Version/14.x" pattern
+    if (ua.includes("macintosh") && ua.match(/version\/[\d.]+/)) {
       return true;
     }
+    // If it's Safari but no clear desktop indicators, it's likely a mobile app
+    return false;
+  }
+
+  if (ua.includes("mozilla")) {
+    // Mozilla is super generic, check for other indicators
+    if (ua.includes("macintosh") || ua.includes("windows") || ua.includes("x11")) {
+      return true; // Desktop browser
+    }
+    return false; // Mobile, likely an app
   }
 
   return false;
