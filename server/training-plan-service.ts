@@ -457,6 +457,17 @@ Their self-assessed fitness level is "${experienceLevel}" — a regular recreati
 Start at a moderate, consistent training volume (~${Math.round(weeklyMileageBase)}km/week) appropriate for a ${experienceLevel} runner.
 Introduce structured sessions from week 2 onwards. Week 1 can be used to establish rhythm, but do NOT default to beginner-level distances.`;
   } else {
+    const isUltraOrLong = goalType === 'ultra' || targetDistance > 42.2;
+    if (isUltraOrLong) {
+      return `IMPORTANT: This runner has NO previous run data recorded in this app — they may be new to running or simply new to this app.
+Their self-assessed fitness level is "${experienceLevel}" — a less experienced runner setting an ambitious ultra/long-distance goal.
+This is a challenging combination. Apply the following approach:
+- Distances and long runs MUST follow the ULTRA LONG-DISTANCE TRAINING REQUIREMENTS below — the event distance is the priority constraint, not the fitness level
+- Intensity and pace: be conservative — keep easy runs genuinely easy, avoid aggressive speed work early
+- Recovery: build in more rest/easy days than you would for a higher-fitness runner
+- Session descriptions should acknowledge the ambitious nature of this goal and encourage the runner to listen to their body
+- Start at ~${Math.round(weeklyMileageBase)}km/week and build as directed by the ultra requirements below`;
+    }
     return `IMPORTANT: This runner has NO previous run data recorded in this app — they may be new to running or simply new to this app.
 Their self-assessed fitness level is "${experienceLevel}". We will use this alongside their profile to estimate baseline pace and mileage.
 Start conservatively and include easier runs in the first week to allow calibration.
@@ -466,9 +477,27 @@ Then build progressively through the plan.`;
 `;
 
     // Generate plan with OpenAI
+    // Determine if this is a high-risk combination: lower fitness + long distance + short duration
+    const normalizedLevelForRisk = (experienceLevel || '').toLowerCase();
+    const isLowerFitnessLevel = ['newcomer', 'beginner', 'casual'].some(l => normalizedLevelForRisk.includes(l));
+    const isLongEventDistance = goalType === 'ultra' || goalType === 'marathon' || targetDistance > 30;
+    const defaultPlanDuration = getPlanDuration(goalType, experienceLevel);
+    const isSignificantlyUnderduration = weeksUntilTarget < defaultPlanDuration * 0.6;
+    const isAmbitiousCombination = isLowerFitnessLevel && isLongEventDistance && !isPreEventPlan;
+
     const prompt = `You are an expert running coach. Generate a tailored ${weeksUntilTarget}-week training plan for a ${experienceLevel} runner preparing for a ${goalType} (${targetDistance}km).
 ${isPreEventPlan ? `
 ⚡ PRE-EVENT SHARPENING PLAN: This is NOT a build-up plan. The runner is already capable of the event distance and has ${weeksUntilTarget} weeks until race day. Design a race-preparation block: race-pace work, taper, confidence sessions. Do NOT start conservatively or include baseline-building runs.
+` : ''}
+${isAmbitiousCombination ? `
+⚠️ COACH ADVISORY — AMBITIOUS GOAL COMBINATION:
+This runner has self-assessed as "${experienceLevel}" (less experienced) but is targeting a ${targetDistance}km event over ${weeksUntilTarget} weeks.${isSignificantlyUnderduration ? ` The recommended duration for this goal is ${defaultPlanDuration} weeks — this plan is ${defaultPlanDuration - weeksUntilTarget} weeks shorter than recommended.` : ''}
+Your responsibilities as coach:
+- Generate the plan as requested — the runner has chosen this goal
+- Include genuine safety cues in session descriptions: warn about injury risk from rapid volume increases, encourage listening to the body, flag the importance of rest days
+- Be honest in the coachingProgrammeSummary comment about the challenge of this combination
+- Prioritise injury prevention and consistent training over hitting arbitrary pace targets
+- Despite the lower fitness level, session distances MUST still follow the event-specific requirements below — watering down distances to "beginner" levels would not prepare them for the event
 ` : ''}
 ${runnerProfileSection}
 
@@ -629,7 +658,18 @@ Requirements:
 7. ${isPreEventPlan
   ? `Maintain current fitness volume — no need to cap volume increases at 10% since this is not a build-up plan`
   : (goalType === 'ultra' || targetDistance > 42.2)
-    ? `Increase weekly volume by max 10% per week — but CRITICALLY: your long runs must follow the ULTRA LONG RUN TARGETS specified above. Do NOT let the 10% rule prevent long runs from reaching the required peak of ${Math.round(targetDistance * 0.55)}–${Math.round(targetDistance * 0.65)}km. The 10% rule applies to total weekly volume, not to individual long run caps.`
+    ? (() => {
+        // Check whether 10%/week from the base can realistically reach the required ultra peak volume
+        // within the available build weeks (total weeks minus 2 taper weeks)
+        const buildWeeks = Math.max(weeksUntilTarget - 2, 1);
+        const projectedPeakAtTenPct = weeklyMileageBase * Math.pow(1.1, buildWeeks);
+        const requiredPeak = targetDistance * 1.6;
+        const rateNeeded = Math.pow(requiredPeak / weeklyMileageBase, 1 / buildWeeks) - 1;
+        if (projectedPeakAtTenPct < requiredPeak) {
+          return `Weekly volume must reach ${Math.round(requiredPeak)}–${Math.round(targetDistance * 2.0)}km/week at peak (starting from ${weeklyMileageBase.toFixed(0)}km/week over ${buildWeeks} build weeks). This requires approximately ${Math.round(rateNeeded * 100)}%/week average growth — higher than the standard 10% guideline. Use a 3-weeks-build / 1-week-recovery pattern but increase build weeks at ~${Math.round(rateNeeded * 100)}% to hit the required peak. LONG RUN DISTANCES must follow the ULTRA LONG RUN TARGETS above — do not cap them at arbitrary small values.`;
+        }
+        return `Increase weekly volume by max 10% per week — but CRITICALLY: your long runs must follow the ULTRA LONG RUN TARGETS above. Do NOT let the 10% rule prevent long runs from reaching the required peak of ${Math.round(targetDistance * 0.55)}–${Math.round(targetDistance * 0.65)}km.`;
+      })()
     : `Increase weekly volume by max 10% per week`}
 8. Reference the runner's current performance AND goal in workout descriptions (e.g. "your current 5km is around ${avgTimeAtGoalDistanceStr || 'estimated from pace data'}. Today's tempo at [X:XX/km] is building your lactate threshold toward your [goal time] goal")
 
