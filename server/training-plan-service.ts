@@ -464,10 +464,10 @@ ${isPreEventPlan ? `
 ${targetDistance > 10 ? `
 COACHING PHILOSOPHY FOR THIS PLAN:
 Build the optimal plan to achieve the goal. The runner has chosen this goal — honour it with a realistic, well-structured plan that gives them the best chance of success.
-- Fitness level (${experienceLevel}) informs training paces and effort levels only — it does NOT reduce session distances or weekly volume targets
-- Anyone targeting >10km is a distance runner — build the plan accordingly
-- If the runner struggles with sessions in practice, the adaptive coaching system will adjust individual sessions based on their real performance data
-- Your job here is to build the best possible plan for the goal, not a pre-emptively watered-down version
+- Fitness level (${experienceLevel}) and run history inform training PACES and effort levels only — they do NOT reduce session distances or weekly volume targets
+- Current weekly mileage (${weeklyMileageBase.toFixed(1)}km/week) is the STARTING POINT, not the ceiling. An elite runner with a high base gets an advanced start; a new runner with a low base gets a faster build — but both plans peak at what the goal requires.
+- Anyone targeting >10km is a distance runner — build the plan to push them toward the goal, not to confirm where they currently are
+- If the runner struggles with sessions in practice, the adaptive coaching system will adjust individual sessions based on their real performance data — pre-emptive watering-down is not needed here
 ` : ''}
 ${runnerProfileSection}
 
@@ -555,7 +555,7 @@ LONG RUN TARGETS (non-negotiable):
 WEEKLY VOLUME:
 - Peak weekly volume should reach ${Math.round(targetDistance * 1.6)}–${Math.round(targetDistance * 2.0)}km/week (weeks ${Math.max(weeksUntilTarget - 5, Math.round(weeksUntilTarget * 0.6))}–${Math.max(weeksUntilTarget - 3, Math.round(weeksUntilTarget * 0.7))})
 - This is significantly higher than road-race training — ultra running demands time-on-feet, not just mileage
-- Starting volume for a runner with no recorded history: ${Math.round(weeklyMileageBase)}km/week is the established baseline — build from here
+- Starting volume: ${Math.round(weeklyMileageBase)}km/week (${hasRunHistory ? 'derived from recent run history' : 'estimated baseline for this goal type'}) — build from here toward the peak volume targets above
 
 BACK-TO-BACK LONG RUN WEEKENDS (critical for ultra preparation):
 - From week ${Math.round(weeksUntilTarget * 0.4)} onwards, schedule paired long runs on consecutive days (e.g. 25km Saturday + 18km Sunday)
@@ -618,7 +618,7 @@ Requirements:
    e) Hill repeats: specify effort (e.g. "Zone 4 effort / hard") not exact pace, since gradient makes pace unreliable.
 2. ${isPreEventPlan
   ? `Start at RACE-READY volume appropriate for a ${experienceLevel} runner — do NOT ramp up slowly. This is a ${weeksUntilTarget}-week pre-race block, not a build-up plan.`
-  : `Build gradually from current ${weeklyMileageBase.toFixed(1)}km/week base`}
+  : `Start from the runner's current ${weeklyMileageBase.toFixed(1)}km/week baseline and build toward the volume the ${targetDistance}km goal demands. The baseline is the FLOOR — where the plan begins — not the ceiling. An elite runner's high base means a strong Week 1; a runner with a lower base needs a faster build rate. Either way, the plan peaks at what the goal requires, not at a marginal improvement of where they currently are.`}
 3. Include easy runs, tempo runs, intervals, and long runs across each week
 4. Follow 80/20 rule (80% easy effort, 20% quality/hard sessions)
 5. ${isPreEventPlan
@@ -708,8 +708,8 @@ CRITICAL REQUIREMENTS:
 COACHING PROGRAMME SUMMARY REQUIREMENTS:
 - aiDeterminedFitnessLevel: Your assessment of the runner's ACTUAL fitness level based on the data provided (may differ from their stated level)
 - comment: A short paragraph assessing their fitness and what you observe from their running patterns
-- keyMetrics.estimatedAveragePace: The realistic average pace they should target for easy runs (not a PR pace)
-- keyMetrics.estimatedWeeklyMileage: Your recommended weekly volume for this plan (e.g. "30-35km")
+- keyMetrics.estimatedAveragePace: The realistic average easy-run pace for this runner based on their current fitness (not a PR pace — this is their comfortable aerobic pace)
+- keyMetrics.estimatedWeeklyMileage: The PEAK weekly volume this plan builds toward at its highest point (NOT the starting volume — show where the plan peaks, e.g. "55-65km" for a half marathon plan)
 - keyMetrics.focusAreas: Array of 3-4 focus areas for this specific runner (e.g. "build aerobic base", "improve speed", "injury prevention")
 
 If runner has NO previous runs:
