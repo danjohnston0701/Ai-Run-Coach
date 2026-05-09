@@ -165,6 +165,7 @@ fun GeneratePlanScreen(
                         "10k" to "10K",
                         "half_marathon" to "Half Marathon",
                         "marathon" to "Marathon",
+                        "ultra" to "Ultra Marathon",
                         "custom" to "Custom Distance"
                     )
                     GoalTypeGrid(
@@ -191,7 +192,7 @@ fun GeneratePlanScreen(
                     Spacer(modifier = Modifier.height(Spacing.sm))
 
                     // Show a "Recommended" nudge for distance events — target time unlocks full pace prescription
-                    val isDistanceEvent = goalType in listOf("half_marathon", "marathon", "10k")
+                    val isDistanceEvent = goalType in listOf("half_marathon", "marathon", "10k", "ultra")
                     if (isDistanceEvent && !hasTimeGoal) {
                         Card(
                             modifier = Modifier
@@ -387,15 +388,20 @@ fun GeneratePlanScreen(
                         "10k" -> 2
                         "half_marathon" -> 4
                         "marathon" -> 4
+                        "ultra" -> 8
                         else -> 2
                     }
-                    val maxWeeks = 20
+                    val maxWeeks = when (goalType) {
+                        "ultra" -> 24
+                        else -> 20
+                    }
                     // Recommended minimum for a full build-up plan (used to show the pre-event nudge)
                     val recommendedMinWeeks = when (goalType) {
                         "5k" -> 6
                         "10k" -> 8
                         "half_marathon" -> 10
                         "marathon" -> 14
+                        "ultra" -> 16
                         else -> 6
                     }
 
@@ -414,7 +420,7 @@ fun GeneratePlanScreen(
                     }
 
                     // Pre-event intent question — shown when duration is shorter than recommended build-up
-                    val showPreEventQuestion = goalType in listOf("half_marathon", "marathon", "10k", "5k") &&
+                    val showPreEventQuestion = goalType in listOf("half_marathon", "marathon", "10k", "5k", "ultra") &&
                         durationWeeks < recommendedMinWeeks
                     AnimatedVisibility(visible = showPreEventQuestion) {
                         Column {
@@ -450,6 +456,7 @@ fun GeneratePlanScreen(
                                             when (goalType) {
                                                 "half_marathon" -> "half marathon"
                                                 "marathon" -> "marathon"
+                                                "ultra" -> "ultra marathon"
                                                 "10k" -> "10K"
                                                 else -> "5K"
                                             }

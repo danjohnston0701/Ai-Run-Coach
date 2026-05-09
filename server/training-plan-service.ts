@@ -139,7 +139,16 @@ export async function generateTrainingPlan(
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const runsLast30 = recentRuns.filter(r => r.completedAt && new Date(r.completedAt) >= thirtyDaysAgo);
     const totalDistanceLast30 = runsLast30.reduce((sum, r) => sum + (r.distance || 0), 0);
-    const weeklyMileageBase = runsLast30.length > 0 ? (totalDistanceLast30 / 4) : 20;
+    // Fallback when no run history — scale to the event type so the AI anchors volume correctly.
+    // A 20km/week fallback is appropriate for 5k/10k/half but far too low for ultra/marathon events;
+    // using it for a 50km+ goal causes the AI to produce tiny session distances.
+    const noHistoryFallbackKm = (() => {
+      if (goalType === 'ultra' || targetDistance > 42.2) return 45;
+      if (goalType === 'marathon') return 30;
+      if (goalType === 'half_marathon') return 20;
+      return 20;
+    })();
+    const weeklyMileageBase = runsLast30.length > 0 ? (totalDistanceLast30 / 4) : noHistoryFallbackKm;
 
     // ── Helper: parse a "M:SS/km" pace string into total seconds per km
     const parsePaceSecs = (pace: string | null | undefined): number | null => {
@@ -501,6 +510,33 @@ CRITICAL: The runner CANNOT achieve ${goalPaceStr} race pace if they never train
 })() : ''}
 ${targetDate ? `- Race date: ${targetDate.toDateString()}` : ''}
 
+${(goalType === 'ultra' || targetDistance > 42.2) ? `
+ULTRA / LONG-DISTANCE TRAINING REQUIREMENTS — READ THIS CAREFULLY:
+This is a ${targetDistance}km ultra/long-distance event. Standard road-racing training principles do NOT apply directly. Key differences:
+
+LONG RUN TARGETS (non-negotiable):
+- Peak long run MUST reach ${Math.round(targetDistance * 0.55)}–${Math.round(targetDistance * 0.65)}km (55-65% of event distance) by weeks ${Math.max(weeksUntilTarget - 4, Math.round(weeksUntilTarget * 0.6))}–${Math.max(weeksUntilTarget - 3, Math.round(weeksUntilTarget * 0.7))}
+- Do NOT cap long runs at marathon distance (42km). For a ${targetDistance}km event, long runs must go beyond typical marathon training peaks.
+- Example long run progression for a ${weeksUntilTarget}-week plan: 12km → 18km → 22km → 26km → 30km → ${Math.round(targetDistance * 0.55)}km → ${Math.round(targetDistance * 0.60)}km (peak) → taper
+
+WEEKLY VOLUME:
+- Peak weekly volume should reach ${Math.round(targetDistance * 1.6)}–${Math.round(targetDistance * 2.0)}km/week (weeks ${Math.max(weeksUntilTarget - 5, Math.round(weeksUntilTarget * 0.6))}–${Math.max(weeksUntilTarget - 3, Math.round(weeksUntilTarget * 0.7))})
+- This is significantly higher than road-race training — ultra running demands time-on-feet, not just mileage
+- Starting volume for a runner with no recorded history: ${Math.round(weeklyMileageBase)}km/week is the established baseline — build from here
+
+BACK-TO-BACK LONG RUN WEEKENDS (critical for ultra preparation):
+- From week ${Math.round(weeksUntilTarget * 0.4)} onwards, schedule paired long runs on consecutive days (e.g. 25km Saturday + 18km Sunday)
+- This trains fatigue resistance, which is the primary challenge of ultra running
+
+WORKOUT TYPE BALANCE for ultra:
+- Prioritise TIME on feet over pace — easy/long runs dominate (85-90% of volume)
+- Reduce interval/speed work compared to road races — ultra is about endurance, not speed
+- Include hill work — ultra courses are typically hilly
+- Include back-to-back long runs as a primary training tool, not just a weekly long run
+
+CRITICAL DISTANCE RULE: Every workout distance in your JSON MUST reflect ultra training volumes. Week 1 easy runs should be 8-12km, not 5-6km. Long runs in peak weeks must reach ${Math.round(targetDistance * 0.55)}km+. Do NOT anchor your session distances to 5-6km road race session sizes.
+` : ''}
+
 ${regularSessions.length > 0 ? `
 Regular Weekly Runs (already in the user's schedule):
 ${regularSessions.map(s => {
@@ -558,10 +594,12 @@ Requirements:
 6. Taper for final ${isPreEventPlan ? Math.min(2, Math.floor(weeksUntilTarget / 2)) : 2} week(s) before race
 7. ${isPreEventPlan
   ? `Maintain current fitness volume — no need to cap volume increases at 10% since this is not a build-up plan`
-  : `Increase weekly volume by max 10% per week`}
+  : (goalType === 'ultra' || targetDistance > 42.2)
+    ? `Increase weekly volume by max 10% per week — but CRITICALLY: your long runs must follow the ULTRA LONG RUN TARGETS specified above. Do NOT let the 10% rule prevent long runs from reaching the required peak of ${Math.round(targetDistance * 0.55)}–${Math.round(targetDistance * 0.65)}km. The 10% rule applies to total weekly volume, not to individual long run caps.`
+    : `Increase weekly volume by max 10% per week`}
 8. Reference the runner's current performance AND goal in workout descriptions (e.g. "your current 5km is around ${avgTimeAtGoalDistanceStr || 'estimated from pace data'}. Today's tempo at [X:XX/km] is building your lactate threshold toward your [goal time] goal")
 
-Return JSON with this exact structure:
+Return JSON with this exact structure (distances shown below are ILLUSTRATIVE FORMAT EXAMPLES ONLY for a 5k plan — your actual distances MUST reflect the goal event of ${targetDistance}km and the requirements above):
 {
   "planName": "12-Week Half Marathon Plan",
   "totalWeeks": 12,
@@ -633,10 +671,10 @@ COACHING PROGRAMME SUMMARY REQUIREMENTS:
 
 If runner has NO previous runs:
 - aiDeterminedFitnessLevel: base on their age, height, weight, BMI and stated level - be conservative
-- comment: "No previous running history. Starting with conservative baseline to establish fitness levels."
-- estimatedAveragePace: estimate based on their profile metrics
-- estimatedWeeklyMileage: appropriate starting point for a beginner
-- focusAreas: should include "establish baseline", "build aerobic foundation", "injury prevention"`;
+- comment: "No previous running history recorded. Starting from estimated baseline for their fitness level and goal event."
+- estimatedAveragePace: estimate based on their profile metrics and goal event
+- estimatedWeeklyMileage: appropriate starting volume for their goal event — for ultra/long distance events this must be ${goalType === 'ultra' || targetDistance > 42.2 ? `at least ${Math.round(weeklyMileageBase)}km/week` : 'proportional to the event'}, NOT a generic beginner road-running volume
+- focusAreas: should reflect the actual event demands — for ultra include "build time-on-feet", "back-to-back long runs", "fatigue resistance"`;
 
     // Fetch AI runner profile for richer personalisation
     const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
