@@ -535,6 +535,15 @@ CRITICAL: The runner CANNOT achieve ${goalPaceStr} race pace if they never train
 })() : ''}
 ${targetDate ? `- Race date: ${targetDate.toDateString()}` : ''}
 
+${(goalType === 'custom' && targetDistance > 21.1 && targetDistance <= 42.2) ? `
+MID-DISTANCE CUSTOM EVENT (${targetDistance}km):
+This is a custom distance between a half marathon and marathon. Key training principles:
+- Treat this similarly to marathon training but with adjusted peak long run targets
+- Peak long run should reach ${Math.round(targetDistance * 0.65)}–${Math.round(targetDistance * 0.75)}km (65-75% of event distance)
+- Peak weekly volume should reach ${Math.round(targetDistance * 2.0)}–${Math.round(targetDistance * 2.5)}km/week
+- Include back-to-back moderate long run weekends in peak training weeks
+- All standard marathon training session types apply: easy runs, tempo, intervals, long runs
+` : ''}
 ${(goalType === 'ultra' || targetDistance > 42.2) ? `
 ULTRA / LONG-DISTANCE TRAINING REQUIREMENTS — READ THIS CAREFULLY:
 This is a ${targetDistance}km ultra/long-distance event. Standard road-racing training principles do NOT apply directly. Key differences:

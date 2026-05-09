@@ -192,7 +192,11 @@ fun GeneratePlanScreen(
                     Spacer(modifier = Modifier.height(Spacing.sm))
 
                     // Show a "Recommended" nudge for distance events — target time unlocks full pace prescription
-                    val isDistanceEvent = goalType in listOf("half_marathon", "marathon", "10k", "ultra") || isUltraDistance || isMarathonDistance || isHalfMarathonDistance
+                    // Show the "set a target time" nudge for any meaningful distance event.
+                    // For custom entries, anything over 10km benefits from a goal pace prescription.
+                    val isDistanceEvent = goalType in listOf("half_marathon", "marathon", "10k", "ultra") ||
+                        isUltraDistance || isMarathonDistance || isHalfMarathonDistance ||
+                        (goalType == "custom" && customDistanceKm > 10.0)
                     if (isDistanceEvent && !hasTimeGoal) {
                         Card(
                             modifier = Modifier
@@ -426,10 +430,10 @@ fun GeneratePlanScreen(
                         Text("$maxWeeks weeks", style = AppTextStyles.small, color = Colors.textMuted)
                     }
 
-                    // Pre-event intent question — shown when duration is shorter than recommended build-up.
-                    // Also fires for custom distances that are effectively ultra/marathon-scale.
-                    val showPreEventQuestion = (goalType in listOf("half_marathon", "marathon", "10k", "5k", "ultra") || isUltraDistance || isMarathonDistance) &&
-                        durationWeeks < recommendedMinWeeks
+                    // Pre-event intent question — shown when the chosen duration is shorter than the
+                    // recommended build-up for this goal. Fires for any goal type (including custom
+                    // distances) as long as the computed recommendedMinWeeks is meaningful (> 4).
+                    val showPreEventQuestion = recommendedMinWeeks > 4 && durationWeeks < recommendedMinWeeks
                     AnimatedVisibility(visible = showPreEventQuestion) {
                         Column {
                             Spacer(modifier = Modifier.height(Spacing.md))
