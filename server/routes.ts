@@ -11286,8 +11286,16 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         return res.status(404).json({ error: "Plan not found or not authorized" });
       }
 
+      // Validate status value
+      const validStatuses = ['active', 'paused', 'completed', 'abandoned'];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+      }
+
       await db.update(trainingPlans).set({ status }).where(eq(trainingPlans.id, planId));
-      res.json({ success: true, planId, status });
+      // Return empty response since client expects Response<Unit>
+      res.setHeader("Content-Type", "application/json");
+      res.status(200).send();
     } catch (error: any) {
       res.status(500).json({ error: "Failed to update plan status" });
     }
