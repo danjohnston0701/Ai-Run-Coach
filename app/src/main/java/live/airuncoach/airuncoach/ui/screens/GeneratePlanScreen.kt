@@ -187,6 +187,13 @@ fun GeneratePlanScreen(
 
                     Spacer(modifier = Modifier.height(Spacing.xl))
 
+                    // ── Calculate distance categories early for use throughout the form ─────
+                    // (Used for distance events nudge, training duration bounds, etc.)
+                    val customDistanceKm = if (goalType == "custom") targetDistance.toDoubleOrNull() ?: 0.0 else 0.0
+                    val isUltraDistance = goalType == "ultra" || (goalType == "custom" && customDistanceKm > 42.2)
+                    val isMarathonDistance = goalType == "marathon" || (goalType == "custom" && customDistanceKm in 40.0..42.2)
+                    val isHalfMarathonDistance = goalType == "half_marathon" || (goalType == "custom" && customDistanceKm in 18.0..22.0)
+
                     // ── Section 2: Time Goal ─────────────────────────────────────────────
                     SectionHeader(title = "Do you have a time target?", icon = R.drawable.icon_timer_vector)
                     Spacer(modifier = Modifier.height(Spacing.sm))
@@ -387,12 +394,7 @@ fun GeneratePlanScreen(
                     Spacer(modifier = Modifier.height(Spacing.lg))
 
                     // Programme duration — min and max adapt to the goal type.
-                    // For custom distances, also check the entered km value so a 50km custom entry
-                    // gets ultra-appropriate bounds, not generic ones.
-                    val customDistanceKm = if (goalType == "custom") targetDistance.toDoubleOrNull() ?: 0.0 else 0.0
-                    val isUltraDistance = goalType == "ultra" || (goalType == "custom" && customDistanceKm > 42.2)
-                    val isMarathonDistance = goalType == "marathon" || (goalType == "custom" && customDistanceKm in 40.0..42.2)
-                    val isHalfMarathonDistance = goalType == "half_marathon" || (goalType == "custom" && customDistanceKm in 18.0..22.0)
+                    // (Distance categories already calculated above for early use in the form)
 
                     val minWeeks = when {
                         isUltraDistance -> 8
