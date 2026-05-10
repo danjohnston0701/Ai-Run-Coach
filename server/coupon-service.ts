@@ -167,7 +167,7 @@ export async function hasUnlimitedGrant(
           eq(userCoupons.userId, userId),
           gt(userCoupons.expiresAt, new Date()),
           eq(couponCodes.isActive, true),
-          sql`${couponCodes.type} = ANY(${allowedTypes})`
+          sql`${couponCodes.type} IN (${sql.join(allowedTypes, sql`, `)})`
         )
       )
       .limit(1);
