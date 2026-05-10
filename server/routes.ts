@@ -15,7 +15,7 @@ import {
   achievements, userAchievements, goals, users, notificationPreferences,
   sharedRuns, webhookFailureQueue, garminMoveIQ, garminBloodPressure,
   garminEpochsRaw, garminEpochsAggregate, garminHealthSnapshots, garminSkinTemperature,
-  friendRequests
+  friendRequests, userStats
 } from "@shared/schema";
 import { DateTime } from "luxon";
 import polylineCodec from "@mapbox/polyline";
@@ -10616,60 +10616,111 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
       );
       
-      // Get user's baseline performance data (last 10 native AI Run Coach runs, no date limit)
-      // No date limit — a user who hasn't run in 5 weeks still has valid baseline data
-      // Exclude Garmin-synced runs (legal constraint: Garmin Connect data cannot be used in AI processes)
-      const allUserRuns = await db
+      // ── Baseline performance data ──────────────────────────────────────────
+      // Fetch native AI Run Coach runs only (Garmin data excluded — legal constraint)
+      // Window priority: 90 days → 180 days → no data message
+      const now90  = new Date(Date.now() - 90  * 24 * 60 * 60 * 1000);
+      const now180 = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000);
+
+      const allNativeRuns = await db
         .select()
         .from(runs)
-        .where(eq(runs.userId, userId))
+        .where(
+          and(
+            eq(runs.userId, userId),
+            gte(runs.completedAt, now180)
+          )
+        )
         .orderBy(desc(runs.completedAt))
-        .limit(50); // fetch more so we have enough after filtering
-      const recentRuns = allUserRuns
-        .filter(r => !r.externalSource || r.externalSource === 'airuncoach')
-        .slice(0, 10);
-      
+        .limit(50);
+
+      // Exclude Garmin-synced activities (legal constraint)
+      const nativeOnly = allNativeRuns.filter(r => !r.externalSource || r.externalSource === 'airuncoach');
+
+      // Determine which window to use and label it
+      const runs90  = nativeOnly.filter(r => r.completedAt && new Date(r.completedAt) >= now90);
+      const runs180 = nativeOnly; // already filtered to 180 days above
+
+      let baselineRuns: typeof nativeOnly;
+      let baselineWindowLabel: string;
+      let baselineWindowDays: number;
+
+      if (runs90.length > 0) {
+        baselineRuns = runs90;
+        baselineWindowLabel = "last 90 days";
+        baselineWindowDays = 90;
+      } else if (runs180.length > 0) {
+        baselineRuns = runs180;
+        baselineWindowLabel = "last 180 days";
+        baselineWindowDays = 180;
+      } else {
+        baselineRuns = [];
+        baselineWindowLabel = "none";
+        baselineWindowDays = 0;
+      }
+
+      // Fetch all-time longestRunKm from userStats cache (same source as My Data)
+      const [cachedStats] = await db
+        .select({ longestRunKm: userStats.longestRunKm })
+        .from(userStats)
+        .where(eq(userStats.userId, userId));
+      const allTimeLongestRun = cachedStats?.longestRunKm ?? null;
+
       // Calculate baseline metrics
       let performanceBaseline: any = null;
-      if (recentRuns.length === 0) {
+      if (baselineRuns.length === 0) {
         performanceBaseline = {
           hasHistory: false,
-          message: "You don't have any run history yet. Let's get started and see what you've got!"
+          message: "No AI Run Coach runs found in the last 180 days. Complete a run in the app to generate your baseline data.",
+          allTimeLongestRun: allTimeLongestRun != null ? Number(allTimeLongestRun).toFixed(1) : null,
         };
       } else {
-        // runs.distance is already in km (per schema definition)
-        const totalDistance = recentRuns.reduce((sum, r) => sum + (Number(r.distance) || 0), 0);
-        const avgDistance = totalDistance / recentRuns.length;
-        const runsPerWeek = recentRuns.length / Math.ceil(
-          (new Date().getTime() - new Date(recentRuns[recentRuns.length - 1].completedAt || Date.now()).getTime()) / (7 * 24 * 60 * 60 * 1000)
-        );
-        
-        // Parse pace data
-        const paceValues = recentRuns
+        // runs.distance is in km
+        const totalDistance = baselineRuns.reduce((sum, r) => sum + (Number(r.distance) || 0), 0);
+        const avgDistance = totalDistance / baselineRuns.length;
+
+        // Longest run within the baseline window
+        const windowLongestRun = Math.max(...baselineRuns.map(r => Number(r.distance) || 0));
+
+        // Runs per week across the window span
+        const oldestRunDate = new Date(baselineRuns[baselineRuns.length - 1].completedAt || Date.now());
+        const newestRunDate  = new Date(baselineRuns[0].completedAt || Date.now());
+        const spanDays = Math.max(1, Math.round((newestRunDate.getTime() - oldestRunDate.getTime()) / (24 * 60 * 60 * 1000)));
+        const spanWeeks = Math.max(1, spanDays / 7);
+        const runsPerWeek = baselineRuns.length / spanWeeks;
+
+        // Date range label e.g. "12 Apr – 10 May 2026"
+        const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+        const dateRangeLabel = baselineRuns.length >= 2
+          ? `${fmt(oldestRunDate)} – ${fmt(newestRunDate)}`
+          : fmt(newestRunDate);
+
+        // Average pace
+        const paceValues = baselineRuns
           .map(r => {
             if (!r.avgPace) return null;
-            const paceStr = String(r.avgPace);
-            const parts = paceStr.split(':');
-            if (parts.length === 2) {
-              return parseInt(parts[0]) * 60 + parseInt(parts[1]);
-            }
+            const parts = String(r.avgPace).split(':');
+            if (parts.length === 2) return parseInt(parts[0]) * 60 + parseInt(parts[1]);
             return null;
           })
           .filter((v): v is number => v !== null);
-        
-        const avgPaceSecs = paceValues.length > 0 
-          ? paceValues.reduce((a, b) => a + b, 0) / paceValues.length 
+        const avgPaceSecs = paceValues.length > 0
+          ? paceValues.reduce((a, b) => a + b, 0) / paceValues.length
           : null;
-        
-        const longestRun = Math.max(...recentRuns.map(r => Number(r.distance) || 0));
 
         performanceBaseline = {
           hasHistory: true,
-          runsRecorded: recentRuns.length,
+          runsRecorded: baselineRuns.length,
+          baselineWindow: baselineWindowLabel,
+          dateRange: dateRangeLabel,
           runsPerWeek: runsPerWeek.toFixed(1),
           avgDistance: avgDistance.toFixed(2),
-          longestRun: longestRun.toFixed(1),
-          avgPace: avgPaceSecs ? `${Math.floor(avgPaceSecs / 60)}:${String(Math.round(avgPaceSecs % 60)).padStart(2, '0')}` : null
+          // Longest run uses all-time figure from My Data cache for consistency; falls back to window max
+          longestRun: allTimeLongestRun != null
+            ? Number(allTimeLongestRun).toFixed(1)
+            : windowLongestRun.toFixed(1),
+          longestRunSource: allTimeLongestRun != null ? 'all_time' : 'window',
+          avgPace: avgPaceSecs ? `${Math.floor(avgPaceSecs / 60)}:${String(Math.round(avgPaceSecs % 60)).padStart(2, '0')}` : null,
         };
       }
       

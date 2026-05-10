@@ -86,9 +86,13 @@ data class PerformanceBaseline(
     @SerializedName("hasHistory") val hasHistory: Boolean,
     @SerializedName("message") val message: String? = null,
     @SerializedName("runsRecorded") val runsRecorded: Int? = null,
+    @SerializedName("baselineWindow") val baselineWindow: String? = null,  // e.g. "last 90 days"
+    @SerializedName("dateRange") val dateRange: String? = null,            // e.g. "12 Apr – 10 May 2026"
     @SerializedName("runsPerWeek") val runsPerWeek: String? = null,
     @SerializedName("avgDistance") val avgDistance: String? = null,
     @SerializedName("longestRun") val longestRun: String? = null,
+    @SerializedName("longestRunSource") val longestRunSource: String? = null, // "all_time" | "window"
+    @SerializedName("allTimeLongestRun") val allTimeLongestRun: String? = null, // populated when hasHistory=false
     @SerializedName("avgPace") val avgPace: String? = null
 )
 

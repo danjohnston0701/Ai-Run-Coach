@@ -1430,23 +1430,46 @@ fun AiPlanSummary(details: TrainingPlanDetails) {
             if (baseline != null && baseline.hasHistory == true) {
                 Text("Your Baseline", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
                 Spacer(modifier = Modifier.height(Spacing.sm))
+
+                // Source label — tells the user exactly what data was used
+                val sourceLabel = if (baseline.runsRecorded != null && !baseline.baselineWindow.isNullOrBlank()) {
+                    val dateRange = if (!baseline.dateRange.isNullOrBlank()) " (${baseline.dateRange})" else ""
+                    "Based on ${baseline.runsRecorded} runs from the ${baseline.baselineWindow}$dateRange"
+                } else if (baseline.runsRecorded != null) {
+                    "Based on ${baseline.runsRecorded} runs"
+                } else null
+
+                if (sourceLabel != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Colors.primary.copy(alpha = 0.08f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            sourceLabel,
+                            style = AppTextStyles.small.copy(fontWeight = FontWeight.Medium),
+                            color = Colors.primary,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                }
+
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (!baseline.avgPace.isNullOrBlank()) {
-                        BaselineRow(icon = R.drawable.icon_clock_vector, text = "Current avg pace: ${baseline.avgPace} /km")
+                        BaselineRow(icon = R.drawable.icon_clock_vector, text = "Avg pace: ${baseline.avgPace} /km")
                     }
                     if (!baseline.runsPerWeek.isNullOrBlank()) {
-                        BaselineRow(icon = R.drawable.icon_chart_vector, text = "You run on average ${baseline.runsPerWeek}x per week")
+                        BaselineRow(icon = R.drawable.icon_chart_vector, text = "Avg frequency: ${baseline.runsPerWeek} runs/week")
                     }
                     if (!baseline.avgDistance.isNullOrBlank()) {
                         val avgDistanceKm = baseline.avgDistance.toDoubleOrNull()?.let { String.format(Locale.US, "%.1f", it) } ?: baseline.avgDistance
-                        BaselineRow(icon = R.drawable.icon_map_pin_vector, text = "Average distance: $avgDistanceKm km")
+                        BaselineRow(icon = R.drawable.icon_map_pin_vector, text = "Avg run distance: $avgDistanceKm km")
                     }
                     if (!baseline.longestRun.isNullOrBlank()) {
                         val longestRunKm = baseline.longestRun.toDoubleOrNull()?.let { String.format(Locale.US, "%.1f", it) } ?: baseline.longestRun
-                        BaselineRow(icon = R.drawable.icon_trophy_vector, text = "Longest run: $longestRunKm km")
-                    }
-                    if (baseline.runsRecorded != null) {
-                        BaselineRow(icon = R.drawable.icon_chart_vector, text = "Based on your last ${baseline.runsRecorded} runs")
+                        val longestRunNote = if (baseline.longestRunSource == "all_time") " (all-time)" else ""
+                        BaselineRow(icon = R.drawable.icon_trophy_vector, text = "Longest run: $longestRunKm km$longestRunNote")
                     }
                 }
                 Spacer(modifier = Modifier.height(Spacing.md))
