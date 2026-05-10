@@ -263,14 +263,17 @@ function calculateOrientationTargets(
   }
 
   // ========== HEART RATE ZONE (Phase 3) ==========
+  // CRITICAL: Orientation sessions must be at TEMPO/THRESHOLD (Zone 3-4) to actually ASSESS fitness
+  // Zone 2 (conversational) is TOO EASY - it won't reveal the runner's true fitness level
+  // Tempo pace allows us to find their actual lactate threshold and current capacity
   const estimatedMaxHR = profile.maxHeartRate || estimateMaxHeartRate(profile.age);
-  const zone2Min = Math.round(estimatedMaxHR * 0.60); // 60-70% max HR
-  const zone2Max = Math.round(estimatedMaxHR * 0.70);
+  const zone3Min = Math.round(estimatedMaxHR * 0.75); // 75-85% max HR (Tempo/Threshold zone)
+  const zone3Max = Math.round(estimatedMaxHR * 0.85);
 
   targetHeartRateZone = {
-    min: zone2Min,
-    max: zone2Max,
-    label: "Comfortable / Conversational Pace (Zone 2)",
+    min: zone3Min,
+    max: zone3Max,
+    label: "Tempo Effort / Threshold Pace (Zone 3-4)",
   };
 
   return {
@@ -361,18 +364,18 @@ This is your first session – we're here to understand your current fitness lev
 ${description}
 
 What to expect:
-• Run at a comfortable, sustainable effort
-• If you have a heart rate monitor, aim for the Zone 2 range (conversational pace)
-• Focus on consistency over speed – we want to see how your body responds
-• Tell us how you felt afterward (your perceived effort, any discomfort)
+• Run at a steady, challenging (but sustainable) pace – this is a TEMPO EFFORT
+• If you have a heart rate monitor, aim for the Zone 3-4 range (challenging but not maximum effort)
+• We want to find your actual fitness level, so this won't be easy – but it's manageable
+• Tell us how you felt afterward (your perceived effort, any discomfort, how long you could sustain it)
 
 This run will help us:
-✓ Establish your baseline fitness
+✓ Establish your actual fitness baseline
+✓ Find your lactate threshold
 ✓ Validate your experience level and self-assessment
-✓ Adjust your training plan if needed
-✓ Set realistic targets for your goal
+✓ Set realistic and personalized targets for your goal
 
-Remember: This is not a test. There's no "right" pace – we're learning about YOU.
+Remember: This IS an assessment, not a casual jog. We need to see what you're capable of right now.
   `.trim();
 }
 
@@ -414,20 +417,21 @@ export function generateOrientationCoachingPrompt(
   assessment: OrientationAssessment,
   planGoalType: string
 ): string {
-  const targetPaceDisplay = assessment.recommendedPace || "comfortable effort";
+  const targetPaceDisplay = assessment.recommendedPace || "tempo effort";
   const targetDistance = assessment.recommendedDistance;
   const hrZoneInfo = assessment.targetHeartRateZone
-    ? `${assessment.targetHeartRateZone.min}-${assessment.targetHeartRateZone.max} bpm`
-    : "conversational pace";
+    ? `${assessment.targetHeartRateZone.min}-${assessment.targetHeartRateZone.max} bpm (Zone 3-4 Tempo)`
+    : "tempo/threshold pace";
 
   return `
 You are an AI running coach providing guidance for an ORIENTATION SESSION.
 
-This is NOT a performance workout. The goal is to:
-1. Understand the runner's actual fitness level
-2. Validate their self-assessed experience
-3. Gather baseline data for plan personalization
-4. Build confidence and establish good running patterns
+This IS a fitness ASSESSMENT WORKOUT. The goal is to:
+1. Discover the runner's actual fitness level through controlled challenge
+2. Find their lactate threshold and sustainable effort capacity
+3. Validate their self-assessed experience against real performance
+4. Gather baseline data for accurate plan personalization
+5. Establish confidence that the plan will be properly calibrated
 
 RUNNER PROFILE:
 - Experience: ${profile.experienceLevel} runner
@@ -438,52 +442,62 @@ SESSION DESIGN:
 - Distance: ${targetDistance} km
 - Target Pace: ${targetPaceDisplay}
 - Target Heart Rate: ${hrZoneInfo}
-- Effort: Conversational, sustainable
-- Focus: Consistency, comfort, learning
+- Effort: TEMPO/THRESHOLD - challenging but sustainable
+- Focus: Finding true fitness level, threshold capacity, mental toughness
 
 COACHING STYLE FOR ORIENTATION:
-✓ Educational and encouraging
-✓ Emphasize process over pace
-✓ Build confidence with positive reinforcement
-✓ Watch for form issues or discomfort (safety first)
-✓ Gather qualitative feedback (how they felt)
-✓ NO pressure or performance metrics
+✓ Supportive but honest about effort level
+✓ Encourage them to find THEIR sustainable hard pace
+✓ Monitor for appropriate challenge (not too easy, not crushing)
+✓ Emphasize that we NEED data to calibrate their plan correctly
+✓ Validate effort and discomfort as useful information
+✓ Build confidence through challenge and completion
 
 KEY MESSAGES AT DIFFERENT POINTS:
-- 0-1km: Welcome, establish rhythm, feel out the pace
-- 1-3km: Building confidence, "you're finding your rhythm"
-- 3-End: Celebrate completion, "we learned a lot about your fitness"
+- 0-1km: Settle into steady rhythm, "let's establish your sustainable pace"
+- 1-2km: "You're finding your effort level – this is where we learn"
+- 2-End: "Keep it steady – this is the data we need for your plan"
+- At finish: "Perfect – that effort told us exactly what we needed to know"
+
+WHAT THIS TEMPO EFFORT REVEALS:
+✓ Real sustainable pace (not their easy, comfortable pace)
+✓ How they handle discomfort and breathing load
+✓ Their true lactate threshold (not just aerobic pace)
+✓ Mental resilience and work capacity
+✓ Honest assessment of experience level
 
 AVOID:
-✗ Comparing to other runners
-✗ Talking about "pushing" or "going hard"
-✗ Setting new personal records
-✗ Competitive language
-✗ Guilt if they slow down
+✗ Easy encouragement ("relax, take it easy") – this is tempo!
+✗ Performance language ("crush it", "go hard") – it's assessment, not racing
+✗ Comparison to others
+✗ Guilt if they slow down from an unsustainable pace
 
 FOCUS ON:
-✓ "How does your body feel?"
-✓ "Breathing: can you speak a sentence?"
-✓ "Your form looks smooth/controlled"
-✓ "This is baseline data for your plan"
-✓ "Great information for personalizing your training"
+✓ "How's your breathing? Can you still think clearly?"
+✓ "Your pace is steady and strong – great for assessment"
+✓ "Your form is holding up well under effort"
+✓ "This data will make your plan truly personal"
+✓ "Only a few more km – you're doing exactly what we need"
 
 SAFETY CHECKS:
-- Watch for signs of overexertion (excessive breathing difficulty, pain)
-- For ${profile.age && profile.age > 40 ? "older runners, encourage conservative pacing" : "younger runners, watch for overconfidence"}
-- If they show distress: suggest slowing down or stopping
+- Watch for signs of distress (gasping, loss of form, pain vs discomfort)
+- For ${profile.age && profile.age > 40 ? "older runners, monitor carefully but allow them to find their genuine threshold" : "younger runners, watch for reckless acceleration"}
+- If real distress appears: suggest backing off slightly, but keep it hard enough to assess
 
-POST-RUN ASSESSMENT:
+POST-RUN ASSESSMENT (CRITICAL):
 Ask about:
-1. How did the pace feel? (Too easy/just right/challenging?)
-2. Any discomfort? (Aches, breathing issues, etc.)
-3. Energy level at end? (Still energized/tired/exhausted?)
-4. Heart rate range if they have monitor?
+1. How hard was that pace on a 1-10 scale? (We want 7-8, sustainable hard effort)
+2. Could you keep running at that pace? How long?
+3. Any pain or just muscular discomfort/breathing effort?
+4. How does this compare to your expected fitness level?
+5. Heart rate range if they have monitor?
 
 USE THIS DATA TO:
-- Adjust recommended training zone
-- Determine if experience level assessment is accurate
-- Set personalized intensity for the plan
+- Set accurate Zone boundaries for their training
+- Determine realistic pace targets for the plan
+- Assess if experience level is accurate
+- Calibrate all future workout intensities
+- Build personalized targets that match THEIR capacity, not generic estimates
   `.trim();
 }
 

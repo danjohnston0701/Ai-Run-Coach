@@ -880,6 +880,8 @@ If runner has NO previous runs:
         if (!userTimezone) todayInUserTz.setHours(0, 0, 0, 0);
 
         // Create orientation workout
+        // Orientation sessions should be at TEMPO/THRESHOLD (Zone 3-4) to actually assess fitness
+        // NOT Zone 2, which is too easy to reveal true fitness level
         const orientationWorkout = await db
           .insert(plannedWorkouts)
           .values({
@@ -889,15 +891,15 @@ If runner has NO previous runs:
             workoutType: "orientation",
             distance: orientationAssessment.recommendedDistance,
             targetPace: orientationAssessment.recommendedPace,
-            intensity: "z2", // Zone 2 (conversational)
+            intensity: "tempo", // Tempo/Threshold effort to assess actual fitness
             description: "Orientation Run: Establish Your Baseline Fitness",
             instructions: orientationAssessment.orientationBrief,
-            effortDescription: "Conversational effort - Zone 2",
+            effortDescription: "Steady tempo effort - challenging but sustainable (Zone 3-4)",
             sessionGoal: "assess_fitness",
             sessionIntent: "orientation_run",
-            hrZoneNumber: 2,
-            hrZoneMinBpm: orientationAssessment.targetHeartRateZone?.min,
-            hrZoneMaxBpm: orientationAssessment.targetHeartRateZone?.max,
+            hrZoneNumber: 3, // Tempo zone instead of Zone 2
+            hrZoneMinBpm: orientationAssessment.targetHeartRateZone ? Math.round(orientationAssessment.targetHeartRateZone.max) : undefined,
+            hrZoneMaxBpm: orientationAssessment.targetHeartRateZone ? Math.round(orientationAssessment.targetHeartRateZone.max * 1.15) : undefined, // Zone 3-4 range
             hrZoneScenario: hrZoneScenario,
           })
           .returning();
@@ -909,7 +911,7 @@ If runner has NO previous runs:
         pendingSessionInstructions.push({
           workoutId: orientationWorkoutId,
           workoutType: "orientation",
-          intensity: "z2",
+          intensity: "tempo",
           sessionGoal: "assess_fitness",
           sessionIntent: "orientation_run",
           distance: orientationAssessment.recommendedDistance,
