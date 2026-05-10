@@ -273,8 +273,8 @@ class PreviousRunsViewModel @Inject constructor(
                 val connectedDevices = apiService.getConnectedDevices()
                 // User has active Garmin auth if they have any connected Garmin device
                 val hasGarminAuth = connectedDevices.any { device ->
-                    device.deviceType?.contains("Garmin", ignoreCase = true) == true ||
-                    device.deviceModel?.contains("Garmin", ignoreCase = true) == true
+                    device.deviceType.contains("garmin", ignoreCase = true) ||
+                    device.deviceName?.contains("Garmin", ignoreCase = true) == true
                 }
                 _hasGarminConnectAuth.value = hasGarminAuth
                 Log.d("PreviousRunsViewModel", "✅ Garmin Connect auth check: $hasGarminAuth (found ${connectedDevices.size} connected devices)")
