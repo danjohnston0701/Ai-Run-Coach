@@ -199,7 +199,7 @@ fun NoPlanState(onCreatePlan: () -> Unit) {
         Text("No Training Plan Yet", style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary, textAlign = TextAlign.Center)
         Spacer(modifier = Modifier.height(Spacing.sm))
         Text(
-            "Let your AI coach design a personalised programme to help you reach your goals.",
+            "Let your Ai coach design a personalised programme to help you reach your goals.",
             style = AppTextStyles.body,
             color = Colors.textSecondary,
             textAlign = TextAlign.Center
@@ -1438,11 +1438,11 @@ fun AiPlanSummary(details: TrainingPlanDetails) {
                         BaselineRow(icon = R.drawable.icon_chart_vector, text = "You run on average ${baseline.runsPerWeek}x per week")
                     }
                     if (!baseline.avgDistance.isNullOrBlank()) {
-                        val avgDistanceKm = baseline.avgDistance.toDoubleOrNull()?.div(1000)?.let { String.format(Locale.US, "%.1f", it) } ?: baseline.avgDistance
+                        val avgDistanceKm = baseline.avgDistance.toDoubleOrNull()?.let { String.format(Locale.US, "%.1f", it) } ?: baseline.avgDistance
                         BaselineRow(icon = R.drawable.icon_map_pin_vector, text = "Average distance: $avgDistanceKm km")
                     }
                     if (!baseline.longestRun.isNullOrBlank()) {
-                        val longestRunKm = baseline.longestRun.toDoubleOrNull()?.div(1000)?.let { String.format(Locale.US, "%.1f", it) } ?: baseline.longestRun
+                        val longestRunKm = baseline.longestRun.toDoubleOrNull()?.let { String.format(Locale.US, "%.1f", it) } ?: baseline.longestRun
                         BaselineRow(icon = R.drawable.icon_trophy_vector, text = "Longest run: $longestRunKm km")
                     }
                     if (baseline.runsRecorded != null) {

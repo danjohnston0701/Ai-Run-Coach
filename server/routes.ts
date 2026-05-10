@@ -10616,19 +10616,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
       );
       
-      // Get user's baseline performance data (last 10 runs or 30 days)
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const recentRuns = await db
+      // Get user's baseline performance data (last 10 native AI Run Coach runs, no date limit)
+      // No date limit — a user who hasn't run in 5 weeks still has valid baseline data
+      // Exclude Garmin-synced runs (legal constraint: Garmin Connect data cannot be used in AI processes)
+      const allUserRuns = await db
         .select()
         .from(runs)
-        .where(
-          and(
-            eq(runs.userId, userId),
-            gte(runs.completedAt, thirtyDaysAgo)
-          )
-        )
+        .where(eq(runs.userId, userId))
         .orderBy(desc(runs.completedAt))
-        .limit(10);
+        .limit(50); // fetch more so we have enough after filtering
+      const recentRuns = allUserRuns
+        .filter(r => !r.externalSource || r.externalSource === 'airuncoach')
+        .slice(0, 10);
       
       // Calculate baseline metrics
       let performanceBaseline: any = null;
