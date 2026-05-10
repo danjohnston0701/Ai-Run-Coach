@@ -497,7 +497,6 @@ export const couponCodes = pgTable("coupon_codes", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   code: text("code").notNull().unique(),
   type: text("type").notNull(),
-  value: integer("value"),
   durationDays: integer("duration_days"),
   maxUses: integer("max_uses"),
   currentUses: integer("current_uses").default(0),
