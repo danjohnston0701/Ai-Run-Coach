@@ -97,6 +97,7 @@ fun MyDataScreen(
     val stats by viewModel.currentPeriodStats.collectAsState()
     val allTimeStats by viewModel.allTimeStats.collectAsState()
     val coachingSummary by viewModel.coachingSummary.collectAsState()
+    val aiCoachReview by viewModel.aiCoachReview.collectAsState()
     
     val pullRefreshState = rememberPullRefreshState(
         refreshing = isLoading,
@@ -165,6 +166,14 @@ fun MyDataScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(Spacing.md)
                     ) {
+                        // Section 0: AI Coach's Review — living profile summary
+                        if (!aiCoachReview.isNullOrBlank()) {
+                            item {
+                                AiCoachReviewSection(review = aiCoachReview!!)
+                                Spacer(modifier = Modifier.height(Spacing.lg))
+                            }
+                        }
+
                         // Section 1: Personal Records (All-Time)
                         item {
                             SectionHeader(title = "🏆 Personal Records")
@@ -285,6 +294,73 @@ private fun SectionHeader(title: String) {
         color = Colors.textPrimary,
         fontWeight = FontWeight.Bold
     )
+}
+
+/**
+ * AI Coach's Review — displays the living "What I know about you" runner profile.
+ * This is the accumulated AI coach intelligence: patterns, tendencies, and
+ * observations that have built up from every post-run analysis.
+ * Only shown when a profile has been generated (requires at least one completed run).
+ */
+@Composable
+private fun AiCoachReviewSection(review: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                // Subtle gradient-style background — slightly warmer than the standard card
+                // to signal this is AI-generated insight, not raw stats
+                Colors.backgroundSecondary
+            )
+            .padding(Spacing.md)
+    ) {
+        // Header row with coach icon
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            // Coach brain/spark icon — using a Unicode symbol for compatibility
+            Text(
+                text = "🧠",
+                fontSize = 20.sp
+            )
+            Spacer(modifier = Modifier.width(Spacing.sm))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "AI Coach's Review",
+                    style = AppTextStyles.h3,
+                    color = Colors.textPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "What your coach knows about you",
+                    style = AppTextStyles.caption,
+                    color = Colors.textSecondary
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(Spacing.sm))
+
+        // Divider
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(Colors.backgroundTertiary)
+        )
+
+        Spacer(modifier = Modifier.height(Spacing.sm))
+
+        // The AI-generated profile text
+        Text(
+            text = review,
+            style = AppTextStyles.body,
+            color = Colors.textPrimary,
+            lineHeight = 22.sp
+        )
+    }
 }
 
 // All 7 standard PB categories — always shown, blank if no PB yet

@@ -547,6 +547,9 @@ interface ApiService {
         @Query("days") days: Int = 90
     ): Response<MyDataResponse>
 
+    @GET("/api/my-data/runner-profile")
+    suspend fun getMyDataRunnerProfile(): Response<MyDataResponse>
+
     // ── Feature Availability ────────────────────────────────────────────────
     
     @GET("/api/features/{featureName}/available")

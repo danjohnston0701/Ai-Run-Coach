@@ -667,6 +667,13 @@ export async function generatePhaseCoaching(params: {
   runnerWeight?: number;
   runnerHeight?: number;
   runnerProfile?: string | null;
+  // Training plan context (optional — used for plan-aware coaching)
+  trainingPlanId?: string;
+  workoutType?: string;
+  workoutDescription?: string;
+  planGoalType?: string;
+  planWeekNumber?: number;
+  planTotalWeeks?: number;
 }): Promise<string> {
   const { phase, distance, targetDistance, elapsedTime, currentPace, currentGrade, totalElevationGain, heartRate, cadence, coachName, coachTone, coachAccent, coachGender, activityType, hasRoute, targetPace, targetTime, triggerType, navigationInstruction, navigationDistance, fitnessLevel, runnerName, runnerAge, runnerWeight, runnerHeight } = params;
   
@@ -1034,6 +1041,27 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
   }
 
   // Detect "run start" scenario: phase is EARLY/warmUp and distance is near zero
+
+  // Training plan context — adds plan-awareness to phase coaching messages
+  let planContext = '';
+  const planGoalType = (params as any).planGoalType as string | undefined;
+  const planWeekNumber = (params as any).planWeekNumber as number | undefined;
+  const planTotalWeeks = (params as any).planTotalWeeks as number | undefined;
+  const phaseWorkoutType = (params as any).workoutType as string | undefined;
+  const phaseWorkoutDescription = (params as any).workoutDescription as string | undefined;
+  const phaseTrainingPlanId = (params as any).trainingPlanId as string | undefined;
+  if (phaseTrainingPlanId && planGoalType) {
+    const goalLabel = planGoalType.replace(/_/g, ' ').toUpperCase();
+    planContext = `\nCoaching Programme Context: This is a scheduled workout in the runner's AI coaching plan`;
+    if (planWeekNumber && planTotalWeeks) {
+      planContext += ` (Week ${planWeekNumber} of ${planTotalWeeks})`;
+    }
+    planContext += `, training for a ${goalLabel}`;
+    if (phaseWorkoutType) planContext += `. Session type: ${phaseWorkoutType.replace(/_/g, ' ')}`;
+    if (phaseWorkoutDescription) planContext += `. Today's goal: "${phaseWorkoutDescription}"`;
+    planContext += '. Reference the plan when relevant — remind them how this session fits the bigger journey.';
+  }
+
   const isRunStart = (phase === 'EARLY' || phase === 'warmUp') && distance < 0.05;
   
   // Build trigger-specific instruction
@@ -1050,7 +1078,7 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
     prompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.
 
 The runner has just started their ${activityType || 'run'}${targetDistance ? ` — their target is ${formatDistanceForTTS(targetDistance)}` : ''}${targetTime && targetTime > 0 ? ` in ${formatDurationForTTS(targetTime)}` : ''}.
-${noTerrainRule}${runnerProfileContext}
+${noTerrainRule}${runnerProfileContext}${planContext}
 Give a short, energetic motivational message (2-3 sentences) to kick off their run. Focus on getting them pumped up and ready to go. Do NOT mention distance covered, pace, cadence, or any metrics — the run has literally just begun. Just motivate them!
 ${phaseVarietySeed}
 CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", or "Hello". Jump straight into the coaching message.${runnerFirstName ? ` You may use "${runnerFirstName}" naturally but not as a greeting opener.` : ''}`;
@@ -1088,13 +1116,13 @@ ${cadenceInfo}
 ${terrainInfo}
 ${elevationInstruction}
 ${cadenceInstruction}
-${noTerrainRule}${runnerProfileContext}
+${noTerrainRule}${runnerProfileContext}${planContext}
 ${PACE_FORMAT_RULE}
 ${phaseVarietySeed}
 ${triggerInstruction} Be ${coachTone} and direct.
 CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", "Hello", or "Hey superstar". Jump straight into the coaching content.${runnerFirstName ? ` You may address them as "${runnerFirstName}" naturally within the message but not as an opening greeting.` : ''}
 
-CRITICAL: You MUST weave in at least 2 specific data points from the Runner Status above (e.g. their actual pace like "${spokenPhasePace}", distance "${distance.toFixed(1)}km", time "${timeFormatted}", cadence, heart rate). Runners want to hear their real numbers — do NOT give vague encouragement without citing their actual stats.${targetPace ? ` You MUST tell the runner whether they are on track for their target pace of ${spokenTargetPace}. ${paceVerdict} — communicate this clearly and honestly. Do NOT praise slow pace when they are behind target.` : ''}${targetTime && targetTime > 0 ? ` You MUST mention whether they are on track for their target time of ${formatDurationForTTS(targetTime)}.` : ''}${cadenceCoachingDirective ? ' You MUST include the cadence coaching directive above.' : ''}${elevationInstruction ? ' You MUST acknowledge the elevation context.' : ''}${hasRoute === true && !elevationInstruction ? ' Consider terrain if relevant.' : ''}`;
+Runners want to hear their real numbers — weave in their actual stats (pace, distance, time, cadence, heart rate) naturally in your coaching message. This should feel like a coach who is watching their real performance, not vague encouragement. ${targetPace ? `Be clear about whether they are on track for target pace ${spokenTargetPace} — ${paceVerdict}. Do not praise a slow pace when they are behind target.` : ""}${targetTime && targetTime > 0 ? ` Address whether they are on track for their ${formatDurationForTTS(targetTime)} target time.` : ""}${cadenceCoachingDirective ? ' Incorporate the cadence coaching directive above.' : ""}${elevationInstruction ? ' Acknowledge the elevation context.' : ""}${hasRoute === true && !elevationInstruction ? ' Consider terrain if relevant.' : ""}`;
 
     systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful — always cite the runner's actual numbers (pace, distance, time etc). NEVER start with greetings like "Hey there", "Hey!", "Hi!" — jump straight into coaching. NEVER praise a poor split or slow pace when the runner is behind target — be honest and direct. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`;
   }
@@ -1152,6 +1180,13 @@ export async function generateIntervalCoaching(params: {
   fitnessLevel?: string;
   runnerName?: string;
   runnerProfile?: string | null;
+  totalIntervals?: number;   // Total number of work intervals in this session
+  // Training plan context
+  workoutType?: string;
+  workoutDescription?: string;
+  planGoalType?: string;
+  planWeekNumber?: number;
+  planTotalWeeks?: number;
 }): Promise<string> {
   const {
     intervalNumber,
@@ -1206,7 +1241,20 @@ ${phaseEmphasis}
 ${paceContext}
 ${hrContext}
 
-Give 1–2 punchy, direct sentences. ${isWorkPhase ? 'Push them hard but safely.' : 'Help them recover and prepare for the next effort.'}`;
+${(params as any).totalIntervals ? `This is rep ${intervalNumber} of ${(params as any).totalIntervals} total.` : ''}
+${(() => {
+  const pg = (params as any).planGoalType as string | undefined;
+  const pw = (params as any).planWeekNumber as number | undefined;
+  const pt = (params as any).planTotalWeeks as number | undefined;
+  const wd = (params as any).workoutDescription as string | undefined;
+  if (!pg) return '';
+  let ctx = `\nCoaching plan: Training for ${pg.replace(/_/g, ' ').toUpperCase()}`;
+  if (pw && pt) ctx += `, Week ${pw} of ${pt}`;
+  if (wd) ctx += `. Session goal: "${wd}"`;
+  return ctx;
+})()}
+
+Give 1–2 punchy, direct sentences. ${isWorkPhase ? 'Push them hard but safely.' : 'Help them recover and prepare for the next effort. If it fits, remind them how this session serves their training goal.'}`;
 
   const systemMsg = buildCoachingSystemPrompt({
     coachName,
@@ -1431,74 +1479,20 @@ export async function generateCadenceCoaching(params: {
   
   let zoneAnalysis = '';
   if (strideZone === 'OVERSTRIDING') {
-    zoneAnalysis = `OVERSTRIDING DETECTED: Cadence ${cadence} spm with stride length ${strideCm}cm — this is above the optimal range of ${optMinCm}-${optMaxCm}cm for their height.
+    zoneAnalysis = `OVERSTRIDING DETECTED: Cadence ${cadence} spm with stride length ${strideCm}cm — their foot is landing ahead of their centre of mass, creating a braking force with each step.
 
-Overstriding means their foot is landing too far ahead of their center of mass, creating a braking force with each step. This:
-- Increases impact on knees and shins (injury risk)
-- Wastes energy fighting the braking force
-- Reduces running efficiency
+Key context:
+- Personalised target: ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}–${dynOptimalCadenceMax} spm) — calculated for their height (${heightCmDisplay ?? 170}cm) at their current pace. NOT a generic target.
+- Overstriding increases knee and shin impact stress
+- The correction: shorten stride, move foot strike closer to beneath the hips
 
-The runner needs to SHORTEN their stride and INCREASE their cadence. Their personalised target is ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}–${dynOptimalCadenceMax} spm) — this is calculated specifically for their height (${heightCmDisplay ?? 170}cm) at their current pace. Provide elite-level coaching on HOW to do this:
-1. Focus on landing with foot beneath hips, not out front
-2. Think "quick, light steps" — aim for ${dynOptimalCadenceMin}-${dynOptimalCadenceMax} spm
-3. Lean slightly forward from ankles (not waist)
-4. Imagine running on hot coals — minimize ground contact time
-5. Arms drive the cadence — quicker arms = quicker feet
-6. Keep your landing tight beneath your center of mass
-7. Let the ground come to your foot—don’t chase it
-8. Shorten the step and land softly beneath your body
-9. Imagine placing your foot straight down under your hips
-10. Reduce the reach—quick feet underneath you
-11. Your stride should land under you, not in front of you
-12. Let your feet move faster with smaller steps.
-13. Increase step rhythm—shorter steps, faster turnover.
-14. Run like you're tapping the ground quickly.
-15. Quick cadence keeps your stride compact.
-16. Let the rhythm of your feet speed up slightly.
-17. Faster cadence, lighter steps.
-18. Think quick feet beneath you.
-19. Compact steps will protect your legs and increase efficiency.
-20. Arms drive cadence—quicker arms mean quicker feet.
-21. Speed up your arm swing slightly.
-22.Compact arm swings will increase cadence.
-23. Let your arms set the rhythm for your legs.
-24. Faster arm turnover shortens the stride.
-25. Keep arms relaxed but quick.
-26. Drive elbows back faster.
-27. Quick arm rhythm = quick foot rhythm.
-28. Let your arms guide the cadence.
-29.Smooth, quick arm drive will tighten your stride.`;
+Use your coaching expertise to choose the 1-2 most effective, actionable cues for this moment. You know how to coach overstriding — pick what will resonate.`;
   } else if (strideZone === 'UNDERSTRIDING') {
-    zoneAnalysis = `UNDERSTRIDING DETECTED: Cadence ${cadence} spm with stride length ${strideCm}cm — their cadence is ${cadenceDeficit} spm below their personalised target.
+    zoneAnalysis = `UNDERSTRIDING DETECTED: Cadence ${cadence} spm — ${cadenceDeficit} spm below their personalised target of ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}–${dynOptimalCadenceMax} spm), calculated for their height (${heightCmDisplay ?? 170}cm) at ${formatPaceForTTS(currentPace)}.
 
-Their personalised target is ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}–${dynOptimalCadenceMax} spm) — calculated for their height (${heightCmDisplay ?? 170}cm) at ${formatPaceForTTS(currentPace)}. This is NOT a generic target like "everyone should run at 180 spm".
+This is NOT a generic "everyone should hit 180" situation — this is their specific efficient range. A low turnover stride reduces propulsion and increases vertical oscillation.
 
-Understriding means they're shuffling with too-short steps at a low turnover rate. This:
-- Wastes energy on vertical oscillation (bouncing up and down)
-- Reduces forward propulsion
-- Can cause calf and Achilles fatigue
-
-The runner needs to find a more efficient cadence FOR THEM. Provide coaching on HOW to increase cadence:
-1. Use a mental metronome — aim for ${dynOptimalCadenceMin}-${dynOptimalCadenceMax} steps per minute (their personal target, not generic)
-2. Push off more powerfully from the balls of their feet
-3. Drive knees forward (not up) with each stride
-4. Keep arms pumping actively — they set the rhythm
-5. Think "smooth and powerful" not "short and choppy"
-6. Run like you're tapping the ground quickly.
-7. Quick cadence keeps your stride compact.
-8. Let the rhythm of your feet speed up slightly.
-9. Faster cadence, lighter steps.
-10. Think quick feet beneath you.
-11. Compact steps will protect your legs and increase efficiency.
-12. Arms drive cadence—quicker arms mean quicker feet.
-13. Speed up your arm swing slightly.
-14.Compact arm swings will increase cadence.
-15. Let your arms set the rhythm for your legs.
-16. Faster arm turnover shortens the stride.
-17. Keep arms relaxed but quick.
-18. Drive elbows back faster.
-19. Quick arm rhythm = quick foot rhythm.
-20. Let your arms guide the cadence.`;
+Use your coaching expertise to choose the 1-2 most effective, actionable cues to increase their cadence. Arms, mental imagery, foot placement, rhythm — whatever you judge will land best for this runner right now.`;
   } else {
     zoneAnalysis = `Cadence ${cadence} spm with stride ${strideCm}cm is in the optimal zone. Brief positive reinforcement.`;
   }
@@ -2065,10 +2059,10 @@ export function buildTTSInstructions(
 }
 
 function buildCoachingSystemPrompt(context: CoachingContext): string {
-  let prompt = `You are an AI running coach. Be encouraging, brief (1-2 sentences max), and specific to the runner's current situation. NEVER start with greetings like "Hey there", "Hey!", "Hi!" — jump straight into coaching.`;
+  const coachIdentity = context.coachName || 'Coach';
+  let prompt = `You are ${coachIdentity}, an elite AI running coach delivering live coaching to an athlete mid-run. You have real-time access to their pace, distance, heart rate, cadence, and terrain data — use it to make every coaching message feel like it comes from someone who is right there watching them perform. Be specific, immediate, and personal. NEVER start with greetings like "Hey there", "Hey!", "Hi!" — jump straight into the coaching.`;
   
   if (context.coachTone) {
-    prompt += ` Your tone should be ${context.coachTone}.`;
     prompt += ` ${toneDirective(context.coachTone)}`;
   }
   
@@ -2739,7 +2733,9 @@ function buildEnhancedCoachingSystemPrompt(context: EnhancedCoachingContext): st
     }
     
     if (context.heartRate) {
-      const currentZone = getHeartRateZone(context.heartRate, 220 - 30); // Assume age 30 for now
+      const runnerAge = (context as any).runnerAge;
+      const effectiveMaxHR = runnerAge ? calcMaxHR(runnerAge) : 190;
+      const currentZone = getHeartRateZoneNumber(context.heartRate, effectiveMaxHR);
       if (currentZone > context.targetHeartRateZone) {
         prompt += ' Runner is ABOVE target zone - encourage them to slow down.';
       } else if (currentZone < context.targetHeartRateZone) {
@@ -4338,62 +4334,57 @@ Session Details:
 - Target HR Range: ${targetHRMin ?? "not set"}–${targetHRMax ?? "not set"} bpm
 ${sessionInstructions ? `\nSession Instructions from Training Plan:\n${sessionInstructions}` : ""}`.trim();
 
-  const systemPrompt = `You are ${coachName}, an elite AI running coach designing a hyper-personalised, bespoke coaching plan for a single training session. Your goal is to make the runner feel like they have a world-class personal trainer running beside them — giving exactly the right instruction, at exactly the right moment, throughout the entire session.
+  const systemPrompt = `You are ${coachName}, an elite AI running coach delivering a world-class, hyper-personalised coaching experience for a single training session. Your mission is to make this athlete feel like they have a dedicated personal coach running beside them — reading their performance in real time and delivering exactly the right guidance at exactly the right moment.
 
-Your job is to generate a complete, session-specific coaching plan that includes:
-1. A breakdown of the session into phases (warmup, main effort, cooldown, reps, recovery jogs, etc.)
-2. Reactive coaching triggers — conditions evaluated against LIVE metrics that fire immediately when the runner needs guidance
-3. A pre-run brief (2-4 sentences) telling the runner what to do and why
-4. A "why this session matters" explanation (1-2 sentences)
-5. The optimal coaching tone for this session
+You have full creative authority over how you design this session's coaching plan. Choose the phase structure, coaching approach, tone, and messaging that YOU believe will give this specific athlete the best performance and experience in this specific session. Do not default to a generic template.
 
-CRITICAL RULES:
-- Do NOT use generic coaching — every message must be specific to THIS session type, distance, pace, and runner
-- Phase names must reflect the actual session (e.g., "hill_rep_1", "tempo_block", "recovery_jog_2")
+Your coaching plan must include:
+- A session breakdown into phases that reflect how this session actually works (warmup, effort blocks, recovery jogs, reps, cooldown — whatever structure genuinely fits this session type)
+- Reactive coaching triggers — live conditions evaluated against GPS/HR data that fire when the athlete needs guidance  
+- A pre-run brief (2-4 sentences) that is specific, motivating, and tells the athlete exactly what they are doing today and why
+- A "why this session matters" explanation (1-2 sentences) connecting this session to the athlete's goal
+- The coaching tone you judge to be most effective for this session and this athlete
+
+COACHING PRINCIPLES:
+- Every message must be specific to THIS session, THIS athlete's targets, and THIS moment in their plan — generic coaching is not acceptable
 - Trigger messages must be SHORT (under 20 words), direct, conversational, and actionable — like a coach talking in your ear
-- The coaching engine evaluates triggers EVERY GPS tick (~1/sec), so reactive triggers (hr_zone, pace_deviation) will fire immediately when conditions are met
-- Provide 3-5 alternativeMessages for every repeating trigger so the runner hears variety, not the same line
-- For interval/rep sessions: ALTERNATE work phases and recovery jog phases explicitly (e.g. work_rep_1, recovery_jog_1, work_rep_2, recovery_jog_2, ...)
-- Each recovery jog phase MUST have its own phase_start trigger with recovery pace and distance targets
-- Choose cueingStrategy based on session complexity:
-  * "interval" — sessions with repeating effort phases (intervals, hill reps, fartlek)
-  * "threshold" — sustained hard effort without reps (tempo, threshold)
-  * "paced" — target-pace sessions (race pace, progression)
-  * "freerun" — simple continuous sessions (easy, recovery, long run)
-- The preRunBrief MUST mention the specific session targets (distance, pace, or effort zones)
-- Coaching tone should be SESSION-appropriate, not just user-preference:
-  * Recovery/easy: calm, light, conversational
-  * Intervals/hills: direct, energetic, motivational
-  * Tempo/threshold: focused, technical, steady
-  * Long run: supportive, steady, milestone-aware
+- The coaching engine evaluates triggers continuously (~1/sec on GPS tick), so reactive triggers fire immediately when conditions are met
+- Provide 3-5 alternativeMessages for every repeating trigger so the athlete hears varied language across the session
+- The preRunBrief must reference the actual session targets (distance, pace, effort zones, rep structure)
+- Match coaching tone to the session's demands — not just the athlete's general preference:
+  * Recovery/easy/aerobic: calm, supportive, conversational — focus on effort feel and zone adherence
+  * Intervals/hills/speed: direct, energetic, motivating — emphasise rep quality and recovery discipline
+  * Tempo/threshold: focused, technical, steady — help the athlete lock into and maintain the target effort
+  * Long run: supportive, milestone-aware — manage pacing and mental engagement over distance
 
-TRIGGER TYPE GUIDE — use these types correctly:
-- "phase_start": fires ONCE when a new phase begins (always include for every phase)
-- "phase_end": fires ONCE 50-100m before a phase ends — use as a "heads up" cue
-- "rep_start": fires at the start of each work interval rep (interval sessions only)
-- "rep_end": fires when an interval rep ends — include next step instruction (e.g. "recovery jog now")
-- "recovery_start": fires at the start of each recovery jog — give pace target and duration
-- "hr_zone_high": REACTIVE — fires when live HR exceeds targetHRMax for this phase — tell runner to ease off
-- "hr_zone_low": REACTIVE — fires when live HR drops below targetHRMin for this phase — tell runner to push harder
-- "pace_too_fast": REACTIVE — fires when live pace is faster than targetPaceMin by >15 sec/km — tell runner to ease off
-- "pace_too_slow": REACTIVE — fires when live pace is slower than targetPaceMax by >15 sec/km — tell runner to pick up
+CUEING STRATEGY — choose the one that best fits this session:
+- "interval" — sessions with structured repeating effort phases (intervals, hill reps, fartlek blocks)
+- "threshold" — sustained continuous hard effort (tempo, threshold)
+- "paced" — sessions targeting a specific pace throughout (race pace, progression run)
+- "freerun" — continuous aerobic sessions where effort/zone adherence is the primary focus (easy, recovery, long run)
+
+APP TRIGGER CAPABILITIES — these are the trigger types the coaching runtime supports:
+- "phase_start": fires once when a phase begins — always include for every phase
+- "phase_end": fires once 50-100m before a phase ends — use as a transition heads-up
+- "rep_start": fires at the start of each work interval rep
+- "rep_end": fires when an interval rep ends — tell the athlete what's next
+- "recovery_start": fires at the start of a recovery phase — give pace target and duration
+- "hr_zone_high": REACTIVE — fires when live HR exceeds targetHRMax — instruct athlete to ease off
+- "hr_zone_low": REACTIVE — fires when live HR drops below targetHRMin — instruct athlete to push more
+- "pace_too_fast": REACTIVE — fires when live pace is faster than targetPaceMin by >15 sec/km
+- "pace_too_slow": REACTIVE — fires when live pace is slower than targetPaceMax by >15 sec/km
 - "milestone": fires once at key distance milestones (halfway, 75%, etc.)
 
-CONDITION SYNTAX (used by the runtime evaluator):
-- HR conditions: "hr > {number}", "hr < {number}", "hr > targetHRMax", "hr < targetHRMin"
-- Pace conditions (sec/km): "pace > targetPaceMax + 15", "pace < targetPaceMin - 15"
-- Phase conditions: "phase == warmup", "phase == main_effort"
-- Rep conditions: "rep_start", "rep_end"
-- Distance conditions: "distance_pct > 50" (percentage of total)
+TRIGGER CONDITION SYNTAX (evaluated by the runtime engine):
+- HR: "hr > {number}", "hr < {number}", "hr > targetHRMax", "hr < targetHRMin"
+- Pace (sec/km): "pace > targetPaceMax + 15", "pace < targetPaceMin - 15"
+- Phase: "phase == warmup", "phase == main_effort"
+- Rep: "rep_start", "rep_end"
+- Distance: "distance_pct > 50" (percentage of total session distance)
 
-FREQUENCY RULES:
-- "once": fires only the first time condition is met (use for phase_start, milestones)
-- "on_condition": fires whenever condition is TRUE, max once per 90 seconds per trigger (use for hr_zone_high/low, pace deviation)
-- "repeating_3min": fires every 3 minutes regardless of condition (avoid — use on_condition instead)
-
-HR ZONE SESSIONS (z1/z2/z3): Generate 2 reactive HR triggers per phase:
-  1. hr_zone_high: fires when HR > phase targetHRMax — instruct runner to slow down and give exact pace guidance
-  2. hr_zone_low: fires when HR < phase targetHRMin — instruct runner to pick up pace
+TRIGGER FREQUENCY:
+- "once": fires only the first time (use for phase_start, milestones, rep_start/end)
+- "on_condition": fires whenever condition is true, max once per 90 seconds (use for reactive HR/pace triggers)
 
 ${toneDirective(coachTone)}
 ${accentDirective(params.coachAccent)}
@@ -4502,19 +4493,17 @@ Return ONLY valid JSON in this exact format:
   }
 }
 
-PHASE DESIGN RULES:
-- Intervals/hill_repeats: warmup (1-2km) + ALTERNATING work_rep_N and recovery_jog_N phases (one of each per rep) + cooldown
-  * Each work_rep phase: include its pace and HR targets, plus rep_start / rep_end / hr_zone_high / hr_zone_low / pace_too_fast / pace_too_slow triggers
-  * Each recovery_jog phase: include its easy pace target plus a recovery_start trigger that says "Rep N done — easy jog for Xm at Y min/km, next interval in Zm"
-  * Example for 5x400m: warmup, work_rep_1, recovery_jog_1, work_rep_2, recovery_jog_2, ..., cooldown
-- Tempo/threshold: warmup (1km) + tempo_block + cooldown — include hr_zone_high/low and pace_too_fast/slow triggers throughout tempo_block
-- Long run: warmup + main_effort + cooldown — milestone triggers at 25%, 50%, 75%, include hr_zone_high/low if HR targets given
-- Easy/zone2/recovery: single main_effort phase — HEAVY hr_zone_high/low triggers since the goal is zone control; include pace guidance if runner has no HR monitor
-- ALWAYS include a warmup phase and a cooldown phase
-- ALWAYS include phase_start triggers for EVERY phase
-- Each trigger id must be unique (use format: "{phase}_{type}" e.g. "work_rep_1_hr_high")
-- Trigger messages must be under 20 words, present tense, active voice, spoken like a coach in your ear
-- For reactive triggers (hr_zone, pace_deviation): provide 3-5 alternativeMessages with varied wording so the runner hears different cues each time`;
+PHASE DESIGN GUIDANCE:
+Design the phase structure that genuinely fits this session. You choose the number of phases, their names, and their sequence based on what makes coaching sense for this specific session type and athlete. Some principles that typically apply:
+- Sessions generally benefit from a warmup phase (to prepare the athlete physically and mentally) and a cooldown phase
+- Interval/rep sessions work best with alternating work and recovery phases so each phase has its own targets and coaching triggers
+- Continuous effort sessions (tempo, easy, long run) can be a single main effort or broken into logical sub-phases with milestone triggers
+- Zone-based sessions benefit from reactive HR triggers throughout to keep the athlete in the target zone
+
+ALWAYS include phase_start triggers for every phase — the athlete needs to know what each phase requires.
+Each trigger id must be unique (use format: "{phase_name}_{trigger_type}" e.g. "tempo_block_hr_high", "work_rep_2_pace_slow").
+Trigger messages: under 20 words, present tense, active voice, spoken like a coach in your ear.
+For reactive triggers (hr_zone, pace_deviation): provide 3-5 alternativeMessages with varied wording so the athlete hears different language each time the condition fires.`;
 
   try {
     const completion = await openai.chat.completions.create({

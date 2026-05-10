@@ -691,7 +691,7 @@ fun GeneratePlanScreen(
                     SectionHeader(title = "Injuries & Conditions", icon = R.drawable.icon_heart_vector)
                     Spacer(modifier = Modifier.height(Spacing.sm))
                     Text(
-                        "Add any injuries or conditions so the AI can design a safe training plan that avoids aggravating recovery.",
+                        "Add any injuries or conditions — the AI coach will design your plan around these. Be as specific as possible so it can make the right adaptations.",
                         style = AppTextStyles.small,
                         color = Colors.textMuted
                     )
@@ -979,7 +979,7 @@ fun AddInjuryDialog(
     var selectedStatus by remember { mutableStateOf(injury?.status ?: InjuryStatus.RECOVERING) }
     var notes by remember { mutableStateOf(injury?.notes ?: "") }
     
-    val bodyParts = listOf("Knee", "Ankle", "Shin", "Hip", "Back", "Foot", "Calf", "Hamstring", "Quad", "Groin", "Shoulder", "Wrist", "Other")
+    val bodyParts = listOf("Knee", "Ankle", "Shin", "Hip", "Back", "Neck / Cervical Spine", "Foot", "Calf", "Hamstring", "Quad", "Groin", "Shoulder", "Wrist", "IT Band", "Achilles", "Plantar Fascia", "Other")
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1045,13 +1045,13 @@ fun AddInjuryDialog(
                 }
 
                 // Notes
-                Text("Notes (optional)", style = AppTextStyles.small, color = Colors.textMuted)
+                Text("Details — tell the AI coach exactly what it is", style = AppTextStyles.small, color = Colors.textMuted)
                 OutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
-                    placeholder = { Text("e.g., Started in January, improving") },
+                    placeholder = { Text("e.g., Fractured C5 vertebra, 3 months post-injury. No jarring impact, no high-intensity effort yet.") },
                     modifier = Modifier.fillMaxWidth(),
-                    maxLines = 3
+                    maxLines = 4
                 )
             }
         },

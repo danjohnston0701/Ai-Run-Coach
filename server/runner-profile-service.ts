@@ -11,8 +11,32 @@
  *   and imprecise.  With a living profile, every feature simply injects 200
  *   words of curated context and gets hyper-personalised output instantly.
  *
+ * THE LEARNING LOOP (Approach B + C):
+ *
+ *   Approach C — Accumulating Profile Memory:
+ *     The profile is NOT rebuilt from scratch on every run.  Instead, the
+ *     current profile is passed back to OpenAI alongside new run data and the
+ *     AI is asked to UPDATE its understanding — enriching the profile with new
+ *     observations rather than overwriting it.  Patterns compound over time.
+ *
+ *   Approach B — Observation History:
+ *     After every post-run analysis, a structured "coaching observation" is
+ *     extracted (pacing tendency, adaptation signals, mental game notes, etc.)
+ *     and stored in user_stats.coaching_observations as a rolling JSONB array
+ *     (max 20 entries).  The profile regeneration prompt receives all of these
+ *     alongside raw data, so the AI coach is reasoning from accumulated insight,
+ *     not just numbers.
+ *
+ *   Result: After 10 runs the profile might say:
+ *     "Dan consistently goes out 15s/km too fast in the first km of tempo sessions
+ *     and fades in the final third — this pattern has appeared 4 times in the last
+ *     6 weeks.  His cadence drops from ~172 to ~163 under fatigue; reminding him
+ *     to 'quick feet' in the last 20% has proven effective. Aerobic adaptation is
+ *     clearly progressing: HR at equivalent effort is 10bpm lower than 4 weeks ago."
+ *
  * WHEN IT RUNS:
  *   - After every run is saved (triggered non-blocking from user-stats-cache)
+ *   - After every post-run analysis (triggered from routes.ts — also non-blocking)
  *   - On demand via POST /api/my-data/refresh-runner-profile
  *
  * WHAT IT CAPTURES:
@@ -23,7 +47,7 @@
  *   advice without looking anything up.
  *
  * OUTPUT:
- *   ~150–250 words of plain English, written in third person.
+ *   ~150–280 words of plain English, written in third person.
  *   Stored in user_stats.ai_runner_profile.  Injected verbatim into AI prompts.
  */
 
@@ -38,6 +62,28 @@ import {
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+/**
+ * A single structured coaching observation extracted from one post-run analysis.
+ * Stored as an entry in user_stats.coaching_observations (JSONB array, max 20).
+ */
+export interface CoachingObservation {
+  date: string;                    // ISO date of the run e.g. "2026-05-10"
+  runId: string;                   // Run ID for deduplication
+  distanceKm: number;              // Distance of the run
+  workoutType: string | null;      // e.g. "tempo", "easy", "intervals", "long_run"
+  performanceScore: number | null; // 1–100 from the analysis
+
+  // Pattern observations (from post-run analysis fields)
+  patternObserved: string | null;  // runPatternAnalysis — how they ran
+  progressionNote: string | null;  // progressionTrend — improving/declining/stable
+  adaptationSignal: string | null; // fitnessContext.adaptationSignals — fitness response
+  struggleNote: string | null;     // strugglePointsAnalysis.likelyReasons
+  pacingNote: string | null;       // pacingStrategy.assessment — pacing tendencies
+  coachingSummary: string | null;  // analysis.summary — the headline observation
+}
+
 // ─── Shared prompt helper ────────────────────────────────────────────────────
 
 /**
@@ -48,10 +94,6 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
  *
  * When profile is empty/null this returns an empty string so callers can
  * safely do: `systemPrompt + runnerProfileBlock(profile)` without guards.
- *
- * Usage example:
- *   const profile = await getRunnerProfile(userId);
- *   const systemPrompt = `You are a running coach...` + runnerProfileBlock(profile);
  */
 export function runnerProfileBlock(profile: string | null | undefined): string {
   if (!profile || profile.trim() === '') return '';
@@ -68,6 +110,10 @@ Use the above context to personalise every part of your response. Reference spec
 /**
  * Regenerate the AI runner profile for a user and persist it to user_stats.
  * Non-blocking safe — all errors are caught and logged, never thrown.
+ *
+ * This is the core of the learning loop.  It reads current profile +
+ * coaching observations + raw data, and asks OpenAI to UPDATE (not rewrite)
+ * its understanding of this runner.
  */
 export async function refreshRunnerProfile(userId: string): Promise<void> {
   try {
@@ -98,6 +144,71 @@ export async function getRunnerProfile(userId: string): Promise<string | null> {
     .from(userStats)
     .where(eq(userStats.userId, userId));
   return row?.aiRunnerProfile ?? null;
+}
+
+/**
+ * Persist a structured coaching observation extracted from a post-run analysis.
+ *
+ * Prepends the new observation to the existing coaching_observations array,
+ * trims to the 20 most recent entries, and saves.  Also triggers a profile
+ * refresh so the living profile incorporates this new insight immediately.
+ *
+ * Called from routes.ts after generateComprehensiveRunAnalysis() completes.
+ * Non-blocking safe — errors are caught and logged, never thrown.
+ */
+export async function persistCoachingObservation(
+  userId: string,
+  observation: CoachingObservation,
+): Promise<void> {
+  try {
+    // Only persist if there's at least one meaningful observation field
+    const hasContent = observation.patternObserved || observation.progressionNote ||
+      observation.adaptationSignal || observation.struggleNote ||
+      observation.pacingNote || observation.coachingSummary;
+    if (!hasContent) return;
+
+    // Fetch current observations array (may be null for new users)
+    const [row] = await db
+      .select({ coachingObservations: userStats.coachingObservations })
+      .from(userStats)
+      .where(eq(userStats.userId, userId));
+
+    const existing: CoachingObservation[] =
+      Array.isArray(row?.coachingObservations) ? row.coachingObservations as CoachingObservation[] : [];
+
+    // Deduplicate by runId (in case of retry/duplicate calls)
+    const deduplicated = existing.filter(o => o.runId !== observation.runId);
+
+    // Prepend new observation and trim to max 20 entries
+    const updated = [observation, ...deduplicated].slice(0, 20);
+
+    await db
+      .insert(userStats)
+      .values({
+        userId,
+        coachingObservations: updated as any,
+        // Required NOT NULL columns with safe defaults — upsert handles the rest
+        totalRuns: 0,
+        totalDistanceKm: 0,
+        totalDurationSeconds: 0,
+        totalElevationGainM: 0,
+        totalCalories: 0,
+        totalActiveCalories: 0,
+        longestRunKm: 0,
+      })
+      .onConflictDoUpdate({
+        target: userStats.userId,
+        set: { coachingObservations: updated as any },
+      });
+
+    console.log(`[RunnerProfile] Coaching observation persisted for user ${userId} (${updated.length} total)`);
+
+    // Immediately refresh the runner profile with the new observation included
+    // This is non-blocking — errors are already handled inside refreshRunnerProfile
+    refreshRunnerProfile(userId).catch(() => {});
+  } catch (err) {
+    console.error(`[RunnerProfile] Failed to persist coaching observation for user ${userId}:`, err);
+  }
 }
 
 // ─── Context assembly ────────────────────────────────────────────────────────
@@ -159,6 +270,12 @@ interface RunnerContext {
     durationMin: number;
     elevationGainM: number | null;
   } | null;
+
+  // ── Learning loop fields ──────────────────────────────────────────────────
+  // Approach C: current profile text — used so AI updates rather than rewrites
+  currentProfile: string | null;
+  // Approach B: accumulated coaching observations from post-run analyses
+  coachingObservations: CoachingObservation[];
 }
 
 async function gatherRunnerContext(userId: string): Promise<RunnerContext | null> {
@@ -178,7 +295,7 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
 
   if (!user) return null;
 
-  // ── 2. Cached totals + PBs ────────────────────────────────────────────────
+  // ── 2. Cached totals + PBs + current profile + coaching observations ──────
   const [stats] = await db
     .select()
     .from(userStats)
@@ -187,6 +304,15 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
   const totalRuns        = stats?.totalRuns        ?? 0;
   const totalDistanceKm  = stats?.totalDistanceKm  ?? 0;
   const totalDurationSec = stats?.totalDurationSeconds ?? 0;
+
+  // Approach C: current profile text for accumulative updates
+  const currentProfile = stats?.aiRunnerProfile ?? null;
+
+  // Approach B: accumulated observations from post-run analyses
+  const coachingObservations: CoachingObservation[] =
+    Array.isArray(stats?.coachingObservations)
+      ? (stats.coachingObservations as CoachingObservation[])
+      : [];
 
   // ── 3. Recent runs — last 10, only essential columns ─────────────────────
   const fourWeeksAgo = new Date();
@@ -317,6 +443,10 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
     activeGoals,
     recentRuns,
     lastRun,
+
+    // Learning loop
+    currentProfile,
+    coachingObservations,
   };
 }
 
@@ -351,6 +481,33 @@ async function generateProfile(ctx: RunnerContext): Promise<string | null> {
     ? `Last run: ${ctx.lastRun.date}, ${ctx.lastRun.distanceKm}km, ${ctx.lastRun.durationMin}min${ctx.lastRun.avgPace ? ` @ ${ctx.lastRun.avgPace}/km` : ''}.`
     : 'No runs recorded yet.';
 
+  // ── Approach B: Build coaching observations block ─────────────────────────
+  // Format the last 12 coaching observations as a concise coaching log
+  let observationsBlock = '';
+  if (ctx.coachingObservations.length > 0) {
+    const obs = ctx.coachingObservations.slice(0, 12);
+    const obsLines = obs.map(o => {
+      const parts: string[] = [`[${o.date}${o.workoutType ? ` · ${o.workoutType}` : ''} · ${o.distanceKm}km${o.performanceScore != null ? ` · score:${o.performanceScore}` : ''}]`];
+      if (o.coachingSummary) parts.push(`  Summary: ${o.coachingSummary}`);
+      if (o.patternObserved) parts.push(`  Pattern: ${o.patternObserved}`);
+      if (o.progressionNote) parts.push(`  Progression: ${o.progressionNote}`);
+      if (o.adaptationSignal) parts.push(`  Adaptation: ${o.adaptationSignal}`);
+      if (o.struggleNote) parts.push(`  Struggle: ${o.struggleNote}`);
+      if (o.pacingNote) parts.push(`  Pacing: ${o.pacingNote}`);
+      return parts.join('\n');
+    }).join('\n\n');
+    observationsBlock = `
+COACHING OBSERVATIONS LOG (from post-run analyses — most recent first):
+These are AI-interpreted insights from actual runs. They reveal patterns, tendencies,
+and adaptation signals that raw numbers alone cannot capture.
+
+${obsLines}`;
+  }
+
+  // ── Approach C: Determine whether to update an existing profile or create fresh ──
+  const isFirstProfile = !ctx.currentProfile || ctx.currentProfile.trim() === '';
+  const hasNewObservations = ctx.coachingObservations.length > 0;
+
   const userPrompt = `
 RUNNER DATA:
 Name: ${ctx.name}${ctx.age ? `, Age: ${ctx.age}` : ''}${ctx.gender ? `, Gender: ${ctx.gender}` : ''}
@@ -372,9 +529,17 @@ RECENT RUNS (newest first):
 ${recentRunLines || 'None'}
 
 ${lastRunNote}
+${observationsBlock}
+${!isFirstProfile ? `
+CURRENT PROFILE (what you already know about this runner):
+${ctx.currentProfile}
+
+${hasNewObservations ? 'UPDATE this profile by incorporating the new coaching observations above. Enrich and refine your understanding — do not simply restate the existing profile. Preserve any insights still relevant, update anything the new data changes, and add genuinely new patterns you now recognise.' : 'The raw data above has been refreshed. Update the profile to reflect any changes in volume, plan progress, or recent form — preserving accumulated insights that remain valid.'}` : ''}
 `.trim();
 
-  const systemPrompt = `You are an AI running coach writing a concise internal briefing note about a runner.
+  // ── System prompt: different framing for first profile vs update ──────────
+  const systemPrompt = isFirstProfile
+    ? `You are an AI running coach writing your first internal briefing note about a runner.
 
 Write a 150–220 word plain-English summary in third person (e.g. "Dan is...").
 This profile is injected into EVERY AI prompt across the app — pre-run briefings,
@@ -393,7 +558,26 @@ INCLUDE (where data is available):
 
 TONE: Factual and concise. No fluff. Write as a coach would brief a colleague.
 FORMAT: Plain text only. No bullet points, headers, or markdown. One flowing paragraph or two short paragraphs.
-DO NOT fabricate data not provided. If a field is missing, simply omit it.`;
+DO NOT fabricate data not provided. If a field is missing, simply omit it.`
+
+    : `You are an AI running coach maintaining your living knowledge of a specific runner.
+
+You are NOT writing a profile from scratch. You are UPDATING your understanding of this runner
+based on new run data and — critically — newly observed patterns from post-run analyses.
+
+Your goal is to produce an enriched 150–280 word plain-English briefing that:
+1. Preserves established facts and patterns that remain valid
+2. Incorporates new coaching observations — patterns, tendencies, adaptation signals
+3. Updates any metrics that have changed (volume, plan week, last run, PBs)
+4. Calls out emerging patterns explicitly: "consistently goes out too fast", "cadence
+   drops under fatigue", "responding well to Zone 2 work — HR trending down"
+5. Reads like a coach's evolving understanding of a specific athlete — not a data report
+
+FORMAT: Plain text only. No bullet points, headers, or markdown. Third person ("Dan is...").
+One flowing paragraph or two short paragraphs. 150–280 words.
+TONE: Factual and sharp. Coaches briefing each other. No filler.
+DO NOT fabricate data not provided. Only reference observed patterns that appear in the
+coaching observations log above — don't invent tendencies.`;
 
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
@@ -401,8 +585,8 @@ DO NOT fabricate data not provided. If a field is missing, simply omit it.`;
       { role: 'system', content: systemPrompt },
       { role: 'user',   content: userPrompt   },
     ],
-    max_tokens: 350,
-    temperature: 0.4, // Low temperature for consistent, factual output
+    max_tokens: 400,
+    temperature: 0.35, // Low temperature for consistent, factual output — slightly higher than before to allow natural synthesis
   });
 
   return completion.choices[0]?.message?.content?.trim() ?? null;

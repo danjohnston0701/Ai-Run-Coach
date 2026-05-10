@@ -457,136 +457,89 @@ Build progressively toward the ${targetDistance}km goal.`;
 `;
 
     // Generate plan with OpenAI
-    const prompt = `You are an expert running coach. Generate a tailored ${weeksUntilTarget}-week training plan for a ${experienceLevel} runner preparing for a ${goalType} (${targetDistance}km).
+    const prompt = `═══════════════════════════════════════════════════════════════
+COACHING COMMISSION — ${weeksUntilTarget}-WEEK PERSONALISED TRAINING PLAN
+═══════════════════════════════════════════════════════════════
+
+You are designing a bespoke training plan for the athlete described below. You have full creative and technical authority as a coach — choose the training philosophy, session types, periodisation model, and pacing approach that YOU believe gives this specific athlete the best possible outcome. This is not a template to fill in. There is no prescribed methodology. You are the expert.
 ${isPreEventPlan ? `
-⚡ PRE-EVENT SHARPENING PLAN: This is NOT a build-up plan. The runner is already capable of the event distance and has ${weeksUntilTarget} weeks until race day. Design a race-preparation block: race-pace work, taper, confidence sessions. Do NOT start conservatively or include baseline-building runs.
+⚡ CONTEXT — PRE-EVENT SHARPENING BLOCK: This runner has specifically confirmed they are already capable of the event distance and are ${weeksUntilTarget} weeks from race day. This is a race-preparation block, not a build-up plan. Design accordingly — race-pace confidence, sharpening, taper strategy.
 ` : ''}
-${targetDistance > 10 ? `
-COACHING PHILOSOPHY FOR THIS PLAN:
-Build the optimal plan to achieve the goal. The runner has chosen this goal — honour it with a realistic, well-structured plan that gives them the best chance of success.
-- Fitness level (${experienceLevel}) and run history inform training PACES and effort levels only — they do NOT reduce session distances or weekly volume targets
-- Current weekly mileage (${weeklyMileageBase.toFixed(1)}km/week) is the STARTING POINT, not the ceiling. An elite runner with a high base gets an advanced start; a new runner with a low base gets a faster build — but both plans peak at what the goal requires.
-- Anyone targeting >10km is a distance runner — build the plan to push them toward the goal, not to confirm where they currently are
-- If the runner struggles with sessions in practice, the adaptive coaching system will adjust individual sessions based on their real performance data — pre-emptive watering-down is not needed here
-` : ''}
+━━━ THE ATHLETE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 ${runnerProfileSection}
 
-Runner Profile:
-- Fitness level: ${experienceLevel}
-- Training days per week: ${daysPerWeek}
-- Current fitness (CTL): ${fitness?.ctl || 'N/A'}
-- Training status: ${fitness?.status || 'N/A'}
+━━━ THE GOAL ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Current Performance Baseline (from last ${recentRuns.length} runs over 90 days):
-- Weekly mileage (last 30 days): ${weeklyMileageBase.toFixed(1)}km/week
-- Runs in last 30 days: ${runsLast30.length}
-${avgPaceStr ? `- Average pace across recent runs: ${avgPaceStr}` : ''}
-${bestPaceStr ? `- Best pace in a recent run: ${bestPaceStr}` : ''}
-${paceTrend ? `- Pace trend: ${paceTrend}` : ''}
-${similarDistanceRuns.length > 0 ? `
-Recent runs at ${targetDistance}km distance (${similarDistanceRuns.length} found):
-${avgTimeAtGoalDistanceStr ? `- Average time for ${targetDistance}km: ${avgTimeAtGoalDistanceStr} (mm:ss)` : ''}
-${bestTimeAtGoalStr ? `- Best time for ${targetDistance}km: ${bestTimeAtGoalStr} (mm:ss)` : ''}
-${avgPaceSecs && avgTimeAtGoalDistanceSecs ? `- Current estimated ability: this runner currently takes approximately ${avgTimeAtGoalDistanceStr} to run ${targetDistance}km.` : ''}` : `- No recent runs found at exactly ${targetDistance}km — use their average pace and weekly mileage as the baseline.`}
-
-Goal:
-- ${goalType.toUpperCase()} (${targetDistance}km)
-${goalEventName ? `- Target event: ${goalEventName}${goalEventLocation ? ` in ${goalEventLocation}` : ''}` : ''}
-${goalDescription ? `- Goal description: ${goalDescription}` : ''}
-${goalNotes ? `- Runner's own notes about this goal: "${goalNotes}" — use this to personalise coaching cues and session descriptions` : ''}
+Event: ${goalType.toUpperCase()} — ${targetDistance}km
+${goalEventName ? `Event name: ${goalEventName}${goalEventLocation ? ` in ${goalEventLocation}` : ''}` : ''}
+${goalDescription ? `Runner's description: ${goalDescription}` : ''}
+${goalNotes ? `Runner's own notes: "${goalNotes}" — weave this context into your coaching language throughout the plan` : ''}
+${targetDate ? `Race date: ${targetDate.toDateString()} (${weeksUntilTarget} weeks away)` : `Timeline: ${weeksUntilTarget} weeks`}
 ${targetTime ? (() => {
-  // Pre-compute goal pace and training paces from goal time
   const goalPaceSecs = Math.round(targetTime / targetDistance);
   const goalPaceStr = `${Math.floor(goalPaceSecs / 60)}:${String(goalPaceSecs % 60).padStart(2, "0")}/km`;
-  const easyPaceSecs = goalPaceSecs + 90;
-  const easyPaceStr = `${Math.floor(easyPaceSecs / 60)}:${String(easyPaceSecs % 60).padStart(2, "0")}/km`;
-  const tempoPaceSecs = goalPaceSecs + 20; // ~20s/km above goal = threshold
-  const tempoPaceStr = `${Math.floor(tempoPaceSecs / 60)}:${String(tempoPaceSecs % 60).padStart(2, "0")}/km`;
-  const intervalPaceSecs = Math.max(goalPaceSecs - 20, 150); // ~20s/km below goal = neuromuscular
-  const intervalPaceStr = `${Math.floor(intervalPaceSecs / 60)}:${String(intervalPaceSecs % 60).padStart(2, "0")}/km`;
-  const longRunPaceSecs = goalPaceSecs + 75;
-  const longRunPaceStr = `${Math.floor(longRunPaceSecs / 60)}:${String(longRunPaceSecs % 60).padStart(2, "0")}/km`;
-  const currentPaceStr = avgPaceStr || "unknown";
+  const currentPaceStr = avgPaceStr || "not yet established";
   const currentTimeStr = avgTimeAtGoalDistanceStr || "unknown";
-  return `- Target time: ${Math.floor(targetTime / 60)}:${String(Math.round((targetTime % 60))).padStart(2,'0')} (mm:ss)
-- Goal pace: ${goalPaceStr} (this is the pace required to achieve the target time)
-- Gap to close: ${avgTimeAtGoalDistanceSecs && targetTime ? `runner currently averages ${currentTimeStr} for ${targetDistance}km (${currentPaceStr}), needs to improve by approximately ${Math.round((avgTimeAtGoalDistanceSecs - targetTime) / 60)} minute(s) ${Math.abs(Math.round((avgTimeAtGoalDistanceSecs - targetTime) % 60))}s` : 'use your expert judgment based on their current pace'}
+  return `Target finish time: ${Math.floor(targetTime / 60)}:${String(Math.round((targetTime % 60))).padStart(2,'0')} — equivalent to a ${goalPaceStr} goal pace
+Current performance at ${targetDistance}km: ${avgTimeAtGoalDistanceSecs ? `averages ${currentTimeStr} (${currentPaceStr}/km)` : `extrapolate from average pace of ${currentPaceStr}`}
+Apply your coaching expertise to determine appropriate training paces across all session types based on this athlete's current fitness and target goal.`;
+})() : `No target time set — design for goal completion and optimal performance at this athlete's current fitness level.`}
 
-TRAINING PACE PRESCRIPTION (derived from goal pace ${goalPaceStr}):
-These are the target paces you MUST use when assigning workouts. Do NOT anchor hard/tempo/interval paces to the runner's current easy pace.
-- Easy / recovery runs:  ~${easyPaceStr}  (aerobic base; conversational effort)
-- Long runs:             ~${longRunPaceStr} (comfortable aerobic, builds endurance)
-- Tempo / threshold:     ~${tempoPaceStr}  (lactate threshold work; comfortably hard but sustainable for 20-40 min)
-- Race pace sessions:    ${goalPaceStr}    (exactly the goal pace; conditions body and mind for race day)
-- Interval reps (400m-1000m): ~${intervalPaceStr} (faster than race pace; neuromuscular conditioning so race pace feels controlled)
-- Hill repeats:          effort-based (target race-pace effort / zone 4 HR — pace is secondary due to gradient)
+━━━ CURRENT PERFORMANCE DATA ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-PACE PROGRESSION OVER THE PLAN:
-- Weeks 1-3:  Focus on easy miles. Introduce tempo at current-ability threshold (~current pace - 30s). Intervals at goal pace.
-- Weeks 4-6:  Tempo creeps toward ${tempoPaceStr}. Intervals at ${intervalPaceStr}. First race pace taste.
-- Weeks 7-9:  Tempo AT ${tempoPaceStr}. Sustained race pace blocks (1-2km at ${goalPaceStr}). Intervals well below race pace.
-- Final weeks: Race-pace specific sessions. Taper volume, maintain intensity.
-
-CRITICAL: The runner CANNOT achieve ${goalPaceStr} race pace if they never train at or faster than that pace. Every plan MUST include:
-1. Interval sessions with reps at ${intervalPaceStr} or faster (conditions body to handle race pace easily)
-2. Tempo sessions at ~${tempoPaceStr} (builds lactate threshold)
-3. Race-pace conditioning runs at exactly ${goalPaceStr} (as the plan progresses)`;
-})() : ''}
+${hasRunHistory ? `Run History (last 90 days — ${recentRuns.length} sessions):
+- Weekly volume (last 30 days): ${weeklyMileageBase.toFixed(1)}km/week
+- Sessions last 30 days: ${runsLast30.length}
+${avgPaceStr ? `- Average pace: ${avgPaceStr}/km` : ''}
+${bestPaceStr ? `- Best recent pace: ${bestPaceStr}/km` : ''}
+${paceTrend ? `- Pace trend: ${paceTrend}` : ''}
+${fitness?.ctl ? `- Chronic Training Load (CTL): ${fitness.ctl}` : ''}
+${fitness?.status ? `- Training status: ${fitness.status}` : ''}
+${similarDistanceRuns.length > 0 ? `
+Performance at goal distance (${targetDistance}km — ${similarDistanceRuns.length} sessions found):
+${avgTimeAtGoalDistanceStr ? `- Average completion time: ${avgTimeAtGoalDistanceStr}` : ''}
+${bestTimeAtGoalStr ? `- Personal best: ${bestTimeAtGoalStr}` : ''}` : `
+No recorded sessions at exactly ${targetDistance}km — extrapolate from average pace and weekly volume.`}` : isPreEventPlan ? `NEW TO THIS APP — no run history in this system. The athlete has confirmed this is a pre-event block; they are already race-capable. Do NOT interpret missing data as low fitness.` : `NEW TO THIS APP — no run history yet. Design a plan appropriate for a ${experienceLevel} runner targeting ${targetDistance}km. The adaptive coaching system will refine future plan adaptations as real performance data accumulates.`}
 ${targetDate ? `- Race date: ${targetDate.toDateString()}` : ''}
 
 ${(goalType === 'custom' && targetDistance > 21.1 && targetDistance <= 42.2) ? `
-MID-DISTANCE CUSTOM EVENT (${targetDistance}km):
-This is a custom distance between a half marathon and marathon. Key training principles:
-- Treat this similarly to marathon training but with adjusted peak long run targets
-- Peak long run should reach ${Math.round(targetDistance * 0.65)}–${Math.round(targetDistance * 0.75)}km (65-75% of event distance)
-- Peak weekly volume should reach ${Math.round(targetDistance * 2.0)}–${Math.round(targetDistance * 2.5)}km/week
-- Include back-to-back moderate long run weekends in peak training weeks
-- All standard marathon training session types apply: easy runs, tempo, intervals, long runs
+━━━ CUSTOM MID-DISTANCE EVENT CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This is a ${targetDistance}km custom event — between half marathon and marathon distance. Standard half marathon or marathon training templates don't directly apply. Apply your coaching expertise to determine the right approach for this specific distance and this specific athlete. Consider what peak long run distances, weekly volumes, and session composition are genuinely appropriate for ${targetDistance}km preparation within ${weeksUntilTarget} weeks.
 ` : ''}
 ${(goalType === 'ultra' || targetDistance > 42.2) ? `
-ULTRA / LONG-DISTANCE TRAINING REQUIREMENTS — READ THIS CAREFULLY:
-This is a ${targetDistance}km ultra/long-distance event. Standard road-racing training principles do NOT apply directly. Key differences:
+━━━ ULTRA / LONG-DISTANCE COACHING CONTEXT ━━━━━━━━━━━━━━━━━━━━
 
-LONG RUN TARGETS (non-negotiable):
-- Peak long run MUST reach ${Math.round(targetDistance * 0.55)}–${Math.round(targetDistance * 0.65)}km (55-65% of event distance) by weeks ${Math.max(weeksUntilTarget - 4, Math.round(weeksUntilTarget * 0.6))}–${Math.max(weeksUntilTarget - 3, Math.round(weeksUntilTarget * 0.7))}
-- Do NOT cap long runs at marathon distance (42km). For a ${targetDistance}km event, long runs must go beyond typical marathon training peaks.
-- Example long run progression for a ${weeksUntilTarget}-week plan: 12km → 18km → 22km → 26km → 30km → ${Math.round(targetDistance * 0.55)}km → ${Math.round(targetDistance * 0.60)}km (peak) → taper
-
-WEEKLY VOLUME:
-- Peak weekly volume should reach ${Math.round(targetDistance * 1.6)}–${Math.round(targetDistance * 2.0)}km/week (weeks ${Math.max(weeksUntilTarget - 5, Math.round(weeksUntilTarget * 0.6))}–${Math.max(weeksUntilTarget - 3, Math.round(weeksUntilTarget * 0.7))})
-- This is significantly higher than road-race training — ultra running demands time-on-feet, not just mileage
-- Starting volume: ${Math.round(weeklyMileageBase)}km/week (${hasRunHistory ? 'derived from recent run history' : 'estimated baseline for this goal type'}) — build from here toward the peak volume targets above
-
-BACK-TO-BACK LONG RUN WEEKENDS (critical for ultra preparation):
-- From week ${Math.round(weeksUntilTarget * 0.4)} onwards, schedule paired long runs on consecutive days (e.g. 25km Saturday + 18km Sunday)
-- This trains fatigue resistance, which is the primary challenge of ultra running
-
-WORKOUT TYPE BALANCE for ultra:
-- Prioritise TIME on feet over pace — easy/long runs dominate (85-90% of volume)
-- Reduce interval/speed work compared to road races — ultra is about endurance, not speed
-- Include hill work — ultra courses are typically hilly
-- Include back-to-back long runs as a primary training tool, not just a weekly long run
-
-CRITICAL DISTANCE RULE: Every workout distance in your JSON MUST reflect ultra training volumes. Week 1 easy runs should be 8-12km, not 5-6km. Long runs in peak weeks must reach ${Math.round(targetDistance * 0.55)}km+. Do NOT anchor your session distances to 5-6km road race session sizes.
+This is a ${targetDistance}km ultra/long-distance event. Road-racing training principles do not directly translate. Key considerations for your coaching design:
+- Peak long run distances typically need to approach 55-65% of event distance to build the fatigue resistance required (~${Math.round(targetDistance * 0.55)}–${Math.round(targetDistance * 0.65)}km for this event)
+- Time-on-feet takes precedence over pace — easy and long runs should dominate overall volume
+- Back-to-back long run weekends are a primary ultra training tool — they build fatigue resistance that single long runs cannot replicate
+- Ultra courses are typically hilly — hillwork is relevant
+- Starting from this athlete's current ${Math.round(weeklyMileageBase)}km/week, design the volume build you believe is appropriate to prepare them for this event in ${weeksUntilTarget} weeks
+Apply your expertise to design the session composition, volume progression, and periodisation you genuinely believe is optimal for this ultra goal.
 ` : ''}
 
+━━━ SCHEDULE & LIFESTYLE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Training sessions per week: ${daysPerWeek}
+Today: ${new Date().toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+First session: ${
+  firstSessionStart === "today" ? `TODAY — first workout must be on or after today. Any sessions earlier in week 1 that fall before today should be omitted; week 1 may have fewer sessions than usual.` :
+  firstSessionStart === "tomorrow" ? `TOMORROW — first workout on or after tomorrow. Omit any week-1 sessions that fall before tomorrow.` :
+  "Flexible — schedule from the current calendar week, omitting any slots that have already passed."
+}
 ${regularSessions.length > 0 ? `
-Regular Weekly Runs (already in the user's schedule):
+Fixed Sessions Already in This Athlete's Schedule:
 ${regularSessions.map(s => {
   const dayNames = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
   const time = `${String(s.timeHour).padStart(2,"0")}:${String(s.timeMinute).padStart(2,"0")}`;
-  const countNote = s.countsTowardWeeklyTotal
-    ? "counts towards weekly session total"
-    : "EXTRA – does NOT count towards weekly session total";
-  return `- ${s.name}: day ${s.dayOfWeek} (${dayNames[s.dayOfWeek]}) at ${time}, ${s.distanceKm}km (${countNote})`;
+  return `- "${s.name}": ${dayNames[s.dayOfWeek]} at ${time}, ${s.distanceKm}km — ${s.countsTowardWeeklyTotal ? `counts toward the ${daysPerWeek} sessions/week total (integrate a coached session on this day that matches its intensity/goal)` : `BLOCKED DAY — do NOT schedule any coached session on this day; this prevents double-running`}`;
 }).join("\n")}
-
-IMPORTANT scheduling rules for regular sessions:
-1. Sessions that COUNT towards the weekly total: Integrate them into the ${daysPerWeek} AI-generated sessions per week by choosing to perform that regular session on its scheduled day instead of a coached session (prefer replacing sessions that match its intensity/goal).
-2. Sessions that DON'T count (marked "EXTRA"): These are BLOCKED DAYS. Do NOT schedule ANY coached workouts on the same days as EXTRA sessions. Schedule your ${daysPerWeek} coached workouts exclusively on other days. This prevents double-running on the same day.
 ` : ""}
-${injuries && injuries.length > 0 ? `
-INJURIES & LIMITATIONS:
+━━━ HEALTH & INJURY CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${injuries && injuries.length > 0 ? `Active Health Considerations (athlete safety is the priority — design around these):
 ${injuries.map(i => {
   const statusLabel = i.status === 'recovering' || i.status === 'RECOVERING' ? 'Recovering' :
                      i.status === 'healed' || i.status === 'HEALED' ? 'Healed' :
@@ -595,129 +548,99 @@ ${injuries.map(i => {
   return `- ${i.bodyPart}: ${statusLabel}${i.notes ? ` — ${i.notes}` : ''}`;
 }).join("\n")}
 
-CRITICAL INJURY GUIDELINES:
-- For "recovering" or "active" injuries: AVOID all exercises that stress the affected area. Replace with cross-training or rest days.
-- For "chronic" injuries: REDUCE intensity and impact. No speed work, hill repeats, or long runs that stress the affected body part. Favor easy runs on flat terrain.
-- For "healed" injuries: Gradually reintroduce normal training but note the history — avoid sudden volume increases.
-- Always err on the side of caution. A conservative plan that keeps the runner healthy is better than an aggressive plan that causes re-injury.
-` : ''}
-Schedule:
-- Today is ${new Date().toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })} (day ${new Date().getDay()} of the week, 0=Sun)
-- First session: ${
-  firstSessionStart === "today" ? `TODAY — the first workout must be on or after today. Any sessions earlier in week 1 (e.g. Monday/Tuesday if today is Wednesday) should be omitted; week 1 may have fewer sessions than usual.` :
-  firstSessionStart === "tomorrow" ? `TOMORROW — first workout on or after tomorrow. Omit any week-1 sessions that fall before tomorrow.` :
-  "Flexible — schedule week 1 starting from the current calendar week. Sessions that would fall before today in week 1 are automatically dropped, so you may schedule them from today onwards."
-}
+Apply appropriate load management: active/recovering = avoid stress to the affected area, substitute with low-impact alternatives; chronic = reduce intensity and impact; healed = gradual reintroduction, conservative volume progression. A plan that keeps this athlete healthy is always better than one that risks re-injury.` : `No current injuries or health limitations reported.`}
 
-Requirements:
-1. PACE RULES — follow this strictly:
-   a) Easy/recovery/long runs: use the runner's CURRENT ability (their average pace + 30-90s/km). These should feel genuinely easy.
-   b) Tempo/threshold sessions: use the TRAINING PACE PRESCRIPTION above (~goal pace + 20s/km). Do NOT use current easy pace for tempo — this is the most common coaching mistake.
-   c) Interval sessions: use the TRAINING PACE PRESCRIPTION above (~goal pace - 20s/km). Reps must be faster than race pace.
-   d) Race pace sessions: use the exact GOAL PACE derived from the target time. These sessions exist to make the runner comfortable at their race pace.
-   e) Hill repeats: specify effort (e.g. "Zone 4 effort / hard") not exact pace, since gradient makes pace unreliable.
-2. ${isPreEventPlan
-  ? `Start at RACE-READY volume appropriate for a ${experienceLevel} runner — do NOT ramp up slowly. This is a ${weeksUntilTarget}-week pre-race block, not a build-up plan.`
-  : `Start from the runner's current ${weeklyMileageBase.toFixed(1)}km/week baseline and build toward the volume the ${targetDistance}km goal demands. The baseline is the FLOOR — where the plan begins — not the ceiling. An elite runner's high base means a strong Week 1; a runner with a lower base needs a faster build rate. Either way, the plan peaks at what the goal requires, not at a marginal improvement of where they currently are.`}
-3. Include easy runs, tempo runs, intervals, and long runs across each week
-4. Follow 80/20 rule (80% easy effort, 20% quality/hard sessions)
-5. ${isPreEventPlan
-  ? `Race-sharpening structure: emphasise race pace, speed, and confidence. Taper the final ${Math.min(2, Math.floor(weeksUntilTarget / 2))} week(s) for peak performance.`
-  : `Build for 3 weeks (up to 20% volume increase each build week), recover 1 week (reduce volume by ~20%)`}
-6. Taper for final ${isPreEventPlan ? Math.min(2, Math.floor(weeksUntilTarget / 2)) : 2} week(s) before race
-7. ${isPreEventPlan
-  ? `Maintain current fitness volume — this is a pre-race block, not a build-up plan`
-  : (goalType === 'ultra' || targetDistance > 42.2)
-    ? (() => {
-        // Check whether 20%/week from the base can realistically reach the required ultra peak volume
-        const buildWeeks = Math.max(weeksUntilTarget - 2, 1);
-        const projectedPeakAt20Pct = weeklyMileageBase * Math.pow(1.2, buildWeeks);
-        const requiredPeak = targetDistance * 1.6;
-        const rateNeeded = Math.pow(requiredPeak / weeklyMileageBase, 1 / buildWeeks) - 1;
-        if (projectedPeakAt20Pct < requiredPeak) {
-          return `Weekly volume must reach ${Math.round(requiredPeak)}–${Math.round(targetDistance * 2.0)}km/week at peak (from ${weeklyMileageBase.toFixed(0)}km/week over ${buildWeeks} build weeks — ~${Math.round(rateNeeded * 100)}%/week average growth required). Use 3-week build / 1-week recovery pattern. LONG RUN DISTANCES must follow the ULTRA LONG RUN TARGETS above.`;
-        }
-        return `Increase weekly volume by up to 20% per week — LONG RUN DISTANCES must follow the ULTRA LONG RUN TARGETS above. Do NOT let the volume rule prevent long runs from reaching the required peak of ${Math.round(targetDistance * 0.55)}–${Math.round(targetDistance * 0.65)}km.`;
-      })()
-    : `Increase weekly volume by up to 20% per week`}
-8. Reference the runner's current performance AND goal in workout descriptions (e.g. "your current 5km is around ${avgTimeAtGoalDistanceStr || 'estimated from pace data'}. Today's tempo at [X:XX/km] is building your lactate threshold toward your [goal time] goal")
+━━━ APP COACHING CAPABILITIES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Return JSON with this exact structure (distances shown below are ILLUSTRATIVE FORMAT EXAMPLES ONLY for a 5k plan — your actual distances MUST reflect the goal event of ${targetDistance}km and the requirements above):
+The app delivers live AI coaching throughout every session. You can design sessions knowing we support:
+- Real-time GPS pace and distance tracking with live audio coaching cues
+- Heart rate zone monitoring with live alerts (when HR device is connected)
+- Interval/rep detection and lap tracking with per-rep coaching messages
+- Live pace deviation alerts when the athlete drifts off target
+- Pre-run briefings personalised to each session
+- Adaptive plan adjustments based on actual performance data from completed sessions
+
+━━━ WHAT TO DELIVER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+NON-NEGOTIABLE STRUCTURAL CONSTRAINTS:
+- Generate EXACTLY ${weeksUntilTarget} weeks — every single week must be fully listed, no skipping or summarising
+- Each week must have EXACTLY ${daysPerWeek} workouts (after accounting for any blocked days)
+- Respect all fixed session scheduling rules above
+- Honour all injury/health limitations — a conservative safe plan is always better than one that causes re-injury
+${isPreEventPlan ? `- This is a race-preparation block — start at race-ready intensity from week 1` : ''}
+
+Return your complete coaching plan as JSON with this structure:
 {
-  "planName": "12-Week Half Marathon Plan",
-  "totalWeeks": 12,
+  "planName": "A descriptive name reflecting this athlete's specific plan and approach",
+  "totalWeeks": ${weeksUntilTarget},
   "coachingProgrammeSummary": {
-    "aiDeterminedFitnessLevel": "intermediate",
-    "comment": "Based on your current running data, you show a consistent aerobic base with room for speed development.",
+    "aiDeterminedFitnessLevel": "Your expert assessment of this athlete's actual fitness level based on all data provided",
+    "coachingApproach": "1-2 sentences describing the training methodology/philosophy you have chosen for this athlete and why",
+    "comment": "A personalised paragraph assessing this athlete — what you see in their data, what you are targeting, and how the plan is designed to get them there",
     "keyMetrics": {
-      "estimatedAveragePace": "7:30/km",
-      "estimatedWeeklyMileage": "30-35km",
-      "focusAreas": ["build aerobic capacity", "improve lactate threshold", "injury prevention"]
+      "estimatedAveragePace": "This athlete's comfortable aerobic training pace based on current fitness (not a PR pace)",
+      "estimatedWeeklyMileage": "Peak weekly volume this plan builds toward — not the starting volume",
+      "focusAreas": ["3-4 specific focus areas tailored to this athlete and their goal"]
     }
   },
   "weeks": [
     {
       "weekNumber": 1,
-      "weekDescription": "Base building week - focus on easy mileage",
+      "weekDescription": "Brief description of this week's training focus and intent",
       "totalDistance": 25.0,
-      "focusArea": "endurance",
-      "intensityLevel": "easy",
+      "focusArea": "What physiological quality this week develops",
+      "intensityLevel": "Overall intensity descriptor for this week",
       "workouts": [
         {
           "dayOfWeek": 1,
           "workoutType": "easy",
           "distance": 6.0,
-          "targetPace": "5:30/km",
-          "intensity": "z2",
-          "description": "Easy recovery run",
-          "instructions": "Keep heart rate in zone 2. Should feel conversational."
+          "targetPace": "Pace appropriate for this session type and this athlete's current fitness",
+          "intensity": "Your chosen intensity label for this session",
+          "description": "Session name, personalised to this athlete and their goal — not a generic label",
+          "instructions": "Detailed, specific coaching instructions for this session — reference the athlete's actual pace data, their goal, and explain why this session matters at this point in the plan"
         },
         {
           "dayOfWeek": 3,
           "workoutType": "tempo",
           "distance": 5.0,
-          "targetPace": "TEMPO_PACE_HERE (use goal-derived tempo pace from TRAINING PACE PRESCRIPTION, NOT easy pace)",
+          "targetPace": "Appropriate threshold pace for this athlete based on their goal and current fitness",
           "intensity": "z4",
-          "description": "Threshold tempo run — this pace is derived from your GOAL pace, not your easy pace",
-          "instructions": "Warm up 1km easy, then hold tempo pace for 3km, cool down 1km. This should be comfortably hard."
+          "description": "Personalised session description",
+          "instructions": "Specific coaching instructions for this athlete"
         },
         {
           "dayOfWeek": 5,
           "workoutType": "intervals",
           "distance": 5.0,
-          "targetPace": "INTERVAL_PACE_HERE (use goal-derived interval pace from TRAINING PACE PRESCRIPTION — faster than race pace)",
+          "targetPace": "Appropriate interval pace based on your coaching assessment",
           "intensity": "z5",
           "intervalCount": 6,
           "intervalDistanceMeters": 400,
           "intervalDurationSeconds": null,
-          "description": "Speed intervals — faster than race pace to make goal pace feel controlled",
-          "instructions": "400m reps at interval pace with 90s recovery jog between reps."
+          "description": "Personalised session description",
+          "instructions": "Specific coaching instructions for this athlete"
         }
       ]
     }
   ]
 }
 
-CRITICAL REQUIREMENTS:
-- You MUST generate EXACTLY ${weeksUntilTarget} weeks. No more, no less.
-- Each week MUST have EXACTLY ${daysPerWeek} workouts.
-- The "totalWeeks" field in your JSON MUST be ${weeksUntilTarget}.
-- Do not add extra weeks, do not skip weeks, do not summarize weeks.
-- Every single week from 1 to ${weeksUntilTarget} must be fully listed.
+IMPORTANT NOTES ON OUTPUT:
+- workoutType is open — use whatever session classification you judge is right (e.g. "easy", "tempo", "intervals", "long_run", "fartlek", "strides", "progression_run", "hill_repeats", "race_pace", "recovery", "time_trial", "back_to_back_long", or any other type you deem appropriate). Use "rest" only for rest/off days.
+- Instructions must be highly personalised — reference this athlete's actual pace, their specific goal, and why each session matters at this stage of the plan. Generic instructions are not acceptable.
+- The coachingApproach field should genuinely describe the methodology you have chosen (e.g. polarised training, threshold-focused, time-on-feet dominant, etc.) and your rationale for this athlete.
 
-COACHING PROGRAMME SUMMARY REQUIREMENTS:
-- aiDeterminedFitnessLevel: Your assessment of the runner's ACTUAL fitness level based on the data provided (may differ from their stated level)
-- comment: A short paragraph assessing their fitness and what you observe from their running patterns
-- keyMetrics.estimatedAveragePace: The realistic average easy-run pace for this runner based on their current fitness (not a PR pace — this is their comfortable aerobic pace)
-- keyMetrics.estimatedWeeklyMileage: The PEAK weekly volume this plan builds toward at its highest point (NOT the starting volume — show where the plan peaks, e.g. "55-65km" for a half marathon plan)
-- keyMetrics.focusAreas: Array of 3-4 focus areas for this specific runner (e.g. "build aerobic base", "improve speed", "injury prevention")
+STRUCTURAL CONSTRAINTS (these are non-negotiable for the app to function):
+- Generate EXACTLY ${weeksUntilTarget} weeks — every single week from 1 to ${weeksUntilTarget} must be fully listed
+- Each week must have EXACTLY ${daysPerWeek} workouts (after accounting for blocked days)
+- The "totalWeeks" field in your JSON must be ${weeksUntilTarget}
+- Do not skip, summarise, or merge weeks
 
-If runner has NO previous runs:
-- aiDeterminedFitnessLevel: use their stated fitness level (${experienceLevel}) as the primary signal. For goals over 10km, treat them as a distance runner — not a beginner.
-- comment: Summarise what this runner is working toward and how the plan is structured for their goal. For >10km goals, do NOT default to "starting conservatively" language — acknowledge the goal and how the plan will build toward it.
-- estimatedAveragePace: estimate appropriate training paces for a ${experienceLevel} runner at this distance
-- estimatedWeeklyMileage: the weekly volume this plan builds toward at peak — must be proportional to the event (not a generic low starting point)
-- focusAreas: reflect the actual event demands and the runner's fitness level — for ultra include "build time-on-feet", "back-to-back long runs", "fatigue resistance"`;
+COACHING SUMMARY NOTES:
+- coachingApproach: explain the training philosophy you have applied — this helps the athlete understand your coaching rationale
+- estimatedWeeklyMileage: show the PEAK weekly volume this plan builds toward, not the starting volume
+- For athletes with no previous run data: base your assessments on their stated fitness level and goal — do not default to conservative or beginner-level language unless genuinely warranted`;
 
     // Fetch AI runner profile for richer personalisation
     const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
@@ -727,7 +650,15 @@ If runner has NO previous runs:
       messages: [
         {
           role: "system",
-          content: `You are an expert running coach who creates scientifically-sound training plans. Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunnerProfile)}`
+          content: `You are an elite AI running coach with deep expertise in exercise physiology, training periodisation, injury prevention, and performance optimisation. You have coached athletes across all levels and distances — from first-time 5K runners to ultra marathon competitors.
+
+You are NOT filling in a template or following a prescribed methodology. You are the expert making every decision: what training philosophy applies to this athlete, what session types they need, how to periodise their weeks, how to prescribe paces and intensity, and how to structure the plan to give them the best possible outcome.
+
+You have access to the full spectrum of training science — polarised training, aerobic threshold development, high-intensity interval training, fatigue resistance, progressive overload, and adaptive periodisation. Apply whatever methodology you genuinely believe is optimal for this specific athlete and goal. Do not default to generic templates or one-size-fits-all structures.
+
+Your coaching decisions should evolve with the athlete's data and the science. Every plan you design should reflect deep, personalised coaching judgement — not a formula.
+
+Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunnerProfile)}`
         },
         {
           role: "user",

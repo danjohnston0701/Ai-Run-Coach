@@ -4,7 +4,7 @@ import { eq, and, or, gte, lt, desc, lte, count } from "drizzle-orm";
 import { storage } from "./storage";
 import { db } from "./db";
 import { onRunSaved, onRunDeleted } from "./user-stats-cache";
-import { getRunnerProfile, runnerProfileBlock } from "./runner-profile-service";
+import { getRunnerProfile, runnerProfileBlock, persistCoachingObservation } from "./runner-profile-service";
 import { 
   garminWellnessMetrics, connectedDevices, garminActivities, garminBodyComposition, 
   runs, garminRealtimeData, garminCompanionSessions,
@@ -1763,6 +1763,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
         analysis,
         hasGarminData: !!garminActivity,
         hasWellnessData: !!wellness,
+      });
+
+      // ── Learning Loop: persist coaching observations + refresh runner profile ──
+      // Extract the AI-interpreted patterns from this analysis and store them
+      // in user_stats.coaching_observations.  This is the feed-forward signal
+      // that makes the "What I know about you" profile accumulate knowledge
+      // over time rather than being rebuilt from raw data each run.
+      // Non-blocking — response has already been sent.
+      setImmediate(() => {
+        // Build weather note if weather impact analysis identified a meaningful pattern
+        // (e.g. "this runner performs significantly worse in heat/humidity")
+        let weatherNote: string | null = null;
+        if (weatherImpactAnalysis && weatherImpactAnalysis.length > 20) {
+          // Only capture if it's a real insight, not a generic fallback message
+          const isGenericFallback = weatherImpactAnalysis.includes('still performed well');
+          if (!isGenericFallback) {
+            weatherNote = weatherImpactAnalysis;
+          }
+        }
+
+        const observation = {
+          date:             new Date().toISOString().split('T')[0],
+          runId,
+          distanceKm:       Math.round(((run.distance ?? 0) / 1000) * 100) / 100,
+          workoutType:      run.workoutType ?? null,
+          performanceScore: (analysis as any).performanceScore ?? null,
+          patternObserved:  (analysis as any).runPatternAnalysis ?? null,
+          progressionNote:  (analysis as any).progressionTrend ?? null,
+          adaptationSignal: (analysis as any).fitnessContext?.adaptationSignals
+            // Append weather impact to adaptation signal when meaningful
+            ? ((analysis as any).fitnessContext.adaptationSignals + (weatherNote ? ` Weather note: ${weatherNote}` : ''))
+            : (weatherNote ?? null),
+          struggleNote:     (analysis as any).strugglePointsAnalysis?.likelyReasons ?? null,
+          pacingNote:       (analysis as any).pacingStrategy?.assessment ?? null,
+          coachingSummary:  (analysis as any).summary ?? null,
+        };
+        persistCoachingObservation(userId, observation).catch(err =>
+          console.error('[Learning] Failed to persist coaching observation:', err)
+        );
       });
 
       // Reassess training plans asynchronously (don't block response)

@@ -1706,6 +1706,25 @@ export const userStats = pgTable("user_stats", {
   //    easy, felt good. Focus: build aerobic base, avoid overstriding."
   aiRunnerProfile:      text("ai_runner_profile"),
   aiRunnerProfileUpdatedAt: timestamp("ai_runner_profile_updated_at"),
+
+  // ── Coaching Observations — "What the AI coach has learned about this runner" ──
+  // A rolling JSONB array of up to 20 structured observations extracted from
+  // post-run analyses.  Each entry captures patterns, tendencies, pacing habits,
+  // mental game notes, and adaptation signals that emerge from actual run data.
+  //
+  // This powers the two-layer learning loop:
+  //   Approach B — observations feed directly into profile regeneration as context
+  //   Approach C — the profile itself is updated (not rewritten) each run, so
+  //                insights accumulate rather than being reset from raw data.
+  //
+  // Example entry:
+  //   { date: "2026-05-10", workoutType: "tempo", distanceKm: 8.5,
+  //     patternObserved: "Negative split on flat tempo — runner is learning to pace",
+  //     progressionNote: "Pace 8s/km faster than 3 weeks ago at same HR",
+  //     struggleNote: "Cadence drops from 172 to 163 in final 2km under fatigue",
+  //     adaptationSignal: "HR 10bpm lower at equivalent effort — aerobic base building",
+  //     performanceScore: 82 }
+  coachingObservations: jsonb("coaching_observations"),
 });
 
 export type UserStats = typeof userStats.$inferSelect;

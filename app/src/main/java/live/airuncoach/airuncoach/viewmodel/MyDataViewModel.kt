@@ -162,6 +162,10 @@ class MyDataViewModel @Inject constructor(
     // Coaching plan summary
     private val _coachingSummary = MutableStateFlow<CoachingPlanSummary?>(null)
     val coachingSummary: StateFlow<CoachingPlanSummary?> = _coachingSummary.asStateFlow()
+
+    // AI Coach's Review — the living "What I know about you" runner profile
+    private val _aiCoachReview = MutableStateFlow<String?>(null)
+    val aiCoachReview: StateFlow<String?> = _aiCoachReview.asStateFlow()
     
     // Cache with TTL (5 minutes)
     private var lastLoadTime = 0L
@@ -204,6 +208,7 @@ class MyDataViewModel @Inject constructor(
                 val trendsTask = loadDetailedTrends()
                 val allTimeTask = loadAllTimeStats()
                 val coachingTask = loadCoachingSummary()
+                val reviewTask = loadAiCoachReview()
                 
                 // Wait for all to complete
                 try {
@@ -234,6 +239,12 @@ class MyDataViewModel @Inject constructor(
                     coachingTask.join()
                 } catch (e: Exception) {
                     Log.e(tag, "Error joining coachingTask", e)
+                }
+
+                try {
+                    reviewTask.join()
+                } catch (e: Exception) {
+                    Log.e(tag, "Error joining reviewTask", e)
                 }
                 
                 lastLoadTime = System.currentTimeMillis()
@@ -362,6 +373,21 @@ class MyDataViewModel @Inject constructor(
         } catch (e: Exception) {
             Log.e(tag, "Error loading all-time stats", e)
             // Keep existing data on error
+        }
+    }
+
+    private fun loadAiCoachReview() = viewModelScope.launch {
+        try {
+            val response = apiService.getMyDataRunnerProfile()
+            if (response.isSuccessful) {
+                val profile = response.body()?.data?.get("profile") as? String
+                _aiCoachReview.value = profile
+                Log.d(tag, "Loaded AI coach review (${profile?.length ?: 0} chars)")
+            } else {
+                Log.w(tag, "Runner profile response not successful: ${response.code()}")
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "Error loading AI coach review", e)
         }
     }
 

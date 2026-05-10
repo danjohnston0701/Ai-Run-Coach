@@ -30,6 +30,7 @@ val BODY_PARTS = listOf(
     "Shin",
     "Hip",
     "Back",
+    "Neck / Cervical Spine",
     "Foot",
     "Calf",
     "Hamstring",
@@ -37,5 +38,8 @@ val BODY_PARTS = listOf(
     "Groin",
     "Shoulder",
     "Wrist",
+    "IT Band",
+    "Achilles",
+    "Plantar Fascia",
     "Other"
 )
