@@ -169,10 +169,7 @@ fun MyDataScreen(
                         item {
                             SectionHeader(title = "🏆 Personal Records")
                             Spacer(modifier = Modifier.height(Spacing.sm))
-                            PersonalRecordsSection(
-                                personalBests = personalBests,
-                                longestRunKm = (allTimeStats["longestRunKm"] as? Number)?.toDouble() ?: 0.0
-                            )
+                            PersonalRecordsSection(personalBests = personalBests)
                             Spacer(modifier = Modifier.height(Spacing.lg))
                         }
 
@@ -290,8 +287,8 @@ private fun SectionHeader(title: String) {
     )
 }
 
-// All supported PB categories: (key, display label, target distance km)
-private val ALL_PB_CATEGORIES = listOf(
+// All 7 standard PB categories — always shown, blank if no PB yet
+private val PB_CATEGORIES = listOf(
     Triple("1K",           "1K",            1.0),
     Triple("Mile",         "Mile",          1.609),
     Triple("5K",           "5K",            5.0),
@@ -301,35 +298,10 @@ private val ALL_PB_CATEGORIES = listOf(
     Triple("Marathon",     "Marathon",       42.2)
 )
 
-/**
- * Show a PB category row if the user:
- *  (a) already has a PB for it, OR
- *  (b) their longest run is at least 80% of the target distance (they're close enough to attempt it)
- * This prevents cluttering the screen with irrelevant distances for newer runners.
- */
-private fun visiblePbCategories(
-    personalBests: List<live.airuncoach.airuncoach.viewmodel.PersonalBest>,
-    longestRunKm: Double
-): List<Triple<String, String, Double>> {
-    return ALL_PB_CATEGORIES.filter { (_, label, targetKm) ->
-        val hasPb = personalBests.any { it.category == label }
-        val withinReach = longestRunKm >= targetKm * 0.8
-        hasPb || withinReach
-    }
-}
-
 @Composable
 private fun PersonalRecordsSection(
-    personalBests: List<live.airuncoach.airuncoach.viewmodel.PersonalBest>,
-    longestRunKm: Double
+    personalBests: List<live.airuncoach.airuncoach.viewmodel.PersonalBest>
 ) {
-    val categories = visiblePbCategories(personalBests, longestRunKm)
-
-    if (categories.isEmpty()) {
-        EmptyStateCard(message = "Complete a run to see your Personal Records here!")
-        return
-    }
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -338,10 +310,10 @@ private fun PersonalRecordsSection(
             .padding(vertical = Spacing.md),
         verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
-        categories.forEachIndexed { index, (_, label, _) ->
+        PB_CATEGORIES.forEachIndexed { index, (_, label, _) ->
             val pb = personalBests.find { it.category == label }
             PersonalBestRow(label = label, pb = pb)
-            if (index < categories.size - 1) {
+            if (index < PB_CATEGORIES.size - 1) {
                 HorizontalDivider(
                     modifier = Modifier
                         .fillMaxWidth()

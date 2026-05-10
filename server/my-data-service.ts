@@ -39,110 +39,91 @@ export async function getPersonalBests(userId: string) {
 }
 
 /**
- * Live PB query — fetches runs and calculates PBs for both distance-based
- * and split-based (fastest km/mile) personal bests.
- * 
- * For distance-based PBs (5K, 10K, Half Marathon, Marathon), we check:
- * 1. Dedicated runs in that distance band
- * 2. Splits from longer runs (e.g., 5K split from a 10K run)
+ * Live PB query — fetches runs and calculates PBs.
+ *
+ * Distance-based PBs (5K, 10K, 20K, Half, Marathon): ONLY awarded when the user
+ * has completed a run within the defined distance band. We never infer these from
+ * km-split data because a fastest-1km split does NOT equal a 10K personal best.
+ *
+ * 1K / Mile PBs: derived from the fastest individual km split across all runs,
+ * which is a valid proxy for short-distance best efforts.
  */
 async function getPersonalBestsLive(userId: string) {
   const distancePBs = [
-    { min: 4.9, max: 5.2,   label: '5K',           target: 5.0 },
-    { min: 9.9, max: 10.2,  label: '10K',          target: 10.0 },
-    { min: 21.0, max: 21.6, label: 'Half Marathon', target: 21.1 },
-    { min: 42.0, max: 42.5, label: 'Marathon',      target: 42.2 },
+    { min: 4.9,  max: 5.3,   label: '5K',           target: 5.0  },
+    { min: 9.8,  max: 10.3,  label: '10K',          target: 10.0 },
+    { min: 19.8, max: 20.3,  label: '20K',          target: 20.0 },
+    { min: 21.0, max: 21.6,  label: 'Half Marathon', target: 21.1 },
+    { min: 42.0, max: 42.6,  label: 'Marathon',      target: 42.2 },
   ];
 
   const personalBests: any[] = [];
 
-  // Fetch all runs to calculate both distance-based and split-based PBs
+  // Fetch all native runs (exclude Garmin imports)
   const userRuns = await db
     .select()
     .from(runs)
     .where(eq(runs.userId, userId))
     .orderBy(asc(runs.completedAt));
 
-  // Calculate distance-based personal bests (5K, 10K, Half Marathon, Marathon)
-  // Check both dedicated runs AND splits from longer runs
+  // ── Distance-based PBs: only awarded for actual full-distance runs ──────────
+  // A 9.9 km run CANNOT generate a 10K PB — the user must have actually run 10K.
   for (const dist of distancePBs) {
     let bestRun: typeof userRuns[0] | null = null;
     let bestPace: number | null = null;
 
-    // ── Check dedicated runs in this distance band ──────────────────────────
     for (const run of userRuns) {
       if (!run.avgPace || run.distance === null) continue;
-      
-      // Convert distance from meters to km for comparison
+
+      // Distance stored in metres — convert to km for comparison
       const distanceKm = run.distance / 1000;
-      const isInRange = distanceKm >= dist.min && distanceKm <= dist.max;
-      if (!isInRange) continue;
+      if (distanceKm < dist.min || distanceKm > dist.max) continue;
 
-      const pace = parseFloat(run.avgPace);
-      if (isNaN(pace)) continue;
+      const paceMinutes = parsePaceToMinutes(run.avgPace);
+      if (paceMinutes === null || paceMinutes <= 0) continue;
 
-      if (bestPace === null || pace < bestPace) {
-        bestPace = pace;
+      if (bestPace === null || paceMinutes < bestPace) {
+        bestPace = paceMinutes;
         bestRun = run;
       }
     }
 
-    // ── Check splits from all runs (fastest segment of this distance) ───────
-    const bestSplit = findFastestSplitFromRuns(userRuns, dist.target);
-    if (bestSplit) {
-      // Parse the split's pace to compare
-      const splitPace = parseFloat(bestSplit.pace.split('/')[0]);
-      if (!isNaN(splitPace) && (bestPace === null || splitPace < bestPace)) {
-        // Split is faster, use it
-        bestRun = userRuns.find(r => r.id === bestSplit.runId) || bestRun;
-        bestPace = splitPace;
-      }
-    }
-
     if (bestRun && bestPace !== null) {
+      // Duration: use the actual run duration (stored in seconds)
+      const durationMs = (bestRun.duration ?? 0) * 1000;
       personalBests.push({
         category: dist.label,
         pace: formatPace(bestPace),
-        distance: bestRun.distance,
-        duration: bestRun.duration,
+        distance: dist.target,
+        duration: durationMs,
         date: bestRun.completedAt?.toISOString().split('T')[0] || '',
         runId: bestRun.id,
       });
     }
   }
 
-  // Calculate fastest 1K from km splits
-  const fastest1K = findFastestSplitFromRuns(userRuns, 1.0);
-  if (fastest1K) {
-    personalBests.push(fastest1K);
-  }
-
-  // Calculate fastest Mile from km splits
-  const fastestMile = findFastestSplitFromRuns(userRuns, 1.609);
-  if (fastestMile) {
-    personalBests.push(fastestMile);
-  }
+  // ── 1K PB: fastest individual km split across all runs ──────────────────────
+  const fastest1K = findFastest1kSplit(userRuns);
+  if (fastest1K) personalBests.push(fastest1K);
 
   return personalBests;
 }
 
 /**
- * Helper: Find fastest split across all runs and return as PersonalBest object
+ * Find the fastest single km split across all runs.
+ * Returns a 1K PersonalBest object, or null if no split data exists.
  */
-function findFastestSplitFromRuns(
-  runs: typeof runs.$inferSelect[],
-  segmentKm: number
-): any | null {
+function findFastest1kSplit(userRuns: any[]): any | null {
   let fastestPaceMinutes: number | null = null;
-  let fastestRun: typeof runs.$inferSelect | null = null;
+  let fastestRun: any | null = null;
 
-  for (const run of runs) {
+  for (const run of userRuns) {
     if (!Array.isArray(run.kmSplits)) continue;
 
     for (const split of run.kmSplits) {
       if (!split.pace) continue;
       const paceMinutes = parsePaceToMinutes(split.pace);
-      if (paceMinutes === null) continue;
+      if (paceMinutes === null || paceMinutes <= 0) continue;
 
       if (fastestPaceMinutes === null || paceMinutes < fastestPaceMinutes) {
         fastestPaceMinutes = paceMinutes;
@@ -153,12 +134,11 @@ function findFastestSplitFromRuns(
 
   if (!fastestRun || fastestPaceMinutes === null) return null;
 
-  const label = segmentKm === 1.0 ? '1K' : 'Mile';
   return {
-    category: label,
+    category: '1K',
     pace: formatPace(fastestPaceMinutes),
-    distance: segmentKm,
-    duration: Math.round(fastestPaceMinutes * 60 * 1000), // Convert min to ms
+    distance: 1.0,
+    duration: Math.round(fastestPaceMinutes * 60 * 1000), // ms
     date: fastestRun.completedAt?.toISOString().split('T')[0] || '',
     runId: fastestRun.id,
   };
