@@ -258,7 +258,9 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 )
             }
             composable("my_data") {
-                MyDataScreen()
+                MyDataScreen(
+                    onNavigateBack = { navController.popBackStack() }
+                )
             }
             // Map My Run Setup Screen (the beautiful redesigned one!)
             composable("map_my_run_setup/{mode}/{dist}/{timeOn}/{h}/{m}/{s}") { backStackEntry ->

@@ -7,6 +7,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
@@ -85,6 +87,7 @@ private fun formatDateToDDMMYYYY(isoDate: String): String {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
 fun MyDataScreen(
+    onNavigateBack: () -> Unit = {},
     viewModel: MyDataViewModel = hiltViewModel()
 ) {
     val selectedPeriod by viewModel.selectedTimePeriod.collectAsState()
@@ -102,6 +105,9 @@ fun MyDataScreen(
 
     Scaffold(
         containerColor = Colors.backgroundRoot,
+        // Prevent double insets — the outer MainScreen Scaffold already consumes
+        // status bar and bottom nav bar padding via Modifier.padding(innerPadding)
+        contentWindowInsets = WindowInsets(0),
         topBar = {
             TopAppBar(
                 title = {
@@ -111,9 +117,19 @@ fun MyDataScreen(
                         color = Colors.textPrimary
                     )
                 },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Colors.textPrimary
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Colors.backgroundRoot
-                )
+                ),
+                windowInsets = WindowInsets(0)
             )
         }
     ) { padding ->
@@ -153,7 +169,10 @@ fun MyDataScreen(
                         item {
                             SectionHeader(title = "🏆 Personal Records")
                             Spacer(modifier = Modifier.height(Spacing.sm))
-                            PersonalRecordsSection(personalBests = personalBests)
+                            PersonalRecordsSection(
+                                personalBests = personalBests,
+                                longestRunKm = (allTimeStats["longestRunKm"] as? Number)?.toDouble() ?: 0.0
+                            )
                             Spacer(modifier = Modifier.height(Spacing.lg))
                         }
 
@@ -271,8 +290,8 @@ private fun SectionHeader(title: String) {
     )
 }
 
-// The 6 standard race categories with their target distances
-private val PB_CATEGORIES = listOf(
+// All supported PB categories: (key, display label, target distance km)
+private val ALL_PB_CATEGORIES = listOf(
     Triple("1K",           "1K",            1.0),
     Triple("Mile",         "Mile",          1.609),
     Triple("5K",           "5K",            5.0),
@@ -282,10 +301,35 @@ private val PB_CATEGORIES = listOf(
     Triple("Marathon",     "Marathon",       42.2)
 )
 
+/**
+ * Show a PB category row if the user:
+ *  (a) already has a PB for it, OR
+ *  (b) their longest run is at least 80% of the target distance (they're close enough to attempt it)
+ * This prevents cluttering the screen with irrelevant distances for newer runners.
+ */
+private fun visiblePbCategories(
+    personalBests: List<live.airuncoach.airuncoach.viewmodel.PersonalBest>,
+    longestRunKm: Double
+): List<Triple<String, String, Double>> {
+    return ALL_PB_CATEGORIES.filter { (_, label, targetKm) ->
+        val hasPb = personalBests.any { it.category == label }
+        val withinReach = longestRunKm >= targetKm * 0.8
+        hasPb || withinReach
+    }
+}
+
 @Composable
 private fun PersonalRecordsSection(
-    personalBests: List<live.airuncoach.airuncoach.viewmodel.PersonalBest>
+    personalBests: List<live.airuncoach.airuncoach.viewmodel.PersonalBest>,
+    longestRunKm: Double
 ) {
+    val categories = visiblePbCategories(personalBests, longestRunKm)
+
+    if (categories.isEmpty()) {
+        EmptyStateCard(message = "Complete a run to see your Personal Records here!")
+        return
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -294,10 +338,10 @@ private fun PersonalRecordsSection(
             .padding(vertical = Spacing.md),
         verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
-        PB_CATEGORIES.forEachIndexed { index, (_, label, _) ->
+        categories.forEachIndexed { index, (_, label, _) ->
             val pb = personalBests.find { it.category == label }
             PersonalBestRow(label = label, pb = pb)
-            if (index < PB_CATEGORIES.size - 1) {
+            if (index < categories.size - 1) {
                 HorizontalDivider(
                     modifier = Modifier
                         .fillMaxWidth()
