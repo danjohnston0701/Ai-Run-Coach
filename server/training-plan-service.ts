@@ -562,12 +562,21 @@ The app delivers live AI coaching throughout every session. You can design sessi
 
 ━━━ WHAT TO DELIVER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+WEEK-BY-WEEK PROGRESSION — THIS IS THE MOST IMPORTANT QUALITY STANDARD:
+Every week MUST be distinct. No two weeks should have identical sessions, distances, or intensity distribution. A plan where week 1 looks the same as week 8 is not a coaching plan — it is a repeated template and is unacceptable.
+
+Your plan must demonstrate clear progressive overload and phase structure. Specifically:
+- Weekly volume (totalDistance) must increase progressively across the plan — each phase should build, with a scheduled deload week (volume drops ~20-30%) at a strategically appropriate point
+- Session types must evolve — early weeks establish aerobic base with easier sessions; middle weeks introduce and develop quality work; late weeks sharpen race-specific fitness
+- Target paces within each session type should tighten progressively as the athlete's fitness improves
+- Intensity distribution must shift across the plan — do not run the same mix of easy/tempo/interval sessions every week
+${isPreEventPlan ? `- PRE-EVENT BLOCK: Week 1 is near race-ready intensity. Progress through sharpening phases. Taper volume in the final 1-2 weeks.` : `- Final 1-2 weeks MUST taper — reduced volume and intensity to arrive at the event fresh`}
+
 NON-NEGOTIABLE STRUCTURAL CONSTRAINTS:
 - Generate EXACTLY ${weeksUntilTarget} weeks — every single week must be fully listed, no skipping or summarising
 - Each week must have EXACTLY ${daysPerWeek} workouts (after accounting for any blocked days)
 - Respect all fixed session scheduling rules above
 - Honour all injury/health limitations — a conservative safe plan is always better than one that causes re-injury
-${isPreEventPlan ? `- This is a race-preparation block — start at race-ready intensity from week 1` : ''}
 
 Return your complete coaching plan as JSON with this structure:
 {
@@ -628,8 +637,9 @@ Return your complete coaching plan as JSON with this structure:
 
 IMPORTANT NOTES ON OUTPUT:
 - workoutType is open — use whatever session classification you judge is right (e.g. "easy", "tempo", "intervals", "long_run", "fartlek", "strides", "progression_run", "hill_repeats", "race_pace", "recovery", "time_trial", "back_to_back_long", or any other type you deem appropriate). Use "rest" only for rest/off days.
-- Instructions must be highly personalised — reference this athlete's actual pace, their specific goal, and why each session matters at this stage of the plan. Generic instructions are not acceptable.
+- Instructions must be concise but personalised (2-3 sentences) — state the session's purpose, a specific target metric for this athlete, and what physiological adaptation it drives at this stage of the plan.
 - The coachingApproach field should genuinely describe the methodology you have chosen (e.g. polarised training, threshold-focused, time-on-feet dominant, etc.) and your rationale for this athlete.
+- weekDescription for each week MUST reflect what makes that specific week different — name the training phase (e.g. "Aerobic foundation", "Threshold introduction", "Volume peak", "Race sharpening", "Taper"). Do not use generic descriptions like "Continue building fitness".
 
 STRUCTURAL CONSTRAINTS (these are non-negotiable for the app to function):
 - Generate EXACTLY ${weeksUntilTarget} weeks — every single week from 1 to ${weeksUntilTarget} must be fully listed
@@ -645,12 +655,7 @@ COACHING SUMMARY NOTES:
     // Fetch AI runner profile for richer personalisation
     const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        {
-          role: "system",
-          content: `You are an elite AI running coach with deep expertise in exercise physiology, training periodisation, injury prevention, and performance optimisation. You have coached athletes across all levels and distances — from first-time 5K runners to ultra marathon competitors.
+    const systemPromptContent = `You are an elite AI running coach with deep expertise in exercise physiology, training periodisation, injury prevention, and performance optimisation. You have coached athletes across all levels and distances — from first-time 5K runners to ultra marathon competitors.
 
 You are NOT filling in a template or following a prescribed methodology. You are the expert making every decision: what training philosophy applies to this athlete, what session types they need, how to periodise their weeks, how to prescribe paces and intensity, and how to structure the plan to give them the best possible outcome.
 
@@ -658,23 +663,41 @@ You have access to the full spectrum of training science — polarised training,
 
 Your coaching decisions should evolve with the athlete's data and the science. Every plan you design should reflect deep, personalised coaching judgement — not a formula.
 
-Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunnerProfile)}`
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.7,
-      max_tokens: 16000,
-    });
+Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunnerProfile)}`;
 
-    // Check if the response was truncated (finish_reason !== 'stop')
-    const finishReason = response.choices[0].finish_reason;
-    if (finishReason === 'length') {
-      console.warn(`[Training Plan] OpenAI response was truncated (finish_reason=length). Retrying with shorter plan description...`);
-    }
+    // Helper to call OpenAI — retries once with compact instructions if the first attempt is truncated
+    const callOpenAI = async (compactMode = false): Promise<any> => {
+      const userPrompt = compactMode
+        ? prompt.replace(
+            /- Instructions must be highly personalised[^\n]*/,
+            '- Instructions: max 1 sentence — name the session type, target metric, and why this week. No padding.'
+          )
+        : prompt;
+
+      const res = await openai.chat.completions.create({
+        model: "gpt-4.1",
+        messages: [
+          { role: "system", content: systemPromptContent },
+          { role: "user",   content: userPrompt }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.7,
+        max_tokens: 32000,
+      });
+
+      const reason = res.choices[0].finish_reason;
+      if (reason === 'length' && !compactMode) {
+        console.warn(`[Training Plan] Response truncated on full mode — retrying in compact mode`);
+        return callOpenAI(true);
+      }
+      if (reason === 'length' && compactMode) {
+        throw new Error(`Training plan response truncated even in compact mode — plan is too large to generate in a single call. Consider reducing the number of weeks.`);
+      }
+
+      return res;
+    };
+
+    const response = await callOpenAI();
 
     let rawContent = response.choices[0].message.content || "{}";
     
@@ -726,17 +749,12 @@ Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunner
 
     // Enforce exact week count — AI sometimes returns wrong number of weeks
     if (planData.weeks.length < weeksUntilTarget) {
-      console.warn(`[Training Plan] AI returned fewer weeks (${planData.weeks.length}) than requested (${weeksUntilTarget}). Filling missing weeks.`);
-      const lastWeek = planData.weeks[planData.weeks.length - 1];
-      while (planData.weeks.length < weeksUntilTarget) {
-        const newWeekNum = planData.weeks.length + 1;
-        planData.weeks.push({
-          ...lastWeek,
-          weekNumber: newWeekNum,
-          weekDescription: `Week ${newWeekNum} — Continue building fitness`,
-          workouts: (lastWeek?.workouts || []).map((w: any) => ({ ...w }))
-        });
-      }
+      // NEVER silently copy weeks — that produces identical sessions across the plan.
+      // If the response is incomplete it must be regenerated, not padded.
+      throw new Error(
+        `Training plan incomplete: AI returned ${planData.weeks.length} weeks but ${weeksUntilTarget} were requested. ` +
+        `This usually means the response was truncated — please try again.`
+      );
     } else if (planData.weeks.length > weeksUntilTarget) {
       console.warn(`[Training Plan] AI returned more weeks (${planData.weeks.length}) than requested (${weeksUntilTarget}). Trimming.`);
       planData.weeks = planData.weeks.slice(0, weeksUntilTarget);
