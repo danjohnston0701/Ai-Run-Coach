@@ -809,6 +809,32 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             }
             composable("training_plan/{planId}") { backStackEntry ->
                 val planId = backStackEntry.arguments?.getString("planId") ?: return@composable
+
+                // ── Cross-ViewModel plan removal ────────────────────────────────────
+                // TrainingPlanDashboardScreen and CoachingProgrammeScreen each hold their own
+                // TrainingPlanViewModel instance (Hilt scopes them to their back stack entries).
+                // When the user cancels a plan here, the detail VM signals success. We grab the
+                // LIST VM (scoped to the plans-list back stack entry) and remove the plan from
+                // it immediately — BEFORE navigating back — so the cancelled plan is never
+                // briefly visible when the list screen regains focus.
+                val detailViewModel: TrainingPlanViewModel = hiltViewModel()
+                val planCancelSuccess by detailViewModel.planActionSuccess.collectAsState()
+
+                val plansListEntry = remember(backStackEntry) {
+                    try { navController.getBackStackEntry(Screen.AiPlans.route) } catch (_: Exception) {
+                        try { navController.getBackStackEntry("coaching_programme") } catch (_: Exception) { null }
+                    }
+                }
+                val listViewModel: TrainingPlanViewModel? =
+                    if (plansListEntry != null) hiltViewModel(plansListEntry) else null
+
+                LaunchedEffect(planCancelSuccess) {
+                    if (planCancelSuccess && planId.isNotBlank()) {
+                        // Remove from the LIST ViewModel immediately so there's zero flicker
+                        listViewModel?.removePlanFromList(planId)
+                    }
+                }
+
                 TrainingPlanDashboardScreen(
                     planId = planId,
                     onNavigateBack = { 

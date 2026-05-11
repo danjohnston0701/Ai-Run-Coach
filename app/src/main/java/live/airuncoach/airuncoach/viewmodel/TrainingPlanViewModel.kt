@@ -89,6 +89,19 @@ class TrainingPlanViewModel @Inject constructor(
         loadUserPlans(statusMap[index] ?: "active")
     }
 
+    /**
+     * Immediately remove a single plan from the current [plansListState] without a network call.
+     * Called by the plan detail route in MainScreen to update the LIST ViewModel the moment a plan
+     * is cancelled — before navigation back — so the cancelled plan never flashes in the list.
+     */
+    fun removePlanFromList(planId: String) {
+        val current = _plansListState.value
+        if (current is PlansListState.Success) {
+            val updated = current.plans.filterNot { it.id == planId }
+            _plansListState.value = if (updated.isEmpty()) PlansListState.Empty else PlansListState.Success(updated)
+        }
+    }
+
     fun loadUserPlans(status: String = "active") {
         viewModelScope.launch {
             _plansListState.value = PlansListState.Loading
@@ -305,17 +318,10 @@ class TrainingPlanViewModel @Inject constructor(
                 if (!response.isSuccessful) {
                     throw Exception("Server returned ${response.code()}: ${response.errorBody()?.string()}")
                 }
-                // ⚡ Immediately reload the plans list to reflect the cancellation
-                // This ensures the UI updates before navigation back
-                Log.d("TrainingPlanVM", "✅ Plan cancelled successfully. Removing from active list...")
-                // Optimistically remove from the active list before navigating back so the
-                // previous screen never briefly shows the cancelled plan as active.
-                val currentState = _plansListState.value
-                if (currentState is PlansListState.Success) {
-                    val updatedPlans = currentState.plans.filterNot { it.id == planId }
-                    _plansListState.value = if (updatedPlans.isEmpty()) PlansListState.Empty else PlansListState.Success(updatedPlans)
-                }
-                loadUserPlans("active")
+                // Signal success — MainScreen observes this and calls removePlanFromList() on the
+                // LIST ViewModel (the separate instance scoped to Screen.AiPlans) BEFORE navigating
+                // back, so the cancelled plan is never visible when the list screen regains focus.
+                Log.d("TrainingPlanVM", "✅ Plan cancelled successfully")
                 _planActionSuccess.value = true
             } catch (e: Exception) {
                 Log.e("TrainingPlanVM", "❌ Failed to cancel plan: ${e.message}", e)
