@@ -15,10 +15,13 @@ data class HeartRateZoneInfo(
 )
 
 object HeartRateZones {
+    /**
+     * Tanaka formula: 208 - (0.7 × age) — significantly more accurate than 220-age,
+     * especially for athletes over 40. Validated in a meta-analysis of 351 studies.
+     * Server-side calcMaxHR() uses the same formula for consistency.
+     */
     fun getMaxHeartRate(age: Int): Int {
-        // More accurate Karvonen formula would use resting HR
-        // For now, use standard 220 - age as fallback
-        return 220 - age
+        return (208 - (0.7 * age)).toInt()
     }
 
     fun getZoneInfo(zone: Int): HeartRateZoneInfo {

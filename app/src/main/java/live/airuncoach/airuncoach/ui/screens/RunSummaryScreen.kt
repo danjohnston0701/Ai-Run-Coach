@@ -489,12 +489,14 @@ private fun RunSummaryTopBarFlagship(
     onShare: () -> Unit,
     difficultyLabel: String?
 ) {
-    // Compact header pinned to top — uses statusBarsPadding to fill the status bar area
+    // Compact header pinned to top.
+    // Note: do NOT add statusBarsPadding here — the outer Scaffold (MainScreen) already applies
+    // innerPadding (which includes the status bar offset) to the NavHost, so adding it again
+    // causes a double-gap between the status bar and the back button.
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(Colors.backgroundRoot)
-            .statusBarsPadding()
             .padding(horizontal = 4.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

@@ -609,18 +609,6 @@ fun PlanDashboardContent(
             Spacer(modifier = Modifier.height(Spacing.lg))
         }
 
-        // ── Rolling block banner (shown when next block hasn't been generated yet) ──
-        if (blockStatus != null) {
-            item {
-                RollingBlockBanner(
-                    blockStatus = blockStatus,
-                    triggering = nextBlockTriggering,
-                    onTriggerNextBlock = onTriggerNextBlock
-                )
-                Spacer(modifier = Modifier.height(Spacing.lg))
-            }
-        }
-
         // ── Overall progress card ─────────────────────────────────────────────
         item {
             OverallProgressCard(progress)
@@ -830,6 +818,21 @@ fun PlanDashboardContent(
                 viewModel = viewModel
             )
             Spacer(modifier = Modifier.height(Spacing.sm))
+        }
+
+        // ── Rolling block banner — shown after the last generated week ────────
+        // Position here so the runner finishes reading the plan, then sees
+        // the "next block coming" message right at the end of the generated weeks.
+        if (blockStatus != null) {
+            item {
+                Spacer(modifier = Modifier.height(Spacing.sm))
+                RollingBlockBanner(
+                    blockStatus = blockStatus,
+                    triggering = nextBlockTriggering,
+                    onTriggerNextBlock = onTriggerNextBlock
+                )
+                Spacer(modifier = Modifier.height(Spacing.lg))
+            }
         }
 
         // ── Abandon and Delete buttons at the bottom ───────────────────────────
@@ -1483,7 +1486,10 @@ fun AiPlanSummary(details: TrainingPlanDetails) {
                         BaselineRow(icon = R.drawable.icon_chart_vector, text = "Avg frequency: ${baseline.runsPerWeek} runs/week")
                     }
                     if (!baseline.avgDistance.isNullOrBlank()) {
-                        val avgDistanceKm = baseline.avgDistance.toDoubleOrNull()?.let { String.format(Locale.US, "%.1f", it) } ?: baseline.avgDistance
+                        // avgDistance is stored in metres — convert to km for display
+                        val avgDistanceKm = baseline.avgDistance.toDoubleOrNull()
+                            ?.let { String.format(Locale.US, "%.1f", it / 1000.0) }
+                            ?: baseline.avgDistance
                         BaselineRow(icon = R.drawable.icon_map_pin_vector, text = "Avg run distance: $avgDistanceKm km")
                     }
                     if (!baseline.longestRun.isNullOrBlank()) {
