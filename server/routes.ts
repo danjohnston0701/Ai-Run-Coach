@@ -10582,13 +10582,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { userId } = req.params;
       const { status = 'active' } = req.query;
       
+      // Normalise cancelled/abandoned: "cancelled" is the UI-facing status,
+      // but older plans may still be stored as "abandoned".
+      const statusFilter = String(status);
+      const statusWhere = statusFilter === 'cancelled'
+        ? or(eq(trainingPlans.status, 'cancelled'), eq(trainingPlans.status, 'abandoned'))
+        : eq(trainingPlans.status, statusFilter);
+
       const plans = await db
         .select()
         .from(trainingPlans)
         .where(
           and(
             eq(trainingPlans.userId, userId),
-            eq(trainingPlans.status, String(status))
+            statusWhere
           )
         )
         .orderBy(desc(trainingPlans.createdAt));
@@ -11441,7 +11448,8 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   app.put("/api/training-plans/:planId/status", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { planId } = req.params;
-      const { status } = req.body as { status: 'active' | 'paused' | 'cancelled' | 'abandoned' };
+      const { status } = req.body as { status: 'active' | 'paused' | 'completed' | 'cancelled' | 'abandoned' };
+      const normalisedStatus = status === 'abandoned' ? 'cancelled' : status;
       const userId = req.user?.userId;
 
       if (!userId) {
@@ -11460,12 +11468,12 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       }
 
       // Validate status value
-      const validStatuses = ['active', 'paused', 'completed', 'abandoned'];
+      const validStatuses = ['active', 'paused', 'completed', 'cancelled', 'abandoned'];
       if (!validStatuses.includes(status)) {
         return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
       }
 
-      await db.update(trainingPlans).set({ status }).where(eq(trainingPlans.id, planId));
+      await db.update(trainingPlans).set({ status: normalisedStatus }).where(eq(trainingPlans.id, planId));
       // Return empty response since client expects Response<Unit>
       res.setHeader("Content-Type", "application/json");
       res.status(200).send();

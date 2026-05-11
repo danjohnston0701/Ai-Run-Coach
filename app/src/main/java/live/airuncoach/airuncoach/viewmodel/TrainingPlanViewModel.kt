@@ -301,25 +301,25 @@ class TrainingPlanViewModel @Inject constructor(
         viewModelScope.launch {
             _actionLoading.value = true
             try {
-                val response = apiService.updatePlanStatus(planId, mapOf("status" to "abandoned"))
+                val response = apiService.updatePlanStatus(planId, mapOf("status" to "cancelled"))
                 if (!response.isSuccessful) {
                     throw Exception("Server returned ${response.code()}: ${response.errorBody()?.string()}")
                 }
                 // ⚡ Immediately reload the plans list to reflect the cancellation
                 // This ensures the UI updates before navigation back
-                Log.d("TrainingPlanVM", "✅ Plan abandoned successfully. Reloading plans list...")
-                val currentStatus = when (_selectedTab.value) {
-                    0 -> "active"
-                    1 -> "completed"
-                    2 -> "cancelled"
-                    else -> "active"
+                Log.d("TrainingPlanVM", "✅ Plan cancelled successfully. Removing from active list...")
+                // Optimistically remove from the active list before navigating back so the
+                // previous screen never briefly shows the cancelled plan as active.
+                val currentState = _plansListState.value
+                if (currentState is PlansListState.Success) {
+                    val updatedPlans = currentState.plans.filterNot { it.id == planId }
+                    _plansListState.value = if (updatedPlans.isEmpty()) PlansListState.Empty else PlansListState.Success(updatedPlans)
                 }
-                loadUserPlans(currentStatus)
-                // Signal success after list is reloaded
+                loadUserPlans("active")
                 _planActionSuccess.value = true
             } catch (e: Exception) {
-                Log.e("TrainingPlanVM", "❌ Failed to abandon plan: ${e.message}", e)
-                _actionError.value = "Failed to abandon plan: ${e.message}"
+                Log.e("TrainingPlanVM", "❌ Failed to cancel plan: ${e.message}", e)
+                _actionError.value = "Failed to cancel plan: ${e.message}"
             } finally {
                 _actionLoading.value = false
             }
