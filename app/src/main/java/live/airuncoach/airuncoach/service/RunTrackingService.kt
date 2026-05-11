@@ -801,7 +801,11 @@ class RunTrackingService : Service(), SensorEventListener {
         hasFinal100mFired = false
         lastFlatTerrainCoachingKm = 0
         techniqueRotationIndex = 0
+        // Load cross-run technique memory before clearing so we can seed usedTechniqueCategories
+        // with the last 5 categories from previous runs — prevents repeating the same cues run to run.
+        val crossRunCategories = loadCrossRunTechniqueCategories()
         usedTechniqueCategories.clear()
+        usedTechniqueCategories.addAll(crossRunCategories)
         hasCoachingFiredThisTick = false
         lastStruggleTriggerTime = 0
         isStruggling = false
@@ -4218,8 +4222,9 @@ class RunTrackingService : Service(), SensorEventListener {
         // Build the hint map for this category — tells the AI what specific cue to give
         val hint = techniqueHints[category] ?: "Focus on good running form"
 
-        // Track what we've used this run
+        // Track what we've used this run AND persist for cross-run memory
         usedTechniqueCategories.add(category)
+        saveCrossRunTechniqueCategory(category)
 
         // Build request with rich technique context
         val baseRequest = buildBaseEliteRequest("technique_form", distKm, duration, avgSpeed)
@@ -4267,30 +4272,24 @@ class RunTrackingService : Service(), SensorEventListener {
             if (unused.isNotEmpty()) return unused.random()
         }
 
-        // Priority 3: Fundamentals early in the run
-        // Emphasize key posture & mechanics (reduced posture to avoid repetition)
+        // Priority 3: Fundamentals early in the run.
+        // 14 categories, deliberately balanced — 1 arm (not 3), so arm cues are 7% not 27%.
         if (phase == CoachingPhase.EARLY) {
             val earlyCategories = listOf(
-                // Only 2 most critical posture tips (not 3)
-                "posture_head_neck",         // Most important first
-                "posture_shoulders",         // Second most important
-                
-                // Breathing variety
-                "breathing_rhythm",
-                "breathing_deep_belly",
-                
-                // Arm technique
-                "arms_swing_direction",
-                "arms_hand_relaxation",
-                "arms_drive_power",          // ADD: arm power for variety
-                
-                // Foot/stride mechanics
-                "feet_strike_pattern",
-                "feet_cadence",
-                
-                // Hip and knee mechanics
-                "hips_forward_drive",        // ADD: hips for variety
-                "knees_lift"                 // ADD: knee lift for variety
+                "posture_head_neck",           // Head/chin position
+                "posture_shoulders",           // Drop and relax shoulders
+                "posture_torso_lean",          // Forward lean from ankles
+                "posture_core_engagement",     // Gentle core brace
+                "breathing_rhythm",            // Breathing cadence
+                "breathing_deep_belly",        // Diaphragm breathing
+                "arms_hand_relaxation",        // ONE arm cue (was 3) — loose fists
+                "feet_strike_pattern",         // Midfoot landing
+                "feet_cadence",                // Light quick steps
+                "hips_forward_drive",          // Drive knees forward
+                "knees_lift",                  // Knee lift
+                "knees_soft_landing",          // Soft landing
+                "stride_length_control",       // Don't overstride
+                "mental_smile",                // Smile to reduce effort perception
             )
             val unused = earlyCategories.filter { it !in usedTechniqueCategories }
             if (unused.isNotEmpty()) return unused.random()
@@ -4306,6 +4305,36 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     /** Specific coaching cues for each technique category — sent to the AI as context */
+    // ─── Cross-run technique memory ────────────────────────────────────────────
+    // Persists the last 5 technique categories used across runs so we never
+    // immediately repeat the same cue in the next session.
+
+    private fun loadCrossRunTechniqueCategories(): List<String> {
+        return try {
+            val prefs = getSharedPreferences("coaching_technique_memory", android.content.Context.MODE_PRIVATE)
+            val raw = prefs.getString("last_categories", "") ?: ""
+            if (raw.isBlank()) emptyList() else raw.split(",").filter { it.isNotBlank() }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun saveCrossRunTechniqueCategory(category: String) {
+        try {
+            val prefs = getSharedPreferences("coaching_technique_memory", android.content.Context.MODE_PRIVATE)
+            val existing = (prefs.getString("last_categories", "") ?: "")
+                .split(",")
+                .filter { it.isNotBlank() }
+                .toMutableList()
+            existing.add(category)
+            // Keep only the last 5 — enough to prevent repeats without blocking too many options
+            val trimmed = if (existing.size > 5) existing.takeLast(5) else existing
+            prefs.edit().putString("last_categories", trimmed.joinToString(",")).apply()
+        } catch (e: Exception) {
+            // Non-fatal — if prefs can't be saved, variety just won't persist between runs
+        }
+    }
+
     private val techniqueHints = mapOf(
         // Posture
         "posture_head_neck" to "Look 20-30m ahead, not at feet. Imagine being pulled up by a string from the crown of your head. Keep chin level.",

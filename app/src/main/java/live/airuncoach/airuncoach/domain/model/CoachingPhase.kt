@@ -21,11 +21,13 @@ fun determinePhase(distanceKm: Double, totalDistanceKm: Double?): CoachingPhase 
             percentComplete <= 10 -> CoachingPhase.EARLY
             else -> CoachingPhase.GENERIC
         }
-        // Fallback for free runs (no target distance)
-        distanceKm <= 2 -> CoachingPhase.EARLY
-        distanceKm in 3.0..5.0 -> CoachingPhase.MID
-        distanceKm > 5.0 && distanceKm < 7.0 -> CoachingPhase.GENERIC // Added for free runs between mid and late
-        distanceKm >= 7.0 -> CoachingPhase.LATE // Simplified for free runs
+        // Fallback for free runs (no target distance).
+        // Was: gap at 2-3km returned GENERIC, meaning all short runs only ever got EARLY
+        // technique cues (fired at 1.5km). Fixed: smooth transitions with no gap.
+        distanceKm < 3.0 -> CoachingPhase.EARLY   // 0-3km: early / warm-up
+        distanceKm < 6.0 -> CoachingPhase.MID      // 3-6km: mid effort
+        distanceKm < 8.0 -> CoachingPhase.GENERIC  // 6-8km: transitional
+        distanceKm >= 8.0 -> CoachingPhase.LATE    // 8km+: late effort
         else -> CoachingPhase.GENERIC
     }
 }
