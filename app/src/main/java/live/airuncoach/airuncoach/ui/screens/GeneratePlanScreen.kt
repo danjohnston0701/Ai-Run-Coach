@@ -1125,7 +1125,7 @@ fun GeneratingScreen() {
                 )
             }
             Text(
-                "Your AI coach is building\nyour personalised plan...",
+                "Your Ai coach is building\nyour personalised plan...",
                 style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
                 color = Colors.textPrimary,
                 textAlign = TextAlign.Center
