@@ -72,7 +72,10 @@ data class TrainingPlanSummary(
     @SerializedName("createdAt") val createdAt: String?,
     @SerializedName("weeklyMileageBase") val weeklyMileageBase: Double? = null,
     @SerializedName("completedWorkouts") val completedWorkouts: Int = 0,
-    @SerializedName("totalWorkouts") val totalWorkouts: Int = 0
+    @SerializedName("totalWorkouts") val totalWorkouts: Int = 0,
+    // Rolling block generation fields (null = legacy plan where all weeks are already generated)
+    @SerializedName("generatedThroughWeek") val generatedThroughWeek: Int? = null,
+    @SerializedName("nextBlockAt") val nextBlockAt: String? = null
 )
 
 /** Full plan returned from GET /api/training-plans/details/:planId */
@@ -168,6 +171,18 @@ data class WeekProgress(
 /** PUT /api/training-plans/workouts/:id/complete */
 data class CompleteWorkoutRequest(
     @SerializedName("runId") val runId: String? = null
+)
+
+/** GET /api/training-plans/:planId/block-status — rolling block generation status */
+data class BlockStatus(
+    @SerializedName("planId") val planId: String,
+    @SerializedName("totalWeeks") val totalWeeks: Int,
+    @SerializedName("generatedThroughWeek") val generatedThroughWeek: Int,
+    @SerializedName("isRolling") val isRolling: Boolean,
+    @SerializedName("isFullyGenerated") val isFullyGenerated: Boolean,
+    @SerializedName("nextBlockAt") val nextBlockAt: String?,
+    @SerializedName("nextBlockMessage") val nextBlockMessage: String?,
+    @SerializedName("nextBlockReady") val nextBlockReady: Boolean
 )
 
 /** Response from PUT /api/training-plans/workouts/:id/complete */

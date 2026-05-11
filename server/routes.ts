@@ -50,7 +50,9 @@ import {
   generateTrainingPlan,
   adaptTrainingPlan,
   completeWorkout,
-  reassessTrainingPlansWithRunData
+  reassessTrainingPlansWithRunData,
+  generateNextBlock,
+  checkAndGeneratePendingBlocks,
 } from "./training-plan-service";
 import {
   sendActivityNotification,
@@ -1419,6 +1421,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.error("[Run] Plan reassessment failed:", err);
           }
         })();
+      });
+
+      // Rolling block: check if any active plans need their next block generated
+      setImmediate(() => {
+        checkAndGeneratePendingBlocks(userId).catch(err =>
+          console.error("[Run] Rolling block check failed:", err)
+        );
       });
 
       // Route Memory Engine — update/create known route fingerprint (non-blocking)
@@ -10927,6 +10936,81 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     } catch (error: any) {
       console.error("Regenerate training plan error:", error);
       res.status(500).json({ error: error.message || "Failed to regenerate training plan" });
+    }
+  });
+
+  // ─── Rolling block: generate next training block ──────────────────────────
+  // Called explicitly by the app when the user taps "Generate next block",
+  // and also fires automatically from checkAndGeneratePendingBlocks() on run completion.
+  app.post("/api/training-plans/:planId/next-block", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { planId } = req.params;
+      const userId = req.user!.userId;
+
+      // Verify plan belongs to this user
+      const [plan] = await db.select().from(trainingPlans).where(
+        and(eq(trainingPlans.id, planId), eq(trainingPlans.userId, userId))
+      );
+      if (!plan) {
+        return res.status(404).json({ error: "Plan not found" });
+      }
+      if (plan.generatedThroughWeek == null) {
+        return res.status(400).json({ error: "This is a legacy plan — all weeks are already generated" });
+      }
+      if ((plan.generatedThroughWeek ?? 0) >= plan.totalWeeks) {
+        return res.status(400).json({ error: "Plan is already fully generated", fullyGenerated: true });
+      }
+
+      // Return immediately, generate in background
+      res.json({ message: "Generating next training block — check back in ~30 seconds", status: "generating" });
+
+      setImmediate(() => {
+        generateNextBlock(planId, userId).catch(err =>
+          console.error(`[NextBlock] Manual trigger failed for plan ${planId}:`, err)
+        );
+      });
+    } catch (err: any) {
+      console.error("Error triggering next block:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── Rolling block: check plan generation status ──────────────────────────
+  app.get("/api/training-plans/:planId/block-status", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { planId } = req.params;
+      const userId = req.user!.userId;
+
+      const [plan] = await db.select().from(trainingPlans).where(
+        and(eq(trainingPlans.id, planId), eq(trainingPlans.userId, userId))
+      );
+      if (!plan) return res.status(404).json({ error: "Plan not found" });
+
+      const isRolling = plan.generatedThroughWeek != null;
+      const generatedThroughWeek = plan.generatedThroughWeek ?? plan.totalWeeks;
+      const isFullyGenerated = generatedThroughWeek >= plan.totalWeeks;
+      const nextBlockAt = plan.nextBlockAt;
+
+      // Human-readable next block message
+      let nextBlockMessage: string | null = null;
+      if (!isFullyGenerated && nextBlockAt) {
+        const dateStr = nextBlockAt.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+        nextBlockMessage = `Your next training block will be generated on ${dateStr}. This ensures your plan evolves with your progress and adapts to your actual fitness.`;
+      }
+
+      res.json({
+        planId,
+        totalWeeks: plan.totalWeeks,
+        generatedThroughWeek,
+        isRolling,
+        isFullyGenerated,
+        nextBlockAt: nextBlockAt ?? null,
+        nextBlockMessage,
+        nextBlockReady: !isFullyGenerated && nextBlockAt != null && new Date(nextBlockAt) <= new Date(),
+      });
+    } catch (err: any) {
+      console.error("Error getting block status:", err);
+      res.status(500).json({ error: err.message });
     }
   });
 

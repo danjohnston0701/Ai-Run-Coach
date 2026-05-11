@@ -312,6 +312,8 @@ fun TrainingPlanDashboardScreen(
     val actionError by viewModel.actionError.collectAsState()
     val pendingAdaptationsCount by viewModel.pendingAdaptationsCount.collectAsState()
     val planActionSuccess by viewModel.planActionSuccess.collectAsState()
+    val blockStatus by viewModel.blockStatus.collectAsState()
+    val nextBlockTriggering by viewModel.nextBlockTriggering.collectAsState()
 
     var showAbandonDialog by remember { mutableStateOf(false) }
     var showAddInjuryDialog by remember { mutableStateOf(false) }
@@ -380,7 +382,10 @@ fun TrainingPlanDashboardScreen(
                 onViewAdaptations = { onViewAdaptations(planId) },
                 modifier = Modifier.fillMaxSize().padding(padding),
                 pendingAdaptationsCount = pendingAdaptationsCount,
-                viewModel = viewModel
+                viewModel = viewModel,
+                blockStatus = blockStatus,
+                onTriggerNextBlock = { viewModel.triggerNextBlock(planId) },
+                nextBlockTriggering = nextBlockTriggering
             )
             }
         }
@@ -574,7 +579,10 @@ fun PlanDashboardContent(
     onViewAdaptations: () -> Unit,
     modifier: Modifier = Modifier,
     pendingAdaptationsCount: Int = 0,
-    viewModel: TrainingPlanViewModel? = null
+    viewModel: TrainingPlanViewModel? = null,
+    blockStatus: live.airuncoach.airuncoach.network.model.BlockStatus? = null,
+    onTriggerNextBlock: () -> Unit = {},
+    nextBlockTriggering: Boolean = false
 ) {
     // Helpers that stamp plan context into WorkoutHolder before delegating to nav callbacks.
     // This allows WorkoutDetailScreen → run_session to build a plan-aware RunSetupConfig.
@@ -599,6 +607,18 @@ fun PlanDashboardContent(
         item {
             AiPlanSummary(details = details)
             Spacer(modifier = Modifier.height(Spacing.lg))
+        }
+
+        // ── Rolling block banner (shown when next block hasn't been generated yet) ──
+        if (blockStatus != null) {
+            item {
+                RollingBlockBanner(
+                    blockStatus = blockStatus,
+                    triggering = nextBlockTriggering,
+                    onTriggerNextBlock = onTriggerNextBlock
+                )
+                Spacer(modifier = Modifier.height(Spacing.lg))
+            }
         }
 
         // ── Overall progress card ─────────────────────────────────────────────
@@ -1507,6 +1527,70 @@ fun AiPlanSummary(details: TrainingPlanDetails) {
                 style = AppTextStyles.small.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic),
                 color = Colors.primary
             )
+        }
+    }
+}
+
+@Composable
+private fun RollingBlockBanner(
+    blockStatus: live.airuncoach.airuncoach.network.model.BlockStatus,
+    triggering: Boolean,
+    onTriggerNextBlock: () -> Unit
+) {
+    val generatedWeeks = blockStatus.generatedThroughWeek
+    val totalWeeks = blockStatus.totalWeeks
+    val canTriggerNow = blockStatus.nextBlockReady
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Colors.primary.copy(alpha = 0.08f)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Colors.primary.copy(alpha = 0.25f))
+    ) {
+        Column(
+            modifier = Modifier.padding(Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Text("🔄", fontSize = 18.sp)
+                Text(
+                    "Adaptive ${totalWeeks}-Week Plan",
+                    style = AppTextStyles.h4.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+                    color = Colors.textPrimary
+                )
+            }
+
+            Text(
+                "Weeks 1–$generatedWeeks of $totalWeeks are ready. Your next training block will be generated on ${blockStatus.nextBlockAt?.let {
+                    try {
+                        val sdf = java.text.SimpleDateFormat("EEEE d MMMM", java.util.Locale.getDefault())
+                        sdf.format(java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault()).parse(it.take(19)) ?: java.util.Date())
+                    } catch (_: Exception) { "an upcoming date" }
+                } ?: "an upcoming date"}, incorporating your real progress and adapting to your fitness development.",
+                style = AppTextStyles.small,
+                color = Colors.textSecondary,
+                lineHeight = 18.sp
+            )
+
+            if (canTriggerNow) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Button(
+                    onClick = onTriggerNextBlock,
+                    enabled = !triggering,
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+                    modifier = Modifier.fillMaxWidth().height(40.dp)
+                ) {
+                    if (triggering) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Colors.buttonText, strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Text(
+                        if (triggering) "Generating your next block…" else "Generate Next Training Block",
+                        style = AppTextStyles.small.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+                        color = Colors.buttonText
+                    )
+                }
+            }
         }
     }
 }

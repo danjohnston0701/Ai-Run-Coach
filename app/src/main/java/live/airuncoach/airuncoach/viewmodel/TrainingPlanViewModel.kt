@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.network.model.BlockStatus
 import live.airuncoach.airuncoach.network.model.CompleteWorkoutRequest
 import live.airuncoach.airuncoach.network.model.TrainingPlanDetails
 import live.airuncoach.airuncoach.network.model.TrainingPlanProgress
@@ -71,6 +72,13 @@ class TrainingPlanViewModel @Inject constructor(
     private val _pendingAdaptationsCount = MutableStateFlow(0)
     val pendingAdaptationsCount: StateFlow<Int> = _pendingAdaptationsCount.asStateFlow()
 
+    // Rolling block status — null means not loaded yet or plan is fully generated
+    private val _blockStatus = MutableStateFlow<BlockStatus?>(null)
+    val blockStatus: StateFlow<BlockStatus?> = _blockStatus.asStateFlow()
+
+    private val _nextBlockTriggering = MutableStateFlow(false)
+    val nextBlockTriggering: StateFlow<Boolean> = _nextBlockTriggering.asStateFlow()
+
     init {
         loadUserPlans("active")
     }
@@ -106,6 +114,35 @@ class TrainingPlanViewModel @Inject constructor(
             } catch (e: Exception) {
                 Log.w("TrainingPlanVM", "Failed to load pending adaptations count: ${e.message}")
                 _pendingAdaptationsCount.value = 0
+            }
+        }
+    }
+
+    fun loadBlockStatus(planId: String) {
+        viewModelScope.launch {
+            try {
+                val status = apiService.getBlockStatus(planId)
+                // Only surface if this is a rolling plan with weeks not yet generated
+                _blockStatus.value = if (status.isRolling && !status.isFullyGenerated) status else null
+            } catch (e: Exception) {
+                Log.w("TrainingPlanVM", "Block status fetch failed: ${e.message}")
+                _blockStatus.value = null
+            }
+        }
+    }
+
+    fun triggerNextBlock(planId: String) {
+        viewModelScope.launch {
+            _nextBlockTriggering.value = true
+            try {
+                apiService.triggerNextBlock(planId)
+                // Re-check status after a short delay (server generates in background)
+                kotlinx.coroutines.delay(2000)
+                loadBlockStatus(planId)
+            } catch (e: Exception) {
+                Log.e("TrainingPlanVM", "Failed to trigger next block: ${e.message}")
+            } finally {
+                _nextBlockTriggering.value = false
             }
         }
     }
@@ -161,8 +198,9 @@ class TrainingPlanViewModel @Inject constructor(
                 _planDetailState.value = PlanDetailState.Success(details, progress, today)
                 Log.d("TrainingPlanVM", "✅ Plan detail state updated")
                 
-                // Load pending adaptations count
+                // Load pending adaptations count + rolling block status
                 loadPendingAdaptationsCount(planId)
+                loadBlockStatus(planId)
             } catch (e: Exception) {
                 Log.e("TrainingPlanVM", "Unexpected error loading plan detail: ${e.message}", e)
                 _planDetailState.value = PlanDetailState.Error("Something went wrong. Please try again.")

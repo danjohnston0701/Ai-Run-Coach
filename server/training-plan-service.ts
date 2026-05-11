@@ -53,6 +53,24 @@ export interface InjuryInput {
   notes?: string;
 }
 
+/**
+ * Calculate how many weeks to generate per block based on sessions/week.
+ * Targets ~15 sessions per block — a sweet spot for quality, variety, and token budget.
+ *
+ *   2 sessions/week → 6-week block  (12 sessions)
+ *   3 sessions/week → 5-week block  (15 sessions)
+ *   4 sessions/week → 4-week block  (16 sessions)
+ *   5 sessions/week → 3-week block  (15 sessions)
+ *   6-7 sessions/week → 2-week block (12-14 sessions)
+ */
+export function getBlockSize(daysPerWeek: number): number {
+  if (daysPerWeek <= 2) return 6;
+  if (daysPerWeek === 3) return 5;
+  if (daysPerWeek === 4) return 4;
+  if (daysPerWeek === 5) return 3;
+  return 2; // 6-7 days/week
+}
+
 export async function generateTrainingPlan(
   userId: string,
   goalType: string, // 5k, 10k, half_marathon, marathon, ultra
@@ -280,7 +298,14 @@ export async function generateTrainingPlan(
       weeksUntilTarget = getPlanDuration(goalType, experienceLevel);
     }
     
-    console.log(`[Training Plan] Duration: durationWeeks=${durationWeeks}, targetDate=${targetDate}, calculated weeksUntilTarget=${weeksUntilTarget}`);
+    // Rolling block: generate only a block of weeks now, rest generated later as the athlete progresses.
+    // weeksUntilTarget is the FULL plan duration (stored in totalWeeks).
+    // weeksToGenerate is how many weeks we actually ask OpenAI to produce in this call.
+    const blockSize = getBlockSize(daysPerWeek);
+    const weeksToGenerate = Math.min(blockSize, weeksUntilTarget);
+    const isRollingPlan = weeksUntilTarget > weeksToGenerate;
+
+    console.log(`[Training Plan] Duration: durationWeeks=${durationWeeks}, targetDate=${targetDate}, calculated weeksUntilTarget=${weeksUntilTarget}, blockSize=${blockSize}, weeksToGenerate=${weeksToGenerate}`);
 
     // Calculate user age for HR zone calculations — fall back to Android/iOS-sent override if DOB not set.
     // Guard against NaN: an invalid DOB string (e.g. empty string, malformed date) causes
@@ -459,10 +484,13 @@ Build progressively toward the ${targetDistance}km goal.`;
     // Generate plan with OpenAI
     const prompt = `═══════════════════════════════════════════════════════════════
 COACHING COMMISSION — ${weeksUntilTarget}-WEEK PERSONALISED TRAINING PLAN
+${isRollingPlan ? `BLOCK 1 OF ${Math.ceil(weeksUntilTarget / weeksToGenerate)} — WEEKS 1–${weeksToGenerate}` : ''}
 ═══════════════════════════════════════════════════════════════
 
 You are designing a bespoke training plan for the athlete described below. You have full creative and technical authority as a coach — choose the training philosophy, session types, periodisation model, and pacing approach that YOU believe gives this specific athlete the best possible outcome. This is not a template to fill in. There is no prescribed methodology. You are the expert.
-${isPreEventPlan ? `
+${isRollingPlan ? `
+📋 ROLLING BLOCK PLAN: The full programme is ${weeksUntilTarget} weeks. You are generating Block 1 — weeks 1 to ${weeksToGenerate}. Subsequent blocks will be generated as the athlete progresses, incorporating their real performance data. Design this block knowing it is the opening phase of a ${weeksUntilTarget}-week journey. Establish the right physiological foundation and make explicit in your weekDescription fields what training phase each week belongs to (so subsequent blocks can continue the progression coherently).
+` : ''}${isPreEventPlan ? `
 ⚡ CONTEXT — PRE-EVENT SHARPENING BLOCK: This runner has specifically confirmed they are already capable of the event distance and are ${weeksUntilTarget} weeks from race day. This is a race-preparation block, not a build-up plan. Design accordingly — race-pace confidence, sharpening, taper strategy.
 ` : ''}
 ━━━ THE ATHLETE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -570,10 +598,14 @@ Your plan must demonstrate clear progressive overload and phase structure. Speci
 - Session types must evolve — early weeks establish aerobic base with easier sessions; middle weeks introduce and develop quality work; late weeks sharpen race-specific fitness
 - Target paces within each session type should tighten progressively as the athlete's fitness improves
 - Intensity distribution must shift across the plan — do not run the same mix of easy/tempo/interval sessions every week
-${isPreEventPlan ? `- PRE-EVENT BLOCK: Week 1 is near race-ready intensity. Progress through sharpening phases. Taper volume in the final 1-2 weeks.` : `- Final 1-2 weeks MUST taper — reduced volume and intensity to arrive at the event fresh`}
+${isRollingPlan
+  ? `- This is Block 1 (weeks 1–${weeksToGenerate} of the full ${weeksUntilTarget}-week plan). End the block at a sensible phase transition point (e.g. end of base phase). Do NOT include a taper in this block — taper weeks will appear in the final block.`
+  : isPreEventPlan
+    ? `- PRE-EVENT BLOCK: Week 1 is near race-ready intensity. Progress through sharpening phases. Taper volume in the final 1-2 weeks.`
+    : `- Final 1-2 weeks MUST taper — reduced volume and intensity to arrive at the event fresh`}
 
 NON-NEGOTIABLE STRUCTURAL CONSTRAINTS:
-- Generate EXACTLY ${weeksUntilTarget} weeks — every single week must be fully listed, no skipping or summarising
+- Generate EXACTLY ${weeksToGenerate} weeks — every single week must be fully listed, no skipping or summarising
 - Each week must have EXACTLY ${daysPerWeek} workouts (after accounting for any blocked days)
 - Respect all fixed session scheduling rules above
 - Honour all injury/health limitations — a conservative safe plan is always better than one that causes re-injury
@@ -581,7 +613,7 @@ NON-NEGOTIABLE STRUCTURAL CONSTRAINTS:
 Return your complete coaching plan as JSON with this structure:
 {
   "planName": "A descriptive name reflecting this athlete's specific plan and approach",
-  "totalWeeks": ${weeksUntilTarget},
+  "totalWeeks": ${weeksToGenerate},
   "coachingProgrammeSummary": {
     "aiDeterminedFitnessLevel": "Your expert assessment of this athlete's actual fitness level based on all data provided",
     "coachingApproach": "1-2 sentences describing the training methodology/philosophy you have chosen for this athlete and why",
@@ -642,9 +674,9 @@ IMPORTANT NOTES ON OUTPUT:
 - weekDescription for each week MUST reflect what makes that specific week different — name the training phase (e.g. "Aerobic foundation", "Threshold introduction", "Volume peak", "Race sharpening", "Taper"). Do not use generic descriptions like "Continue building fitness".
 
 STRUCTURAL CONSTRAINTS (these are non-negotiable for the app to function):
-- Generate EXACTLY ${weeksUntilTarget} weeks — every single week from 1 to ${weeksUntilTarget} must be fully listed
+- Generate EXACTLY ${weeksToGenerate} weeks — every single week from 1 to ${weeksToGenerate} must be fully listed
 - Each week must have EXACTLY ${daysPerWeek} workouts (after accounting for blocked days)
-- The "totalWeeks" field in your JSON must be ${weeksUntilTarget}
+- The "totalWeeks" field in your JSON must be ${weeksToGenerate}
 - Do not skip, summarise, or merge weeks
 
 COACHING SUMMARY NOTES:
@@ -733,7 +765,7 @@ Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunner
       throw new Error("Invalid plan data: missing or invalid weeks array");
     }
 
-    console.log(`[Training Plan] AI returned ${planData.weeks.length} weeks, expected ${weeksUntilTarget}`);
+    console.log(`[Training Plan] AI returned ${planData.weeks.length} weeks, expected ${weeksToGenerate} (block 1 of ${isRollingPlan ? Math.ceil(weeksUntilTarget / weeksToGenerate) : 1})`);
 
     // Coerce weeks data to correct types
     planData.weeks = planData.weeks.map((week: any) => ({
@@ -748,16 +780,15 @@ Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunner
     }));
 
     // Enforce exact week count — AI sometimes returns wrong number of weeks
-    if (planData.weeks.length < weeksUntilTarget) {
+    if (planData.weeks.length < weeksToGenerate) {
       // NEVER silently copy weeks — that produces identical sessions across the plan.
-      // If the response is incomplete it must be regenerated, not padded.
       throw new Error(
-        `Training plan incomplete: AI returned ${planData.weeks.length} weeks but ${weeksUntilTarget} were requested. ` +
+        `Training plan incomplete: AI returned ${planData.weeks.length} weeks but ${weeksToGenerate} were requested. ` +
         `This usually means the response was truncated — please try again.`
       );
-    } else if (planData.weeks.length > weeksUntilTarget) {
-      console.warn(`[Training Plan] AI returned more weeks (${planData.weeks.length}) than requested (${weeksUntilTarget}). Trimming.`);
-      planData.weeks = planData.weeks.slice(0, weeksUntilTarget);
+    } else if (planData.weeks.length > weeksToGenerate) {
+      console.warn(`[Training Plan] AI returned more weeks (${planData.weeks.length}) than requested (${weeksToGenerate}). Trimming.`);
+      planData.weeks = planData.weeks.slice(0, weeksToGenerate);
     }
 
     // Sanitise numeric fields before DB insert — Postgres rejects NaN for integer/real columns
@@ -765,7 +796,23 @@ Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunner
     const safeWeeklyMileage = (!isNaN(weeklyMileageBase) && weeklyMileageBase > 0) ? weeklyMileageBase : 20;
     const safeDaysPerWeek   = (!isNaN(daysPerWeek) && daysPerWeek >= 1) ? Math.round(daysPerWeek) : 4;
 
-    // Create training plan in database
+    // nextBlockAt: start of the last week of this block (i.e. when we should generate the next batch)
+    // This gives the app a week's lead time — next block is ready before the athlete needs it.
+    const nextBlockAt: Date | null = (() => {
+      if (!isRollingPlan) return null;
+      const today = userTimezone
+        ? new Date(new Date().toLocaleDateString('en-CA', { timeZone: userTimezone }) + 'T00:00:00')
+        : new Date();
+      const daysSinceMonday = today.getDay() === 0 ? 6 : today.getDay() - 1;
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - daysSinceMonday);
+      // Trigger generation at the start of the final week of this block
+      const triggerDate = new Date(weekStart);
+      triggerDate.setDate(weekStart.getDate() + (weeksToGenerate - 1) * 7);
+      return triggerDate;
+    })();
+
+    // Create training plan in database — totalWeeks is the FULL plan duration
     const plan = await db
       .insert(trainingPlans)
       .values({
@@ -774,7 +821,7 @@ Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunner
         targetDistance,
         targetTime: safeTargetTime,
         targetDate,
-        totalWeeks: weeksUntilTarget,
+        totalWeeks: weeksUntilTarget,  // full plan duration
         experienceLevel,
         weeklyMileageBase: safeWeeklyMileage,
         daysPerWeek: safeDaysPerWeek,
@@ -783,6 +830,8 @@ Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunner
         includeLongRuns: true,
         status: "active",
         aiGenerated: true,
+        generatedThroughWeek: weeksToGenerate,  // how many weeks are actually in the DB now
+        nextBlockAt,                             // when to generate the next block (null if full plan already generated)
       })
       .returning();
 
@@ -1010,7 +1059,7 @@ Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunner
       }
     }
 
-    console.log(`✅ Generated ${weeksUntilTarget}-week training plan for user ${userId} (${pendingSessionInstructions.length} workouts queued for coaching instructions)`);
+    console.log(`✅ Generated ${isRollingPlan ? `block 1 (weeks 1-${weeksToGenerate}) of ${weeksUntilTarget}` : `${weeksUntilTarget}`}-week training plan for user ${userId} (${pendingSessionInstructions.length} workouts queued for coaching instructions)${nextBlockAt ? `, next block scheduled at ${nextBlockAt.toDateString()}` : ''}`);
 
     // Fire-and-forget: generate session instructions in the background so the plan
     // is returned to the user immediately (~60s instead of ~5min).
@@ -1025,6 +1074,285 @@ Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunner
   } catch (error) {
     console.error("Error generating training plan:", error);
     throw error;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ROLLING BLOCK GENERATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Generate the next training block for a rolling plan.
+ *
+ * Called automatically when:
+ *   - The user opens the app and nextBlockAt has passed, OR
+ *   - A POST /api/training-plans/:planId/next-block request arrives
+ *
+ * Uses the athlete's actual run data since block 1 was generated, plus a
+ * summary of the previous block, so each new block genuinely adapts to growth.
+ */
+export async function generateNextBlock(planId: string, userId: string): Promise<void> {
+  // ── 1. Load plan + existing weeks ──────────────────────────────────────────
+  const [plan] = await db.select().from(trainingPlans).where(eq(trainingPlans.id, planId));
+  if (!plan) throw new Error(`Plan ${planId} not found`);
+  if (plan.status !== 'active') throw new Error(`Plan ${planId} is not active`);
+  if (plan.generatedThroughWeek == null) {
+    console.log(`[NextBlock] Plan ${planId} is a legacy plan (all weeks already generated) — skipping`);
+    return;
+  }
+
+  const generatedThrough = plan.generatedThroughWeek;
+  const totalWeeks = plan.totalWeeks;
+
+  if (generatedThrough >= totalWeeks) {
+    console.log(`[NextBlock] Plan ${planId} is fully generated (${generatedThrough}/${totalWeeks} weeks)`);
+    // Clear nextBlockAt so we don't keep checking
+    await db.update(trainingPlans)
+      .set({ nextBlockAt: null })
+      .where(eq(trainingPlans.id, planId));
+    return;
+  }
+
+  const daysPerWeek = plan.daysPerWeek ?? 4;
+  const blockSize = getBlockSize(daysPerWeek);
+  const nextBlockStart = generatedThrough + 1;
+  const nextBlockEnd = Math.min(generatedThrough + blockSize, totalWeeks);
+  const weeksToGenerate = nextBlockEnd - nextBlockStart + 1;
+  const blockNumber = Math.floor(generatedThrough / blockSize) + 1;
+  const totalBlocks = Math.ceil(totalWeeks / blockSize);
+
+  console.log(`[NextBlock] Generating block ${blockNumber} (weeks ${nextBlockStart}–${nextBlockEnd}) for plan ${planId}`);
+
+  // ── 2. Build context from previous block ──────────────────────────────────
+  const previousWeeks = await db
+    .select()
+    .from(weeklyPlans)
+    .where(eq(weeklyPlans.trainingPlanId, planId))
+    .orderBy(weeklyPlans.weekNumber);
+
+  const previousBlockSummary = previousWeeks.map(w =>
+    `Week ${w.weekNumber}: ${w.weekDescription ?? ''} | Focus: ${w.focusArea ?? ''} | Volume: ${w.totalDistance ? `${w.totalDistance}km` : 'n/a'} | Intensity: ${w.intensityLevel ?? ''}`
+  ).join('\n');
+
+  // ── 3. Fetch runner's recent performance data ──────────────────────────────
+  const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
+
+  // ── 4. Build the next-block prompt ────────────────────────────────────────
+  const isLastBlock = nextBlockEnd >= totalWeeks;
+  const weeksRemainingAfter = totalWeeks - nextBlockEnd;
+
+  const prompt = `═══════════════════════════════════════════════════════════════
+COACHING COMMISSION — NEXT TRAINING BLOCK
+BLOCK ${blockNumber} OF ${totalBlocks} — WEEKS ${nextBlockStart}–${nextBlockEnd} OF ${totalWeeks}
+═══════════════════════════════════════════════════════════════
+
+You are continuing a ${totalWeeks}-week personalised training programme. The athlete has completed the previous block and you are now designing the next phase of their journey.
+
+━━━ PREVIOUS BLOCK SUMMARY ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The athlete has completed (or is completing) the following weeks:
+${previousBlockSummary}
+
+Continue the progression logically from where this block ends. Do not repeat the same sessions or volumes — build on the foundation that has been laid.
+
+━━━ PLAN CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Full plan: ${plan.goalType.toUpperCase()} — ${plan.targetDistance}km over ${totalWeeks} weeks
+${plan.targetDate ? `Race date: ${new Date(plan.targetDate).toDateString()}` : ''}
+Sessions per week: ${daysPerWeek}
+This is Block ${blockNumber} of ${totalBlocks} — covering weeks ${nextBlockStart} to ${nextBlockEnd}.
+${isLastBlock ? `⚡ FINAL BLOCK: Include a taper in the last 1-2 weeks — reduce volume and intensity to arrive at the event fresh and race-ready.` : `Weeks remaining after this block: ${weeksRemainingAfter}. End at a sensible phase transition (do NOT taper yet).`}
+
+━━━ WEEK-BY-WEEK PROGRESSION ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+All the same rules apply as block 1:
+- Every week MUST be distinct. No two weeks can have identical sessions.
+- Weekly volume must show progression (except a deload week if appropriate)
+- Session types, paces, and intensity must evolve across these weeks
+- Name each week's training phase explicitly in weekDescription
+
+━━━ WHAT TO DELIVER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Generate EXACTLY ${weeksToGenerate} weeks (weeks ${nextBlockStart} to ${nextBlockEnd}).
+weekNumber values must start at ${nextBlockStart} and end at ${nextBlockEnd}.
+
+Return valid JSON only:
+{
+  "weeks": [
+    {
+      "weekNumber": ${nextBlockStart},
+      "weekDescription": "Phase name and what makes this week unique",
+      "totalDistance": 28.0,
+      "focusArea": "The physiological quality this week develops",
+      "intensityLevel": "Overall intensity for this week",
+      "workouts": [
+        {
+          "dayOfWeek": 1,
+          "workoutType": "tempo",
+          "distance": 7.0,
+          "targetPace": "Pace appropriate for this stage of the plan",
+          "intensity": "z4",
+          "description": "Personalised session name",
+          "instructions": "2-3 sentences: session purpose, specific target, why it matters now"
+        }
+      ]
+    }
+  ]
+}
+
+STRUCTURAL CONSTRAINTS:
+- Generate EXACTLY ${weeksToGenerate} weeks (${nextBlockStart} to ${nextBlockEnd})
+- Each week must have EXACTLY ${daysPerWeek} workouts
+- weekNumber values must be ${nextBlockStart} through ${nextBlockEnd} (not 1 through ${weeksToGenerate})
+- Do not include a coachingProgrammeSummary — just the weeks array`;
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-4.1",
+    messages: [
+      {
+        role: "system",
+        content: `You are an elite AI running coach continuing a personalised multi-block training programme. You have full creative authority. Use the previous block summary and athlete profile to design the next logical training phase. Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunnerProfile)}`
+      },
+      { role: "user", content: prompt }
+    ],
+    response_format: { type: "json_object" },
+    temperature: 0.7,
+    max_tokens: 32000,
+  });
+
+  if (response.choices[0].finish_reason === 'length') {
+    throw new Error(`[NextBlock] Response truncated for block ${blockNumber} — try reducing block size`);
+  }
+
+  let rawContent = (response.choices[0].message.content || '{}').replace(/```json\n?/g, '').replace(/\n?```/g, '').trim();
+  const blockData = JSON.parse(rawContent);
+
+  if (!blockData.weeks || !Array.isArray(blockData.weeks) || blockData.weeks.length < weeksToGenerate) {
+    throw new Error(`[NextBlock] AI returned ${blockData.weeks?.length ?? 0} weeks, expected ${weeksToGenerate}`);
+  }
+
+  // ── 5. Compute timezone-aware nextBlockAt ─────────────────────────────────
+  const userRecord = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  const userTimezone = userRecord[0]?.timezone ?? null;
+
+  const newNextBlockAt: Date | null = (() => {
+    if (isLastBlock) return null; // Plan fully generated after this block
+    const today = userTimezone
+      ? new Date(new Date().toLocaleDateString('en-CA', { timeZone: userTimezone }) + 'T00:00:00')
+      : new Date();
+    const daysSinceMonday = today.getDay() === 0 ? 6 : today.getDay() - 1;
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - daysSinceMonday);
+    // Trigger at the start of the last week of this new block
+    const triggerDate = new Date(weekStart);
+    triggerDate.setDate(weekStart.getDate() + (nextBlockEnd - plan.currentWeek!) * 7);
+    return triggerDate;
+  })();
+
+  // ── 6. Insert weeks + workouts into DB ────────────────────────────────────
+  const pendingSessionInstructions: Array<{
+    workoutId: string;
+    workoutType: string;
+    intensity: string;
+    sessionGoal?: string | null;
+    sessionIntent?: string | null;
+    intervalCount?: number | null;
+    distance?: number | null;
+    duration?: number | null;
+  }> = [];
+
+  const today = userTimezone
+    ? new Date(new Date().toLocaleDateString('en-CA', { timeZone: userTimezone }) + 'T00:00:00')
+    : (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
+  const daysSinceMonday = today.getDay() === 0 ? 6 : today.getDay() - 1;
+  const planWeekStart = new Date(today);
+  planWeekStart.setDate(today.getDate() - daysSinceMonday);
+
+  for (const week of blockData.weeks) {
+    const weekNum = parseInt(String(week.weekNumber), 10);
+    const weeklyPlan = await db.insert(weeklyPlans).values({
+      trainingPlanId: planId,
+      weekNumber: weekNum,
+      weekDescription: week.weekDescription,
+      totalDistance: parseFloat(String(week.totalDistance ?? 0).replace(/[^\d.]/g, '')) || 0,
+      focusArea: week.focusArea,
+      intensityLevel: week.intensityLevel,
+    }).returning();
+
+    const weeklyPlanId = weeklyPlan[0].id;
+
+    for (const workout of (week.workouts ?? [])) {
+      const dayOfWeek = parseInt(String(workout.dayOfWeek), 10) || 1;
+      const dayOffsetFromMonday = (dayOfWeek + 6) % 7;
+      const scheduledDate = new Date(planWeekStart);
+      scheduledDate.setDate(planWeekStart.getDate() + ((weekNum - 1) * 7) + dayOffsetFromMonday);
+
+      const workoutResult = await db.insert(plannedWorkouts).values({
+        weeklyPlanId,
+        trainingPlanId: planId,
+        dayOfWeek,
+        scheduledDate,
+        workoutType: workout.workoutType || 'easy',
+        distance: parseFloat(String(workout.distance ?? 0).replace(/[^\d.]/g, '')) || 0,
+        targetPace: workout.targetPace,
+        intensity: workout.intensity,
+        description: workout.description,
+        instructions: workout.instructions,
+        intervalCount: workout.intervalCount ?? null,
+        intervalDistanceMeters: workout.intervalDistanceMeters ?? null,
+        intervalDurationSeconds: workout.intervalDurationSeconds ?? null,
+        isCompleted: false,
+      }).returning({ id: plannedWorkouts.id });
+
+      if (workoutResult[0]) {
+        pendingSessionInstructions.push({
+          workoutId: workoutResult[0].id,
+          workoutType: workout.workoutType || 'easy',
+          intensity: workout.intensity || 'z3',
+          distance: parseFloat(String(workout.distance ?? 0)) || null,
+        });
+      }
+    }
+  }
+
+  // ── 7. Update plan metadata ───────────────────────────────────────────────
+  await db.update(trainingPlans)
+    .set({
+      generatedThroughWeek: nextBlockEnd,
+      nextBlockAt: newNextBlockAt,
+    })
+    .where(eq(trainingPlans.id, planId));
+
+  console.log(`✅ [NextBlock] Generated block ${blockNumber} (weeks ${nextBlockStart}–${nextBlockEnd}) for plan ${planId}. Next block at: ${newNextBlockAt?.toDateString() ?? 'N/A (plan complete)'}`);
+
+  // Background session instruction generation
+  setImmediate(() => {
+    generateSessionInstructionsInBackground(userId, pendingSessionInstructions).catch(err =>
+      console.error(`[NextBlock][SessionInstructions] Background generation failed:`, err)
+    );
+  });
+}
+
+/**
+ * Check if any active rolling plans need their next block generated now.
+ * Call this on app startup and after each run completion.
+ */
+export async function checkAndGeneratePendingBlocks(userId: string): Promise<void> {
+  const now = new Date();
+  const activePlans = await db.select().from(trainingPlans).where(
+    and(
+      eq(trainingPlans.userId, userId),
+      eq(trainingPlans.status, 'active')
+    )
+  );
+
+  for (const plan of activePlans) {
+    if (plan.nextBlockAt && plan.nextBlockAt <= now && plan.generatedThroughWeek != null) {
+      console.log(`[NextBlock] Auto-triggering next block for plan ${plan.id} (nextBlockAt=${plan.nextBlockAt.toDateString()})`);
+      generateNextBlock(plan.id, userId).catch(err =>
+        console.error(`[NextBlock] Auto-generation failed for plan ${plan.id}:`, err)
+      );
+    }
   }
 }
 

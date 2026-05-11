@@ -344,6 +344,13 @@ interface ApiService {
     @DELETE("/api/training-plans/{planId}")
     suspend fun deleteTrainingPlan(@Path("planId") planId: String): Response<Unit>
 
+    // ── Rolling block generation ──────────────────────────────────────────────
+    @GET("/api/training-plans/{planId}/block-status")
+    suspend fun getBlockStatus(@Path("planId") planId: String): BlockStatus
+
+    @POST("/api/training-plans/{planId}/next-block")
+    suspend fun triggerNextBlock(@Path("planId") planId: String): Response<Map<String, String>>
+
     @POST("/api/training-plans/adaptations/{adaptationId}/accept")
     suspend fun acceptAdaptation(@Path("adaptationId") adaptationId: String): Response<AdaptationResponse>
 

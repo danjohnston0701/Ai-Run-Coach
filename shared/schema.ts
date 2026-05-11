@@ -1150,6 +1150,11 @@ export const trainingPlans = pgTable("training_plans", {
   includeLongRuns: boolean("include_long_runs").default(true),
   status: text("status").default("active"), // active, completed, paused
   aiGenerated: boolean("ai_generated").default(true),
+  // Rolling block generation — we generate a block of weeks at a time rather than the full plan.
+  // generatedThroughWeek: how many weeks exist in the DB right now (e.g. 4 out of 20).
+  // nextBlockAt: when the next block should be generated (start of the last week of current block).
+  generatedThroughWeek: integer("generated_through_week"),  // null = legacy plans (all weeks exist)
+  nextBlockAt: timestamp("next_block_at"),                  // null = next block not yet scheduled
   createdAt: timestamp("created_at").defaultNow(),
   completedAt: timestamp("completed_at"),
 });
