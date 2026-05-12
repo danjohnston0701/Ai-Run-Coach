@@ -818,19 +818,59 @@ private fun AiInsightsTabContent(
                 }
             }
         } else {
-            item {
-                AiSectionFlagship(
-                    analysisState = analysisState,
-                    comments = comments,
-                    coachingNotes = coachingNotes,
-                    onCommentsChange = onCommentsChange,
-                    onGenerateAi = onGenerateAi,
-                    onRetryAi = onRetryAi,
-                    run = run,
-                    isGarminConnected = isGarminConnected,
-                    onEnrichWithGarmin = onEnrichWithGarmin,
-                    isEnrichingWithGarmin = isEnrichingWithGarmin
-                )
+            // Check if run originated from Garmin Connect
+            if (run.externalSource == "garmin") {
+                // AI Analysis unavailable for Garmin-synced runs
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary.copy(alpha = 0.6f)),
+                        border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.5f))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.icon_lock),
+                                contentDescription = null,
+                                tint = Colors.textMuted.copy(alpha = 0.6f),
+                                modifier = Modifier.size(32.dp)
+                            )
+                            Text(
+                                text = "AI Analysis Unavailable",
+                                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                                color = Colors.textPrimary,
+                                textAlign = TextAlign.Center
+                            )
+                            Text(
+                                text = "AI Analysis unavailable on activities synced from Garmin Connect. Create runs in AI Run Coach to get AI coaching insights.",
+                                style = AppTextStyles.body,
+                                color = Colors.textSecondary,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            } else {
+                item {
+                    AiSectionFlagship(
+                        analysisState = analysisState,
+                        comments = comments,
+                        coachingNotes = coachingNotes,
+                        onCommentsChange = onCommentsChange,
+                        onGenerateAi = onGenerateAi,
+                        onRetryAi = onRetryAi,
+                        run = run,
+                        isGarminConnected = isGarminConnected,
+                        onEnrichWithGarmin = onEnrichWithGarmin,
+                        isEnrichingWithGarmin = isEnrichingWithGarmin
+                    )
+                }
             }
         }
 
