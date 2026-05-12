@@ -1498,6 +1498,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── iOS: Rename a run ────────────────────────────────────────────────────────
+  app.patch("/api/runs/:id/rename", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const run = await storage.getRun(req.params.id);
+      if (!run) return res.status(404).json({ error: "Run not found" });
+      if (req.user?.userId && run.userId !== req.user.userId) {
+        return res.status(403).json({ error: "Not authorized" });
+      }
+      const updated = await storage.updateRun(req.params.id, { name: req.body.name });
+      res.json(updated);
+    } catch (error: any) {
+      console.error("[PATCH /api/runs/:id/rename]", error);
+      res.status(500).json({ error: "Failed to rename run" });
+    }
+  });
+
+  // ── iOS: Save user comments + struggle points ────────────────────────────────
+  app.put("/api/runs/:id/struggle-points", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const run = await storage.getRun(req.params.id);
+      if (!run) return res.status(404).json({ error: "Run not found" });
+      if (req.user?.userId && run.userId !== req.user.userId) {
+        return res.status(403).json({ error: "Not authorized" });
+      }
+      const updated = await storage.updateRun(req.params.id, {
+        userComments: req.body.user_comments ?? req.body.userComments ?? run.userComments,
+        strugglePoints: req.body.struggle_points ?? req.body.strugglePoints ?? run.strugglePoints,
+      } as any);
+      res.json(updated);
+    } catch (error: any) {
+      console.error("[PUT /api/runs/:id/struggle-points]", error);
+      res.status(500).json({ error: "Failed to save struggle points" });
+    }
+  });
+
   app.post("/api/runs/sync-progress", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { runId, ...data } = req.body;
@@ -9825,6 +9860,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Get comprehensive run analysis (Android-compatible)
   // Accepts the Android `RunAnalysisRequest` payload and returns an Android `RunAnalysisResponse` shape.
+  // ── iOS: Fetch coaching events for a completed run ───────────────────────────
+  // Called by RunSummaryScreen to populate the coaching timeline tab.
+  app.get("/api/coaching/session-events/:runId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const events = await db
+        .select()
+        .from(coachingSessionEvents)
+        .where(eq(coachingSessionEvents.runId, runId))
+        .orderBy(coachingSessionEvents.triggeredAt);
+      res.json({ events });
+    } catch (error: any) {
+      console.error("[GET /api/coaching/session-events/:runId]", error);
+      res.status(500).json({ error: "Failed to fetch coaching events" });
+    }
+  });
+
   app.post("/api/coaching/run-analysis", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const body = req.body || {};
