@@ -1753,8 +1753,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         previousRuns: previousRuns.filter(r => r.id !== runId).slice(0, 10),
         userProfile: user ? {
           fitnessLevel: user.fitnessLevel || undefined,
-          age: user.dob ? Math.floor((Date.now() - new Date(user.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : undefined,
-          weight: user.weight ? parseFloat(user.weight) : undefined,
+          age: user.dob ? (() => { 
+            const dob = new Date(user.dob); 
+            const ageMs = Date.now() - dob.getTime(); 
+            const ageYears = Math.floor(ageMs / (365.25 * 24 * 60 * 60 * 1000)); 
+            return ageYears > 0 && ageYears < 150 ? ageYears : undefined; 
+          })() : undefined,
+          weight: user.weight ? (() => { const w = parseFloat(user.weight); return w > 0 && w < 500 ? w : undefined; })() : undefined,
         } : undefined,
         coachName,
         coachTone,
