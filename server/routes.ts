@@ -1785,6 +1785,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           triggeredAt: e.triggeredAt,
         })) : undefined,
         expectedSessionGoal: expectedSessionGoal,
+        weatherImpactAnalysis: weatherImpactAnalysis || undefined,
       });
       const analysisEndTime = Date.now();
       console.log(`[comprehensive-analysis] AI analysis generated in ${analysisEndTime - analysisStartTime}ms for run ${runId}`);
