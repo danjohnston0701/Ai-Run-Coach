@@ -1583,7 +1583,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userProfileFromRequest = req.body?.userProfile || null;
       
       console.log(`[comprehensive-analysis] Starting analysis for run ${runId}, user ${userId}` +
-        (garminDataSummary?.hasGarminData ? ` [WITH Garmin data from ${garminDataSummary.deviceName}]` : ` [NO Garmin data]`));
+        (garminDataSummary?.deviceName ? ` [WITH Garmin data from ${garminDataSummary.deviceName}]` : ` [NO Garmin data]`));
       
       // Check for existing analysis first — return cached if available (no quota cost for cached results)
       const existingAnalysis = await storage.getRunAnalysis(runId);
