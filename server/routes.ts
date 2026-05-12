@@ -1650,6 +1650,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Proceed without wellness data
       }
       
+      // Initialize weatherImpactAnalysis as null (used in learning loop below)
+      let weatherImpactAnalysis: string | null = null;
+      
       // Get previous runs for context
       const previousRuns = await db.query.runs.findMany({
         where: eq(runs.userId, userId),
