@@ -11445,6 +11445,40 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   });
 
   // Pause or cancel a plan
+  // iOS uses PATCH, Android uses PUT — both are supported
+  app.patch("/api/training-plans/:planId/status", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { planId } = req.params;
+      const { status } = req.body as { status: 'active' | 'paused' | 'completed' | 'cancelled' | 'abandoned' };
+      const normalisedStatus = status === 'abandoned' ? 'cancelled' : status;
+      const userId = req.user?.userId;
+
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const plan = await db
+        .select()
+        .from(trainingPlans)
+        .where(and(eq(trainingPlans.id, planId), eq(trainingPlans.userId, userId)))
+        .limit(1);
+
+      if (plan.length === 0) {
+        return res.status(404).json({ error: "Plan not found or not authorized" });
+      }
+
+      const validStatuses = ['active', 'paused', 'completed', 'cancelled', 'abandoned'];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+      }
+
+      await db.update(trainingPlans).set({ status: normalisedStatus }).where(eq(trainingPlans.id, planId));
+      res.status(200).json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to update plan status" });
+    }
+  });
+
   app.put("/api/training-plans/:planId/status", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { planId } = req.params;
