@@ -3017,7 +3017,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/features/:featureName/available", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { featureName } = req.params;
-      const user = await storage.getUser(req.user!.userId);
+      const userId = req.user!.userId;
+      const user = await storage.getUser(userId);
       
       // Validate feature name
       const validFeatures = ["trainingPlansGenerated", "routesGenerated", "postRunAnalyses", "aiCoachingKm"];
@@ -3028,8 +3029,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Get current usage
-      const usageData = await getUsageWithLimits(req.user!.userId, user?.subscriptionTier);
+      // ── Check for active promo codes FIRST (highest priority) ──
+      const { hasUnlimitedGrant } = await import("./coupon-service");
+      const hasPromoUnlimited = await hasUnlimitedGrant(userId, featureName);
+      if (hasPromoUnlimited) {
+        const renewalDate = new Date();
+        renewalDate.setMonth(renewalDate.getMonth() + 1);
+        return res.json({
+          isAvailable: true,
+          remaining: null,
+          limit: null,
+          used: 0,
+          renewalDate: renewalDate.toISOString(),
+          isUnlimited: true,
+          message: `🎁 You have unlimited ${featureName} from your promo code`,
+          grantedBy: "promo_code"
+        });
+      }
+      
+      // Get current usage (if not already unlimited via promo)
+      const usageData = await getUsageWithLimits(userId, user?.subscriptionTier);
       
       // Extract relevant data for this feature
       const used = usageData.usage[featureName as keyof typeof usageData.usage] || 0;
