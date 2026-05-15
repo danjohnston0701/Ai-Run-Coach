@@ -1044,36 +1044,38 @@ private fun GraphsTabContent(
 
         // ═══════════════════════════════════════════════════════════════════════
         // HEART RATE ANALYSIS SECTION
-        // (Always shown, NO expand/collapse button)
-        // ═════════���═════════════════════════════════════════════════════════════
+        // (Only shown when heart rate data exists from any source: Garmin/Apple/Samsung)
+        // ═══════════════════════════════════════════════════════════════════════
         
-        stickyHeader {
-            // Just show title as header — no expandable toggle
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = Spacing.md)
-            ) {
-                Text(
-                    "Heart Rate Analysis",
-                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                    color = Colors.textPrimary
-                )
+        if (run.heartRateData != null && run.heartRateData.isNotEmpty()) {
+            stickyHeader {
+                // Just show title as header — no expandable toggle
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = Spacing.md)
+                ) {
+                    Text(
+                        "Heart Rate Analysis",
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                }
             }
+
+            // Display heart rate content only when data exists
+            item { ChartsSectionFlagship(run = run) }
+
+            // Show disclosure if heart rate data is from Garmin
+            if (run.hasGarminData && run.heartRateData != null) {
+                item { GarminDataDisclosure(disclosureType = "chart") }
+            }
+
+            item { HeartRateZonesVisualCard(heartRateData = run.heartRateData) }
+
+            // Intensity Distribution Donut
+            item { IntensityDistributionCard(run = run) }
         }
-
-        // Always display heart rate content
-        item { ChartsSectionFlagship(run = run) }
-
-        // Show disclosure if heart rate data is from Garmin
-        if (run.hasGarminData && run.heartRateData != null) {
-            item { GarminDataDisclosure(disclosureType = "chart") }
-        }
-
-        item { HeartRateZonesVisualCard(heartRateData = run.heartRateData) }
-
-        // Intensity Distribution Donut
-        item { IntensityDistributionCard(run = run) }
 
         // ═══════════════════════════════════════════════════════════════════════
         // RUNNING DYNAMICS SECTION (only when Garmin data available)
