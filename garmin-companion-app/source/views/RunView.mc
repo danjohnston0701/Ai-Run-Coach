@@ -67,6 +67,9 @@ class RunView extends Ui.View {
     private var _phoneLink    = null;
     private var _session      = null;
 
+    // Tracks whether we've already sent sessionReady to the phone this session
+    private var _sessionReadySent = false;
+
     // Watch GPS cache
     private var _lastGpsLat    = null;
     private var _lastGpsLng    = null;
@@ -231,8 +234,9 @@ class RunView extends Ui.View {
     }
 
     function finishRun() {
-        _isRunning    = false;
-        _isPaused     = false;
+        _isRunning       = false;
+        _isPaused        = false;
+        _sessionReadySent = false;  // Reset so next session notifies phone again
         _overlayState = OVERLAY_READY;
         Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
         _gpsListening = false;
@@ -293,6 +297,11 @@ class RunView extends Ui.View {
                     _overlayState = _gpsReady ? OVERLAY_READY : OVERLAY_GPS_WAIT;
                 }
                 Sys.println("Auth received — overlayState=" + _overlayState);
+                // If GPS was already locked before auth arrived, notify phone now
+                if (_gpsReady && !_isRunning && !_sessionReadySent) {
+                    _phoneLink.sendCommand("sessionReady");
+                    _sessionReadySent = true;
+                }
             }
             if (rname != null) { App.Storage.setValue("runnerName", rname); }
             Ui.requestUpdate();
@@ -514,6 +523,12 @@ class RunView extends Ui.View {
                         ? OVERLAY_COACHED : OVERLAY_READY;
                 }
                 _vibeShort();
+                // Notify phone that the watch session is fully ready
+                // (authenticated + GPS locked) — phone will fire a push notification
+                if (_isAuthenticated && !_sessionReadySent) {
+                    _phoneLink.sendCommand("sessionReady");
+                    _sessionReadySent = true;
+                }
             }
         }
         // Cache raw GPS coordinates for phone streaming only.
@@ -836,6 +851,9 @@ class RunDelegate extends Ui.BehaviorDelegate {
     function initialize()      { BehaviorDelegate.initialize(); }
     function setView(v)        { _view = v; }
 
+    // ── Physical START button (top-right) ─────────────────────────────────────
+    // onSelect() fires on the physical START button press.
+    // Screen taps are consumed silently by onTap() / onHold() below.
     function onSelect() {
         if (_view == null) { return true; }
         if (!_view.isRunning())     { _view.startRun();  }
@@ -844,6 +862,19 @@ class RunDelegate extends Ui.BehaviorDelegate {
         return true;
     }
 
+    // ── Screen touch — intentionally ignored ──────────────────────────────────
+    // On touchscreen Garmin models (Venu, Venu 2, FR55 etc.) tapping the screen
+    // would previously also trigger run control. Override onTap and onHold to
+    // consume the events silently — no run start/pause from screen touch.
+    function onTap(clickEvent) {
+        return true; // consume — do nothing
+    }
+
+    function onHold(clickEvent) {
+        return true; // consume — do nothing
+    }
+
+    // ── BACK button ───────────────────────────────────────────────────────────
     function onBack() {
         if (_view == null) { return true; }
         if (!_view.isRunning()) {

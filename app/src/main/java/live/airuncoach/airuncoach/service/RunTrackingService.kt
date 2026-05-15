@@ -392,6 +392,7 @@ class RunTrackingService : Service(), SensorEventListener {
     companion object {
         private const val CHANNEL_ID = "run_tracking_channel"
         private const val NOTIFICATION_ID = 1001
+        private const val NOTIF_ID_WATCH_SESSION_READY = 1002
         private const val LOCATION_UPDATE_INTERVAL = 1000L  // Request GPS every 1 second (matches Garmin frequency)
         private const val LOCATION_FASTEST_INTERVAL = 500L   // Accept updates as fast as 500ms
         private const val STRUGGLE_COOLDOWN_MS = 120_000 // 2 minutes
@@ -572,6 +573,12 @@ class RunTrackingService : Service(), SensorEventListener {
                                 val name  = currentUser?.name ?: ""
                                 if (token != null) garminWatchManager?.sendAuth(token, name)
                             }
+                        }
+                        "sessionReady" -> {
+                            // Watch has authenticated + GPS locked — ready for user to press START
+                            // Fire a local push notification so the user knows their session is ready
+                            Log.d("RunTrackingService", "⌚ Watch session ready — posting notification")
+                            postWatchSessionReadyNotification()
                         }
                     }
                 }
@@ -2810,6 +2817,58 @@ class RunTrackingService : Service(), SensorEventListener {
         } catch (e: Exception) {
             Log.w("RunTrackingService", "Failed to update running metrics baselines: ${e.message}")
             // Non-critical - don't fail the run upload if this fails
+        }
+    }
+
+    /**
+     * Posts a local notification letting the user know their Garmin watch
+     * is authenticated, GPS is locked, and the run session is ready to start.
+     * Tapping the notification deep-links into the app.
+     */
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun postWatchSessionReadyNotification() {
+        try {
+            val channelId = "garmin_session_ready"
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+
+            // Ensure channel exists
+            if (nm.getNotificationChannel(channelId) == null) {
+                nm.createNotificationChannel(
+                    android.app.NotificationChannel(
+                        channelId,
+                        "Garmin Watch Ready",
+                        android.app.NotificationManager.IMPORTANCE_HIGH
+                    ).apply {
+                        description = "Alerts when your Garmin watch is ready to start a run"
+                        enableVibration(true)
+                    }
+                )
+            }
+
+            val intent = android.content.Intent(this, live.airuncoach.airuncoach.MainActivity::class.java).apply {
+                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("deeplink_destination", "dashboard")
+            }
+            val pendingIntent = android.app.PendingIntent.getActivity(
+                this,
+                "session_ready".hashCode(),
+                intent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
+                .setContentTitle("⌚ Watch Ready")
+                .setContentText("Your Garmin watch is connected and GPS is locked. Press START on your watch to begin.")
+                .setSmallIcon(R.drawable.android_icon_monochrome)
+                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .build()
+
+            nm.notify(NOTIF_ID_WATCH_SESSION_READY, notification)
+            Log.d("RunTrackingService", "⌚ Session ready notification posted")
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "Failed to post session ready notification: ${e.message}")
         }
     }
 
