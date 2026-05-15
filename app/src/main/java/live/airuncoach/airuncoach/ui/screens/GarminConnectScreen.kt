@@ -97,7 +97,7 @@ fun GarminConnectScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            painter = painterResource(id = R.drawable.ic_garmin_connect_logo),
+                            painter = painterResource(id = R.drawable.ic_garmin_logo),
                             contentDescription = "Garmin Connect",
                             tint = Color.Unspecified,
                             modifier = Modifier.size(52.dp)

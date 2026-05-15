@@ -125,6 +125,27 @@ data class GarminDataSummary(
      */
     val vo2MaxEstimate: Float? = null,
     
+    // ── POWER & RESPIRATION ────────────────────────────────────────────────────
+    
+    /**
+     * Average running power (watts) during the run.
+     * Only available on Fenix 7+, FR965, or with running power app.
+     * Same power at faster pace = improved efficiency.
+     */
+    val avgRunningPower: Int? = null,
+    
+    /**
+     * Maximum running power (watts) during the run (peak power exertion).
+     */
+    val maxRunningPower: Int? = null,
+    
+    /**
+     * Average respiration rate (breaths per minute) during the run.
+     * Only available on Fenix 7+, FR965 series.
+     * Easy: 30-35, Tempo: 40-50, VO2 Max: 50-65.
+     */
+    val avgRespirationRate: Float? = null,
+    
     // ── ENVIRONMENTAL ────────────────────────────────────────────────────────
     
     /**

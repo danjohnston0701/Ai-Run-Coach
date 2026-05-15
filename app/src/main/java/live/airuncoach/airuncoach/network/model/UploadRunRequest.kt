@@ -81,6 +81,10 @@ data class UploadRunRequest(
     val trainingEffectLabel: String? = null,
     val recoveryTimeMinutes: Int? = null,
     val vo2MaxEstimate: Float? = null,
+    // ── Power & Respiration (device-dependent, null if unsupported) ───────────
+    val avgRunningPower: Int? = null,
+    val maxRunningPower: Int? = null,
+    val avgRespirationRate: Float? = null,
     // ── Environmental ─────────────────────────────────────────────────────────
     val avgAmbientPressure: Float? = null,
     val avgBearing: Float? = null,

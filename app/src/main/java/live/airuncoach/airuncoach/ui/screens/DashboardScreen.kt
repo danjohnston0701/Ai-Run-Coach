@@ -75,6 +75,7 @@ fun DashboardScreen(
     onNavigateToGoals: () -> Unit = {},
     onNavigateToProfile: () -> Unit = {},
     onNavigateToHistory: () -> Unit = {},
+    onNavigateToLocationPermission: () -> Unit = {},
     onCreateGoal: () -> Unit = {},
     viewModel: DashboardViewModel = hiltViewModel(),
     // Key to trigger refresh when returning from other screens
@@ -156,7 +157,7 @@ fun DashboardScreen(
         
         // Location permission warning
         if (!hasLocationPermission) {
-            item { LocationPermissionWarning() }
+            item { LocationPermissionWarning(onNavigateToLocationPermission) }
             item { Spacer(modifier = Modifier.height(Spacing.md)) }
         }
         item { TargetDistanceSection(distance = targetDistance, onDistanceChanged = viewModel::onDistanceChanged) }
@@ -651,11 +652,14 @@ fun TargetDistanceSection(distance: Float, onDistanceChanged: (Float) -> Unit) {
 }
 
 @Composable
-fun LocationPermissionWarning() {
+fun LocationPermissionWarning(onNavigateToLocationPermission: () -> Unit = {}) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = Spacing.lg),
+            .padding(horizontal = Spacing.lg)
+            .clickable {
+                onNavigateToLocationPermission()
+            },
         shape = RoundedCornerShape(BorderRadius.md),
         colors = CardDefaults.cardColors(
             containerColor = Color(0xFFEF4444).copy(alpha = 0.15f)
@@ -681,7 +685,7 @@ fun LocationPermissionWarning() {
                     color = Color(0xFFEF4444)
                 )
                 Text(
-                    text = "Enable location services to generate routes and track runs",
+                    text = "Tap to enable location services to generate routes and track runs",
                     style = AppTextStyles.small,
                     color = Colors.textSecondary
                 )
@@ -936,19 +940,6 @@ fun PreviousRunsCard(
                         text = "MOST RECENT RUN",
                         style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
                         color = Colors.textPrimary
-                    )
-                }
-
-                // ── Garmin attribution (Garmin API Brand Guidelines) ──────────
-                // Required adjacent to the primary heading of any data view
-                // displaying Garmin device-sourced data.
-                val showAttribution = garminDeviceModel != null ||
-                    (recentRun?.externalSource == "garmin") ||
-                    (recentRun?.hasGarminData == true)
-                if (showAttribution) {
-                    GarminAttributionBadge(
-                        deviceModel = garminDeviceModel,
-                        style = GarminBadgeStyle.INLINE,
                     )
                 }
             }

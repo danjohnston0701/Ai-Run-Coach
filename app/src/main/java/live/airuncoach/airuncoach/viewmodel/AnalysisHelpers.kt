@@ -43,6 +43,11 @@ fun RunSession.buildGarminDataSummary(terrainSummary: String): GarminDataSummary
         recoveryTimeMinutes = recoveryTimeMinutes,
         vo2MaxEstimate = vo2MaxEstimate,
         
+        // Power & Respiration (device-dependent, null on unsupported watches)
+        avgRunningPower = avgRunningPower,
+        maxRunningPower = maxRunningPower,
+        avgRespirationRate = avgRespirationRate,
+        
         // Environmental
         avgAmbientPressure = avgAmbientPressure,
         avgBearing = if (bearingData?.isNotEmpty() == true) bearingData.average().toFloat() else null,

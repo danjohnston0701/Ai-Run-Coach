@@ -52,19 +52,32 @@ class DataStreamer {
             return;
         }
         
-        // Build data payload
+        // Build data payload — all available Garmin sensor metrics
         var payload = {
-            "sessionId" => _sessionId,
-            "timestamp" => Sys.getTimer(),
-            "heartRate" => data.get("heartRate"),
-            "heartRateZone" => data.get("heartRateZone"),
-            "cadence" => data.get("cadence"),
-            "pace" => data.get("pace"),
-            "cumulativeDistance" => data.get("distance"),
-            "altitude" => _altitude,
-            "elapsedTime" => data.get("elapsedTime"),
-            "isMoving" => true,
-            "isPaused" => false
+            "sessionId"            => _sessionId,
+            "timestamp"            => Sys.getTimer(),
+            // Core metrics
+            "heartRate"            => data.get("heartRate"),
+            "heartRateZone"        => data.get("heartRateZone"),
+            "cadence"              => data.get("cadence"),
+            "pace"                 => data.get("pace"),
+            "cumulativeDistance"   => data.get("distance"),
+            "elapsedTime"          => data.get("elapsedTime"),
+            "altitude"             => _altitude,
+            "isMoving"             => true,
+            "isPaused"             => false,
+            // Running dynamics (null on unsupported devices, filtered server-side)
+            "groundContactTime"    => data.get("groundContactTime"),
+            "groundContactBalance" => data.get("groundContactBalance"),
+            "verticalOscillation"  => data.get("verticalOscillation"),
+            "verticalRatio"        => data.get("verticalRatio"),
+            "strideLength"         => data.get("strideLength"),
+            // Power & respiration
+            "runningPower"         => data.get("runningPower"),
+            "respirationRate"      => data.get("respirationRate"),
+            // Training effect (firmware-computed, updates periodically)
+            "aerobicTrainingEffect"    => data.get("aerobicTE"),
+            "anaerobicTrainingEffect"  => data.get("anaerobicTE")
         };
         
         // Add GPS if available

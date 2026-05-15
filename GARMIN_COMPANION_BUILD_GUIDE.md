@@ -1,5 +1,17 @@
 # 🏗️ Garmin Companion App - Complete Build Guide
 
+## 📌 Production App UUID
+
+**Production UUID**: `C7BF12555C184F9FB1F82B49E72E20A2`
+
+This UUID is found in the manifest.xml file of the compiled production `.iq` file. Use this for reference when:
+- Linking to the app store
+- Debugging manifest issues
+- Verifying production builds
+- Registering with Garmin servers
+
+---
+
 ## ✅ What I Just Created
 
 I've built the complete foundation for your Garmin Connect IQ companion app integration:

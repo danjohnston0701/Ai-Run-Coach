@@ -19,6 +19,7 @@ using Toybox.Sensor as Sensor;
 using Toybox.System as Sys;
 using Toybox.Timer as Timer;
 using Toybox.ActivityRecording as Record;
+using Toybox.Activity;
 using Toybox.Application as App;
 using Toybox.Communications as Comm;
 
@@ -90,6 +91,17 @@ class RunView extends Ui.View {
     private var _dispDistance  = 0.0;
     private var _dispHR        = 0;
     private var _dispCadence   = 0;
+
+    // Running dynamics (read from Activity.Info each tick)
+    private var _gct   = 0.0;   // Ground contact time (ms)
+    private var _gcb   = 0.0;   // Ground contact balance (%, 50 = perfect)
+    private var _vo    = 0.0;   // Vertical oscillation (mm)
+    private var _vr    = 0.0;   // Vertical ratio (%)
+    private var _sl    = 0.0;   // Stride length (m)
+    private var _power = 0;     // Running power (watts, device-dependent)
+    private var _respRate = 0.0; // Respiration rate (breaths/min, Fenix 7+)
+    private var _ate   = 0.0;   // Aerobic training effect (0-5)
+    private var _anate = 0.0;   // Anaerobic training effect (0-5)
 
     // 5-second pace smoothing buffer (20 ticks x 250ms = 5s)
     private var _paceHistory    = [];
@@ -258,16 +270,17 @@ class RunView extends Ui.View {
     }
 
     // ── Phone messages ────────────────────────────────────────────────────────
+    // Single unified handler — PhoneLink routes all messages here via onPhoneMessage.
+    // onPhoneAppMessage was the old direct-callback style; it is NOT called by PhoneLink.
 
-    function onPhoneAppMessage(msg as Comm.PhoneAppMessage) as Void {
-        try {
-        if (msg == null || msg.data == null) { return; }
-        var d = msg.data;
-        var t = d["type"];
+    function onPhoneMessage(data) {
+        if (data == null) { return; }
+        var t = data.get("type");
         if (t == null) { return; }
 
         if (t.equals("auth")) {
-            var tok = d["authToken"];
+            var tok   = data.get("authToken");
+            var rname = data.get("runnerName");
             if (tok != null && tok.length() > 0) {
                 App.Storage.setValue("authToken", tok);
                 _isAuthenticated = true;
@@ -279,19 +292,21 @@ class RunView extends Ui.View {
                     }
                     _overlayState = _gpsReady ? OVERLAY_READY : OVERLAY_GPS_WAIT;
                 }
+                Sys.println("Auth received — overlayState=" + _overlayState);
             }
+            if (rname != null) { App.Storage.setValue("runnerName", rname); }
             Ui.requestUpdate();
 
         } else if (t.equals("preparedRun")) {
-            var dist = d["distance"];
-            var rt   = d["runType"];
-            var wt   = d["workoutType"];
-            var tp   = d["targetPace"];
-            var wd   = d["workoutDesc"];
-            if (dist != null) { _prepRunDist    = dist.toFloat(); }
-            if (rt   != null) { _prepRunType    = rt; }
+            var dist = data.get("distance");
+            var rt   = data.get("runType");
+            var wt   = data.get("workoutType");
+            var tp   = data.get("targetPace");
+            var wd   = data.get("workoutDesc");
+            if (dist != null) { _prepRunDist     = dist.toFloat(); }
+            if (rt   != null) { _prepRunType     = rt; }
             if (wt   != null) { _prepWorkoutType = wt; }
-            if (tp   != null) { _prepTargetPace = tp; _coachTargetPace = tp; _coachTargetPaceSec = _parsePace(tp); _isCoached = true; }
+            if (tp   != null) { _prepTargetPace  = tp; _coachTargetPace = tp; _coachTargetPaceSec = _parsePace(tp); _isCoached = true; }
             if (wd   != null) { _prepWorkoutDesc = wd; }
             if (!_isRunning) {
                 _overlayState = _gpsReady ? OVERLAY_COACHED : OVERLAY_GPS_WAIT;
@@ -301,16 +316,8 @@ class RunView extends Ui.View {
         } else if (t.equals("disconnect")) {
             _isConnected = false;
             Ui.requestUpdate();
-        }
-        } catch (e) { Sys.println("onPhoneAppMessage err: " + e.getErrorMessage()); }
-    }
 
-    function onPhoneMessage(data) {
-        if (data == null) { return; }
-        var t = data.get("type");
-        if (t == null) { return; }
-
-        if (t.equals("runUpdate")) {
+        } else if (t.equals("runUpdate")) {
             var pv = data.get("pace");        if (pv != null) { _pace        = pv.toFloat(); }
             var dv = data.get("distance");    if (dv != null) { _distance    = dv.toFloat(); }
             var hv = data.get("hr");          if (hv != null) { _heartRate   = hv.toNumber(); _heartRateZone = _hrZone(_heartRate); }
@@ -343,22 +350,75 @@ class RunView extends Ui.View {
     function onTick() as Void {
         _dotCount = (_dotCount + 1) % 4;
 
-        if (!_phoneControlled && _isRunning && !_isPaused) {
-            _elapsedMs  += _tickMs;
-            _elapsedTime = _elapsedMs / 1000;
-        }
-
-        // ── 5-second pace smoothing ────────────────────────────────────────────
-        if (_pace > 0 && _pace < 1200) {
-            _paceHistory.add(_pace);
-            if (_paceHistory.size() > _paceHistoryMax) {
-                _paceHistory.remove(0);
+        // ── Read native Garmin Activity metrics (standalone mode) ──────────────
+        // Activity.getActivityInfo() returns the same values the Garmin native Run
+        // app shows — Kalman-filtered GPS distance, smoothed speed→pace, cadence,
+        // and HR straight from the firmware.  Only use when we own the session.
+        if (!_phoneControlled && _isRunning) {
+            var actInfo = Activity.getActivityInfo();
+            if (actInfo != null) {
+                // Distance (meters) — Garmin's filtered GPS accumulation
+                if (actInfo.elapsedDistance != null) {
+                    _distance = actInfo.elapsedDistance.toFloat();
+                }
+                // Pace (sec/km) — derived from Garmin's smoothed speed
+                if (actInfo.currentSpeed != null && actInfo.currentSpeed > 0.1) {
+                    _pace = 1000.0 / actInfo.currentSpeed.toFloat();
+                } else if (!_isPaused) {
+                    _pace = 0.0;
+                }
+                // Heart rate
+                if (actInfo.currentHeartRate != null && actInfo.currentHeartRate > 0) {
+                    _heartRate     = actInfo.currentHeartRate.toNumber();
+                    _heartRateZone = _hrZone(_heartRate);
+                }
+                // Cadence (steps per minute)
+                if (actInfo.currentCadence != null) {
+                    _cadence = actInfo.currentCadence.toNumber();
+                }
+                // Elapsed timer (ms → seconds, pauses when session is paused)
+                if (actInfo.timerTime != null) {
+                    _elapsedTime = (actInfo.timerTime / 1000).toNumber();
+                    _elapsedMs   = actInfo.timerTime.toNumber();
+                }
+                // ── Running Dynamics (Fenix 6+/FR945+ only, null on unsupported devices) ──
+                if (actInfo has :currentGroundContactTime && actInfo.currentGroundContactTime != null) {
+                    _gct = actInfo.currentGroundContactTime.toFloat();
+                }
+                if (actInfo has :currentGroundContactBalance && actInfo.currentGroundContactBalance != null) {
+                    _gcb = actInfo.currentGroundContactBalance.toFloat();
+                }
+                if (actInfo has :currentVerticalOscillation && actInfo.currentVerticalOscillation != null) {
+                    _vo = actInfo.currentVerticalOscillation.toFloat();  // millimetres
+                }
+                if (actInfo has :currentVerticalRatio && actInfo.currentVerticalRatio != null) {
+                    _vr = actInfo.currentVerticalRatio.toFloat();
+                }
+                if (actInfo has :currentStrideLength && actInfo.currentStrideLength != null && actInfo.currentStrideLength > 0) {
+                    _sl = actInfo.currentStrideLength.toFloat();
+                }
+                // ── Running Power (device-dependent) ──────────────────────────
+                if (actInfo has :currentPower && actInfo.currentPower != null && actInfo.currentPower > 0) {
+                    _power = actInfo.currentPower.toNumber();
+                }
+                // ── Respiration Rate (Fenix 7 / FR965 series) ─────────────────
+                if (actInfo has :currentRespirationRate && actInfo.currentRespirationRate != null && actInfo.currentRespirationRate > 0) {
+                    _respRate = actInfo.currentRespirationRate.toFloat();
+                }
+                // ── Training Effect (updated periodically by firmware) ─────────
+                if (actInfo has :trainingEffect && actInfo.trainingEffect != null && actInfo.trainingEffect > 0) {
+                    _ate = actInfo.trainingEffect.toFloat();
+                }
+                if (actInfo has :anaerobicTrainingEffect && actInfo.anaerobicTrainingEffect != null && actInfo.anaerobicTrainingEffect > 0) {
+                    _anate = actInfo.anaerobicTrainingEffect.toFloat();
+                }
             }
         }
-        var smoothed = _smoothedPace();
-        var e = 0.20;
-        _dispPace     = smoothed > 0 ? _dispPace + (smoothed - _dispPace) * e : _dispPace * 0.92;
-        _dispDistance = _dispDistance + (_distance - _dispDistance) * 0.15;
+
+        // Smoothed display values (light EMA for visual stability, phone-controlled
+        // uses phone data which is already smoothed on the phone side)
+        _dispPace     = _pace > 0 ? _pace : _dispPace * 0.90;
+        _dispDistance = _dispDistance + (_distance - _dispDistance) * 0.20;
         _dispHR       = (_dispHR + (_heartRate - _dispHR) * 0.30).toNumber();
         _dispCadence  = (_dispCadence + (_cadence  - _dispCadence) * 0.30).toNumber();
 
@@ -373,12 +433,25 @@ class RunView extends Ui.View {
                 _streamAccumMs = 0;
                 if (_dataStreamer != null) {
                     _dataStreamer.sendData({
-                        "heartRate"     => _heartRate,
-                        "heartRateZone" => _heartRateZone,
-                        "distance"      => _distance,
-                        "pace"          => _pace,
-                        "cadence"       => _cadence,
-                        "elapsedTime"   => _elapsedTime
+                        // Core metrics
+                        "heartRate"             => _heartRate,
+                        "heartRateZone"         => _heartRateZone,
+                        "distance"              => _distance,
+                        "pace"                  => _pace,
+                        "cadence"               => _cadence,
+                        "elapsedTime"           => _elapsedTime,
+                        // Running dynamics
+                        "groundContactTime"     => _gct,
+                        "groundContactBalance"  => _gcb,
+                        "verticalOscillation"   => _vo,
+                        "verticalRatio"         => _vr,
+                        "strideLength"          => _sl,
+                        // Power & respiration
+                        "runningPower"          => _power,
+                        "respirationRate"       => _respRate,
+                        // Training effect
+                        "aerobicTE"             => _ate,
+                        "anaerobicTE"           => _anate
                     });
                 }
             }
@@ -389,12 +462,30 @@ class RunView extends Ui.View {
             if (_gpsStreamTick >= 8 && _lastGpsLat != null && _lastGpsLng != null) {
                 _gpsStreamTick = 0;
                 _phoneLink.sendRunData({
+                    // GPS
                     "lat"   => _lastGpsLat,
                     "lng"   => _lastGpsLng,
                     "alt"   => _lastGpsAlt,
                     "speed" => _lastGpsSpeed,
+                    "bear"  => _lastGpsSpeed > 0 ? _lastGpsSpeed : null,
+                    "acc"   => _gpsQuality,
+                    // Core biometrics
                     "hr"    => _heartRate,
-                    "cad"   => _cadence
+                    "hrz"   => _heartRateZone,
+                    "cad"   => _cadence,
+                    "elap"  => _elapsedTime,
+                    // Running dynamics
+                    "gct"   => _gct,
+                    "gcb"   => _gcb,
+                    "vo"    => _vo,
+                    "vr"    => _vr,
+                    "sl"    => _sl,
+                    // Power & respiration
+                    "pwr"   => _power,
+                    "resp"  => _respRate,
+                    // Training effect
+                    "te"    => _ate,
+                    "ate"   => _anate
                 });
             }
         }
@@ -412,6 +503,7 @@ class RunView extends Ui.View {
     // ── Sensors / GPS ─────────────────────────────────────────────────────────
 
     function onPosition(info as Pos.Info) as Void {
+        // Track GPS quality for the GPS-wait overlay
         if (info.accuracy != null) {
             _gpsQuality = info.accuracy;
             var wasReady = _gpsReady;
@@ -424,37 +516,32 @@ class RunView extends Ui.View {
                 _vibeShort();
             }
         }
+        // Cache raw GPS coordinates for phone streaming only.
+        // Metrics (distance, pace) come from Activity.getActivityInfo() in onTick.
         if (info.position != null) {
             var deg = info.position.toDegrees();
-            var lat = deg[0];
-            var lng = deg[1];
-            _lastGpsLat = lat;
-            _lastGpsLng = lng;
+            _lastGpsLat = deg[0];
+            _lastGpsLng = deg[1];
             _lastGpsAlt = info.altitude;
-            if (info.speed != null && info.speed > 0.3) {
-                _lastGpsSpeed = info.speed;
-                if (_isRunning && !_isPaused) { _pace = 1000.0 / info.speed; }
-            } else if (_isRunning && !_isPaused) {
-                _pace = 0.0;
-            }
-            // Accumulate distance via haversine between consecutive GPS fixes
-            if (_isRunning && !_isPaused && _gpsQuality >= 3 && _prevGpsLat != null && _prevGpsLng != null) {
-                var d = _haversineMeters(_prevGpsLat, _prevGpsLng, lat, lng);
-                if (d >= 2.0 && d <= 100.0) { _distance += d; }
-            }
-            if (_isRunning && !_isPaused && _gpsQuality >= 3) {
-                _prevGpsLat = lat;
-                _prevGpsLng = lng;
-            }
+            if (info.speed != null) { _lastGpsSpeed = info.speed; }
             if (!_phoneControlled && info.altitude != null && _dataStreamer != null) {
-                _dataStreamer.updateGPS(lat, lng, info.altitude);
+                _dataStreamer.updateGPS(_lastGpsLat, _lastGpsLng, info.altitude);
             }
         }
     }
 
     function onSensor(info as Sensor.Info) as Void {
-        if (info.heartRate != null) { _heartRate = info.heartRate; _heartRateZone = _hrZone(_heartRate); }
-        if (info.cadence   != null) { _cadence   = info.cadence; }
+        // Activity.getActivityInfo() is the primary source for HR and cadence
+        // in standalone mode.  onSensor provides a fallback for older devices
+        // or when Activity.Info fields are null.
+        if (!_phoneControlled) {
+            // Values will be overwritten by Activity.Info in onTick if available
+            if (info.heartRate != null && info.heartRate > 0) {
+                _heartRate     = info.heartRate;
+                _heartRateZone = _hrZone(_heartRate);
+            }
+            if (info.cadence != null) { _cadence = info.cadence; }
+        }
     }
 
     // ==========================================================================

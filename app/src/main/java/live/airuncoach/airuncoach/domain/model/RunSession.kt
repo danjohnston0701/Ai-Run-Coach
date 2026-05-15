@@ -117,6 +117,11 @@ data class RunSession(
     val recoveryTimeMinutes: Int? = null,        // minutes until fully recovered
     val vo2MaxEstimate: Float? = null,           // ml/kg/min estimated from this run
 
+    // ── Power & Respiration (device-dependent, null if unsupported) ───────────
+    val avgRunningPower: Int? = null,            // watts – average running power
+    val maxRunningPower: Int? = null,            // watts – peak running power
+    val avgRespirationRate: Float? = null,       // breaths/min – average respiration
+
     // ── Environmental (from Garmin GPS) ──────────────────────────────────────
     val avgAmbientPressure: Float? = null,       // Pa – barometric pressure
 
@@ -129,6 +134,8 @@ data class RunSession(
     val cadenceData: List<Int>? = null,                // cadence per 2s sample
     val altitudeData: List<Float>? = null,             // altitude per GPS sample
     val bearingData: List<Float>? = null,              // bearing per sample
+    val runningPowerData: List<Int>? = null,           // running power per 2s sample
+    val respirationRateData: List<Float>? = null,      // respiration rate per 2s sample
 
     // Run achievements and milestones
     val achievements: List<RunAchievement> = emptyList() // Personal bests and milestone badges

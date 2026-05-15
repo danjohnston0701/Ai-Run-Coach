@@ -73,7 +73,7 @@ fun GarminAttributionBadge(
             horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             Image(
-                painter = painterResource(id = R.drawable.ic_garmin_connect_logo),
+                painter = painterResource(id = R.drawable.ic_garmin_logo),
                 contentDescription = null,
                 modifier = Modifier.size(iconSize),
                 contentScale = ContentScale.Fit,

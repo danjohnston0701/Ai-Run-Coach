@@ -848,7 +848,7 @@ private fun AiInsightsTabContent(
                                 textAlign = TextAlign.Center
                             )
                             Text(
-                                text = "AI Analysis unavailable on activities synced from Garmin Connect. Create runs in AI Run Coach to get AI coaching insights.",
+                                text = "AI Analysis unavailable on activities synced from Garmin Connect. Complete runs using Ai Run Coach to get AI coaching insights.",
                                 style = AppTextStyles.body,
                                 color = Colors.textSecondary,
                                 textAlign = TextAlign.Center
@@ -6463,7 +6463,7 @@ private fun GarminReconnectDialog(onDismiss: () -> Unit) {
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Image(
-                    painter = painterResource(id = R.drawable.ic_garmin_connect_logo),
+                    painter = painterResource(id = R.drawable.ic_garmin_logo),
                     contentDescription = "Garmin",
                     modifier = Modifier.size(22.dp),
                     contentScale = ContentScale.Fit
@@ -6567,7 +6567,7 @@ private fun GarminEnrichCTACard(
             horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
             Image(
-                painter = painterResource(id = R.drawable.ic_garmin_connect_logo),
+                painter = painterResource(id = R.drawable.ic_garmin_logo),
                 contentDescription = "Garmin Connect",
                 modifier = Modifier.size(28.dp),
                 contentScale = ContentScale.Fit
@@ -6685,7 +6685,7 @@ private fun GarminPoweredByBadge(text: String) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Image(
-            painter = painterResource(id = R.drawable.ic_garmin_connect_logo),
+            painter = painterResource(id = R.drawable.ic_garmin_logo),
             contentDescription = "Garmin Connect",
             modifier = Modifier.size(20.dp),
             contentScale = ContentScale.Fit

@@ -165,12 +165,11 @@ fun GarminCompanionPromptScreen(
                 Spacer(modifier = Modifier.height(Spacing.xs))
                 
                 DataItemRow("Heart Rate", hasBasic = false, hasAdvanced = true)
-                DataItemRow("GPS Location", hasBasic = false, hasAdvanced = true)
-                DataItemRow("Cadence", hasBasic = false, hasAdvanced = true)
-                DataItemRow("Pace & Speed", hasBasic = false, hasAdvanced = true)
-                DataItemRow("Elevation", hasBasic = false, hasAdvanced = true)
+                DataItemRow("Ground Contact Time", hasBasic = false, hasAdvanced = true)
+                DataItemRow("Vertical Oscillation", hasBasic = false, hasAdvanced = true)
                 DataItemRow("Running Dynamics", hasBasic = false, hasAdvanced = true)
                 DataItemRow("Running Power", hasBasic = false, hasAdvanced = true)
+                DataItemRow("VO2 Max", hasBasic = false, hasAdvanced = true)
             }
         }
 
@@ -180,9 +179,8 @@ fun GarminCompanionPromptScreen(
         Button(
             onClick = {
                 onInstall()
-                // Open Connect IQ Store — search for AI Run Coach
-                // TODO: Replace with the direct app URL once the app is published
-                val connectIQUrl = "https://apps.garmin.com/en-US/search?query=AI+Run+Coach"
+                // Open Connect IQ Store to the Ai Run Coach Companion App
+                val connectIQUrl = "https://apps.garmin.com/en-NZ/apps/91452a05-d077-4707-a9a3-0e98277f6017"
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(connectIQUrl))
                 context.startActivity(intent)
             },

@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import live.airuncoach.airuncoach.util.AbbreviationExpander
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -225,7 +226,9 @@ object CoachingAudioQueue {
             } else if (!next.fallbackText.isNullOrEmpty()) {
                 val tts = ttsHelper
                 if (tts != null) {
-                    tts.speak(next.fallbackText, accent = next.accent, onComplete = onDone)
+                    // Expand abbreviations for TTS clarity (e.g., "bpm" → "beats per minute")
+                    val expandedText = AbbreviationExpander.expandForSpeech(next.fallbackText)
+                    tts.speak(expandedText, accent = next.accent, onComplete = onDone)
                 } else {
                     Log.e(TAG, "TextToSpeechHelper not initialized")
                     onDone()

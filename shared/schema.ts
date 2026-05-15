@@ -252,6 +252,78 @@ export const runs = pgTable("runs", {
   altitudeData: jsonb("altitude_data"),                       // number[] – altitude per GPS sample
   bearingData: jsonb("bearing_data"),                         // number[] – bearing per sample
 
+  // ── Running Power (Fenix 7+, FR965 only; null on unsupported devices) ────────
+  avgRunningPower: integer("avg_running_power"),              // watts – average running power
+  maxRunningPower: integer("max_running_power"),              // watts – peak running power
+  runningPowerData: jsonb("running_power_data"),              // number[] – watts per 2s sample
+
+  // ── Respiration Rate (Fenix 7+, FR965 only; null on unsupported devices) ─────
+  avgRespirationRate: real("avg_respiration_rate"),           // breaths/min – average respiration
+  minRespirationRate: real("min_respiration_rate"),           // breaths/min – slowest breathing
+  maxRespirationRate: real("max_respiration_rate"),           // breaths/min ��� fastest breathing
+  respirationRateData: jsonb("respiration_rate_data"),        // number[] – breaths/min per 2s sample
+
+  // ── Extended Cadence, Stride & Movement ──────────────────────────────────────
+  minCadence: integer("min_cadence"),                         // spm – slowest cadence
+  maxStrideLength: real("max_stride_length"),                 // m – longest stride
+  minStrideLength: real("min_stride_length"),                 // m – shortest stride
+  minVerticalOscillation: real("min_vertical_oscillation"),   // cm – best (most efficient) VO
+  maxVerticalRatio: real("max_vertical_ratio"),               // % – worst efficiency
+  minVerticalRatio: real("min_vertical_ratio"),               // % – best efficiency
+
+  // ── Ground Contact Balance Decomposed ────────────────────────────────────────
+  avgGroundContactBalanceLeft: real("avg_ground_contact_balance_left"),   // % left leg
+  avgGroundContactBalanceRight: real("avg_ground_contact_balance_right"), // % right leg
+
+  // ── Extended Training Effects ────────────────────────────────────────────────
+  maxTrainingEffect: real("max_training_effect"),             // 0-5 peak aerobic
+  maxAnaerobicTrainingEffect: real("max_anaerobic_training_effect"), // 0-5 peak anaerobic
+  fitnessLevelAfter: real("fitness_level_after"),             // ml/kg/min VO2 max estimate
+
+  // ── Extended Running Power ───────────────────────────────────────────────────
+  minRunningPower: integer("min_running_power"),              // watts – minimum output
+  powerToPaceRatio: real("power_to_pace_ratio"),              // watts/(km/h) efficiency
+
+  // ── Extended Speed & Pace ────────────────────────────────────────────────────
+  minPace: real("min_pace"),                                  // min/km – fastest pace
+  maxPace: real("max_pace"),                                  // min/km – slowest pace
+
+  // ── Extended Heart Rate Zones ────────────────────────────────────────────────
+  avgHeartRateZone: integer("avg_heart_rate_zone"),           // 1-5 average zone
+  timeInZone1: integer("time_in_zone_1"),                     // seconds in Z1
+  timeInZone2: integer("time_in_zone_2"),                     // seconds in Z2
+  timeInZone3: integer("time_in_zone_3"),                     // seconds in Z3
+  timeInZone4: integer("time_in_zone_4"),                     // seconds in Z4
+  timeInZone5: integer("time_in_zone_5"),                     // seconds in Z5
+
+  // ── Environmental Extended ───────────────────────────────────────────────────
+  minAmbientPressure: real("min_ambient_pressure"),           // Pa – lowest pressure
+  maxAmbientPressure: real("max_ambient_pressure"),           // Pa – highest pressure
+  avgTemperature: real("avg_temperature"),                    // Celsius – avg wrist temp
+  maxTemperature: real("max_temperature"),                    // Celsius – peak wrist temp
+  minTemperature: real("min_temperature"),                    // Celsius – lowest wrist temp
+
+  // ── GPS Quality ──────────────────────────────────────────────────────────────
+  avgGpsAccuracy: real("avg_gps_accuracy"),                   // meters CEP
+  worstGpsAccuracy: real("worst_gps_accuracy"),               // meters CEP
+
+  // ── Additional Time-Series Data ──────────────────────────────────────────────
+  stepsData: jsonb("steps_data"),                             // number[] steps per sample
+  trainingEffectData: jsonb("training_effect_data"),          // number[] ATE per sample
+  anaerobicEffectData: jsonb("anaerobic_effect_data"),        // number[] AnATE per sample
+  temperatureData: jsonb("temperature_data"),                 // number[] wrist temp per sample
+  powerToPaceRatioData: jsonb("power_to_pace_ratio_data"),   // number[] efficiency per sample
+
+  // ── Basic Metrics Extended ───────────────────────────────────────────────────
+  totalSteps: integer("total_steps"),                         // total steps during run
+  totalEnergy: integer("total_energy"),                       // kcal burned
+
+  // ── Metadata ─────────────────────────────────────────────────────────────────
+  activityType: text("activity_type"),                        // "running", "trail_running"
+  sportName: text("sport_name"),                              // Garmin sport classification
+  subSportName: text("sub_sport_name"),                       // "trail_run", "fell_running"
+  dataQualityScore: real("data_quality_score"),               // 0-100 valid sample percentage
+
   createdAt: timestamp("created_at").defaultNow(), // When record was created in database
   updatedAt: timestamp("updated_at").defaultNow(), // When record was last updated
 });
@@ -295,6 +367,39 @@ export const watchBiometricSamples = pgTable("watch_biometric_samples", {
   verticalOscillation: real("vertical_oscillation"),     // cm
   verticalRatio: real("vertical_ratio"),                 // %
 
+  // ── Running Power (Fenix 7+, FR965 only) ──────────────────────────────────
+  runningPower: integer("running_power"),                // watts per sample
+
+  // ── Respiration Rate (Fenix 7+, FR965 only) ───────────────────────────────
+  respirationRate: real("respiration_rate"),             // breaths/min per sample
+  respirationZone: integer("respiration_zone"),          // 0-5 (0=unknown, 1=easy, 5=max)
+
+  // ── Cadence & Stride Extended ──────────────────────────────────────────────
+  avgCadenceThisSample: integer("avg_cadence_this_sample"), // spm smoothed
+  stepCountIncremental: integer("step_count_incremental"),  // steps in window
+
+  // ── Vertical Oscillation Extended ──────────────────────────────────────────
+  maxVerticalOscillationThisSample: real("max_vertical_oscillation_this_sample"), // cm peak in window
+
+  // ── Ground Contact Balance Decomposed ───────────────────────────────────────
+  groundContactBalanceLeft: real("ground_contact_balance_left"),   // % left leg
+  groundContactBalanceRight: real("ground_contact_balance_right"), // % right leg
+
+  // ── Running Power Extended ─────────────────────────────────────────────────
+  powerToPaceRatio: real("power_to_pace_ratio"),         // watts/(km/h) efficiency
+
+  // ── Training Effect (live updates) ─────────────────────────────────────────
+  aerobicTrainingEffectCurrent: real("aerobic_training_effect_current"),   // 0-5 live
+  anaerobicTrainingEffectCurrent: real("anaerobic_training_effect_current"), // 0-5 live
+
+  // ── Cumulative Elevation ───────────────────────────────────────────────────
+  altitudeGainSoFar: real("altitude_gain_so_far"),       // m cumulative gain
+  altitudeLossSoFar: real("altitude_loss_so_far"),       // m cumulative loss
+
+  // ── Environment (wrist sensor + GPS) ───────────────────────────────────────
+  temperature: real("temperature"),                      // Celsius – wrist skin temp
+  weatherCondition: text("weather_condition"),           // "sunny", "cloudy", "rain" (inferred)
+
   // ── Training Metrics (updated periodically) ───────────────────────────────
   trainingEffect: real("training_effect"),               // 0-5
   vo2Max: real("vo2_max"),                               // ml/kg/min
@@ -307,6 +412,9 @@ export const watchBiometricSamples = pgTable("watch_biometric_samples", {
   terrainGrade: real("terrain_grade"),                   // % (negative = downhill)
   // Fatigue estimate computed server-side
   estimatedFatigue: integer("estimated_fatigue"),        // 0-100
+  // Coaching throttle
+  timeSinceLastCoachingCue: integer("time_since_last_coaching_cue"),   // seconds
+  recoveryHeartbeatsSincePeak: integer("recovery_heartbeats_since_peak"), // HB count
 
   // ── Coaching ──────────────────────────────────────────────────────────────
   // If AI coaching was generated for this moment, store it
@@ -317,6 +425,12 @@ export const watchBiometricSamples = pgTable("watch_biometric_samples", {
   runIdx: index("watch_biometric_samples_run_idx").on(table.runId),
   // Index for user-level queries
   userIdx: index("watch_biometric_samples_user_idx").on(table.userId),
+  // Index for efficiency analysis
+  powerToPaceIdx: index("watch_biometric_samples_power_pace_idx").on(table.powerToPaceRatio),
+  // Index for fatigue analysis
+  fatigueIdx: index("watch_biometric_samples_fatigue_idx").on(table.estimatedFatigue),
+  // Composite index for time-series queries
+  runTimeIdx: index("watch_biometric_samples_run_time_idx").on(table.runId, table.elapsedMs),
 }));
 
 // Activity Merge Log table - tracks merged runs from different sources

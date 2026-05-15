@@ -1,6 +1,7 @@
 package live.airuncoach.airuncoach.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -132,7 +133,7 @@ fun ConnectedDevicesScreen(
             // ── Page subtitle ─────────────────────────────────────────────────
             item {
                 Text(
-                    "Connect your Garmin watch for live AI coaching during runs, or link your Garmin account to sync activity history.",
+                    "Connect your Ai Run Coach app to your other fitness apps and devices. Watch apps provide realtime data and insights for AI processing and Coaching. Publish your completed runs to your Strava account. Or sync your Garmin Connect data into the Ai Run Coach app.",
                     style = AppTextStyles.body,
                     color = Colors.textSecondary,
                     modifier = Modifier.padding(top = 4.dp)
@@ -143,7 +144,6 @@ fun ConnectedDevicesScreen(
             item {
                 SectionHeader(
                     title = "Garmin Watch App",
-                    subtitle = "Most popular integration",
                     accentColor = Colors.primary
                 )
             }
@@ -199,7 +199,7 @@ fun ConnectedDevicesScreen(
 // ── Section header ────────────────────────────────────────────────────────────
 
 @Composable
-private fun SectionHeader(title: String, subtitle: String, accentColor: Color) {
+private fun SectionHeader(title: String, accentColor: Color, subtitle: String? = null) {
     Column(modifier = Modifier.padding(top = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -211,13 +211,15 @@ private fun SectionHeader(title: String, subtitle: String, accentColor: Color) {
             Spacer(modifier = Modifier.width(8.dp))
             Text(title, style = AppTextStyles.h3, color = Colors.textPrimary)
         }
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            subtitle,
-            style = AppTextStyles.caption,
-            color = Colors.textSecondary,
-            modifier = Modifier.padding(start = 11.dp)
-        )
+        if (subtitle != null) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                subtitle,
+                style = AppTextStyles.caption,
+                color = Colors.textSecondary,
+                modifier = Modifier.padding(start = 11.dp)
+            )
+        }
     }
 }
 
@@ -244,19 +246,19 @@ private fun GarminWatchAppCard(onSetUp: () -> Unit) {
         ) {
             // Top row: Garmin IQ asset logo (full width)
             Icon(
-                painter = painterResource(id = R.drawable.ic_garmin_tag),
+                painter = painterResource(id = R.drawable.available_connect_iq_badge),
                 contentDescription = "Garmin Connect IQ",
                 tint = Color.Unspecified,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(40.dp)
+                    .height(52.dp)
             )
 
             // Header: "Garmin Watch App" title + "Premium" badge
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Garmin Watch App",
+                        "Download from Connect IQ Store",
                         style = AppTextStyles.h3,
                         color = Colors.textPrimary
                     )
@@ -266,7 +268,7 @@ private fun GarminWatchAppCard(onSetUp: () -> Unit) {
                         color = Colors.primary.copy(alpha = 0.18f)
                     ) {
                         Text(
-                            "★ PREMIUM",
+                            "★ FREE",
                             style = AppTextStyles.caption.copy(
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold
@@ -352,9 +354,9 @@ private fun GarminWatchAppCard(onSetUp: () -> Unit) {
 @Composable
 private fun WatchFeatureChips() {
     val chips = listOf(
-        Pair(Icons.Default.LocationOn, "23+ Biometric Metrics"),     // Ground contact, vertical oscillation, training effect, etc.
+        Pair(Icons.Default.LocationOn, "23+ Biometric Sensors"),     // Ground contact, vertical oscillation, training effect, etc.
         Pair(Icons.Default.Favorite, "Personal HR Zones"),            // Based on user's actual max HR
-        Pair(Icons.Default.Star, "Form Analysis"),                    // GCT, stride, bounce tracking
+        Pair(Icons.Default.Star, "Advanced Running Metrics"),                    // GCT, stride, bounce tracking
         Pair(Icons.Default.Info, "Real-Time Coaching")                // AI-powered form & pacing cues
     )
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -418,7 +420,7 @@ private fun GarminConnectCard(
             // Header row: logo + name
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    painter = painterResource(id = R.drawable.ic_garmin_connect_logo),
+                    painter = painterResource(id = R.drawable.ic_garmin_logo),
                     contentDescription = "Garmin Connect",
                     tint = Color.Unspecified,
                     modifier = Modifier.size(52.dp)
@@ -435,6 +437,34 @@ private fun GarminConnectCard(
                         "Cloud activity sync & run history",
                         style = AppTextStyles.caption,
                         color = Colors.textSecondary
+                    )
+                }
+            }
+
+            // AI exclusion notice — prominent and clear
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Color(0xFFFFA726).copy(alpha = 0.1f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        Icons.Default.Info,
+                        contentDescription = null,
+                        tint = Color(0xFFFFA726),
+                        modifier = Modifier
+                            .size(15.dp)
+                            .padding(top = 1.dp)
+                    )
+                    Spacer(modifier = Modifier.width(7.dp))
+                    Text(
+                        "Garmin Connect data is NOT allowed to be used or processed for any AI services. This data is displayed for reference purposes only.",
+                        style = AppTextStyles.caption.copy(fontSize = 11.sp),
+                        color = Color(0xFFFFA726),
+                        lineHeight = 16.sp
                     )
                 }
             }
@@ -474,35 +504,6 @@ private fun GarminConnectCard(
                 SmallChip(Icons.Default.DateRange, "Run History", Color(0xFF4CAF50))
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // AI exclusion notice — prominent and clear
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = Color(0xFFFFA726).copy(alpha = 0.1f),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Icon(
-                        Icons.Default.Info,
-                        contentDescription = null,
-                        tint = Color(0xFFFFA726),
-                        modifier = Modifier
-                            .size(15.dp)
-                            .padding(top = 1.dp)
-                    )
-                    Spacer(modifier = Modifier.width(7.dp))
-                    Text(
-                        "Garmin Connect data is displayed for reference only and is not used in any AI coaching analysis or recommendations.",
-                        style = AppTextStyles.caption.copy(fontSize = 11.sp),
-                        color = Color(0xFFFFA726),
-                        lineHeight = 16.sp
-                    )
-                }
-            }
 
             Spacer(modifier = Modifier.height(14.dp))
 
@@ -707,6 +708,3 @@ fun DeviceCard(device: DeviceInfo, isConnected: Boolean = false, isComingSoon: B
         }
     }
 }
-
-// ── Legacy badge composables (kept for any external usage) ────────────────────
-

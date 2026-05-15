@@ -66,6 +66,10 @@ data class WatchBiometricFrame(
     val recoveryTimeMinutes: Int,     // minutes until fully recovered
     val vo2MaxEstimate: Float,        // ml/kg/min
 
+    // Power & Respiration (device-dependent — 0 if unsupported)
+    val runningPower: Int,            // watts (Fenix 7/FR965 with Running Power app)
+    val respirationRate: Float,       // breaths/min (Fenix 7 series)
+
     // Environmental
     val ambientPressure: Float,       // Pa (~101325 at sea level)
 )
@@ -74,8 +78,8 @@ class GarminWatchManager(private val context: Context) {
 
     companion object {
         private const val TAG = "GarminWatchManager"
-        // Must match the UUID in garmin-companion-app/manifest.xml
-        const val APP_ID = "F05F6F7A3B2347668CCACE4B043DB794"
+        // Must match the UUID in garmin-companion-app/manifest.xml (production)
+        const val APP_ID = "C7BF12555C184F9FB1F82B49E72E20A2"
     }
 
     // ── Public state ──────────────────────────────────────────────────────────
@@ -355,11 +359,14 @@ class GarminWatchManager(private val context: Context) {
                     val ate   = (map["ate"]   as? Number)?.toFloat() ?: 0f
                     val rt    = (map["rt"]    as? Number)?.toInt() ?: 0
                     val vo2   = (map["vo2"]   as? Number)?.toFloat() ?: 0f
+                    // Power & Respiration (device-dependent)
+                    val pwr   = (map["pwr"]   as? Number)?.toInt() ?: 0
+                    val resp  = (map["resp"]  as? Number)?.toFloat() ?: 0f
                     // Environmental
                     val pres  = (map["pres"]  as? Number)?.toFloat() ?: 0f
                     val elap  = (map["elap"]  as? Number)?.toInt() ?: 0
 
-                    Log.d(TAG, "Watch frame: hr=$hr cad=$cad gct=$gct vo=$vo stride=$sl te=$te")
+                    Log.d(TAG, "Watch frame: hr=$hr cad=$cad gct=$gct vo=$vo stride=$sl te=$te pwr=$pwr resp=$resp")
 
                     val frame = WatchBiometricFrame(
                         elapsedSeconds          = elap,
@@ -381,6 +388,8 @@ class GarminWatchManager(private val context: Context) {
                         anaerobicTrainingEffect = ate,
                         recoveryTimeMinutes     = rt,
                         vo2MaxEstimate          = vo2,
+                        runningPower            = pwr,
+                        respirationRate         = resp,
                         ambientPressure         = pres,
                     )
 

@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <drawables>
-    <bitmap id="LauncherIcon" filename="launcher_icon.png" />
+    <!-- Main launcher icon (24-bit color, full color version) -->
+    <bitmap id="LauncherIcon" filename="app_icon_128.png" />
+    
+    <!-- Device submission icons -->
+    <bitmap id="Device64Color" filename="device_64_color_128.png" />
+    <bitmap id="Device24BitColor" filename="app_icon_128.png" />
 </drawables>

@@ -164,6 +164,10 @@ class RunTrackingService : Service(), SensorEventListener {
     private var watchLatestVo2Max:       Float = 0f   // VO2 Max estimate
     private var watchLatestPressure:     Float = 0f   // Ambient pressure (Pa)
     private var watchLatestBearing:      Float = 0f   // GPS bearing (degrees)
+    // Running Power (watts — device-dependent, 0 if unsupported)
+    private var watchPwrSum:   Float = 0f;  private var watchPwrCount:  Int = 0;  private var watchMaxPwr:  Int = 0
+    // Respiration Rate (breaths/min — Fenix 7+ only)
+    private var watchRespSum:  Float = 0f;  private var watchRespCount: Int = 0
     
     // Struggle detection - baseline is session average pace, updated every 500m
     private var baselinePace: Float = 0f
@@ -583,7 +587,23 @@ class RunTrackingService : Service(), SensorEventListener {
                 manager.onWatchSensorData = { frame ->
                     updateWatchSensorData(frame)
                 }
-                
+
+                // Watch app resolved & ready — proactively push auth token so the
+                // watch authenticates immediately without waiting for "watchReady"
+                manager.onWatchAppReady = {
+                    Log.d("RunTrackingService", "Watch app ready — pushing auth token proactively")
+                    serviceScope.launch {
+                        val token = sessionManager.getAuthToken()
+                        val name  = currentUser?.name ?: ""
+                        if (token != null) {
+                            Log.d("RunTrackingService", "Sending auth to watch for user: $name")
+                            garminWatchManager?.sendAuth(token, name)
+                        } else {
+                            Log.w("RunTrackingService", "Watch ready but no auth token available — user may not be logged in")
+                        }
+                    }
+                }
+
                 // NOW initialize the SDK (after handlers are set up)
                 manager.initialize()
             }
@@ -772,6 +792,8 @@ class RunTrackingService : Service(), SensorEventListener {
         watchSlSum  = 0f;    watchSlCount  = 0;  watchMinSl  = 0f;  watchMaxSl = 0f
         watchLatestAte = 0f; watchLatestAnAte = 0f; watchLatestRecoveryMins = 0
         watchLatestVo2Max = 0f; watchLatestPressure = 0f; watchLatestBearing = 0f
+        watchPwrSum  = 0f;   watchPwrCount  = 0;   watchMaxPwr  = 0
+        watchRespSum = 0f;   watchRespCount = 0
         initialStepCount = -1
         lastStepTimestamp = 0
         stepDetectorSteps = 0
@@ -1827,6 +1849,14 @@ class RunTrackingService : Service(), SensorEventListener {
         if (frame.recoveryTimeMinutes > 0) watchLatestRecoveryMins = frame.recoveryTimeMinutes
         if (frame.vo2MaxEstimate > 0f) watchLatestVo2Max = frame.vo2MaxEstimate
 
+        // ── Running Power (watts, device-dependent) ───────────────────────────
+        if (frame.runningPower > 0) {
+            watchPwrSum += frame.runningPower; watchPwrCount++
+            if (frame.runningPower > watchMaxPwr) watchMaxPwr = frame.runningPower
+        }
+        // ── Respiration Rate (breaths/min, Fenix 7+ only) ─────────────────────
+        if (frame.respirationRate > 0f) { watchRespSum += frame.respirationRate; watchRespCount++ }
+
         // ── Environmental ─────────────────────────────────────────────────────
         if (frame.ambientPressure > 0f) watchLatestPressure = frame.ambientPressure
         if (frame.bearingDeg != null && frame.bearingDeg >= 0f) watchLatestBearing = frame.bearingDeg
@@ -1845,6 +1875,9 @@ class RunTrackingService : Service(), SensorEventListener {
             anaerobicTrainingEffect = if (watchLatestAnAte > 0f) watchLatestAnAte else null,
             recoveryTimeMinutes     = if (watchLatestRecoveryMins > 0) watchLatestRecoveryMins else null,
             vo2MaxEstimate          = if (watchLatestVo2Max > 0f) watchLatestVo2Max else null,
+            avgRunningPower         = if (watchPwrCount > 0) (watchPwrSum / watchPwrCount).toInt() else null,
+            maxRunningPower         = if (watchMaxPwr > 0) watchMaxPwr else null,
+            avgRespirationRate      = if (watchRespCount > 0) watchRespSum / watchRespCount else null,
         )
     }
 
@@ -2657,6 +2690,10 @@ class RunTrackingService : Service(), SensorEventListener {
             anaerobicTrainingEffect  = if (watchLatestAnAte > 0f) watchLatestAnAte else null,
             recoveryTimeMinutes      = if (watchLatestRecoveryMins > 0) watchLatestRecoveryMins else null,
             vo2MaxEstimate           = if (watchLatestVo2Max > 0f) watchLatestVo2Max else null,
+            // ── Power & Respiration (device-dependent) ─────────────────────────
+            avgRunningPower          = if (watchPwrCount > 0) (watchPwrSum / watchPwrCount).toInt() else null,
+            maxRunningPower          = if (watchMaxPwr > 0) watchMaxPwr else null,
+            avgRespirationRate       = if (watchRespCount > 0) watchRespSum / watchRespCount else null,
             // ── Environmental ──────────────────────────────────────────────────
             avgAmbientPressure       = if (watchLatestPressure > 0f) watchLatestPressure else null,
             avgBearing               = if (watchLatestBearing > 0f) watchLatestBearing else null,
@@ -2674,6 +2711,10 @@ class RunTrackingService : Service(), SensorEventListener {
                 // Update the run session with the backend ID
                 _currentRunSession.value = _currentRunSession.value?.copy(id = response.id)
                 _uploadComplete.value = response.id
+                
+                // Update running metrics baselines with this run's data (for personalization)
+                // This ensures future coaching uses this runner's actual performance baselines, not generic defaults
+                updateRunningMetricsBaselines(runSession)
                 
                 // Auto-upload to Garmin Connect if enabled
                 tryAutoUploadToGarmin(response.id)
@@ -2736,6 +2777,42 @@ class RunTrackingService : Service(), SensorEventListener {
      * Auto-upload run to Garmin Connect if user has auto-sync enabled
      * Silent background operation - doesn't interrupt user if it fails
      */
+    /**
+     * Update running metrics baselines with data from this run.
+     * Ensures all future coaching uses personalized thresholds based on actual user performance.
+     * NOT hardcoded defaults.
+     *
+     * Uses exponential moving average: baseline = 0.8 * old + 0.2 * new
+     * This prevents single outlier runs from skewing benchmarks while allowing gradual adaptation.
+     */
+    private fun updateRunningMetricsBaselines(runSession: RunSession) {
+        try {
+            val config = live.airuncoach.airuncoach.config.RunningMetricsConfig(this)
+            
+            // Calculate power-to-pace ratio if we have both metrics
+            val powerToPaceRatio = if (runSession.avgRunningPower != null && 
+                runSession.avgRunningPower > 0 && 
+                runSession.avgSpeed != null && 
+                runSession.avgSpeed > 0) {
+                (runSession.avgRunningPower / (runSession.avgSpeed * 3.6f)).coerceIn(0f, 1000f)
+            } else null
+            
+            // Update all baselines with this run's data
+            config.updateBaselinesFromRun(
+                gctAvg = runSession.avgGroundContactTime,
+                voAvg = runSession.avgVerticalOscillation,
+                vrAvg = runSession.avgVerticalRatio,
+                slAvg = runSession.avgStrideLength,
+                powerToPaceRatio = powerToPaceRatio
+            )
+            
+            Log.d("RunTrackingService", "✅ Updated running metrics baselines from run")
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "Failed to update running metrics baselines: ${e.message}")
+            // Non-critical - don't fail the run upload if this fails
+        }
+    }
+
     private suspend fun tryAutoUploadToGarmin(runId: String) {
         try {
             // Check if auto-sync is enabled
@@ -4011,6 +4088,25 @@ class RunTrackingService : Service(), SensorEventListener {
         val remainingKm = targetDistance?.let { (it - totalDistance) / 1000.0 }?.takeIf { it > 0 }
         val remainingFormatted = remainingKm?.let { formatDistanceForAI(it) }
         val distanceCompletedFormatted = formatDistanceForAI(distKm)
+        
+        // ── Calculate running efficiency metrics ───────────────────────────────────
+        // Power-to-pace efficiency: lower power for target pace = more efficient
+        val avgPowerWatts = if (watchPwrCount > 0) watchPwrSum / watchPwrCount else null
+        val powerToPaceRatio = if (avgPowerWatts != null && avgPowerWatts > 0 && avgSpeed > 0) {
+            (avgPowerWatts / (avgSpeed * 3.6f)).coerceIn(0f, 1000f) // normalize to W per km/h
+        } else null
+        
+        // Classify efficiency based on user's personalized baseline (not hardcoded)
+        val metricsConfig = live.airuncoach.airuncoach.config.RunningMetricsConfig(this)
+        val runningEfficiency = metricsConfig.classifyRunningEfficiency(powerToPaceRatio)
+        
+        // ── Calculate HR Zone (personalized to user) ────────────────────────────────
+        // Uses user's actual max HR or age-based estimate; not generic hardcoded zones
+        val estimatedHrZone = if (currentHeartRate > 0) {
+            currentUser?.age?.let { userAge ->
+                metricsConfig.calculateHeartRateZone(currentHeartRate, userAge)
+            }
+        } else null
 
         return EliteCoachingRequest(
             coachingType = type,
@@ -4035,6 +4131,24 @@ class RunTrackingService : Service(), SensorEventListener {
             kmSplits = kmSplits.map { KmSplitBrief(it.km, it.pace) },
             remainingDistanceFormatted = remainingFormatted,
             distanceCompletedFormatted = distanceCompletedFormatted,
+            // ── Running Dynamics (current averages from Garmin watch) ────────────────
+            groundContactTime = if (watchGctCount > 0) watchGctSum / watchGctCount else null,
+            groundContactBalance = if (watchGcbCount > 0) watchGcbSum / watchGcbCount else null,
+            verticalOscillation = if (watchVoCount > 0) watchVoSum / watchVoCount else null,
+            verticalRatio = if (watchVrCount > 0) watchVrSum / watchVrCount else null,
+            strideLength = if (watchSlCount > 0) watchSlSum / watchSlCount else null,
+            // ── Power & Respiration (current averages) ────────────────────────────────
+            runningPower = avgPowerWatts?.toInt(),
+            respirationRate = if (watchRespCount > 0) watchRespSum / watchRespCount else null,
+            // ── Training Effect & Recovery (latest from watch) ────────────────────────
+            aerobicTrainingEffect = if (watchLatestAte > 0f) watchLatestAte else null,
+            anaerobicTrainingEffect = if (watchLatestAnAte > 0f) watchLatestAnAte else null,
+            recoveryTimeMinutes = if (watchLatestRecoveryMins > 0) watchLatestRecoveryMins else null,
+            vo2MaxEstimate = if (watchLatestVo2Max > 0f) watchLatestVo2Max else null,
+            // ── Performance Context ────────────────────────────────────────────────────
+            heartRateZone = estimatedHrZone,
+            powerToPaceRatio = powerToPaceRatio,
+            runningEfficiency = runningEfficiency,
             // Coaching programme context — non-null only when this is a plan workout
             trainingPlanId = planTrainingPlanId,
             workoutId = planWorkoutId,

@@ -1,0 +1,27 @@
+--- a/garmin-companion-app/source/views/RunView.mc
++++ b/garmin-companion-app/source/views/RunView.mc
+@@ -308,6 +308,25 @@ class RunView extends Ui.View {
+     function onPhoneMessage(data) {
+         if (data == null) { return; }
+         var t = data.get("type");
+         if (t == null) { return; }
+ 
++        // ✅ NEW: Handle authentication message (production UUID C7BF12555C184F9FB1F82B49E72E20A2)
++        if (t.equals("auth")) {
++            var token = data.get("authToken");
++            var rname = data.get("runnerName");
++            if (token != null && token.length() > 0) {
++                App.Storage.setValue("authToken", token);
++                _isAuthenticated = true;
++                _isConnected     = true;
++                _overlayState    = OVERLAY_GPS_WAIT;
++                Sys.println("✅ Auth token received from phone (production UUID)");
++            }
++            if (rname != null) {
++                App.Storage.setValue("runnerName", rname);
++                Sys.println("✅ Runner name: " + rname);
++            }
++            Ui.requestUpdate();
++
++        } else if (t.equals("runUpdate")) {
+             var pv = data.get("pace");        if (pv != null) { _pace        = pv.toFloat(); }

@@ -103,15 +103,6 @@ fun PreviousRunsScreen(
                     style = AppTextStyles.body,
                     color = Colors.textSecondary
                 )
-                // ── Garmin attribution (Garmin API Brand Guidelines) ───────────
-                // Required directly beneath the primary heading when Garmin data
-                // is present. Show when user has active Garmin Connect authentication
-                // or any run in history originated from Garmin.
-                val hasGarminRuns = runs.any { it.externalSource == "garmin" || it.hasGarminData }
-                if (hasGarminConnectAuth || hasGarminRuns) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    GarminAttributionBadge(style = GarminBadgeStyle.INLINE)
-                }
             }
             /*
             // Refresh button
@@ -228,7 +219,8 @@ fun PreviousRunsScreen(
                         RunListItem(
                             run = run,
                             isPersonalBest = run.id in personalBestRunIds,
-                            onClick = { onNavigateToRunSummary(run.id) }
+                            onClick = { onNavigateToRunSummary(run.id) },
+                            showGarminSyncedActivities = showGarminSyncedActivities
                         )
                         Spacer(modifier = Modifier.height(Spacing.md))
                     }
@@ -1030,7 +1022,7 @@ fun WeatherImpactAnalysisCard(
 }
 
 @Composable
-fun RunListItem(run: RunSession, isPersonalBest: Boolean = false, onClick: () -> Unit) {
+fun RunListItem(run: RunSession, isPersonalBest: Boolean = false, onClick: () -> Unit, showGarminSyncedActivities: Boolean = false) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1071,8 +1063,8 @@ fun RunListItem(run: RunSession, isPersonalBest: Boolean = false, onClick: () ->
                         color = Colors.textMuted
                     )
                     
-                    // Garmin badge if synced from Garmin
-                    if (run.externalSource == "garmin") {
+                    // Garmin badge if synced from Garmin (only show when toggle is enabled)
+                    if (run.externalSource == "garmin" && showGarminSyncedActivities) {
                         Spacer(modifier = Modifier.width(Spacing.sm))
                         Icon(
                             painter = painterResource(id = R.drawable.ic_garmin_logo),
@@ -1082,8 +1074,8 @@ fun RunListItem(run: RunSession, isPersonalBest: Boolean = false, onClick: () ->
                         )
                     }
                     
-                    // Garmin badge if AI Run Coach run was uploaded TO Garmin
-                    if (run.uploadedToGarmin == true && run.externalSource != "garmin") {
+                    // Garmin badge if AI Run Coach run was uploaded TO Garmin (only show when toggle is enabled)
+                    if (run.uploadedToGarmin == true && run.externalSource != "garmin" && showGarminSyncedActivities) {
                         Spacer(modifier = Modifier.width(Spacing.sm))
                         Row(
                             modifier = Modifier

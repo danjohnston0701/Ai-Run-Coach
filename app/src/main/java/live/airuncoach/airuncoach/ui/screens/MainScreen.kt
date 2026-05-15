@@ -41,6 +41,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.google.gson.Gson
+import live.airuncoach.airuncoach.AppRoutes
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
 import live.airuncoach.airuncoach.domain.model.RunSetupConfig
@@ -208,6 +209,9 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     },
                     onNavigateToHistory = {
                         navController.navigate(Screen.History.route)
+                    },
+                    onNavigateToLocationPermission = {
+                        navController.navigate(AppRoutes.LOCATION_PERMISSION)
                     },
                     onCreateGoal = {
                         navController.navigate("create_goal")

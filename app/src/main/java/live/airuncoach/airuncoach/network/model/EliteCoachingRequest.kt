@@ -28,6 +28,28 @@ data class EliteCoachingRequest(
     @SerializedName("totalElevationLoss") val totalElevationLoss: Double? = null,
     @SerializedName("targetTime") val targetTime: Long? = null, // seconds
     @SerializedName("targetPace") val targetPace: String? = null,
+    
+    // ── Running Dynamics (from Garmin watch — device-dependent, null if unsupported) ──
+    @SerializedName("groundContactTime") val groundContactTime: Float? = null,     // ms – foot contact per step
+    @SerializedName("groundContactBalance") val groundContactBalance: Float? = null, // % – left/right symmetry
+    @SerializedName("verticalOscillation") val verticalOscillation: Float? = null, // cm – torso bounce
+    @SerializedName("verticalRatio") val verticalRatio: Float? = null,             // % – oscillation/stride
+    @SerializedName("strideLength") val strideLength: Float? = null,               // m – distance per stride
+    
+    // ── Power & Respiration (device-dependent) ──────────────────────────────────
+    @SerializedName("runningPower") val runningPower: Int? = null,                 // watts
+    @SerializedName("respirationRate") val respirationRate: Float? = null,         // breaths/min
+    
+    // ── Training Effect & Recovery ────────────────────────────────────────────────
+    @SerializedName("aerobicTrainingEffect") val aerobicTrainingEffect: Float? = null,       // 0-5
+    @SerializedName("anaerobicTrainingEffect") val anaerobicTrainingEffect: Float? = null,   // 0-5
+    @SerializedName("recoveryTimeMinutes") val recoveryTimeMinutes: Int? = null,             // minutes
+    @SerializedName("vo2MaxEstimate") val vo2MaxEstimate: Float? = null,                     // ml/kg/min
+    
+    // ── Performance Comparisons ───────────────────────────────────────────────────
+    @SerializedName("heartRateZone") val heartRateZone: Int? = null,               // 1-5
+    @SerializedName("powerToPaceRatio") val powerToPaceRatio: Float? = null,       // efficiency metric
+    @SerializedName("runningEfficiency") val runningEfficiency: String? = null,    // "efficient" | "moderate" | "taxing"
 
     // Type-specific context
     @SerializedName("milestonePercent") val milestonePercent: Int? = null,
