@@ -1027,10 +1027,8 @@ private fun GraphsTabContent(
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
 ) {
-    // State for collapsible sections
-    var heartRateExpanded by remember { mutableStateOf(true) }
+    // State for collapsible sections — only used when Garmin data IS available
     var dynamicsExpanded by remember { mutableStateOf(true) }
-    var multiMetricExpanded by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -1046,78 +1044,100 @@ private fun GraphsTabContent(
 
         // ═══════════════════════════════════════════════════════════════════════
         // HEART RATE ANALYSIS SECTION
-        // ═══════════════════════════════════════════════════════════════════════
+        // (Always shown, NO expand/collapse button)
+        // ═════════���═════════════════════════════════════════════════════════════
         
         stickyHeader {
-            GraphSectionHeader(
-                title = "Heart Rate Analysis",
-                expanded = heartRateExpanded,
-                onToggle = { heartRateExpanded = !heartRateExpanded }
-            )
-        }
-
-        if (heartRateExpanded) {
-            item { ChartsSectionFlagship(run = run) }
-
-            // Show disclosure if heart rate data is from Garmin
-            if (run.hasGarminData && run.heartRateData != null) {
-                item { GarminDataDisclosure(disclosureType = "chart") }
+            // Just show title as header — no expandable toggle
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = Spacing.md)
+            ) {
+                Text(
+                    "Heart Rate Analysis",
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.textPrimary
+                )
             }
-
-            item { HeartRateZonesVisualCard(heartRateData = run.heartRateData) }
-
-            // Intensity Distribution Donut
-            item { IntensityDistributionCard(run = run) }
         }
+
+        // Always display heart rate content
+        item { ChartsSectionFlagship(run = run) }
+
+        // Show disclosure if heart rate data is from Garmin
+        if (run.hasGarminData && run.heartRateData != null) {
+            item { GarminDataDisclosure(disclosureType = "chart") }
+        }
+
+        item { HeartRateZonesVisualCard(heartRateData = run.heartRateData) }
+
+        // Intensity Distribution Donut
+        item { IntensityDistributionCard(run = run) }
 
         // ═══════════════════════════════════════════════════════════════════════
-        // RUNNING DYNAMICS SECTION (when Garmin data available)
+        // RUNNING DYNAMICS SECTION (only when Garmin data available)
+        // (Non-expandable section header if data exists)
         // ═══════════════════════════════════════════════════════════════════════
         
         if (run.hasGarminData) {
             stickyHeader {
-                GraphSectionHeader(
-                    title = "Running Dynamics",
-                    expanded = dynamicsExpanded,
-                    onToggle = { dynamicsExpanded = !dynamicsExpanded }
-                )
+                // Just show title as header — no expandable toggle
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = Spacing.md)
+                ) {
+                    Text(
+                        "Running Dynamics",
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                }
             }
 
-            if (dynamicsExpanded) {
-                // Running dynamics cards will be added here in Phase 2
-                // Placeholder for now
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = Colors.backgroundSecondary
-                        )
-                    ) {
-                        Text(
-                            "Ground Contact Time, Vertical Oscillation, and Stride data will appear here",
-                            modifier = Modifier.padding(Spacing.md),
-                            style = AppTextStyles.body,
-                            color = Colors.textSecondary
-                        )
-                    }
+            // Always display running dynamics content when data exists
+            // Running dynamics cards will be added here in Phase 2
+            // Placeholder for now
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Colors.backgroundSecondary
+                    )
+                ) {
+                    Text(
+                        "Ground Contact Time, Vertical Oscillation, and Stride data will appear here",
+                        modifier = Modifier.padding(Spacing.md),
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary
+                    )
                 }
             }
         }
 
         // ═══════════════════════════════════════════════════════════════════════
-        // MULTI-METRIC ANALYSIS SECTION
+        // MULTI-METRIC ANALYSIS SECTION (only when Garmin data available)
+        // (Non-expandable section header if data exists)
         // ═══════════════════════════════════════════════════════════════════════
         
-        stickyHeader {
-            GraphSectionHeader(
-                title = "Multi-Metric Analysis",
-                expanded = multiMetricExpanded,
-                onToggle = { multiMetricExpanded = !multiMetricExpanded }
-            )
-        }
+        if (run.hasGarminData) {
+            stickyHeader {
+                // Just show title as header — no expandable toggle
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = Spacing.md)
+                ) {
+                    Text(
+                        "Multi-Metric Analysis",
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                }
+            }
 
-        if (multiMetricExpanded) {
-
+            // Always display multi-metric content when data exists
             // Pace Decay / Fatigue Curve
             item { FatigueCurveCard(run = run) }
 
