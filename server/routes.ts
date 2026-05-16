@@ -9271,8 +9271,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         version,
         releaseNote,
         dryRun = false,
-        // Default Connect IQ store URL for AI Run Coach (UUID from manifest.xml)
-        storeUrl = "https://apps.garmin.com/apps/c7bf1255-5c18-4f9b-b1f8-2b49e72e20a2",
+        // Default Connect IQ store URL for AI Run Coach
+        storeUrl = "https://apps.garmin.com/en-NZ/apps/91452a05-d077-4707-a9a3-0e98277f6017",
       } = req.body;
 
       if (!version) {

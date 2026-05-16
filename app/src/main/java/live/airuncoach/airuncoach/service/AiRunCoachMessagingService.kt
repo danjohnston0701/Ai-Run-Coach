@@ -44,9 +44,9 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
         const val CHANNEL_GENERAL = "general"
         const val CHANNEL_GARMIN_WATCH_UPDATES = "garmin_watch_updates"
 
-        /** Default Connect IQ store listing URL (matches manifest.xml app ID) */
+        /** Connect IQ store listing URL for AI Run Coach */
         const val CONNECT_IQ_STORE_URL =
-            "https://apps.garmin.com/apps/c7bf1255-5c18-4f9b-b1f8-2b49e72e20a2"
+            "https://apps.garmin.com/en-NZ/apps/91452a05-d077-4707-a9a3-0e98277f6017"
     }
 
     override fun onNewToken(token: String) {
