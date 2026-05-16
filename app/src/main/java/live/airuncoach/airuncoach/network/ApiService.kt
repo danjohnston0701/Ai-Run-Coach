@@ -97,6 +97,10 @@ interface ApiService {
 
     @POST("/api/coaching/talk-to-coach")
     suspend fun talkToCoach(@Body request: TalkToCoachRequest): TalkToCoachResponse
+
+    /** Generate Polly TTS audio for any short phrase (e.g. "Yes?", "Listening...") */
+    @POST("/api/tts/generate")
+    suspend fun generateTts(@Body request: GenerateTtsRequest): GenerateTtsResponse
     
     @POST("/api/coaching/hr-coaching")
     suspend fun getHeartRateCoaching(@Body request: HeartRateCoachingRequest): HeartRateCoachingResponse

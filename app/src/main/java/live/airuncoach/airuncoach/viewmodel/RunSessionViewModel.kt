@@ -357,6 +357,15 @@ class RunSessionViewModel @Inject constructor(
     /** True while the user-preference "voice activation" is enabled */
     private var voiceActivationEnabled: Boolean = true
 
+    /**
+     * Pre-warmed "Yes?" audio bytes from AWS Polly.
+     * Generated once when wake word detection starts so there's zero network
+     * latency when the wake word fires — we just play the cached bytes instantly.
+     * Falls back to device TTS if the API call fails.
+     */
+    private var yesAudioBytes: ByteArray? = null
+    private var yesAudioFormat: String = "mp3"
+
     /** Expose wake word detector state to the UI */
     val wakeWordState: StateFlow<WakeWordDetector.State> = wakeWordDetector.state
 
@@ -1087,24 +1096,65 @@ class RunSessionViewModel @Inject constructor(
 
     // ── Wake word ─────────────────────────────────────────────────────────────
 
-    /** Called by [WakeWordDetector] when "hey coach" is heard. */
+    /**
+     * Called by [WakeWordDetector] when "hey coach" is heard.
+     *
+     * Plays the pre-warmed Polly "Yes?" audio (cached at run start) so there's
+     * zero network latency. Falls back to device TTS if audio wasn't pre-warmed.
+     * After playback completes the query listening window opens.
+     */
     private fun onWakeWordDetected() {
         Log.d("RunSessionViewModel", "🎤 Wake word detected — opening query window")
-        // Play a short audio cue so the user knows they can speak
-        textToSpeechHelper.speak("Yes?", accent = user?.coachAccent)
-        startListening(fromWakeWord = true)
+        val cachedBytes = yesAudioBytes
+        if (cachedBytes != null) {
+            // Play pre-warmed Polly audio — instant, no network call
+            Log.d("RunSessionViewModel", "Playing pre-warmed Polly 'Yes?' audio")
+            val base64 = android.util.Base64.encodeToString(cachedBytes, android.util.Base64.NO_WRAP)
+            audioPlayerHelper.playAudio(base64, yesAudioFormat) {
+                startListening(fromWakeWord = true)
+            }
+        } else {
+            // Fallback to device TTS if pre-warm failed (offline, cold start, etc.)
+            Log.w("RunSessionViewModel", "Polly 'Yes?' not pre-warmed — falling back to device TTS")
+            textToSpeechHelper.speak("Yes?", accent = user?.coachAccent)
+            startListening(fromWakeWord = true)
+        }
+    }
+
+    /**
+     * Pre-warm "Yes?" audio from AWS Polly so it plays instantly when the
+     * wake word fires. Called once per run — the audio is cached for the duration.
+     */
+    private fun preWarmYesAudio() {
+        viewModelScope.launch {
+            try {
+                val response = apiService.generateTts(
+                    live.airuncoach.airuncoach.network.model.GenerateTtsRequest("Yes?")
+                )
+                val bytes = android.util.Base64.decode(response.audio, android.util.Base64.DEFAULT)
+                yesAudioBytes = bytes
+                yesAudioFormat = response.format
+                Log.d("RunSessionViewModel", "✅ Pre-warmed Polly 'Yes?' audio (${bytes.size} bytes)")
+            } catch (e: Exception) {
+                Log.w("RunSessionViewModel", "Could not pre-warm Polly 'Yes?' audio: ${e.message} — device TTS will be used as fallback")
+                yesAudioBytes = null
+            }
+        }
     }
 
     /** Start/stop wake word detection in sync with run active state. */
     fun startWakeWordDetection() {
         if (voiceActivationEnabled) {
             wakeWordDetector.startWatching()
+            // Pre-warm "Yes?" via Polly so playback is instant when wake word fires
+            preWarmYesAudio()
             Log.d("RunSessionViewModel", "Wake word detection started")
         }
     }
 
     fun stopWakeWordDetection() {
         wakeWordDetector.stopWatching()
+        yesAudioBytes = null  // Free the cached bytes
         Log.d("RunSessionViewModel", "Wake word detection stopped")
     }
 

@@ -1,0 +1,12 @@
+package live.airuncoach.airuncoach.network.model
+
+import com.google.gson.annotations.SerializedName
+
+data class GenerateTtsRequest(
+    @SerializedName("text") val text: String
+)
+
+data class GenerateTtsResponse(
+    @SerializedName("audio") val audio: String,   // base64-encoded mp3
+    @SerializedName("format") val format: String  // always "mp3"
+)

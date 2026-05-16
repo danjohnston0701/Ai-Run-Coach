@@ -9,6 +9,50 @@ Implement two ways for a runner to talk to their AI coach hands-free during a ru
 
 This is a **backend-ready** feature — the API endpoint and OpenAI prompt already handle both data questions ("how's my pace?") and general coaching questions ("I'm getting a stitch", "my calf is cramping", "how should I breathe") without any changes needed on the server.
 
+## ⚠️ Critical TTS Requirement: AWS Polly — No Device TTS
+
+**All voice output must go through AWS Polly**, not `AVSpeechSynthesizer`. This includes:
+- The **"Yes?"** confirmation after the wake word fires
+- The **coach response** after the user's question
+- Any other spoken feedback during the talk-to-coach flow
+
+The backend already does this — both the `POST /api/tts/generate` and `POST /api/coaching/talk-to-coach` endpoints route through **AWS Polly Neural TTS** (with OpenAI TTS as fallback). iOS must always play the base64 audio returned from the server, never fall back to device TTS.
+
+### "Yes?" Pre-Warming — Zero Latency
+
+The "Yes?" confirmation must play **instantly** when the wake word fires — before the mic opens. A network round-trip in that moment would feel laggy. The solution: **pre-generate and cache the "Yes?" audio at run start**.
+
+```swift
+// Call this when the run starts and wake word detection begins
+func preWarmYesAudio() async {
+    do {
+        let response = try await apiService.generateTts(text: "Yes?")
+        if let audioData = Data(base64Encoded: response.audio) {
+            yesAudioData = audioData  // cache it — play instantly on wake word
+            print("✅ Pre-warmed Polly 'Yes?' audio (\(audioData.count) bytes)")
+        }
+    } catch {
+        print("⚠️ Could not pre-warm 'Yes?' audio: \(error) — no fallback, stay silent")
+        yesAudioData = nil
+    }
+}
+
+// Call this when wake word fires — play cached audio, THEN open mic
+func onWakeWordDetected() {
+    if let audioData = yesAudioData {
+        playAudio(audioData) { [weak self] in
+            // Audio finished — now open the mic
+            self?.startListening(fromWakeWord: true)
+        }
+    } else {
+        // No cached audio (offline at run start) — open mic silently, skip "Yes?"
+        startListening(fromWakeWord: true)
+    }
+}
+```
+
+**Important**: If the pre-warm fails (e.g. offline), open the mic silently — do NOT fall back to `AVSpeechSynthesizer`. A jarring robot voice is worse than no confirmation sound.
+
 ---
 
 ## Part 1 — iOS Phone: "Hey Coach" Wake Word
@@ -18,7 +62,7 @@ This is a **backend-ready** feature — the API endpoint and OpenAI prompt alrea
 Android uses `SpeechRecognizer` in a continuous 4-second loop:
 - Start looping on run start, stop on run end
 - Each window checks if result contains "hey coach" (fuzzy match)
-- On match: pause loop → play "Yes?" TTS → open full 5s query window → send to API → speak response → resume loop
+- On match: pause loop → play pre-warmed Polly "Yes?" → open full 5s query window → send to API → play Polly response → resume loop
 - Errors (silence, timeout, network) silently loop without crashing
 
 ### iOS Implementation
@@ -301,12 +345,12 @@ private func sendMessageToCoach(_ message: String) {
             let response = try await apiService.talkToCoach(request)
             await MainActor.run { coachText = response.message }
 
-            // Play audio response — backend returns base64 mp3
+            // Play audio response — backend always returns base64 Polly MP3
+            // NEVER use AVSpeechSynthesizer — always use the server-provided audio
             if let audioB64 = response.audio, let audioData = Data(base64Encoded: audioB64) {
-                playAudio(audioData)  // use your existing AudioPlayerHelper
-            } else {
-                speakTTS(response.message)  // AVSpeechSynthesizer fallback
+                playAudio(audioData)  // AWS Polly MP3 via AudioPlayerHelper
             }
+            // If audio is nil (network failure), show text only — no device TTS fallback
 
             await MainActor.run { coachText = "" }
             wakeWordDetector.resumeListening()
@@ -583,20 +627,45 @@ No changes to the backend needed.
 
 ## Audio Handling Notes
 
-- **Response audio is base64-encoded MP3** from OpenAI TTS — same voice/accent as the rest of the app's coaching
+### TTS Source — AWS Polly Only
+
+| Audio | Source | How to play |
+|-------|--------|-------------|
+| "Yes?" confirmation | `POST /api/tts/generate` (pre-warmed at run start) | `AVAudioPlayer` with cached `Data` |
+| Coach response | `POST /api/coaching/talk-to-coach` → `audio` field | `AVAudioPlayer` with base64-decoded `Data` |
+| **Device TTS** | **Never used** | **Do not use `AVSpeechSynthesizer`** |
+
+- **Response audio is base64-encoded MP3** from AWS Polly Neural TTS — same voice, accent, and persona as the rest of the app's coaching
 - Play using `AVAudioPlayer` with `AVAudioSession.sharedInstance().setCategory(.playback)`
 - Before starting `SFSpeechRecognizer`, set audio session to `.record` mode; after coach responds, switch back to `.playback`
-- **Important**: Stop the wake word detector's audio engine before playing the response (avoid feedback loop). Resume after playback completes.
+- **Stop the wake word detector's audio engine before playing audio** (avoid feedback loop). Resume after playback completes.
 
 ```swift
-// Before speaking coach response:
-audioEngine.stop()
-audioEngine.inputNode.removeTap(onBus: 0)
-try? AVAudioSession.sharedInstance().setCategory(.playback)
+// Before playing Polly response:
+wakeWordDetector.stopAudioEngine()
+try? AVAudioSession.sharedInstance().setCategory(.playback, options: .duckOthers)
+try? AVAudioSession.sharedInstance().setActive(true)
+
+// Play audio...
 
 // After playback completes — resume wake word detection:
+try? AVAudioSession.sharedInstance().setCategory(.record, mode: .measurement)
 wakeWordDetector.resumeListening()
 ```
+
+### TTS Endpoint
+
+```
+POST /api/tts/generate
+Authorization: Bearer <jwt>
+Content-Type: application/json
+
+{ "text": "Yes?" }
+
+→ { "audio": "<base64 mp3>", "format": "mp3" }
+```
+
+The endpoint automatically uses the user's saved coach voice (accent, gender, tone) — no need to pass those in the request body.
 
 ---
 
