@@ -62,6 +62,8 @@ android {
             buildConfigField("String", "WEATHER_API_KEY", "\"5cce843c24f81f4ea2c2880b112e27d5\"")
             // Google Cloud Platform API key (for Maps later)
             buildConfigField("String", "GOOGLE_API_KEY", "\"AIzaSyAunS1M9c5wxGMqjd9gOoNTvso7AACZcF0\"")
+            // Picovoice Porcupine AccessKey — set PICOVOICE_ACCESS_KEY in local.properties
+            buildConfigField("String", "PICOVOICE_ACCESS_KEY", "\"${localProp("PICOVOICE_ACCESS_KEY")}\"")
         }
         debug {
             // Define the base URL for the debug (local development) build.
@@ -70,6 +72,8 @@ android {
             buildConfigField("String", "WEATHER_API_KEY", "\"5cce843c24f81f4ea2c2880b112e27d5\"")
             // Google Cloud Platform API key (for Maps later)
             buildConfigField("String", "GOOGLE_API_KEY", "\"AIzaSyAunS1M9c5wxGMqjd9gOoNTvso7AACZcF0\"")
+            // Picovoice Porcupine AccessKey — set PICOVOICE_ACCESS_KEY in local.properties
+            buildConfigField("String", "PICOVOICE_ACCESS_KEY", "\"${localProp("PICOVOICE_ACCESS_KEY")}\"")
         }
     }
     compileOptions {
@@ -170,6 +174,11 @@ dependencies {
     // Available on Maven Central — no AAR download needed.
     // Requires Garmin Connect app installed on the user's phone to communicate with the watch.
     implementation("com.garmin.connectiq:ciq-companion-app-sdk:2.3.0@aar")
+
+    // --- Picovoice Porcupine: On-device wake word detection ("hey coach") ---
+    // Always-on, ~1% CPU, fully offline, sub-100ms response.
+    // Requires: PICOVOICE_ACCESS_KEY in local.properties + hey_coach_android.ppn in assets/
+    implementation("ai.picovoice:porcupine-android:3.0.2")
 
     // --- Firebase: Cloud Messaging for push notifications ---
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))

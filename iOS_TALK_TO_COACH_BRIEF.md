@@ -59,129 +59,136 @@ func onWakeWordDetected() {
 
 ### How Android Does It (reference implementation)
 
-Android uses `SpeechRecognizer` in a continuous 4-second loop:
-- Start looping on run start, stop on run end
-- Each window checks if result contains "hey coach" (fuzzy match)
-- On match: pause loop → play pre-warmed Polly "Yes?" → open full 5s query window → send to API → play Polly response → resume loop
-- Errors (silence, timeout, network) silently loop without crashing
+Android uses **Picovoice Porcupine** — a dedicated on-device wake word engine:
+- Starts when the run begins, stops when the run ends
+- Processes 16kHz mono PCM audio in 512-sample frames using `AudioRecord`
+- Porcupine's `.ppn` model detects "hey coach" on-device with sub-100ms latency
+- `~1% CPU / <2% battery per hour` — negligible during a run
+- On detection: pause Porcupine → play pre-warmed Polly "Yes?" → open 5s query window → send to API → play Polly response → resume Porcupine
+
+### Why Porcupine (not SFSpeechRecognizer looping)
+
+| | Porcupine | SFSpeechRecognizer loop |
+|---|---|---|
+| **CPU overhead** | ~1% | ~8-15% per window |
+| **Battery per hour** | <2% | 5-12% |
+| **Latency** | <100ms | 500ms-2s |
+| **Offline** | ✅ Fully on-device | ❌ Network required |
+| **Running noise** | ✅ Dedicated model | ❌ Confused by footsteps/breathing |
+| **False positives** | Very low | Higher |
+
+Porcupine is the correct solution. Do not use `SFSpeechRecognizer` for wake word detection.
+
+### Setup Required (one-time)
+
+1. **Picovoice Console**: https://console.picovoice.ai/
+   - Sign up free → copy your **AccessKey**
+   - Add to `Config.swift` or `Secrets.plist`:
+     ```swift
+     static let picovoiceAccessKey = "your_key_here"
+     ```
+
+2. **Generate "hey coach" wake word model**:
+   - Console → Wake Word → New Wake Word → Phrase: **"hey coach"** → Platform: **iOS**
+   - Download the `.ppn` file → add to Xcode project as resource:
+     `Resources/hey_coach_ios.ppn`
+
+3. **Add Porcupine iOS SDK**:
+   ```
+   // Package.swift or Xcode SPM
+   .package(url: "https://github.com/Picovoice/porcupine-ios", from: "3.0.0")
+   ```
+   Or CocoaPods:
+   ```ruby
+   pod 'iOS-Voice-Processor', '~> 1.1.0'
+   pod 'Porcupine-iOS', '~> 3.0.0'
+   ```
 
 ### iOS Implementation
-
-**Recommended approach:** Use `SFSpeechRecognizer` (built-in, no third-party SDK).
 
 #### 1. `WakeWordDetector.swift` — New file
 
 ```swift
 import Foundation
-import Speech
-import AVFoundation
+import Porcupine  // from Picovoice Porcupine iOS SDK
 
-/// Continuously listens for "hey coach" during an active run using SFSpeechRecognizer.
-/// Uses short recognition tasks in a loop — no third-party wake word SDK required.
+/// On-device wake word detector for "hey coach" using Picovoice Porcupine.
+///
+/// Fully offline, ~1% CPU, sub-100ms latency.
+/// Requires: Porcupine SDK + AccessKey + hey_coach_ios.ppn in bundle.
 class WakeWordDetector: ObservableObject {
 
     enum State { case idle, watching, paused, stopped }
 
     @Published var state: State = .idle
-
     var onWakeWord: (() -> Void)?
 
-    private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
-    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
-    private var recognitionTask: SFSpeechRecognitionTask?
-    private let audioEngine = AVAudioEngine()
-    private var isWatching = false
+    private var porcupineManager: PorcupineManager?
 
-    // Phrases accepted as the wake word (fuzzy match)
-    private let wakePhrases = ["hey coach", "ok coach", "okay coach", "hey couch", "a coach"]
+    private let accessKey: String
+    private let keywordPath: String
+
+    init(accessKey: String = AppConfig.picovoiceAccessKey) {
+        self.accessKey = accessKey
+        self.keywordPath = Bundle.main.path(forResource: "hey_coach_ios", ofType: "ppn") ?? ""
+    }
 
     func startWatching() {
-        guard SFSpeechRecognizer.authorizationStatus() == .authorized else { return }
-        isWatching = true
-        state = .watching
-        startListeningWindow()
+        guard !accessKey.isEmpty else {
+            print("⚠️ WakeWordDetector: Picovoice AccessKey not set")
+            return
+        }
+        guard !keywordPath.isEmpty else {
+            print("⚠️ WakeWordDetector: hey_coach_ios.ppn not found in bundle")
+            print("→ Generate at https://console.picovoice.ai/ and add to Xcode project")
+            return
+        }
+
+        do {
+            porcupineManager = try PorcupineManager(
+                accessKey: accessKey,
+                keywordPath: keywordPath,
+                modelPath: nil,       // use default English model
+                sensitivity: 0.7,    // 0.7 is good for running with ambient noise
+                onDetection: { [weak self] keywordIndex in
+                    print("🎤 'Hey coach' detected! (index=\(keywordIndex))")
+                    self?.pauseListening()
+                    DispatchQueue.main.async { self?.onWakeWord?() }
+                },
+                errorCallback: { error in
+                    print("⚠️ Porcupine error: \(error)")
+                }
+            )
+            try porcupineManager?.start()
+            state = .watching
+            print("✅ Porcupine started — listening for 'hey coach'")
+        } catch {
+            print("❌ Failed to start Porcupine: \(error)")
+        }
     }
 
     func pauseListening() {
+        guard state == .watching else { return }
+        try? porcupineManager?.stop()
         state = .paused
-        stopAudioEngine()
     }
 
     func resumeListening() {
-        guard isWatching else { return }
-        state = .watching
-        startListeningWindow()
+        guard state == .paused else { return }
+        do {
+            try porcupineManager?.start()
+            state = .watching
+            print("Wake word detector resumed")
+        } catch {
+            print("⚠️ Could not resume Porcupine: \(error)")
+        }
     }
 
     func stopWatching() {
-        isWatching = false
+        try? porcupineManager?.stop()
+        porcupineManager = nil
         state = .stopped
-        stopAudioEngine()
-    }
-
-    private func startListeningWindow() {
-        guard isWatching, state != .paused, state != .stopped else { return }
-        stopAudioEngine()
-
-        let audioSession = AVAudioSession.sharedInstance()
-        try? audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
-        try? audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-
-        recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
-        guard let recognitionRequest else { return loop(); return }
-        recognitionRequest.shouldReportPartialResults = true
-        recognitionRequest.requiresOnDeviceRecognition = false // on-device if available
-
-        let inputNode = audioEngine.inputNode
-        let recordingFormat = inputNode.outputFormat(forBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
-            self?.recognitionRequest?.append(buffer)
-        }
-
-        audioEngine.prepare()
-        try? audioEngine.start()
-
-        // 4-second window timeout
-        let deadline = DispatchTime.now() + .seconds(4)
-        recognitionTask = speechRecognizer?.recognitionTask(with: recognitionRequest) { [weak self] result, error in
-            guard let self else { return }
-            if let result {
-                let text = result.bestTranscription.formattedString.lowercased()
-                if self.wakePhrases.contains(where: { text.contains($0) }) {
-                    self.pauseListening()
-                    DispatchQueue.main.async { self.onWakeWord?() }
-                    return
-                }
-            }
-            if error != nil || result?.isFinal == true {
-                self.loop()
-            }
-        }
-
-        // Force-end the window after 4 seconds to prevent hanging
-        DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
-            guard let self, self.state == .watching else { return }
-            self.recognitionTask?.finish()
-            self.loop()
-        }
-    }
-
-    private func stopAudioEngine() {
-        recognitionTask?.cancel()
-        recognitionTask = nil
-        recognitionRequest?.endAudio()
-        recognitionRequest = nil
-        if audioEngine.isRunning {
-            audioEngine.stop()
-            audioEngine.inputNode.removeTap(onBus: 0)
-        }
-    }
-
-    private func loop() {
-        guard isWatching, state != .paused, state != .stopped else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.startListeningWindow()
-        }
+        print("Wake word detector stopped")
     }
 }
 ```
@@ -293,8 +300,12 @@ private let ttsPlayer = AVSpeechSynthesizer() // or your existing TTS helper
 @Published var coachText: String = ""
 
 func onRunStarted() {
-    guard AVAudioSession.sharedInstance().recordPermission == .granted,
-          SFSpeechRecognizer.authorizationStatus() == .authorized else { return }
+    // Porcupine only needs microphone permission for wake word detection
+    // SFSpeechRecognizer authorization is checked inside speechHelper when query window opens
+    guard AVAudioSession.sharedInstance().recordPermission == .granted else { return }
+
+    // Pre-warm "Yes?" audio so it plays instantly when wake word fires
+    Task { await preWarmYesAudio() }
 
     wakeWordDetector.onWakeWord = { [weak self] in
         self?.onWakeWordDetected()
@@ -419,19 +430,34 @@ Add `@State private var pulseOpacity: Double = 0.3` to the view.
 
 #### 5. `Info.plist` — Permissions (if not already present)
 
+**Important**: Porcupine only needs microphone permission for wake word detection.
+`NSSpeechRecognitionUsageDescription` is only needed for the full query window (`SFSpeechRecognizer`).
+
 ```xml
-<key>NSSpeechRecognitionUsageDescription</key>
-<string>AI Run Coach listens for "hey coach" to let you talk to your coach hands-free during a run.</string>
-
+<!-- Required for Porcupine wake word detection AND SFSpeechRecognizer query window -->
 <key>NSMicrophoneUsageDescription</key>
-<string>Required to hear your questions and coaching commands during a run.</string>
+<string>Required to hear "hey coach" and your questions to your AI running coach during a run.</string>
+
+<!-- Required for SFSpeechRecognizer (full query window only — NOT needed for Porcupine) -->
+<key>NSSpeechRecognitionUsageDescription</key>
+<string>Used to transcribe your question after saying "hey coach" during a run.</string>
 ```
 
-Request both permissions at run setup time:
+Request permissions at run setup time:
 ```swift
+// Microphone — needed for both Porcupine and SFSpeechRecognizer
+AVAudioSession.sharedInstance().requestRecordPermission { granted in
+    if granted {
+        // Start wake word detector
+        self.wakeWordDetector.startWatching()
+    }
+}
+
+// Speech recognition — only needed for the full query window
 SFSpeechRecognizer.requestAuthorization { _ in }
-AVAudioSession.sharedInstance().requestRecordPermission { _ in }
 ```
+
+**Note**: Porcupine does NOT send audio to any server — it processes entirely on-device using CoreML.
 
 ---
 
