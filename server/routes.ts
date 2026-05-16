@@ -9076,8 +9076,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .returning();
       
       console.log(`[Companion] Session ${sessionId} ended - ${stats.totalDistance?.toFixed(0) || 0}m in ${stats.totalDuration || 0}s`);
-      
-      res.json({ success: true, session: updated, summary: stats });
+
+      // ── Create a permanent run record in the runs table ────────────────────
+      let newRunId: string | null = null;
+      try {
+        const distanceKm = stats.totalDistance ? stats.totalDistance / 1000 : 0;
+        const durationSecs = stats.totalDuration || 0;
+
+        // Only save if there's meaningful data (at least 100m and 30s)
+        if (distanceKm >= 0.1 && durationSecs >= 30) {
+          // Format avg pace as mm:ss string
+          let avgPaceStr: string | null = null;
+          if (stats.avgPace && stats.avgPace > 0) {
+            const totalSecs = Math.round(stats.avgPace);
+            const mins = Math.floor(totalSecs / 60);
+            const secs = totalSecs % 60;
+            avgPaceStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+          }
+
+          const now = new Date();
+          const [newRun] = await db.insert(runs).values({
+            userId,
+            distance: distanceKm,
+            duration: durationSecs,
+            avgPace: avgPaceStr,
+            avgHeartRate: stats.avgHeartRate ?? null,
+            maxHeartRate: stats.maxHeartRate ?? null,
+            cadence: stats.avgCadence ?? null,
+            elevationGain: stats.totalAscent ?? null,
+            elevationLoss: stats.totalDescent ?? null,
+            elevation: stats.totalAscent ?? null,
+            name: `Garmin Watch Run`,
+            runDate: now.toISOString().split('T')[0],
+            runTime: now.toTimeString().split(' ')[0].slice(0, 5),
+            completedAt: now,
+            externalId: sessionId,
+            externalSource: 'garmin_companion',
+            hasGarminData: true,
+            difficulty: 'moderate',
+            isPublic: false,
+            // Running dynamics
+            avgStrideLength: stats.avgStrideLength ?? null,
+            // Advanced Garmin metrics (stored in existing columns)
+            avgGroundContactTime: stats.avgGroundContactTime ?? null,
+            avgVerticalOscillation: stats.avgVerticalOscillation ?? null,
+            avgVerticalRatio: stats.avgVerticalRatio ?? null,
+            avgGroundContactBalance: stats.avgGroundContactBalance ?? null,
+            avgRunningPower: stats.avgRunningPower ?? null,
+            avgRespirationRate: stats.avgRespirationRate ?? null,
+            aerobicTrainingEffect: stats.aerobicTrainingEffect ?? null,
+            anaerobicTrainingEffect: stats.anaerobicTrainingEffect ?? null,
+          }).returning();
+
+          newRunId = newRun.id;
+
+          // Link the companion session to the run
+          await db.update(garminCompanionSessions)
+            .set({ linkedRunId: newRunId } as any)
+            .where(eq(garminCompanionSessions.sessionId, sessionId));
+
+          console.log(`[Companion] Created run record ${newRunId} from standalone Garmin session ${sessionId} (${distanceKm.toFixed(2)}km)`);
+        } else {
+          console.log(`[Companion] Session ${sessionId} too short to save as run (${distanceKm.toFixed(3)}km, ${durationSecs}s)`);
+        }
+      } catch (runCreateError: any) {
+        // Don't fail the whole request if run creation fails — session is still marked complete
+        console.error(`[Companion] Failed to create run from session ${sessionId}:`, runCreateError?.message);
+      }
+
+      res.json({ success: true, session: updated, summary: stats, runId: newRunId });
     } catch (error: any) {
       console.error("Companion session end error:", error);
       res.status(500).json({ error: "Failed to end session" });

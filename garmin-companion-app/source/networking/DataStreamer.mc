@@ -168,6 +168,66 @@ class DataStreamer {
         }
     }
     
+    // End session on backend — creates a permanent run record in AI Run Coach
+    function endSession(summary) {
+        if (_authToken == null || _sessionId == null) {
+            Sys.println("DataStreamer.endSession: no auth or session");
+            return;
+        }
+
+        var payload = {
+            "sessionId"              => _sessionId,
+            "summary" => {
+                "totalDistance"          => summary.get("distance"),
+                "totalDuration"          => summary.get("elapsedTime"),
+                "avgHeartRate"           => summary.get("avgHR"),
+                "maxHeartRate"           => summary.get("maxHR"),
+                "avgCadence"             => summary.get("avgCadence"),
+                "avgPace"                => summary.get("avgPace"),
+                "totalAscent"            => summary.get("totalAscent"),
+                "totalDescent"           => summary.get("totalDescent"),
+                // Running dynamics
+                "avgGroundContactTime"   => summary.get("avgGct"),
+                "avgVerticalOscillation" => summary.get("avgVo"),
+                "avgVerticalRatio"       => summary.get("avgVr"),
+                "avgStrideLength"        => summary.get("avgSl"),
+                "avgGroundContactBalance"=> summary.get("avgGcb"),
+                // Power & respiration
+                "avgRunningPower"        => summary.get("avgPower"),
+                "avgRespirationRate"     => summary.get("avgResp"),
+                // Training effect
+                "aerobicTrainingEffect"   => summary.get("ate"),
+                "anaerobicTrainingEffect" => summary.get("anate"),
+                "recoveryTime"           => summary.get("recoveryTime"),
+                "vo2MaxEstimate"         => summary.get("vo2Max")
+            }
+        };
+
+        var url = _baseUrl + "/api/garmin-companion/session/end";
+        var options = {
+            :method => Comm.HTTP_REQUEST_METHOD_POST,
+            :headers => {
+                "Content-Type" => Comm.REQUEST_CONTENT_TYPE_JSON,
+                "Authorization" => "Bearer " + _authToken
+            },
+            :responseType => Comm.HTTP_RESPONSE_CONTENT_TYPE_JSON
+        };
+
+        Comm.makeWebRequest(url, payload, options, method(:onSessionEnded));
+
+        // Clear session so next run gets a fresh session
+        App.Storage.deleteValue("sessionId");
+        _sessionId = null;
+    }
+
+    function onSessionEnded(responseCode as Lang.Number, data as Lang.Dictionary or Lang.String or Null) as Void {
+        if (responseCode == 200) {
+            Sys.println("DataStreamer: session ended and run saved to AI Run Coach");
+        } else {
+            Sys.println("DataStreamer: session end failed: " + responseCode);
+        }
+    }
+
     // Generate random session ID
     private function generateSessionId() {
         var chars = "abcdefghijklmnopqrstuvwxyz0123456789";

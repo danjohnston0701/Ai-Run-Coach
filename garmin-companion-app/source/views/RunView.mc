@@ -110,6 +110,23 @@ class RunView extends Ui.View {
     private var _paceHistory    = [];
     private var _paceHistoryMax = 20;
 
+    // ── Run summary accumulators (for endSession summary sent to backend) ──────
+    private var _sumHR      = 0;     // Heart rate sum
+    private var _maxHR      = 0;     // Peak heart rate
+    private var _sumCadence = 0;     // Cadence sum
+    private var _sumPace    = 0.0;   // Pace sum (sec/km)
+    private var _sumGct     = 0.0;   // GCT sum (ms)
+    private var _sumVo      = 0.0;   // Vertical oscillation sum
+    private var _sumVr      = 0.0;   // Vertical ratio sum
+    private var _sumSl      = 0.0;   // Stride length sum
+    private var _sumGcb     = 0.0;   // Ground contact balance sum
+    private var _sumPower   = 0;     // Power sum (watts)
+    private var _sumResp    = 0.0;   // Respiration rate sum
+    private var _sampleN    = 0;     // Number of samples accumulated
+    private var _totalAscent  = 0.0; // Elevation gain (m)
+    private var _totalDescent = 0.0; // Elevation loss (m)
+    private var _lastAlt      = null; // Last altitude for delta calc
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     function initialize() {
@@ -207,6 +224,12 @@ class RunView extends Ui.View {
         Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE]);
         Sensor.enableSensorEvents(method(:onSensor));
 
+        // Reset run summary accumulators
+        _sumHR = 0; _maxHR = 0; _sumCadence = 0; _sumPace = 0.0;
+        _sumGct = 0.0; _sumVo = 0.0; _sumVr = 0.0; _sumSl = 0.0;
+        _sumGcb = 0.0; _sumPower = 0; _sumResp = 0.0; _sampleN = 0;
+        _totalAscent = 0.0; _totalDescent = 0.0; _lastAlt = null;
+
         if (!_phoneControlled) { _startSession(); }
         else { _phoneLink.sendCommand("start"); }
         _vibeShort();
@@ -241,8 +264,34 @@ class RunView extends Ui.View {
         Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
         _gpsListening = false;
         Sensor.enableSensorEvents(null);
-        if (_phoneControlled) { _phoneLink.sendCommand("stop"); }
-        else { _stopSession(); }
+        if (_phoneControlled) {
+            _phoneLink.sendCommand("stop");
+        } else {
+            _stopSession();
+            // Compute averages and tell backend to save the run
+            if (_dataStreamer != null && _sampleN > 0) {
+                var n = _sampleN.toFloat();
+                _dataStreamer.endSession({
+                    "distance"    => _distance,
+                    "elapsedTime" => _elapsedTime,
+                    "avgHR"       => (_sumHR   > 0) ? (_sumHR   / n).toNumber() : null,
+                    "maxHR"       => (_maxHR   > 0) ? _maxHR : null,
+                    "avgCadence"  => (_sumCadence > 0) ? (_sumCadence / n).toNumber() : null,
+                    "avgPace"     => (_sumPace > 0.0) ? _sumPace / n : null,
+                    "totalAscent" => (_totalAscent  > 0.0) ? _totalAscent  : null,
+                    "totalDescent"=> (_totalDescent > 0.0) ? _totalDescent : null,
+                    "avgGct"      => (_sumGct   > 0.0) ? _sumGct   / n : null,
+                    "avgVo"       => (_sumVo    > 0.0) ? _sumVo    / n : null,
+                    "avgVr"       => (_sumVr    > 0.0) ? _sumVr    / n : null,
+                    "avgSl"       => (_sumSl    > 0.0) ? _sumSl    / n : null,
+                    "avgGcb"      => (_sumGcb   > 0.0) ? _sumGcb   / n : null,
+                    "avgPower"    => (_sumPower  > 0)   ? (_sumPower / n).toNumber() : null,
+                    "avgResp"     => (_sumResp  > 0.0) ? _sumResp  / n : null,
+                    "ate"         => (_ate  > 0.0) ? _ate  : null,
+                    "anate"       => (_anate > 0.0) ? _anate : null
+                });
+            }
+        }
         _vibeLong();
         Ui.requestUpdate();
     }
@@ -437,6 +486,31 @@ class RunView extends Ui.View {
         }
 
         if (!_phoneControlled && _isRunning && !_isPaused) {
+            // Accumulate summary stats every sample (for endSession)
+            _sampleN += 1;
+            if (_heartRate > 0) {
+                _sumHR += _heartRate;
+                if (_heartRate > _maxHR) { _maxHR = _heartRate; }
+            }
+            if (_cadence > 0)   { _sumCadence += _cadence; }
+            if (_pace > 0.0)    { _sumPace    += _pace; }
+            if (_gct > 0.0)     { _sumGct     += _gct; }
+            if (_vo > 0.0)      { _sumVo      += _vo; }
+            if (_vr > 0.0)      { _sumVr      += _vr; }
+            if (_sl > 0.0)      { _sumSl      += _sl; }
+            if (_gcb > 0.0)     { _sumGcb     += _gcb; }
+            if (_power > 0)     { _sumPower   += _power; }
+            if (_respRate > 0.0){ _sumResp    += _respRate; }
+            // Elevation gain/loss tracking
+            if (_lastGpsAlt != null) {
+                if (_lastAlt != null) {
+                    var delta = _lastGpsAlt - _lastAlt;
+                    if (delta > 0.1) { _totalAscent  += delta; }
+                    if (delta < -0.1){ _totalDescent -= delta; }
+                }
+                _lastAlt = _lastGpsAlt;
+            }
+
             _streamAccumMs += _tickMs;
             if (_streamAccumMs >= 1000) {
                 _streamAccumMs = 0;
