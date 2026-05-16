@@ -47,6 +47,11 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
         /** Connect IQ store listing URL for AI Run Coach */
         const val CONNECT_IQ_STORE_URL =
             "https://apps.garmin.com/en-NZ/apps/91452a05-d077-4707-a9a3-0e98277f6017"
+
+        // Explicit positive request codes — negative codes from hashCode() can cause
+        // silent PendingIntent failures on some Android OEM builds.
+        private const val REQUEST_CODE_GARMIN_WATCH_UPDATE = 7001
+        private const val REQUEST_CODE_GENERAL = 7002
     }
 
     override fun onNewToken(token: String) {
@@ -93,11 +98,16 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
         val pendingIntent = if (type == "garmin_watch_update") {
             val url = storeUrl ?: CONNECT_IQ_STORE_URL
             val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                // CATEGORY_BROWSABLE is required for notification taps to reliably
+                // open URLs. Without it, some devices silently drop the intent because
+                // they can't determine which activity should handle an https:// URI
+                // launched from a background service context.
+                addCategory(Intent.CATEGORY_BROWSABLE)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             PendingIntent.getActivity(
                 this,
-                "garmin_watch_update".hashCode(),
+                REQUEST_CODE_GARMIN_WATCH_UPDATE,
                 browserIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
@@ -108,7 +118,7 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
             }
             PendingIntent.getActivity(
                 this,
-                (runId ?: "").hashCode(),
+                REQUEST_CODE_GENERAL,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
