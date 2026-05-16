@@ -1,7 +1,7 @@
 <!-- Garmin Connect IQ Manifest -->
 <!-- This defines the app metadata and permissions -->
 <iq:manifest xmlns:iq="http://www.garmin.com/xml/connectiq" version="3">
-    <iq:application entry="AiRunCoachApp" id="C7BF12555C184F9FB1F82B49E72E20A2" launcherIcon="@Drawables.LauncherIcon" minApiLevel="3.2.0" name="@Strings.AppName" type="watch-app" version="2.3.0">
+    <iq:application entry="AiRunCoachApp" id="C7BF12555C184F9FB1F82B49E72E20A2" launcherIcon="@Drawables.LauncherIcon" minApiLevel="3.2.0" name="@Strings.AppName" type="watch-app" version="2.4.0">
         <iq:products>
             <iq:product id="fenix6"/>
             <iq:product id="fenix6pro"/>

@@ -230,8 +230,9 @@ class RunView extends Ui.View {
         _sumGcb = 0.0; _sumPower = 0; _sumResp = 0.0; _sampleN = 0;
         _totalAscent = 0.0; _totalDescent = 0.0; _lastAlt = null;
 
-        if (!_phoneControlled) { _startSession(); }
-        else { _phoneLink.sendCommand("start"); }
+        // Always start local Garmin session AND notify phone (phone must activate its run session for coaching)
+        _startSession();
+        _phoneLink.sendCommand("start");
         _vibeShort();
         Ui.requestUpdate();
     }
@@ -241,8 +242,9 @@ class RunView extends Ui.View {
         _isPaused = true;
         _prevGpsLat = null;
         _prevGpsLng = null;
-        if (_phoneControlled) { _phoneLink.sendCommand("pause"); }
-        else if (_session != null && _session.isRecording()) { _session.stop(); }
+        // Always notify phone, always stop local recording
+        _phoneLink.sendCommand("pause");
+        if (_session != null && _session.isRecording()) { _session.stop(); }
         _vibeShort();
         Ui.requestUpdate();
     }
@@ -250,8 +252,9 @@ class RunView extends Ui.View {
     function resumeRun() {
         if (!_isPaused) { return; }
         _isPaused = false;
-        if (_phoneControlled) { _phoneLink.sendCommand("resume"); }
-        else if (_session != null && !_session.isRecording()) { _session.start(); }
+        // Always notify phone, always restart local recording
+        _phoneLink.sendCommand("resume");
+        if (_session != null && !_session.isRecording()) { _session.start(); }
         _vibeShort();
         Ui.requestUpdate();
     }
@@ -277,33 +280,30 @@ class RunView extends Ui.View {
         Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
         _gpsListening = false;
         Sensor.enableSensorEvents(null);
-        if (_phoneControlled) {
-            _phoneLink.sendCommand("stop");
-        } else {
-            _stopSession();
-            // Compute averages and tell backend to save the run
-            if (_dataStreamer != null && _sampleN > 0) {
-                var n = _sampleN.toFloat();
-                _dataStreamer.endSession({
-                    "distance"    => _distance,
-                    "elapsedTime" => _elapsedTime,
-                    "avgHR"       => (_sumHR   > 0) ? (_sumHR   / n).toNumber() : null,
-                    "maxHR"       => (_maxHR   > 0) ? _maxHR : null,
-                    "avgCadence"  => (_sumCadence > 0) ? (_sumCadence / n).toNumber() : null,
-                    "avgPace"     => (_sumPace > 0.0) ? _sumPace / n : null,
-                    "totalAscent" => (_totalAscent  > 0.0) ? _totalAscent  : null,
-                    "totalDescent"=> (_totalDescent > 0.0) ? _totalDescent : null,
-                    "avgGct"      => (_sumGct   > 0.0) ? _sumGct   / n : null,
-                    "avgVo"       => (_sumVo    > 0.0) ? _sumVo    / n : null,
-                    "avgVr"       => (_sumVr    > 0.0) ? _sumVr    / n : null,
-                    "avgSl"       => (_sumSl    > 0.0) ? _sumSl    / n : null,
-                    "avgGcb"      => (_sumGcb   > 0.0) ? _sumGcb   / n : null,
-                    "avgPower"    => (_sumPower  > 0)   ? (_sumPower / n).toNumber() : null,
-                    "avgResp"     => (_sumResp  > 0.0) ? _sumResp  / n : null,
-                    "ate"         => (_ate  > 0.0) ? _ate  : null,
-                    "anate"       => (_anate > 0.0) ? _anate : null
-                });
-            }
+        // Always notify phone, always stop local recording and finalise backend session
+        _phoneLink.sendCommand("stop");
+        _stopSession();
+        if (_dataStreamer != null && _sampleN > 0) {
+            var n = _sampleN.toFloat();
+            _dataStreamer.endSession({
+                "distance"    => _distance,
+                "elapsedTime" => _elapsedTime,
+                "avgHR"       => (_sumHR   > 0) ? (_sumHR   / n).toNumber() : null,
+                "maxHR"       => (_maxHR   > 0) ? _maxHR : null,
+                "avgCadence"  => (_sumCadence > 0) ? (_sumCadence / n).toNumber() : null,
+                "avgPace"     => (_sumPace > 0.0) ? _sumPace / n : null,
+                "totalAscent" => (_totalAscent  > 0.0) ? _totalAscent  : null,
+                "totalDescent"=> (_totalDescent > 0.0) ? _totalDescent : null,
+                "avgGct"      => (_sumGct   > 0.0) ? _sumGct   / n : null,
+                "avgVo"       => (_sumVo    > 0.0) ? _sumVo    / n : null,
+                "avgVr"       => (_sumVr    > 0.0) ? _sumVr    / n : null,
+                "avgSl"       => (_sumSl    > 0.0) ? _sumSl    / n : null,
+                "avgGcb"      => (_sumGcb   > 0.0) ? _sumGcb   / n : null,
+                "avgPower"    => (_sumPower  > 0)   ? (_sumPower / n).toNumber() : null,
+                "avgResp"     => (_sumResp  > 0.0) ? _sumResp  / n : null,
+                "ate"         => (_ate  > 0.0) ? _ate  : null,
+                "anate"       => (_anate > 0.0) ? _anate : null
+            });
         }
         _vibeLong();
         Ui.requestUpdate();
@@ -553,7 +553,7 @@ class RunView extends Ui.View {
             }
         }
 
-        if (_phoneControlled && _isRunning && !_isPaused) {
+        if (_isRunning && !_isPaused) { // Always stream GPS to phone (phone uses watch GPS when available)
             _gpsStreamTick += 1;
             if (_gpsStreamTick >= 8 && _lastGpsLat != null && _lastGpsLng != null) {
                 _gpsStreamTick = 0;
