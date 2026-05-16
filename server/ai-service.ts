@@ -2060,7 +2060,9 @@ export function buildTTSInstructions(
 
 function buildCoachingSystemPrompt(context: CoachingContext): string {
   const coachIdentity = context.coachName || 'Coach';
-  let prompt = `You are ${coachIdentity}, an elite AI running coach delivering live coaching to an athlete mid-run. You have real-time access to their pace, distance, heart rate, cadence, and terrain data — use it to make every coaching message feel like it comes from someone who is right there watching them perform. Be specific, immediate, and personal. NEVER start with greetings like "Hey there", "Hey!", "Hi!" — jump straight into the coaching.`;
+  let prompt = `You are ${coachIdentity}, an elite AI running coach delivering live coaching to an athlete mid-run. You have real-time access to their pace, distance, heart rate, cadence, and terrain data — use it to make every coaching message feel like it comes from someone who is right there watching them perform. Be specific, immediate, and personal. NEVER start with greetings like "Hey there", "Hey!", "Hi!" — jump straight into the coaching.
+
+IMPORTANT: You are a fully qualified running coach with deep sports science knowledge. When the runner asks about physical symptoms (stitch, cramp, nausea, dizziness, shin splints, blisters, heavy legs, etc.), technique (breathing, form, footstrike, cadence), or any general running question — answer it directly and practically using your coaching expertise. These questions do NOT require sensor data. Give immediate, actionable advice the runner can apply RIGHT NOW while still running. Keep responses to 2-4 sentences spoken naturally — no bullet points, no lists.`;
   
   if (context.coachTone) {
     prompt += ` ${toneDirective(context.coachTone)}`;
@@ -2679,6 +2681,12 @@ export async function getWellnessAwareCoachingResponse(
   context: EnhancedCoachingContext
 ): Promise<string> {
   const systemPrompt = buildEnhancedCoachingSystemPrompt(context);
+
+  // Detect whether the message is asking a general running knowledge question
+  // (stitch, cramp, breathing, form, nutrition, etc.) vs a data query.
+  // We boost max_tokens for knowledge questions so the answer isn't truncated.
+  const isKnowledgeQuestion = isGeneralRunningQuestion(message);
+  const maxTokens = isKnowledgeQuestion ? 250 : 150;
   
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -2686,11 +2694,34 @@ export async function getWellnessAwareCoachingResponse(
       { role: "system", content: systemPrompt },
       { role: "user", content: message }
     ],
-    max_tokens: 150,
+    max_tokens: maxTokens,
     temperature: 0.7,
   });
 
   return completion.choices[0].message.content || "Keep going, you're doing great!";
+}
+
+/**
+ * Returns true when the user's message is asking a general running physiology,
+ * technique, or nutrition question rather than requesting data-based feedback.
+ * Used to increase the token budget so the answer isn't cut short.
+ */
+function isGeneralRunningQuestion(message: string): boolean {
+  const lower = message.toLowerCase();
+  const knowledgeKeywords = [
+    'stitch', 'cramp', 'cramps', 'side stitch', 'breathing', 'breathe',
+    'blister', 'chafe', 'chafing', 'shin splint', 'shin splints', 'plantar',
+    'knee', 'hip', 'calf', 'hamstring', 'quad', 'achilles', 'it band',
+    'how do i', 'how should i', 'what should i', 'why am i', 'why do i',
+    'what is', 'how to', 'tips for', 'advice on', 'help me',
+    'nutrition', 'hydration', 'water', 'gel', 'electrolyte', 'fueling',
+    'tired', 'exhausted', 'fatigued', 'heavy legs', 'legs hurt',
+    'nausea', 'dizzy', 'dizziness', 'lightheaded', 'headache',
+    'form', 'posture', 'stride', 'footstrike', 'heel strike',
+    'breathing technique', 'rhythm', 'cadence advice',
+    'bored', 'motivation', 'give up', 'want to stop', 'struggling',
+  ];
+  return knowledgeKeywords.some(kw => lower.includes(kw));
 }
 
 function buildEnhancedCoachingSystemPrompt(context: EnhancedCoachingContext): string {
