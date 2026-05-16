@@ -53,6 +53,12 @@ export const users = pgTable("users", {
   priorRaceExperience: text("prior_race_experience"), // "none", "local", "national", "elite"
   injuryHistory: jsonb("injury_history"), // [{date, type, resolved}]
   allowAiToneAdaptation: boolean("allow_ai_tone_adaptation").default(true), // Let AI adjust tone per session
+
+  // Garmin Watch App (Connect IQ) tracking
+  hasGarminWatchApp: boolean("has_garmin_watch_app").default(false), // TRUE if user has downloaded the Garmin companion IQ app
+  garminWatchAppFirstSeenAt: timestamp("garmin_watch_app_first_seen_at"),   // When they first authenticated from the watch
+  garminWatchAppLastSeenAt: timestamp("garmin_watch_app_last_seen_at"),     // Most recent companion auth
+  garminWatchAppVersion: text("garmin_watch_app_version"),                   // Last-reported IQ app version
 });
 
 // Friends table

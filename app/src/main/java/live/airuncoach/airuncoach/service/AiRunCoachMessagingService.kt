@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import dagger.hilt.android.AndroidEntryPoint
@@ -41,6 +42,11 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
         private const val TAG = "AiRunCoachFCM"
         const val CHANNEL_GARMIN_SYNC = "garmin_sync"
         const val CHANNEL_GENERAL = "general"
+        const val CHANNEL_GARMIN_WATCH_UPDATES = "garmin_watch_updates"
+
+        /** Default Connect IQ store listing URL (matches manifest.xml app ID) */
+        const val CONNECT_IQ_STORE_URL =
+            "https://apps.garmin.com/apps/c7bf1255-5c18-4f9b-b1f8-2b49e72e20a2"
     }
 
     override fun onNewToken(token: String) {
@@ -60,32 +66,58 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
         super.onMessageReceived(message)
         Log.d(TAG, "FCM message received: ${message.data}")
 
-        val type  = message.data["type"]
-        val runId = message.data["runId"]?.takeIf { it.isNotBlank() }
-        val title = message.notification?.title ?: message.data["title"] ?: "AI Run Coach"
-        val body  = message.notification?.body  ?: message.data["body"]  ?: ""
+        val type     = message.data["type"]
+        val runId    = message.data["runId"]?.takeIf { it.isNotBlank() }
+        val storeUrl = message.data["storeUrl"]?.takeIf { it.isNotBlank() }
+        val title    = message.notification?.title ?: message.data["title"] ?: "AI Run Coach"
+        val body     = message.notification?.body  ?: message.data["body"]  ?: ""
 
-        showNotification(title, body, type, runId)
+        showNotification(title, body, type, runId, storeUrl)
     }
 
-    private fun showNotification(title: String, body: String, type: String?, runId: String?) {
-        val channelId = if (type == "run_enriched" || type == "new_activity") CHANNEL_GARMIN_SYNC else CHANNEL_GENERAL
+    private fun showNotification(
+        title: String,
+        body: String,
+        type: String?,
+        runId: String?,
+        storeUrl: String? = null
+    ) {
+        val channelId = when (type) {
+            "run_enriched", "new_activity" -> CHANNEL_GARMIN_SYNC
+            "garmin_watch_update"          -> CHANNEL_GARMIN_WATCH_UPDATES
+            else                           -> CHANNEL_GENERAL
+        }
         ensureNotificationChannel(channelId)
 
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            if (runId != null) putExtra("deeplink_run_id", runId)
+        // For Garmin watch update notifications: tap opens the Connect IQ store
+        val pendingIntent = if (type == "garmin_watch_update") {
+            val url = storeUrl ?: CONNECT_IQ_STORE_URL
+            val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            PendingIntent.getActivity(
+                this,
+                "garmin_watch_update".hashCode(),
+                browserIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        } else {
+            val intent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                if (runId != null) putExtra("deeplink_run_id", runId)
+            }
+            PendingIntent.getActivity(
+                this,
+                (runId ?: "").hashCode(),
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
         }
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            (runId ?: "").hashCode(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
 
         val notification = NotificationCompat.Builder(this, channelId)
             .setContentTitle(title)
             .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setSmallIcon(R.drawable.android_icon_monochrome)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -100,8 +132,9 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (nm.getNotificationChannel(channelId) != null) return
         val (name, desc) = when (channelId) {
-            CHANNEL_GARMIN_SYNC -> "Garmin Sync" to "Notifications when your run is enriched with Garmin data"
-            else -> "AI Run Coach" to "General notifications from AI Run Coach"
+            CHANNEL_GARMIN_SYNC          -> "Garmin Sync" to "Notifications when your run is enriched with Garmin data"
+            CHANNEL_GARMIN_WATCH_UPDATES -> "Garmin Watch Updates" to "Notifications when a new version of the AI Run Coach watch app is available"
+            else                         -> "AI Run Coach" to "General notifications from AI Run Coach"
         }
         nm.createNotificationChannel(
             NotificationChannel(channelId, name, NotificationManager.IMPORTANCE_HIGH).apply { description = desc }

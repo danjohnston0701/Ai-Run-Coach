@@ -256,6 +256,105 @@ export async function getUnreadNotificationCount(userId: string): Promise<number
   return userNotifications.filter((n) => !n.read).length;
 }
 
+// ── Garmin Watch App Update Broadcast ────────────────────────────────────────
+
+/**
+ * Broadcast a "new Garmin companion app version available" push notification to
+ * every user who has authenticated from the Garmin IQ watch app.
+ *
+ * @param version    - New version string (e.g. "2.4.0")
+ * @param releaseNote - Short plain-English description of what's new
+ * @param storeUrl   - Full Connect IQ store URL for the app listing
+ * @returns Summary of sent/failed counts and the list of targeted user IDs
+ */
+export async function broadcastGarminWatchAppUpdate(
+  version: string,
+  releaseNote: string,
+  storeUrl: string
+): Promise<{ targeted: number; pushSent: number; pushFailed: number; inAppSent: number; userIds: string[] }> {
+  const results = { targeted: 0, pushSent: 0, pushFailed: 0, inAppSent: 0, userIds: [] as string[] };
+
+  // Fetch all users who have the Garmin watch app installed
+  const watchAppUsers = await db
+    .select({ id: users.id, fcmToken: users.fcmToken })
+    .from(users)
+    .where(eq(users.hasGarminWatchApp as any, true));
+
+  results.targeted = watchAppUsers.length;
+  results.userIds = watchAppUsers.map((u) => u.id);
+
+  if (watchAppUsers.length === 0) {
+    console.log("[GarminWatchBroadcast] No users with Garmin watch app found — nothing to send");
+    return results;
+  }
+
+  const title = `⌚ Garmin Watch App v${version} Available`;
+  const body = releaseNote || `A new version of the AI Run Coach watch app is ready. Tap to update on your Garmin.`;
+  const notificationData: Record<string, string> = {
+    type: "garmin_watch_update",
+    version,
+    storeUrl,
+    action: "open_connect_iq_store",
+    timestamp: new Date().toISOString(),
+  };
+
+  console.log(`[GarminWatchBroadcast] Broadcasting v${version} update to ${watchAppUsers.length} users...`);
+
+  for (const user of watchAppUsers) {
+    try {
+      // In-app notification (always, even without FCM token)
+      await storage.createNotification({
+        userId: user.id,
+        title,
+        message: body,
+        type: "garmin_watch_update",
+        data: notificationData,
+        read: false,
+      });
+      results.inAppSent++;
+
+      // Firebase push (only if FCM token is present)
+      if (user.fcmToken) {
+        const app = await getFirebaseApp();
+        if (app) {
+          try {
+            const message: any = {
+              token: user.fcmToken,
+              notification: { title, body },
+              data: notificationData,
+              android: {
+                priority: "high",
+                notification: {
+                  channelId: "garmin_watch_updates",
+                  sound: "default",
+                  clickAction: "OPEN_CONNECT_IQ_STORE",
+                },
+              },
+            };
+            const messaging = adminSDK.messaging ? adminSDK.messaging(app) : adminSDK.default?.messaging(app);
+            await messaging.send(message);
+            results.pushSent++;
+          } catch (pushErr: any) {
+            if (pushErr?.code === "messaging/registration-token-not-registered") {
+              console.warn(`[GarminWatchBroadcast] Stale token for user ${user.id} — clearing`);
+              await db.update(users).set({ fcmToken: null }).where(eq(users.id, user.id));
+            }
+            results.pushFailed++;
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`[GarminWatchBroadcast] Failed for user ${user.id}:`, err);
+      results.pushFailed++;
+    }
+  }
+
+  console.log(
+    `[GarminWatchBroadcast] Done — in-app: ${results.inAppSent}, push sent: ${results.pushSent}, push failed: ${results.pushFailed}`
+  );
+  return results;
+}
+
 /**
  * Send coaching plan session reminder notification at 8am.
  * Called by scheduler for users who have a workout scheduled for today.

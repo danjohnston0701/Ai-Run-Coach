@@ -8655,7 +8655,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       
       console.log(`[Companion] User ${user.email} authenticated from device ${deviceModel || deviceId}`);
-      
+
+      // Mark this user as a Garmin watch app user (for update broadcast targeting)
+      const now = new Date();
+      const watchAppUpdate: Record<string, any> = {
+        hasGarminWatchApp: true,
+        garminWatchAppLastSeenAt: now,
+      };
+      if (!user.hasGarminWatchApp) {
+        watchAppUpdate.garminWatchAppFirstSeenAt = now;
+      }
+      await db.update(users).set(watchAppUpdate).where(eq(users.id, user.id));
+
       res.json({
         success: true,
         token,
@@ -9220,6 +9231,139 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
+  // ==================== ADMIN ENDPOINTS ====================
+
+  /**
+   * POST /api/admin/garmin-watch-app/broadcast-update
+   *
+   * Sends a push notification + in-app message to every user who has the
+   * Garmin Connect IQ watch companion app installed, directing them to update.
+   *
+   * Security: requires the ADMIN_API_KEY environment variable to be set and
+   * passed via the X-Admin-Key header (or admin_key query param).
+   *
+   * Body:
+   *   version      (required) e.g. "2.4.0"
+   *   releaseNote  (optional) short description of what's new
+   *   storeUrl     (optional) defaults to the Connect IQ listing URL
+   *   dryRun       (optional, boolean) if true, returns the target list without sending
+   */
+  app.post("/api/admin/garmin-watch-app/broadcast-update", async (req: Request, res: Response) => {
+    try {
+      // ── Admin authentication ─────────────────────────────────────────────────
+      const adminKey = process.env.ADMIN_API_KEY;
+      if (!adminKey) {
+        return res.status(503).json({ error: "Admin API not configured on this server" });
+      }
+
+      const providedKey =
+        req.headers["x-admin-key"] ||
+        req.query["admin_key"] ||
+        req.body?.adminKey;
+
+      if (providedKey !== adminKey) {
+        console.warn("[Admin] Unauthorized broadcast-update attempt from", req.ip);
+        return res.status(401).json({ error: "Unauthorized — invalid admin key" });
+      }
+
+      // ── Payload ──────────────────────────────────────────────────────────────
+      const {
+        version,
+        releaseNote,
+        dryRun = false,
+        // Default Connect IQ store URL for AI Run Coach (UUID from manifest.xml)
+        storeUrl = "https://apps.garmin.com/apps/c7bf1255-5c18-4f9b-b1f8-2b49e72e20a2",
+      } = req.body;
+
+      if (!version) {
+        return res.status(400).json({ error: "version is required (e.g. '2.4.0')" });
+      }
+
+      // ── Dry-run: just return who would be targeted ───────────────────────────
+      if (dryRun) {
+        const targets = await db
+          .select({ id: users.id, email: users.email, hasFcm: users.fcmToken })
+          .from(users)
+          .where(eq(users.hasGarminWatchApp as any, true));
+
+        return res.json({
+          dryRun: true,
+          version,
+          storeUrl,
+          targeted: targets.length,
+          withFcmToken: targets.filter((u) => !!u.hasFcm).length,
+          withoutFcmToken: targets.filter((u) => !u.hasFcm).length,
+          users: targets.map((u) => ({ id: u.id, email: u.email, hasFcm: !!u.hasFcm })),
+        });
+      }
+
+      // ── Live broadcast ────────────────────────────────────────────────────────
+      const { broadcastGarminWatchAppUpdate } = await import("./notification-service");
+      const results = await broadcastGarminWatchAppUpdate(version, releaseNote || "", storeUrl);
+
+      console.log(
+        `[Admin] Garmin watch app broadcast v${version} complete — ` +
+        `targeted: ${results.targeted}, push sent: ${results.pushSent}, in-app: ${results.inAppSent}`
+      );
+
+      res.json({
+        success: true,
+        version,
+        storeUrl,
+        targeted: results.targeted,
+        pushSent: results.pushSent,
+        pushFailed: results.pushFailed,
+        inAppSent: results.inAppSent,
+        message: `Broadcast sent to ${results.targeted} Garmin watch app users (${results.pushSent} push, ${results.inAppSent} in-app)`,
+      });
+    } catch (error: any) {
+      console.error("[Admin] Garmin broadcast-update error:", error);
+      res.status(500).json({ error: "Broadcast failed", details: error?.message });
+    }
+  });
+
+  /**
+   * GET /api/admin/garmin-watch-app/users
+   * Returns all users who have the Garmin watch app installed.
+   */
+  app.get("/api/admin/garmin-watch-app/users", async (req: Request, res: Response) => {
+    try {
+      const adminKey = process.env.ADMIN_API_KEY;
+      if (!adminKey) return res.status(503).json({ error: "Admin API not configured" });
+
+      const providedKey = req.headers["x-admin-key"] || req.query["admin_key"];
+      if (providedKey !== adminKey) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const watchUsers = await db
+        .select({
+          id: users.id,
+          email: users.email,
+          name: users.name,
+          hasFcmToken: users.fcmToken,
+          firstSeen: users.garminWatchAppFirstSeenAt,
+          lastSeen: users.garminWatchAppLastSeenAt,
+          appVersion: users.garminWatchAppVersion,
+        })
+        .from(users)
+        .where(eq(users.hasGarminWatchApp as any, true))
+        .orderBy(desc(users.garminWatchAppLastSeenAt as any));
+
+      res.json({
+        total: watchUsers.length,
+        withFcmToken: watchUsers.filter((u) => !!u.hasFcmToken).length,
+        users: watchUsers.map((u) => ({
+          ...u,
+          hasFcmToken: !!u.hasFcmToken,
+        })),
+      });
+    } catch (error: any) {
+      console.error("[Admin] Get Garmin watch users error:", error);
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
   // ==================== ANDROID V2 ENDPOINTS ====================
 
   // Update coach settings
