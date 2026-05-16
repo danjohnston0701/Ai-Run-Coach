@@ -480,6 +480,19 @@ class RunTrackingService : Service(), SensorEventListener {
         private val _latestCoachingText = MutableStateFlow<String?>(null)
         val latestCoachingText: StateFlow<String?> = _latestCoachingText
 
+        // Talk-to-Coach trigger — set to true when watch taps to request coach conversation.
+        // Observed by RunSessionViewModel; reset to false after handled.
+        private val _watchTalkToCoachRequest = MutableStateFlow(false)
+        val watchTalkToCoachRequest: StateFlow<Boolean> = _watchTalkToCoachRequest
+
+        fun triggerWatchTalkToCoach() {
+            _watchTalkToCoachRequest.value = true
+        }
+
+        fun clearWatchTalkToCoachRequest() {
+            _watchTalkToCoachRequest.value = false
+        }
+
         // Route Memory Engine — emits (lat, lng) on the first GPS fix once a run is active.
         // Observed by RunSessionViewModel to trigger route recognition asynchronously.
         // Reset to null at the start of each new run.
@@ -579,6 +592,11 @@ class RunTrackingService : Service(), SensorEventListener {
                             // Fire a local push notification so the user knows their session is ready
                             Log.d("RunTrackingService", "⌚ Watch session ready — posting notification")
                             postWatchSessionReadyNotification()
+                        }
+                        "talkToCoach" -> {
+                            // User tapped the watch screen during a run — trigger phone talk-to-coach
+                            Log.d("RunTrackingService", "⌚ Watch tap → talk to coach request")
+                            triggerWatchTalkToCoach()
                         }
                     }
                 }

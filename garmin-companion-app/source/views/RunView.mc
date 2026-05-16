@@ -256,6 +256,19 @@ class RunView extends Ui.View {
         Ui.requestUpdate();
     }
 
+    // ── Talk to Coach ─────────────────────────────────────────────────────────
+
+    function requestTalkToCoach() {
+        // Send a command to the phone to open the talk-to-coach listening window
+        _phoneLink.sendCommand("talkToCoach");
+        // Haptic confirmation so the user knows the tap registered
+        _vibeShort();
+        // Show a brief prompt on screen
+        _statusMessage = "Asking coach...";
+        _statusTicks = 8; // ~2 seconds at 250ms tick
+        Ui.requestUpdate();
+    }
+
     function finishRun() {
         _isRunning       = false;
         _isPaused        = false;
@@ -936,12 +949,16 @@ class RunDelegate extends Ui.BehaviorDelegate {
         return true;
     }
 
-    // ── Screen touch — intentionally ignored ──────────────────────────────────
-    // On touchscreen Garmin models (Venu, Venu 2, FR55 etc.) tapping the screen
-    // would previously also trigger run control. Override onTap and onHold to
-    // consume the events silently — no run start/pause from screen touch.
+    // ── Screen touch ──────────────────────────────────────────────────────────
+    // Single tap during an active run = "Talk to Coach" request.
+    // Tap before or after a run (ready/finished screens) = ignored.
+    // Hold = always ignored to prevent accidental triggers.
     function onTap(clickEvent) {
-        return true; // consume — do nothing
+        if (_view != null && _view.isRunning() && !_view.isPaused()) {
+            // Tell the phone to open the talk-to-coach query window
+            _view.requestTalkToCoach();
+        }
+        return true; // always consume
     }
 
     function onHold(clickEvent) {

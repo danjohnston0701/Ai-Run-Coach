@@ -103,6 +103,7 @@ import live.airuncoach.airuncoach.viewmodel.IntervalPhase
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
+import live.airuncoach.airuncoach.utils.WakeWordDetector
 import live.airuncoach.airuncoach.viewmodel.RunSessionViewModel
 import kotlin.math.PI
 import kotlin.math.max
@@ -135,6 +136,7 @@ fun RunSessionScreen(
     val runSession by viewModel.runSession.collectAsState()
     val pendingSyncCount by viewModel.pendingSyncCount.collectAsState()
     val knownRouteMatch by viewModel.knownRouteMatch.collectAsState()
+    val wakeWordState by viewModel.wakeWordState.collectAsState()
 
     var showMap by remember { mutableStateOf(hasRoute) }
     var routePolyline by remember { mutableStateOf<String?>(null) }
@@ -172,6 +174,19 @@ fun RunSessionScreen(
             if (isGranted) viewModel.startListening()
         }
     )
+
+    // Wake word detection: start when run is active, stop when run ends
+    val audioPermissionGranted = remember(context) {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+    LaunchedEffect(runState.isRunning, audioPermissionGranted) {
+        if (runState.isRunning && audioPermissionGranted) {
+            viewModel.startWakeWordDetection()
+        } else {
+            viewModel.stopWakeWordDetection()
+        }
+    }
 
     LaunchedEffect(Unit) {
         // CRITICAL: Validate auth token before starting a run. If expired, clear session and navigate to login.
@@ -285,6 +300,7 @@ fun RunSessionScreen(
                     isMuted = runState.isMuted,
                     actionsEnabled = !isRunActive,
                     micEnabled = true,
+                    isListeningForWakeWord = wakeWordState == WakeWordDetector.State.WATCHING,
                     onCoachToggle = { viewModel.toggleCoach() },
                     onMicClick = {
                         when (PackageManager.PERMISSION_GRANTED) {
@@ -2090,6 +2106,7 @@ fun TopBarSection(
     isMuted: Boolean,
     actionsEnabled: Boolean,
     micEnabled: Boolean,
+    isListeningForWakeWord: Boolean = false,
     onCoachToggle: () -> Unit,
     onMicClick: () -> Unit,
     onShareClick: () -> Unit,
@@ -2150,11 +2167,50 @@ fun TopBarSection(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm), verticalAlignment = Alignment.CenterVertically) {
+            // Wake word pulse indicator — shown when actively listening for "hey coach"
+            if (isListeningForWakeWord) {
+                val pulseAlpha by androidx.compose.animation.core.rememberInfiniteTransition(label = "wake_pulse")
+                    .animateFloat(
+                        initialValue = 0.3f,
+                        targetValue = 1f,
+                        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                            animation = androidx.compose.animation.core.tween(900),
+                            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+                        ),
+                        label = "wake_alpha"
+                    )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Colors.primary.copy(alpha = 0.15f))
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(Colors.primary.copy(alpha = pulseAlpha))
+                        )
+                        Text(
+                            text = "Hey Coach",
+                            style = AppTextStyles.caption,
+                            color = Colors.primary.copy(alpha = pulseAlpha),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+
             IconButton(onClick = onMicClick, modifier = Modifier.size(36.dp), enabled = micEnabled) {
                 Icon(
                     painter = painterResource(id = R.drawable.icon_mic_vector),
                     contentDescription = "Talk to coach",
-                    tint = Colors.primary
+                    tint = if (isListeningForWakeWord) Colors.primary.copy(alpha = 0.5f) else Colors.primary
                 )
             }
 

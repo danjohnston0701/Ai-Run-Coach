@@ -39,6 +39,7 @@ import live.airuncoach.airuncoach.data.SyncQueue
 import live.airuncoach.airuncoach.utils.SpeechRecognizerHelper
 import live.airuncoach.airuncoach.utils.SpeechState
 import live.airuncoach.airuncoach.utils.SpeechStatus
+import live.airuncoach.airuncoach.utils.WakeWordDetector
 import live.airuncoach.airuncoach.util.NavigationRouteHolder
 import live.airuncoach.airuncoach.utils.TextToSpeechHelper
 import java.util.Locale
@@ -345,6 +346,32 @@ class RunSessionViewModel @Inject constructor(
     private val speechRecognizerHelper = SpeechRecognizerHelper(context)
     private val textToSpeechHelper = TextToSpeechHelper(context)
     private val audioPlayerHelper = AudioPlayerHelper(context)
+
+    // ── Wake word detection ("hey coach") ────────────────────────────────────
+    private val wakeWordDetector = WakeWordDetector(context) {
+        // Fires on main thread when "hey coach" is detected
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            onWakeWordDetected()
+        }
+    }
+    /** True while the user-preference "voice activation" is enabled */
+    private var voiceActivationEnabled: Boolean = true
+
+    /** Expose wake word detector state to the UI */
+    val wakeWordState: StateFlow<WakeWordDetector.State> = wakeWordDetector.state
+
+    // Observe watch-initiated talk-to-coach requests
+    init {
+        viewModelScope.launch {
+            RunTrackingService.watchTalkToCoachRequest.collect { requested ->
+                if (requested) {
+                    RunTrackingService.clearWatchTalkToCoachRequest()
+                    Log.d("RunSessionViewModel", "⌚ Watch tap → triggering talk-to-coach")
+                    onWakeWordDetected() // reuses the same flow as the phone wake word
+                }
+            }
+        }
+    }
     private val weatherRepository = WeatherRepository(context)
     private val sessionCoachingHelper = SessionCoachingHelper(apiService)  // NEW: Session coaching
 
@@ -1058,10 +1085,52 @@ class RunSessionViewModel @Inject constructor(
         _runState.update { it.copy(isRunning = false, isPaused = false, isStopping = true) }
     }
 
-    fun startListening() {
+    // ── Wake word ─────────────────────────────────────────────────────────────
+
+    /** Called by [WakeWordDetector] when "hey coach" is heard. */
+    private fun onWakeWordDetected() {
+        Log.d("RunSessionViewModel", "🎤 Wake word detected — opening query window")
+        // Play a short audio cue so the user knows they can speak
+        textToSpeechHelper.speak("Yes?", accent = user?.coachAccent)
+        startListening(fromWakeWord = true)
+    }
+
+    /** Start/stop wake word detection in sync with run active state. */
+    fun startWakeWordDetection() {
+        if (voiceActivationEnabled) {
+            wakeWordDetector.startWatching()
+            Log.d("RunSessionViewModel", "Wake word detection started")
+        }
+    }
+
+    fun stopWakeWordDetection() {
+        wakeWordDetector.stopWatching()
+        Log.d("RunSessionViewModel", "Wake word detection stopped")
+    }
+
+    fun setVoiceActivationEnabled(enabled: Boolean) {
+        voiceActivationEnabled = enabled
+        if (!enabled) {
+            wakeWordDetector.stopWatching()
+        } else if (_runState.value.isRunning) {
+            wakeWordDetector.startWatching()
+        }
+    }
+
+    // ── Talk to Coach ─────────────────────────────────────────────────────────
+
+    /**
+     * Begin a talk-to-coach session (5-second silence timeout).
+     * [fromWakeWord] = true means this was triggered by "hey coach" — the wake
+     * detector is already paused and will be resumed after the exchange.
+     */
+    fun startListening(fromWakeWord: Boolean = false) {
+        // Pause the wake word detector while we handle the full query
+        if (!fromWakeWord) wakeWordDetector.pauseListening()
+
         speechRecognizerHelper.startListening()
         _runState.update { it.copy(coachText = "Listening...") }
-        
+
         // Collect speech recognition results
         viewModelScope.launch {
             speechRecognizerHelper.speechState.collect { speechState ->
@@ -1072,20 +1141,35 @@ class RunSessionViewModel @Inject constructor(
                     SpeechStatus.IDLE -> {
                         if (speechState.text.isNotEmpty()) {
                             _runState.update { it.copy(coachText = "You said: ${speechState.text}") }
-                            sendMessageToCoach(speechState.text)
+                            sendMessageToCoach(speechState.text, onComplete = {
+                                wakeWordDetector.resumeListening()
+                            })
                         }
                     }
+                    SpeechStatus.TIMED_OUT -> {
+                        // User didn't speak within 5 seconds — cancel quietly
+                        Log.d("RunSessionViewModel", "Speech timeout — no query received")
+                        _runState.update { it.copy(coachText = "") }
+                        wakeWordDetector.resumeListening()
+                        return@collect
+                    }
                     SpeechStatus.ERROR -> {
-                        _runState.update { 
-                            it.copy(coachText = "Sorry, I couldn't hear you. Try again!") 
+                        _runState.update {
+                            it.copy(coachText = "Sorry, I couldn't hear you. Try again!")
                         }
+                        viewModelScope.launch {
+                            kotlinx.coroutines.delay(2000)
+                            _runState.update { it.copy(coachText = "") }
+                        }
+                        wakeWordDetector.resumeListening()
+                        return@collect
                     }
                 }
             }
         }
     }
     
-    private fun sendMessageToCoach(message: String) {
+    private fun sendMessageToCoach(message: String, onComplete: (() -> Unit)? = null) {
         viewModelScope.launch {
             try {
                 _runState.update { it.copy(coachText = "Thinking...") }
@@ -1130,21 +1214,24 @@ class RunSessionViewModel @Inject constructor(
                     if (response.audio != null && response.format != null) {
                         audioPlayerHelper.playAudio(response.audio!!, response.format!!) {
                             isBriefingAudioPlaying = false
-                            // Clear coach text after audio completes
                             _runState.update { it.copy(coachText = "") }
+                            onComplete?.invoke()
                         }
                     } else {
                         textToSpeechHelper.speak(response.message, accent = user?.coachAccent)
                         isBriefingAudioPlaying = false
-                        // Clear coach text after TTS completes
                         _runState.update { it.copy(coachText = "") }
+                        onComplete?.invoke()
                     }
+                } else {
+                    onComplete?.invoke()
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
-                _runState.update { 
-                    it.copy(coachText = "Sorry, I couldn't process that. Keep going!") 
+                _runState.update {
+                    it.copy(coachText = "Sorry, I couldn't process that. Keep going!")
                 }
+                onComplete?.invoke()
             }
         }
     }
@@ -1204,5 +1291,7 @@ class RunSessionViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         textToSpeechHelper.destroy()
+        wakeWordDetector.stopWatching()
+        speechRecognizerHelper.destroy()
     }
 }
