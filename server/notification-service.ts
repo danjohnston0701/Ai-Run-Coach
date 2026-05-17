@@ -293,6 +293,7 @@ export async function broadcastGarminWatchAppUpdate(
   const notificationData: Record<string, string> = {
     type: "garmin_watch_update",
     version,
+    releaseNote: body,  // Pass the full release note/body to the app
     storeUrl,
     action: "open_connect_iq_store",
     timestamp: new Date().toISOString(),
@@ -318,16 +319,26 @@ export async function broadcastGarminWatchAppUpdate(
         const app = await getFirebaseApp();
         if (app) {
           try {
+            // DATA-ONLY message — no `notification` field.
+            // This forces Firebase to always call onMessageReceived() on Android
+            // regardless of whether the app is in foreground, background, or killed.
+            // Our onMessageReceived() builds the notification with a PendingIntent
+            // that opens the Connect IQ store URL on tap.
+            // If we included a `notification` field, Firebase would show the notification
+            // automatically when the app is backgrounded/killed and tapping it would
+            // just open MainActivity instead of the store URL.
             const message: any = {
               token: user.fcmToken,
-              notification: { title, body },
-              data: notificationData,
+              data: {
+                ...notificationData,
+                title,   // read by onMessageReceived via message.data["title"]
+                body,    // read by onMessageReceived via message.data["body"]
+              },
               android: {
                 priority: "high",
+                // Channel used by onMessageReceived when building the notification
                 notification: {
                   channelId: "garmin_watch_updates",
-                  sound: "default",
-                  clickAction: "OPEN_CONNECT_IQ_STORE",
                 },
               },
             };
@@ -380,29 +391,4 @@ export async function sendCoachingPlanReminder(
       type: "coaching_plan_reminder",
       workoutName,
       distance: distance?.toString() ?? "",
-      intensity: intensity ?? "",
-      timestamp: new Date().toISOString(),
-    };
-
-    // 1. In-app notification
-    await storage.createNotification({
-      userId,
-      title,
-      message: body,  // schema field is 'message'
-      type: "coaching_plan_reminder",
-      data: notificationData,
-      read: false,
-    });
-    results.inAppSent = true;
-    console.log(`[Notification] In-app coaching plan reminder created for user ${userId}: "${workoutName}"`);
-
-    // 2. Firebase push notification
-    const pushSent = await sendFirebasePush(userId, title, body, notificationData);
-    results.pushSent = pushSent;
-
-    return results;
-  } catch (error) {
-    console.error("[Notification] Failed to send coaching plan reminder:", error);
-    return results;
-  }
-}
+      intensit

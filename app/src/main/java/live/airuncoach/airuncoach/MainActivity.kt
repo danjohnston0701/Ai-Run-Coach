@@ -45,10 +45,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Handle notification tap intents (e.g. open Connect IQ store)
-        handleNotificationIntent(intent)
-
         android.util.Log.d("MainActivity", "onCreate called")
+        android.util.Log.d("MainActivity", "Intent action: ${intent?.action}")
+        
+        // Ensure the intent is preserved for later use
+        if (intent == null) {
+            android.util.Log.w("MainActivity", "Intent is null in onCreate!")
+        }
         
         // Initialize RetrofitClient before anything else
         try {
@@ -94,10 +97,15 @@ class MainActivity : ComponentActivity() {
         val launchToActiveRun = intent?.getBooleanExtra(RunTrackingService.EXTRA_ACTIVE_RUN, false) == true
 
         // Check if this is a Garmin watch update notification tap
-        val garminUpdateVersion = if (intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE)
-            intent.getStringExtra("version") ?: "" else null
-        val garminUpdateReleaseNote = if (intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE)
-            intent.getStringExtra("releaseNote") ?: "" else null
+        val isGarminUpdateNotification = intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE
+        val garminUpdateVersion = if (isGarminUpdateNotification) 
+            intent?.getStringExtra("version") ?: "" else null
+        val garminUpdateReleaseNote = if (isGarminUpdateNotification) 
+            intent?.getStringExtra("releaseNote") ?: "" else null
+        
+        Log.d("MainActivity", "Is Garmin update notification: $isGarminUpdateNotification")
+        Log.d("MainActivity", "Garmin update version: '$garminUpdateVersion'")
+        Log.d("MainActivity", "Garmin update release note: '$garminUpdateReleaseNote'")
         Log.d("MainActivity", "Launch to active run: $launchToActiveRun")
 
         try {
