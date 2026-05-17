@@ -10,9 +10,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -24,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.service.AiRunCoachMessagingService
+import live.airuncoach.airuncoach.service.GarminWatchManager
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
@@ -32,9 +35,12 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 /**
  * Shown when the user taps a "Garmin Watch App Update Available" push notification.
  *
- * Displays update details and a prominent button that opens the Connect IQ store
- * listing from within this Activity context — bypassing any App Link interception
- * by the Garmin Connect app.
+ * Displays:
+ *  - Currently installed watch app version (reported by the watch on connect, stored locally)
+ *  - New version available
+ *  - Release notes
+ *  - A prominent button that opens the Connect IQ store listing from within this Activity
+ *    context — bypassing any App Link interception by the Garmin Connect app.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,6 +51,12 @@ fun GarminWatchUpdateScreen(
 ) {
     val context = LocalContext.current
     val storeUrl = AiRunCoachMessagingService.CONNECT_IQ_STORE_URL
+
+    // Read the installed version that the watch reported on last connection
+    val installedVersion = remember {
+        context.getSharedPreferences("garmin_watch_prefs", android.content.Context.MODE_PRIVATE)
+            .getString(GarminWatchManager.PREF_WATCH_APP_VERSION, null)
+    }
 
     Scaffold(
         topBar = {
@@ -123,15 +135,63 @@ fun GarminWatchUpdateScreen(
                 textAlign = TextAlign.Center
             )
 
-            if (version.isNotBlank()) {
-                Spacer(modifier = Modifier.height(Spacing.xs))
-                Text(
-                    text = "Version $version",
-                    style = AppTextStyles.body,
-                    color = Colors.primary,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center
-                )
+            Spacer(modifier = Modifier.height(Spacing.md))
+
+            // Version pill row — shows "Installed → New" when we know both
+            if (installedVersion != null || version.isNotBlank()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+                    shape = RoundedCornerShape(BorderRadius.md)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(Spacing.md),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Installed version
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Installed",
+                                style = AppTextStyles.small,
+                                color = Colors.textSecondary
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (installedVersion != null) "v$installedVersion" else "—",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                                color = Colors.textSecondary
+                            )
+                        }
+
+                        // Arrow
+                        Spacer(modifier = Modifier.width(Spacing.lg))
+                        Icon(
+                            imageVector = Icons.Default.ArrowForward,
+                            contentDescription = null,
+                            tint = Colors.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(Spacing.lg))
+
+                        // New version
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "New",
+                                style = AppTextStyles.small,
+                                color = Colors.textSecondary
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (version.isNotBlank()) "v$version" else "Latest",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                                color = Colors.primary
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(Spacing.md))

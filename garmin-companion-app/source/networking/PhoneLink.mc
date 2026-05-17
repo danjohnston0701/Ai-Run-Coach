@@ -44,6 +44,17 @@ class PhoneLink {
         Sys.println("PhoneLink tx command: " + action);
     }
 
+    // ── Send app version to phone on first connect ────────────────────────────
+    // The phone stores this so the Watch Update notification screen can show
+    // "Installed: X.Y.Z → New: A.B.C" to the user.
+    function sendHello(appVersion) {
+        _transmit({
+            "type"       => "hello",
+            "appVersion" => appVersion
+        });
+        Sys.println("PhoneLink tx hello: v" + appVersion);
+    }
+
     // ── Send run data to phone (Scenario 3 — optional confirmation) ───────────
     // Not required in Scenario 2 (phone already has the data).
     function sendRunData(data) {

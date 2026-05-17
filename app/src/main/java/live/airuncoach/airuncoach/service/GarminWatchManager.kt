@@ -80,6 +80,9 @@ class GarminWatchManager(private val context: Context) {
         private const val TAG = "GarminWatchManager"
         // Must match the UUID in garmin-companion-app/manifest.xml (production)
         const val APP_ID = "C7BF12555C184F9FB1F82B49E72E20A2"
+        /** SharedPreferences key — the watch app version last reported via the "hello" message. */
+        const val PREF_WATCH_APP_VERSION = "garmin_watch_installed_version"
+        private const val PREFS_NAME = "garmin_watch_prefs"
     }
 
     // ── Public state ──────────────────────────────────────────────────────────
@@ -100,6 +103,11 @@ class GarminWatchManager(private val context: Context) {
 
     /** Invoked when a command message arrives from the watch. */
     var onWatchCommand: ((action: String) -> Unit)? = null
+
+    /** Returns the last version string received from the watch, or null if never connected. */
+    fun getInstalledWatchVersion(): String? =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(PREF_WATCH_APP_VERSION, null)
 
     /**
      * Invoked when the watch sends a GPS fix during a phone-controlled run.
@@ -330,6 +338,16 @@ class GarminWatchManager(private val context: Context) {
             val map    = data?.firstOrNull() as? Map<String, Any> ?: return
             val type   = map["type"] as? String ?: return
             when (type) {
+                "hello" -> {
+                    // Watch reports its installed app version on first connect.
+                    // Persisted so GarminWatchUpdateScreen can show "Installed vs New".
+                    val watchVersion = map["appVersion"] as? String
+                    if (!watchVersion.isNullOrBlank()) {
+                        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                            .edit().putString(PREF_WATCH_APP_VERSION, watchVersion).apply()
+                        Log.d(TAG, "Watch app version reported: $watchVersion")
+                    }
+                }
                 "command" -> {
                     val action = map["action"] as? String ?: return
                     Log.d(TAG, "Watch command: $action")

@@ -364,6 +364,9 @@ class RunView extends Ui.View {
                     _overlayState = _gpsReady ? OVERLAY_READY : OVERLAY_GPS_WAIT;
                 }
                 Sys.println("Auth received — overlayState=" + _overlayState);
+                // Tell the phone which watch app version is installed so the
+                // "Watch App Update" notification screen can show the diff.
+                _phoneLink.sendHello("2.4.1");
                 // If GPS was already locked before auth arrived, notify phone now
                 if (_gpsReady && !_isRunning && !_sessionReadySent) {
                     _phoneLink.sendCommand("sessionReady");
