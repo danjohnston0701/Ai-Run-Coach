@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -41,6 +42,11 @@ class MainActivity : ComponentActivity() {
 
     // Injected singleton — shared with RunTrackingService and ViewModels via Hilt
     @Inject lateinit var garminWatchManager: GarminWatchManager
+
+    // Mutable state so that notification taps arriving via onNewIntent() (when the
+    // activity is already running with singleTop launchMode) can trigger navigation.
+    // The LaunchedEffect in setContent observes this and navigates to the update screen.
+    private val _pendingGarminUpdate = mutableStateOf<Pair<String, String>?>(null)
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -124,6 +130,7 @@ class MainActivity : ComponentActivity() {
                         
                         // Navigate to active run if launched from notification
                         // Only navigate after navigation graph is set up (when graph is not empty)
+                        // Handle deep links from onCreate (cold launch)
                         LaunchedEffect(navController, launchToActiveRun, sharedRunId, garminUpdateVersion) {
                             // Add delay to ensure navigation graph is ready
                             delay(100)
@@ -156,6 +163,26 @@ class MainActivity : ComponentActivity() {
                                 } catch (e: Exception) {
                                     Log.e("MainActivity", "Shared run navigation failed", e)
                                 }
+                            }
+                        }
+
+                        // Handle Garmin update notification taps via onNewIntent
+                        // (when the app is already running — singleTop launch mode)
+                        val pendingUpdate = _pendingGarminUpdate.value
+                        LaunchedEffect(pendingUpdate) {
+                            if (pendingUpdate != null) {
+                                val version = pendingUpdate.first
+                                val releaseNote = pendingUpdate.second
+                                Log.d("MainActivity", "Pending Garmin update observed → navigating to update screen v$version")
+                                try {
+                                    navController.navigate(AppRoutes.garminWatchUpdate(
+                                        version = version,
+                                        releaseNote = releaseNote
+                                    ))
+                                } catch (e: Exception) {
+                                    Log.e("MainActivity", "Garmin update navigation (onNewIntent) failed", e)
+                                }
+                                _pendingGarminUpdate.value = null // consume the event
                             }
                         }
                         
@@ -207,10 +234,14 @@ class MainActivity : ComponentActivity() {
      * Activity context avoids the App Link interception entirely.
      */
     private fun handleNotificationIntent(intent: Intent?) {
-        // Navigation for garmin_watch_update is now handled in-app via LaunchedEffect
-        // (navigates to GarminWatchUpdateScreen instead of opening an external URL)
+        // When the activity is already running (singleTop), onNewIntent() is called
+        // instead of onCreate(). Push the update data into LiveData so the composable
+        // LaunchedEffect picks it up and navigates.
         if (intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE) {
-            Log.d("MainActivity", "Garmin watch update notification tap received — will navigate to update screen")
+            val version     = intent.getStringExtra("version") ?: ""
+            val releaseNote = intent.getStringExtra("releaseNote") ?: ""
+            Log.d("MainActivity", "Garmin watch update notification tap → posting pending update v$version")
+            _pendingGarminUpdate.value = Pair(version, releaseNote)
         }
     }
     

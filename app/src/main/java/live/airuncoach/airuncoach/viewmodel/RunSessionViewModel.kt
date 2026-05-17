@@ -380,6 +380,63 @@ class RunSessionViewModel @Inject constructor(
                 }
             }
         }
+
+        // ── Watch command handler ─────────────────────────────────────────────
+        // The DI singleton GarminWatchManager is alive as soon as the ViewModel
+        // is created (i.e. the user has opened the Run screen).  If the user
+        // presses START on the watch *before* tapping Start on the phone, the
+        // RunTrackingService doesn't exist yet — so this handler bridges the gap.
+        garminWatchManager.onWatchCommand = { action ->
+            Log.d("RunSessionViewModel", "⌚ Watch command received in ViewModel: $action")
+            when (action) {
+                "start" -> {
+                    Log.d("RunSessionViewModel", "⌚ Watch START → calling startRun() from ViewModel")
+                    startRun()
+                }
+                "pause" -> {
+                    Log.d("RunSessionViewModel", "⌚ Watch PAUSE")
+                    val intent = android.content.Intent(context, RunTrackingService::class.java).apply {
+                        this.action = RunTrackingService.ACTION_PAUSE_TRACKING
+                    }
+                    try { context.startService(intent) } catch (e: Exception) {
+                        Log.w("RunSessionViewModel", "pause intent failed: ${e.message}")
+                    }
+                }
+                "resume" -> {
+                    Log.d("RunSessionViewModel", "⌚ Watch RESUME")
+                    val intent = android.content.Intent(context, RunTrackingService::class.java).apply {
+                        this.action = RunTrackingService.ACTION_RESUME_TRACKING
+                    }
+                    try { context.startService(intent) } catch (e: Exception) {
+                        Log.w("RunSessionViewModel", "resume intent failed: ${e.message}")
+                    }
+                }
+                "stop" -> {
+                    Log.d("RunSessionViewModel", "⌚ Watch STOP")
+                    val intent = android.content.Intent(context, RunTrackingService::class.java).apply {
+                        this.action = RunTrackingService.ACTION_STOP_TRACKING
+                    }
+                    try { context.startService(intent) } catch (e: Exception) {
+                        Log.w("RunSessionViewModel", "stop intent failed: ${e.message}")
+                    }
+                }
+                "watchReady" -> {
+                    Log.d("RunSessionViewModel", "⌚ Watch ready — pushing auth token")
+                    viewModelScope.launch {
+                        val token = sessionManager.getAuthToken()
+                        val name = user?.name ?: ""
+                        if (token != null) garminWatchManager.sendAuth(token, name)
+                    }
+                }
+                "sessionReady" -> {
+                    Log.d("RunSessionViewModel", "⌚ Watch session ready (GPS locked)")
+                }
+                "talkToCoach" -> {
+                    Log.d("RunSessionViewModel", "⌚ Watch tap → talk to coach from ViewModel")
+                    onWakeWordDetected()
+                }
+            }
+        }
     }
     private val weatherRepository = WeatherRepository(context)
     private val sessionCoachingHelper = SessionCoachingHelper(apiService)  // NEW: Session coaching

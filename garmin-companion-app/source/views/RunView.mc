@@ -233,6 +233,7 @@ class RunView extends Ui.View {
         // Always start local Garmin session AND notify phone (phone must activate its run session for coaching)
         _startSession();
         _phoneLink.sendCommand("start");
+        Sys.println(">>> startRun() — session started, start command sent to phone");
         _vibeShort();
         Ui.requestUpdate();
     }
@@ -932,6 +933,16 @@ class RunView extends Ui.View {
 // =============================================================================
 // RunDelegate — button handling
 // =============================================================================
+// KEY DESIGN:
+//   Physical START button (top-right) → onKey(KEY_ENTER / KEY_START) → start / pause / resume
+//   Screen tap                        → onTap()  → "Talk to Coach" during active run, ignored otherwise
+//   Screen hold                       → onHold() → always consumed (no action)
+//   BACK button                       → onBack() → exit / pause / finish-confirm
+//
+// We deliberately do NOT override onSelect() because on touchscreen Garmin
+// watches (Fenix 7, Venu, etc.) the firmware routes BOTH physical-button AND
+// screen-tap events through onSelect(), making it impossible to distinguish
+// between them.  Using onKey() + onTap() gives us clean separation.
 
 class RunDelegate extends Ui.BehaviorDelegate {
     private var _view;
@@ -939,30 +950,43 @@ class RunDelegate extends Ui.BehaviorDelegate {
     function setView(v)        { _view = v; }
 
     // ── Physical START button (top-right) ─────────────────────────────────────
-    // onSelect() fires on the physical START button press.
-    // Screen taps are consumed silently by onTap() / onHold() below.
-    function onSelect() {
-        if (_view == null) { return true; }
-        if (!_view.isRunning())     { _view.startRun();  }
-        else if (_view.isPaused())  { _view.resumeRun(); }
-        else                        { _view.pauseRun();  }
-        return true;
+    // onKey() fires ONLY for physical hardware buttons — never for screen taps.
+    // KEY_ENTER is the standard mapping for the START/STOP button on all Garmin
+    // devices.  We also check KEY_START for older firmware revisions.
+    function onKey(keyEvent) {
+        var key = keyEvent.getKey();
+        if (key == Ui.KEY_ENTER || key == Ui.KEY_START) {
+            if (_view == null) { return true; }
+            Sys.println(">>> onKey: START button pressed, isRunning=" + _view.isRunning() + " isPaused=" + _view.isPaused());
+            if (!_view.isRunning())     { _view.startRun();  }
+            else if (_view.isPaused())  { _view.resumeRun(); }
+            else                        { _view.pauseRun();  }
+            return true;
+        }
+        return false; // let other keys propagate (e.g. BACK handled by onBack)
     }
 
     // ── Screen touch ──────────────────────────────────────────────────────────
     // Single tap during an active run = "Talk to Coach" request.
     // Tap before or after a run (ready/finished screens) = ignored.
-    // Hold = always ignored to prevent accidental triggers.
+    // ALWAYS returns true so the tap is consumed and never falls through to
+    // onSelect() which would incorrectly start/pause the run.
     function onTap(clickEvent) {
+        Sys.println(">>> onTap: screen touched, consuming event (no start/pause)");
         if (_view != null && _view.isRunning() && !_view.isPaused()) {
-            // Tell the phone to open the talk-to-coach query window
             _view.requestTalkToCoach();
         }
-        return true; // always consume
+        return true; // always consume — screen touches must NEVER start/pause a run
     }
 
     function onHold(clickEvent) {
         return true; // consume — do nothing
+    }
+
+    // ── Swipe ─────────────────────────────────────────────────────────────────
+    // Consume swipes so they don't accidentally trigger any behavior.
+    function onSwipe(swipeEvent) {
+        return true;
     }
 
     // ── BACK button ───────────────────────────────────────────────────────────

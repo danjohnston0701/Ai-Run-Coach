@@ -573,9 +573,15 @@ class RunTrackingService : Service(), SensorEventListener {
             // where SDK fires callbacks before handlers are assigned
             garminWatchManager?.let { manager ->
                 manager.onWatchCommand = { action ->
-                    Log.d("RunTrackingService", "Watch command received: $action")
+                    Log.d("RunTrackingService", "⌚ Watch command received: $action")
                     when (action) {
-                        "start"      -> startForegroundService(Intent(this, RunTrackingService::class.java).apply { this.action = ACTION_START_TRACKING })
+                        "start"      -> {
+                            // Call startTracking() directly — the service is already running.
+                            // Previously used startForegroundService() which fails on Android 12+
+                            // when the app is in the background (user looking at watch, not phone).
+                            Log.d("RunTrackingService", "⌚ Watch START → calling startTracking() directly")
+                            startTracking()
+                        }
                         "pause"      -> pauseTracking()
                         "resume"     -> resumeTracking()
                         "stop"       -> stopTracking()
@@ -1783,11 +1789,16 @@ class RunTrackingService : Service(), SensorEventListener {
      * Called by [GarminWatchManager.onWatchGpsUpdate] during phone-controlled runs.
      */
     fun injectWatchLocation(lat: Double, lng: Double, altM: Double?, speedMs: Float?) {
-        // Guard: only process if run session is active and tracking
-        if (!isTracking || _currentRunSession.value == null) {
-            Log.d("RunTrackingService", "Ignoring watch GPS injection: isTracking=$isTracking, sessionExists=${_currentRunSession.value != null}")
+        // Guard: only process if tracking is active
+        if (!isTracking) {
+            Log.d("RunTrackingService", "Ignoring watch GPS injection: isTracking=false")
             return
         }
+        // NOTE: We intentionally do NOT check _currentRunSession.value here.
+        // When the run is started from the watch, the phone's own GPS may not
+        // have delivered a fix yet — so _currentRunSession is still null.
+        // onNewLocation() creates the RunSession on the first GPS fix, regardless
+        // of whether it comes from the phone or the watch.
         val loc = android.location.Location("garmin").apply {
             latitude  = lat
             longitude = lng
@@ -1812,11 +1823,15 @@ class RunTrackingService : Service(), SensorEventListener {
      * and queues a [WatchBiometricFrame] sample for storage in watch_biometric_samples.
      */
     private fun updateWatchSensorData(frame: WatchBiometricFrame) {
-        // Guard: only process if run session is active and tracking
-        if (!isTracking || _currentRunSession.value == null) {
-            Log.d("RunTrackingService", "Ignoring watch sensor data: isTracking=$isTracking, sessionExists=${_currentRunSession.value != null}")
+        // Guard: only process if tracking is active
+        if (!isTracking) {
+            Log.d("RunTrackingService", "Ignoring watch sensor data: isTracking=false")
             return
         }
+        // NOTE: We still accumulate HR/cadence/dynamics data even if _currentRunSession
+        // is null (awaiting first GPS fix from phone or watch).  The running dynamics
+        // accumulators (watchGctSum, watchHR, etc.) are independent of the RunSession.
+        // The RunSession will pick them up once the first GPS fix creates it.
 
         Log.d("RunTrackingService",
             "Watch frame: hr=${frame.heartRate} cad=${frame.cadence} " +
