@@ -457,12 +457,20 @@ class RunSessionViewModel @Inject constructor(
         loadAiCoachPreference()
         viewModelScope.launch {
             runSession.collect { session ->
-                session?.let { 
+                session?.let {
                     // Update interval tracking if this is an interval workout
                     val updatedIntervalPhase = if (_runState.value.isIntervalWorkout) {
                         updateIntervalTracking(session)
                     } else null
-                    
+
+                    // Detect when the service transitions the session to inactive (isActive→false).
+                    // This happens when the watch sends "stop" and stopTracking() finalises the session.
+                    // In that case the service handler calls stopTracking() directly without going through
+                    // the ViewModel's stopRun() — so isStopping is never set via the normal path.
+                    // Setting it here ensures the RunSessionScreen navigation guard fires correctly.
+                    val wasRunning = _runState.value.isRunning
+                    val sessionJustEnded = wasRunning && !session.isActive
+
                     val updatedState = _runState.value.copy(
                         time = session.getFormattedDuration(),
                         distance = String.format("%.2f", session.getDistanceInKm()),
@@ -471,9 +479,12 @@ class RunSessionViewModel @Inject constructor(
                         cadence = session.cadence.toString(),
                         heartRate = session.heartRate.toString(),
                         intervalPhase = updatedIntervalPhase ?: _runState.value.intervalPhase,
-                        isRunning = session.isActive && !_runState.value.isPaused
+                        isRunning = session.isActive && !_runState.value.isPaused,
+                        // Automatically set isStopping when the service ends the session
+                        // (covers watch-initiated stop where ViewModel.stopRun() is not called)
+                        isStopping = if (sessionJustEnded) true else _runState.value.isStopping
                     )
-                    
+
                     _runState.update { updatedState }
                 }
             }

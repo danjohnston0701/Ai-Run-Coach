@@ -2647,8 +2647,19 @@ class RunTrackingService : Service(), SensorEventListener {
                     // Get end weather and finalize run
                     weatherAtEnd = weatherRepository.getCurrentWeather()
                     _currentRunSession.value?.let { session ->
+                        // If the run was stopped while paused, pauseStartTime is still set but
+                        // hasn't been added to totalPausedMs yet (that only happens in resumeTracking).
+                        // Account for it now so the final active duration is correct.
+                        val finalPausedMs = if (pauseStartTime > 0) {
+                            totalPausedMs + (System.currentTimeMillis() - pauseStartTime)
+                        } else {
+                            totalPausedMs
+                        }
+                        val finalDurationMs = (System.currentTimeMillis() - startTime) - finalPausedMs
+
                         val finalSession = session.copy(
                             endTime = System.currentTimeMillis(),
+                            duration = finalDurationMs.coerceAtLeast(0L),
                             weatherAtEnd = weatherAtEnd,
                             isActive = false
                         )

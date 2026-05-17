@@ -281,10 +281,14 @@ class RunView extends Ui.View {
         Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
         _gpsListening = false;
         Sensor.enableSensorEvents(null);
-        // Always notify phone, always stop local recording and finalise backend session
+        // Always notify phone, always stop local recording
         _phoneLink.sendCommand("stop");
         _stopSession();
-        if (_dataStreamer != null && _sampleN > 0) {
+        // Only call DataStreamer.endSession() for STANDALONE watch runs (no phone connection).
+        // When the phone is connected (_isConnected), the phone owns the run session and saves
+        // it to the backend itself.  Calling endSession() here would create a duplicate run record
+        // AND can crash the watch app (IQ error) if ConnectIQ was already shut down on the phone side.
+        if (!_isConnected && _dataStreamer != null && _sampleN > 0) {
             var n = _sampleN.toFloat();
             _dataStreamer.endSession({
                 "distance"    => _distance,
