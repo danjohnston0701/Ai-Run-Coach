@@ -41,7 +41,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.google.gson.Gson
+import kotlinx.coroutines.delay
 import live.airuncoach.airuncoach.AppRoutes
+import live.airuncoach.airuncoach.MainActivity
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
 import live.airuncoach.airuncoach.domain.model.RunSetupConfig
@@ -89,6 +91,23 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+    }
+
+    // ── Deep-link / notification routing ──────────────────────────────────────
+    // run_summary and run_session live in THIS inner NavHost, not the root one.
+    // MainActivity.pendingDeepLink is set by both cold-launch (onCreate) and
+    // warm-launch (onNewIntent → handleNotificationIntent) paths and consumed here.
+    val deepLinkRoute = MainActivity.pendingDeepLink.value
+    LaunchedEffect(deepLinkRoute) {
+        val route = deepLinkRoute ?: return@LaunchedEffect
+        delay(300) // let the inner NavHost finish initial composition
+        Log.d("MainScreen", "Consuming pendingDeepLink → $route")
+        try {
+            navController.navigate(route)
+        } catch (e: Exception) {
+            Log.e("MainScreen", "Deep-link navigation failed: $route", e)
+        }
+        MainActivity.pendingDeepLink.value = null // consume
     }
 
     // Hide bottom navigation during run session

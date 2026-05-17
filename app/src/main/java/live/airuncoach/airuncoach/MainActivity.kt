@@ -43,9 +43,7 @@ class MainActivity : ComponentActivity() {
     // Injected singleton — shared with RunTrackingService and ViewModels via Hilt
     @Inject lateinit var garminWatchManager: GarminWatchManager
 
-    // Mutable state so that notification taps arriving via onNewIntent() (when the
-    // activity is already running with singleTop launchMode) can trigger navigation.
-    // The LaunchedEffect in setContent observes this and navigates to the update screen.
+    // Garmin watch update pending state (navigates to root-level garmin_watch_update screen)
     private val _pendingGarminUpdate = mutableStateOf<Pair<String, String>?>(null)
     
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,19 +93,30 @@ class MainActivity : ComponentActivity() {
             defaultHandler?.uncaughtException(thread, throwable)
         }
         
-        // Check if this is a shared run deep link
-        val sharedRunId = extractSharedRunId(intent)
-        Log.d("MainActivity", "Shared run deep link: $sharedRunId")
+        // ── Resolve notification / deep link intent ───────────────────────────
+        // URI-based share link:  airuncoach://run/{id}
+        val uriRunId   = extractSharedRunId(intent)
+        // Notification extra:    deeplink_run_id (run_enriched / new_activity)
+        val notifRunId = intent?.getStringExtra("deeplink_run_id")
+        // Combined run ID (URI-based wins over notification extra)
+        val anyRunId   = uriRunId ?: notifRunId
 
-        // Check if this is launching from an active run notification
+        // Active-run notification (tap on the ongoing run notification)
         val launchToActiveRun = intent?.getBooleanExtra(RunTrackingService.EXTRA_ACTIVE_RUN, false) == true
 
-        // Check if this is a Garmin watch update notification tap
+        // Garmin watch update notification
         val isGarminUpdateNotification = intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE
-        val garminUpdateVersion = if (isGarminUpdateNotification) 
-            intent?.getStringExtra("version") ?: "" else null
-        val garminUpdateReleaseNote = if (isGarminUpdateNotification) 
-            intent?.getStringExtra("releaseNote") ?: "" else null
+        val garminUpdateVersion     = if (isGarminUpdateNotification) intent?.getStringExtra("version")     ?: "" else null
+        val garminUpdateReleaseNote = if (isGarminUpdateNotification) intent?.getStringExtra("releaseNote") ?: "" else null
+
+        Log.d("MainActivity", "Deep link — uriRun=$uriRunId notifRun=$notifRunId activeRun=$launchToActiveRun garminUpdate=$garminUpdateVersion")
+
+        // Store inner-nav destinations so MainScreen can handle them once its
+        // NavHost is ready. run_summary and run_session are NOT in the root NavHost.
+        when {
+            launchToActiveRun -> pendingDeepLink.value = "run_session"
+            anyRunId != null  -> pendingDeepLink.value = "run_summary/$anyRunId"
+        }
         
         Log.d("MainActivity", "Is Garmin update notification: $isGarminUpdateNotification")
         Log.d("MainActivity", "Garmin update version: '$garminUpdateVersion'")
@@ -128,40 +137,20 @@ class MainActivity : ComponentActivity() {
                         val navController = rememberNavController()
                         Log.d("MainActivity", "NavController created")
                         
-                        // Navigate to active run if launched from notification
-                        // Only navigate after navigation graph is set up (when graph is not empty)
-                        // Handle deep links from onCreate (cold launch)
-                        LaunchedEffect(navController, launchToActiveRun, sharedRunId, garminUpdateVersion) {
-                            // Add delay to ensure navigation graph is ready
-                            delay(100)
-                            if (launchToActiveRun) {
+                        // Cold-launch: handle root-level destinations only.
+                        // Inner-nav destinations (run_summary, run_session) are handled
+                        // by MainScreen observing pendingDeepLink below.
+                        LaunchedEffect(navController, garminUpdateVersion) {
+                            if (garminUpdateVersion != null) {
+                                delay(300) // wait for nav graph + login auto-nav to settle
                                 try {
-                                    val currentRoute = navController.currentBackStackEntry?.destination?.route
-                                    if (currentRoute != null && currentRoute != "run_session") {
-                                        navController.navigate("run_session") {
-                                            popUpTo(0) { inclusive = true }
-                                        }
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e("MainActivity", "Navigation failed", e)
-                                }
-                            } else if (garminUpdateVersion != null) {
-                                // Notification tap for Garmin watch app update — show in-app update screen
-                                try {
-                                    Log.d("MainActivity", "Navigating to Garmin watch update screen v$garminUpdateVersion")
+                                    Log.d("MainActivity", "Cold launch: Garmin watch update v$garminUpdateVersion")
                                     navController.navigate(AppRoutes.garminWatchUpdate(
                                         version = garminUpdateVersion,
                                         releaseNote = garminUpdateReleaseNote ?: ""
                                     ))
                                 } catch (e: Exception) {
                                     Log.e("MainActivity", "Garmin update navigation failed", e)
-                                }
-                            } else if (sharedRunId != null) {
-                                try {
-                                    Log.d("MainActivity", "Navigating to shared run: $sharedRunId")
-                                    navController.navigate("run_summary/$sharedRunId")
-                                } catch (e: Exception) {
-                                    Log.e("MainActivity", "Shared run navigation failed", e)
                                 }
                             }
                         }
@@ -173,7 +162,7 @@ class MainActivity : ComponentActivity() {
                             if (pendingUpdate != null) {
                                 val version = pendingUpdate.first
                                 val releaseNote = pendingUpdate.second
-                                Log.d("MainActivity", "Pending Garmin update observed → navigating to update screen v$version")
+                                Log.d("MainActivity", "Pending Garmin update observed → navigating v$version")
                                 try {
                                     navController.navigate(AppRoutes.garminWatchUpdate(
                                         version = version,
@@ -182,9 +171,12 @@ class MainActivity : ComponentActivity() {
                                 } catch (e: Exception) {
                                     Log.e("MainActivity", "Garmin update navigation (onNewIntent) failed", e)
                                 }
-                                _pendingGarminUpdate.value = null // consume the event
+                                _pendingGarminUpdate.value = null // consume
                             }
                         }
+
+                        // Warm-launch inner-nav deep links are handled by MainScreen
+                        // observing MainActivity.pendingDeepLink — no LaunchedEffect needed here.
                         
                         RootNavigationGraph(navController = navController)
                         Log.d("MainActivity", "Navigation graph set up")
@@ -233,15 +225,42 @@ class MainActivity : ComponentActivity() {
      * Opening our own app first (always reliable), then launching the URL from an
      * Activity context avoids the App Link interception entirely.
      */
+    /**
+     * Handles notification tap intents that arrive via [onNewIntent] (warm launch).
+     *
+     * When the activity is already running (singleTop launchMode), Android calls
+     * onNewIntent() instead of recreating the activity. We push the destination into
+     * mutable state so the composable LaunchedEffects pick it up and navigate.
+     */
+    /**
+     * Routes notification tap intents that arrive via [onNewIntent] (warm launch — app already open).
+     *
+     * Root-level destinations: handled via mutable states read in the setContent LaunchedEffects.
+     * Inner-nav destinations (run_summary, run_session): stored in [pendingDeepLink] which
+     * MainScreen observes and acts on with its own inner NavController.
+     */
     private fun handleNotificationIntent(intent: Intent?) {
-        // When the activity is already running (singleTop), onNewIntent() is called
-        // instead of onCreate(). Push the update data into LiveData so the composable
-        // LaunchedEffect picks it up and navigates.
-        if (intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE) {
-            val version     = intent.getStringExtra("version") ?: ""
-            val releaseNote = intent.getStringExtra("releaseNote") ?: ""
-            Log.d("MainActivity", "Garmin watch update notification tap → posting pending update v$version")
-            _pendingGarminUpdate.value = Pair(version, releaseNote)
+        when {
+            // Garmin watch update → root nav screen
+            intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE -> {
+                val version     = intent.getStringExtra("version") ?: ""
+                val releaseNote = intent.getStringExtra("releaseNote") ?: ""
+                Log.d("MainActivity", "Warm launch: Garmin watch update v$version")
+                _pendingGarminUpdate.value = Pair(version, releaseNote)
+            }
+            // Run-completed / enriched / new_activity → inner nav run_summary
+            intent?.hasExtra("deeplink_run_id") == true -> {
+                val runId = intent.getStringExtra("deeplink_run_id")
+                if (!runId.isNullOrBlank()) {
+                    Log.d("MainActivity", "Warm launch: run_summary/$runId")
+                    pendingDeepLink.value = "run_summary/$runId"
+                }
+            }
+            // Active-run notification → inner nav run_session
+            intent?.getBooleanExtra(RunTrackingService.EXTRA_ACTIVE_RUN, false) == true -> {
+                Log.d("MainActivity", "Warm launch: run_session (active run)")
+                pendingDeepLink.value = "run_session"
+            }
         }
     }
     
@@ -373,7 +392,17 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        /**
+         * A pending inner-nav route (e.g. "run_summary/123" or "run_session") set when
+         * a notification is tapped. MainScreen observes this and navigates once its inner
+         * NavHost is ready, then clears it.
+         *
+         * This is the correct pattern because run_summary/run_session live in the *inner*
+         * NavHost inside MainScreen, not in the root NavHost that MainActivity controls.
+         */
+        val pendingDeepLink = mutableStateOf<String?>(null)
+
         @Volatile
-        var pendingSharedRunId: String? = null
+        var pendingSharedRunId: String? = null  // kept for legacy callers
     }
 }
