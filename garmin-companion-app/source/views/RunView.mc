@@ -390,11 +390,20 @@ class RunView extends Ui.View {
             Ui.requestUpdate();
 
         } else if (t.equals("runUpdate")) {
-            var pv = data.get("pace");        if (pv != null) { _pace        = pv.toFloat(); }
-            var dv = data.get("distance");    if (dv != null) { _distance    = dv.toFloat(); }
-            var hv = data.get("hr");          if (hv != null) { _heartRate   = hv.toNumber(); _heartRateZone = _hrZone(_heartRate); }
-            var tv = data.get("elapsedTime"); if (tv != null) { _elapsedTime = tv.toNumber(); _elapsedMs = _elapsedTime * 1000; }
-            var cv = data.get("cadence");     if (cv != null) { _cadence     = cv.toNumber(); }
+            // When the PHONE started the run (_phoneControlled), mirror all phone metrics.
+            // When the WATCH started the run (!_phoneControlled), the watch own Activity.Info
+            // data (actInfo.timerTime, actInfo.elapsedDistance, etc.) is authoritative — do NOT
+            // overwrite those with phone-calculated values which run on a different clock and
+            // may include early phone-GPS noise.  Only sync run-state flags so the watch stays
+            // in step if the phone pauses or stops the session.
+            if (_phoneControlled) {
+                var pv = data.get("pace");        if (pv != null) { _pace        = pv.toFloat(); }
+                var dv = data.get("distance");    if (dv != null) { _distance    = dv.toFloat(); }
+                var hv = data.get("hr");          if (hv != null) { _heartRate   = hv.toNumber(); _heartRateZone = _hrZone(_heartRate); }
+                var tv = data.get("elapsedTime"); if (tv != null) { _elapsedTime = tv.toNumber(); _elapsedMs = _elapsedTime * 1000; }
+                var cv = data.get("cadence");     if (cv != null) { _cadence     = cv.toNumber(); }
+            }
+            // State flags always honoured — phone can pause/stop regardless of who started
             var rv = data.get("isRunning");   if (rv != null) { _isRunning   = rv; }
             var uv = data.get("isPaused");    if (uv != null) { _isPaused    = uv; }
             if (_isRunning) { _overlayState = OVERLAY_NONE; }

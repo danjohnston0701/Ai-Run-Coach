@@ -81,8 +81,13 @@ class RunTrackingService : Service(), SensorEventListener {
     private var garminWatchManager: GarminWatchManager? = null
 
     // Timestamp of the last watch GPS injection (ms).  While watch GPS is flowing
-    // (within 5 s) phone GPS updates are skipped to prevent double-counting distance.
+    // (within 15 s) phone GPS updates are skipped to prevent double-counting distance.
     private var lastWatchGpsMs: Long = 0L
+
+    // True when this run was initiated by a watch "start" command.
+    // Used to: (a) pre-block phone GPS at run start and (b) skip sending redundant
+    // runUpdate messages back to the watch (watch has its own authoritative data).
+    private var wasRunStartedByWatch: Boolean = false
 
     // AI Coaching
     private lateinit var coachingFeaturePrefs: live.airuncoach.airuncoach.data.CoachingFeaturePreferences
@@ -576,10 +581,14 @@ class RunTrackingService : Service(), SensorEventListener {
                     Log.d("RunTrackingService", "⌚ Watch command received: $action")
                     when (action) {
                         "start"      -> {
-                            // Call startTracking() directly — the service is already running.
-                            // Previously used startForegroundService() which fails on Android 12+
-                            // when the app is in the background (user looking at watch, not phone).
-                            Log.d("RunTrackingService", "⌚ Watch START → calling startTracking() directly")
+                            // Mark this as a watch-initiated run BEFORE startTracking() so that:
+                            // (a) lastWatchGpsMs blocks early phone-GPS contamination from the
+                            //     very first moment, and
+                            // (b) we skip sending runUpdate back to the watch (it has its own
+                            //     authoritative Activity.Info data).
+                            wasRunStartedByWatch = true
+                            lastWatchGpsMs = System.currentTimeMillis()
+                            Log.d("RunTrackingService", "⌚ Watch START → wasRunStartedByWatch=true, phone GPS blocked")
                             startTracking()
                         }
                         "pause"      -> pauseTracking()
@@ -788,6 +797,9 @@ class RunTrackingService : Service(), SensorEventListener {
         _uploadComplete.value = null
         _isServiceRunning.value = true
         _firstGpsPoint.value = null      // Reset route recognition for new run
+        // wasRunStartedByWatch is intentionally NOT reset here — it is set BEFORE
+        // startTracking() is called (in the watch "start" command handler).
+        // Resetting it here would erase the flag before we can use it.
         startTime = System.currentTimeMillis()
         lastSplitTime = startTime
         totalPausedMs = 0      // Reset pause tracking for new run
@@ -1808,7 +1820,22 @@ class RunTrackingService : Service(), SensorEventListener {
             time      = System.currentTimeMillis()
         }
         lastWatchGpsMs = System.currentTimeMillis()
-        Log.d("RunTrackingService", "Watch GPS injected: lat=$lat lng=$lng alt=$altM speed=$speedMs")
+
+        // Immediately update pace from Garmin's own speed (more accurate & instant than
+        // waiting for two consecutive GPS fixes and computing distance/time).
+        // speed = 0 (stationary) → pace "0:00"; speed > 0 → sec/km from watch firmware.
+        if (speedMs != null) {
+            currentPace = if (speedMs > 0.2f) {
+                val paceSecPerKm = 1000.0 / speedMs.toDouble()
+                val minutes = (paceSecPerKm / 60).toInt()
+                val seconds = (paceSecPerKm % 60).toInt()
+                String.format("%d:%02d", minutes, seconds)
+            } else {
+                "0:00"  // stationary — show zero pace, not stale phone-GPS pace
+            }
+        }
+
+        Log.d("RunTrackingService", "Watch GPS injected: lat=$lat lng=$lng alt=$altM speed=$speedMs pace=$currentPace")
         onNewLocation(loc)
     }
 
@@ -1972,10 +1999,12 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun onNewLocation(location: Location) {
         if (!isTracking) return
 
-        // If the watch is actively streaming GPS (within the last 5 s), skip phone GPS
+        // If the watch is actively streaming GPS (within the last 15 s), skip phone GPS
         // updates entirely to prevent double-counting distance.  The watch's Garmin
         // multi-band antenna is significantly more accurate than the phone GPS.
-        if (location.provider != "garmin" && (System.currentTimeMillis() - lastWatchGpsMs) < 5_000L) {
+        // 15 s window (was 5 s) gives headroom for BT latency spikes and brief gaps
+        // between watch GPS packets without phone GPS sneaking in.
+        if (location.provider != "garmin" && (System.currentTimeMillis() - lastWatchGpsMs) < 15_000L) {
             Log.d("RunTrackingService", "Skipping phone GPS — watch GPS is active (${System.currentTimeMillis() - lastWatchGpsMs}ms ago)")
             return
         }
@@ -2384,10 +2413,14 @@ class RunTrackingService : Service(), SensorEventListener {
 
         // ── Broadcast to Garmin watch (Scenario 2) ────────────────────────
         // Sends a lightweight runUpdate so the watch mirrors live metrics.
+        // Skip when the run was started BY the watch — the watch already has its own
+        // authoritative Activity.Info data (Garmin-filtered GPS, native timer).
+        // Sending phone-recalculated metrics back would cause display jitter because
+        // the phone's clock and distance differ from the Garmin firmware values.
         // No-ops gracefully if no watch is connected.
         try {
             val session = _currentRunSession.value
-            if (session != null && garminWatchManager?.isWatchConnected?.value == true) {
+            if (session != null && garminWatchManager?.isWatchConnected?.value == true && !wasRunStartedByWatch) {
                 val paceSeconds = parsePaceToSeconds(session.currentPace ?: "0:00")
                 garminWatchManager?.sendRunUpdate(
                     paceSecPerKm   = paceSeconds,
@@ -2594,6 +2627,8 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun stopTracking() {
         isTracking = false
         isSimulating = false
+        wasRunStartedByWatch = false   // Reset for next run
+        lastWatchGpsMs = 0L            // Reset so phone GPS works normally after session ends
         _isServiceRunning.value = false
         
         // Stop GPS, sensors, and timer
