@@ -81,7 +81,7 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
         val title    = message.notification?.title ?: message.data["title"] ?: "AI Run Coach"
         val body     = message.notification?.body  ?: message.data["body"]  ?: ""
 
-        showNotification(title, body, type, runId, storeUrl)
+        showNotification(title, body, type, runId, storeUrl, message.data)
     }
 
     private fun showNotification(
@@ -89,7 +89,8 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
         body: String,
         type: String?,
         runId: String?,
-        storeUrl: String? = null
+        storeUrl: String? = null,
+        data: Map<String, String> = emptyMap()
     ) {
         val channelId = when (type) {
             "run_enriched", "new_activity" -> CHANNEL_GARMIN_SYNC
@@ -110,11 +111,17 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
         // opens the URL from an Activity context where it always reaches the browser.
         val pendingIntent = if (type == "garmin_watch_update") {
             val url = storeUrl ?: CONNECT_IQ_STORE_URL
+            // Pass version and releaseNote so the in-app update screen can display them
+            val notifVersion = data?.get("version") ?: ""
+            val notifReleaseNote = data?.get("releaseNote") ?: ""
             val mainIntent = Intent(this, MainActivity::class.java).apply {
                 action = ACTION_OPEN_CONNECT_IQ_STORE
                 putExtra(EXTRA_STORE_URL, url)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("version", notifVersion)
+                putExtra("releaseNote", notifReleaseNote)
+                // No SINGLE_TOP — we want a fresh onCreate so the LaunchedEffect
+                // always picks up the intent and navigates to the update screen.
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
             PendingIntent.getActivity(
                 this,

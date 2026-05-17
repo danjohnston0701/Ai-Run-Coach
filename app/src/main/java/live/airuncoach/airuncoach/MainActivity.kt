@@ -92,6 +92,12 @@ class MainActivity : ComponentActivity() {
 
         // Check if this is launching from an active run notification
         val launchToActiveRun = intent?.getBooleanExtra(RunTrackingService.EXTRA_ACTIVE_RUN, false) == true
+
+        // Check if this is a Garmin watch update notification tap
+        val garminUpdateVersion = if (intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE)
+            intent.getStringExtra("version") ?: "" else null
+        val garminUpdateReleaseNote = if (intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE)
+            intent.getStringExtra("releaseNote") ?: "" else null
         Log.d("MainActivity", "Launch to active run: $launchToActiveRun")
 
         try {
@@ -110,7 +116,7 @@ class MainActivity : ComponentActivity() {
                         
                         // Navigate to active run if launched from notification
                         // Only navigate after navigation graph is set up (when graph is not empty)
-                        LaunchedEffect(navController, launchToActiveRun, sharedRunId) {
+                        LaunchedEffect(navController, launchToActiveRun, sharedRunId, garminUpdateVersion) {
                             // Add delay to ensure navigation graph is ready
                             delay(100)
                             if (launchToActiveRun) {
@@ -123,6 +129,17 @@ class MainActivity : ComponentActivity() {
                                     }
                                 } catch (e: Exception) {
                                     Log.e("MainActivity", "Navigation failed", e)
+                                }
+                            } else if (garminUpdateVersion != null) {
+                                // Notification tap for Garmin watch app update — show in-app update screen
+                                try {
+                                    Log.d("MainActivity", "Navigating to Garmin watch update screen v$garminUpdateVersion")
+                                    navController.navigate(AppRoutes.garminWatchUpdate(
+                                        version = garminUpdateVersion,
+                                        releaseNote = garminUpdateReleaseNote ?: ""
+                                    ))
+                                } catch (e: Exception) {
+                                    Log.e("MainActivity", "Garmin update navigation failed", e)
                                 }
                             } else if (sharedRunId != null) {
                                 try {
@@ -182,18 +199,10 @@ class MainActivity : ComponentActivity() {
      * Activity context avoids the App Link interception entirely.
      */
     private fun handleNotificationIntent(intent: Intent?) {
+        // Navigation for garmin_watch_update is now handled in-app via LaunchedEffect
+        // (navigates to GarminWatchUpdateScreen instead of opening an external URL)
         if (intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE) {
-            val url = intent.getStringExtra(AiRunCoachMessagingService.EXTRA_STORE_URL)
-                ?: AiRunCoachMessagingService.CONNECT_IQ_STORE_URL
-            Log.d("MainActivity", "Notification tap → opening Connect IQ store: $url")
-            try {
-                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                    addCategory(Intent.CATEGORY_BROWSABLE)
-                }
-                startActivity(browserIntent)
-            } catch (e: Exception) {
-                Log.e("MainActivity", "Failed to open Connect IQ store URL: ${e.message}")
-            }
+            Log.d("MainActivity", "Garmin watch update notification tap received — will navigate to update screen")
         }
     }
     

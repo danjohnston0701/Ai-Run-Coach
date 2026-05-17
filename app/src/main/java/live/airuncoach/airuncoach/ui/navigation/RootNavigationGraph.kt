@@ -8,8 +8,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import live.airuncoach.airuncoach.AppRoutes
 import live.airuncoach.airuncoach.data.AiConsentManager
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import live.airuncoach.airuncoach.ui.screens.AiConsentScreen
 import live.airuncoach.airuncoach.ui.screens.ForgotPasswordScreen
+import live.airuncoach.airuncoach.ui.screens.GarminWatchUpdateScreen
 import live.airuncoach.airuncoach.ui.screens.LoginScreen
 import live.airuncoach.airuncoach.ui.screens.SignUpScreen
 import live.airuncoach.airuncoach.ui.screens.LocationPermissionScreen
@@ -117,6 +120,28 @@ fun RootNavigationGraph(navController: NavHostController) {
                         popUpTo(AppRoutes.MAIN) { inclusive = true }
                     }
                 }
+            )
+        }
+
+        composable(
+            route = AppRoutes.GARMIN_WATCH_UPDATE,
+            arguments = listOf(
+                navArgument("version") {
+                    type = NavType.StringType
+                    defaultValue = ""
+                    nullable = true
+                },
+                navArgument("releaseNote") {
+                    type = NavType.StringType
+                    defaultValue = ""
+                    nullable = true
+                }
+            )
+        ) { backStackEntry ->
+            GarminWatchUpdateScreen(
+                version = backStackEntry.arguments?.getString("version") ?: "",
+                releaseNote = backStackEntry.arguments?.getString("releaseNote") ?: "",
+                onBack = { navController.popBackStack() }
             )
         }
     }
