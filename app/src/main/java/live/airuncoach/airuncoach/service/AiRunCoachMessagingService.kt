@@ -52,6 +52,10 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
         // silent PendingIntent failures on some Android OEM builds.
         private const val REQUEST_CODE_GARMIN_WATCH_UPDATE = 7001
         private const val REQUEST_CODE_GENERAL = 7002
+
+        // Intent action + extras used to route notification taps through MainActivity
+        const val ACTION_OPEN_CONNECT_IQ_STORE = "live.airuncoach.action.OPEN_CONNECT_IQ_STORE"
+        const val EXTRA_STORE_URL = "store_url"
     }
 
     override fun onNewToken(token: String) {
@@ -94,21 +98,28 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
         }
         ensureNotificationChannel(channelId)
 
-        // For Garmin watch update notifications: tap opens the Connect IQ store
+        // For Garmin watch update notifications: tap opens the Connect IQ store.
+        //
+        // WHY we route through MainActivity instead of firing a browser intent directly:
+        // Garmin Connect app registers itself as an Android App Link handler for
+        // apps.garmin.com. A direct browser PendingIntent fires and gets intercepted
+        // by Garmin Connect which then silently drops it — the user sees the notification
+        // dismiss but nothing opens.
+        //
+        // Routing through MainActivity (our own app) always succeeds. MainActivity then
+        // opens the URL from an Activity context where it always reaches the browser.
         val pendingIntent = if (type == "garmin_watch_update") {
             val url = storeUrl ?: CONNECT_IQ_STORE_URL
-            val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                // CATEGORY_BROWSABLE is required for notification taps to reliably
-                // open URLs. Without it, some devices silently drop the intent because
-                // they can't determine which activity should handle an https:// URI
-                // launched from a background service context.
-                addCategory(Intent.CATEGORY_BROWSABLE)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            val mainIntent = Intent(this, MainActivity::class.java).apply {
+                action = ACTION_OPEN_CONNECT_IQ_STORE
+                putExtra(EXTRA_STORE_URL, url)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
             }
             PendingIntent.getActivity(
                 this,
                 REQUEST_CODE_GARMIN_WATCH_UPDATE,
-                browserIntent,
+                mainIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         } else {

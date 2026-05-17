@@ -1,6 +1,7 @@
 package live.airuncoach.airuncoach
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -25,6 +26,7 @@ import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.data.GarminAuthManager
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.network.RetrofitClient
+import live.airuncoach.airuncoach.service.AiRunCoachMessagingService
 import live.airuncoach.airuncoach.service.GarminWatchManager
 import live.airuncoach.airuncoach.service.RunTrackingService
 import javax.inject.Inject
@@ -42,7 +44,10 @@ class MainActivity : ComponentActivity() {
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
+        // Handle notification tap intents (e.g. open Connect IQ store)
+        handleNotificationIntent(intent)
+
         android.util.Log.d("MainActivity", "onCreate called")
         
         // Initialize RetrofitClient before anything else
@@ -161,7 +166,35 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         android.util.Log.d("MainActivity", "onNewIntent called")
+        handleNotificationIntent(intent)
         handleGarminOAuthCallback(intent)
+    }
+
+    /**
+     * Handles intents fired from notification taps.
+     *
+     * We route notification taps through MainActivity rather than firing browser
+     * intents directly from the FCM service. This is because Garmin Connect registers
+     * as an App Link handler for apps.garmin.com — a direct browser PendingIntent
+     * gets intercepted by Garmin Connect which then drops it silently.
+     *
+     * Opening our own app first (always reliable), then launching the URL from an
+     * Activity context avoids the App Link interception entirely.
+     */
+    private fun handleNotificationIntent(intent: Intent?) {
+        if (intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE) {
+            val url = intent.getStringExtra(AiRunCoachMessagingService.EXTRA_STORE_URL)
+                ?: AiRunCoachMessagingService.CONNECT_IQ_STORE_URL
+            Log.d("MainActivity", "Notification tap → opening Connect IQ store: $url")
+            try {
+                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                    addCategory(Intent.CATEGORY_BROWSABLE)
+                }
+                startActivity(browserIntent)
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Failed to open Connect IQ store URL: ${e.message}")
+            }
+        }
     }
     
     private fun handleGarminOAuthCallback(intent: Intent?) {
