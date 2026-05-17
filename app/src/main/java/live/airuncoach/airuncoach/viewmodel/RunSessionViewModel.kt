@@ -432,8 +432,12 @@ class RunSessionViewModel @Inject constructor(
                     Log.d("RunSessionViewModel", "⌚ Watch session ready (GPS locked)")
                 }
                 "talkToCoach" -> {
-                    Log.d("RunSessionViewModel", "⌚ Watch tap → talk to coach from ViewModel")
-                    onWakeWordDetected()
+                    // Intentionally NOT handled here. When the service is running it routes
+                    // talkToCoach through triggerWatchTalkToCoach() → watchTalkToCoachRequest
+                    // StateFlow → the collector below. Handling it here too would cause a
+                    // double "hello" because both this handler and the service's handler can
+                    // fire for the same ConnectIQ message.
+                    Log.d("RunSessionViewModel", "⌚ talkToCoach in ViewModel handler — ignored (service path handles it)")
                 }
             }
         }
@@ -446,6 +450,10 @@ class RunSessionViewModel @Inject constructor(
     private var user: User? = null
     private var runConfig: RunSetupConfig? = null
     private var isBriefingAudioPlaying = false // Guard against duplicate audio playback
+    // Debounce guard: ignore duplicate talk-to-coach triggers within 3 seconds.
+    // Protects against the watch + service both firing onWakeWordDetected() for one tap.
+    private var lastWakeWordTriggerMs: Long = 0L
+    private val WAKE_WORD_DEBOUNCE_MS = 3_000L
     private var sessionInstructions: SessionInstructionsResponse? = null  // NEW: Store session context
 
     // ── Interval Training State ──────────────────────────────────────────────
@@ -1172,6 +1180,14 @@ class RunSessionViewModel @Inject constructor(
      * After playback completes the query listening window opens.
      */
     private fun onWakeWordDetected() {
+        // Debounce: reject duplicate triggers within 3 seconds (guards against ConnectIQ
+        // delivering the same talkToCoach message to both the service and ViewModel handlers)
+        val now = System.currentTimeMillis()
+        if (now - lastWakeWordTriggerMs < WAKE_WORD_DEBOUNCE_MS) {
+            Log.d("RunSessionViewModel", "🎤 Wake word debounced (${now - lastWakeWordTriggerMs}ms since last trigger)")
+            return
+        }
+        lastWakeWordTriggerMs = now
         Log.d("RunSessionViewModel", "🎤 Wake word detected — opening query window")
         val cachedBytes = yesAudioBytes
         if (cachedBytes != null) {
