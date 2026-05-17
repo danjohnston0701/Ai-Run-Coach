@@ -391,4 +391,29 @@ export async function sendCoachingPlanReminder(
       type: "coaching_plan_reminder",
       workoutName,
       distance: distance?.toString() ?? "",
-      intensit
+      intensity: intensity ?? "",
+      timestamp: new Date().toISOString(),
+    };
+
+    // 1. In-app notification
+    await storage.createNotification({
+      userId,
+      title,
+      message: body,  // schema field is 'message'
+      type: "coaching_plan_reminder",
+      data: notificationData,
+      read: false,
+    });
+    results.inAppSent = true;
+    console.log(`[Notification] In-app coaching plan reminder created for user ${userId}: "${workoutName}"`);
+
+    // 2. Firebase push notification
+    const pushSent = await sendFirebasePush(userId, title, body, notificationData);
+    results.pushSent = pushSent;
+
+    return results;
+  } catch (error) {
+    console.error("[Notification] Failed to send coaching plan reminder:", error);
+    return results;
+  }
+}
