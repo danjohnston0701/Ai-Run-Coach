@@ -65,6 +65,7 @@ import {
   initializeAchievements
 } from "./achievements-service";
 import garminOAuthRouter from "./garmin-oauth-bridge";
+import stravaOAuthRouter from "./strava-oauth-bridge";
 import {
   extractHeartRateData,
   extractPaceData as extractPaceDataDetailed,
@@ -72,6 +73,12 @@ import {
   extractGpsTrack,
   buildDetailedMetricsFromGarminActivity,
 } from "./garmin-detailed-metrics";
+import { generateFitFile } from "./fit-file-generator";
+import {
+  uploadRunToStrava,
+  pollUploadStatus,
+} from "./strava-upload-service";
+import { refreshStravaToken } from "./strava-oauth-service";
 import adaptationRouter from "./routes-adaptation";
 import myDataRouter from "./routes-my-data";
 import achievementsRouter from "./routes-achievements";
@@ -94,6 +101,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // ==================== GARMIN OAUTH BRIDGE ====================
   app.use(garminOAuthRouter);
+  
+  // ==================== STRAVA OAUTH BRIDGE ====================
+  app.use(stravaOAuthRouter);
+  
   app.use("/api", adaptationRouter);
   app.use("/api/my-data", myDataRouter);
   app.use("/api/coaching", realtimeCoachingRouter); // Real-time biomechanical coaching
@@ -10057,6 +10068,226 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // ==================== RUN ANALYSIS ENDPOINT ====================
+  
+  // ==================== STRAVA INTEGRATION ====================
+
+  /**
+   * POST /api/runs/:runId/publish-strava
+   * Publish a completed run to Strava with GPS track
+   */
+  app.post("/api/runs/:runId/publish-strava", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const userId = req.user!.userId;
+
+      // Fetch run
+      const run = await storage.getRun(runId);
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+
+      if (run.userId !== userId) {
+        return res.status(403).json({ error: "Not authorized" });
+      }
+
+      // Check if already published to Strava
+      if (run.externalSource === "strava" && run.externalId) {
+        return res.status(400).json({
+          error: "Run already published to Strava",
+          activityId: run.externalId,
+        });
+      }
+
+      // Fetch Strava device
+      const stravaDevices = await storage.getConnectedDevices(userId);
+      const stravaDevice = stravaDevices.find(
+        (d) => d.deviceType === "strava" && d.isActive
+      );
+
+      if (!stravaDevice) {
+        return res.status(400).json({ error: "Strava not connected" });
+      }
+
+      let accessToken = stravaDevice.accessToken;
+
+      // Check if token is expired and refresh if needed
+      if (
+        stravaDevice.tokenExpiresAt &&
+        stravaDevice.tokenExpiresAt < new Date()
+      ) {
+        if (!stravaDevice.refreshToken) {
+          return res.status(401).json({
+            error: "Token expired, please reconnect Strava",
+          });
+        }
+
+        try {
+          const {
+            accessToken: newToken,
+            refreshToken: newRefresh,
+            expiresAt,
+          } = await refreshStravaToken(stravaDevice.refreshToken);
+
+          await storage.updateConnectedDevice(stravaDevice.id, {
+            accessToken: newToken,
+            refreshToken: newRefresh,
+            tokenExpiresAt: expiresAt,
+            updatedAt: new Date(),
+          });
+
+          accessToken = newToken;
+        } catch (error) {
+          return res.status(401).json({
+            error: "Strava token refresh failed, please reconnect",
+          });
+        }
+      }
+
+      // Generate FIT file from run data
+      const fitFile = await generateFitFile(run);
+
+      // Upload to Strava
+      const { uploadId } = await uploadRunToStrava(
+        fitFile,
+        accessToken,
+        run.name || "AI Run Coach Run",
+        run.userComments || `Distance: ${run.distance}km | Duration: ${run.duration}s`,
+        `airuncoach-${runId}`
+      );
+
+      console.log(`[Strava] Starting async poll for upload ${uploadId}`);
+
+      // Start async polling in background
+      pollUploadAndSaveActivity(uploadId, accessToken, runId, userId).catch(
+        (error) => {
+          console.error(
+            `[Strava] Background polling failed for run ${runId}:`,
+            error
+          );
+        }
+      );
+
+      // Return immediately with upload ID
+      res.json({
+        success: true,
+        uploadId,
+        message: "Run submitted to Strava. Publishing in background...",
+      });
+    } catch (error: any) {
+      console.error("[Strava Publish] Error:", error.message);
+      res.status(500).json({
+        error: `Failed to publish run: ${error.message}`,
+      });
+    }
+  });
+
+  /**
+   * Helper: Poll upload status and save activity ID
+   * Run this asynchronously in background
+   */
+  async function pollUploadAndSaveActivity(
+    uploadId: number,
+    accessToken: string,
+    runId: string,
+    userId: string
+  ): Promise<void> {
+    try {
+      // Poll with 30 attempts, 2s between each
+      const activityId = await pollUploadStatus(uploadId, accessToken, 30, 2000);
+
+      // Update run with Strava activity ID
+      await storage.updateRun(runId, {
+        externalId: activityId.toString(),
+        externalSource: "strava",
+      });
+
+      console.log(
+        `✅ [Strava] Run published successfully: activity ${activityId}`
+      );
+    } catch (error: any) {
+      console.error(
+        `[Strava] Failed to publish run ${runId}:`,
+        error.message
+      );
+    }
+  }
+
+  /**
+   * GET /api/strava/connection-status
+   * Check Strava connection status for current user
+   */
+  app.get(
+    "/api/strava/connection-status",
+    authMiddleware,
+    async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+
+        const devices = await storage.getConnectedDevices(userId);
+        const device = devices.find((d) => d.deviceType === "strava");
+
+        if (!device) {
+          return res.json({ connected: false });
+        }
+
+        const isExpired =
+          device.tokenExpiresAt && device.tokenExpiresAt < new Date();
+
+        res.json({
+          connected: device.isActive && !isExpired,
+          athleteName: device.deviceName || "Strava Athlete",
+          athleteId: device.deviceId,
+          lastSync: device.lastSyncAt,
+          tokenExpired: isExpired,
+        });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    }
+  );
+
+  /**
+   * GET /api/strava/activities
+   * Fetch list of runs synced to Strava for current user
+   */
+  app.get(
+    "/api/strava/activities",
+    authMiddleware,
+    async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.userId;
+
+        // Get all runs that were published to Strava
+        const stravaRuns = await db
+          .select()
+          .from(runs)
+          .where(
+            and(
+              eq(runs.userId, userId),
+              eq(runs.externalSource, "strava")
+            )
+          )
+          .orderBy(desc(runs.completedAt));
+
+        res.json({
+          count: stravaRuns.length,
+          activities: stravaRuns.map((run) => ({
+            id: run.id,
+            name: run.name,
+            distance: run.distance,
+            duration: run.duration,
+            completedAt: run.completedAt,
+            stravaUrl: `https://www.strava.com/activities/${run.externalId}`,
+            stravaId: run.externalId,
+          })),
+        });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    }
+  );
+
+  // ==================== END STRAVA INTEGRATION ====================
   
   // Delete a run
   app.delete("/api/runs/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {

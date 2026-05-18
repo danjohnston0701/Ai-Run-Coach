@@ -56,6 +56,7 @@ __export(schema_exports, {
   insertRouteSchema: () => insertRouteSchema,
   insertRunSchema: () => insertRunSchema,
   insertUserSchema: () => insertUserSchema,
+  knownRoutes: () => knownRoutes,
   liveRunSessions: () => liveRunSessions,
   monthlyUsage: () => monthlyUsage,
   notificationPreferences: () => notificationPreferences,
@@ -80,13 +81,14 @@ __export(schema_exports, {
   userCoupons: () => userCoupons,
   userStats: () => userStats,
   users: () => users,
+  watchBiometricSamples: () => watchBiometricSamples,
   webhookFailureQueue: () => webhookFailureQueue,
   weeklyPlans: () => weeklyPlans
 });
 import { sql } from "drizzle-orm";
 import { pgTable, text, varchar, boolean, real, integer, timestamp, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
-var users, friends, friendRequests, routes, events, runs, activityMergeLog, goals, notifications, notificationPreferences, liveRunSessions, groupRuns, groupRunParticipants, pushSubscriptions, routeRatings, runAnalyses, couponCodes, userCoupons, garminWellnessMetrics, garminActivities, garminSkinTemperature, garminBodyComposition, garminBloodPressure, garminHealthSnapshots, garminEpochsRaw, garminEpochsAggregate, deviceData, connectedDevices, garminRealtimeData, garminCompanionSessions, dailyFitness, segments, segmentEfforts, segmentStars, trainingPlans, weeklyPlans, plannedWorkouts, planAdaptations, sharedRuns, feedActivities, reactions, activityComments, commentLikes, clubs, clubMemberships, challenges, challengeParticipants, achievements, userAchievements, garminMoveIQ, oauthStateStore, webhookFailureQueue, garminWebhookEvents, insertUserSchema, insertRunSchema, insertRouteSchema, insertGoalSchema, insertFriendSchema, insertFriendRequestSchema, insertNotificationSchema, sessionInstructions, coachingSessionEvents2, userStats, passwordResetTokens, monthlyUsage;
+var users, friends, friendRequests, routes, events, runs, watchBiometricSamples, activityMergeLog, goals, notifications, notificationPreferences, liveRunSessions, groupRuns, groupRunParticipants, pushSubscriptions, routeRatings, runAnalyses, couponCodes, userCoupons, garminWellnessMetrics, garminActivities, garminSkinTemperature, garminBodyComposition, garminBloodPressure, garminHealthSnapshots, garminEpochsRaw, garminEpochsAggregate, deviceData, connectedDevices, garminRealtimeData, garminCompanionSessions, dailyFitness, segments, segmentEfforts, segmentStars, trainingPlans, weeklyPlans, plannedWorkouts, planAdaptations, sharedRuns, feedActivities, reactions, activityComments, commentLikes, clubs, clubMemberships, challenges, challengeParticipants, achievements, userAchievements, garminMoveIQ, oauthStateStore, webhookFailureQueue, garminWebhookEvents, insertUserSchema, insertRunSchema, insertRouteSchema, insertGoalSchema, insertFriendSchema, insertFriendRequestSchema, insertNotificationSchema, sessionInstructions, coachingSessionEvents2, knownRoutes, userStats, passwordResetTokens, monthlyUsage;
 var init_schema = __esm({
   "shared/schema.ts"() {
     users = pgTable("users", {
@@ -141,8 +143,17 @@ var init_schema = __esm({
       // "none", "local", "national", "elite"
       injuryHistory: jsonb("injury_history"),
       // [{date, type, resolved}]
-      allowAiToneAdaptation: boolean("allow_ai_tone_adaptation").default(true)
+      allowAiToneAdaptation: boolean("allow_ai_tone_adaptation").default(true),
       // Let AI adjust tone per session
+      // Garmin Watch App (Connect IQ) tracking
+      hasGarminWatchApp: boolean("has_garmin_watch_app").default(false),
+      // TRUE if user has downloaded the Garmin companion IQ app
+      garminWatchAppFirstSeenAt: timestamp("garmin_watch_app_first_seen_at"),
+      // When they first authenticated from the watch
+      garminWatchAppLastSeenAt: timestamp("garmin_watch_app_last_seen_at"),
+      // Most recent companion auth
+      garminWatchAppVersion: text("garmin_watch_app_version")
+      // Last-reported IQ app version
     });
     friends = pgTable("friends", {
       id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -304,6 +315,11 @@ var init_schema = __esm({
       // kcal
       estSweatLoss: real("est_sweat_loss"),
       // liters
+      // Route Memory Engine — matched known route at run start
+      knownRouteId: varchar("known_route_id"),
+      // FK to known_routes.id (set after route recognition)
+      routeConfidence: real("route_confidence"),
+      // 0.0–1.0 confidence score at run start
       // Training plan context (if this run is part of a coached plan)
       linkedWorkoutId: varchar("linked_workout_id"),
       // ID of the planned workout this run executes
@@ -325,11 +341,294 @@ var init_schema = __esm({
       // Step count for the run (calculated from cadence × duration if step counter unavailable)
       totalSteps: integer("total_steps"),
       // Total steps taken during the run
+      // ── Running Dynamics (from Garmin companion watch) ────────────────────────
+      // These biomechanical metrics are streamed in real-time from the watch
+      // and stored as averages for run summary analysis and graphs
+      avgGroundContactTime: real("avg_ground_contact_time"),
+      // ms – avg foot contact per step (200-300ms normal)
+      minGroundContactTime: real("min_ground_contact_time"),
+      // ms – best (lowest) GCT during run
+      maxGroundContactTime: real("max_ground_contact_time"),
+      // ms – worst (highest) GCT during run
+      avgGroundContactBalance: real("avg_ground_contact_balance"),
+      // % – left/right symmetry (50% = perfect)
+      avgVerticalOscillation: real("avg_vertical_oscillation"),
+      // cm – avg torso bounce per step (6-8cm efficient)
+      maxVerticalOscillation: real("max_vertical_oscillation"),
+      // cm – worst bounce reading
+      avgVerticalRatio: real("avg_vertical_ratio"),
+      // % – oscillation / stride ratio (8-10% efficient)
+      minStrideLength: real("min_stride_length"),
+      // m  – shortest stride (e.g. steep uphill)
+      maxStrideLength: real("max_stride_length"),
+      // m  – longest stride
+      // ── Training Effect & Recovery (from Garmin) ──────────────────────────────
+      aerobicTrainingEffect: real("aerobic_training_effect"),
+      // 0-5 (aerobic load)
+      anaerobicTrainingEffect: real("anaerobic_training_effect"),
+      // 0-5 (anaerobic load)
+      trainingEffectLabel: text("training_effect_label"),
+      // "Recovery" | "Base" | "Tempo" | "Threshold" | "VO2 Max"
+      recoveryTimeMinutes: integer("recovery_time_minutes"),
+      // minutes until fully recovered
+      vo2MaxEstimate: real("vo2_max_estimate"),
+      // ml/kg/min estimated from this run
+      // ── Environmental (from Garmin GPS) ──────────────────────────────────────
+      avgAmbientPressure: real("avg_ambient_pressure"),
+      // Pa – used for altitude verification & weather
+      avgBearing: real("avg_bearing"),
+      // degrees – overall direction of run
+      garminDeviceName: text("garmin_device_name"),
+      // e.g. "Fenix 7X", "VivoActive 4"
+      // ── Time-series data from watch ───────────────────────────────────────────
+      // Stored as JSONB arrays — one value per 2-second sample during the run.
+      // Used to render graphs (GCT over time, VO over time, stride length trends, etc.)
+      groundContactTimeData: jsonb("ground_contact_time_data"),
+      // number[] – GCT per sample
+      groundContactBalanceData: jsonb("ground_contact_balance_data"),
+      // number[] – balance per sample
+      verticalOscillationData: jsonb("vertical_oscillation_data"),
+      // number[] – VO per sample
+      verticalRatioData: jsonb("vertical_ratio_data"),
+      // number[] – VR per sample
+      strideLengthData: jsonb("stride_length_data"),
+      // number[] – stride per sample
+      cadenceData: jsonb("cadence_data"),
+      // number[] – cadence per sample (fine-grained)
+      altitudeData: jsonb("altitude_data"),
+      // number[] – altitude per GPS sample
+      bearingData: jsonb("bearing_data"),
+      // number[] – bearing per sample
+      // ── Running Power (Fenix 7+, FR965 only; null on unsupported devices) ────────
+      avgRunningPower: integer("avg_running_power"),
+      // watts – average running power
+      maxRunningPower: integer("max_running_power"),
+      // watts – peak running power
+      runningPowerData: jsonb("running_power_data"),
+      // number[] – watts per 2s sample
+      // ── Respiration Rate (Fenix 7+, FR965 only; null on unsupported devices) ─────
+      avgRespirationRate: real("avg_respiration_rate"),
+      // breaths/min – average respiration
+      minRespirationRate: real("min_respiration_rate"),
+      // breaths/min – slowest breathing
+      maxRespirationRate: real("max_respiration_rate"),
+      // breaths/min ��� fastest breathing
+      respirationRateData: jsonb("respiration_rate_data"),
+      // number[] – breaths/min per 2s sample
+      // ── Extended Cadence, Stride & Movement ──────────────────────────────────────
+      minCadence: integer("min_cadence"),
+      // spm – slowest cadence
+      maxStrideLength: real("max_stride_length"),
+      // m – longest stride
+      minStrideLength: real("min_stride_length"),
+      // m – shortest stride
+      minVerticalOscillation: real("min_vertical_oscillation"),
+      // cm – best (most efficient) VO
+      maxVerticalRatio: real("max_vertical_ratio"),
+      // % – worst efficiency
+      minVerticalRatio: real("min_vertical_ratio"),
+      // % – best efficiency
+      // ── Ground Contact Balance Decomposed ────────────────────────────────────────
+      avgGroundContactBalanceLeft: real("avg_ground_contact_balance_left"),
+      // % left leg
+      avgGroundContactBalanceRight: real("avg_ground_contact_balance_right"),
+      // % right leg
+      // ── Extended Training Effects ────────────────────────────────────────────────
+      maxTrainingEffect: real("max_training_effect"),
+      // 0-5 peak aerobic
+      maxAnaerobicTrainingEffect: real("max_anaerobic_training_effect"),
+      // 0-5 peak anaerobic
+      fitnessLevelAfter: real("fitness_level_after"),
+      // ml/kg/min VO2 max estimate
+      // ── Extended Running Power ───────────────────────────────────────────────────
+      minRunningPower: integer("min_running_power"),
+      // watts – minimum output
+      powerToPaceRatio: real("power_to_pace_ratio"),
+      // watts/(km/h) efficiency
+      // ── Extended Speed & Pace ────────────────────────────────────────────────────
+      minPace: real("min_pace"),
+      // min/km – fastest pace
+      maxPace: real("max_pace"),
+      // min/km – slowest pace
+      // ── Extended Heart Rate Zones ────────────────────────────────────────────────
+      avgHeartRateZone: integer("avg_heart_rate_zone"),
+      // 1-5 average zone
+      timeInZone1: integer("time_in_zone_1"),
+      // seconds in Z1
+      timeInZone2: integer("time_in_zone_2"),
+      // seconds in Z2
+      timeInZone3: integer("time_in_zone_3"),
+      // seconds in Z3
+      timeInZone4: integer("time_in_zone_4"),
+      // seconds in Z4
+      timeInZone5: integer("time_in_zone_5"),
+      // seconds in Z5
+      // ── Environmental Extended ───────────────────────────────────────────────────
+      minAmbientPressure: real("min_ambient_pressure"),
+      // Pa – lowest pressure
+      maxAmbientPressure: real("max_ambient_pressure"),
+      // Pa – highest pressure
+      avgTemperature: real("avg_temperature"),
+      // Celsius – avg wrist temp
+      maxTemperature: real("max_temperature"),
+      // Celsius – peak wrist temp
+      minTemperature: real("min_temperature"),
+      // Celsius – lowest wrist temp
+      // ── GPS Quality ──────────────────────────────────────────────────────────────
+      avgGpsAccuracy: real("avg_gps_accuracy"),
+      // meters CEP
+      worstGpsAccuracy: real("worst_gps_accuracy"),
+      // meters CEP
+      // ── Additional Time-Series Data ──────────────────────────────────────────────
+      stepsData: jsonb("steps_data"),
+      // number[] steps per sample
+      trainingEffectData: jsonb("training_effect_data"),
+      // number[] ATE per sample
+      anaerobicEffectData: jsonb("anaerobic_effect_data"),
+      // number[] AnATE per sample
+      temperatureData: jsonb("temperature_data"),
+      // number[] wrist temp per sample
+      powerToPaceRatioData: jsonb("power_to_pace_ratio_data"),
+      // number[] efficiency per sample
+      // ── Basic Metrics Extended ───────────────────────────────────────────────────
+      totalSteps: integer("total_steps"),
+      // total steps during run
+      totalEnergy: integer("total_energy"),
+      // kcal burned
+      // ── Metadata ─────────────────────────────────────────────────────────────────
+      activityType: text("activity_type"),
+      // "running", "trail_running"
+      sportName: text("sport_name"),
+      // Garmin sport classification
+      subSportName: text("sub_sport_name"),
+      // "trail_run", "fell_running"
+      dataQualityScore: real("data_quality_score"),
+      // 0-100 valid sample percentage
       createdAt: timestamp("created_at").defaultNow(),
       // When record was created in database
       updatedAt: timestamp("updated_at").defaultNow()
       // When record was last updated
     });
+    watchBiometricSamples = pgTable("watch_biometric_samples", {
+      id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+      runId: varchar("run_id").notNull().references(() => runs.id, { onDelete: "cascade" }),
+      userId: varchar("user_id").notNull().references(() => users.id),
+      // When this sample was recorded (ms since run start)
+      elapsedMs: integer("elapsed_ms").notNull(),
+      // ms from run start
+      sampledAt: timestamp("sampled_at").defaultNow(),
+      // wall-clock timestamp
+      // ── Location ─────────────────────────────────────────────────────────────
+      latitude: real("latitude"),
+      longitude: real("longitude"),
+      altitude: real("altitude"),
+      // meters
+      bearing: real("bearing"),
+      // degrees 0-360
+      gpsAccuracy: real("gps_accuracy"),
+      // meters CEP
+      // ── Pace & Speed ──────────────────────────────────────────────────────────
+      pace: real("pace"),
+      // min/km
+      speed: real("speed"),
+      // m/s
+      distanceSoFar: real("distance_so_far"),
+      // meters
+      // ── Heart Rate ────────────────────────────────────────────────────────────
+      heartRate: integer("heart_rate"),
+      // bpm
+      heartRateZone: integer("heart_rate_zone"),
+      // 1-5
+      // ── Cadence & Stride ─────────────────────────────────────────────────────
+      cadence: integer("cadence"),
+      // spm
+      strideLength: real("stride_length"),
+      // meters
+      // ── Running Dynamics ─────────────────────────────────────────────────────
+      groundContactTime: real("ground_contact_time"),
+      // ms
+      groundContactBalance: real("ground_contact_balance"),
+      // %
+      verticalOscillation: real("vertical_oscillation"),
+      // cm
+      verticalRatio: real("vertical_ratio"),
+      // %
+      // ── Running Power (Fenix 7+, FR965 only) ──────────────────────────────────
+      runningPower: integer("running_power"),
+      // watts per sample
+      // ── Respiration Rate (Fenix 7+, FR965 only) ───────────────────────────────
+      respirationRate: real("respiration_rate"),
+      // breaths/min per sample
+      respirationZone: integer("respiration_zone"),
+      // 0-5 (0=unknown, 1=easy, 5=max)
+      // ── Cadence & Stride Extended ──────────────────────────────────────────────
+      avgCadenceThisSample: integer("avg_cadence_this_sample"),
+      // spm smoothed
+      stepCountIncremental: integer("step_count_incremental"),
+      // steps in window
+      // ── Vertical Oscillation Extended ──────────────────────────────────────────
+      maxVerticalOscillationThisSample: real("max_vertical_oscillation_this_sample"),
+      // cm peak in window
+      // ── Ground Contact Balance Decomposed ───────────────────────────────────────
+      groundContactBalanceLeft: real("ground_contact_balance_left"),
+      // % left leg
+      groundContactBalanceRight: real("ground_contact_balance_right"),
+      // % right leg
+      // ── Running Power Extended ─────────────────────────────────────────────────
+      powerToPaceRatio: real("power_to_pace_ratio"),
+      // watts/(km/h) efficiency
+      // ── Training Effect (live updates) ─────────────────────────────────────────
+      aerobicTrainingEffectCurrent: real("aerobic_training_effect_current"),
+      // 0-5 live
+      anaerobicTrainingEffectCurrent: real("anaerobic_training_effect_current"),
+      // 0-5 live
+      // ── Cumulative Elevation ───────────────────────────────────────────────────
+      altitudeGainSoFar: real("altitude_gain_so_far"),
+      // m cumulative gain
+      altitudeLossSoFar: real("altitude_loss_so_far"),
+      // m cumulative loss
+      // ── Environment (wrist sensor + GPS) ───────────────────────────────────────
+      temperature: real("temperature"),
+      // Celsius – wrist skin temp
+      weatherCondition: text("weather_condition"),
+      // "sunny", "cloudy", "rain" (inferred)
+      // ── Training Metrics (updated periodically) ───────────────────────────────
+      trainingEffect: real("training_effect"),
+      // 0-5
+      vo2Max: real("vo2_max"),
+      // ml/kg/min
+      // ── Environmental ─────────────────────────────────────────────────────────
+      ambientPressure: real("ambient_pressure"),
+      // Pa
+      // ── Computed Contextual Fields ────────────────────────────────────────────
+      // Terrain grade computed server-side from adjacent altitude samples
+      terrainGrade: real("terrain_grade"),
+      // % (negative = downhill)
+      // Fatigue estimate computed server-side
+      estimatedFatigue: integer("estimated_fatigue"),
+      // 0-100
+      // Coaching throttle
+      timeSinceLastCoachingCue: integer("time_since_last_coaching_cue"),
+      // seconds
+      recoveryHeartbeatsSincePeak: integer("recovery_heartbeats_since_peak"),
+      // HB count
+      // ── Coaching ──────────────────────────────────────────────────────────────
+      // If AI coaching was generated for this moment, store it
+      coachingCue: text("coaching_cue"),
+      coachingCategory: text("coaching_category")
+      // form|pacing|effort|fatigue|etc.
+    }, (table) => ({
+      // Index for fast queries by run (all samples for a run, ordered by time)
+      runIdx: index("watch_biometric_samples_run_idx").on(table.runId),
+      // Index for user-level queries
+      userIdx: index("watch_biometric_samples_user_idx").on(table.userId),
+      // Index for efficiency analysis
+      powerToPaceIdx: index("watch_biometric_samples_power_pace_idx").on(table.powerToPaceRatio),
+      // Index for fatigue analysis
+      fatigueIdx: index("watch_biometric_samples_fatigue_idx").on(table.estimatedFatigue),
+      // Composite index for time-series queries
+      runTimeIdx: index("watch_biometric_samples_run_time_idx").on(table.runId, table.elapsedMs)
+    }));
     activityMergeLog = pgTable("activity_merge_log", {
       id: text("id").primaryKey().default(sql`gen_random_uuid()::text`),
       aiRunCoachRunId: varchar("ai_run_coach_run_id").notNull().references(() => runs.id),
@@ -1149,6 +1448,13 @@ var init_schema = __esm({
       status: text("status").default("active"),
       // active, completed, paused
       aiGenerated: boolean("ai_generated").default(true),
+      // Rolling block generation — we generate a block of weeks at a time rather than the full plan.
+      // generatedThroughWeek: how many weeks exist in the DB right now (e.g. 4 out of 20).
+      // nextBlockAt: when the next block should be generated (start of the last week of current block).
+      generatedThroughWeek: integer("generated_through_week"),
+      // null = legacy plans (all weeks exist)
+      nextBlockAt: timestamp("next_block_at"),
+      // null = next block not yet scheduled
       createdAt: timestamp("created_at").defaultNow(),
       completedAt: timestamp("completed_at")
     });
@@ -1525,6 +1831,51 @@ var init_schema = __esm({
       triggeredAt: timestamp("triggered_at").defaultNow(),
       createdAt: timestamp("created_at").defaultNow()
     });
+    knownRoutes = pgTable("known_routes", {
+      id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+      userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+      // Human-readable names
+      name: text("name"),
+      // Auto-generated (e.g. "Saturday Morning Loop")
+      displayName: text("display_name"),
+      // User-editable friendly name
+      // Location fingerprint — centroid of all observed start points
+      startLat: real("start_lat").notNull(),
+      startLng: real("start_lng").notNull(),
+      startRadiusM: real("start_radius_m").default(75),
+      // Adaptive match radius in metres
+      // Route characteristics
+      typicalDistanceKm: real("typical_distance_km"),
+      elevationProfile: jsonb("elevation_profile"),
+      // [{pct: 0.0, altM: 45}, ...] normalised 0–1
+      notableSegments: jsonb("notable_segments"),
+      // [{name, startPct, endPct, gradient, severity, coachingNote}]
+      terrainType: text("terrain_type"),
+      // "road" | "trail" | "track" | "mixed"
+      // Temporal fingerprint — when does the user typically run this route?
+      typicalDaysOfWeek: jsonb("typical_days_of_week"),
+      // [6] = Saturday, [1,3] = Mon+Wed
+      typicalStartHour: integer("typical_start_hour"),
+      // 8 = 8am
+      typicalStartMinute: integer("typical_start_minute"),
+      // 0 = on the hour
+      // Run history summary
+      runCount: integer("run_count").default(0).notNull(),
+      firstRunAt: timestamp("first_run_at"),
+      lastRunAt: timestamp("last_run_at"),
+      constituentRunIds: jsonb("constituent_run_ids"),
+      // string[] — IDs of runs that built this fingerprint
+      // All-time stats for this route
+      bestTimeMs: integer("best_time_ms"),
+      // Personal best duration in milliseconds
+      avgTimeMs: integer("avg_time_ms"),
+      avgPaceSecPerKm: real("avg_pace_sec_per_km"),
+      // km-by-km split profiles — averages across all runs on this route
+      splitProfiles: jsonb("split_profiles"),
+      // [{km, avgSecPerKm, bestSecPerKm, worstSecPerKm, runCount}]
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
     userStats = pgTable("user_stats", {
       userId: varchar("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
       updatedAt: timestamp("updated_at").defaultNow(),
@@ -1578,7 +1929,25 @@ var init_schema = __esm({
       //    Best 5K: 24:12 (improving). Current plan: Week 6 of 12. Last run: 8km
       //    easy, felt good. Focus: build aerobic base, avoid overstriding."
       aiRunnerProfile: text("ai_runner_profile"),
-      aiRunnerProfileUpdatedAt: timestamp("ai_runner_profile_updated_at")
+      aiRunnerProfileUpdatedAt: timestamp("ai_runner_profile_updated_at"),
+      // ── Coaching Observations — "What the AI coach has learned about this runner" ──
+      // A rolling JSONB array of up to 20 structured observations extracted from
+      // post-run analyses.  Each entry captures patterns, tendencies, pacing habits,
+      // mental game notes, and adaptation signals that emerge from actual run data.
+      //
+      // This powers the two-layer learning loop:
+      //   Approach B — observations feed directly into profile regeneration as context
+      //   Approach C — the profile itself is updated (not rewritten) each run, so
+      //                insights accumulate rather than being reset from raw data.
+      //
+      // Example entry:
+      //   { date: "2026-05-10", workoutType: "tempo", distanceKm: 8.5,
+      //     patternObserved: "Negative split on flat tempo — runner is learning to pace",
+      //     progressionNote: "Pace 8s/km faster than 3 weeks ago at same HR",
+      //     struggleNote: "Cadence drops from 172 to 163 in final 2km under fatigue",
+      //     adaptationSignal: "HR 10bpm lower at equivalent effort — aerobic base building",
+      //     performanceScore: 82 }
+      coachingObservations: jsonb("coaching_observations")
     });
     passwordResetTokens = pgTable("password_reset_tokens", {
       token: text("token").primaryKey(),
@@ -1901,6 +2270,14 @@ var init_storage = __esm({
         await tryCleanup(
           "connected_devices",
           sql2`DELETE FROM connected_devices WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "monthly_usage",
+          sql2`DELETE FROM monthly_usage WHERE user_id = ${userId}`
+        );
+        await tryCleanup(
+          "user_coupons",
+          sql2`DELETE FROM user_coupons WHERE user_id = ${userId}`
         );
         await tryCleanup(
           "password_reset_tokens",
@@ -2585,6 +2962,36 @@ async function getRunnerProfile(userId) {
   const [row] = await db.select({ aiRunnerProfile: userStats.aiRunnerProfile }).from(userStats).where(eq2(userStats.userId, userId));
   return row?.aiRunnerProfile ?? null;
 }
+async function persistCoachingObservation(userId, observation) {
+  try {
+    const hasContent = observation.patternObserved || observation.progressionNote || observation.adaptationSignal || observation.struggleNote || observation.pacingNote || observation.coachingSummary;
+    if (!hasContent) return;
+    const [row] = await db.select({ coachingObservations: userStats.coachingObservations }).from(userStats).where(eq2(userStats.userId, userId));
+    const existing = Array.isArray(row?.coachingObservations) ? row.coachingObservations : [];
+    const deduplicated = existing.filter((o) => o.runId !== observation.runId);
+    const updated = [observation, ...deduplicated].slice(0, 20);
+    await db.insert(userStats).values({
+      userId,
+      coachingObservations: updated,
+      // Required NOT NULL columns with safe defaults — upsert handles the rest
+      totalRuns: 0,
+      totalDistanceKm: 0,
+      totalDurationSeconds: 0,
+      totalElevationGainM: 0,
+      totalCalories: 0,
+      totalActiveCalories: 0,
+      longestRunKm: 0
+    }).onConflictDoUpdate({
+      target: userStats.userId,
+      set: { coachingObservations: updated }
+    });
+    console.log(`[RunnerProfile] Coaching observation persisted for user ${userId} (${updated.length} total)`);
+    refreshRunnerProfile(userId).catch(() => {
+    });
+  } catch (err) {
+    console.error(`[RunnerProfile] Failed to persist coaching observation for user ${userId}:`, err);
+  }
+}
 async function gatherRunnerContext(userId) {
   const [user] = await db.select({
     name: users.name,
@@ -2600,6 +3007,8 @@ async function gatherRunnerContext(userId) {
   const totalRuns = stats?.totalRuns ?? 0;
   const totalDistanceKm = stats?.totalDistanceKm ?? 0;
   const totalDurationSec = stats?.totalDurationSeconds ?? 0;
+  const currentProfile = stats?.aiRunnerProfile ?? null;
+  const coachingObservations = Array.isArray(stats?.coachingObservations) ? stats.coachingObservations : [];
   const fourWeeksAgo = /* @__PURE__ */ new Date();
   fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
   const recentRawRuns = await db.select({
@@ -2684,7 +3093,10 @@ async function gatherRunnerContext(userId) {
     activePlan,
     activeGoals,
     recentRuns,
-    lastRun
+    lastRun,
+    // Learning loop
+    currentProfile,
+    coachingObservations
   };
 }
 async function generateProfile(ctx) {
@@ -2702,6 +3114,28 @@ async function generateProfile(ctx) {
     (r) => `${r.date}: ${r.distanceKm}km in ${r.durationMin}min${r.avgPace ? ` @ ${r.avgPace}/km` : ""}${r.elevationGainM ? ` (+${r.elevationGainM}m elev)` : ""}${r.workoutType ? ` [${r.workoutType}]` : ""}${r.avgHeartRate ? ` HR:${r.avgHeartRate}` : ""}`
   ).join("\n");
   const lastRunNote = ctx.lastRun ? `Last run: ${ctx.lastRun.date}, ${ctx.lastRun.distanceKm}km, ${ctx.lastRun.durationMin}min${ctx.lastRun.avgPace ? ` @ ${ctx.lastRun.avgPace}/km` : ""}.` : "No runs recorded yet.";
+  let observationsBlock = "";
+  if (ctx.coachingObservations.length > 0) {
+    const obs = ctx.coachingObservations.slice(0, 12);
+    const obsLines = obs.map((o) => {
+      const parts = [`[${o.date}${o.workoutType ? ` \xB7 ${o.workoutType}` : ""} \xB7 ${o.distanceKm}km${o.performanceScore != null ? ` \xB7 score:${o.performanceScore}` : ""}]`];
+      if (o.coachingSummary) parts.push(`  Summary: ${o.coachingSummary}`);
+      if (o.patternObserved) parts.push(`  Pattern: ${o.patternObserved}`);
+      if (o.progressionNote) parts.push(`  Progression: ${o.progressionNote}`);
+      if (o.adaptationSignal) parts.push(`  Adaptation: ${o.adaptationSignal}`);
+      if (o.struggleNote) parts.push(`  Struggle: ${o.struggleNote}`);
+      if (o.pacingNote) parts.push(`  Pacing: ${o.pacingNote}`);
+      return parts.join("\n");
+    }).join("\n\n");
+    observationsBlock = `
+COACHING OBSERVATIONS LOG (from post-run analyses \u2014 most recent first):
+These are AI-interpreted insights from actual runs. They reveal patterns, tendencies,
+and adaptation signals that raw numbers alone cannot capture.
+
+${obsLines}`;
+  }
+  const isFirstProfile = !ctx.currentProfile || ctx.currentProfile.trim() === "";
+  const hasNewObservations = ctx.coachingObservations.length > 0;
   const userPrompt = `
 RUNNER DATA:
 Name: ${ctx.name}${ctx.age ? `, Age: ${ctx.age}` : ""}${ctx.gender ? `, Gender: ${ctx.gender}` : ""}
@@ -2723,8 +3157,14 @@ RECENT RUNS (newest first):
 ${recentRunLines || "None"}
 
 ${lastRunNote}
+${observationsBlock}
+${!isFirstProfile ? `
+CURRENT PROFILE (what you already know about this runner):
+${ctx.currentProfile}
+
+${hasNewObservations ? "UPDATE this profile by incorporating the new coaching observations above. Enrich and refine your understanding \u2014 do not simply restate the existing profile. Preserve any insights still relevant, update anything the new data changes, and add genuinely new patterns you now recognise." : "The raw data above has been refreshed. Update the profile to reflect any changes in volume, plan progress, or recent form \u2014 preserving accumulated insights that remain valid."}` : ""}
 `.trim();
-  const systemPrompt = `You are an AI running coach writing a concise internal briefing note about a runner.
+  const systemPrompt = isFirstProfile ? `You are an AI running coach writing your first internal briefing note about a runner.
 
 Write a 150\u2013220 word plain-English summary in third person (e.g. "Dan is...").
 This profile is injected into EVERY AI prompt across the app \u2014 pre-run briefings,
@@ -2743,16 +3183,33 @@ INCLUDE (where data is available):
 
 TONE: Factual and concise. No fluff. Write as a coach would brief a colleague.
 FORMAT: Plain text only. No bullet points, headers, or markdown. One flowing paragraph or two short paragraphs.
-DO NOT fabricate data not provided. If a field is missing, simply omit it.`;
+DO NOT fabricate data not provided. If a field is missing, simply omit it.` : `You are an AI running coach maintaining your living knowledge of a specific runner.
+
+You are NOT writing a profile from scratch. You are UPDATING your understanding of this runner
+based on new run data and \u2014 critically \u2014 newly observed patterns from post-run analyses.
+
+Your goal is to produce an enriched 150\u2013280 word plain-English briefing that:
+1. Preserves established facts and patterns that remain valid
+2. Incorporates new coaching observations \u2014 patterns, tendencies, adaptation signals
+3. Updates any metrics that have changed (volume, plan week, last run, PBs)
+4. Calls out emerging patterns explicitly: "consistently goes out too fast", "cadence
+   drops under fatigue", "responding well to Zone 2 work \u2014 HR trending down"
+5. Reads like a coach's evolving understanding of a specific athlete \u2014 not a data report
+
+FORMAT: Plain text only. No bullet points, headers, or markdown. Third person ("Dan is...").
+One flowing paragraph or two short paragraphs. 150\u2013280 words.
+TONE: Factual and sharp. Coaches briefing each other. No filler.
+DO NOT fabricate data not provided. Only reference observed patterns that appear in the
+coaching observations log above \u2014 don't invent tendencies.`;
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt }
     ],
-    max_tokens: 350,
-    temperature: 0.4
-    // Low temperature for consistent, factual output
+    max_tokens: 400,
+    temperature: 0.35
+    // Low temperature for consistent, factual output — slightly higher than before to allow natural synthesis
   });
   return completion.choices[0]?.message?.content?.trim() ?? null;
 }
@@ -2786,6 +3243,227 @@ var init_runner_profile_service = __esm({
     init_db();
     init_schema();
     openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+});
+
+// server/user-stats-cache.ts
+var user_stats_cache_exports = {};
+__export(user_stats_cache_exports, {
+  onRunDeleted: () => onRunDeleted,
+  onRunSaved: () => onRunSaved,
+  recomputeForUser: () => recomputeForUser
+});
+import { eq as eq3, and as and3, gte as gte3, isNotNull as isNotNull3, count as count3, sum as sum3, max as max3, sql as sql3 } from "drizzle-orm";
+async function onRunSaved(userId, run) {
+  try {
+    await recomputeForUser(userId);
+    console.log(`[UserStatsCache] Recomputed stats for user ${userId} after run ${run.id}`);
+  } catch (error) {
+    console.error(`[UserStatsCache] Failed to update stats for user ${userId}:`, error);
+  }
+  refreshRunnerProfile(userId).catch(
+    (err) => console.error(`[UserStatsCache] Runner profile refresh failed for ${userId}:`, err)
+  );
+}
+async function onRunDeleted(userId) {
+  try {
+    await recomputeForUser(userId);
+    console.log(`[UserStatsCache] Recomputed stats for user ${userId} after run deletion`);
+  } catch (error) {
+    console.error(`[UserStatsCache] Failed to recompute after deletion for user ${userId}:`, error);
+  }
+}
+async function recomputeForUser(userId) {
+  const [agg] = await db.select({
+    totalRuns: count3(),
+    totalDistanceM: sum3(runs.distance),
+    // meters — divide by 1000 for km
+    totalDurationSec: sum3(runs.duration),
+    // seconds — store as-is
+    totalElevationGain: sum3(runs.elevationGain),
+    totalCalories: sum3(runs.calories),
+    totalActiveCalories: sum3(runs.activeCalories),
+    longestRunM: max3(runs.distance),
+    // meters — divide by 1000 for km
+    // Highest elevation: prefer maxElevation column; fall back to elevationGain
+    highestElevationM: sql3`COALESCE(MAX(${runs.maxElevation}), MAX(${runs.elevationGain}), 0)`,
+    // avgPace is stored as "M:SS" format (e.g. "5:22") — parse via SPLIT_PART
+    fastestPace: sql3`MIN(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
+    avgPace: sql3`AVG(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`
+  }).from(runs).where(eq3(runs.userId, userId));
+  const pbUpdates = {};
+  for (const splitDist of [
+    { key: "1k", segmentKm: 1 },
+    { key: "mile", segmentKm: 1.609 }
+  ]) {
+    const rows = await db.execute(sql3`
+      SELECT
+        r.id,
+        r.completed_at,
+        SPLIT_PART(elem->>'pace', ':', 1)::numeric * 60
+          + SPLIT_PART(elem->>'pace', ':', 2)::numeric AS pace_seconds
+      FROM runs r,
+      LATERAL jsonb_array_elements(r.km_splits) AS elem
+      WHERE r.user_id = ${userId}
+        AND r.km_splits IS NOT NULL
+        AND jsonb_typeof(r.km_splits) = 'array'
+        AND (elem->>'pace') LIKE '%:%'
+      ORDER BY pace_seconds ASC
+      LIMIT 1
+    `);
+    const best = rows.rows?.[0];
+    const cols = PB_COLUMNS[splitDist.key];
+    if (best) {
+      const durationMs = Math.round(Number(best.pace_seconds) * splitDist.segmentKm * 1e3);
+      pbUpdates[cols.durationCol] = durationMs;
+      pbUpdates[cols.runIdCol] = best.id;
+      pbUpdates[cols.dateCol] = toDate(best.completed_at);
+    } else {
+      pbUpdates[cols.durationCol] = null;
+      pbUpdates[cols.runIdCol] = null;
+      pbUpdates[cols.dateCol] = null;
+    }
+  }
+  for (const dist of PB_DISTANCES.filter((d) => d.key !== "1k" && d.key !== "mile")) {
+    const cols = PB_COLUMNS[dist.key];
+    const minMeters = dist.minKm * 1e3;
+    const maxMeters = dist.maxKm * 1e3;
+    const [pbRun] = await db.select({ id: runs.id, duration: runs.duration, completedAt: runs.completedAt }).from(runs).where(and3(
+      eq3(runs.userId, userId),
+      gte3(runs.distance, minMeters),
+      sql3`${runs.distance} <= ${maxMeters}`,
+      isNotNull3(runs.avgPace)
+    )).orderBy(runs.avgPace).limit(1);
+    let bestRun = pbRun ?? null;
+    let bestPaceSecsPerKm = null;
+    if (bestRun?.duration) {
+      bestPaceSecsPerKm = bestRun.duration;
+    }
+    const splitRows = await db.execute(sql3`
+      SELECT
+        r.id,
+        r.completed_at,
+        SPLIT_PART(elem->>'pace', ':', 1)::numeric * 60
+          + SPLIT_PART(elem->>'pace', ':', 2)::numeric AS pace_seconds
+      FROM runs r,
+      LATERAL jsonb_array_elements(r.km_splits) AS elem
+      WHERE r.user_id = ${userId}
+        AND r.km_splits IS NOT NULL
+        AND jsonb_typeof(r.km_splits) = 'array'
+        AND (elem->>'pace') LIKE '%:%'
+      ORDER BY pace_seconds ASC
+      LIMIT 1
+    `);
+    const bestSplit = splitRows.rows?.[0];
+    if (bestSplit && (!bestPaceSecsPerKm || bestSplit.pace_seconds < bestPaceSecsPerKm)) {
+      bestRun = {
+        id: bestSplit.id,
+        duration: null,
+        // Will use pace_seconds directly
+        completedAt: bestSplit.completed_at ? toDate(bestSplit.completed_at) : null
+      };
+      bestPaceSecsPerKm = bestSplit.pace_seconds;
+    }
+    if (bestRun && bestPaceSecsPerKm !== null) {
+      const durationMs = Math.round(bestPaceSecsPerKm * dist.minKm * 1e3);
+      pbUpdates[cols.durationCol] = durationMs;
+      pbUpdates[cols.runIdCol] = bestRun.id;
+      pbUpdates[cols.dateCol] = bestRun.completedAt ?? null;
+    } else {
+      pbUpdates[cols.durationCol] = null;
+      pbUpdates[cols.runIdCol] = null;
+      pbUpdates[cols.dateCol] = null;
+    }
+  }
+  const [completedGoalsResult] = await db.select({ count: count3() }).from(goals).where(and3(eq3(goals.userId, userId), eq3(goals.status, "completed")));
+  const goalsAchieved = Number(completedGoalsResult?.count ?? 0);
+  const totalRuns = Number(agg.totalRuns ?? 0);
+  const totalDistanceKm = Number(agg.totalDistanceM ?? 0) / 1e3;
+  const longestRunKm = Number(agg.longestRunM ?? 0) / 1e3;
+  const totalDurationSeconds = Number(agg.totalDurationSec ?? 0);
+  let longestRunTimeSec = 0;
+  if (totalRuns > 0) {
+    const [longestRun] = await db.select({ duration: runs.duration }).from(runs).where(eq3(runs.userId, userId)).orderBy(sql3`${runs.distance} DESC NULLS LAST`).limit(1);
+    longestRunTimeSec = Math.round(longestRun?.duration || 0);
+  }
+  const highestElevationM = Math.round(Number(agg.highestElevationM ?? 0));
+  console.log(`[UserStatsCache] Recomputing for user ${userId}: ${totalRuns} runs, ${totalDistanceKm.toFixed(2)}km, ${totalDurationSeconds}s, longestTime=${longestRunTimeSec}s, highElev=${highestElevationM}m`);
+  const upsertData = {
+    userId,
+    updatedAt: /* @__PURE__ */ new Date(),
+    totalRuns,
+    totalDistanceKm,
+    totalDurationSeconds,
+    totalElevationGainM: Number(agg.totalElevationGain ?? 0),
+    totalCalories: Number(agg.totalCalories ?? 0),
+    totalActiveCalories: Number(agg.totalActiveCalories ?? 0),
+    avgPaceMinPerKm: Number(agg.avgPace ?? 0) || null,
+    fastestPaceMinPerKm: Number(agg.fastestPace ?? 0) || null,
+    longestRunKm,
+    longestRunTimeSec,
+    highestElevationM,
+    // PB fields — all duration columns store MILLISECONDS
+    pb1kDurationMs: pbUpdates["pb1kDurationMs"],
+    pb1kRunId: pbUpdates["pb1kRunId"],
+    pb1kDate: pbUpdates["pb1kDate"],
+    pbMileDurationMs: pbUpdates["pbMileDurationMs"],
+    pbMileRunId: pbUpdates["pbMileRunId"],
+    pbMileDate: pbUpdates["pbMileDate"],
+    pb5kDurationMs: pbUpdates["pb5kDurationMs"],
+    pb5kRunId: pbUpdates["pb5kRunId"],
+    pb5kDate: pbUpdates["pb5kDate"],
+    pb10kDurationMs: pbUpdates["pb10kDurationMs"],
+    pb10kRunId: pbUpdates["pb10kRunId"],
+    pb10kDate: pbUpdates["pb10kDate"],
+    pb20kDurationMs: pbUpdates["pb20kDurationMs"],
+    pb20kRunId: pbUpdates["pb20kRunId"],
+    pb20kDate: pbUpdates["pb20kDate"],
+    pbHalfDurationMs: pbUpdates["pbHalfDurationMs"],
+    pbHalfRunId: pbUpdates["pbHalfRunId"],
+    pbHalfDate: pbUpdates["pbHalfDate"],
+    pbMarathonDurationMs: pbUpdates["pbMarathonDurationMs"],
+    pbMarathonRunId: pbUpdates["pbMarathonRunId"],
+    pbMarathonDate: pbUpdates["pbMarathonDate"],
+    goalsAchieved
+  };
+  await db.insert(userStats).values(upsertData).onConflictDoUpdate({
+    target: userStats.userId,
+    set: { ...upsertData, userId: void 0 }
+    // Don't overwrite PK
+  });
+}
+function toDate(value) {
+  if (value == null) return null;
+  if (value instanceof Date) return value;
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : d;
+}
+var PB_DISTANCES, PB_COLUMNS;
+var init_user_stats_cache = __esm({
+  "server/user-stats-cache.ts"() {
+    init_db();
+    init_schema();
+    init_runner_profile_service();
+    PB_DISTANCES = [
+      { key: "1k", label: "1K", minKm: 0.95, maxKm: 1.1 },
+      { key: "mile", label: "Mile", minKm: 1.59, maxKm: 1.65 },
+      { key: "5k", label: "5K", minKm: 4.9, maxKm: 5.2 },
+      { key: "10k", label: "10K", minKm: 9.9, maxKm: 10.2 },
+      { key: "20k", label: "20K", minKm: 19.8, maxKm: 20.3 },
+      { key: "half", label: "Half Marathon", minKm: 21, maxKm: 21.6 },
+      // ← was 21.05–21.2, too narrow
+      { key: "marathon", label: "Marathon", minKm: 42, maxKm: 42.5 }
+      // ← also widened
+    ];
+    PB_COLUMNS = {
+      "1k": { durationCol: "pb1kDurationMs", runIdCol: "pb1kRunId", dateCol: "pb1kDate" },
+      "mile": { durationCol: "pbMileDurationMs", runIdCol: "pbMileRunId", dateCol: "pbMileDate" },
+      "5k": { durationCol: "pb5kDurationMs", runIdCol: "pb5kRunId", dateCol: "pb5kDate" },
+      "10k": { durationCol: "pb10kDurationMs", runIdCol: "pb10kRunId", dateCol: "pb10kDate" },
+      "20k": { durationCol: "pb20kDurationMs", runIdCol: "pb20kRunId", dateCol: "pb20kDate" },
+      "half": { durationCol: "pbHalfDurationMs", runIdCol: "pbHalfRunId", dateCol: "pbHalfDate" },
+      "marathon": { durationCol: "pbMarathonDurationMs", runIdCol: "pbMarathonRunId", dateCol: "pbMarathonDate" }
+    };
   }
 });
 
@@ -2965,7 +3643,6 @@ function getRegionForAccent(accent) {
     british: process.env.AWS_REGION_BRITISH || "eu-west-1",
     irish: process.env.AWS_REGION_IRISH || "eu-west-1",
     south_african: process.env.AWS_REGION_SOUTH_AFRICAN || "eu-west-1",
-    indian: process.env.AWS_REGION_INDIAN || "eu-west-1",
     // AP accents → ap-southeast-2 (Sydney)
     australian: process.env.AWS_REGION_AUSTRALIAN || "ap-southeast-2",
     new_zealand: process.env.AWS_REGION_NEW_ZEALAND || "ap-southeast-2",
@@ -3017,12 +3694,6 @@ function mapAccentToPollyVoice(accent, gender) {
       female: "Ayanda"
       // en-ZA Neural female
     },
-    indian: {
-      male: "Kajal",
-      // en-IN Neural (only one IN Neural voice)
-      female: "Kajal"
-      // en-IN Neural female
-    },
     new_zealand: {
       male: "Aria",
       // en-NZ — no male Neural voice exists, Aria is gender-neutral enough
@@ -3041,7 +3712,6 @@ function mapAccentToLanguageCode(accent) {
     australian: "en-AU",
     irish: "en-IE",
     south_african: "en-ZA",
-    indian: "en-IN",
     new_zealand: "en-NZ"
   };
   return languageMap[normalizedAccent] || "en-GB";
@@ -3245,6 +3915,43 @@ Be encouraging, specific to the conditions, and give one actionable tip. Speak n
   });
   return completion.choices[0].message.content || "Take it easy at the start and find your rhythm. Good luck!";
 }
+function buildRouteIntelligenceContext(routeCtx, currentDistanceKm, totalDistanceKm, currentKmSplitSec, splitKm) {
+  const lines = [];
+  lines.push(`ROUTE MEMORY: ${routeCtx.routeName} (${Math.round(routeCtx.confidence * 100)}% confidence)`);
+  if (routeCtx.personalBestFormatted) {
+    lines.push(`PB on this route: ${routeCtx.personalBestFormatted}`);
+  }
+  if (routeCtx.lastRunFormatted) {
+    lines.push(`Last run: ${routeCtx.lastRunFormatted} (${routeCtx.lastRunDate ?? "recent"})`);
+  }
+  if (splitKm && currentKmSplitSec && routeCtx.splitComparisons) {
+    const cmp = routeCtx.splitComparisons.find((s) => s.km === splitKm);
+    if (cmp) {
+      if (cmp.lastRunSecPerKm) {
+        const deltaLast = cmp.lastRunSecPerKm - currentKmSplitSec;
+        const label = deltaLast > 0 ? `${Math.abs(Math.round(deltaLast))}s FASTER than last run` : `${Math.abs(Math.round(deltaLast))}s SLOWER than last run`;
+        lines.push(`Km ${splitKm} vs last run: ${label}`);
+      }
+      if (cmp.avgSecPerKm) {
+        const deltaAvg = cmp.avgSecPerKm - currentKmSplitSec;
+        const label = deltaAvg > 0 ? `${Math.abs(Math.round(deltaAvg))}s FASTER than their average` : `${Math.abs(Math.round(deltaAvg))}s SLOWER than their average`;
+        lines.push(`Km ${splitKm} vs average: ${label}`);
+      }
+    }
+  }
+  if (routeCtx.notableSegments && routeCtx.typicalDistanceKm && routeCtx.typicalDistanceKm > 0) {
+    const progressPct = currentDistanceKm / routeCtx.typicalDistanceKm;
+    const lookaheadPct = 0.6 / routeCtx.typicalDistanceKm;
+    const approaching = routeCtx.notableSegments.find(
+      (seg) => seg.startPct >= progressPct && seg.startPct <= progressPct + lookaheadPct
+    );
+    if (approaching) {
+      const distanceToSegM = Math.round((approaching.startPct - progressPct) * routeCtx.typicalDistanceKm * 1e3);
+      lines.push(`\u26A0\uFE0F TERRAIN ALERT: "${approaching.name}" in ~${distanceToSegM}m \u2014 ${approaching.coachingNote} MENTION THIS FIRST.`);
+    }
+  }
+  return lines.join("\n");
+}
 function buildRunHistoryContext(history, currentPace) {
   if (!history || history.runsAnalysed === 0) return "";
   let ctx = `Based on their last ${history.runsAnalysed} runs: avg pace ${history.avgPaceFormatted}/km`;
@@ -3338,6 +4045,13 @@ CRITICAL: No GPS elevation data available for this run. Do NOT mention hills, te
     }
   }
   const varietySeed = getVarietySeed();
+  const routeCtxBlock = params.routeIntelligence ? buildRouteIntelligenceContext(
+    params.routeIntelligence,
+    distance,
+    targetDistance,
+    params.lastKmSplitSeconds,
+    isSplit ? splitKm : void 0
+  ) : "";
   let prompt;
   if (isSplit && splitKm && splitPace) {
     prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
@@ -3351,11 +4065,13 @@ The runner just completed kilometer ${splitKm} with a split pace of ${spokenSpli
 - Target pace: ${spokenTargetPace}` : ""}
 ${splitTargetVerdict ? `
 PACE ASSESSMENT: ${splitTargetVerdict}` : ""}
+${routeCtxBlock ? `
+${routeCtxBlock}` : ""}
 ${terrainContext}${paceTrend}
 ${noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${varietySeed}
-Give a brief (1-2 sentences) split update. You MUST mention their SPLIT pace (${spokenSplitPace}) and${splitTargetVerdict ? " whether they are on track for their target pace (CRITICAL \u2014 do NOT praise a slow split if they are behind target)." : " at least one other data point (progress, time, or pace trend)."} ${hasRoute === true && isOnHill ? "Acknowledge the hill effort. " : ""}${paceTrend ? "Comment on their pace trend." : ""}`;
+Give a brief (1-2 sentences) split update. ${routeCtxBlock ? "PRIORITISE the route memory data \u2014 mention the split delta vs last run or average (faster/slower by X seconds) as this is the most impactful insight. If a terrain alert is present, mention that first. " : ""}You MUST mention their SPLIT pace (${spokenSplitPace}) and${splitTargetVerdict ? " whether they are on track for their target pace (CRITICAL \u2014 do NOT praise a slow split if they are behind target)." : " at least one other data point (progress, time, or pace trend)."} ${hasRoute === true && isOnHill ? "Acknowledge the hill effort. " : ""}${paceTrend ? "Comment on their pace trend." : ""}`;
   } else {
     prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
 ${runnerContext ? `
@@ -3635,6 +4351,7 @@ STOP nagging about the target. Switch to: acknowledge the effort they ARE puttin
       }
     }
     const paceVarietySeed = getVarietySeed();
+    const runnerFirstName2 = runnerName ? runnerName.split(" ")[0] : null;
     const pacePrompt = `You are ${coachName}, an AI ${activityType || "running"} coach with a ${coachTone} style.
 
 PACE COACHING \u2014 ${paceZone}
@@ -3653,7 +4370,7 @@ ${paceVarietySeed}
 Give 2-3 sentences of pace coaching. Be specific about the numbers \u2014 tell them their actual pace and what they need.
 ${progressPercent > 80 ? "They're in the final stretch \u2014 be extra motivating!" : ""}
 Do NOT use markdown, emojis, or bullet points \u2014 this will be spoken aloud.
-Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight into the pace coaching.${runnerFirstName ? ` The runner's name is ${runnerFirstName} \u2014 use it naturally but not as a greeting.` : ""}`;
+Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight into the pace coaching.${runnerFirstName2 ? ` The runner's name is ${runnerFirstName2} \u2014 use it naturally but not as a greeting.` : ""}`;
     const paceSystemMsg = `You are ${coachName}, a ${coachTone} running coach giving pace guidance. Be specific with pace numbers (use "X minutes Y seconds per kilometre" format, not "X:YY"). Keep it concise (2-3 sentences). NEVER start with greetings. NEVER praise a slow pace as good when the runner is behind target \u2014 be honest and specific. ${toneDirective(coachTone)}${coachAccent ? " " + accentDirective(coachAccent) : ""}${runnerProfileBlock(params.runnerProfile)}`;
     const paceCompletion = await openai2.chat.completions.create({
       model: "gpt-4o-mini",
@@ -3666,7 +4383,6 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
     });
     return paceCompletion.choices[0].message.content || `You're running ${avgPaceFormatted} per kilometre, target is ${targetPaceFormatted}.`;
   }
-  const runnerFirstName = runnerName ? runnerName.split(" ")[0] : null;
   let runnerProfileContext = "";
   if (runnerFirstName) {
     runnerProfileContext += `
@@ -3715,15 +4431,31 @@ Runner's fitness level: ${fitnessLevel}. Tailor your advice complexity and expec
     case "welsh":
       runnerProfileContext += '\nWrite with natural Welsh English phrasing \u2014 use "lovely", "tidy", "fair play", "cracking on", "kilometres". Passionate and heartfelt with musical warmth.';
       break;
-    case "indian":
-      runnerProfileContext += '\nWrite with natural Indian English phrasing \u2014 use "very good", "excellent", "well done", "superb", "kilometres". Articulate, encouraging, and warm. Slightly formal but genuinely caring.';
-      break;
     case "caribbean":
       runnerProfileContext += '\nWrite with natural Caribbean English phrasing \u2014 use "wicked", "big up yourself", "nuff respect", "easy now", "kilometres". Rhythmic, confident, uplifting energy. Island warmth.';
       break;
     case "scandinavian":
       runnerProfileContext += '\nWrite with natural Scandinavian-influenced English \u2014 use "very nice", "good job", "exactly", "perfect", "kilometres". Clean, precise, understated positivity. Hygge energy \u2014 calm confidence.';
       break;
+  }
+  let planContext = "";
+  const planGoalType = params.planGoalType;
+  const planWeekNumber = params.planWeekNumber;
+  const planTotalWeeks = params.planTotalWeeks;
+  const phaseWorkoutType = params.workoutType;
+  const phaseWorkoutDescription = params.workoutDescription;
+  const phaseTrainingPlanId = params.trainingPlanId;
+  if (phaseTrainingPlanId && planGoalType) {
+    const goalLabel = planGoalType.replace(/_/g, " ").toUpperCase();
+    planContext = `
+Coaching Programme Context: This is a scheduled workout in the runner's AI coaching plan`;
+    if (planWeekNumber && planTotalWeeks) {
+      planContext += ` (Week ${planWeekNumber} of ${planTotalWeeks})`;
+    }
+    planContext += `, training for a ${goalLabel}`;
+    if (phaseWorkoutType) planContext += `. Session type: ${phaseWorkoutType.replace(/_/g, " ")}`;
+    if (phaseWorkoutDescription) planContext += `. Today's goal: "${phaseWorkoutDescription}"`;
+    planContext += ". Reference the plan when relevant \u2014 remind them how this session fits the bigger journey.";
   }
   const isRunStart = (phase === "EARLY" || phase === "warmUp") && distance < 0.05;
   const is500mCheckin = triggerType === "500m_checkin";
@@ -3734,7 +4466,7 @@ Runner's fitness level: ${fitnessLevel}. Tailor your advice complexity and expec
     prompt = `You are ${coachName}, an AI ${activityType || "running"} coach with a ${coachTone} style.
 
 The runner has just started their ${activityType || "run"}${targetDistance ? ` \u2014 their target is ${formatDistanceForTTS(targetDistance)}` : ""}${targetTime && targetTime > 0 ? ` in ${formatDurationForTTS(targetTime)}` : ""}.
-${noTerrainRule}${runnerProfileContext}
+${noTerrainRule}${runnerProfileContext}${planContext}
 Give a short, energetic motivational message (2-3 sentences) to kick off their run. Focus on getting them pumped up and ready to go. Do NOT mention distance covered, pace, cadence, or any metrics \u2014 the run has literally just begun. Just motivate them!
 ${phaseVarietySeed}
 CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", or "Hello". Jump straight into the coaching message.${runnerFirstName ? ` You may use "${runnerFirstName}" naturally but not as a greeting opener.` : ""}`;
@@ -3757,13 +4489,13 @@ ${cadenceInfo}
 ${terrainInfo}
 ${elevationInstruction}
 ${cadenceInstruction}
-${noTerrainRule}${runnerProfileContext}
+${noTerrainRule}${runnerProfileContext}${planContext}
 ${PACE_FORMAT_RULE}
 ${phaseVarietySeed}
 ${triggerInstruction} Be ${coachTone} and direct.
 CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", "Hello", or "Hey superstar". Jump straight into the coaching content.${runnerFirstName ? ` You may address them as "${runnerFirstName}" naturally within the message but not as an opening greeting.` : ""}
 
-CRITICAL: You MUST weave in at least 2 specific data points from the Runner Status above (e.g. their actual pace like "${spokenPhasePace}", distance "${distance.toFixed(1)}km", time "${timeFormatted}", cadence, heart rate). Runners want to hear their real numbers \u2014 do NOT give vague encouragement without citing their actual stats.${targetPace ? ` You MUST tell the runner whether they are on track for their target pace of ${spokenTargetPace}. ${paceVerdict} \u2014 communicate this clearly and honestly. Do NOT praise slow pace when they are behind target.` : ""}${targetTime && targetTime > 0 ? ` You MUST mention whether they are on track for their target time of ${formatDurationForTTS(targetTime)}.` : ""}${cadenceCoachingDirective ? " You MUST include the cadence coaching directive above." : ""}${elevationInstruction ? " You MUST acknowledge the elevation context." : ""}${hasRoute === true && !elevationInstruction ? " Consider terrain if relevant." : ""}`;
+Runners want to hear their real numbers \u2014 weave in their actual stats (pace, distance, time, cadence, heart rate) naturally in your coaching message. This should feel like a coach who is watching their real performance, not vague encouragement. ${targetPace ? `Be clear about whether they are on track for target pace ${spokenTargetPace} \u2014 ${paceVerdict}. Do not praise a slow pace when they are behind target.` : ""}${targetTime && targetTime > 0 ? ` Address whether they are on track for their ${formatDurationForTTS(targetTime)} target time.` : ""}${cadenceCoachingDirective ? " Incorporate the cadence coaching directive above." : ""}${elevationInstruction ? " Acknowledge the elevation context." : ""}${hasRoute === true && !elevationInstruction ? " Consider terrain if relevant." : ""}`;
     systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || "running"} coach. Keep coaching messages brief and impactful \u2014 always cite the runner's actual numbers (pace, distance, time etc). NEVER start with greetings like "Hey there", "Hey!", "Hi!" \u2014 jump straight into coaching. NEVER praise a poor split or slow pace when the runner is behind target \u2014 be honest and direct. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? " " + accentDirective(coachAccent) : ""}${runnerProfileBlock(params.runnerProfile)}`;
   }
   const completion = await openai2.chat.completions.create({
@@ -3838,7 +4570,21 @@ ${phaseEmphasis}
 ${paceContext}
 ${hrContext}
 
-Give 1\u20132 punchy, direct sentences. ${isWorkPhase ? "Push them hard but safely." : "Help them recover and prepare for the next effort."}`;
+${params.totalIntervals ? `This is rep ${intervalNumber} of ${params.totalIntervals} total.` : ""}
+${(() => {
+    const pg2 = params.planGoalType;
+    const pw = params.planWeekNumber;
+    const pt = params.planTotalWeeks;
+    const wd = params.workoutDescription;
+    if (!pg2) return "";
+    let ctx = `
+Coaching plan: Training for ${pg2.replace(/_/g, " ").toUpperCase()}`;
+    if (pw && pt) ctx += `, Week ${pw} of ${pt}`;
+    if (wd) ctx += `. Session goal: "${wd}"`;
+    return ctx;
+  })()}
+
+Give 1\u20132 punchy, direct sentences. ${isWorkPhase ? "Push them hard but safely." : "Help them recover and prepare for the next effort. If it fits, remind them how this session serves their training goal."}`;
   const systemMsg = buildCoachingSystemPrompt({
     coachName,
     coachTone,
@@ -3969,74 +4715,20 @@ async function generateCadenceCoaching(params) {
   physicalContext += `Personalised optimal cadence for this runner at this pace: ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}\u2013${dynOptimalCadenceMax} spm). This is specific to their height, age, and current pace \u2014 not a generic target.`;
   let zoneAnalysis = "";
   if (strideZone === "OVERSTRIDING") {
-    zoneAnalysis = `OVERSTRIDING DETECTED: Cadence ${cadence} spm with stride length ${strideCm}cm \u2014 this is above the optimal range of ${optMinCm}-${optMaxCm}cm for their height.
+    zoneAnalysis = `OVERSTRIDING DETECTED: Cadence ${cadence} spm with stride length ${strideCm}cm \u2014 their foot is landing ahead of their centre of mass, creating a braking force with each step.
 
-Overstriding means their foot is landing too far ahead of their center of mass, creating a braking force with each step. This:
-- Increases impact on knees and shins (injury risk)
-- Wastes energy fighting the braking force
-- Reduces running efficiency
+Key context:
+- Personalised target: ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}\u2013${dynOptimalCadenceMax} spm) \u2014 calculated for their height (${heightCmDisplay ?? 170}cm) at their current pace. NOT a generic target.
+- Overstriding increases knee and shin impact stress
+- The correction: shorten stride, move foot strike closer to beneath the hips
 
-The runner needs to SHORTEN their stride and INCREASE their cadence. Their personalised target is ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}\u2013${dynOptimalCadenceMax} spm) \u2014 this is calculated specifically for their height (${heightCmDisplay ?? 170}cm) at their current pace. Provide elite-level coaching on HOW to do this:
-1. Focus on landing with foot beneath hips, not out front
-2. Think "quick, light steps" \u2014 aim for ${dynOptimalCadenceMin}-${dynOptimalCadenceMax} spm
-3. Lean slightly forward from ankles (not waist)
-4. Imagine running on hot coals \u2014 minimize ground contact time
-5. Arms drive the cadence \u2014 quicker arms = quicker feet
-6. Keep your landing tight beneath your center of mass
-7. Let the ground come to your foot\u2014don\u2019t chase it
-8. Shorten the step and land softly beneath your body
-9. Imagine placing your foot straight down under your hips
-10. Reduce the reach\u2014quick feet underneath you
-11. Your stride should land under you, not in front of you
-12. Let your feet move faster with smaller steps.
-13. Increase step rhythm\u2014shorter steps, faster turnover.
-14. Run like you're tapping the ground quickly.
-15. Quick cadence keeps your stride compact.
-16. Let the rhythm of your feet speed up slightly.
-17. Faster cadence, lighter steps.
-18. Think quick feet beneath you.
-19. Compact steps will protect your legs and increase efficiency.
-20. Arms drive cadence\u2014quicker arms mean quicker feet.
-21. Speed up your arm swing slightly.
-22.Compact arm swings will increase cadence.
-23. Let your arms set the rhythm for your legs.
-24. Faster arm turnover shortens the stride.
-25. Keep arms relaxed but quick.
-26. Drive elbows back faster.
-27. Quick arm rhythm = quick foot rhythm.
-28. Let your arms guide the cadence.
-29.Smooth, quick arm drive will tighten your stride.`;
+Use your coaching expertise to choose the 1-2 most effective, actionable cues for this moment. You know how to coach overstriding \u2014 pick what will resonate.`;
   } else if (strideZone === "UNDERSTRIDING") {
-    zoneAnalysis = `UNDERSTRIDING DETECTED: Cadence ${cadence} spm with stride length ${strideCm}cm \u2014 their cadence is ${cadenceDeficit} spm below their personalised target.
+    zoneAnalysis = `UNDERSTRIDING DETECTED: Cadence ${cadence} spm \u2014 ${cadenceDeficit} spm below their personalised target of ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}\u2013${dynOptimalCadenceMax} spm), calculated for their height (${heightCmDisplay ?? 170}cm) at ${formatPaceForTTS(currentPace)}.
 
-Their personalised target is ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}\u2013${dynOptimalCadenceMax} spm) \u2014 calculated for their height (${heightCmDisplay ?? 170}cm) at ${formatPaceForTTS(currentPace)}. This is NOT a generic target like "everyone should run at 180 spm".
+This is NOT a generic "everyone should hit 180" situation \u2014 this is their specific efficient range. A low turnover stride reduces propulsion and increases vertical oscillation.
 
-Understriding means they're shuffling with too-short steps at a low turnover rate. This:
-- Wastes energy on vertical oscillation (bouncing up and down)
-- Reduces forward propulsion
-- Can cause calf and Achilles fatigue
-
-The runner needs to find a more efficient cadence FOR THEM. Provide coaching on HOW to increase cadence:
-1. Use a mental metronome \u2014 aim for ${dynOptimalCadenceMin}-${dynOptimalCadenceMax} steps per minute (their personal target, not generic)
-2. Push off more powerfully from the balls of their feet
-3. Drive knees forward (not up) with each stride
-4. Keep arms pumping actively \u2014 they set the rhythm
-5. Think "smooth and powerful" not "short and choppy"
-6. Run like you're tapping the ground quickly.
-7. Quick cadence keeps your stride compact.
-8. Let the rhythm of your feet speed up slightly.
-9. Faster cadence, lighter steps.
-10. Think quick feet beneath you.
-11. Compact steps will protect your legs and increase efficiency.
-12. Arms drive cadence\u2014quicker arms mean quicker feet.
-13. Speed up your arm swing slightly.
-14.Compact arm swings will increase cadence.
-15. Let your arms set the rhythm for your legs.
-16. Faster arm turnover shortens the stride.
-17. Keep arms relaxed but quick.
-18. Drive elbows back faster.
-19. Quick arm rhythm = quick foot rhythm.
-20. Let your arms guide the cadence.`;
+Use your coaching expertise to choose the 1-2 most effective, actionable cues to increase their cadence. Arms, mental imagery, foot placement, rhythm \u2014 whatever you judge will land best for this runner right now.`;
   } else {
     zoneAnalysis = `Cadence ${cadence} spm with stride ${strideCm}cm is in the optimal zone. Brief positive reinforcement.`;
   }
@@ -4259,7 +4951,7 @@ async function generateEmotionalCoaching(params) {
   } = params;
   const timeMin = Math.floor(elapsedTime / 60);
   const progress = targetDistance ? Math.round(distance / targetDistance * 100) : 0;
-  const runnerFirstName = runnerName ? runnerName.split(" ")[0] : null;
+  const runnerFirstName2 = runnerName ? runnerName.split(" ")[0] : null;
   const emotionalPrompts = {
     positive_self_talk: `You are ${coachName}, an AI running coach with a ${coachTone} style.
 
@@ -4418,9 +5110,6 @@ function buildTTSInstructions(coachAccent, coachTone, coachGender, coachName) {
     case "welsh":
       parts.push("Speak with a Welsh accent. Musical, lilting intonation with a warm sing-song quality. Rich vowels. Passionate and heartfelt delivery.");
       break;
-    case "indian":
-      parts.push("Speak with an Indian English accent. Clear, rhythmic cadence with distinctive intonation patterns. Articulate and precise. Warm and encouraging with natural Indian English flow.");
-      break;
     case "caribbean":
       parts.push("Speak with a Caribbean English accent. Rhythmic, melodic delivery with warm island energy. Relaxed but powerful. Think Jamaican-influenced \u2014 confident and uplifting.");
       break;
@@ -4480,9 +5169,11 @@ function buildTTSInstructions(coachAccent, coachTone, coachGender, coachName) {
   return parts.join(" ");
 }
 function buildCoachingSystemPrompt(context) {
-  let prompt = `You are an AI running coach. Be encouraging, brief (1-2 sentences max), and specific to the runner's current situation. NEVER start with greetings like "Hey there", "Hey!", "Hi!" \u2014 jump straight into coaching.`;
+  const coachIdentity = context.coachName || "Coach";
+  let prompt = `You are ${coachIdentity}, an elite AI running coach delivering live coaching to an athlete mid-run. You have real-time access to their pace, distance, heart rate, cadence, and terrain data \u2014 use it to make every coaching message feel like it comes from someone who is right there watching them perform. Be specific, immediate, and personal. NEVER start with greetings like "Hey there", "Hey!", "Hi!" \u2014 jump straight into the coaching.
+
+IMPORTANT: You are a fully qualified running coach with deep sports science knowledge. When the runner asks about physical symptoms (stitch, cramp, nausea, dizziness, shin splints, blisters, heavy legs, etc.), technique (breathing, form, footstrike, cadence), or any general running question \u2014 answer it directly and practically using your coaching expertise. These questions do NOT require sensor data. Give immediate, actionable advice the runner can apply RIGHT NOW while still running. Keep responses to 2-4 sentences spoken naturally \u2014 no bullet points, no lists.`;
   if (context.coachTone) {
-    prompt += ` Your tone should be ${context.coachTone}.`;
     prompt += ` ${toneDirective(context.coachTone)}`;
   }
   const currentPhase = context.phase || (context.distance !== void 0 ? determinePhase(context.distance, context.totalDistance || null) : "generic");
@@ -4771,35 +5462,9 @@ RUN (No planned route):
     routeInfo += `
 - Target: Complete ${formatDistanceForTTS(distance)} in ${formatDurationForTTS(targetTime)} (target pace: ${formatPaceForTTS(targetPace)})`;
   }
-  let wellnessContext = "";
-  if (wellness.sleepHours !== void 0) {
-    wellnessContext += `
-- Sleep: ${wellness.sleepHours.toFixed(1)} hours (${wellness.sleepQuality || "N/A"})`;
-    if (wellness.sleepScore) wellnessContext += `, score: ${wellness.sleepScore}/100`;
-  }
-  if (wellness.bodyBattery !== void 0) {
-    wellnessContext += `
-- Body Battery: ${wellness.bodyBattery}/100`;
-  }
-  if (wellness.stressLevel !== void 0) {
-    wellnessContext += `
-- Stress: ${wellness.stressQualifier || "N/A"} (${wellness.stressLevel}/100)`;
-  }
-  if (wellness.hrvStatus) {
-    wellnessContext += `
-- HRV Status: ${wellness.hrvStatus}`;
-    if (wellness.hrvFeedback) wellnessContext += ` - ${wellness.hrvFeedback}`;
-  }
-  if (wellness.restingHeartRate) {
-    wellnessContext += `
-- Resting HR: ${wellness.restingHeartRate} bpm`;
-  }
-  if (wellness.readinessScore !== void 0) {
-    wellnessContext += `
-- Overall Readiness: ${wellness.readinessScore}/100`;
-  }
+  const wellnessContext = "";
   let readinessGuidance = "";
-  if (wellness.readinessScore !== void 0) {
+  if (false) {
     const score = wellness.readinessScore;
     if (score >= 90) {
       readinessGuidance = `
@@ -4905,16 +5570,82 @@ Respond as JSON with fields: briefing, intensityAdvice, weatherAdvice, warnings 
 }
 async function getWellnessAwareCoachingResponse(message, context) {
   const systemPrompt = buildEnhancedCoachingSystemPrompt(context);
+  const isKnowledgeQuestion = isGeneralRunningQuestion(message);
+  const maxTokens = isKnowledgeQuestion ? 250 : 150;
   const completion = await openai2.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: message }
     ],
-    max_tokens: 150,
+    max_tokens: maxTokens,
     temperature: 0.7
   });
   return completion.choices[0].message.content || "Keep going, you're doing great!";
+}
+function isGeneralRunningQuestion(message) {
+  const lower = message.toLowerCase();
+  const knowledgeKeywords = [
+    "stitch",
+    "cramp",
+    "cramps",
+    "side stitch",
+    "breathing",
+    "breathe",
+    "blister",
+    "chafe",
+    "chafing",
+    "shin splint",
+    "shin splints",
+    "plantar",
+    "knee",
+    "hip",
+    "calf",
+    "hamstring",
+    "quad",
+    "achilles",
+    "it band",
+    "how do i",
+    "how should i",
+    "what should i",
+    "why am i",
+    "why do i",
+    "what is",
+    "how to",
+    "tips for",
+    "advice on",
+    "help me",
+    "nutrition",
+    "hydration",
+    "water",
+    "gel",
+    "electrolyte",
+    "fueling",
+    "tired",
+    "exhausted",
+    "fatigued",
+    "heavy legs",
+    "legs hurt",
+    "nausea",
+    "dizzy",
+    "dizziness",
+    "lightheaded",
+    "headache",
+    "form",
+    "posture",
+    "stride",
+    "footstrike",
+    "heel strike",
+    "breathing technique",
+    "rhythm",
+    "cadence advice",
+    "bored",
+    "motivation",
+    "give up",
+    "want to stop",
+    "struggling"
+  ];
+  return knowledgeKeywords.some((kw) => lower.includes(kw));
 }
 function buildEnhancedCoachingSystemPrompt(context) {
   let prompt = buildCoachingSystemPrompt(context);
@@ -4966,7 +5697,9 @@ TARGET HR ZONE: Zone ${context.targetHeartRateZone}. `;
         break;
     }
     if (context.heartRate) {
-      const currentZone = getHeartRateZone(context.heartRate, 220 - 30);
+      const runnerAge = context.runnerAge;
+      const effectiveMaxHR = runnerAge ? calcMaxHR(runnerAge) : 190;
+      const currentZone = getHeartRateZoneNumber(context.heartRate, effectiveMaxHR);
       if (currentZone > context.targetHeartRateZone) {
         prompt += " Runner is ABOVE target zone - encourage them to slow down.";
       } else if (currentZone < context.targetHeartRateZone) {
@@ -4989,7 +5722,7 @@ async function generateHeartRateCoaching(params) {
   const effectiveMaxHR = runnerAge ? calcMaxHR(runnerAge) : maxHR;
   const currentZone = getHeartRateZoneNumber(currentHR, effectiveMaxHR);
   const percentMax = Math.round(currentHR / effectiveMaxHR * 100);
-  const runnerFirstName = runnerName ? runnerName.split(" ")[0] : null;
+  const runnerFirstName2 = runnerName ? runnerName.split(" ")[0] : null;
   const zoneNames = ["", "Recovery", "Aerobic", "Tempo", "Threshold", "Maximum"];
   let wellnessContext = "";
   if (wellness) {
@@ -5004,7 +5737,7 @@ async function generateHeartRateCoaching(params) {
     }
   }
   let runnerProfileContext = "";
-  if (runnerFirstName) runnerProfileContext += `Runner's name: ${runnerFirstName}. `;
+  if (runnerFirstName2) runnerProfileContext += `Runner's name: ${runnerFirstName2}. `;
   if (runnerAge) runnerProfileContext += `Age: ${runnerAge} (max HR ~${effectiveMaxHR} bpm). `;
   if (fitnessLevel) runnerProfileContext += `Fitness level: ${fitnessLevel}. `;
   const prompt = `You are ${coachName}, a ${coachTone} running coach giving real-time heart rate guidance.
@@ -5035,7 +5768,7 @@ Give a brief (1-2 sentences) heart rate coaching tip tailored to this runner's a
   }
 }
 async function generateComprehensiveRunAnalysis(params) {
-  const { runData, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent, linkedPlanId, planGoalType, planProgressWeek, planProgressWeeks, workoutType, workoutIntensity, workoutDescription, sessionInstructions: sessionInstructions2, coachingEvents, expectedSessionGoal } = params;
+  const { runData, garminDataFromWatch, userProfileContext, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent, linkedPlanId, planGoalType, planProgressWeek, planProgressWeeks, workoutType, workoutIntensity, workoutDescription, sessionInstructions: sessionInstructions2, coachingEvents, expectedSessionGoal } = params;
   let prompt = `You are ${coachName}, an expert running coach with a ${coachTone} coaching style.
 
 ## YOUR COACHING APPROACH:
@@ -5087,6 +5820,116 @@ Think of yourself analyzing a training session you coached in person - you'd und
     prompt += `Tailor your analysis depth, pacing expectations, and recommendations to this runner's fitness level. `;
     prompt += `For example, a "Newcomer" needs simple encouragement and basic form tips, while a "Competitive" or "Elite" runner expects detailed training load analysis and race-specific insights.
 `;
+  }
+  if (userProfileContext?.whatIKnowAboutYou) {
+    prompt += `
+## ABOUT THIS RUNNER:
+${userProfileContext.whatIKnowAboutYou}`;
+    if (userProfileContext.garminInsights) {
+      prompt += `
+
+### Recent Garmin Data Patterns:
+${userProfileContext.garminInsights}`;
+    }
+  }
+  if (garminDataFromWatch?.hasGarminData) {
+    prompt += `
+## GARMIN WATCH METRICS (Device: ${garminDataFromWatch.deviceName || "Garmin Device"})
+
+### Running Dynamics`;
+    if (garminDataFromWatch.avgGroundContactTime !== null && garminDataFromWatch.avgGroundContactTime !== void 0) {
+      prompt += `
+- Ground Contact Time: ${garminDataFromWatch.avgGroundContactTime.toFixed(1)}ms`;
+      if (garminDataFromWatch.minGroundContactTime && garminDataFromWatch.maxGroundContactTime) {
+        prompt += ` (range: ${garminDataFromWatch.minGroundContactTime.toFixed(1)}-${garminDataFromWatch.maxGroundContactTime.toFixed(1)}ms)`;
+      }
+      if (userProfileContext?.baselineGCT) {
+        const diff = garminDataFromWatch.avgGroundContactTime - userProfileContext.baselineGCT;
+        const percentChange = (diff / userProfileContext.baselineGCT * 100).toFixed(0);
+        prompt += ` \u2014 baseline: ${userProfileContext.baselineGCT.toFixed(1)}ms (${percentChange > 0 ? "+" : ""}${percentChange}%)`;
+      }
+    }
+    if (garminDataFromWatch.avgVerticalOscillation !== null && garminDataFromWatch.avgVerticalOscillation !== void 0) {
+      prompt += `
+- Vertical Oscillation: ${garminDataFromWatch.avgVerticalOscillation.toFixed(1)}cm`;
+      if (garminDataFromWatch.maxVerticalOscillation) {
+        prompt += ` (peak: ${garminDataFromWatch.maxVerticalOscillation.toFixed(1)}cm)`;
+      }
+      if (userProfileContext?.baselineVO) {
+        const diff = garminDataFromWatch.avgVerticalOscillation - userProfileContext.baselineVO;
+        const percentChange = (diff / userProfileContext.baselineVO * 100).toFixed(0);
+        prompt += ` \u2014 baseline: ${userProfileContext.baselineVO.toFixed(1)}cm (${percentChange > 0 ? "+" : ""}${percentChange}%)`;
+      }
+    }
+    if (garminDataFromWatch.avgGroundContactBalance !== null && garminDataFromWatch.avgGroundContactBalance !== void 0) {
+      const balance = garminDataFromWatch.avgGroundContactBalance;
+      const symmetry = balance >= 48 && balance <= 52 ? "balanced" : balance < 48 ? "left-heavy" : "right-heavy";
+      prompt += `
+- Ground Contact Balance: ${balance.toFixed(1)}% (${symmetry})`;
+    }
+    if (garminDataFromWatch.avgVerticalRatio !== null && garminDataFromWatch.avgVerticalRatio !== void 0) {
+      prompt += `
+- Vertical Ratio: ${garminDataFromWatch.avgVerticalRatio.toFixed(1)}% (oscillation/stride efficiency)`;
+    }
+    if (garminDataFromWatch.avgStrideLength !== null && garminDataFromWatch.avgStrideLength !== void 0) {
+      prompt += `
+- Average Stride: ${garminDataFromWatch.avgStrideLength.toFixed(2)}m`;
+      if (garminDataFromWatch.minStrideLength && garminDataFromWatch.maxStrideLength) {
+        prompt += ` (range: ${garminDataFromWatch.minStrideLength.toFixed(2)}-${garminDataFromWatch.maxStrideLength.toFixed(2)}m)`;
+      }
+      if (userProfileContext?.baselineStride) {
+        const diff = garminDataFromWatch.avgStrideLength - userProfileContext.baselineStride;
+        const percentChange = (diff / userProfileContext.baselineStride * 100).toFixed(0);
+        prompt += ` \u2014 baseline: ${userProfileContext.baselineStride.toFixed(2)}m (${percentChange > 0 ? "+" : ""}${percentChange}%)`;
+      }
+    }
+    if (garminDataFromWatch.aerobicTrainingEffect !== null || garminDataFromWatch.anaerobicTrainingEffect !== null || garminDataFromWatch.recoveryTimeMinutes !== null || garminDataFromWatch.vo2MaxEstimate !== null) {
+      prompt += `
+
+### Training Load`;
+      if (garminDataFromWatch.aerobicTrainingEffect !== null && garminDataFromWatch.aerobicTrainingEffect !== void 0) {
+        prompt += `
+- Aerobic Training Effect: ${garminDataFromWatch.aerobicTrainingEffect.toFixed(1)}/5.0`;
+      }
+      if (garminDataFromWatch.anaerobicTrainingEffect !== null && garminDataFromWatch.anaerobicTrainingEffect !== void 0) {
+        prompt += `
+- Anaerobic Training Effect: ${garminDataFromWatch.anaerobicTrainingEffect.toFixed(1)}/5.0`;
+      }
+      if (garminDataFromWatch.recoveryTimeMinutes !== null && garminDataFromWatch.recoveryTimeMinutes !== void 0) {
+        prompt += `
+- Recovery Time: ${Math.round(garminDataFromWatch.recoveryTimeMinutes / 60)} hours (${garminDataFromWatch.recoveryTimeMinutes} min)`;
+      }
+      if (garminDataFromWatch.vo2MaxEstimate !== null && garminDataFromWatch.vo2MaxEstimate !== void 0) {
+        prompt += `
+- VO2 Max Estimate: ${garminDataFromWatch.vo2MaxEstimate.toFixed(1)}ml/kg/min`;
+        if (userProfileContext?.baselineVO2Max) {
+          const diff = garminDataFromWatch.vo2MaxEstimate - userProfileContext.baselineVO2Max;
+          prompt += ` (baseline: ${userProfileContext.baselineVO2Max.toFixed(1)}ml/kg/min, change: ${diff > 0 ? "+" : ""}${diff.toFixed(1)})`;
+        }
+      }
+    }
+    if (garminDataFromWatch.estimatedFatigue !== null && garminDataFromWatch.estimatedFatigue !== void 0) {
+      prompt += `
+
+### Fatigue & Recovery Context
+Estimated fatigue level: ${garminDataFromWatch.estimatedFatigue}%`;
+      if (garminDataFromWatch.estimatedFatigue >= 60) {
+        prompt += ` (HIGH \u2014 expect form degradation and need for recovery)`;
+      } else if (garminDataFromWatch.estimatedFatigue >= 30) {
+        prompt += ` (MODERATE \u2014 some form compromise expected due to accumulated effort)`;
+      } else {
+        prompt += ` (LOW \u2014 strong form expected)`;
+      }
+      prompt += `
+Consider fatigue level when evaluating form metrics and pacing decisions.`;
+    }
+    if (garminDataFromWatch.terrainSummary) {
+      prompt += `
+
+### Course Profile
+Terrain: ${garminDataFromWatch.terrainSummary}
+Consider how terrain affects reasonable pacing and form expectations.`;
+    }
   }
   if (linkedPlanId || workoutType) {
     prompt += `
@@ -5253,10 +6096,10 @@ Acknowledge how weather conditions impacted performance in your analysis.
   }
   if (previousRuns && previousRuns.length > 0) {
     prompt += `
-## RECENT RUN HISTORY (last ${previousRuns.length} runs):
+## RECENT RUN HISTORY (last ${Math.min(previousRuns.length, 10)} runs):
 Use this to identify patterns in their running - pace trends, consistency, pacing strategy, heart rate patterns, etc.
 `;
-    previousRuns.slice(0, 5).forEach((run, i) => {
+    previousRuns.slice(0, 10).forEach((run, i) => {
       prompt += `${i + 1}. ${run.distance?.toFixed(1) || "?"}km at ${run.avgPace || "N/A"}/km`;
       if (run.avgHeartRate) prompt += `, ${run.avgHeartRate}bpm`;
       if (run.wasChallenging) prompt += ` [challenging]`;
@@ -5972,32 +6815,57 @@ Session Details:
 ${sessionInstructions2 ? `
 Session Instructions from Training Plan:
 ${sessionInstructions2}` : ""}`.trim();
-  const systemPrompt = `You are ${coachName}, an expert AI running coach designing a bespoke coaching plan for a single training session.
+  const systemPrompt = `You are ${coachName}, an elite AI running coach delivering a world-class, hyper-personalised coaching experience for a single training session. Your mission is to make this athlete feel like they have a dedicated personal coach running beside them \u2014 reading their performance in real time and delivering exactly the right guidance at exactly the right moment.
 
-Your job is to generate a complete, session-specific coaching plan that includes:
-1. A breakdown of the session into phases (warmup, main effort, cooldown, reps, recovery jogs, etc.)
-2. Specific coaching triggers \u2014 conditions that fire live cues during the run
-3. A pre-run brief (2-4 sentences) telling the runner what to do and why
-4. A "why this session matters" explanation (1-2 sentences)
-5. The optimal coaching tone for this session
+You have full creative authority over how you design this session's coaching plan. Choose the phase structure, coaching approach, tone, and messaging that YOU believe will give this specific athlete the best performance and experience in this specific session. Do not default to a generic template.
 
-CRITICAL RULES:
-- Do NOT use generic coaching \u2014 every message must be specific to THIS session type, distance, pace, and runner
-- Phase names must reflect the actual session (e.g., "hill_rep_1", "tempo_block", "recovery_jog_2")
-- Trigger messages must be SHORT (under 20 words), direct, and actionable
-- For interval/rep sessions: create explicit rep_start and rep_end triggers for each rep
-- For continuous sessions: use pace_deviation, hr_zone, and milestone triggers
-- Choose cueingStrategy based on session complexity:
-  * "interval" \u2014 sessions with repeating effort phases (intervals, hill reps, fartlek)
-  * "threshold" \u2014 sustained hard effort without reps (tempo, threshold)
-  * "paced" \u2014 target-pace sessions (race pace, progression)
-  * "freerun" \u2014 simple continuous sessions (easy, recovery, long run)
-- The preRunBrief MUST mention the specific session targets (distance, pace, or effort zones)
-- Coaching tone should be SESSION-appropriate, not just user-preference:
-  * Recovery/easy: calm, light, conversational
-  * Intervals/hills: direct, energetic, motivational
-  * Tempo/threshold: focused, technical, steady
-  * Long run: supportive, steady, milestone-aware
+Your coaching plan must include:
+- A session breakdown into phases that reflect how this session actually works (warmup, effort blocks, recovery jogs, reps, cooldown \u2014 whatever structure genuinely fits this session type)
+- Reactive coaching triggers \u2014 live conditions evaluated against GPS/HR data that fire when the athlete needs guidance  
+- A pre-run brief (2-4 sentences) that is specific, motivating, and tells the athlete exactly what they are doing today and why
+- A "why this session matters" explanation (1-2 sentences) connecting this session to the athlete's goal
+- The coaching tone you judge to be most effective for this session and this athlete
+
+COACHING PRINCIPLES:
+- Every message must be specific to THIS session, THIS athlete's targets, and THIS moment in their plan \u2014 generic coaching is not acceptable
+- Trigger messages must be SHORT (under 20 words), direct, conversational, and actionable \u2014 like a coach talking in your ear
+- The coaching engine evaluates triggers continuously (~1/sec on GPS tick), so reactive triggers fire immediately when conditions are met
+- Provide 3-5 alternativeMessages for every repeating trigger so the athlete hears varied language across the session
+- The preRunBrief must reference the actual session targets (distance, pace, effort zones, rep structure)
+- Match coaching tone to the session's demands \u2014 not just the athlete's general preference:
+  * Recovery/easy/aerobic: calm, supportive, conversational \u2014 focus on effort feel and zone adherence
+  * Intervals/hills/speed: direct, energetic, motivating \u2014 emphasise rep quality and recovery discipline
+  * Tempo/threshold: focused, technical, steady \u2014 help the athlete lock into and maintain the target effort
+  * Long run: supportive, milestone-aware \u2014 manage pacing and mental engagement over distance
+
+CUEING STRATEGY \u2014 choose the one that best fits this session:
+- "interval" \u2014 sessions with structured repeating effort phases (intervals, hill reps, fartlek blocks)
+- "threshold" \u2014 sustained continuous hard effort (tempo, threshold)
+- "paced" \u2014 sessions targeting a specific pace throughout (race pace, progression run)
+- "freerun" \u2014 continuous aerobic sessions where effort/zone adherence is the primary focus (easy, recovery, long run)
+
+APP TRIGGER CAPABILITIES \u2014 these are the trigger types the coaching runtime supports:
+- "phase_start": fires once when a phase begins \u2014 always include for every phase
+- "phase_end": fires once 50-100m before a phase ends \u2014 use as a transition heads-up
+- "rep_start": fires at the start of each work interval rep
+- "rep_end": fires when an interval rep ends \u2014 tell the athlete what's next
+- "recovery_start": fires at the start of a recovery phase \u2014 give pace target and duration
+- "hr_zone_high": REACTIVE \u2014 fires when live HR exceeds targetHRMax \u2014 instruct athlete to ease off
+- "hr_zone_low": REACTIVE \u2014 fires when live HR drops below targetHRMin \u2014 instruct athlete to push more
+- "pace_too_fast": REACTIVE \u2014 fires when live pace is faster than targetPaceMin by >15 sec/km
+- "pace_too_slow": REACTIVE \u2014 fires when live pace is slower than targetPaceMax by >15 sec/km
+- "milestone": fires once at key distance milestones (halfway, 75%, etc.)
+
+TRIGGER CONDITION SYNTAX (evaluated by the runtime engine):
+- HR: "hr > {number}", "hr < {number}", "hr > targetHRMax", "hr < targetHRMin"
+- Pace (sec/km): "pace > targetPaceMax + 15", "pace < targetPaceMin - 15"
+- Phase: "phase == warmup", "phase == main_effort"
+- Rep: "rep_start", "rep_end"
+- Distance: "distance_pct > 50" (percentage of total session distance)
+
+TRIGGER FREQUENCY:
+- "once": fires only the first time (use for phase_start, milestones, rep_start/end)
+- "on_condition": fires whenever condition is true, max once per 90 seconds (use for reactive HR/pace triggers)
 
 ${toneDirective(coachTone)}
 ${accentDirective(params.coachAccent)}
@@ -6046,21 +6914,45 @@ Return ONLY valid JSON in this exact format:
       "suppressWhenIntensity": []
     },
     {
-      "id": "pace_too_slow",
-      "type": "pace_deviation",
-      "condition": "pace > targetPaceMax + 30",
-      "message": "Pick it up slightly \u2014 you're running slower than target",
-      "frequency": "repeating_3min",
+      "id": "main_effort_pace_too_slow",
+      "type": "pace_too_slow",
+      "condition": "pace > targetPaceMax + 15",
+      "message": "Pick it up \u2014 you're drifting slower than target pace",
+      "frequency": "on_condition",
+      "alternativeMessages": [
+        "Just a touch quicker \u2014 hold that target pace",
+        "You're dropping off pace \u2014 push a little",
+        "Lift your effort slightly, pace is slipping"
+      ],
       "alertType": "vibrate",
       "suppressWhenIntensity": ["z1"]
     },
     {
-      "id": "hr_too_high",
-      "type": "hr_zone",
+      "id": "main_effort_hr_zone_high",
+      "type": "hr_zone_high",
       "condition": "hr > targetHRMax",
-      "message": "Heart rate too high \u2014 ease off the pace",
+      "message": "Heart rate too high \u2014 ease off and slow down",
       "frequency": "on_condition",
+      "alternativeMessages": [
+        "Back off \u2014 HR above zone, slow your pace now",
+        "HR creeping up \u2014 ease back to stay in zone",
+        "Slow down a touch, keep that heart rate in check"
+      ],
       "alertType": "vibrate",
+      "suppressWhenIntensity": []
+    },
+    {
+      "id": "main_effort_hr_zone_low",
+      "type": "hr_zone_low",
+      "condition": "hr < targetHRMin",
+      "message": "HR dropping below zone \u2014 push a little harder",
+      "frequency": "on_condition",
+      "alternativeMessages": [
+        "Pick up the effort \u2014 HR is below your target zone",
+        "A bit more intensity \u2014 heart rate is too low",
+        "Push a little, you need to be working harder than this"
+      ],
+      "alertType": "none",
       "suppressWhenIntensity": []
     }
   ],
@@ -6081,15 +6973,17 @@ Return ONLY valid JSON in this exact format:
   }
 }
 
-PHASE DESIGN RULES:
-- Intervals/hill_repeats: warmup (1-2km) + N work phases + N recovery phases alternating + cooldown
-- Tempo: warmup (1km) + tempo_block + cooldown (0.5-1km)
-- Long run: single main_effort phase + milestone triggers at 25%, 50%, 75%, final km
-- Easy/recovery: single main_effort phase, very light triggers only
-- Fartlek: alternating effort and float phases as runner decides
-- ALWAYS include a warmup phase and a cooldown phase
-- Each trigger id must be unique
-- Trigger messages must be under 20 words, present tense, active voice`;
+PHASE DESIGN GUIDANCE:
+Design the phase structure that genuinely fits this session. You choose the number of phases, their names, and their sequence based on what makes coaching sense for this specific session type and athlete. Some principles that typically apply:
+- Sessions generally benefit from a warmup phase (to prepare the athlete physically and mentally) and a cooldown phase
+- Interval/rep sessions work best with alternating work and recovery phases so each phase has its own targets and coaching triggers
+- Continuous effort sessions (tempo, easy, long run) can be a single main effort or broken into logical sub-phases with milestone triggers
+- Zone-based sessions benefit from reactive HR triggers throughout to keep the athlete in the target zone
+
+ALWAYS include phase_start triggers for every phase \u2014 the athlete needs to know what each phase requires.
+Each trigger id must be unique (use format: "{phase_name}_{trigger_type}" e.g. "tempo_block_hr_high", "work_rep_2_pace_slow").
+Trigger messages: under 20 words, present tense, active voice, spoken like a coach in your ear.
+For reactive triggers (hr_zone, pace_deviation): provide 3-5 alternativeMessages with varied wording so the athlete hears different language each time the condition fires.`;
   try {
     const completion = await openai2.chat.completions.create({
       model: "gpt-4o",
@@ -6332,8 +7226,6 @@ var init_ai_service = __esm({
           return 'Write with Canadian English phrasing, using words like \u2014 "eh", "for sure", "beauty". Friendly and humble. Use "kilometres".';
         case "welsh":
           return 'Write with Welsh English phrasing, using words like \u2014 "lovely", "tidy", "fair play", "cracking on". Passionate warmth. Use "kilometres".';
-        case "indian":
-          return 'Write with Indian English phrasing, using words like  \u2014 "very good", "excellent", "superb". Articulate and warm. Use "kilometres".';
         case "caribbean":
           return 'Write with Caribbean English phrasing, using words like \u2014 "wicked", "big up yourself", "nuff respect". Rhythmic and uplifting. Use "kilometres".';
         case "scandinavian":
@@ -6399,6 +7291,7 @@ var init_ai_service = __esm({
 // server/notification-service.ts
 var notification_service_exports = {};
 __export(notification_service_exports, {
+  broadcastGarminWatchAppUpdate: () => broadcastGarminWatchAppUpdate,
   getUnreadNotificationCount: () => getUnreadNotificationCount,
   markNotificationsRead: () => markNotificationsRead,
   sendActivityNotification: () => sendActivityNotification,
@@ -6406,7 +7299,7 @@ __export(notification_service_exports, {
   sendCoachingPlanReminder: () => sendCoachingPlanReminder,
   sendFirebasePush: () => sendFirebasePush
 });
-import { eq as eq9 } from "drizzle-orm";
+import { eq as eq10 } from "drizzle-orm";
 async function getFirebaseApp() {
   if (firebaseApp) return firebaseApp;
   const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
@@ -6495,7 +7388,7 @@ async function sendFirebasePush(userId, title, body, data) {
     return false;
   }
   try {
-    const [user] = await db.select({ fcmToken: users.fcmToken }).from(users).where(eq9(users.id, userId)).limit(1);
+    const [user] = await db.select({ fcmToken: users.fcmToken }).from(users).where(eq10(users.id, userId)).limit(1);
     if (!user) {
       console.warn(`[Firebase Push] User ${userId} not found in database`);
       return false;
@@ -6525,7 +7418,7 @@ async function sendFirebasePush(userId, title, body, data) {
   } catch (err) {
     if (err?.code === "messaging/registration-token-not-registered") {
       console.warn(`[Firebase Push] Stale FCM token for user ${userId} \u2014 clearing`);
-      await db.update(users).set({ fcmToken: null }).where(eq9(users.id, userId));
+      await db.update(users).set({ fcmToken: null }).where(eq10(users.id, userId));
     } else {
       console.error(`[Firebase Push] Error sending to user ${userId}:`, {
         code: err?.code,
@@ -6578,6 +7471,81 @@ async function getUnreadNotificationCount(userId) {
   const userNotifications = await storage.getUserNotifications(userId);
   return userNotifications.filter((n) => !n.read).length;
 }
+async function broadcastGarminWatchAppUpdate(version, releaseNote, storeUrl) {
+  const results = { targeted: 0, pushSent: 0, pushFailed: 0, inAppSent: 0, userIds: [] };
+  const watchAppUsers = await db.select({ id: users.id, fcmToken: users.fcmToken }).from(users).where(eq10(users.hasGarminWatchApp, true));
+  results.targeted = watchAppUsers.length;
+  results.userIds = watchAppUsers.map((u) => u.id);
+  if (watchAppUsers.length === 0) {
+    console.log("[GarminWatchBroadcast] No users with Garmin watch app found \u2014 nothing to send");
+    return results;
+  }
+  const title = `\u231A Garmin Watch App v${version} Available`;
+  const body = releaseNote || `A new version of the AI Run Coach watch app is ready. Tap to update on your Garmin.`;
+  const notificationData = {
+    type: "garmin_watch_update",
+    version,
+    releaseNote: body,
+    // Pass the full release note/body to the app
+    storeUrl,
+    action: "open_connect_iq_store",
+    timestamp: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  console.log(`[GarminWatchBroadcast] Broadcasting v${version} update to ${watchAppUsers.length} users...`);
+  for (const user of watchAppUsers) {
+    try {
+      await storage.createNotification({
+        userId: user.id,
+        title,
+        message: body,
+        type: "garmin_watch_update",
+        data: notificationData,
+        read: false
+      });
+      results.inAppSent++;
+      if (user.fcmToken) {
+        const app2 = await getFirebaseApp();
+        if (app2) {
+          try {
+            const message = {
+              token: user.fcmToken,
+              data: {
+                ...notificationData,
+                title,
+                // read by onMessageReceived via message.data["title"]
+                body
+                // read by onMessageReceived via message.data["body"]
+              },
+              android: {
+                priority: "high",
+                // Channel used by onMessageReceived when building the notification
+                notification: {
+                  channelId: "garmin_watch_updates"
+                }
+              }
+            };
+            const messaging = adminSDK.messaging ? adminSDK.messaging(app2) : adminSDK.default?.messaging(app2);
+            await messaging.send(message);
+            results.pushSent++;
+          } catch (pushErr) {
+            if (pushErr?.code === "messaging/registration-token-not-registered") {
+              console.warn(`[GarminWatchBroadcast] Stale token for user ${user.id} \u2014 clearing`);
+              await db.update(users).set({ fcmToken: null }).where(eq10(users.id, user.id));
+            }
+            results.pushFailed++;
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`[GarminWatchBroadcast] Failed for user ${user.id}:`, err);
+      results.pushFailed++;
+    }
+  }
+  console.log(
+    `[GarminWatchBroadcast] Done \u2014 in-app: ${results.inAppSent}, push sent: ${results.pushSent}, push failed: ${results.pushFailed}`
+  );
+  return results;
+}
 async function sendCoachingPlanReminder(userId, workoutName, distance, intensity) {
   const results = { inAppSent: false, pushSent: false };
   try {
@@ -6618,6 +7586,404 @@ var init_notification_service = __esm({
     firebaseApp = null;
     adminSDK = null;
     adminCredential = null;
+  }
+});
+
+// server/coupon-service.ts
+var coupon_service_exports = {};
+__export(coupon_service_exports, {
+  getUserActiveGrants: () => getUserActiveGrants,
+  hasUnlimitedGrant: () => hasUnlimitedGrant,
+  redeemPromoCode: () => redeemPromoCode
+});
+import { sql as sql6, eq as eq11, and as and10, gt } from "drizzle-orm";
+async function redeemPromoCode(userId, code) {
+  try {
+    const normalizedCode = code.trim();
+    const couponRecords = await db.select().from(couponCodes).where(
+      and10(
+        sql6`LOWER(${couponCodes.code}) = LOWER(${normalizedCode})`,
+        eq11(couponCodes.isActive, true)
+      )
+    ).limit(1);
+    if (couponRecords.length === 0) {
+      return {
+        success: false,
+        message: "Invalid or expired promo code. Please check and try again."
+      };
+    }
+    const couponRecord = couponRecords[0];
+    if (couponRecord.expiresAt && new Date(couponRecord.expiresAt) < /* @__PURE__ */ new Date()) {
+      return {
+        success: false,
+        message: "This promo code has expired."
+      };
+    }
+    if (couponRecord.maxUses && couponRecord.currentUses >= couponRecord.maxUses) {
+      return {
+        success: false,
+        message: "This promo code has reached its usage limit."
+      };
+    }
+    const existingUses = await db.select().from(userCoupons).where(
+      and10(
+        eq11(userCoupons.userId, userId),
+        eq11(userCoupons.couponId, couponRecord.id)
+      )
+    ).limit(1);
+    if (existingUses.length > 0) {
+      return {
+        success: false,
+        message: "You have already redeemed this promo code."
+      };
+    }
+    const durationDays = couponRecord.durationDays || 30;
+    const expiresAt = /* @__PURE__ */ new Date();
+    expiresAt.setDate(expiresAt.getDate() + durationDays);
+    await db.insert(userCoupons).values({
+      userId,
+      couponId: couponRecord.id,
+      expiresAt
+    });
+    await db.update(couponCodes).set({ currentUses: sql6`${couponCodes.currentUses} + 1` }).where(eq11(couponCodes.id, couponRecord.id));
+    const features = ["trainingPlansGenerated", "routesGenerated", "postRunAnalyses"];
+    if (couponRecord.type === "unlimited_all") {
+    } else if (couponRecord.type === "unlimited_plans") {
+      features.length = 0;
+      features.push("trainingPlansGenerated");
+    } else if (couponRecord.type === "unlimited_routes") {
+      features.length = 0;
+      features.push("routesGenerated");
+    }
+    return {
+      success: true,
+      message: `\u{1F389} Promo code applied! You now have unlimited ${features.join(", ")} until ${expiresAt.toLocaleDateString()}.`,
+      grantedUntil: expiresAt.toISOString(),
+      features
+    };
+  } catch (err) {
+    console.error("[CouponService] Error redeeming promo code:", err);
+    return {
+      success: false,
+      message: "An error occurred while redeeming the promo code. Please try again."
+    };
+  }
+}
+async function hasUnlimitedGrant(userId, feature) {
+  try {
+    const allowedTypes = FEATURE_TO_COUPON_TYPES[feature];
+    if (!allowedTypes || allowedTypes.length === 0) return false;
+    const activeCoupons = await db.select({ id: userCoupons.id }).from(userCoupons).innerJoin(couponCodes, eq11(userCoupons.couponId, couponCodes.id)).where(
+      and10(
+        eq11(userCoupons.userId, userId),
+        gt(userCoupons.expiresAt, /* @__PURE__ */ new Date()),
+        eq11(couponCodes.isActive, true),
+        sql6`${couponCodes.type} IN (${sql6.join(allowedTypes, sql6`, `)})`
+      )
+    ).limit(1);
+    return activeCoupons.length > 0;
+  } catch (err) {
+    console.error("[CouponService] Error checking unlimited grant:", err);
+    return false;
+  }
+}
+async function getUserActiveGrants(userId) {
+  try {
+    const grants = await db.select({
+      code: couponCodes.code,
+      expiresAt: userCoupons.expiresAt,
+      type: couponCodes.type
+    }).from(userCoupons).innerJoin(couponCodes, eq11(userCoupons.couponId, couponCodes.id)).where(
+      and10(
+        eq11(userCoupons.userId, userId),
+        gt(userCoupons.expiresAt, /* @__PURE__ */ new Date())
+      )
+    );
+    return grants.map((grant) => ({
+      code: grant.code,
+      expiresAt: grant.expiresAt?.toISOString() ?? "",
+      features: grant.type === "unlimited_all" ? ["training plans", "routes", "analyses"] : grant.type === "unlimited_plans" ? ["training plans"] : grant.type === "unlimited_routes" ? ["routes"] : ["analyses"]
+    }));
+  } catch (err) {
+    console.error("[CouponService] Error fetching user grants:", err);
+    return [];
+  }
+}
+var FEATURE_TO_COUPON_TYPES;
+var init_coupon_service = __esm({
+  "server/coupon-service.ts"() {
+    init_db();
+    init_schema();
+    FEATURE_TO_COUPON_TYPES = {
+      aiCoachingKm: ["unlimited_all", "unlimited_coaching"],
+      trainingPlansGenerated: ["unlimited_all", "unlimited_plans"],
+      routesGenerated: ["unlimited_all", "unlimited_routes"],
+      postRunAnalyses: ["unlimited_all", "unlimited_analyses"]
+    };
+  }
+});
+
+// server/strava-oauth-service.ts
+var strava_oauth_service_exports = {};
+__export(strava_oauth_service_exports, {
+  buildStravaAuthUrl: () => buildStravaAuthUrl,
+  exchangeStravaCode: () => exchangeStravaCode,
+  generateOAuthState: () => generateOAuthState,
+  getStravaAthleteInfo: () => getStravaAthleteInfo,
+  refreshStravaToken: () => refreshStravaToken,
+  retrieveTemporaryToken: () => retrieveTemporaryToken,
+  storeTokenTemporarily: () => storeTokenTemporarily,
+  validateStravaToken: () => validateStravaToken
+});
+import * as crypto2 from "crypto";
+import axios2 from "axios";
+function generateOAuthState() {
+  return crypto2.randomBytes(32).toString("hex");
+}
+function buildStravaAuthUrl(state) {
+  const params = new URLSearchParams({
+    client_id: STRAVA_CLIENT_ID || "",
+    redirect_uri: STRAVA_REDIRECT_URI,
+    response_type: "code",
+    scope: "activity:write,activity:read_all",
+    // activity:write for uploads, activity:read_all for fetching
+    state,
+    approval_prompt: "auto"
+    // Skip approval if already authorized
+  });
+  return `${STRAVA_AUTH_URL}?${params.toString()}`;
+}
+async function exchangeStravaCode(code) {
+  if (!STRAVA_CLIENT_ID || !STRAVA_CLIENT_SECRET) {
+    throw new Error("Strava credentials not configured");
+  }
+  try {
+    const response = await axios2.post(STRAVA_TOKEN_URL, {
+      client_id: STRAVA_CLIENT_ID,
+      client_secret: STRAVA_CLIENT_SECRET,
+      code,
+      grant_type: "authorization_code"
+    });
+    const {
+      access_token,
+      refresh_token,
+      expires_in,
+      expires_at,
+      athlete
+    } = response.data;
+    console.log(`[Strava] OAuth exchange successful for athlete: ${athlete.firstname} ${athlete.lastname}`);
+    return {
+      accessToken: access_token,
+      refreshToken: refresh_token,
+      athleteId: athlete.id,
+      athleteName: `${athlete.firstname} ${athlete.lastname}`,
+      expiresIn: expires_in,
+      expiresAt: new Date(expires_at * 1e3)
+    };
+  } catch (error) {
+    console.error("[Strava] OAuth exchange failed:", error.response?.data || error.message);
+    throw new Error(`Strava OAuth exchange failed: ${error.message}`);
+  }
+}
+async function refreshStravaToken(refreshToken) {
+  if (!STRAVA_CLIENT_ID || !STRAVA_CLIENT_SECRET) {
+    throw new Error("Strava credentials not configured");
+  }
+  try {
+    const response = await axios2.post(STRAVA_TOKEN_URL, {
+      client_id: STRAVA_CLIENT_ID,
+      client_secret: STRAVA_CLIENT_SECRET,
+      grant_type: "refresh_token",
+      refresh_token: refreshToken
+    });
+    const {
+      access_token,
+      refresh_token,
+      expires_at
+    } = response.data;
+    console.log("[Strava] Token refreshed successfully");
+    return {
+      accessToken: access_token,
+      refreshToken: refresh_token,
+      expiresAt: new Date(expires_at * 1e3)
+    };
+  } catch (error) {
+    console.error("[Strava] Token refresh failed:", error.response?.data || error.message);
+    throw new Error(`Strava token refresh failed: ${error.message}`);
+  }
+}
+function storeTokenTemporarily(accessToken, refreshToken, athleteId, athleteName) {
+  const tempTokenId = crypto2.randomBytes(16).toString("hex");
+  tokenStore2.set(tempTokenId, {
+    accessToken,
+    refreshToken,
+    athleteId,
+    athleteName,
+    timestamp: Date.now()
+  });
+  return tempTokenId;
+}
+function retrieveTemporaryToken(tempTokenId) {
+  const tokenData = tokenStore2.get(tempTokenId);
+  if (tokenData) {
+    tokenStore2.delete(tempTokenId);
+  }
+  return tokenData || null;
+}
+async function validateStravaToken(accessToken) {
+  try {
+    const response = await axios2.get(`${STRAVA_API_BASE}/athlete`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    return response.status === 200 && !!response.data.id;
+  } catch (error) {
+    console.warn("[Strava] Token validation failed:", error);
+    return false;
+  }
+}
+async function getStravaAthleteInfo(accessToken) {
+  try {
+    const response = await axios2.get(`${STRAVA_API_BASE}/athlete`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    return response.data;
+  } catch (error) {
+    console.error("[Strava] Failed to fetch athlete info:", error.message);
+    throw new Error(`Failed to fetch Strava athlete info: ${error.message}`);
+  }
+}
+var STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET, STRAVA_REDIRECT_URI, STRAVA_AUTH_URL, STRAVA_TOKEN_URL, STRAVA_API_BASE, tokenStore2;
+var init_strava_oauth_service = __esm({
+  "server/strava-oauth-service.ts"() {
+    STRAVA_CLIENT_ID = process.env.STRAVA_CLIENT_ID;
+    STRAVA_CLIENT_SECRET = process.env.STRAVA_CLIENT_SECRET;
+    STRAVA_REDIRECT_URI = process.env.STRAVA_REDIRECT_URI || "https://api.airuncoach.com/strava/callback";
+    STRAVA_AUTH_URL = "https://www.strava.com/oauth/authorize";
+    STRAVA_TOKEN_URL = "https://www.strava.com/api/v3/oauth/token";
+    STRAVA_API_BASE = "https://www.strava.com/api/v3";
+    tokenStore2 = /* @__PURE__ */ new Map();
+    setInterval(() => {
+      const oneHourAgo = Date.now() - 36e5;
+      const keysToDelete = [];
+      tokenStore2.forEach((value, key) => {
+        if (value.timestamp < oneHourAgo) {
+          keysToDelete.push(key);
+        }
+      });
+      keysToDelete.forEach((key) => tokenStore2.delete(key));
+    }, 36e5);
+  }
+});
+
+// server/strava-upload-service.ts
+var strava_upload_service_exports = {};
+__export(strava_upload_service_exports, {
+  deregisterFromStrava: () => deregisterFromStrava,
+  getStravaActivity: () => getStravaActivity,
+  pollUploadStatus: () => pollUploadStatus,
+  uploadRunToStrava: () => uploadRunToStrava
+});
+import axios3 from "axios";
+import FormData from "form-data";
+import { Readable } from "stream";
+async function uploadRunToStrava(fitFileBuffer, accessToken, runName, description, externalId) {
+  try {
+    const form = new FormData();
+    const stream = Readable.from(fitFileBuffer);
+    form.append("file", stream, `run_${externalId || Date.now()}.fit`);
+    form.append("data_type", "fit");
+    form.append("sport_type", "Run");
+    form.append("name", runName);
+    if (description) {
+      form.append("description", description);
+    }
+    form.append("external_id", externalId || `airuncoach-${Date.now()}.fit`);
+    form.append("trainer", "false");
+    form.append("commute", "false");
+    console.log(`[Strava] Uploading run: ${runName}`);
+    const response = await axios3.post(
+      `${STRAVA_API_BASE2}/uploads`,
+      form,
+      {
+        headers: {
+          ...form.getHeaders(),
+          Authorization: `Bearer ${accessToken}`
+        }
+      }
+    );
+    const { id, external_id } = response.data;
+    console.log(`[Strava] Upload successful: uploadId=${id}`);
+    return { uploadId: id, externalId: external_id };
+  } catch (error) {
+    console.error("[Strava] Upload failed:", error.response?.data || error.message);
+    throw new Error(`Strava upload failed: ${error.message}`);
+  }
+}
+async function pollUploadStatus(uploadId, accessToken, maxAttempts = 30, delayMs = 2e3) {
+  let attempt = 0;
+  while (attempt < maxAttempts) {
+    try {
+      const response = await axios3.get(
+        `${STRAVA_API_BASE2}/uploads/${uploadId}`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        }
+      );
+      const { id, status, activity_id, error } = response.data;
+      if (status === "Ready") {
+        console.log(`[Strava] Activity ready: ${activity_id}`);
+        return activity_id;
+      }
+      if (error) {
+        throw new Error(`Strava processing error: ${error}`);
+      }
+      console.log(`[Strava] Upload status: ${status} (attempt ${attempt + 1}/${maxAttempts})`);
+      await new Promise((resolve2) => setTimeout(resolve2, delayMs));
+      attempt++;
+    } catch (error) {
+      if (error.response?.status === 404) {
+        await new Promise((resolve2) => setTimeout(resolve2, delayMs));
+        attempt++;
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error(`Strava upload processing timeout after ${maxAttempts} attempts`);
+}
+async function getStravaActivity(activityId, accessToken) {
+  try {
+    const response = await axios3.get(
+      `${STRAVA_API_BASE2}/activities/${activityId}`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      }
+    );
+    return response.data;
+  } catch (error) {
+    console.error("[Strava] Failed to fetch activity:", error.message);
+    throw new Error(`Failed to fetch Strava activity: ${error.message}`);
+  }
+}
+async function deregisterFromStrava(accessToken) {
+  try {
+    await axios3.post(
+      `${STRAVA_API_BASE2}/athlete/deauthorize`,
+      {},
+      {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      }
+    );
+    console.log("[Strava] Deregistration successful");
+  } catch (error) {
+    console.error("[Strava] Deregistration failed:", error.message);
+    throw new Error(`Strava deregistration failed: ${error.message}`);
+  }
+}
+var STRAVA_API_BASE2;
+var init_strava_upload_service = __esm({
+  "server/strava-upload-service.ts"() {
+    STRAVA_API_BASE2 = "https://www.strava.com/api/v3";
   }
 });
 
@@ -7688,14 +9054,14 @@ __export(garmin_permissions_service_exports, {
   getRequiredScopes: () => getRequiredScopes,
   handlePermissionChange: () => handlePermissionChange
 });
-import { eq as eq17, and as and13 } from "drizzle-orm";
-import axios3 from "axios";
+import { eq as eq22, and as and18 } from "drizzle-orm";
+import axios5 from "axios";
 async function getCurrentPermissions(userId) {
   const device2 = await db.query.connectedDevices.findFirst({
-    where: and13(
-      eq17(connectedDevices.userId, userId),
-      eq17(connectedDevices.deviceType, "garmin"),
-      eq17(connectedDevices.isActive, true)
+    where: and18(
+      eq22(connectedDevices.userId, userId),
+      eq22(connectedDevices.deviceType, "garmin"),
+      eq22(connectedDevices.isActive, true)
     )
   });
   if (!device2) {
@@ -7737,7 +9103,7 @@ async function getReauthorizationUrl(userId, baseUrl) {
   const requestTokenUrl = "https://auth.garmin.com/oauth-provider/oauth/requestToken";
   const redirectUri = `${baseUrl}/api/auth/garmin/callback`;
   try {
-    const response = await axios3.post(requestTokenUrl, null, {
+    const response = await axios5.post(requestTokenUrl, null, {
       params: {
         oauth_consumer_key: consumerKey,
         oauth_signature_method: "HMAC-SHA1",
@@ -7763,19 +9129,19 @@ async function handlePermissionChange(data) {
   let device2 = null;
   if (garminUserId) {
     device2 = await db.query.connectedDevices.findFirst({
-      where: eq17(connectedDevices.deviceId, String(garminUserId))
+      where: eq22(connectedDevices.deviceId, String(garminUserId))
     });
   }
   if (!device2 && userAccessToken) {
     device2 = await db.query.connectedDevices.findFirst({
-      where: eq17(connectedDevices.accessToken, userAccessToken)
+      where: eq22(connectedDevices.accessToken, userAccessToken)
     });
   }
   if (!device2) {
     const allDevices = await db.query.connectedDevices.findMany({
-      where: and13(
-        eq17(connectedDevices.deviceType, "garmin"),
-        eq17(connectedDevices.isActive, true)
+      where: and18(
+        eq22(connectedDevices.deviceType, "garmin"),
+        eq22(connectedDevices.isActive, true)
       )
     });
     if (allDevices.length === 1) {
@@ -7793,7 +9159,7 @@ async function handlePermissionChange(data) {
   await db.update(connectedDevices).set({
     grantedScopes: Array.from(updatedScopes).join(","),
     updatedAt: /* @__PURE__ */ new Date()
-  }).where(eq17(connectedDevices.id, device2.id));
+  }).where(eq22(connectedDevices.id, device2.id));
   console.log("[Garmin] Permission change processed:", {
     device: device2.deviceName,
     granted: permissionsGranted,
@@ -7809,9 +9175,9 @@ async function disconnectDevice(userId) {
     isActive: false,
     updatedAt: /* @__PURE__ */ new Date()
   }).where(
-    and13(
-      eq17(connectedDevices.userId, userId),
-      eq17(connectedDevices.deviceType, "garmin")
+    and18(
+      eq22(connectedDevices.userId, userId),
+      eq22(connectedDevices.deviceType, "garmin")
     )
   );
   console.log("[Garmin] All Garmin devices disconnected for user:", userId);
@@ -7842,8 +9208,8 @@ function generateSignature(method, url, params, consumerSecret) {
   const paramsString = Object.entries(params).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("&");
   const baseString = `${method}&${encodeURIComponent(url)}&${encodeURIComponent(paramsString)}`;
   const signingKey = `${consumerSecret}&`;
-  const crypto3 = __require("crypto");
-  return crypto3.createHmac("sha1", signingKey).update(baseString).digest("base64");
+  const crypto4 = __require("crypto");
+  return crypto4.createHmac("sha1", signingKey).update(baseString).digest("base64");
 }
 async function triggerDataSync(userId, scopes) {
   console.log("[Garmin] Triggering data sync for new scopes:", scopes);
@@ -8064,11 +9430,11 @@ __export(garmin_service_exports, {
   uploadActivityToGarmin: () => uploadActivityToGarmin,
   uploadRunToGarmin: () => uploadRunToGarmin
 });
-import crypto2 from "crypto";
-import { sql as sql8 } from "drizzle-orm";
+import crypto3 from "crypto";
+import { sql as sql11 } from "drizzle-orm";
 async function storeCodeVerifier(nonce, verifier) {
   try {
-    await db.execute(sql8`
+    await db.execute(sql11`
       INSERT INTO oauth_state (nonce, code_verifier, created_at)
       VALUES (${nonce}, ${verifier}, NOW())
       ON CONFLICT (nonce) DO UPDATE SET code_verifier = ${verifier}, created_at = NOW()
@@ -8081,7 +9447,7 @@ async function storeCodeVerifier(nonce, verifier) {
 }
 async function getCodeVerifier(nonce) {
   try {
-    const result = await db.execute(sql8`
+    const result = await db.execute(sql11`
       SELECT code_verifier FROM oauth_state WHERE nonce = ${nonce}
     `);
     const verifier = result.rows[0]?.code_verifier || null;
@@ -8098,7 +9464,7 @@ async function getCodeVerifier(nonce) {
 }
 async function deleteCodeVerifier(nonce) {
   try {
-    await db.execute(sql8`DELETE FROM oauth_state WHERE nonce = ${nonce}`);
+    await db.execute(sql11`DELETE FROM oauth_state WHERE nonce = ${nonce}`);
     console.log(`[Garmin] Deleted code verifier from database for nonce: ${nonce}`);
   } catch (error) {
     console.error(`[Garmin] Failed to delete code verifier:`, error);
@@ -8106,14 +9472,14 @@ async function deleteCodeVerifier(nonce) {
 }
 async function cleanupOldVerifiers() {
   try {
-    await db.execute(sql8`DELETE FROM oauth_state WHERE created_at < NOW() - INTERVAL '15 minutes'`);
+    await db.execute(sql11`DELETE FROM oauth_state WHERE created_at < NOW() - INTERVAL '15 minutes'`);
   } catch (error) {
     console.error(`[Garmin] Failed to cleanup old verifiers:`, error);
   }
 }
 function generatePKCE() {
-  const codeVerifier = crypto2.randomBytes(32).toString("base64url");
-  const codeChallenge = crypto2.createHash("sha256").update(codeVerifier).digest("base64url");
+  const codeVerifier = crypto3.randomBytes(32).toString("base64url");
+  const codeChallenge = crypto3.createHash("sha256").update(codeVerifier).digest("base64url");
   return { codeVerifier, codeChallenge };
 }
 async function getAndRemoveCodeVerifier(nonce) {
@@ -8232,6 +9598,17 @@ async function requestGarminBackfill(accessToken, startTime, endTime) {
   });
   const responseText = await response.text();
   if (!response.ok) {
+    if (response.status === 412) {
+      console.warn(
+        `\u26A0\uFE0F  Garmin backfill skipped: HISTORICAL_DATA_EXPORT permission not enabled for this API key.
+   To enable historical sync, go to the Garmin Developer Portal \u2192 your app \u2192 Permissions and enable "Historical Data Export".
+   Real-time activity webhooks are unaffected and will continue to work.`
+      );
+      return {
+        requested: false,
+        message: "Garmin backfill skipped \u2014 HISTORICAL_DATA_EXPORT permission not enabled. Real-time webhooks will still deliver new activities."
+      };
+    }
     console.error(`\u274C Garmin backfill request failed: HTTP ${response.status}`, responseText.substring(0, 300));
     throw new Error(`Garmin backfill request failed: ${response.status}`);
   }
@@ -8584,12 +9961,11 @@ async function syncGarminActivities(userId, accessToken, startDateISO, endDateIS
   console.log(`\u{1F4C5} Date range: ${startDateISO} to ${endDateISO}`);
   const { db: db2 } = await Promise.resolve().then(() => (init_db(), db_exports));
   const { connectedDevices: connectedDevices2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-  const { eq: eq22, and: and18 } = await import("drizzle-orm");
+  const { eq: eq27, and: and23 } = await import("drizzle-orm");
   try {
     const currentAccessToken = accessToken;
     const startDate = new Date(startDateISO);
     const endDate = new Date(endDateISO);
-    console.log(`\u{1F4E4} Requesting Garmin backfill for ${startDate.toISOString().split("T")[0]} \u2192 ${endDate.toISOString().split("T")[0]}`);
     await requestGarminBackfill(currentAccessToken, startDate, endDate);
     console.log("\u2705 Garmin backfill requested \u2014 activities will arrive via webhook and be processed automatically");
     return { synced: 0, skipped: 0, errors: 0 };
@@ -8683,8 +10059,8 @@ async function uploadActivityToGarmin(accessToken, tcxData, activityName) {
   try {
     console.log("\u{1F4E4} Uploading activity to Garmin Connect...");
     const uploadUrl = `${GARMIN_API_BASE}/upload-service/upload/.tcx`;
-    const FormData = __require("form-data");
-    const form = new FormData();
+    const FormData2 = __require("form-data");
+    const form = new FormData2();
     form.append("file", Buffer.from(tcxData), {
       filename: `activity_${Date.now()}.tcx`,
       contentType: "application/xml"
@@ -8740,7 +10116,7 @@ async function uploadRunToGarmin(userId, runData, accessToken, refreshToken, tok
       console.log("\u{1F504} Access token expired or expiring soon, refreshing...");
       const tokenData = await refreshGarminToken(refreshToken);
       currentAccessToken = tokenData.accessToken;
-      await db.execute(sql8`
+      await db.execute(sql11`
         UPDATE connected_devices
         SET 
           access_token = ${tokenData.accessToken},
@@ -8754,7 +10130,7 @@ async function uploadRunToGarmin(userId, runData, accessToken, refreshToken, tok
     const activityName = `AI Run Coach - ${new Date(runData.startTime).toLocaleDateString()}`;
     const result = await uploadActivityToGarmin(currentAccessToken, tcxData, activityName);
     if (result.success && result.garminActivityId) {
-      await db.execute(sql8`
+      await db.execute(sql11`
         UPDATE runs
         SET 
           uploaded_to_garmin = true,
@@ -8818,14 +10194,14 @@ __export(webhook_processor_exports, {
   processWebhookFailureQueue: () => processWebhookFailureQueue,
   retryWebhook: () => retryWebhook
 });
-import { eq as eq18, lt as lt3, and as and14 } from "drizzle-orm";
-import { sql as sql9 } from "drizzle-orm";
+import { eq as eq23, lt as lt3, and as and19 } from "drizzle-orm";
+import { sql as sql12 } from "drizzle-orm";
 async function processWebhookFailureQueue() {
   console.log("[Webhook Queue] Processing failed webhooks...");
   try {
     const now = /* @__PURE__ */ new Date();
     const failedWebhooks = await db.query.webhookFailureQueue.findMany({
-      where: and14(
+      where: and19(
         lt3(webhookFailureQueue.nextRetryAt, now),
         lt3(webhookFailureQueue.retryCount, MAX_RETRY_ATTEMPTS)
       ),
@@ -8887,7 +10263,7 @@ async function processWebhookFailureQueue() {
         await db.update(webhookFailureQueue).set({
           retryCount: webhook.retryCount + 1,
           updatedAt: now
-        }).where(eq18(webhookFailureQueue.id, webhook.id));
+        }).where(eq23(webhookFailureQueue.id, webhook.id));
       } catch (retryError) {
         console.error(`[Webhook Queue] Retry failed for webhook ${webhook.id}:`, retryError.message);
         await db.update(webhookFailureQueue).set({
@@ -8896,15 +10272,15 @@ async function processWebhookFailureQueue() {
           nextRetryAt: new Date(Date.now() + RETRY_DELAY_MS),
           // Retry again later
           updatedAt: now
-        }).where(eq18(webhookFailureQueue.id, webhook.id));
+        }).where(eq23(webhookFailureQueue.id, webhook.id));
         failed++;
       }
     }
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1e3);
     const deleted = await db.delete(webhookFailureQueue).where(
-      and14(
+      and19(
         lt3(webhookFailureQueue.createdAt, weekAgo),
-        eq18(webhookFailureQueue.retryCount, MAX_RETRY_ATTEMPTS)
+        eq23(webhookFailureQueue.retryCount, MAX_RETRY_ATTEMPTS)
       )
     );
     console.log(`[Webhook Queue] Processing complete: ${retried} retried, ${failed} failed`);
@@ -8938,19 +10314,19 @@ async function getWebhookQueueStats() {
   try {
     const now = /* @__PURE__ */ new Date();
     const [totalResult] = await db.execute(
-      sql9`SELECT COUNT(*) as count FROM webhook_failure_queue`
+      sql12`SELECT COUNT(*) as count FROM webhook_failure_queue`
     );
     const total = parseInt(totalResult.count, 10);
     const [pendingResult] = await db.execute(
-      sql9`SELECT COUNT(*) as count FROM webhook_failure_queue WHERE next_retry_at <= NOW() AND retry_count < ${MAX_RETRY_ATTEMPTS}`
+      sql12`SELECT COUNT(*) as count FROM webhook_failure_queue WHERE next_retry_at <= NOW() AND retry_count < ${MAX_RETRY_ATTEMPTS}`
     );
     const pending = parseInt(pendingResult.count, 10);
     const [failedResult] = await db.execute(
-      sql9`SELECT COUNT(*) as count FROM webhook_failure_queue WHERE retry_count >= ${MAX_RETRY_ATTEMPTS}`
+      sql12`SELECT COUNT(*) as count FROM webhook_failure_queue WHERE retry_count >= ${MAX_RETRY_ATTEMPTS}`
     );
     const failed = parseInt(failedResult.count, 10);
     const byTypeResult = await db.execute(
-      sql9`SELECT webhook_type, COUNT(*) as count FROM webhook_failure_queue GROUP BY webhook_type`
+      sql12`SELECT webhook_type, COUNT(*) as count FROM webhook_failure_queue GROUP BY webhook_type`
     );
     const byType = {};
     for (const row of byTypeResult.rows) {
@@ -8968,7 +10344,7 @@ async function retryWebhook(webhookId) {
       nextRetryAt: /* @__PURE__ */ new Date(),
       // Retry immediately
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq18(webhookFailureQueue.id, webhookId));
+    }).where(eq23(webhookFailureQueue.id, webhookId));
     console.log(`[Webhook Queue] Webhook ${webhookId} queued for immediate retry`);
     return true;
   } catch (error) {
@@ -10158,13 +11534,13 @@ __export(health_insights_service_exports, {
   getTodaySnapshot: () => getTodaySnapshot,
   getTrendData: () => getTrendData
 });
-import { eq as eq19, and as and15, desc as desc7 } from "drizzle-orm";
+import { eq as eq24, and as and20, desc as desc9 } from "drizzle-orm";
 async function getTodaySnapshot(userId) {
   const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
   const metrics = await db.select().from(garminWellnessMetrics).where(
-    and15(
-      eq19(garminWellnessMetrics.userId, userId),
-      eq19(garminWellnessMetrics.date, today)
+    and20(
+      eq24(garminWellnessMetrics.userId, userId),
+      eq24(garminWellnessMetrics.date, today)
     )
   ).limit(1);
   if (!metrics.length) {
@@ -10196,9 +11572,9 @@ async function getTodaySnapshot(userId) {
 }
 async function getSleepDetails(userId, date) {
   const metrics = await db.select().from(garminWellnessMetrics).where(
-    and15(
-      eq19(garminWellnessMetrics.userId, userId),
-      eq19(garminWellnessMetrics.date, date)
+    and20(
+      eq24(garminWellnessMetrics.userId, userId),
+      eq24(garminWellnessMetrics.date, date)
     )
   ).limit(1);
   if (!metrics.length) {
@@ -10250,9 +11626,9 @@ async function getSleepDetails(userId, date) {
 async function getRecoveryStatus(userId) {
   const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
   const metrics = await db.select().from(garminWellnessMetrics).where(
-    and15(
-      eq19(garminWellnessMetrics.userId, userId),
-      eq19(garminWellnessMetrics.date, today)
+    and20(
+      eq24(garminWellnessMetrics.userId, userId),
+      eq24(garminWellnessMetrics.date, today)
     )
   ).limit(1);
   const availableMetrics = [];
@@ -10301,9 +11677,9 @@ async function getRecoveryStatus(userId) {
 }
 async function getDailyWellness(userId, date) {
   const metrics = await db.select().from(garminWellnessMetrics).where(
-    and15(
-      eq19(garminWellnessMetrics.userId, userId),
-      eq19(garminWellnessMetrics.date, date)
+    and20(
+      eq24(garminWellnessMetrics.userId, userId),
+      eq24(garminWellnessMetrics.date, date)
     )
   ).limit(1);
   if (!metrics.length) {
@@ -10338,9 +11714,9 @@ async function getDailyWellness(userId, date) {
 async function getHealthMetrics(userId) {
   const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
   const metrics = await db.select().from(garminWellnessMetrics).where(
-    and15(
-      eq19(garminWellnessMetrics.userId, userId),
-      eq19(garminWellnessMetrics.date, today)
+    and20(
+      eq24(garminWellnessMetrics.userId, userId),
+      eq24(garminWellnessMetrics.date, today)
     )
   ).limit(1);
   const availableMetrics = [];
@@ -10412,9 +11788,9 @@ async function getHealthInsights(userId) {
   const insights = [];
   const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
   const metrics = await db.select().from(garminWellnessMetrics).where(
-    and15(
-      eq19(garminWellnessMetrics.userId, userId),
-      eq19(garminWellnessMetrics.date, today)
+    and20(
+      eq24(garminWellnessMetrics.userId, userId),
+      eq24(garminWellnessMetrics.date, today)
     )
   ).limit(1);
   if (!metrics.length) {
@@ -10485,7 +11861,7 @@ async function getTrendData(userId, days = 7) {
     vo2Max: [],
     bodyBattery: []
   };
-  const metricsData = await db.select().from(garminWellnessMetrics).where(eq19(garminWellnessMetrics.userId, userId)).orderBy(desc7(garminWellnessMetrics.date)).limit(days);
+  const metricsData = await db.select().from(garminWellnessMetrics).where(eq24(garminWellnessMetrics.userId, userId)).orderBy(desc9(garminWellnessMetrics.date)).limit(days);
   metricsData.reverse().forEach((metric) => {
     trendData.dates.push(metric.date);
     if (metric.sleepDurationInSeconds) {
@@ -10557,194 +11933,21 @@ var init_health_insights_service = __esm({
 });
 
 // server/index.ts
-import express2 from "express";
+import express3 from "express";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import compression from "compression";
 
 // server/routes.ts
 init_storage();
 init_db();
+init_user_stats_cache();
+init_runner_profile_service();
+init_schema();
 import { createServer } from "node:http";
-import { eq as eq20, and as and16, or as or4, gte as gte10, lt as lt4, desc as desc8, lte as lte5, count as count5 } from "drizzle-orm";
-
-// server/user-stats-cache.ts
-init_db();
-init_schema();
-init_runner_profile_service();
-import { eq as eq3, and as and3, gte as gte3, isNotNull as isNotNull3, count as count3, sum as sum3, max as max3, sql as sql3 } from "drizzle-orm";
-var PB_DISTANCES = [
-  { key: "1k", label: "1K", minKm: 0.95, maxKm: 1.1 },
-  { key: "mile", label: "Mile", minKm: 1.59, maxKm: 1.65 },
-  { key: "5k", label: "5K", minKm: 4.9, maxKm: 5.2 },
-  { key: "10k", label: "10K", minKm: 9.9, maxKm: 10.2 },
-  { key: "20k", label: "20K", minKm: 19.8, maxKm: 20.3 },
-  { key: "half", label: "Half Marathon", minKm: 21, maxKm: 21.6 },
-  // ← was 21.05–21.2, too narrow
-  { key: "marathon", label: "Marathon", minKm: 42, maxKm: 42.5 }
-  // ← also widened
-];
-var PB_COLUMNS = {
-  "1k": { durationCol: "pb1kDurationMs", runIdCol: "pb1kRunId", dateCol: "pb1kDate" },
-  "mile": { durationCol: "pbMileDurationMs", runIdCol: "pbMileRunId", dateCol: "pbMileDate" },
-  "5k": { durationCol: "pb5kDurationMs", runIdCol: "pb5kRunId", dateCol: "pb5kDate" },
-  "10k": { durationCol: "pb10kDurationMs", runIdCol: "pb10kRunId", dateCol: "pb10kDate" },
-  "20k": { durationCol: "pb20kDurationMs", runIdCol: "pb20kRunId", dateCol: "pb20kDate" },
-  "half": { durationCol: "pbHalfDurationMs", runIdCol: "pbHalfRunId", dateCol: "pbHalfDate" },
-  "marathon": { durationCol: "pbMarathonDurationMs", runIdCol: "pbMarathonRunId", dateCol: "pbMarathonDate" }
-};
-async function onRunSaved(userId, run) {
-  try {
-    await recomputeForUser(userId);
-    console.log(`[UserStatsCache] Recomputed stats for user ${userId} after run ${run.id}`);
-  } catch (error) {
-    console.error(`[UserStatsCache] Failed to update stats for user ${userId}:`, error);
-  }
-  refreshRunnerProfile(userId).catch(
-    (err) => console.error(`[UserStatsCache] Runner profile refresh failed for ${userId}:`, err)
-  );
-}
-async function onRunDeleted(userId) {
-  try {
-    await recomputeForUser(userId);
-    console.log(`[UserStatsCache] Recomputed stats for user ${userId} after run deletion`);
-  } catch (error) {
-    console.error(`[UserStatsCache] Failed to recompute after deletion for user ${userId}:`, error);
-  }
-}
-async function recomputeForUser(userId) {
-  const [agg] = await db.select({
-    totalRuns: count3(),
-    totalDistanceM: sum3(runs.distance),
-    // meters — divide by 1000 for km
-    totalDurationSec: sum3(runs.duration),
-    // seconds — store as-is
-    totalElevationGain: sum3(runs.elevationGain),
-    totalCalories: sum3(runs.calories),
-    totalActiveCalories: sum3(runs.activeCalories),
-    longestRunM: max3(runs.distance),
-    // meters — divide by 1000 for km
-    // Highest elevation: prefer maxElevation column; fall back to elevationGain
-    highestElevationM: sql3`COALESCE(MAX(${runs.maxElevation}), MAX(${runs.elevationGain}), 0)`,
-    // avgPace is stored as "M:SS" format (e.g. "5:22") — parse via SPLIT_PART
-    fastestPace: sql3`MIN(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
-    avgPace: sql3`AVG(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`
-  }).from(runs).where(eq3(runs.userId, userId));
-  const pbUpdates = {};
-  for (const splitDist of [
-    { key: "1k", segmentKm: 1 },
-    { key: "mile", segmentKm: 1.609 }
-  ]) {
-    const rows = await db.execute(sql3`
-      SELECT
-        r.id,
-        r.completed_at,
-        SPLIT_PART(elem->>'pace', ':', 1)::numeric * 60
-          + SPLIT_PART(elem->>'pace', ':', 2)::numeric AS pace_seconds
-      FROM runs r,
-      LATERAL jsonb_array_elements(r.km_splits) AS elem
-      WHERE r.user_id = ${userId}
-        AND r.km_splits IS NOT NULL
-        AND jsonb_typeof(r.km_splits) = 'array'
-        AND (elem->>'pace') LIKE '%:%'
-      ORDER BY pace_seconds ASC
-      LIMIT 1
-    `);
-    const best = rows.rows?.[0];
-    const cols = PB_COLUMNS[splitDist.key];
-    if (best) {
-      const durationMs = Math.round(Number(best.pace_seconds) * splitDist.segmentKm * 1e3);
-      pbUpdates[cols.durationCol] = durationMs;
-      pbUpdates[cols.runIdCol] = best.id;
-      pbUpdates[cols.dateCol] = toDate(best.completed_at);
-    } else {
-      pbUpdates[cols.durationCol] = null;
-      pbUpdates[cols.runIdCol] = null;
-      pbUpdates[cols.dateCol] = null;
-    }
-  }
-  for (const dist of PB_DISTANCES.filter((d) => d.key !== "1k" && d.key !== "mile")) {
-    const minMeters = dist.minKm * 1e3;
-    const maxMeters = dist.maxKm * 1e3;
-    const [pbRun] = await db.select({ id: runs.id, duration: runs.duration, completedAt: runs.completedAt }).from(runs).where(and3(
-      eq3(runs.userId, userId),
-      gte3(runs.distance, minMeters),
-      sql3`${runs.distance} <= ${maxMeters}`,
-      isNotNull3(runs.avgPace)
-    )).orderBy(runs.avgPace).limit(1);
-    const cols = PB_COLUMNS[dist.key];
-    pbUpdates[cols.durationCol] = pbRun?.duration != null ? pbRun.duration * 1e3 : null;
-    pbUpdates[cols.runIdCol] = pbRun?.id ?? null;
-    pbUpdates[cols.dateCol] = toDate(pbRun?.completedAt);
-  }
-  const [completedGoalsResult] = await db.select({ count: count3() }).from(goals).where(and3(eq3(goals.userId, userId), eq3(goals.status, "completed")));
-  const goalsAchieved = Number(completedGoalsResult?.count ?? 0);
-  const totalRuns = Number(agg.totalRuns ?? 0);
-  const totalDistanceKm = Number(agg.totalDistanceM ?? 0) / 1e3;
-  const longestRunKm = Number(agg.longestRunM ?? 0) / 1e3;
-  const totalDurationSeconds = Number(agg.totalDurationSec ?? 0);
-  let longestRunTimeSec = 0;
-  if (totalRuns > 0) {
-    const [longestRun] = await db.select({ duration: runs.duration }).from(runs).where(eq3(runs.userId, userId)).orderBy(sql3`${runs.distance} DESC NULLS LAST`).limit(1);
-    longestRunTimeSec = Math.round(longestRun?.duration || 0);
-  }
-  const highestElevationM = Math.round(Number(agg.highestElevationM ?? 0));
-  console.log(`[UserStatsCache] Recomputing for user ${userId}: ${totalRuns} runs, ${totalDistanceKm.toFixed(2)}km, ${totalDurationSeconds}s, longestTime=${longestRunTimeSec}s, highElev=${highestElevationM}m`);
-  const upsertData = {
-    userId,
-    updatedAt: /* @__PURE__ */ new Date(),
-    totalRuns,
-    totalDistanceKm,
-    totalDurationSeconds,
-    totalElevationGainM: Number(agg.totalElevationGain ?? 0),
-    totalCalories: Number(agg.totalCalories ?? 0),
-    totalActiveCalories: Number(agg.totalActiveCalories ?? 0),
-    avgPaceMinPerKm: Number(agg.avgPace ?? 0) || null,
-    fastestPaceMinPerKm: Number(agg.fastestPace ?? 0) || null,
-    longestRunKm,
-    longestRunTimeSec,
-    highestElevationM,
-    // PB fields — all duration columns store MILLISECONDS
-    pb1kDurationMs: pbUpdates["pb1kDurationMs"],
-    pb1kRunId: pbUpdates["pb1kRunId"],
-    pb1kDate: pbUpdates["pb1kDate"],
-    pbMileDurationMs: pbUpdates["pbMileDurationMs"],
-    pbMileRunId: pbUpdates["pbMileRunId"],
-    pbMileDate: pbUpdates["pbMileDate"],
-    pb5kDurationMs: pbUpdates["pb5kDurationMs"],
-    pb5kRunId: pbUpdates["pb5kRunId"],
-    pb5kDate: pbUpdates["pb5kDate"],
-    pb10kDurationMs: pbUpdates["pb10kDurationMs"],
-    pb10kRunId: pbUpdates["pb10kRunId"],
-    pb10kDate: pbUpdates["pb10kDate"],
-    pb20kDurationMs: pbUpdates["pb20kDurationMs"],
-    pb20kRunId: pbUpdates["pb20kRunId"],
-    pb20kDate: pbUpdates["pb20kDate"],
-    pbHalfDurationMs: pbUpdates["pbHalfDurationMs"],
-    pbHalfRunId: pbUpdates["pbHalfRunId"],
-    pbHalfDate: pbUpdates["pbHalfDate"],
-    pbMarathonDurationMs: pbUpdates["pbMarathonDurationMs"],
-    pbMarathonRunId: pbUpdates["pbMarathonRunId"],
-    pbMarathonDate: pbUpdates["pbMarathonDate"],
-    goalsAchieved
-  };
-  await db.insert(userStats).values(upsertData).onConflictDoUpdate({
-    target: userStats.userId,
-    set: { ...upsertData, userId: void 0 }
-    // Don't overwrite PK
-  });
-}
-function toDate(value) {
-  if (value == null) return null;
-  if (value instanceof Date) return value;
-  const d = new Date(value);
-  return isNaN(d.getTime()) ? null : d;
-}
-
-// server/routes.ts
-init_runner_profile_service();
-init_schema();
+import { eq as eq25, and as and21, or as or4, gte as gte11, lt as lt4, desc as desc10, lte as lte5, count as count5 } from "drizzle-orm";
 import { DateTime as DateTime2 } from "luxon";
-import { sql as sql10 } from "drizzle-orm";
+import polylineCodec from "@mapbox/polyline";
+import { sql as sql13 } from "drizzle-orm";
 
 // server/auth.ts
 import jwt from "jsonwebtoken";
@@ -11135,7 +12338,10 @@ async function mergeGarminActivityWithAiRunCoachRun(aiRunCoachRunId, garminActiv
       paceData: detailedMetrics.paceData,
       heartRateData: detailedMetrics.heartRateData,
       kmSplits: detailedMetrics.kmSplits,
-      gpsTrack: detailedMetrics.gpsTrack,
+      // Only overwrite GPS if Garmin actually provided GPS samples.
+      // If undefined (Garmin had no GPS data for this activity), preserve the
+      // phone-recorded GPS so the route doesn't disappear after a merge.
+      ...detailedMetrics.gpsTrack != null ? { gpsTrack: detailedMetrics.gpsTrack } : {},
       elevationProfile: detailedMetrics.elevationProfile,
       // Merge tracking
       mergeScore: mergeCandidate.matchScore,
@@ -11156,6 +12362,19 @@ async function mergeGarminActivityWithAiRunCoachRun(aiRunCoachRunId, garminActiv
     console.log(
       `   Reasons: ${mergeCandidate.matchReasons.join(", ")}`
     );
+    try {
+      const { onRunSaved: onRunSaved2 } = await Promise.resolve().then(() => (init_user_stats_cache(), user_stats_cache_exports));
+      const mergedRun = await db.query.runs.findFirst({
+        where: (r, { eq: eq27 }) => eq27(r.id, aiRunCoachRunId)
+      });
+      if (mergedRun) {
+        onRunSaved2(userId, mergedRun).catch(
+          (err) => console.error("[Merge] onRunSaved failed:", err)
+        );
+      }
+    } catch (cacheErr) {
+      console.error("[Merge] Error updating stats cache:", cacheErr);
+    }
   } catch (error) {
     console.error("\u274C Error merging Garmin activity with run:", error);
     throw error;
@@ -11375,7 +12594,7 @@ async function createSegmentFromRun(runId, userId, startIndex, endIndex, name, d
 // server/training-plan-service.ts
 init_db();
 init_schema();
-import { eq as eq8, and as and8, desc as desc5, gte as gte6 } from "drizzle-orm";
+import { eq as eq9, and as and9, desc as desc6, gte as gte7 } from "drizzle-orm";
 
 // server/heart-rate-zones.ts
 var HeartRateZones = class {
@@ -11665,13 +12884,13 @@ async function generateSessionInstructions(userId, plannedWorkoutId, workoutData
 }
 async function generateAiSessionDesign(workout, aiRunnerProfile) {
   const sessionDesc = buildSessionCharacteristics(workout);
-  const systemPrompt = `You are an expert running coach AI designing a specific training session.
-Your job is to:
-1. Write a short, motivating pre-run briefing (2-4 sentences) that tells the runner exactly what they're doing today, what to focus on, and why this session matters for their goal.
-2. Design a precise session structure with phases, targets, and coaching trigger messages.
+  const systemPrompt = `You are an elite AI running coach designing a personalised coaching plan for a specific training session. You have full creative authority over how this session is structured and coached.
 
-The briefing should be SPECIFIC to this session \u2014 not generic. Mention the exact distances, intensities, and what to feel.
-The session structure must include coaching trigger messages that are ACTIVE and INSTRUCTIVE, not just descriptive.
+Your job is to:
+1. Write a specific, motivating pre-run briefing (2-4 sentences) that tells the athlete exactly what they are doing today, what to focus on, and why this session matters for their goal \u2014 reference the actual session targets, not generic running advice.
+2. Design a session structure with phases, targets, and coaching trigger messages that genuinely fit this session type and this athlete.
+
+Apply your coaching expertise \u2014 choose the phase structure, coaching approach, and trigger messages that you believe will give this athlete the best performance and experience in this session.
 
 You must respond with ONLY valid JSON (no markdown, no code blocks).${runnerProfileBlock(aiRunnerProfile)}`;
   const userPrompt = `SESSION TO DESIGN:
@@ -11697,21 +12916,26 @@ Return ONLY valid JSON in this exact format:
     "coachingTriggers": [
       {
         "phase": "phase_name",
-        "trigger": "at_start|at_end|rep_start|rep_end|every_km|pace_deviation|hr_alert",
-        "message": "Specific coaching message for this trigger (1-2 sentences, active voice)"
+        "trigger": "at_start|at_end|rep_start|rep_end|recovery_start|recovery_end|hr_alert|pace_deviation",
+        "message": "Specific coaching message for this trigger (under 20 words, active voice, like a coach talking in your ear)"
       }
     ]
   }
 }
 
-PHASE DESIGN RULES:
-- For intervals/hill_repeats: warmup (1-2km) + N repetitions of work + recovery between each + cooldown (0.5-1km)
-- For tempo runs: warmup (1km) + tempo block + cooldown (0.5km)
-- For easy/zone2/recovery: single easy_run phase covering the full distance
-- For long runs: easy_run phase with milestone coaching triggers at 25%, 50%, 75%, final_stretch
-- durationKm should be the distance of that phase. For repeating intervals, set repetitions and durationKm = distance per rep.
-- For each interval rep, the coachingTriggers must have rep_start and rep_end triggers with specific messages.
-- Coaching trigger messages must be SHORT (under 20 words), direct, and actionable.`;
+PHASE DESIGN GUIDANCE:
+Design the phase structure that genuinely fits this session type and athlete. You choose the number of phases, their structure, and their coaching approach based on what will deliver the best session experience.
+
+Some principles that typically apply:
+- Sessions generally benefit from a warmup and cooldown phase to bookend the main effort
+- Interval/rep sessions work well with named work and recovery phases so each has its own targets and coaching \u2014 name recovery phases starting with "recovery_" so the runtime detects them correctly
+- Continuous effort sessions can be a single phase or broken into logical blocks with milestone triggers
+- Zone-based sessions benefit from reactive hr_alert triggers throughout to keep the athlete in the right zone
+- durationKm should be the distance of that phase; for repeating intervals, set repetitions > 1 and durationKm = distance per rep
+
+Always include at_start triggers for every phase so the athlete knows what each phase requires.
+Coaching trigger messages: under 20 words, direct, active voice, spoken like a coach in your ear.
+For hr_alert and pace_deviation triggers: messages must address the real-time situation the athlete is in.`;
   try {
     const response = await openai3.chat.completions.create({
       model: "gpt-4o-mini",
@@ -11907,16 +13131,14 @@ async function loadSessionCoachingPlan(plannedWorkoutId) {
 
 // server/training-plan-service.ts
 init_runner_profile_service();
-import OpenAI4 from "openai";
-var openai4 = new OpenAI4({
-  apiKey: process.env.OPENAI_API_KEY
-});
-async function generateTrainingPlan(userId, goalType, targetDistance, targetTime, targetDate, experienceLevel = "intermediate", daysPerWeek = 4, regularSessions = [], firstSessionStart = "flexible", durationWeeks, injuries = [], userTimezone = null, goalId = null, overrideAge = null, overrideGender = null, overrideHeight = null, overrideWeight = null) {
+
+// server/orientation-session-service.ts
+init_db();
+init_schema();
+import { eq as eq8, and as and8, desc as desc5, gte as gte6 } from "drizzle-orm";
+async function assessOrientationNeed(userId, userDemographics, userExperienceLevel, planGoalType) {
+  console.log(`[Orientation] Assessing orientation need for user ${userId}...`);
   try {
-    const user = await db.select().from(users).where(eq8(users.id, userId)).limit(1);
-    const connectedDevice = await db.select().from(connectedDevices).where(eq8(connectedDevices.userId, userId)).limit(1);
-    const hasConnectedDevice = connectedDevice.length > 0;
-    const fitness = await getCurrentFitness(userId);
     const ninetyDaysAgo = /* @__PURE__ */ new Date();
     ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
     const recentRuns = await db.select().from(runs).where(
@@ -11925,6 +13147,353 @@ async function generateTrainingPlan(userId, goalType, targetDistance, targetTime
         gte6(runs.completedAt, ninetyDaysAgo)
       )
     ).orderBy(desc5(runs.completedAt)).limit(30);
+    const runsWithGps = recentRuns.filter((r) => {
+      const hasGpsTrack = r.gpsTrack && typeof r.gpsTrack === "object" && Object.keys(r.gpsTrack).length > 0;
+      const isAiAppRun = !r.externalSource || r.externalSource === "airuncoach";
+      return hasGpsTrack && isAiAppRun;
+    });
+    console.log(`[Orientation] User has ${recentRuns.length} recent runs, ${runsWithGps.length} with GPS data`);
+    const profile = buildFitnessProfile(
+      userId,
+      userDemographics,
+      userExperienceLevel,
+      runsWithGps
+    );
+    const needsOrientation = runsWithGps.length < 3;
+    if (!needsOrientation) {
+      console.log(`[Orientation] User has sufficient run history. Skipping orientation.`);
+      return {
+        needsOrientation: false,
+        reason: "Sufficient training history available",
+        recommendedDistance: 0
+      };
+    }
+    console.log(`[Orientation] Orientation needed: ${needsOrientation}`);
+    const assessment = calculateOrientationTargets(
+      profile,
+      planGoalType,
+      userDemographics
+    );
+    assessment.orientationBrief = generateOrientationBrief(profile, planGoalType);
+    assessment.postOrientationPlan = generatePostOrientationPlan(profile, planGoalType);
+    return assessment;
+  } catch (error) {
+    console.error(`[Orientation] Error assessing orientation need:`, error);
+    return {
+      needsOrientation: true,
+      reason: "Unable to assess training history",
+      recommendedDistance: 5,
+      orientationBrief: "Let's assess your current fitness level with a comfortable run.",
+      postOrientationPlan: "We'll use this run to personalize your training plan."
+    };
+  }
+}
+function buildFitnessProfile(userId, demographics, experienceLevel, recentRuns) {
+  let bmi;
+  if (demographics.height && demographics.weight) {
+    const heightInMeters = demographics.height / 100;
+    bmi = demographics.weight / (heightInMeters * heightInMeters);
+  }
+  const avgPaces = recentRuns.map((r) => parsePace(r.avgPace)).filter((p) => p !== null);
+  const avgPace = avgPaces.length > 0 ? avgPaces.reduce((a, b) => a + b, 0) / avgPaces.length : void 0;
+  const maxHR = Math.max(
+    ...recentRuns.map((r) => r.maxHeartRate || 0).filter((hr) => hr > 0)
+  ) || void 0;
+  return {
+    age: demographics.age,
+    gender: demographics.gender,
+    height: demographics.height,
+    weight: demographics.weight,
+    bmi,
+    experienceLevel: normalizeExperienceLevel(experienceLevel),
+    recentRunCount: recentRuns.length,
+    hasGpsData: recentRuns.length > 0,
+    averagePace: avgPace,
+    maxHeartRate: maxHR
+  };
+}
+function calculateOrientationTargets(profile, planGoalType, demographics) {
+  console.log(`[Orientation] Calculating targets for ${profile.experienceLevel} runner, goal: ${planGoalType}`);
+  let recommendedDistance = 5;
+  let recommendedPace;
+  let targetHeartRateZone;
+  let riskFactors = [];
+  if (profile.age && profile.age > 40) {
+    riskFactors.push("over_40_consider_medical_clearance");
+  }
+  if (profile.bmi && profile.bmi > 28) {
+    riskFactors.push("elevated_bmi_manage_load");
+  }
+  if (profile.weight && profile.weight > 95) {
+    riskFactors.push("higher_body_weight_impact_load");
+  }
+  const distanceMap = {
+    beginner: {
+      "5k": 4,
+      "10k": 5,
+      "half_marathon": 6,
+      "marathon": 7
+    },
+    intermediate: {
+      "5k": 5,
+      "10k": 7,
+      "half_marathon": 8,
+      "marathon": 10
+    },
+    advanced: {
+      "5k": 6,
+      "10k": 10,
+      "half_marathon": 12,
+      "marathon": 15
+    }
+  };
+  recommendedDistance = distanceMap[profile.experienceLevel]?.[planGoalType] || 5;
+  if (profile.averagePace) {
+    recommendedPace = formatPace(profile.averagePace);
+  } else {
+    recommendedPace = estimatePaceFromDemographics(
+      profile.age,
+      profile.bmi,
+      profile.experienceLevel,
+      planGoalType
+    );
+  }
+  const estimatedMaxHR = profile.maxHeartRate || estimateMaxHeartRate(profile.age);
+  const zone3Min = Math.round(estimatedMaxHR * 0.75);
+  const zone3Max = Math.round(estimatedMaxHR * 0.85);
+  targetHeartRateZone = {
+    min: zone3Min,
+    max: zone3Max,
+    label: "Tempo Effort / Threshold Pace (Zone 3-4)"
+  };
+  return {
+    needsOrientation: true,
+    reason: `Insufficient training history (${profile.recentRunCount} runs in last 90 days)`,
+    riskFactors,
+    recommendedDistance,
+    recommendedPace,
+    targetHeartRateZone,
+    orientationBrief: "",
+    // Will be filled by generateOrientationBrief()
+    postOrientationPlan: ""
+    // Will be filled by generatePostOrientationPlan()
+  };
+}
+function estimatePaceFromDemographics(age, bmi, experience, goalType) {
+  const baseLinePaces = {
+    beginner: 600,
+    // 10:00/km
+    intermediate: 300,
+    // 5:00/km
+    advanced: 240
+    // 4:00/km
+  };
+  let pace = baseLinePaces[experience] || 600;
+  if (age && age > 40) {
+    pace += (age - 40) * 5;
+  }
+  if (bmi && bmi > 25) {
+    pace += (bmi - 25) * 10;
+  }
+  const goalAdjustments = {
+    "5k": 0,
+    "10k": 10,
+    "half_marathon": 20,
+    "marathon": 30
+  };
+  pace += goalAdjustments[goalType] || 0;
+  return formatPace(pace);
+}
+function estimateMaxHeartRate(age) {
+  if (!age) return 180;
+  return 220 - age;
+}
+function generateOrientationBrief(profile, planGoalType) {
+  const experienceDescriptions = {
+    beginner: "You're just starting your running journey, and this orientation run will help us understand your current baseline.",
+    intermediate: "You've been running consistently. This orientation session will establish your current fitness level to personalize your plan.",
+    advanced: "As an experienced runner, this assessment will help us fine-tune your training plan for optimal progression."
+  };
+  const description = experienceDescriptions[profile.experienceLevel];
+  return `
+\u{1F3C3}\u200D\u2642\uFE0F ORIENTATION SESSION
+
+This is your first session \u2013 we're here to understand your current fitness level so we can personalize your ${planGoalType.replace("_", " ")} training plan.
+
+${description}
+
+What to expect:
+\u2022 Run at a steady, challenging (but sustainable) pace \u2013 this is a TEMPO EFFORT
+\u2022 If you have a heart rate monitor, aim for the Zone 3-4 range (challenging but not maximum effort)
+\u2022 We want to find your actual fitness level, so this won't be easy \u2013 but it's manageable
+\u2022 Tell us how you felt afterward (your perceived effort, any discomfort, how long you could sustain it)
+
+This run will help us:
+\u2713 Establish your actual fitness baseline
+\u2713 Find your lactate threshold
+\u2713 Validate your experience level and self-assessment
+\u2713 Set realistic and personalized targets for your goal
+
+Remember: This IS an assessment, not a casual jog. We need to see what you're capable of right now.
+  `.trim();
+}
+function generatePostOrientationPlan(profile, planGoalType) {
+  return `
+After you complete this orientation session, we'll:
+
+1. \u{1F4CA} Analyze your results
+   \u2022 Compare your actual pace/effort to our estimates
+   \u2022 Check for any form or pacing issues
+   \u2022 Assess your recovery
+
+2. \u{1F3AF} Fine-tune your plan
+   \u2022 If you're stronger than expected, we'll increase intensity
+   \u2022 If you need more base building, we'll adjust accordingly
+   \u2022 Calibrate all future workouts to your actual fitness level
+
+3. \u{1F4AA} Get personalized coaching
+   \u2022 Your in-run AI coaching will be tailored to your fitness
+   \u2022 We'll know how hard to push on interval days
+   \u2022 We'll pace your long runs correctly
+
+Your ${planGoalType.replace("_", " ")} plan will be truly personalized, not generic.
+  `.trim();
+}
+function generateOrientationCoachingPrompt(profile, assessment, planGoalType) {
+  const targetPaceDisplay = assessment.recommendedPace || "tempo effort";
+  const targetDistance = assessment.recommendedDistance;
+  const hrZoneInfo = assessment.targetHeartRateZone ? `${assessment.targetHeartRateZone.min}-${assessment.targetHeartRateZone.max} bpm (Zone 3-4 Tempo)` : "tempo/threshold pace";
+  return `
+You are an AI running coach providing guidance for an ORIENTATION SESSION.
+
+This IS a fitness ASSESSMENT WORKOUT. The goal is to:
+1. Discover the runner's actual fitness level through controlled challenge
+2. Find their lactate threshold and sustainable effort capacity
+3. Validate their self-assessed experience against real performance
+4. Gather baseline data for accurate plan personalization
+5. Establish confidence that the plan will be properly calibrated
+
+RUNNER PROFILE:
+- Experience: ${profile.experienceLevel} runner
+- Goal: ${planGoalType.replace("_", " ")}
+- Recent runs: ${profile.recentRunCount}
+
+SESSION DESIGN:
+- Distance: ${targetDistance} km
+- Target Pace: ${targetPaceDisplay}
+- Target Heart Rate: ${hrZoneInfo}
+- Effort: TEMPO/THRESHOLD - challenging but sustainable
+- Focus: Finding true fitness level, threshold capacity, mental toughness
+
+COACHING STYLE FOR ORIENTATION:
+\u2713 Supportive but honest about effort level
+\u2713 Encourage them to find THEIR sustainable hard pace
+\u2713 Monitor for appropriate challenge (not too easy, not crushing)
+\u2713 Emphasize that we NEED data to calibrate their plan correctly
+\u2713 Validate effort and discomfort as useful information
+\u2713 Build confidence through challenge and completion
+
+KEY MESSAGES AT DIFFERENT POINTS:
+- 0-1km: Settle into steady rhythm, "let's establish your sustainable pace"
+- 1-2km: "You're finding your effort level \u2013 this is where we learn"
+- 2-End: "Keep it steady \u2013 this is the data we need for your plan"
+- At finish: "Perfect \u2013 that effort told us exactly what we needed to know"
+
+WHAT THIS TEMPO EFFORT REVEALS:
+\u2713 Real sustainable pace (not their easy, comfortable pace)
+\u2713 How they handle discomfort and breathing load
+\u2713 Their true lactate threshold (not just aerobic pace)
+\u2713 Mental resilience and work capacity
+\u2713 Honest assessment of experience level
+
+AVOID:
+\u2717 Easy encouragement ("relax, take it easy") \u2013 this is tempo!
+\u2717 Performance language ("crush it", "go hard") \u2013 it's assessment, not racing
+\u2717 Comparison to others
+\u2717 Guilt if they slow down from an unsustainable pace
+
+FOCUS ON:
+\u2713 "How's your breathing? Can you still think clearly?"
+\u2713 "Your pace is steady and strong \u2013 great for assessment"
+\u2713 "Your form is holding up well under effort"
+\u2713 "This data will make your plan truly personal"
+\u2713 "Only a few more km \u2013 you're doing exactly what we need"
+
+SAFETY CHECKS:
+- Watch for signs of distress (gasping, loss of form, pain vs discomfort)
+- For ${profile.age && profile.age > 40 ? "older runners, monitor carefully but allow them to find their genuine threshold" : "younger runners, watch for reckless acceleration"}
+- If real distress appears: suggest backing off slightly, but keep it hard enough to assess
+
+POST-RUN ASSESSMENT (CRITICAL):
+Ask about:
+1. How hard was that pace on a 1-10 scale? (We want 7-8, sustainable hard effort)
+2. Could you keep running at that pace? How long?
+3. Any pain or just muscular discomfort/breathing effort?
+4. How does this compare to your expected fitness level?
+5. Heart rate range if they have monitor?
+
+USE THIS DATA TO:
+- Set accurate Zone boundaries for their training
+- Determine realistic pace targets for the plan
+- Assess if experience level is accurate
+- Calibrate all future workout intensities
+- Build personalized targets that match THEIR capacity, not generic estimates
+  `.trim();
+}
+function parsePace(paceStr) {
+  if (!paceStr) return null;
+  const match = paceStr.match(/(\d+):(\d+)/);
+  if (match) {
+    return parseInt(match[1]) * 60 + parseInt(match[2]);
+  }
+  return null;
+}
+function formatPace(seconds) {
+  const minutes = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  return `${minutes}:${String(secs).padStart(2, "0")}/km`;
+}
+function normalizeExperienceLevel(level) {
+  const normalized = level?.toLowerCase() || "intermediate";
+  if (normalized.includes("beginner") || normalized.includes("new") || normalized.includes("novice")) {
+    return "beginner";
+  }
+  if (normalized.includes("advanced") || normalized.includes("expert") || normalized.includes("elite")) {
+    return "advanced";
+  }
+  return "intermediate";
+}
+
+// server/training-plan-service.ts
+import OpenAI4 from "openai";
+var openai4 = new OpenAI4({
+  apiKey: process.env.OPENAI_API_KEY
+});
+function getBlockSize(daysPerWeek) {
+  if (daysPerWeek <= 2) return 6;
+  if (daysPerWeek === 3) return 5;
+  if (daysPerWeek === 4) return 4;
+  if (daysPerWeek === 5) return 3;
+  return 2;
+}
+async function generateTrainingPlan(userId, goalType, targetDistance, targetTime, targetDate, experienceLevel = "intermediate", daysPerWeek = 4, regularSessions = [], firstSessionStart = "flexible", durationWeeks, injuries = [], userTimezone = null, goalId = null, overrideAge = null, overrideGender = null, overrideHeight = null, overrideWeight = null, isPreEventPlan = false) {
+  try {
+    const user = await db.select().from(users).where(eq9(users.id, userId)).limit(1);
+    const connectedDevice = await db.select().from(connectedDevices).where(eq9(connectedDevices.userId, userId)).limit(1);
+    const hasConnectedDevice = connectedDevice.length > 0;
+    const fitness = await getCurrentFitness(userId);
+    const ninetyDaysAgo = /* @__PURE__ */ new Date();
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+    const allRecentRuns = await db.select().from(runs).where(
+      and9(
+        eq9(runs.userId, userId),
+        gte7(runs.completedAt, ninetyDaysAgo)
+      )
+    ).orderBy(desc6(runs.completedAt)).limit(100);
+    const aiRunCoachRuns = allRecentRuns.filter((r) => {
+      return !r.externalSource || r.externalSource === "airuncoach";
+    });
+    const recentRuns = aiRunCoachRuns.slice(0, 30);
     const runsWithHRData = recentRuns.filter((r) => r.heartRate && r.heartRate > 0);
     const hasHRHistory = runsWithHRData.length >= 3;
     let hrZoneScenario = "effort";
@@ -11937,7 +13506,13 @@ async function generateTrainingPlan(userId, goalType, targetDistance, targetTime
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const runsLast30 = recentRuns.filter((r) => r.completedAt && new Date(r.completedAt) >= thirtyDaysAgo);
     const totalDistanceLast30 = runsLast30.reduce((sum5, r) => sum5 + (r.distance || 0), 0);
-    const weeklyMileageBase = runsLast30.length > 0 ? totalDistanceLast30 / 4 : 20;
+    const noHistoryFallbackKm = (() => {
+      if (goalType === "ultra" || targetDistance > 42.2) return 45;
+      if (goalType === "marathon") return 30;
+      if (goalType === "half_marathon") return 20;
+      return 20;
+    })();
+    const weeklyMileageBase = runsLast30.length > 0 ? totalDistanceLast30 / 4 : noHistoryFallbackKm;
     const parsePaceSecs = (pace) => {
       if (!pace) return null;
       const parts = pace.replace(/\/km.*/, "").trim().split(":");
@@ -11984,7 +13559,7 @@ async function generateTrainingPlan(userId, goalType, targetDistance, targetTime
     let goalEventLocation = null;
     if (goalId) {
       try {
-        const goalRecord = await db.select().from(goals).where(eq8(goals.id, goalId)).limit(1);
+        const goalRecord = await db.select().from(goals).where(eq9(goals.id, goalId)).limit(1);
         if (goalRecord[0]) {
           goalDescription = goalRecord[0].description || null;
           goalNotes = goalRecord[0].notes || null;
@@ -11995,8 +13570,10 @@ async function generateTrainingPlan(userId, goalType, targetDistance, targetTime
         console.warn(`[Training Plan] Could not fetch goal ${goalId} for prompt:`, goalErr);
       }
     }
-    const userHeight = user[0]?.height || overrideHeight || 170;
-    const userWeight = user[0]?.weight || overrideWeight || 70;
+    const rawHeight = user[0]?.height || overrideHeight;
+    const rawWeight = user[0]?.weight || overrideWeight;
+    const userHeight = rawHeight != null && !isNaN(Number(rawHeight)) && Number(rawHeight) > 0 ? Number(rawHeight) : 170;
+    const userWeight = rawWeight != null && !isNaN(Number(rawWeight)) && Number(rawWeight) > 0 ? Number(rawWeight) : 70;
     const bmi = userWeight / (userHeight / 100) ** 2;
     const bmiCategory = bmi < 18.5 ? "underweight" : bmi < 25 ? "normal" : bmi < 30 ? "overweight" : "obese";
     let paceTrend = null;
@@ -12008,9 +13585,59 @@ async function generateTrainingPlan(userId, goalType, targetDistance, targetTime
       else if (diffSecs < -15) paceTrend = `declining (\u2248${Math.round(Math.abs(diffSecs))}s/km slower than 3 months ago)`;
       else paceTrend = "consistent";
     }
-    const weeksUntilTarget = durationWeeks && durationWeeks > 0 ? durationWeeks : targetDate ? Math.ceil((targetDate.getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1e3)) : getPlanDuration(goalType, experienceLevel);
-    console.log(`[Training Plan] Duration: durationWeeks=${durationWeeks}, weeksUntilTarget=${weeksUntilTarget}`);
-    const userAge = user[0]?.dob ? Math.floor((Date.now() - new Date(user[0].dob).getTime()) / 315576e5) : overrideAge || 30;
+    let weeksUntilTarget = 0;
+    if (durationWeeks && durationWeeks > 0) {
+      weeksUntilTarget = durationWeeks;
+    } else if (targetDate && targetDate instanceof Date && !isNaN(targetDate.getTime())) {
+      const calculatedWeeks = Math.ceil((targetDate.getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1e3));
+      weeksUntilTarget = calculatedWeeks && calculatedWeeks > 0 ? calculatedWeeks : getPlanDuration(goalType, experienceLevel);
+    } else {
+      weeksUntilTarget = getPlanDuration(goalType, experienceLevel);
+    }
+    if (!Number.isInteger(weeksUntilTarget) || weeksUntilTarget <= 0) {
+      weeksUntilTarget = getPlanDuration(goalType, experienceLevel);
+    }
+    const blockSize = getBlockSize(daysPerWeek);
+    const weeksToGenerate = Math.min(blockSize, weeksUntilTarget);
+    const isRollingPlan = weeksUntilTarget > weeksToGenerate;
+    console.log(`[Training Plan] Duration: durationWeeks=${durationWeeks}, targetDate=${targetDate}, calculated weeksUntilTarget=${weeksUntilTarget}, blockSize=${blockSize}, weeksToGenerate=${weeksToGenerate}`);
+    const userAge = (() => {
+      if (user[0]?.dob) {
+        const ms = new Date(user[0].dob).getTime();
+        if (!isNaN(ms)) {
+          const calculated = Math.floor((Date.now() - ms) / 315576e5);
+          if (calculated > 0 && calculated < 120) return calculated;
+        }
+      }
+      const fallback = overrideAge && !isNaN(overrideAge) && overrideAge > 0 ? overrideAge : 30;
+      return fallback;
+    })();
+    let orientationAssessment = null;
+    const userDemographics = {
+      age: userAge,
+      gender: user[0]?.gender || overrideGender,
+      height: userHeight,
+      weight: userWeight
+    };
+    try {
+      orientationAssessment = await assessOrientationNeed(
+        userId,
+        userDemographics,
+        experienceLevel,
+        goalType
+      );
+      if (orientationAssessment.needsOrientation) {
+        console.log(`[Orientation] User requires orientation session:`, {
+          reason: orientationAssessment.reason,
+          distance: orientationAssessment.recommendedDistance,
+          pace: orientationAssessment.recommendedPace,
+          riskFactors: orientationAssessment.riskFactors
+        });
+      }
+    } catch (orientationErr) {
+      console.warn(`[Orientation] Error assessing orientation need, continuing without orientation:`, orientationErr);
+      orientationAssessment = { needsOrientation: false, recommendedDistance: 0 };
+    }
     const maxHR = HeartRateZones.getMaxHeartRate(userAge);
     const context = {
       user: {
@@ -12101,216 +13728,255 @@ Last 3 Run Sessions Snapshot:
 - Average pace: ${last3AvgData ? Math.floor(last3AvgData.avgPace / 60) + ":" + String(Math.round(last3AvgData.avgPace % 60)).padStart(2, "0") : "N/A"}/km
 - Time span between sessions: ${last3AvgData?.daysSpan || 0} days
 
-Pace Trend: ${paceTrend || "Not enough data yet"}` : `IMPORTANT: This runner has NO previous run data recorded. 
-We will use their stated fitness level (${experienceLevel}) to estimate baseline pace and mileage. 
-Create a plan that starts conservatively and includes baseline-building runs in the first week to establish their actual current fitness. 
-Then adjust subsequent weeks based on performance.`}
+Pace Trend: ${paceTrend || "Not enough data yet"}` : isPreEventPlan ? `IMPORTANT: This runner has NO previous run data recorded in this app \u2014 they are a NEW USER.
+However, they have explicitly indicated this is a PRE-EVENT SHARPENING BLOCK, meaning they are already fully capable of the event distance and are using this app for the first time in the weeks leading up to their race.
+DO NOT treat the absence of run data as evidence of low fitness. Instead:
+- Assume the runner is race-ready and capable of the event distance right now
+- Start at full training volume appropriate for their stated fitness level (${experienceLevel})
+- Focus on race-pace conditioning, sharpening speed, and taper strategy
+- Do NOT include baseline-building or "establish current fitness" sessions \u2014 they are already fit
+- Use their stated fitness level (${experienceLevel}) and target time (if provided) to set all paces` : (() => {
+      const isLongDistanceGoal = targetDistance > 10 || ["ultra", "marathon", "half_marathon", "10k"].includes(goalType);
+      if (isLongDistanceGoal) {
+        return `IMPORTANT: This runner has NO previous run data recorded in this app \u2014 they are NEW to this app only.
+Build the OPTIMAL plan for this ${targetDistance}km goal. Key principle: fitness level (${experienceLevel}) informs training PACES and session intensity only \u2014 it does NOT cap session distances or weekly volume.
+- Session distances and weekly volume must be built to genuinely achieve the ${targetDistance}km goal within ${weeksUntilTarget} weeks \u2014 do NOT water down distances based on fitness level
+- Start at ~${Math.round(weeklyMileageBase)}km/week and build to meet the event requirements
+- Paces: estimate appropriate training paces for a ${experienceLevel} runner \u2014 adjust effort levels to match the stated level, but keep distances true to the goal
+- The adaptive coaching system will adjust individual sessions based on actual performance \u2014 build the plan for the goal, not a conservative version of it`;
+      } else {
+        return `IMPORTANT: This runner has NO previous run data recorded in this app.
+Use their stated fitness level (${experienceLevel}) and the ${weeklyMileageBase.toFixed(0)}km/week baseline to set appropriate starting volume and paces.
+Build progressively toward the ${targetDistance}km goal.`;
+      }
+    })()}
 `;
-    const prompt = `You are an expert running coach. Generate a tailored ${weeksUntilTarget}-week training plan for a ${experienceLevel} runner preparing for a ${goalType} (${targetDistance}km).
+    const prompt = `\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+COACHING COMMISSION \u2014 ${weeksUntilTarget}-WEEK PERSONALISED TRAINING PLAN
+${isRollingPlan ? `BLOCK 1 OF ${Math.ceil(weeksUntilTarget / weeksToGenerate)} \u2014 WEEKS 1\u2013${weeksToGenerate}` : ""}
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+You are designing a bespoke training plan for the athlete described below. You have full creative and technical authority as a coach \u2014 choose the training philosophy, session types, periodisation model, and pacing approach that YOU believe gives this specific athlete the best possible outcome. This is not a template to fill in. There is no prescribed methodology. You are the expert.
+${isRollingPlan ? `
+\u{1F4CB} ROLLING BLOCK PLAN: The full programme is ${weeksUntilTarget} weeks. You are generating Block 1 \u2014 weeks 1 to ${weeksToGenerate}. Subsequent blocks will be generated as the athlete progresses, incorporating their real performance data. Design this block knowing it is the opening phase of a ${weeksUntilTarget}-week journey. Establish the right physiological foundation and make explicit in your weekDescription fields what training phase each week belongs to (so subsequent blocks can continue the progression coherently).
+` : ""}${isPreEventPlan ? `
+\u26A1 CONTEXT \u2014 PRE-EVENT SHARPENING BLOCK: This runner has specifically confirmed they are already capable of the event distance and are ${weeksUntilTarget} weeks from race day. This is a race-preparation block, not a build-up plan. Design accordingly \u2014 race-pace confidence, sharpening, taper strategy.
+` : ""}
+\u2501\u2501\u2501 THE ATHLETE \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
 
 ${runnerProfileSection}
 
-Runner Profile:
-- Fitness level: ${experienceLevel}
-- Training days per week: ${daysPerWeek}
-- Current fitness (CTL): ${fitness?.ctl || "N/A"}
-- Training status: ${fitness?.status || "N/A"}
+\u2501\u2501\u2501 THE GOAL \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
 
-Current Performance Baseline (from last ${recentRuns.length} runs over 90 days):
-- Weekly mileage (last 30 days): ${weeklyMileageBase.toFixed(1)}km/week
-- Runs in last 30 days: ${runsLast30.length}
-${avgPaceStr ? `- Average pace across recent runs: ${avgPaceStr}` : ""}
-${bestPaceStr ? `- Best pace in a recent run: ${bestPaceStr}` : ""}
-${paceTrend ? `- Pace trend: ${paceTrend}` : ""}
-${similarDistanceRuns.length > 0 ? `
-Recent runs at ${targetDistance}km distance (${similarDistanceRuns.length} found):
-${avgTimeAtGoalDistanceStr ? `- Average time for ${targetDistance}km: ${avgTimeAtGoalDistanceStr} (mm:ss)` : ""}
-${bestTimeAtGoalStr ? `- Best time for ${targetDistance}km: ${bestTimeAtGoalStr} (mm:ss)` : ""}
-${avgPaceSecs && avgTimeAtGoalDistanceSecs ? `- Current estimated ability: this runner currently takes approximately ${avgTimeAtGoalDistanceStr} to run ${targetDistance}km.` : ""}` : `- No recent runs found at exactly ${targetDistance}km \u2014 use their average pace and weekly mileage as the baseline.`}
-
-Goal:
-- ${goalType.toUpperCase()} (${targetDistance}km)
-${goalEventName ? `- Target event: ${goalEventName}${goalEventLocation ? ` in ${goalEventLocation}` : ""}` : ""}
-${goalDescription ? `- Goal description: ${goalDescription}` : ""}
-${goalNotes ? `- Runner's own notes about this goal: "${goalNotes}" \u2014 use this to personalise coaching cues and session descriptions` : ""}
+Event: ${goalType.toUpperCase()} \u2014 ${targetDistance}km
+${goalEventName ? `Event name: ${goalEventName}${goalEventLocation ? ` in ${goalEventLocation}` : ""}` : ""}
+${goalDescription ? `Runner's description: ${goalDescription}` : ""}
+${goalNotes ? `Runner's own notes: "${goalNotes}" \u2014 weave this context into your coaching language throughout the plan` : ""}
+${targetDate ? `Race date: ${targetDate.toDateString()} (${weeksUntilTarget} weeks away)` : `Timeline: ${weeksUntilTarget} weeks`}
 ${targetTime ? (() => {
       const goalPaceSecs = Math.round(targetTime / targetDistance);
       const goalPaceStr = `${Math.floor(goalPaceSecs / 60)}:${String(goalPaceSecs % 60).padStart(2, "0")}/km`;
-      const easyPaceSecs = goalPaceSecs + 90;
-      const easyPaceStr = `${Math.floor(easyPaceSecs / 60)}:${String(easyPaceSecs % 60).padStart(2, "0")}/km`;
-      const tempoPaceSecs = goalPaceSecs + 20;
-      const tempoPaceStr = `${Math.floor(tempoPaceSecs / 60)}:${String(tempoPaceSecs % 60).padStart(2, "0")}/km`;
-      const intervalPaceSecs = Math.max(goalPaceSecs - 20, 150);
-      const intervalPaceStr = `${Math.floor(intervalPaceSecs / 60)}:${String(intervalPaceSecs % 60).padStart(2, "0")}/km`;
-      const longRunPaceSecs = goalPaceSecs + 75;
-      const longRunPaceStr = `${Math.floor(longRunPaceSecs / 60)}:${String(longRunPaceSecs % 60).padStart(2, "0")}/km`;
-      const currentPaceStr = avgPaceStr || "unknown";
+      const currentPaceStr = avgPaceStr || "not yet established";
       const currentTimeStr = avgTimeAtGoalDistanceStr || "unknown";
-      return `- Target time: ${Math.floor(targetTime / 60)}:${String(Math.round(targetTime % 60)).padStart(2, "0")} (mm:ss)
-- Goal pace: ${goalPaceStr} (this is the pace required to achieve the target time)
-- Gap to close: ${avgTimeAtGoalDistanceSecs && targetTime ? `runner currently averages ${currentTimeStr} for ${targetDistance}km (${currentPaceStr}), needs to improve by approximately ${Math.round((avgTimeAtGoalDistanceSecs - targetTime) / 60)} minute(s) ${Math.abs(Math.round((avgTimeAtGoalDistanceSecs - targetTime) % 60))}s` : "use your expert judgment based on their current pace"}
+      return `Target finish time: ${Math.floor(targetTime / 60)}:${String(Math.round(targetTime % 60)).padStart(2, "0")} \u2014 equivalent to a ${goalPaceStr} goal pace
+Current performance at ${targetDistance}km: ${avgTimeAtGoalDistanceSecs ? `averages ${currentTimeStr} (${currentPaceStr}/km)` : `extrapolate from average pace of ${currentPaceStr}`}
+Apply your coaching expertise to determine appropriate training paces across all session types based on this athlete's current fitness and target goal.`;
+    })() : `No target time set \u2014 design for goal completion and optimal performance at this athlete's current fitness level.`}
 
-TRAINING PACE PRESCRIPTION (derived from goal pace ${goalPaceStr}):
-These are the target paces you MUST use when assigning workouts. Do NOT anchor hard/tempo/interval paces to the runner's current easy pace.
-- Easy / recovery runs:  ~${easyPaceStr}  (aerobic base; conversational effort)
-- Long runs:             ~${longRunPaceStr} (comfortable aerobic, builds endurance)
-- Tempo / threshold:     ~${tempoPaceStr}  (lactate threshold work; comfortably hard but sustainable for 20-40 min)
-- Race pace sessions:    ${goalPaceStr}    (exactly the goal pace; conditions body and mind for race day)
-- Interval reps (400m-1000m): ~${intervalPaceStr} (faster than race pace; neuromuscular conditioning so race pace feels controlled)
-- Hill repeats:          effort-based (target race-pace effort / zone 4 HR \u2014 pace is secondary due to gradient)
+\u2501\u2501\u2501 CURRENT PERFORMANCE DATA \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
 
-PACE PROGRESSION OVER THE PLAN:
-- Weeks 1-3:  Focus on easy miles. Introduce tempo at current-ability threshold (~current pace - 30s). Intervals at goal pace.
-- Weeks 4-6:  Tempo creeps toward ${tempoPaceStr}. Intervals at ${intervalPaceStr}. First race pace taste.
-- Weeks 7-9:  Tempo AT ${tempoPaceStr}. Sustained race pace blocks (1-2km at ${goalPaceStr}). Intervals well below race pace.
-- Final weeks: Race-pace specific sessions. Taper volume, maintain intensity.
-
-CRITICAL: The runner CANNOT achieve ${goalPaceStr} race pace if they never train at or faster than that pace. Every plan MUST include:
-1. Interval sessions with reps at ${intervalPaceStr} or faster (conditions body to handle race pace easily)
-2. Tempo sessions at ~${tempoPaceStr} (builds lactate threshold)
-3. Race-pace conditioning runs at exactly ${goalPaceStr} (as the plan progresses)`;
-    })() : ""}
+${hasRunHistory ? `Run History (last 90 days \u2014 ${recentRuns.length} sessions):
+- Weekly volume (last 30 days): ${weeklyMileageBase.toFixed(1)}km/week
+- Sessions last 30 days: ${runsLast30.length}
+${avgPaceStr ? `- Average pace: ${avgPaceStr}/km` : ""}
+${bestPaceStr ? `- Best recent pace: ${bestPaceStr}/km` : ""}
+${paceTrend ? `- Pace trend: ${paceTrend}` : ""}
+${fitness?.ctl ? `- Chronic Training Load (CTL): ${fitness.ctl}` : ""}
+${fitness?.status ? `- Training status: ${fitness.status}` : ""}
+${similarDistanceRuns.length > 0 ? `
+Performance at goal distance (${targetDistance}km \u2014 ${similarDistanceRuns.length} sessions found):
+${avgTimeAtGoalDistanceStr ? `- Average completion time: ${avgTimeAtGoalDistanceStr}` : ""}
+${bestTimeAtGoalStr ? `- Personal best: ${bestTimeAtGoalStr}` : ""}` : `
+No recorded sessions at exactly ${targetDistance}km \u2014 extrapolate from average pace and weekly volume.`}` : isPreEventPlan ? `NEW TO THIS APP \u2014 no run history in this system. The athlete has confirmed this is a pre-event block; they are already race-capable. Do NOT interpret missing data as low fitness.` : `NEW TO THIS APP \u2014 no run history yet. Design a plan appropriate for a ${experienceLevel} runner targeting ${targetDistance}km. The adaptive coaching system will refine future plan adaptations as real performance data accumulates.`}
 ${targetDate ? `- Race date: ${targetDate.toDateString()}` : ""}
 
+${goalType === "custom" && targetDistance > 21.1 && targetDistance <= 42.2 ? `
+\u2501\u2501\u2501 CUSTOM MID-DISTANCE EVENT CONTEXT \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+
+This is a ${targetDistance}km custom event \u2014 between half marathon and marathon distance. Standard half marathon or marathon training templates don't directly apply. Apply your coaching expertise to determine the right approach for this specific distance and this specific athlete. Consider what peak long run distances, weekly volumes, and session composition are genuinely appropriate for ${targetDistance}km preparation within ${weeksUntilTarget} weeks.
+` : ""}
+${goalType === "ultra" || targetDistance > 42.2 ? `
+\u2501\u2501\u2501 ULTRA / LONG-DISTANCE COACHING CONTEXT \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+
+This is a ${targetDistance}km ultra/long-distance event. Road-racing training principles do not directly translate. Key considerations for your coaching design:
+- Peak long run distances typically need to approach 55-65% of event distance to build the fatigue resistance required (~${Math.round(targetDistance * 0.55)}\u2013${Math.round(targetDistance * 0.65)}km for this event)
+- Time-on-feet takes precedence over pace \u2014 easy and long runs should dominate overall volume
+- Back-to-back long run weekends are a primary ultra training tool \u2014 they build fatigue resistance that single long runs cannot replicate
+- Ultra courses are typically hilly \u2014 hillwork is relevant
+- Starting from this athlete's current ${Math.round(weeklyMileageBase)}km/week, design the volume build you believe is appropriate to prepare them for this event in ${weeksUntilTarget} weeks
+Apply your expertise to design the session composition, volume progression, and periodisation you genuinely believe is optimal for this ultra goal.
+` : ""}
+
+\u2501\u2501\u2501 SCHEDULE & LIFESTYLE \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+
+Training sessions per week: ${daysPerWeek}
+Today: ${(/* @__PURE__ */ new Date()).toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+First session: ${firstSessionStart === "today" ? `TODAY \u2014 first workout must be on or after today. Any sessions earlier in week 1 that fall before today should be omitted; week 1 may have fewer sessions than usual.` : firstSessionStart === "tomorrow" ? `TOMORROW \u2014 first workout on or after tomorrow. Omit any week-1 sessions that fall before tomorrow.` : "Flexible \u2014 schedule from the current calendar week, omitting any slots that have already passed."}
 ${regularSessions.length > 0 ? `
-Regular Weekly Runs (already in the user's schedule):
+Fixed Sessions Already in This Athlete's Schedule:
 ${regularSessions.map((s) => {
       const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
       const time = `${String(s.timeHour).padStart(2, "0")}:${String(s.timeMinute).padStart(2, "0")}`;
-      const countNote = s.countsTowardWeeklyTotal ? "counts towards weekly session total" : "EXTRA \u2013 does NOT count towards weekly session total";
-      return `- ${s.name}: day ${s.dayOfWeek} (${dayNames[s.dayOfWeek]}) at ${time}, ${s.distanceKm}km (${countNote})`;
+      return `- "${s.name}": ${dayNames[s.dayOfWeek]} at ${time}, ${s.distanceKm}km \u2014 ${s.countsTowardWeeklyTotal ? `counts toward the ${daysPerWeek} sessions/week total (integrate a coached session on this day that matches its intensity/goal)` : `BLOCKED DAY \u2014 do NOT schedule any coached session on this day; this prevents double-running`}`;
+    }).join("\n")}
+` : ""}
+\u2501\u2501\u2501 HEALTH & INJURY CONTEXT \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+
+${injuries && injuries.length > 0 ? `Active Health Considerations (athlete safety is the priority \u2014 design around these):
+${injuries.map((i) => {
+      const statusLabel = i.status === "recovering" || i.status === "RECOVERING" ? "Recovering" : i.status === "healed" || i.status === "HEALED" ? "Healed" : i.status === "chronic" || i.status === "CHRONIC" ? "Chronic" : i.status === "active" || i.status === "ACTIVE" ? "Active" : i.status;
+      return `- ${i.bodyPart}: ${statusLabel}${i.notes ? ` \u2014 ${i.notes}` : ""}`;
     }).join("\n")}
 
-IMPORTANT scheduling rules for regular sessions:
-1. Sessions that COUNT towards the weekly total: Integrate them into the ${daysPerWeek} AI-generated sessions per week by choosing to perform that regular session on its scheduled day instead of a coached session (prefer replacing sessions that match its intensity/goal).
-2. Sessions that DON'T count (marked "EXTRA"): These are BLOCKED DAYS. Do NOT schedule ANY coached workouts on the same days as EXTRA sessions. Schedule your ${daysPerWeek} coached workouts exclusively on other days. This prevents double-running on the same day.
-` : ""}
-${injuries.length > 0 ? `
-INJURIES & LIMITATIONS:
-${injuries.map((i) => `- ${i.bodyPart}: ${i.status}${i.notes ? ` \u2014 ${i.notes}` : ""}`).join("\n")}
+Apply appropriate load management: active/recovering = avoid stress to the affected area, substitute with low-impact alternatives; chronic = reduce intensity and impact; healed = gradual reintroduction, conservative volume progression. A plan that keeps this athlete healthy is always better than one that risks re-injury.` : `No current injuries or health limitations reported.`}
 
-CRITICAL INJURY GUIDELINES:
-- For "active" injuries: AVOID all exercises that stress the affected area. Replace with cross-training or rest days.
-- For "recovering" injuries: REDUCE intensity and impact. No speed work, hill repeats, or long runs that stress the affected body part. Favor easy runs on flat terrain.
-- For "healed" injuries: Gradually reintroduce normal training but note the history \u2014 avoid sudden volume increases.
-- Always err on the side of caution. A conservative plan that keeps the runner healthy is better than an aggressive plan that causes re-injury.
-` : ""}
-Schedule:
-- Today is ${(/* @__PURE__ */ new Date()).toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })} (day ${(/* @__PURE__ */ new Date()).getDay()} of the week, 0=Sun)
-- First session: ${firstSessionStart === "today" ? `TODAY \u2014 the first workout must be on or after today. Any sessions earlier in week 1 (e.g. Monday/Tuesday if today is Wednesday) should be omitted; week 1 may have fewer sessions than usual.` : firstSessionStart === "tomorrow" ? `TOMORROW \u2014 first workout on or after tomorrow. Omit any week-1 sessions that fall before tomorrow.` : "Flexible \u2014 schedule week 1 starting from the current calendar week. Sessions that would fall before today in week 1 are automatically dropped, so you may schedule them from today onwards."}
+\u2501\u2501\u2501 APP COACHING CAPABILITIES \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
 
-Requirements:
-1. PACE RULES \u2014 follow this strictly:
-   a) Easy/recovery/long runs: use the runner's CURRENT ability (their average pace + 30-90s/km). These should feel genuinely easy.
-   b) Tempo/threshold sessions: use the TRAINING PACE PRESCRIPTION above (~goal pace + 20s/km). Do NOT use current easy pace for tempo \u2014 this is the most common coaching mistake.
-   c) Interval sessions: use the TRAINING PACE PRESCRIPTION above (~goal pace - 20s/km). Reps must be faster than race pace.
-   d) Race pace sessions: use the exact GOAL PACE derived from the target time. These sessions exist to make the runner comfortable at their race pace.
-   e) Hill repeats: specify effort (e.g. "Zone 4 effort / hard") not exact pace, since gradient makes pace unreliable.
-2. Build gradually from current ${weeklyMileageBase.toFixed(1)}km/week base
-3. Include easy runs, tempo runs, intervals, and long runs across each week
-4. Follow 80/20 rule (80% easy effort, 20% quality/hard sessions)
-5. Build for 3 weeks, recover 1 week pattern
-6. Taper for final 2 weeks before race
-7. Increase weekly volume by max 10% per week
-8. Reference the runner's current performance AND goal in workout descriptions (e.g. "your current 5km is around ${avgTimeAtGoalDistanceStr || "estimated from pace data"}. Today's tempo at [X:XX/km] is building your lactate threshold toward your [goal time] goal")
+The app delivers live AI coaching throughout every session. You can design sessions knowing we support:
+- Real-time GPS pace and distance tracking with live audio coaching cues
+- Heart rate zone monitoring with live alerts (when HR device is connected)
+- Interval/rep detection and lap tracking with per-rep coaching messages
+- Live pace deviation alerts when the athlete drifts off target
+- Pre-run briefings personalised to each session
+- Adaptive plan adjustments based on actual performance data from completed sessions
 
-Return JSON with this exact structure:
+\u2501\u2501\u2501 WHAT TO DELIVER \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+
+WEEK-BY-WEEK PROGRESSION \u2014 THIS IS THE MOST IMPORTANT QUALITY STANDARD:
+Every week MUST be distinct. No two weeks should have identical sessions, distances, or intensity distribution. A plan where week 1 looks the same as week 8 is not a coaching plan \u2014 it is a repeated template and is unacceptable.
+
+Your plan must demonstrate clear progressive overload and phase structure. Specifically:
+- Weekly volume (totalDistance) must increase progressively across the plan \u2014 each phase should build, with a scheduled deload week (volume drops ~20-30%) at a strategically appropriate point
+- Session types must evolve \u2014 early weeks establish aerobic base with easier sessions; middle weeks introduce and develop quality work; late weeks sharpen race-specific fitness
+- Target paces within each session type should tighten progressively as the athlete's fitness improves
+- Intensity distribution must shift across the plan \u2014 do not run the same mix of easy/tempo/interval sessions every week
+${isRollingPlan ? `- This is Block 1 (weeks 1\u2013${weeksToGenerate} of the full ${weeksUntilTarget}-week plan). End the block at a sensible phase transition point (e.g. end of base phase). Do NOT include a taper in this block \u2014 taper weeks will appear in the final block.` : isPreEventPlan ? `- PRE-EVENT BLOCK: Week 1 is near race-ready intensity. Progress through sharpening phases. Taper volume in the final 1-2 weeks.` : `- Final 1-2 weeks MUST taper \u2014 reduced volume and intensity to arrive at the event fresh`}
+
+NON-NEGOTIABLE STRUCTURAL CONSTRAINTS:
+- Generate EXACTLY ${weeksToGenerate} weeks \u2014 every single week must be fully listed, no skipping or summarising
+- Each week must have EXACTLY ${daysPerWeek} workouts (after accounting for any blocked days)
+- Respect all fixed session scheduling rules above
+- Honour all injury/health limitations \u2014 a conservative safe plan is always better than one that causes re-injury
+
+Return your complete coaching plan as JSON with this structure:
 {
-  "planName": "12-Week Half Marathon Plan",
-  "totalWeeks": 12,
+  "planName": "A descriptive name reflecting this athlete's specific plan and approach",
+  "totalWeeks": ${weeksToGenerate},
   "coachingProgrammeSummary": {
-    "aiDeterminedFitnessLevel": "intermediate",
-    "comment": "Based on your current running data, you show a consistent aerobic base with room for speed development.",
+    "aiDeterminedFitnessLevel": "Your expert assessment of this athlete's actual fitness level based on all data provided",
+    "coachingApproach": "1-2 sentences describing the training methodology/philosophy you have chosen for this athlete and why",
+    "comment": "A personalised paragraph assessing this athlete \u2014 what you see in their data, what you are targeting, and how the plan is designed to get them there",
     "keyMetrics": {
-      "estimatedAveragePace": "7:30/km",
-      "estimatedWeeklyMileage": "30-35km",
-      "focusAreas": ["build aerobic capacity", "improve lactate threshold", "injury prevention"]
+      "estimatedAveragePace": "This athlete's comfortable aerobic training pace based on current fitness (not a PR pace)",
+      "estimatedWeeklyMileage": "Peak weekly volume this plan builds toward \u2014 not the starting volume",
+      "focusAreas": ["3-4 specific focus areas tailored to this athlete and their goal"]
     }
   },
   "weeks": [
     {
       "weekNumber": 1,
-      "weekDescription": "Base building week - focus on easy mileage",
+      "weekDescription": "Brief description of this week's training focus and intent",
       "totalDistance": 25.0,
-      "focusArea": "endurance",
-      "intensityLevel": "easy",
+      "focusArea": "What physiological quality this week develops",
+      "intensityLevel": "Overall intensity descriptor for this week",
       "workouts": [
         {
           "dayOfWeek": 1,
           "workoutType": "easy",
           "distance": 6.0,
-          "targetPace": "5:30/km",
-          "intensity": "z2",
-          "description": "Easy recovery run",
-          "instructions": "Keep heart rate in zone 2. Should feel conversational."
+          "targetPace": "Pace appropriate for this session type and this athlete's current fitness",
+          "intensity": "Your chosen intensity label for this session",
+          "description": "Session name, personalised to this athlete and their goal \u2014 not a generic label",
+          "instructions": "Detailed, specific coaching instructions for this session \u2014 reference the athlete's actual pace data, their goal, and explain why this session matters at this point in the plan"
         },
         {
           "dayOfWeek": 3,
           "workoutType": "tempo",
           "distance": 5.0,
-          "targetPace": "TEMPO_PACE_HERE (use goal-derived tempo pace from TRAINING PACE PRESCRIPTION, NOT easy pace)",
+          "targetPace": "Appropriate threshold pace for this athlete based on their goal and current fitness",
           "intensity": "z4",
-          "description": "Threshold tempo run \u2014 this pace is derived from your GOAL pace, not your easy pace",
-          "instructions": "Warm up 1km easy, then hold tempo pace for 3km, cool down 1km. This should be comfortably hard."
+          "description": "Personalised session description",
+          "instructions": "Specific coaching instructions for this athlete"
         },
         {
           "dayOfWeek": 5,
           "workoutType": "intervals",
           "distance": 5.0,
-          "targetPace": "INTERVAL_PACE_HERE (use goal-derived interval pace from TRAINING PACE PRESCRIPTION \u2014 faster than race pace)",
+          "targetPace": "Appropriate interval pace based on your coaching assessment",
           "intensity": "z5",
           "intervalCount": 6,
           "intervalDistanceMeters": 400,
           "intervalDurationSeconds": null,
-          "description": "Speed intervals \u2014 faster than race pace to make goal pace feel controlled",
-          "instructions": "400m reps at interval pace with 90s recovery jog between reps."
+          "description": "Personalised session description",
+          "instructions": "Specific coaching instructions for this athlete"
         }
       ]
     }
   ]
 }
 
-CRITICAL REQUIREMENTS:
-- You MUST generate EXACTLY ${weeksUntilTarget} weeks. No more, no less.
-- Each week MUST have EXACTLY ${daysPerWeek} workouts.
-- The "totalWeeks" field in your JSON MUST be ${weeksUntilTarget}.
-- Do not add extra weeks, do not skip weeks, do not summarize weeks.
-- Every single week from 1 to ${weeksUntilTarget} must be fully listed.
+IMPORTANT NOTES ON OUTPUT:
+- workoutType is open \u2014 use whatever session classification you judge is right (e.g. "easy", "tempo", "intervals", "long_run", "fartlek", "strides", "progression_run", "hill_repeats", "race_pace", "recovery", "time_trial", "back_to_back_long", or any other type you deem appropriate). Use "rest" only for rest/off days.
+- Instructions must be concise but personalised (2-3 sentences) \u2014 state the session's purpose, a specific target metric for this athlete, and what physiological adaptation it drives at this stage of the plan.
+- The coachingApproach field should genuinely describe the methodology you have chosen (e.g. polarised training, threshold-focused, time-on-feet dominant, etc.) and your rationale for this athlete.
+- weekDescription for each week MUST reflect what makes that specific week different \u2014 name the training phase (e.g. "Aerobic foundation", "Threshold introduction", "Volume peak", "Race sharpening", "Taper"). Do not use generic descriptions like "Continue building fitness".
 
-COACHING PROGRAMME SUMMARY REQUIREMENTS:
-- aiDeterminedFitnessLevel: Your assessment of the runner's ACTUAL fitness level based on the data provided (may differ from their stated level)
-- comment: A short paragraph assessing their fitness and what you observe from their running patterns
-- keyMetrics.estimatedAveragePace: The realistic average pace they should target for easy runs (not a PR pace)
-- keyMetrics.estimatedWeeklyMileage: Your recommended weekly volume for this plan (e.g. "30-35km")
-- keyMetrics.focusAreas: Array of 3-4 focus areas for this specific runner (e.g. "build aerobic base", "improve speed", "injury prevention")
+STRUCTURAL CONSTRAINTS (these are non-negotiable for the app to function):
+- Generate EXACTLY ${weeksToGenerate} weeks \u2014 every single week from 1 to ${weeksToGenerate} must be fully listed
+- Each week must have EXACTLY ${daysPerWeek} workouts (after accounting for blocked days)
+- The "totalWeeks" field in your JSON must be ${weeksToGenerate}
+- Do not skip, summarise, or merge weeks
 
-If runner has NO previous runs:
-- aiDeterminedFitnessLevel: base on their age, height, weight, BMI and stated level - be conservative
-- comment: "No previous running history. Starting with conservative baseline to establish fitness levels."
-- estimatedAveragePace: estimate based on their profile metrics
-- estimatedWeeklyMileage: appropriate starting point for a beginner
-- focusAreas: should include "establish baseline", "build aerobic foundation", "injury prevention"`;
+COACHING SUMMARY NOTES:
+- coachingApproach: explain the training philosophy you have applied \u2014 this helps the athlete understand your coaching rationale
+- estimatedWeeklyMileage: show the PEAK weekly volume this plan builds toward, not the starting volume
+- For athletes with no previous run data: base your assessments on their stated fitness level and goal \u2014 do not default to conservative or beginner-level language unless genuinely warranted`;
     const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
-    const response = await openai4.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        {
-          role: "system",
-          content: `You are an expert running coach who creates scientifically-sound training plans. Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunnerProfile)}`
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.7,
-      max_tokens: 16e3
-    });
-    const finishReason = response.choices[0].finish_reason;
-    if (finishReason === "length") {
-      console.warn(`[Training Plan] OpenAI response was truncated (finish_reason=length). Retrying with shorter plan description...`);
-    }
+    const systemPromptContent = `You are an elite AI running coach with deep expertise in exercise physiology, training periodisation, injury prevention, and performance optimisation. You have coached athletes across all levels and distances \u2014 from first-time 5K runners to ultra marathon competitors.
+
+You are NOT filling in a template or following a prescribed methodology. You are the expert making every decision: what training philosophy applies to this athlete, what session types they need, how to periodise their weeks, how to prescribe paces and intensity, and how to structure the plan to give them the best possible outcome.
+
+You have access to the full spectrum of training science \u2014 polarised training, aerobic threshold development, high-intensity interval training, fatigue resistance, progressive overload, and adaptive periodisation. Apply whatever methodology you genuinely believe is optimal for this specific athlete and goal. Do not default to generic templates or one-size-fits-all structures.
+
+Your coaching decisions should evolve with the athlete's data and the science. Every plan you design should reflect deep, personalised coaching judgement \u2014 not a formula.
+
+Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunnerProfile)}`;
+    const callOpenAI = async (compactMode = false) => {
+      const userPrompt = compactMode ? prompt.replace(
+        /- Instructions must be highly personalised[^\n]*/,
+        "- Instructions: max 1 sentence \u2014 name the session type, target metric, and why this week. No padding."
+      ) : prompt;
+      const res = await openai4.chat.completions.create({
+        model: "gpt-4.1",
+        messages: [
+          { role: "system", content: systemPromptContent },
+          { role: "user", content: userPrompt }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.7,
+        max_tokens: 32e3
+      });
+      const reason = res.choices[0].finish_reason;
+      if (reason === "length" && !compactMode) {
+        console.warn(`[Training Plan] Response truncated on full mode \u2014 retrying in compact mode`);
+        return callOpenAI(true);
+      }
+      if (reason === "length" && compactMode) {
+        throw new Error(`Training plan response truncated even in compact mode \u2014 plan is too large to generate in a single call. Consider reducing the number of weeks.`);
+      }
+      return res;
+    };
+    const response = await callOpenAI();
     let rawContent = response.choices[0].message.content || "{}";
     rawContent = rawContent.replace(/```json\n?/g, "").replace(/\n?```/g, "").trim();
     let planData;
@@ -12333,7 +13999,7 @@ If runner has NO previous runs:
     if (!planData.weeks || !Array.isArray(planData.weeks)) {
       throw new Error("Invalid plan data: missing or invalid weeks array");
     }
-    console.log(`[Training Plan] AI returned ${planData.weeks.length} weeks, expected ${weeksUntilTarget}`);
+    console.log(`[Training Plan] AI returned ${planData.weeks.length} weeks, expected ${weeksToGenerate} (block 1 of ${isRollingPlan ? Math.ceil(weeksUntilTarget / weeksToGenerate) : 1})`);
     planData.weeks = planData.weeks.map((week) => ({
       ...week,
       weekNumber: parseInt(String(week.weekNumber), 10) || 1,
@@ -12344,46 +14010,108 @@ If runner has NO previous runs:
         distance: parseFloat(String(wo.distance).replace(/[^\d.]/g, "")) || 0
       })) : []
     }));
-    if (planData.weeks.length < weeksUntilTarget) {
-      console.warn(`[Training Plan] AI returned fewer weeks (${planData.weeks.length}) than requested (${weeksUntilTarget}). Filling missing weeks.`);
-      const lastWeek = planData.weeks[planData.weeks.length - 1];
-      while (planData.weeks.length < weeksUntilTarget) {
-        const newWeekNum = planData.weeks.length + 1;
-        planData.weeks.push({
-          ...lastWeek,
-          weekNumber: newWeekNum,
-          weekDescription: `Week ${newWeekNum} \u2014 Continue building fitness`,
-          workouts: (lastWeek?.workouts || []).map((w) => ({ ...w }))
-        });
-      }
-    } else if (planData.weeks.length > weeksUntilTarget) {
-      console.warn(`[Training Plan] AI returned more weeks (${planData.weeks.length}) than requested (${weeksUntilTarget}). Trimming.`);
-      planData.weeks = planData.weeks.slice(0, weeksUntilTarget);
+    if (planData.weeks.length < weeksToGenerate) {
+      throw new Error(
+        `Training plan incomplete: AI returned ${planData.weeks.length} weeks but ${weeksToGenerate} were requested. This usually means the response was truncated \u2014 please try again.`
+      );
+    } else if (planData.weeks.length > weeksToGenerate) {
+      console.warn(`[Training Plan] AI returned more weeks (${planData.weeks.length}) than requested (${weeksToGenerate}). Trimming.`);
+      planData.weeks = planData.weeks.slice(0, weeksToGenerate);
     }
+    const safeTargetTime = targetTime != null && !isNaN(targetTime) && targetTime > 0 ? Math.round(targetTime) : null;
+    const safeWeeklyMileage = !isNaN(weeklyMileageBase) && weeklyMileageBase > 0 ? weeklyMileageBase : 20;
+    const safeDaysPerWeek = !isNaN(daysPerWeek) && daysPerWeek >= 1 ? Math.round(daysPerWeek) : 4;
+    const nextBlockAt = (() => {
+      if (!isRollingPlan) return null;
+      const today = userTimezone ? /* @__PURE__ */ new Date((/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: userTimezone }) + "T00:00:00") : /* @__PURE__ */ new Date();
+      const daysSinceMonday = today.getDay() === 0 ? 6 : today.getDay() - 1;
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - daysSinceMonday);
+      const triggerDate = new Date(weekStart);
+      triggerDate.setDate(weekStart.getDate() + (weeksToGenerate - 1) * 7);
+      return triggerDate;
+    })();
     const plan = await db.insert(trainingPlans).values({
       userId,
       goalType,
       targetDistance,
-      targetTime,
+      targetTime: safeTargetTime,
       targetDate,
       totalWeeks: weeksUntilTarget,
+      // full plan duration
       experienceLevel,
-      weeklyMileageBase,
-      daysPerWeek,
+      weeklyMileageBase: safeWeeklyMileage,
+      daysPerWeek: safeDaysPerWeek,
       includeSpeedWork: true,
       includeHillWork: true,
       includeLongRuns: true,
       status: "active",
-      aiGenerated: true
+      aiGenerated: true,
+      generatedThroughWeek: weeksToGenerate,
+      // how many weeks are actually in the DB now
+      nextBlockAt
+      // when to generate the next block (null if full plan already generated)
     }).returning();
     const planId = plan[0].id;
     const pendingSessionInstructions = [];
+    let weekOneInsertionIndex = 0;
+    if (orientationAssessment?.needsOrientation) {
+      console.log(`[Orientation] Inserting orientation session as Week 1, Day 1...`);
+      try {
+        const orientationWeek = await db.insert(weeklyPlans).values({
+          trainingPlanId: planId,
+          weekNumber: 1,
+          weekDescription: "Orientation & Fitness Assessment",
+          totalDistance: orientationAssessment.recommendedDistance,
+          focusArea: "Fitness Assessment",
+          intensityLevel: "Assessment"
+        }).returning();
+        const weeklyPlanId = orientationWeek[0].id;
+        const todayInUserTz = userTimezone ? /* @__PURE__ */ new Date((/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: userTimezone }) + "T00:00:00") : /* @__PURE__ */ new Date();
+        if (!userTimezone) todayInUserTz.setHours(0, 0, 0, 0);
+        const orientationWorkout = await db.insert(plannedWorkouts).values({
+          weeklyPlanId,
+          dayOfWeek: todayInUserTz.getDay(),
+          scheduledDate: todayInUserTz,
+          workoutType: "orientation",
+          distance: orientationAssessment.recommendedDistance,
+          targetPace: orientationAssessment.recommendedPace,
+          intensity: "tempo",
+          // Tempo/Threshold effort to assess actual fitness
+          description: "Orientation Run: Establish Your Baseline Fitness",
+          instructions: orientationAssessment.orientationBrief,
+          effortDescription: "Steady tempo effort - challenging but sustainable (Zone 3-4)",
+          sessionGoal: "assess_fitness",
+          sessionIntent: "orientation_run",
+          hrZoneNumber: 3,
+          // Tempo zone instead of Zone 2
+          hrZoneMinBpm: orientationAssessment.targetHeartRateZone ? Math.round(orientationAssessment.targetHeartRateZone.max) : void 0,
+          hrZoneMaxBpm: orientationAssessment.targetHeartRateZone ? Math.round(orientationAssessment.targetHeartRateZone.max * 1.15) : void 0,
+          // Zone 3-4 range
+          hrZoneScenario
+        }).returning();
+        const orientationWorkoutId = orientationWorkout[0].id;
+        console.log(`[Orientation] \u2705 Orientation workout created: ${orientationWorkoutId}`);
+        pendingSessionInstructions.push({
+          workoutId: orientationWorkoutId,
+          workoutType: "orientation",
+          intensity: "tempo",
+          sessionGoal: "assess_fitness",
+          sessionIntent: "orientation_run",
+          distance: orientationAssessment.recommendedDistance
+        });
+        weekOneInsertionIndex = 1;
+      } catch (orientationInsertErr) {
+        console.error(`[Orientation] \u274C Error inserting orientation session, continuing without it:`, orientationInsertErr);
+      }
+    }
     for (const week of planData.weeks) {
+      const safeWeekNumber = typeof week.weekNumber === "number" && !isNaN(week.weekNumber) && week.weekNumber > 0 ? Math.round(week.weekNumber) + weekOneInsertionIndex : planData.weeks.indexOf(week) + 1 + weekOneInsertionIndex;
       const weeklyPlan = await db.insert(weeklyPlans).values({
         trainingPlanId: planId,
-        weekNumber: week.weekNumber,
+        weekNumber: safeWeekNumber,
         weekDescription: week.weekDescription,
-        totalDistance: week.totalDistance,
+        totalDistance: week.totalDistance != null && !isNaN(week.totalDistance) ? week.totalDistance : null,
         focusArea: week.focusArea,
         intensityLevel: week.intensityLevel
       }).returning();
@@ -12411,20 +14139,22 @@ If runner has NO previous runs:
         let effortDescription = null;
         if (hrZoneNumber && hrZoneNumber >= 1 && hrZoneNumber <= 5) {
           const zoneRange = HeartRateZones.getZoneRange(hrZoneNumber, maxHR);
-          hrZoneMinBpm = zoneRange.min;
-          hrZoneMaxBpm = zoneRange.max;
+          hrZoneMinBpm = zoneRange.min != null && !isNaN(zoneRange.min) ? Math.round(zoneRange.min) : null;
+          hrZoneMaxBpm = zoneRange.max != null && !isNaN(zoneRange.max) ? Math.round(zoneRange.max) : null;
           if (hrZoneScenario === "effort") {
             const zoneDesc = HeartRateZones.getZoneDescription(hrZoneNumber);
             effortDescription = zoneDesc.effortLabel;
           }
         }
+        const safeDay = typeof workout.dayOfWeek === "number" && !isNaN(workout.dayOfWeek) ? workout.dayOfWeek : 1;
+        const safeDistance = workout.distance != null && !isNaN(Number(workout.distance)) && Number(workout.distance) > 0 ? Number(workout.distance) : null;
         const plannedWorkoutResult = await db.insert(plannedWorkouts).values({
           weeklyPlanId,
           trainingPlanId: planId,
-          dayOfWeek: workout.dayOfWeek,
+          dayOfWeek: safeDay,
           scheduledDate,
           workoutType: workout.workoutType,
-          distance: workout.distance,
+          distance: safeDistance,
           targetPace: workout.targetPace,
           intensity: workout.intensity,
           hrZoneNumber,
@@ -12453,7 +14183,7 @@ If runner has NO previous runs:
         }
       }
     }
-    console.log(`\u2705 Generated ${weeksUntilTarget}-week training plan for user ${userId} (${pendingSessionInstructions.length} workouts queued for coaching instructions)`);
+    console.log(`\u2705 Generated ${isRollingPlan ? `block 1 (weeks 1-${weeksToGenerate}) of ${weeksUntilTarget}` : `${weeksUntilTarget}`}-week training plan for user ${userId} (${pendingSessionInstructions.length} workouts queued for coaching instructions)${nextBlockAt ? `, next block scheduled at ${nextBlockAt.toDateString()}` : ""}`);
     setImmediate(() => {
       generateSessionInstructionsInBackground(userId, pendingSessionInstructions).catch(
         (err) => console.error(`[SessionInstructions] Background generation failed for plan ${planId}:`, err)
@@ -12465,6 +14195,212 @@ If runner has NO previous runs:
     throw error;
   }
 }
+async function generateNextBlock(planId, userId) {
+  const [plan] = await db.select().from(trainingPlans).where(eq9(trainingPlans.id, planId));
+  if (!plan) throw new Error(`Plan ${planId} not found`);
+  if (plan.status !== "active") throw new Error(`Plan ${planId} is not active`);
+  if (plan.generatedThroughWeek == null) {
+    console.log(`[NextBlock] Plan ${planId} is a legacy plan (all weeks already generated) \u2014 skipping`);
+    return;
+  }
+  const generatedThrough = plan.generatedThroughWeek;
+  const totalWeeks = plan.totalWeeks;
+  if (generatedThrough >= totalWeeks) {
+    console.log(`[NextBlock] Plan ${planId} is fully generated (${generatedThrough}/${totalWeeks} weeks)`);
+    await db.update(trainingPlans).set({ nextBlockAt: null }).where(eq9(trainingPlans.id, planId));
+    return;
+  }
+  const daysPerWeek = plan.daysPerWeek ?? 4;
+  const blockSize = getBlockSize(daysPerWeek);
+  const nextBlockStart = generatedThrough + 1;
+  const nextBlockEnd = Math.min(generatedThrough + blockSize, totalWeeks);
+  const weeksToGenerate = nextBlockEnd - nextBlockStart + 1;
+  const blockNumber = Math.floor(generatedThrough / blockSize) + 1;
+  const totalBlocks = Math.ceil(totalWeeks / blockSize);
+  console.log(`[NextBlock] Generating block ${blockNumber} (weeks ${nextBlockStart}\u2013${nextBlockEnd}) for plan ${planId}`);
+  const previousWeeks = await db.select().from(weeklyPlans).where(eq9(weeklyPlans.trainingPlanId, planId)).orderBy(weeklyPlans.weekNumber);
+  const previousBlockSummary = previousWeeks.map(
+    (w) => `Week ${w.weekNumber}: ${w.weekDescription ?? ""} | Focus: ${w.focusArea ?? ""} | Volume: ${w.totalDistance ? `${w.totalDistance}km` : "n/a"} | Intensity: ${w.intensityLevel ?? ""}`
+  ).join("\n");
+  const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
+  const isLastBlock = nextBlockEnd >= totalWeeks;
+  const weeksRemainingAfter = totalWeeks - nextBlockEnd;
+  const prompt = `\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+COACHING COMMISSION \u2014 NEXT TRAINING BLOCK
+BLOCK ${blockNumber} OF ${totalBlocks} \u2014 WEEKS ${nextBlockStart}\u2013${nextBlockEnd} OF ${totalWeeks}
+\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+You are continuing a ${totalWeeks}-week personalised training programme. The athlete has completed the previous block and you are now designing the next phase of their journey.
+
+\u2501\u2501\u2501 PREVIOUS BLOCK SUMMARY \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+
+The athlete has completed (or is completing) the following weeks:
+${previousBlockSummary}
+
+Continue the progression logically from where this block ends. Do not repeat the same sessions or volumes \u2014 build on the foundation that has been laid.
+
+\u2501\u2501\u2501 PLAN CONTEXT \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+
+Full plan: ${plan.goalType.toUpperCase()} \u2014 ${plan.targetDistance}km over ${totalWeeks} weeks
+${plan.targetDate ? `Race date: ${new Date(plan.targetDate).toDateString()}` : ""}
+Sessions per week: ${daysPerWeek}
+This is Block ${blockNumber} of ${totalBlocks} \u2014 covering weeks ${nextBlockStart} to ${nextBlockEnd}.
+${isLastBlock ? `\u26A1 FINAL BLOCK: Include a taper in the last 1-2 weeks \u2014 reduce volume and intensity to arrive at the event fresh and race-ready.` : `Weeks remaining after this block: ${weeksRemainingAfter}. End at a sensible phase transition (do NOT taper yet).`}
+
+\u2501\u2501\u2501 WEEK-BY-WEEK PROGRESSION \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+
+All the same rules apply as block 1:
+- Every week MUST be distinct. No two weeks can have identical sessions.
+- Weekly volume must show progression (except a deload week if appropriate)
+- Session types, paces, and intensity must evolve across these weeks
+- Name each week's training phase explicitly in weekDescription
+
+\u2501\u2501\u2501 WHAT TO DELIVER \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+
+Generate EXACTLY ${weeksToGenerate} weeks (weeks ${nextBlockStart} to ${nextBlockEnd}).
+weekNumber values must start at ${nextBlockStart} and end at ${nextBlockEnd}.
+
+Return valid JSON only:
+{
+  "weeks": [
+    {
+      "weekNumber": ${nextBlockStart},
+      "weekDescription": "Phase name and what makes this week unique",
+      "totalDistance": 28.0,
+      "focusArea": "The physiological quality this week develops",
+      "intensityLevel": "Overall intensity for this week",
+      "workouts": [
+        {
+          "dayOfWeek": 1,
+          "workoutType": "tempo",
+          "distance": 7.0,
+          "targetPace": "Pace appropriate for this stage of the plan",
+          "intensity": "z4",
+          "description": "Personalised session name",
+          "instructions": "2-3 sentences: session purpose, specific target, why it matters now"
+        }
+      ]
+    }
+  ]
+}
+
+STRUCTURAL CONSTRAINTS:
+- Generate EXACTLY ${weeksToGenerate} weeks (${nextBlockStart} to ${nextBlockEnd})
+- Each week must have EXACTLY ${daysPerWeek} workouts
+- weekNumber values must be ${nextBlockStart} through ${nextBlockEnd} (not 1 through ${weeksToGenerate})
+- Do not include a coachingProgrammeSummary \u2014 just the weeks array`;
+  const response = await openai4.chat.completions.create({
+    model: "gpt-4.1",
+    messages: [
+      {
+        role: "system",
+        content: `You are an elite AI running coach continuing a personalised multi-block training programme. You have full creative authority. Use the previous block summary and athlete profile to design the next logical training phase. Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunnerProfile)}`
+      },
+      { role: "user", content: prompt }
+    ],
+    response_format: { type: "json_object" },
+    temperature: 0.7,
+    max_tokens: 32e3
+  });
+  if (response.choices[0].finish_reason === "length") {
+    throw new Error(`[NextBlock] Response truncated for block ${blockNumber} \u2014 try reducing block size`);
+  }
+  let rawContent = (response.choices[0].message.content || "{}").replace(/```json\n?/g, "").replace(/\n?```/g, "").trim();
+  const blockData = JSON.parse(rawContent);
+  if (!blockData.weeks || !Array.isArray(blockData.weeks) || blockData.weeks.length < weeksToGenerate) {
+    throw new Error(`[NextBlock] AI returned ${blockData.weeks?.length ?? 0} weeks, expected ${weeksToGenerate}`);
+  }
+  const userRecord = await db.select().from(users).where(eq9(users.id, userId)).limit(1);
+  const userTimezone = userRecord[0]?.timezone ?? null;
+  const newNextBlockAt = (() => {
+    if (isLastBlock) return null;
+    const today2 = userTimezone ? /* @__PURE__ */ new Date((/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: userTimezone }) + "T00:00:00") : /* @__PURE__ */ new Date();
+    const daysSinceMonday2 = today2.getDay() === 0 ? 6 : today2.getDay() - 1;
+    const weekStart = new Date(today2);
+    weekStart.setDate(today2.getDate() - daysSinceMonday2);
+    const triggerDate = new Date(weekStart);
+    triggerDate.setDate(weekStart.getDate() + (nextBlockEnd - plan.currentWeek) * 7);
+    return triggerDate;
+  })();
+  const pendingSessionInstructions = [];
+  const today = userTimezone ? /* @__PURE__ */ new Date((/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: userTimezone }) + "T00:00:00") : (() => {
+    const d = /* @__PURE__ */ new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  })();
+  const daysSinceMonday = today.getDay() === 0 ? 6 : today.getDay() - 1;
+  const planWeekStart = new Date(today);
+  planWeekStart.setDate(today.getDate() - daysSinceMonday);
+  for (const week of blockData.weeks) {
+    const weekNum = parseInt(String(week.weekNumber), 10);
+    const weeklyPlan = await db.insert(weeklyPlans).values({
+      trainingPlanId: planId,
+      weekNumber: weekNum,
+      weekDescription: week.weekDescription,
+      totalDistance: parseFloat(String(week.totalDistance ?? 0).replace(/[^\d.]/g, "")) || 0,
+      focusArea: week.focusArea,
+      intensityLevel: week.intensityLevel
+    }).returning();
+    const weeklyPlanId = weeklyPlan[0].id;
+    for (const workout of week.workouts ?? []) {
+      const dayOfWeek = parseInt(String(workout.dayOfWeek), 10) || 1;
+      const dayOffsetFromMonday = (dayOfWeek + 6) % 7;
+      const scheduledDate = new Date(planWeekStart);
+      scheduledDate.setDate(planWeekStart.getDate() + (weekNum - 1) * 7 + dayOffsetFromMonday);
+      const workoutResult = await db.insert(plannedWorkouts).values({
+        weeklyPlanId,
+        trainingPlanId: planId,
+        dayOfWeek,
+        scheduledDate,
+        workoutType: workout.workoutType || "easy",
+        distance: parseFloat(String(workout.distance ?? 0).replace(/[^\d.]/g, "")) || 0,
+        targetPace: workout.targetPace,
+        intensity: workout.intensity,
+        description: workout.description,
+        instructions: workout.instructions,
+        intervalCount: workout.intervalCount ?? null,
+        intervalDistanceMeters: workout.intervalDistanceMeters ?? null,
+        intervalDurationSeconds: workout.intervalDurationSeconds ?? null,
+        isCompleted: false
+      }).returning({ id: plannedWorkouts.id });
+      if (workoutResult[0]) {
+        pendingSessionInstructions.push({
+          workoutId: workoutResult[0].id,
+          workoutType: workout.workoutType || "easy",
+          intensity: workout.intensity || "z3",
+          distance: parseFloat(String(workout.distance ?? 0)) || null
+        });
+      }
+    }
+  }
+  await db.update(trainingPlans).set({
+    generatedThroughWeek: nextBlockEnd,
+    nextBlockAt: newNextBlockAt
+  }).where(eq9(trainingPlans.id, planId));
+  console.log(`\u2705 [NextBlock] Generated block ${blockNumber} (weeks ${nextBlockStart}\u2013${nextBlockEnd}) for plan ${planId}. Next block at: ${newNextBlockAt?.toDateString() ?? "N/A (plan complete)"}`);
+  setImmediate(() => {
+    generateSessionInstructionsInBackground(userId, pendingSessionInstructions).catch(
+      (err) => console.error(`[NextBlock][SessionInstructions] Background generation failed:`, err)
+    );
+  });
+}
+async function checkAndGeneratePendingBlocks(userId) {
+  const now = /* @__PURE__ */ new Date();
+  const activePlans = await db.select().from(trainingPlans).where(
+    and9(
+      eq9(trainingPlans.userId, userId),
+      eq9(trainingPlans.status, "active")
+    )
+  );
+  for (const plan of activePlans) {
+    if (plan.nextBlockAt && plan.nextBlockAt <= now && plan.generatedThroughWeek != null) {
+      console.log(`[NextBlock] Auto-triggering next block for plan ${plan.id} (nextBlockAt=${plan.nextBlockAt.toDateString()})`);
+      generateNextBlock(plan.id, userId).catch(
+        (err) => console.error(`[NextBlock] Auto-generation failed for plan ${plan.id}:`, err)
+      );
+    }
+  }
+}
 async function generateSessionInstructionsInBackground(userId, workouts) {
   const BATCH_SIZE = 5;
   console.log(`[SessionInstructions] Starting background generation for ${workouts.length} workouts (batches of ${BATCH_SIZE})`);
@@ -12473,17 +14409,75 @@ async function generateSessionInstructionsInBackground(userId, workouts) {
     await Promise.allSettled(
       batch.map(async (w) => {
         try {
-          const coaching = await generateSessionInstructions(userId, w.workoutId, {
-            userId,
-            plannedWorkoutId: w.workoutId,
-            workoutType: w.workoutType,
-            intensity: w.intensity,
-            sessionGoal: w.sessionGoal ?? void 0,
-            sessionIntent: w.sessionIntent ?? void 0,
-            intervalCount: w.intervalCount ?? void 0,
-            distance: w.distance ?? void 0,
-            duration: w.duration ?? void 0
-          });
+          let coaching;
+          if (w.workoutType === "orientation" && w.sessionIntent === "orientation_run") {
+            console.log(`[SessionInstructions] Generating orientation-specific coaching for workout ${w.workoutId}...`);
+            const orientationCoachingPrompt = generateOrientationCoachingPrompt(
+              {
+                age: void 0,
+                gender: void 0,
+                height: void 0,
+                weight: void 0,
+                bmi: void 0,
+                experienceLevel: "intermediate",
+                recentRunCount: 0,
+                hasGpsData: false,
+                averagePace: void 0,
+                maxHeartRate: void 0,
+                restingHeartRate: void 0
+              },
+              {
+                needsOrientation: true,
+                recommendedDistance: w.distance || 5,
+                recommendedPace: void 0,
+                targetHeartRateZone: { min: 120, max: 140, label: "Zone 2" },
+                orientationBrief: "Fitness assessment run",
+                postOrientationPlan: "Results will personalize your plan"
+              },
+              "5k"
+              // Default goal type for orientation
+            );
+            coaching = {
+              preRunBrief: orientationCoachingPrompt.substring(0, 500),
+              // Use first part as brief
+              sessionStructure: {
+                phases: [
+                  {
+                    name: "Warm-up",
+                    duration: "5 min",
+                    description: "Easy jog to get body ready"
+                  },
+                  {
+                    name: "Main Run",
+                    duration: `${Math.round((w.distance || 5) / 6)} minutes`,
+                    description: "Steady, conversational pace"
+                  },
+                  {
+                    name: "Cool-down",
+                    duration: "5 min",
+                    description: "Easy jog to finish"
+                  }
+                ]
+              },
+              aiDeterminedTone: "encouraging",
+              aiDeterminedIntensity: "comfortable",
+              coachingStyle: "assessment",
+              insightFilters: ["form_check", "effort_feedback", "encouragement"],
+              toneReasoning: "Orientation session - focus on confidence and learning"
+            };
+          } else {
+            coaching = await generateSessionInstructions(userId, w.workoutId, {
+              userId,
+              plannedWorkoutId: w.workoutId,
+              workoutType: w.workoutType,
+              intensity: w.intensity,
+              sessionGoal: w.sessionGoal ?? void 0,
+              sessionIntent: w.sessionIntent ?? void 0,
+              intervalCount: w.intervalCount ?? void 0,
+              distance: w.distance ?? void 0,
+              duration: w.duration ?? void 0
+            });
+          }
           const instructionResult = await db.insert(sessionInstructions).values({
             plannedWorkoutId: w.workoutId,
             preRunBrief: coaching.preRunBrief,
@@ -12495,7 +14489,7 @@ async function generateSessionInstructionsInBackground(userId, workouts) {
             toneReasoning: coaching.toneReasoning
           }).returning({ id: sessionInstructions.id });
           if (instructionResult && instructionResult.length > 0) {
-            await db.update(plannedWorkouts).set({ sessionInstructionsId: instructionResult[0].id }).where(eq8(plannedWorkouts.id, w.workoutId));
+            await db.update(plannedWorkouts).set({ sessionInstructionsId: instructionResult[0].id }).where(eq9(plannedWorkouts.id, w.workoutId));
           }
         } catch (err) {
           console.warn(`[SessionInstructions] Failed for workout ${w.workoutId}:`, err);
@@ -12514,6 +14508,9 @@ function getPlanDuration(goalType, experienceLevel) {
     "marathon": { beginner: 20, intermediate: 18, advanced: 16 },
     "ultra": { beginner: 24, intermediate: 20, advanced: 18 }
   };
+  if (!experienceLevel || experienceLevel.trim() === "") {
+    return durations[goalType]?.["intermediate"] ?? 8;
+  }
   const level = experienceLevel.toLowerCase();
   let normalizedLevel;
   if (["newcomer", "beginner", "casual"].includes(level)) {
@@ -12527,43 +14524,93 @@ function getPlanDuration(goalType, experienceLevel) {
   }
   return durations[goalType]?.[normalizedLevel] ?? 8;
 }
-async function adaptTrainingPlan(planId, reason, userId) {
+async function adaptTrainingPlan(planId, reason, userId, options) {
   try {
-    const plan = await db.select().from(trainingPlans).where(eq8(trainingPlans.id, planId)).limit(1);
+    const plan = await db.select().from(trainingPlans).where(eq9(trainingPlans.id, planId)).limit(1);
     if (!plan[0]) {
       throw new Error("Training plan not found");
     }
     const fitness = await getCurrentFitness(userId);
     const completedWorkouts = await db.select().from(plannedWorkouts).where(
-      and8(
-        eq8(plannedWorkouts.trainingPlanId, planId),
-        eq8(plannedWorkouts.isCompleted, true)
+      and9(
+        eq9(plannedWorkouts.trainingPlanId, planId),
+        eq9(plannedWorkouts.isCompleted, true)
       )
     );
-    const prompt = `As a running coach, adapt this training plan due to: ${reason}
-
-Current Status:
-- Current week: ${plan[0].currentWeek}/${plan[0].totalWeeks}
-- Completed workouts: ${completedWorkouts.length}
-- Current fitness (CTL): ${fitness?.ctl || "N/A"}
-- Training status: ${fitness?.status || "N/A"}
-
-Recommend adaptations in JSON format:
-{
-  "recommendation": "Brief explanation of changes",
-  "adjustments": [
-    "Reduce next week volume by 20%",
-    "Add extra rest day"
-  ],
-  "continueAsIs": false
-}`;
+    const upcomingWorkouts = await db.select({
+      id: plannedWorkouts.id,
+      dayOfWeek: plannedWorkouts.dayOfWeek,
+      scheduledDate: plannedWorkouts.scheduledDate,
+      workoutType: plannedWorkouts.workoutType,
+      distance: plannedWorkouts.distance,
+      intensity: plannedWorkouts.intensity,
+      description: plannedWorkouts.description,
+      intervalCount: plannedWorkouts.intervalCount,
+      intervalDistanceMeters: plannedWorkouts.intervalDistanceMeters
+    }).from(plannedWorkouts).where(
+      and9(
+        eq9(plannedWorkouts.trainingPlanId, planId),
+        eq9(plannedWorkouts.isCompleted, false)
+      )
+    ).orderBy(plannedWorkouts.scheduledDate).limit(7);
+    const complianceSection = options?.sessionCompliance ? `
+SESSION PERFORMANCE DETAILS:
+- Session type: ${options.sessionCompliance.sessionType || "run"}
+- HR above zone alerts fired: ${options.sessionCompliance.hrZoneHighAlerts} times
+- HR below zone alerts fired: ${options.sessionCompliance.hrZoneLowAlerts} times
+- Pace deviation alerts fired: ${options.sessionCompliance.paceDeviationAlerts} times
+${options.sessionCompliance.intervalsCompleted != null ? `- Intervals completed: ${options.sessionCompliance.intervalsCompleted}` : ""}
+${options.sessionCompliance.intervalsFailed != null ? `- Intervals failed/cut short: ${options.sessionCompliance.intervalsFailed}` : ""}
+- Overall session adherence: ${options.sessionCompliance.overallAdherence}` : "";
+    const upcomingSection = upcomingWorkouts.length > 0 ? `
+UPCOMING WORKOUTS (next ${upcomingWorkouts.length} sessions):
+${upcomingWorkouts.map((w, i) => `${i + 1}. ID="${w.id}" | ${w.workoutType} | ${w.distance ?? "?"}km | intensity=${w.intensity ?? "?"} | ${w.scheduledDate ? new Date(w.scheduledDate).toDateString() : "unscheduled"}`).join("\n")}` : "\nNo upcoming workouts found.";
     const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
+    const prompt = `As an expert running coach, adapt this training plan based on real session performance data.
+
+REASON FOR ADAPTATION: ${reason}
+${options?.fullAssessment?.recommendation ? `INITIAL ASSESSMENT: ${options.fullAssessment.recommendation}` : ""}
+
+TRAINING PLAN:
+- Goal: ${plan[0].goalType}
+- Current Week: ${plan[0].currentWeek}/${plan[0].totalWeeks}
+- Experience Level: ${plan[0].experienceLevel}
+- Current Fitness (CTL): ${fitness?.ctl || "N/A"}
+- Training Status: ${fitness?.status || "N/A"}
+- Completed workouts so far: ${completedWorkouts.length}
+${complianceSection}
+${upcomingSection}
+
+INSTRUCTIONS:
+- Only adjust workouts that genuinely need it \u2014 not every session requires a change
+- Use the exact workout IDs from the UPCOMING WORKOUTS list above in your response
+- For HR zone adherence issues (many hr_zone_high alerts): reduce intensity of next hard session
+- For poor interval completion: reduce interval count or distance for next interval session
+- For overtraining signals: add rest, reduce volume
+- For underperformance: encourage consistency, don't increase load yet
+- Keep changes minimal and targeted \u2014 1-3 workouts maximum
+
+Respond with ONLY valid JSON in this exact format:
+{
+  "summary": "2-3 sentence explanation of what you're changing and why, written directly to the runner",
+  "changeCount": 2,
+  "upcoming_workout_adjustments": [
+    {
+      "workoutId": "exact-id-from-list-above",
+      "newIntensity": "z2",
+      "newWorkoutType": "easy",
+      "newDescription": "Easy recovery run \u2014 keep heart rate in zone 2 the whole way",
+      "newDistance": 6.0,
+      "skip": false
+    }
+  ]
+}`;
     const response = await openai4.chat.completions.create({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: `You are an expert running coach providing training plan adaptations. Respond with JSON only.${runnerProfileBlock(aiRunnerProfile)}`
+          content: `You are an expert running coach adapting a training plan based on session performance data. You have access to specific upcoming workout IDs and must reference them exactly. Respond with JSON only.${runnerProfileBlock(aiRunnerProfile)}`
         },
         {
           role: "user",
@@ -12571,18 +14618,18 @@ Recommend adaptations in JSON format:
         }
       ],
       response_format: { type: "json_object" },
-      temperature: 0.7,
-      max_tokens: 500
+      temperature: 0.6,
+      max_tokens: 800
     });
     const adaptation = JSON.parse(response.choices[0].message.content || "{}");
     await db.insert(planAdaptations).values({
       trainingPlanId: planId,
       reason,
       changes: adaptation,
-      aiSuggestion: adaptation.recommendation,
+      aiSuggestion: adaptation.summary,
       userAccepted: false
     });
-    console.log(`\u2705 Plan adaptation created for ${reason}`);
+    console.log(`\u2705 Plan adaptation created for ${reason} (${adaptation.changeCount ?? 0} workout(s) targeted)`);
   } catch (error) {
     console.error("Error adapting training plan:", error);
     throw error;
@@ -12592,40 +14639,68 @@ async function completeWorkout(workoutId, runId) {
   await db.update(plannedWorkouts).set({
     isCompleted: true,
     completedRunId: runId
-  }).where(eq8(plannedWorkouts.id, workoutId));
+  }).where(eq9(plannedWorkouts.id, workoutId));
 }
 async function reassessTrainingPlansWithRunData(userId, runId) {
   try {
-    const runData = await db.select().from(runs).where(eq8(runs.id, runId)).limit(1);
+    const runData = await db.select().from(runs).where(eq9(runs.id, runId)).limit(1);
     if (!runData[0]) {
       console.warn(`[Plan Reassessment] Run ${runId} not found`);
       return;
     }
     const run = runData[0];
     const activePlans = await db.select().from(trainingPlans).where(
-      and8(
-        eq8(trainingPlans.userId, userId),
-        eq8(trainingPlans.status, "active")
+      and9(
+        eq9(trainingPlans.userId, userId),
+        eq9(trainingPlans.status, "active")
       )
     );
     if (activePlans.length === 0) {
       console.log(`[Plan Reassessment] No active plans for user ${userId}`);
       return;
     }
-    const user = await db.select().from(users).where(eq8(users.id, userId)).limit(1);
+    const user = await db.select().from(users).where(eq9(users.id, userId)).limit(1);
     const userProfile = user[0];
     const fitness = await getCurrentFitness(userId);
     for (const plan of activePlans) {
       try {
         console.log(`[Plan Reassessment] Reassessing plan ${plan.id} with run data`);
-        const recentRuns = await db.select().from(runs).where(eq8(runs.userId, userId)).orderBy(desc5(runs.completedAt)).limit(10);
+        const recentRuns = await db.select().from(runs).where(eq9(runs.userId, userId)).orderBy(desc6(runs.completedAt)).limit(10);
         const completedWorkouts = await db.select().from(plannedWorkouts).where(
-          and8(
-            eq8(plannedWorkouts.trainingPlanId, plan.id),
-            eq8(plannedWorkouts.isCompleted, true)
+          and9(
+            eq9(plannedWorkouts.trainingPlanId, plan.id),
+            eq9(plannedWorkouts.isCompleted, true)
           )
         );
-        const prompt = `As an expert running coach, reassess this training plan based on recent run data.
+        const sessionEvents = await db.select().from(coachingSessionEvents2).where(eq9(coachingSessionEvents2.runId, runId));
+        const hrZoneHighAlerts = sessionEvents.filter((e) => e.eventType === "hr_zone_high").length;
+        const hrZoneLowAlerts = sessionEvents.filter((e) => e.eventType === "hr_zone_low").length;
+        const paceTooFastAlerts = sessionEvents.filter((e) => e.eventType === "pace_too_fast").length;
+        const paceTooSlowAlerts = sessionEvents.filter((e) => e.eventType === "pace_too_slow").length;
+        const paceDeviationAlerts = paceTooFastAlerts + paceTooSlowAlerts;
+        const intervalsCompleted = sessionEvents.filter((e) => e.eventType === "rep_end").length;
+        const repStarts = sessionEvents.filter((e) => e.eventType === "rep_start").length;
+        const intervalsFailed = Math.max(0, repStarts - intervalsCompleted);
+        const totalDeviations = hrZoneHighAlerts + paceDeviationAlerts;
+        const overallAdherence = totalDeviations >= 6 ? "poor" : totalDeviations >= 3 ? "moderate" : "good";
+        const sessionCompliance = {
+          sessionType: run.workoutType || void 0,
+          hrZoneHighAlerts,
+          hrZoneLowAlerts,
+          paceDeviationAlerts,
+          intervalsCompleted,
+          intervalsFailed,
+          overallAdherence
+        };
+        const complianceText = sessionEvents.length > 0 ? `
+SESSION COACHING DATA (from live AI coaching during the run):
+- HR above zone alerts: ${hrZoneHighAlerts} times${hrZoneHighAlerts > 3 ? " \u26A0\uFE0F SIGNIFICANT \u2014 runner consistently above target zone" : ""}
+- HR below zone alerts: ${hrZoneLowAlerts} times
+- Pace deviation alerts: ${paceDeviationAlerts} times
+- Intervals completed: ${intervalsCompleted} (started: ${repStarts})
+- Overall session adherence: ${overallAdherence.toUpperCase()}
+- Total coaching cues delivered: ${sessionEvents.length}` : "\nNo in-session coaching data available for this run.";
+        const prompt = `As an expert running coach, reassess this training plan based on real session performance data including live coaching signals from the run.
 
 TRAINING PLAN DETAILS:
 - Goal: ${plan.goalType}
@@ -12640,35 +14715,34 @@ RUNNER PROFILE:
 - Fitness Level: ${userProfile?.fitnessLevel || "Not specified"}
 - Current CTL (Fitness): ${fitness?.ctl || "N/A"}
 - Training Status: ${fitness?.status || "N/A"}
+${userProfile?.injuryHistory ? `- Injury History: ${JSON.stringify(userProfile.injuryHistory)}` : ""}
 
 RECENT RUN (Just Completed):
+- Workout Type: ${run.workoutType || "general run"}
 - Distance: ${(run.distance / 1e3).toFixed(2)} km
 - Duration: ${(run.duration / 60).toFixed(0)} minutes
 - Pace: ${run.avgPace || "N/A"}
-- Calories: ${run.calories || "N/A"}
 - Avg Heart Rate: ${run.avgHeartRate || "N/A"} bpm
 - Max Heart Rate: ${run.maxHeartRate || "N/A"} bpm
 - Elevation Gain: ${run.elevationGain || 0} m
+${complianceText}
 
-PROGRESS:
-- Completed Workouts in Plan: ${completedWorkouts.length}
-- Recent Run Count (last 10): ${recentRuns.length}
+PLAN PROGRESS:
+- Completed workouts in plan: ${completedWorkouts.length}
+- Recent runs in last 10: ${recentRuns.length}
 
-Based on this runner's progress and the recent run, assess if the plan needs adjustment. Consider:
-1. Is the runner progressing well or struggling?
-2. Should we adjust weekly mileage or intensity?
-3. Are there any red flags (overtraining, undertraining)?
-4. Is the runner on pace to achieve their goal?
+KEY QUESTIONS TO ANSWER:
+1. Was the session completed as intended? (check adherence + HR/pace deviation alerts)
+2. Does the HR zone data suggest the runner is struggling (consistently above zone) or coasting (consistently below)?
+3. Are intervals being completed fully? (check intervalsCompleted vs repStarts)
+4. Does the training load need to change based on this run?
 
 Provide your assessment in JSON format:
 {
   "needsAdjustment": true/false,
-  "reason": "Brief explanation of why plan needs/doesn't need adjustment",
+  "reason": "Specific explanation referencing the actual coaching data (e.g. HR alerts, interval completion)",
   "adjustmentType": "none" | "volume_reduction" | "volume_increase" | "intensity_adjustment" | "recovery_addition",
-  "recommendation": "Specific coaching recommendation",
-  "adjustments": [
-    "List of specific changes to implement"
-  ]
+  "recommendation": "Specific coaching recommendation for the runner"
 }`;
         const aiRunnerProfileForReassess = await getRunnerProfile(userId).catch(() => null);
         const response = await openai4.chat.completions.create({
@@ -12701,7 +14775,14 @@ Provide your assessment in JSON format:
           await adaptTrainingPlan(
             plan.id,
             `run_data_feedback: ${assessment.reason}`,
-            userId
+            userId,
+            {
+              sessionCompliance,
+              fullAssessment: {
+                adjustmentType: assessment.adjustmentType,
+                recommendation: assessment.recommendation
+              }
+            }
           );
         } else {
           console.log(
@@ -12811,24 +14892,41 @@ async function checkAndEnforceLimit(res, userId, tier, feature, amount = 1) {
   const limits = getLimitsForTier(tier);
   const limit = limits[feature];
   if (limit === Infinity) return true;
+  try {
+    const { hasUnlimitedGrant: hasUnlimitedGrant2 } = await Promise.resolve().then(() => (init_coupon_service(), coupon_service_exports));
+    if (await hasUnlimitedGrant2(userId, feature)) {
+      return true;
+    }
+  } catch (err) {
+    console.error(`[UsageService] Error checking unlimited grant: ${err}`);
+  }
   const yearMonth = currentYearMonth();
   const row = await storage.getMonthlyUsage(userId, yearMonth);
   const current = row[feature];
   if (current + amount > limit) {
     const featureLabel = {
       aiCoachingKm: "AI coaching",
-      trainingPlansGenerated: "training plan generation",
-      routesGenerated: "route generation",
+      trainingPlansGenerated: "Plans",
+      routesGenerated: "Routes",
       postRunAnalyses: "post-run AI analysis"
     };
+    const nextMonth = nextMonthLabel(yearMonth);
+    const isFreeUser = tier === "free" || !tier;
+    let message = `You have reached the limit of ${featureLabel[feature]} this month for your ${tier ?? "free"} plan. `;
+    if (isFreeUser) {
+      message += `Upgrade to unlock unlimited ${featureLabel[feature]}, or wait until ${nextMonth} to try again.`;
+    } else {
+      message += `Upgrade to a higher tier, or wait until ${nextMonth} to try again.`;
+    }
     res.status(429).json({
       error: "monthly_limit_reached",
       feature,
-      message: `You've reached your monthly limit for ${featureLabel[feature]} on the ${tier ?? "free"} plan. Upgrade to continue.`,
+      message,
       limit,
       used: current,
       remaining: Math.max(0, limit - current),
-      resetMonth: nextMonthLabel(yearMonth)
+      resetMonth: nextMonth,
+      isFreeUser
     });
     return false;
   }
@@ -12849,7 +14947,7 @@ function nextMonthLabel(yearMonth) {
 // server/achievements-service.ts
 init_db();
 init_schema();
-import { eq as eq10, and as and9, lt } from "drizzle-orm";
+import { eq as eq12, and as and11, lt } from "drizzle-orm";
 var ACHIEVEMENT_CONFIGS = [
   {
     type: "PERSONAL_BEST_1K" /* PERSONAL_BEST_1K */,
@@ -12978,8 +15076,8 @@ async function calculateRunAchievements(userId, runId, distance, avgPace, kmSpli
       return achievements2;
     }
     const userRuns = await db.select().from(runs).where(
-      and9(
-        eq10(runs.userId, userId),
+      and11(
+        eq12(runs.userId, userId),
         lt(runs.completedAt, /* @__PURE__ */ new Date())
         // Exclude current run
       )
@@ -13075,7 +15173,7 @@ async function calculateRunAchievements(userId, runId, distance, avgPace, kmSpli
 }
 async function checkAchievementsAfterRun(runId, userId) {
   try {
-    const runRows = await db.select().from(runs).where(and9(eq10(runs.id, runId), eq10(runs.userId, userId))).limit(1);
+    const runRows = await db.select().from(runs).where(and11(eq12(runs.id, runId), eq12(runs.userId, userId))).limit(1);
     if (runRows.length === 0) {
       console.log(`[achievements] Run ${runId} not found for user ${userId}`);
       return [];
@@ -13095,7 +15193,7 @@ async function checkAchievementsAfterRun(runId, userId) {
 }
 async function getUserAchievements(userId) {
   try {
-    const userRuns = await db.select().from(runs).where(eq10(runs.userId, userId));
+    const userRuns = await db.select().from(runs).where(eq12(runs.userId, userId));
     const personalBests = {};
     for (const config of ACHIEVEMENT_CONFIGS) {
       if (config.type === "FASTEST_KM" /* FASTEST_KM */ || config.type === "FASTEST_MILE" /* FASTEST_MILE */) {
@@ -13244,8 +15342,231 @@ function parseOAuthResponse(response) {
 }
 var garmin_oauth_bridge_default = router;
 
+// server/strava-oauth-bridge.ts
+init_db();
+init_schema();
+init_strava_oauth_service();
+import express2 from "express";
+import { eq as eq13, and as and12 } from "drizzle-orm";
+var router2 = express2.Router();
+router2.post("/api/strava/auth/authorize", async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+    const {
+      generateOAuthState: generateOAuthState2,
+      buildStravaAuthUrl: buildStravaAuthUrl2
+    } = await Promise.resolve().then(() => (init_strava_oauth_service(), strava_oauth_service_exports));
+    const state = generateOAuthState2();
+    await db.insert(oauthStateStore).values({
+      state,
+      userId,
+      provider: "strava",
+      expiresAt: new Date(Date.now() + 10 * 60 * 1e3)
+      // 10 minutes
+    }).catch(() => {
+    });
+    const authUrl = buildStravaAuthUrl2(state);
+    res.json({ authUrl, state });
+  } catch (error) {
+    console.error("[Strava Auth] Error:", error.message);
+    res.status(500).json({ error: "Failed to initiate Strava auth" });
+  }
+});
+router2.get("/strava/callback", async (req, res) => {
+  const { code, state, error, error_description } = req.query;
+  console.log("[Strava Callback] Received:", { code, state, error });
+  if (error) {
+    return res.redirect(
+      `airuncoach://strava/auth-complete?success=false&error=${encodeURIComponent(
+        error_description || error
+      )}`
+    );
+  }
+  if (!code || !state) {
+    return res.redirect(
+      "airuncoach://strava/auth-complete?success=false&error=missing_parameters"
+    );
+  }
+  try {
+    const [stateRecord] = await db.select().from(oauthStateStore).where(eq13(oauthStateStore.state, state));
+    if (!stateRecord) {
+      throw new Error("Invalid state parameter - possible CSRF attack");
+    }
+    const userId = stateRecord.userId;
+    const { accessToken, refreshToken, athleteId, athleteName, expiresAt } = await exchangeStravaCode(code);
+    console.log(`[Strava Callback] Exchange successful for: ${athleteName}`);
+    const [existingDevice] = await db.select().from(connectedDevices).where(
+      and12(
+        eq13(connectedDevices.userId, userId),
+        eq13(connectedDevices.deviceType, "strava")
+      )
+    );
+    const deviceId = `strava-${athleteId}`;
+    if (existingDevice) {
+      await db.update(connectedDevices).set({
+        accessToken,
+        refreshToken,
+        tokenExpiresAt: expiresAt,
+        deviceId,
+        deviceName: `Strava - ${athleteName}`,
+        lastSyncAt: /* @__PURE__ */ new Date(),
+        isActive: true,
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where(eq13(connectedDevices.id, existingDevice.id));
+      console.log("[Strava Callback] Updated existing device");
+    } else {
+      await db.insert(connectedDevices).values({
+        userId,
+        deviceType: "strava",
+        deviceId,
+        deviceName: `Strava - ${athleteName}`,
+        accessToken,
+        refreshToken,
+        tokenExpiresAt: expiresAt,
+        isActive: true
+      });
+      console.log("[Strava Callback] Created new device");
+    }
+    await db.delete(oauthStateStore).where(eq13(oauthStateStore.state, state));
+    res.redirect("airuncoach://strava/auth-complete?success=true");
+  } catch (error2) {
+    console.error("[Strava Callback] Error:", error2.message);
+    res.redirect(
+      `airuncoach://strava/auth-complete?success=false&error=${encodeURIComponent(
+        error2.message
+      )}`
+    );
+  }
+});
+router2.post("/api/strava/disconnect", async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+    const [device2] = await db.select().from(connectedDevices).where(
+      and12(
+        eq13(connectedDevices.userId, userId),
+        eq13(connectedDevices.deviceType, "strava")
+      )
+    );
+    if (!device2) {
+      return res.status(404).json({ error: "Strava not connected" });
+    }
+    if (device2.accessToken) {
+      try {
+        const { deregisterFromStrava: deregisterFromStrava2 } = await Promise.resolve().then(() => (init_strava_upload_service(), strava_upload_service_exports));
+        await deregisterFromStrava2(device2.accessToken);
+      } catch (error) {
+        console.warn("[Strava Disconnect] Deregistration failed (non-fatal):", error);
+      }
+    }
+    await db.update(connectedDevices).set({ isActive: false }).where(eq13(connectedDevices.id, device2.id));
+    res.json({ success: true, message: "Strava disconnected" });
+  } catch (error) {
+    console.error("[Strava Disconnect] Error:", error.message);
+    res.status(500).json({ error: "Failed to disconnect Strava" });
+  }
+});
+var strava_oauth_bridge_default = router2;
+
 // server/routes.ts
 init_garmin_detailed_metrics();
+
+// server/fit-file-generator.ts
+async function generateFitFile(run, options = {}) {
+  const {
+    deviceName = "AI Run Coach",
+    manufacturerId = 255
+    // 255 = Unknown/Custom manufacturer
+  } = options;
+  const FitFile = __require("fit-file");
+  const fit = new FitFile();
+  const startTime = Math.floor(run.completedAt?.getTime() / 1e3 || Date.now() / 1e3);
+  const endTime = startTime + (run.duration || run.elapsedTime || 0);
+  fit.addRecord("FileId", {
+    type: 4,
+    // activity
+    manufacturer: manufacturerId,
+    product: 256,
+    serialNumber: Math.floor(Math.random() * 1e9),
+    timeCreated: startTime,
+    dataType: 128
+    // FIT
+  });
+  fit.addRecord("DeviceInfo", {
+    timestamp: startTime,
+    deviceIndex: 0,
+    manufacturer: manufacturerId,
+    product: 256,
+    serialNumber: Math.floor(Math.random() * 1e9),
+    hardwareVersion: 1,
+    softwareVersion: 100
+  });
+  fit.addRecord("Session", {
+    timestamp: endTime,
+    startTime,
+    sport: 1,
+    // running
+    subSport: 13,
+    // trail running
+    totalDistance: (run.distance || 0) * 1e3,
+    // meters
+    totalElapsedTime: (run.elapsedTime || run.duration || 0) * 1e3,
+    // milliseconds
+    totalTimerTime: (run.movingTime || run.duration || 0) * 1e3,
+    numActiveLaps: 1,
+    avgSpeed: run.avgSpeed || 0,
+    maxSpeed: run.maxSpeed || 0,
+    avgHeartRate: run.avgHeartRate || 0,
+    maxHeartRate: run.maxHeartRate || 0,
+    avgCadence: run.cadence || 0,
+    totalAscent: Math.round(run.elevationGain || 0),
+    totalDescent: Math.round(run.elevationLoss || 0),
+    messageIndex: 0
+  });
+  fit.addRecord("Lap", {
+    timestamp: endTime,
+    startTime,
+    sport: 1,
+    // running
+    totalDistance: (run.distance || 0) * 1e3,
+    totalElapsedTime: (run.elapsedTime || run.duration || 0) * 1e3,
+    totalTimerTime: (run.movingTime || run.duration || 0) * 1e3,
+    avgSpeed: run.avgSpeed || 0,
+    maxSpeed: run.maxSpeed || 0,
+    avgHeartRate: run.avgHeartRate || 0,
+    maxHeartRate: run.maxHeartRate || 0,
+    avgCadence: run.cadence || 0,
+    messageIndex: 0
+  });
+  if (run.gpsTrack && Array.isArray(run.gpsTrack)) {
+    const gpsTrack = run.gpsTrack;
+    gpsTrack.forEach((point, index2) => {
+      const recordTimestamp = startTime + (point.timestamp || index2);
+      fit.addRecord("Record", {
+        timestamp: recordTimestamp,
+        latitude: point.lat || point.latitude,
+        longitude: point.lng || point.longitude,
+        altitude: Math.round(point.elevation || point.altitude || 0),
+        distance: point.distance || index2 / gpsTrack.length * (run.distance || 0) * 1e3,
+        speed: point.speed || 0,
+        heartRate: point.heartRate || 0,
+        cadence: point.cadence || 0,
+        temperature: point.temperature || void 0,
+        power: point.power || void 0
+      });
+    });
+  }
+  return fit.toBuffer();
+}
+
+// server/routes.ts
+init_strava_upload_service();
+init_strava_oauth_service();
 
 // server/routes-adaptation.ts
 import { Router } from "express";
@@ -13253,19 +15574,19 @@ import { Router } from "express";
 // server/adaptation-service.ts
 init_db();
 init_schema();
-import { eq as eq11, and as and10, isNull } from "drizzle-orm";
+import { eq as eq14, and as and13, isNull } from "drizzle-orm";
 async function acceptAndApplyAdaptation(adaptationId, userId) {
   try {
-    const adaptations = await db.select().from(planAdaptations).where(eq11(planAdaptations.id, adaptationId));
+    const adaptations = await db.select().from(planAdaptations).where(eq14(planAdaptations.id, adaptationId));
     if (adaptations.length === 0) {
       return { success: false, workoutsUpdated: 0, error: "Adaptation not found" };
     }
     const adaptation = adaptations[0];
     const trainingPlanId = adaptation.trainingPlanId;
     const plans = await db.select().from(trainingPlans).where(
-      and10(
-        eq11(trainingPlans.id, trainingPlanId),
-        eq11(trainingPlans.userId, userId)
+      and13(
+        eq14(trainingPlans.id, trainingPlanId),
+        eq14(trainingPlans.userId, userId)
       )
     );
     if (plans.length === 0) {
@@ -13287,35 +15608,40 @@ async function acceptAndApplyAdaptation(adaptationId, userId) {
     let workoutsUpdated = 0;
     if (changes.upcoming_workout_adjustments && Array.isArray(changes.upcoming_workout_adjustments)) {
       for (const adjustment of changes.upcoming_workout_adjustments) {
+        if (!adjustment.workoutId) continue;
         if (adjustment.skip) {
-          const updated = await db.update(plannedWorkouts).set({
-            intensity: "rest",
-            description: "Rest day (adapted)"
+          await db.update(plannedWorkouts).set({
+            workoutType: "rest",
+            intensity: "z1",
+            description: "Rest day \u2014 adapted by AI coach based on recent session performance",
+            distance: 0
           }).where(
-            and10(
-              eq11(plannedWorkouts.trainingPlanId, trainingPlanId),
-              eq11(plannedWorkouts.weekNumber, adjustment.weekOffset + 1),
-              eq11(plannedWorkouts.dayOfWeek, adjustment.dayOffset)
+            and13(
+              eq14(plannedWorkouts.id, adjustment.workoutId),
+              eq14(plannedWorkouts.trainingPlanId, trainingPlanId)
+              // Security: verify same plan
             )
           );
           workoutsUpdated += 1;
-        } else if (adjustment.newIntensity || adjustment.newDescription) {
+        } else {
           const updates = {};
           if (adjustment.newIntensity) updates.intensity = adjustment.newIntensity;
-          if (adjustment.newDescription)
-            updates.description = adjustment.newDescription;
-          const updated = await db.update(plannedWorkouts).set(updates).where(
-            and10(
-              eq11(plannedWorkouts.trainingPlanId, trainingPlanId),
-              eq11(plannedWorkouts.weekNumber, adjustment.weekOffset + 1),
-              eq11(plannedWorkouts.dayOfWeek, adjustment.dayOffset)
-            )
-          );
-          workoutsUpdated += 1;
+          if (adjustment.newWorkoutType) updates.workoutType = adjustment.newWorkoutType;
+          if (adjustment.newDescription) updates.description = adjustment.newDescription;
+          if (adjustment.newDistance != null) updates.distance = adjustment.newDistance;
+          if (Object.keys(updates).length > 0) {
+            await db.update(plannedWorkouts).set(updates).where(
+              and13(
+                eq14(plannedWorkouts.id, adjustment.workoutId),
+                eq14(plannedWorkouts.trainingPlanId, trainingPlanId)
+              )
+            );
+            workoutsUpdated += 1;
+          }
         }
       }
     }
-    await db.update(planAdaptations).set({ userAccepted: true }).where(eq11(planAdaptations.id, adaptationId));
+    await db.update(planAdaptations).set({ userAccepted: true }).where(eq14(planAdaptations.id, adaptationId));
     console.log(
       `\u2705 Adaptation ${adaptationId} accepted and applied. ${workoutsUpdated} workouts updated.`
     );
@@ -13333,17 +15659,17 @@ async function declineAdaptation(adaptationId, userId) {
   try {
     const result = await db.select().from(planAdaptations).innerJoin(
       trainingPlans,
-      eq11(planAdaptations.trainingPlanId, trainingPlans.id)
+      eq14(planAdaptations.trainingPlanId, trainingPlans.id)
     ).where(
-      and10(
-        eq11(planAdaptations.id, adaptationId),
-        eq11(trainingPlans.userId, userId)
+      and13(
+        eq14(planAdaptations.id, adaptationId),
+        eq14(trainingPlans.userId, userId)
       )
     );
     if (result.length === 0) {
       return { success: false, error: "Adaptation not found or access denied" };
     }
-    await db.update(planAdaptations).set({ userAccepted: false }).where(eq11(planAdaptations.id, adaptationId));
+    await db.update(planAdaptations).set({ userAccepted: false }).where(eq14(planAdaptations.id, adaptationId));
     console.log(`\u23ED\uFE0F  Adaptation ${adaptationId} declined by user.`);
     return { success: true };
   } catch (error) {
@@ -13360,11 +15686,11 @@ async function getPendingAdaptations(trainingPlanId, userId) {
     const startTime = Date.now();
     const result = await db.select().from(planAdaptations).innerJoin(
       trainingPlans,
-      eq11(planAdaptations.trainingPlanId, trainingPlans.id)
+      eq14(planAdaptations.trainingPlanId, trainingPlans.id)
     ).where(
-      and10(
-        eq11(planAdaptations.trainingPlanId, trainingPlanId),
-        eq11(trainingPlans.userId, userId),
+      and13(
+        eq14(planAdaptations.trainingPlanId, trainingPlanId),
+        eq14(trainingPlans.userId, userId),
         // Only include rows where userAccepted is NULL (never responded)
         // Exclude declined (userAccepted = false) and accepted (userAccepted = true)
         isNull(planAdaptations.userAccepted)
@@ -13380,8 +15706,8 @@ async function getPendingAdaptations(trainingPlanId, userId) {
 }
 
 // server/routes-adaptation.ts
-var router2 = Router();
-router2.post(
+var router3 = Router();
+router3.post(
   "/training-plans/adaptations/:adaptationId/accept",
   authMiddleware,
   async (req, res) => {
@@ -13403,7 +15729,7 @@ router2.post(
     }
   }
 );
-router2.post(
+router3.post(
   "/training-plans/adaptations/:adaptationId/decline",
   authMiddleware,
   async (req, res) => {
@@ -13421,7 +15747,7 @@ router2.post(
     }
   }
 );
-router2.get(
+router3.get(
   "/training-plans/:planId/adaptations/pending",
   authMiddleware,
   async (req, res) => {
@@ -13443,7 +15769,7 @@ router2.get(
     }
   }
 );
-var routes_adaptation_default = router2;
+var routes_adaptation_default = router3;
 
 // server/routes-my-data.ts
 import { Router as Router2 } from "express";
@@ -13451,10 +15777,10 @@ import { Router as Router2 } from "express";
 // server/my-data-service.ts
 init_db();
 init_schema();
-import { eq as eq12, gte as gte8, and as and11, desc as desc6, asc as asc2, count as count4, sum as sum4, avg as avg3, max as max4, sql as sql6, isNotNull as isNotNull4, isNull as isNull2, or as or3 } from "drizzle-orm";
+import { eq as eq15, gte as gte9, and as and14, desc as desc7, asc as asc2, count as count4, sum as sum4, avg as avg3, max as max4, sql as sql8, isNotNull as isNotNull4, isNull as isNull2, or as or3 } from "drizzle-orm";
 async function getPersonalBests(userId) {
   try {
-    const [cached] = await db.select().from(userStats).where(eq12(userStats.userId, userId));
+    const [cached] = await db.select().from(userStats).where(eq15(userStats.userId, userId));
     if (cached) {
       return buildPersonalBestsFromCache(cached);
     }
@@ -13465,58 +15791,53 @@ async function getPersonalBests(userId) {
 }
 async function getPersonalBestsLive(userId) {
   const distancePBs = [
-    { min: 0.95, max: 1.1, label: "5K", target: 5 },
-    { min: 9.95, max: 10.1, label: "10K", target: 10 },
-    { min: 21.05, max: 21.2, label: "Half Marathon", target: 21.1 },
-    { min: 42.15, max: 42.3, label: "Marathon", target: 42.2 }
+    { min: 4.9, max: 5.3, label: "5K", target: 5 },
+    { min: 9.8, max: 10.3, label: "10K", target: 10 },
+    { min: 19.8, max: 20.3, label: "20K", target: 20 },
+    { min: 21, max: 21.6, label: "Half Marathon", target: 21.1 },
+    { min: 42, max: 42.6, label: "Marathon", target: 42.2 }
   ];
   const personalBests = [];
-  const userRuns = await db.select().from(runs).where(eq12(runs.userId, userId)).orderBy(asc2(runs.completedAt));
+  const userRuns = await db.select().from(runs).where(eq15(runs.userId, userId)).orderBy(asc2(runs.completedAt));
   for (const dist of distancePBs) {
     let bestRun = null;
     let bestPace = null;
     for (const run of userRuns) {
       if (!run.avgPace || run.distance === null) continue;
       const distanceKm = run.distance / 1e3;
-      const isInRange = distanceKm >= dist.min && distanceKm <= dist.max;
-      if (!isInRange) continue;
-      const pace = parseFloat(run.avgPace);
-      if (isNaN(pace)) continue;
-      if (bestPace === null || pace < bestPace) {
-        bestPace = pace;
+      if (distanceKm < dist.min || distanceKm > dist.max) continue;
+      const paceMinutes = parsePaceToMinutes2(run.avgPace);
+      if (paceMinutes === null || paceMinutes <= 0) continue;
+      if (bestPace === null || paceMinutes < bestPace) {
+        bestPace = paceMinutes;
         bestRun = run;
       }
     }
     if (bestRun && bestPace !== null) {
+      const durationMs = (bestRun.duration ?? 0) * 1e3;
       personalBests.push({
         category: dist.label,
-        pace: formatPace(bestPace),
-        distance: bestRun.distance,
-        duration: bestRun.duration,
+        pace: formatPace2(bestPace),
+        distance: dist.target,
+        duration: durationMs,
         date: bestRun.completedAt?.toISOString().split("T")[0] || "",
         runId: bestRun.id
       });
     }
   }
-  const fastest1K = findFastestSplitFromRuns(userRuns, 1);
-  if (fastest1K) {
-    personalBests.push(fastest1K);
-  }
-  const fastestMile = findFastestSplitFromRuns(userRuns, 1.609);
-  if (fastestMile) {
-    personalBests.push(fastestMile);
-  }
+  const fastest1K = findFastest1kSplit(userRuns);
+  if (fastest1K) personalBests.push(fastest1K);
   return personalBests;
 }
-function findFastestSplitFromRuns(runs3, segmentKm) {
+function findFastest1kSplit(userRuns) {
   let fastestPaceMinutes = null;
   let fastestRun = null;
-  for (const run of runs3) {
+  for (const run of userRuns) {
     if (!Array.isArray(run.kmSplits)) continue;
     for (const split of run.kmSplits) {
       if (!split.pace) continue;
       const paceMinutes = parsePaceToMinutes2(split.pace);
-      if (paceMinutes === null) continue;
+      if (paceMinutes === null || paceMinutes <= 0) continue;
       if (fastestPaceMinutes === null || paceMinutes < fastestPaceMinutes) {
         fastestPaceMinutes = paceMinutes;
         fastestRun = run;
@@ -13524,13 +15845,12 @@ function findFastestSplitFromRuns(runs3, segmentKm) {
     }
   }
   if (!fastestRun || fastestPaceMinutes === null) return null;
-  const label = segmentKm === 1 ? "1K" : "Mile";
   return {
-    category: label,
-    pace: formatPace(fastestPaceMinutes),
-    distance: segmentKm,
+    category: "1K",
+    pace: formatPace2(fastestPaceMinutes),
+    distance: 1,
     duration: Math.round(fastestPaceMinutes * 60 * 1e3),
-    // Convert min to ms
+    // ms
     date: fastestRun.completedAt?.toISOString().split("T")[0] || "",
     runId: fastestRun.id
   };
@@ -13560,7 +15880,7 @@ function buildPersonalBestsFromCache(cached) {
       const paceMinPerKm = durationMins / entry.distance;
       bests.push({
         category: entry.label,
-        pace: formatPace(paceMinPerKm),
+        pace: formatPace2(paceMinPerKm),
         distance: entry.distance,
         duration: entry.duration,
         date: entry.date?.toISOString().split("T")[0] || "",
@@ -13584,12 +15904,12 @@ async function getPeriodStatistics(userId, days) {
       avgCadence: avg3(runs.cadence),
       longestRunKm: max4(runs.distance),
       // avgPace is stored as "M:SS" format (e.g. "5:22") — parse via SPLIT_PART
-      avgPaceNumeric: sql6`AVG(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
-      fastestPaceNumeric: sql6`MIN(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
-      slowestPaceNumeric: sql6`MAX(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`
-    }).from(runs).where(and11(
-      eq12(runs.userId, userId),
-      gte8(runs.completedAt, startDate)
+      avgPaceNumeric: sql8`AVG(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
+      fastestPaceNumeric: sql8`MIN(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
+      slowestPaceNumeric: sql8`MAX(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`
+    }).from(runs).where(and14(
+      eq15(runs.userId, userId),
+      gte9(runs.completedAt, startDate)
     ));
     const totalRuns = Number(stats.totalRuns ?? 0);
     if (totalRuns === 0) {
@@ -13608,7 +15928,7 @@ async function getPeriodStatistics(userId, days) {
       totalDuration: totalDurationSec * 1e3,
       // ms for client compatibility
       totalElevationGain: Math.round(Number(stats.totalElevationGain ?? 0)),
-      averagePace: formatPace(avgPace),
+      averagePace: formatPace2(avgPace),
       averageHeartRate: stats.avgHeartRate ? Math.round(Number(stats.avgHeartRate)) : 0,
       averageCadence: stats.avgCadence ? Math.round(Number(stats.avgCadence)) : 0,
       averageRunDuration: Math.round(totalDurationSec / totalRuns) * 1e3,
@@ -13653,9 +15973,9 @@ async function getDetailedTrends(userId, days) {
       avgHeartRate: runs.avgHeartRate,
       elevationGain: runs.elevationGain,
       cadence: runs.cadence
-    }).from(runs).where(and11(
-      eq12(runs.userId, userId),
-      gte8(runs.completedAt, startDate),
+    }).from(runs).where(and14(
+      eq15(runs.userId, userId),
+      gte9(runs.completedAt, startDate),
       isNull2(runs.linkedPlanId),
       isNull2(runs.linkedWorkoutId)
     )).orderBy(asc2(runs.completedAt));
@@ -13678,21 +15998,21 @@ async function getDetailedTrends(userId, days) {
 async function getCoachingPlanSummary(userId, days) {
   const startDate = /* @__PURE__ */ new Date();
   startDate.setDate(startDate.getDate() - days);
-  const coachingFilter = and11(
-    eq12(runs.userId, userId),
+  const coachingFilter = and14(
+    eq15(runs.userId, userId),
     or3(isNotNull4(runs.linkedPlanId), isNotNull4(runs.linkedWorkoutId))
   );
-  const periodFilter = and11(
+  const periodFilter = and14(
     coachingFilter,
-    gte8(runs.completedAt, startDate)
+    gte9(runs.completedAt, startDate)
   );
   try {
     const [periodAgg] = await db.select({
       sessionCount: count4(),
-      targetHitCount: sql6`COUNT(*) FILTER (WHERE ${runs.wasTargetAchieved} = true)`,
+      targetHitCount: sql8`COUNT(*) FILTER (WHERE ${runs.wasTargetAchieved} = true)`,
       totalDistanceM: sum4(runs.distance),
       totalDurationSec: sum4(runs.duration),
-      avgPaceNumeric: sql6`AVG(CASE
+      avgPaceNumeric: sql8`AVG(CASE
         WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%'
         THEN NULL
         ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0
@@ -13767,12 +16087,12 @@ async function getCoachingPlanSummary(userId, days) {
     let progressionTrend = "STABLE";
     let progressionNote = `${sessionCount} coaching session${sessionCount !== 1 ? "s" : ""} this period.`;
     if (allSessionsForPeriod.length >= 4) {
-      const parsePace = (s) => {
+      const parsePace2 = (s) => {
         if (!s || !s.includes(":")) return null;
         const [m, sec] = s.split(":").map(Number);
         return isNaN(m) || isNaN(sec) ? null : m + sec / 60;
       };
-      const validSessions = allSessionsForPeriod.map((r) => parsePace(r.avgPace)).filter((v) => v !== null && v > 0);
+      const validSessions = allSessionsForPeriod.map((r) => parsePace2(r.avgPace)).filter((v) => v !== null && v > 0);
       if (validSessions.length >= 4) {
         const half = Math.floor(validSessions.length / 2);
         const firstH = validSessions.slice(0, half);
@@ -13799,14 +16119,14 @@ async function getCoachingPlanSummary(userId, days) {
       completedAt: runs.completedAt,
       distance: runs.distance,
       avgPace: runs.avgPace
-    }).from(runs).where(and11(periodFilter, isNotNull4(runs.avgPace))).orderBy(
+    }).from(runs).where(and14(periodFilter, isNotNull4(runs.avgPace))).orderBy(
       // Order by pace numerically (lower = faster) — avoid nulls
-      sql6`CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN 9999 ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END ASC`
+      sql8`CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN 9999 ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END ASC`
     ).limit(1);
     const bestRun = bestRuns[0] ?? null;
     const weeksInPeriod = Math.max(1, days / 7);
     const avgWeeklyCoachingSessions = Math.round(sessionCount / weeksInPeriod * 10) / 10;
-    const avgPaceDisplay = avgPaceNum > 0 ? formatPace(avgPaceNum) : "--";
+    const avgPaceDisplay = avgPaceNum > 0 ? formatPace2(avgPaceNum) : "--";
     return {
       hasCoachingSessions: true,
       totalSessions,
@@ -13845,7 +16165,7 @@ async function getCoachingPlanSummary(userId, days) {
 }
 async function getAllTimeStats(userId) {
   try {
-    const [cached] = await db.select().from(userStats).where(eq12(userStats.userId, userId));
+    const [cached] = await db.select().from(userStats).where(eq15(userStats.userId, userId));
     if (cached) {
       return {
         totalRuns: cached.totalRuns ?? 0,
@@ -13875,9 +16195,9 @@ async function getAllTimeStatsLive(userId) {
       totalActiveCalories: sum4(runs.activeCalories),
       longestRunKm: max4(runs.distance),
       maxElevation: max4(runs.maxElevation),
-      fastestPaceNumeric: sql6`MIN(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
-      avgPaceNumeric: sql6`AVG(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`
-    }).from(runs).where(eq12(runs.userId, userId));
+      fastestPaceNumeric: sql8`MIN(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
+      avgPaceNumeric: sql8`AVG(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`
+    }).from(runs).where(eq15(runs.userId, userId));
     const totalRuns = Number(stats.totalRuns ?? 0);
     if (totalRuns === 0) {
       return {
@@ -13892,12 +16212,12 @@ async function getAllTimeStatsLive(userId) {
         goalsAchieved: 0
       };
     }
-    const longestRun = await db.select({ duration: runs.duration }).from(runs).where(eq12(runs.userId, userId)).orderBy(desc6(runs.distance)).limit(1);
+    const longestRun = await db.select({ duration: runs.duration }).from(runs).where(eq15(runs.userId, userId)).orderBy(desc7(runs.distance)).limit(1);
     const longestRunTimeSec = longestRun.length > 0 ? Math.round(longestRun[0].duration || 0) : 0;
     const highestElevationM = Math.round(
       Number(stats.maxElevation ?? 0) || Number(stats.totalElevationGain ?? 0)
     );
-    const [completedGoalsResult] = await db.select({ count: count4() }).from(goals).where(and11(eq12(goals.userId, userId), eq12(goals.status, "completed")));
+    const [completedGoalsResult] = await db.select({ count: count4() }).from(goals).where(and14(eq15(goals.userId, userId), eq15(goals.status, "completed")));
     const goalsAchieved = Number(completedGoalsResult?.count ?? 0);
     return {
       totalRuns,
@@ -13916,7 +16236,7 @@ async function getAllTimeStatsLive(userId) {
     throw error;
   }
 }
-function formatPace(minPerKm) {
+function formatPace2(minPerKm) {
   if (!minPerKm || minPerKm <= 0) return "--";
   const minutes = Math.floor(minPerKm);
   const seconds = Math.round((minPerKm - minutes) * 60);
@@ -13925,12 +16245,13 @@ function formatPace(minPerKm) {
 var my_data_service_default = { getPersonalBests, getPeriodStatistics, getDetailedTrends, getAllTimeStats, getCoachingPlanSummary };
 
 // server/routes-my-data.ts
+init_user_stats_cache();
 init_runner_profile_service();
 init_db();
 init_schema();
-import { eq as eq13 } from "drizzle-orm";
-var router3 = Router2();
-router3.get("/personal-bests", authMiddleware, async (req, res) => {
+import { eq as eq16 } from "drizzle-orm";
+var router4 = Router2();
+router4.get("/personal-bests", authMiddleware, async (req, res) => {
   try {
     const userId = req.user?.userId;
     if (!userId) {
@@ -13950,7 +16271,7 @@ router3.get("/personal-bests", authMiddleware, async (req, res) => {
     });
   }
 });
-router3.get("/statistics", authMiddleware, async (req, res) => {
+router4.get("/statistics", authMiddleware, async (req, res) => {
   try {
     const userId = req.user?.userId;
     if (!userId) {
@@ -13971,7 +16292,7 @@ router3.get("/statistics", authMiddleware, async (req, res) => {
     });
   }
 });
-router3.get("/trends", authMiddleware, async (req, res) => {
+router4.get("/trends", authMiddleware, async (req, res) => {
   try {
     const userId = req.user?.userId;
     if (!userId) {
@@ -13991,7 +16312,7 @@ router3.get("/trends", authMiddleware, async (req, res) => {
     });
   }
 });
-router3.get("/detailed-trends", authMiddleware, async (req, res) => {
+router4.get("/detailed-trends", authMiddleware, async (req, res) => {
   try {
     const userId = req.user?.userId;
     if (!userId) {
@@ -14012,7 +16333,7 @@ router3.get("/detailed-trends", authMiddleware, async (req, res) => {
     });
   }
 });
-router3.get("/all-time-stats", authMiddleware, async (req, res) => {
+router4.get("/all-time-stats", authMiddleware, async (req, res) => {
   try {
     const userId = req.user?.userId;
     if (!userId) {
@@ -14032,7 +16353,7 @@ router3.get("/all-time-stats", authMiddleware, async (req, res) => {
     });
   }
 });
-router3.get("/coaching-summary", authMiddleware, async (req, res) => {
+router4.get("/coaching-summary", authMiddleware, async (req, res) => {
   try {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
@@ -14044,7 +16365,7 @@ router3.get("/coaching-summary", authMiddleware, async (req, res) => {
     res.status(500).json({ success: false, error: "Failed to fetch coaching summary", message: error.message });
   }
 });
-router3.get("/runner-profile", authMiddleware, async (req, res) => {
+router4.get("/runner-profile", authMiddleware, async (req, res) => {
   try {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
@@ -14055,7 +16376,7 @@ router3.get("/runner-profile", authMiddleware, async (req, res) => {
     res.status(500).json({ success: false, error: "Failed to fetch runner profile", message: error.message });
   }
 });
-router3.post("/refresh-runner-profile", authMiddleware, async (req, res) => {
+router4.post("/refresh-runner-profile", authMiddleware, async (req, res) => {
   try {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
@@ -14067,7 +16388,7 @@ router3.post("/refresh-runner-profile", authMiddleware, async (req, res) => {
     res.status(500).json({ success: false, error: "Failed to refresh runner profile", message: error.message });
   }
 });
-router3.post("/reset-cache", authMiddleware, async (req, res) => {
+router4.post("/reset-cache", authMiddleware, async (req, res) => {
   try {
     const userId = req.user?.userId;
     if (!userId) {
@@ -14088,11 +16409,11 @@ router3.post("/reset-cache", authMiddleware, async (req, res) => {
     });
   }
 });
-router3.post("/admin/recompute-all", authMiddleware, async (req, res) => {
+router4.post("/admin/recompute-all", authMiddleware, async (req, res) => {
   try {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
-    const [requestingUser] = await db.select({ isAdmin: users.isAdmin }).from(users).where(eq13(users.id, userId));
+    const [requestingUser] = await db.select({ isAdmin: users.isAdmin }).from(users).where(eq16(users.id, userId));
     if (!requestingUser?.isAdmin) {
       return res.status(403).json({ error: "Admin access required" });
     }
@@ -14125,22 +16446,22 @@ router3.post("/admin/recompute-all", authMiddleware, async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-var routes_my_data_default = router3;
+var routes_my_data_default = router4;
 
 // server/routes-achievements.ts
 import { Router as Router3 } from "express";
 init_db();
 init_schema();
-import { eq as eq14, and as and12 } from "drizzle-orm";
-var router4 = Router3();
-router4.post("/runs/:runId/achievements", authMiddleware, async (req, res) => {
+import { eq as eq17, and as and15 } from "drizzle-orm";
+var router5 = Router3();
+router5.post("/runs/:runId/achievements", authMiddleware, async (req, res) => {
   try {
     const userId = req.user?.userId;
     const runId = req.params.runId;
     if (!userId) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    const runData = await db.select().from(runs).where(and12(eq14(runs.id, runId), eq14(runs.userId, userId))).limit(1);
+    const runData = await db.select().from(runs).where(and15(eq17(runs.id, runId), eq17(runs.userId, userId))).limit(1);
     if (runData.length === 0) {
       return res.status(404).json({ error: "Run not found" });
     }
@@ -14168,14 +16489,14 @@ router4.post("/runs/:runId/achievements", authMiddleware, async (req, res) => {
     });
   }
 });
-router4.get("/users/:userId/achievements", authMiddleware, async (req, res) => {
+router5.get("/users/:userId/achievements", authMiddleware, async (req, res) => {
   try {
     const tokenUserId = req.user?.userId;
     const requestedUserId = req.params.userId;
     if (tokenUserId !== requestedUserId) {
       return res.status(403).json({ error: "Forbidden" });
     }
-    const userRuns = await db.select().from(runs).where(eq14(runs.userId, requestedUserId));
+    const userRuns = await db.select().from(runs).where(eq17(runs.userId, requestedUserId));
     const achievementsCounts = {
       PERSONAL_BEST_1K: 0,
       PERSONAL_BEST_1_MILE: 0,
@@ -14202,26 +16523,685 @@ router4.get("/users/:userId/achievements", authMiddleware, async (req, res) => {
     });
   }
 });
-var routes_achievements_default = router4;
+var routes_achievements_default = router5;
+
+// server/real-time-coaching-integration.ts
+init_db();
+init_schema();
+import { Router as Router4 } from "express";
+import { and as and16, eq as eq18, gt as gt3, isNotNull as isNotNull5 } from "drizzle-orm";
+
+// server/real-time-biomechanical-coach.ts
+import Anthropic from "@anthropic-ai/sdk";
+var RealTimeBiomechanicalCoach = class {
+  client;
+  constructor() {
+    this.client = new Anthropic();
+  }
+  /**
+   * Main entry point: Analyze biomechanics and generate coaching feedback.
+   * This is FULLY DYNAMIC - no hardcoded cues.
+   */
+  async generateCoachingFeedback(context) {
+    const issues = this.detectBiomechanicalIssues(context);
+    if (issues.length === 0) {
+      return this.generatePositiveReinforcement(context);
+    }
+    const primaryIssue = issues.sort((a, b) => b.severity - a.severity)[0];
+    return this.generateAICoachingFeedback(context, primaryIssue);
+  }
+  /**
+   * Detect biomechanical issues by comparing to baselines and terrain context
+   */
+  detectBiomechanicalIssues(context) {
+    const issues = [];
+    const { biometrics, baseline, terrain, fatigueLevel } = context;
+    if (biometrics.groundContactTime > 0) {
+      const expectedGCT = this.getExpectedGroundContactTime(
+        baseline,
+        terrain.currentGrade,
+        biometrics.pace,
+        fatigueLevel
+      );
+      if (biometrics.groundContactTime > expectedGCT * 1.15) {
+        issues.push({
+          type: "ground_contact_time",
+          metric: "Ground Contact Time",
+          current: biometrics.groundContactTime,
+          expected: expectedGCT,
+          deviation: (biometrics.groundContactTime - expectedGCT) / expectedGCT * 100,
+          severity: this.calculateGCTSeverity(biometrics.groundContactTime, expectedGCT, fatigueLevel),
+          context: `On ${terrain.currentGrade >= 0 ? "uphill" : "downhill"} terrain`
+        });
+      }
+    }
+    if (biometrics.strideLength > 0) {
+      const expectedStride = this.getExpectedStrideLength(
+        baseline,
+        terrain.currentGrade,
+        biometrics.pace,
+        fatigueLevel
+      );
+      if (terrain.currentGrade === 0) {
+        if (biometrics.strideLength < expectedStride * 0.9) {
+          issues.push({
+            type: "stride_shortening",
+            metric: "Stride Length",
+            current: biometrics.strideLength,
+            expected: expectedStride,
+            deviation: (biometrics.strideLength - expectedStride) / expectedStride * 100,
+            severity: this.calculateStrideSeverity(biometrics.strideLength, expectedStride, fatigueLevel),
+            context: "On flat terrain - stride is shortening"
+          });
+        }
+      }
+    }
+    if (biometrics.verticalOscillation > 0) {
+      const expectedVO = this.getExpectedVerticalOscillation(
+        baseline,
+        biometrics.pace,
+        terrain.currentGrade,
+        fatigueLevel
+      );
+      if (biometrics.verticalOscillation > expectedVO * 1.2) {
+        issues.push({
+          type: "vertical_oscillation",
+          metric: "Vertical Oscillation",
+          current: biometrics.verticalOscillation,
+          expected: expectedVO,
+          deviation: (biometrics.verticalOscillation - expectedVO) / expectedVO * 100,
+          severity: this.calculateVOSeverity(biometrics.verticalOscillation, expectedVO, fatigueLevel),
+          context: `Elevated bounce - possible poor posture or fatigue (${fatigueLevel}% fatigued)`
+        });
+      }
+    }
+    if (biometrics.groundContactBalance > 0) {
+      const imbalance = Math.abs(biometrics.groundContactBalance - 50);
+      if (imbalance > 4) {
+        issues.push({
+          type: "gct_imbalance",
+          metric: "Ground Contact Balance",
+          current: biometrics.groundContactBalance,
+          expected: 50,
+          deviation: imbalance,
+          severity: this.calculateImbalanceSeverity(imbalance),
+          context: `${biometrics.groundContactBalance > 50 ? "Left-biased" : "Right-biased"} - possible asymmetrical form or strain`
+        });
+      }
+    }
+    if (biometrics.cadence > 0) {
+      const expectedCadence = this.getExpectedCadence(
+        baseline,
+        terrain.currentGrade,
+        biometrics.pace
+      );
+      if (biometrics.cadence < expectedCadence * 0.93) {
+        issues.push({
+          type: "low_cadence",
+          metric: "Cadence",
+          current: biometrics.cadence,
+          expected: expectedCadence,
+          deviation: (biometrics.cadence - expectedCadence) / expectedCadence * 100,
+          severity: this.calculateCadenceSeverity(biometrics.cadence, expectedCadence),
+          context: `Low cadence on ${terrain.currentGrade > 0 ? "uphill" : "this"} terrain`
+        });
+      }
+    }
+    if (biometrics.heartRate > 0) {
+      if (biometrics.heartRateZone === 5 && biometrics.pace > baseline.normalPace.avg * 1.05) {
+        issues.push({
+          type: "hr_effort_mismatch",
+          metric: "Heart Rate",
+          current: biometrics.heartRate,
+          expected: this.getExpectedHRForPace(baseline, biometrics.pace),
+          deviation: (biometrics.heartRate - this.getExpectedHRForPace(baseline, biometrics.pace)) / this.getExpectedHRForPace(baseline, biometrics.pace) * 100,
+          severity: 7,
+          context: "Max zone HR but pace is manageable - you're fatiguing"
+        });
+      }
+    }
+    if (biometrics.ambientPressure > 0) {
+      const expectedPressure = 101325;
+      if (biometrics.ambientPressure < expectedPressure * 0.98) {
+        issues.push({
+          type: "pressure_drop",
+          metric: "Ambient Pressure",
+          current: biometrics.ambientPressure,
+          expected: expectedPressure,
+          deviation: (biometrics.ambientPressure - expectedPressure) / expectedPressure * 100,
+          severity: 3,
+          // Low severity, informational
+          context: "Pressure dropping - storm system approaching"
+        });
+      }
+    }
+    return issues;
+  }
+  /**
+   * Get expected ground contact time for runner at this pace/terrain/fatigue
+   */
+  getExpectedGroundContactTime(baseline, grade, pace, fatigueLevel) {
+    let expected = baseline.normalGroundContactTime.avg;
+    if (grade > 3) {
+      expected *= 0.95;
+    }
+    if (grade < -3) {
+      expected *= 1.05;
+    }
+    if (pace < baseline.normalPace.avg) {
+      expected *= 0.98;
+    }
+    if (fatigueLevel > 70) {
+      expected *= 1.08;
+    }
+    return expected;
+  }
+  /**
+   * Get expected stride length considering terrain, pace, and runner characteristics
+   */
+  getExpectedStrideLength(baseline, grade, pace, fatigueLevel) {
+    let expected = baseline.normalStrideLength.avg;
+    if (grade > 3) {
+      expected *= 0.92;
+    }
+    if (grade < -3) {
+      expected *= 1.05;
+    }
+    if (pace < baseline.normalPace.avg) {
+      expected *= 1.03;
+    }
+    if (fatigueLevel > 70) {
+      expected *= 0.95;
+    }
+    return expected;
+  }
+  /**
+   * Get expected vertical oscillation (bounce)
+   */
+  getExpectedVerticalOscillation(baseline, pace, grade, fatigueLevel) {
+    let expected = baseline.normalVerticalOscillation.avg;
+    if (pace < baseline.normalPace.avg) {
+      expected *= 0.95;
+    }
+    if (grade > 5) {
+      expected *= 1.08;
+    }
+    if (fatigueLevel > 60) {
+      expected *= 1.1;
+    }
+    return expected;
+  }
+  /**
+   * Get expected cadence for this terrain and pace
+   */
+  getExpectedCadence(baseline, grade, pace) {
+    let expected = baseline.preferredCadence || 175;
+    if (grade > 3) {
+      expected *= 1.03;
+    }
+    if (grade < -3) {
+      expected *= 0.97;
+    }
+    if (pace < baseline.normalPace.avg) {
+      expected *= 1.02;
+    }
+    return expected;
+  }
+  /**
+   * Get expected heart rate for this pace in this runner
+   */
+  getExpectedHRForPace(baseline, pace) {
+    const paceRatio = baseline.normalPace.avg / pace;
+    const hrRange = baseline.normalHeartRate.max - baseline.normalHeartRate.min;
+    return baseline.normalHeartRate.avg + hrRange * (paceRatio - 1) * 0.5;
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+  // SEVERITY CALCULATIONS
+  // ──────────────────────────────────────────────────────────────────────────
+  calculateGCTSeverity(current, expected, fatigueLevel) {
+    const deviation = (current - expected) / expected * 100;
+    if (deviation > 30) return 9;
+    if (deviation > 20) return 7;
+    if (deviation > 15) return 5;
+    if (fatigueLevel < 60) return 3;
+    return 4;
+  }
+  calculateStrideSeverity(current, expected, fatigueLevel) {
+    const deviation = Math.abs((current - expected) / expected * 100);
+    if (fatigueLevel > 80) return 8;
+    if (fatigueLevel > 70) return 6;
+    if (deviation > 15) return 5;
+    return 3;
+  }
+  calculateVOSeverity(current, expected, fatigueLevel) {
+    const deviation = (current - expected) / expected * 100;
+    if (deviation > 30 && fatigueLevel > 75) return 9;
+    if (deviation > 20) return 7;
+    if (deviation > 15) return 5;
+    return 3;
+  }
+  calculateImbalanceSeverity(imbalance) {
+    if (imbalance > 10) return 8;
+    if (imbalance > 7) return 6;
+    if (imbalance > 5) return 4;
+    return 2;
+  }
+  calculateCadenceSeverity(current, expected) {
+    const deviation = Math.abs((current - expected) / expected * 100);
+    if (deviation > 15) return 7;
+    if (deviation > 10) return 5;
+    return 3;
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+  // POSITIVE REINFORCEMENT
+  // ──────────────────────────────────────────────────────────────────────────
+  async generatePositiveReinforcement(context) {
+    const { biometrics, baseline, terrain } = context;
+    const prompt = `
+You are an elite running coach analyzing real-time biometric data.
+The runner is performing WELL with no detected issues.
+
+Runner Profile:
+- Normal cadence: ${baseline.preferredCadence} spm
+- Normal pace: ${baseline.normalPace.avg.toFixed(2)} min/km
+- Normal GCT: ${baseline.normalGroundContactTime.avg.toFixed(0)}ms
+- Typical stride: ${baseline.normalStrideLength.avg.toFixed(2)}m
+
+Current Performance (All Excellent):
+- Cadence: ${biometrics.cadence} spm (${Math.round((biometrics.cadence - baseline.preferredCadence) / baseline.preferredCadence * 100)}% of normal)
+- Pace: ${biometrics.pace.toFixed(2)} min/km
+- GCT: ${biometrics.groundContactTime}ms
+- Stride: ${biometrics.strideLength.toFixed(2)}m
+- Vertical Oscillation: ${biometrics.verticalOscillation.toFixed(1)}cm (efficient)
+- HR Zone: ${biometrics.heartRateZone}
+- Fatigue: ${context.fatigueLevel}%
+- Terrain: ${terrain.courseType} (${terrain.currentGrade.toFixed(1)}% grade)
+
+Generate ONE positive, encouraging coaching message that:
+1. Acknowledges what they're doing RIGHT
+2. Provides ONE specific thing to maintain or slightly improve
+3. Is energizing and motivating
+4. Is 1-2 sentences MAX
+
+Format as JSON:
+{
+  "message": "...",
+  "action": "...",
+  "reasoning": "..."
+}
+`;
+    const response = await this.client.messages.create({
+      model: "claude-3-5-sonnet-20241022",
+      max_tokens: 300,
+      messages: [
+        {
+          role: "user",
+          content: prompt
+        }
+      ]
+    });
+    const content = response.content[0];
+    if (content.type !== "text") {
+      throw new Error("Unexpected response type");
+    }
+    let result;
+    try {
+      result = JSON.parse(content.text);
+    } catch {
+      const cleaned = content.text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+      result = JSON.parse(cleaned);
+    }
+    return {
+      message: result.message,
+      action: result.action,
+      reasoning: result.reasoning,
+      category: "efficiency",
+      confidence: 0.9,
+      severity: "info",
+      isAnomalous: false,
+      comparedToBaseline: "Running at personal best form",
+      targetMetric: "Maintain",
+      targetValue: biometrics.pace
+    };
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+  // AI-POWERED COACHING GENERATION
+  // ──────────────────────────────────────────────────────────────────────────
+  async generateAICoachingFeedback(context, primaryIssue) {
+    const { biometrics, baseline, terrain, fatigueLevel } = context;
+    const prompt = `
+You are an elite running coach analyzing real-time biometric data during a run.
+
+RUNNER PROFILE (Baseline from recent runs):
+- Max HR: ${baseline.maxHeartRate} bpm
+- Resting HR: ${baseline.restingHeartRate} bpm
+- Preferred Cadence: ${baseline.preferredCadence} spm
+- Typical Pace: ${baseline.normalPace.avg.toFixed(2)} \xB1 ${(baseline.normalPace.max - baseline.normalPace.avg).toFixed(2)} min/km
+- Normal GCT: ${baseline.normalGroundContactTime.avg.toFixed(0)}ms
+- Normal Vertical Oscillation: ${baseline.normalVerticalOscillation.avg.toFixed(1)}cm
+- Typical Stride: ${baseline.normalStrideLength.avg.toFixed(2)}m
+
+CURRENT SITUATION:
+- Pace: ${biometrics.pace.toFixed(2)} min/km
+- HR: ${biometrics.heartRate} bpm (Zone ${biometrics.heartRateZone})
+- Cadence: ${biometrics.cadence} spm
+- GCT: ${biometrics.groundContactTime}ms
+- Vertical Oscillation: ${biometrics.verticalOscillation.toFixed(1)}cm
+- Stride: ${biometrics.strideLength.toFixed(2)}m
+- GCT Balance: ${biometrics.groundContactBalance.toFixed(1)}% (50% = perfect)
+- Fatigue Level: ${fatigueLevel}%
+- Distance: ${(biometrics.distance / 1e3).toFixed(2)}km
+- Elapsed: ${Math.floor(biometrics.elapsedTime / 60)}min
+
+TERRAIN CONTEXT:
+- Course Type: ${terrain.courseType}
+- Current Grade: ${terrain.currentGrade.toFixed(1)}%
+- Recent Grade: ${terrain.recentGrade.toFixed(1)}%
+- Elevation Gain So Far: ${terrain.elevationGain}m
+- Elevation Loss So Far: ${terrain.elevationLoss}m
+
+PRIMARY ISSUE DETECTED:
+- Type: ${primaryIssue.type}
+- Metric: ${primaryIssue.metric}
+- Current: ${primaryIssue.current.toFixed(primaryIssue.current > 100 ? 0 : 2)}
+- Expected: ${primaryIssue.expected.toFixed(primaryIssue.expected > 100 ? 0 : 2)}
+- Deviation: ${primaryIssue.deviation.toFixed(1)}%
+- Context: ${primaryIssue.context}
+
+INSTRUCTIONS:
+Generate a SPECIFIC, ACTIONABLE coaching message that:
+
+1. IS INTELLIGENT: Consider the terrain context. Don't fault shorter strides uphill or longer strides downhill.
+   Don't confuse fatigue-induced form loss with normal terrain adaptation.
+
+2. ADDRESSES THE ROOT CAUSE: Identify WHY this is happening:
+   - Terrain effect (uphill/downhill changes are normal)
+   - Fatigue accumulation (after km ${(biometrics.distance / 1e3).toFixed(1)})
+   - Effort level mismatch
+   - Possible form breakdown
+   - Environmental factor
+
+3. PROVIDES ACTIONABLE GUIDANCE: Tell them exactly what to do:
+   - "Shorten stride on this hill" (not just "stride is short")
+   - "Pick cadence up to 176" (specific target)
+   - "Relax shoulders, focus on gravity pull" (form cue)
+   - "Dial pace back to 5:50/km to recover" (specific number)
+
+4. IS ENCOURAGING: Even if negative feedback, frame as fixable guidance not criticism.
+
+5. IS BRIEF: 1-2 sentences maximum.
+
+Generate JSON response:
+{
+  "message": "Your primary coaching cue (1-2 sentences, specific and actionable)",
+  "category": "form|pacing|effort|fatigue|efficiency|recovery|environment",
+  "action": "Specific thing to do right now",
+  "targetMetric": "HR|pace|cadence|GCT|stride|etc",
+  "targetValue": 123,
+  "reasoning": "Why this issue is happening and why this advice fixes it",
+  "severity": "info|warning|critical"
+}
+`;
+    const response = await this.client.messages.create({
+      model: "claude-3-5-sonnet-20241022",
+      max_tokens: 500,
+      messages: [
+        {
+          role: "user",
+          content: prompt
+        }
+      ]
+    });
+    const content = response.content[0];
+    if (content.type !== "text") {
+      throw new Error("Unexpected response type");
+    }
+    let result;
+    try {
+      result = JSON.parse(content.text);
+    } catch {
+      const cleaned = content.text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+      result = JSON.parse(cleaned);
+    }
+    return {
+      message: result.message,
+      category: result.category,
+      action: result.action,
+      reasoning: result.reasoning,
+      targetMetric: result.targetMetric,
+      targetValue: result.targetValue,
+      confidence: 0.85,
+      severity: result.severity,
+      isAnomalous: primaryIssue.deviation > 20,
+      comparedToBaseline: `${primaryIssue.deviation > 0 ? "+" : ""}${primaryIssue.deviation.toFixed(1)}% from baseline`
+    };
+  }
+};
+var real_time_biomechanical_coach_default = new RealTimeBiomechanicalCoach();
+
+// server/real-time-coaching-integration.ts
+var realtimeCoachingRouter = Router4();
+realtimeCoachingRouter.post(
+  "/biometric-data",
+  async (req, res) => {
+    try {
+      const { userId, biometrics, distanceRemaining, targetPace } = req.body;
+      if (!userId || !biometrics) {
+        return res.status(400).json({ error: "Missing userId or biometrics" });
+      }
+      const baseline = await getRunnerBaseline(userId);
+      if (!baseline) {
+        return res.status(404).json({ error: "Runner profile not found" });
+      }
+      const terrain = await computeTerrainContext(
+        biometrics.latitude,
+        biometrics.longitude,
+        biometrics.altitude,
+        biometrics.distance
+      );
+      const fatigueLevel = estimateFatigue(
+        biometrics.heartRate,
+        baseline.maxHeartRate,
+        biometrics.verticalOscillation,
+        baseline.normalVerticalOscillation.avg,
+        biometrics.elapsedTime
+      );
+      const context = {
+        biometrics,
+        baseline,
+        terrain,
+        fatigueLevel,
+        distanceRemaining,
+        targetPace,
+        workoutPhase: determineWorkoutPhase(
+          biometrics.heartRateZone,
+          biometrics.elapsedTime,
+          biometrics.distance
+        ),
+        timeInZone: {}
+        // Would be populated from session history
+      };
+      const coaching = await real_time_biomechanical_coach_default.generateCoachingFeedback(context);
+      return res.json({
+        success: true,
+        coaching,
+        context: {
+          fatigueLevel: Math.round(fatigueLevel),
+          terrain: {
+            courseType: terrain.courseType,
+            currentGrade: terrain.currentGrade.toFixed(1)
+          }
+        }
+      });
+    } catch (error) {
+      console.error("Biometric coaching error:", error);
+      return res.status(500).json({ error: "Failed to generate coaching" });
+    }
+  }
+);
+realtimeCoachingRouter.get(
+  "/runner-baseline",
+  async (req, res) => {
+    try {
+      const userId = req.query.userId;
+      if (!userId) {
+        return res.status(400).json({ error: "Missing userId" });
+      }
+      const baseline = await getRunnerBaseline(userId);
+      if (!baseline) {
+        return res.status(404).json({ error: "No baseline found" });
+      }
+      return res.json(baseline);
+    } catch (error) {
+      console.error("Baseline fetch error:", error);
+      return res.status(500).json({ error: "Failed to fetch baseline" });
+    }
+  }
+);
+function parsePaceToSeconds(pace) {
+  if (!pace) return 360;
+  const parts = pace.split(":");
+  if (parts.length !== 2) return 360;
+  const mins = parseInt(parts[0], 10);
+  const secs = parseInt(parts[1], 10);
+  if (isNaN(mins) || isNaN(secs)) return 360;
+  return mins * 60 + secs;
+}
+async function getRunnerBaseline(userId) {
+  try {
+    const fourWeeksAgo = /* @__PURE__ */ new Date();
+    fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
+    const recentRuns = await db.select().from(runs).where(
+      and16(
+        eq18(runs.userId, userId),
+        gt3(runs.completedAt, fourWeeksAgo),
+        isNotNull5(runs.completedAt)
+      )
+    ).limit(20);
+    if (recentRuns.length === 0) {
+      return null;
+    }
+    const heartRates = recentRuns.map((r) => r.avgHeartRate).filter((hr) => hr != null && hr > 0);
+    const cadences = recentRuns.map((r) => r.cadence).filter((c) => c != null && c > 0);
+    const paces = recentRuns.map((r) => parsePaceToSeconds(r.avgPace)).filter((p) => p > 0 && p < 3600);
+    const strideLengths = recentRuns.map((r) => r.avgStrideLength).filter((s) => s != null && s > 0);
+    const gcts = recentRuns.map((r) => r.groundContactTime).filter((g) => g != null && g > 0);
+    const vos = recentRuns.map((r) => r.verticalOscillation).filter((v) => v != null && v > 0);
+    const avg4 = (arr, fallback) => arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : fallback;
+    const baseline = {
+      userId,
+      normalHeartRate: {
+        min: heartRates.length > 0 ? Math.min(...heartRates) : 120,
+        max: heartRates.length > 0 ? Math.max(...heartRates) : 180,
+        avg: avg4(heartRates, 150)
+      },
+      normalCadence: {
+        min: cadences.length > 0 ? Math.min(...cadences) : 160,
+        max: cadences.length > 0 ? Math.max(...cadences) : 190,
+        avg: avg4(cadences, 175)
+      },
+      normalPace: {
+        // Pace stored as seconds/km: higher = slower, lower = faster
+        min: paces.length > 0 ? Math.min(...paces) : 300,
+        // fastest
+        max: paces.length > 0 ? Math.max(...paces) : 420,
+        // slowest
+        avg: avg4(paces, 360)
+        // ~6:00 /km
+      },
+      normalGroundContactTime: {
+        min: gcts.length > 0 ? Math.min(...gcts) : 220,
+        max: gcts.length > 0 ? Math.max(...gcts) : 290,
+        avg: avg4(gcts, 250)
+      },
+      normalVerticalOscillation: {
+        min: vos.length > 0 ? Math.min(...vos) : 6,
+        max: vos.length > 0 ? Math.max(...vos) : 10,
+        avg: avg4(vos, 7.5)
+      },
+      normalStrideLength: {
+        min: strideLengths.length > 0 ? Math.min(...strideLengths) : 1.1,
+        max: strideLengths.length > 0 ? Math.max(...strideLengths) : 1.7,
+        avg: avg4(strideLengths, 1.4)
+      },
+      maxHeartRate: heartRates.length > 0 ? Math.max(...heartRates) + 5 : 185,
+      restingHeartRate: heartRates.length > 0 ? Math.min(...heartRates) : 60,
+      lactateThreshold: heartRates.length > 0 ? Math.max(...heartRates) * 0.85 : 157,
+      preferredCadence: avg4(cadences, 175),
+      typicalStrideLength: avg4(strideLengths, 1.4),
+      typicalGroundContactTime: avg4(gcts, 250),
+      typicalVerticalOscillation: avg4(vos, 7.5)
+    };
+    return baseline;
+  } catch (error) {
+    console.error("Error computing baseline:", error);
+    return null;
+  }
+}
+async function computeTerrainContext(lat, lng, altitude, totalDistance) {
+  const currentGrade = 0;
+  let courseType = "flat";
+  if (totalDistance > 5e3) {
+    courseType = "rolling";
+  }
+  return {
+    currentGrade,
+    recentGrade: 0,
+    elevationGain: 0,
+    elevationLoss: 0,
+    courseType
+  };
+}
+function estimateFatigue(currentHR, maxHR, currentVO, normalVO, elapsedSeconds) {
+  let fatigue = 0;
+  if (maxHR > 0) {
+    const hrPercent = currentHR / maxHR * 100;
+    if (hrPercent > 85) fatigue += 30;
+    else if (hrPercent > 75) fatigue += 20;
+    else if (hrPercent > 65) fatigue += 10;
+  }
+  if (normalVO > 0 && currentVO > 0) {
+    const voRatio = currentVO / normalVO;
+    if (voRatio > 1.15) fatigue += 25;
+    else if (voRatio > 1.08) fatigue += 12;
+    else if (voRatio > 1) fatigue += 5;
+  }
+  const minutesElapsed = elapsedSeconds / 60;
+  if (minutesElapsed > 60) fatigue += Math.min(25, (minutesElapsed - 60) * 0.25);
+  else if (minutesElapsed > 45) fatigue += 10;
+  else if (minutesElapsed > 30) fatigue += 5;
+  return Math.min(100, Math.max(0, fatigue));
+}
+function determineWorkoutPhase(hrZone, elapsedSeconds, distanceMeters) {
+  const minutes = elapsedSeconds / 60;
+  if (minutes < 10) return "warmup";
+  if (minutes > 50 && hrZone <= 2) return "cooldown";
+  if (hrZone <= 2) return "easy";
+  if (hrZone === 3) return "tempo";
+  if (hrZone === 4) return "threshold";
+  if (hrZone === 5) return "max";
+  return "easy";
+}
+var real_time_coaching_integration_default = realtimeCoachingRouter;
 
 // server/routes-session-coaching.ts
 init_db();
 init_schema();
-import { eq as eq15 } from "drizzle-orm";
+import { eq as eq19 } from "drizzle-orm";
 function registerSessionCoachingRoutes(app2) {
   app2.get(
     "/api/workouts/:workoutId/session-instructions",
     async (req, res) => {
       try {
         const { workoutId } = req.params;
-        const workout = await db.select().from(plannedWorkouts).where(eq15(plannedWorkouts.id, workoutId)).then((rows) => rows[0]);
+        const workout = await db.select().from(plannedWorkouts).where(eq19(plannedWorkouts.id, workoutId)).then((rows) => rows[0]);
         if (!workout) {
           return res.status(404).json({ error: "Workout not found" });
         }
-        const instructions = await db.select().from(sessionInstructions).where(eq15(sessionInstructions.plannedWorkoutId, workoutId)).then((rows) => rows[0]);
+        const instructions = await db.select().from(sessionInstructions).where(eq19(sessionInstructions.plannedWorkoutId, workoutId)).then((rows) => rows[0]);
         if (!instructions) {
           try {
-            const userId = workout.trainingPlanId ? await db.select({ userId: (await Promise.resolve().then(() => (init_schema(), schema_exports))).trainingPlans.userId }).from((await Promise.resolve().then(() => (init_schema(), schema_exports))).trainingPlans).where(eq15((await Promise.resolve().then(() => (init_schema(), schema_exports))).trainingPlans.id, workout.trainingPlanId)).then((r) => r[0]?.userId) : null;
+            const userId = workout.trainingPlanId ? await db.select({ userId: (await Promise.resolve().then(() => (init_schema(), schema_exports))).trainingPlans.userId }).from((await Promise.resolve().then(() => (init_schema(), schema_exports))).trainingPlans).where(eq19((await Promise.resolve().then(() => (init_schema(), schema_exports))).trainingPlans.id, workout.trainingPlanId)).then((r) => r[0]?.userId) : null;
             if (!userId) {
               return res.status(404).json({
                 error: "Session instructions not found and could not determine user for generation"
@@ -14249,7 +17229,7 @@ function registerSessionCoachingRoutes(app2) {
               toneReasoning: coaching.toneReasoning
             }).returning();
             if (inserted[0]) {
-              await db.update(plannedWorkouts).set({ sessionInstructionsId: inserted[0].id }).where(eq15(plannedWorkouts.id, workoutId));
+              await db.update(plannedWorkouts).set({ sessionInstructionsId: inserted[0].id }).where(eq19(plannedWorkouts.id, workoutId));
             }
             return res.json({
               workoutId,
@@ -14295,7 +17275,7 @@ function registerSessionCoachingRoutes(app2) {
         if (!userId) {
           return res.status(401).json({ error: "Unauthorized" });
         }
-        const workout = await db.select().from(plannedWorkouts).where(eq15(plannedWorkouts.id, workoutId)).then((rows) => rows[0]);
+        const workout = await db.select().from(plannedWorkouts).where(eq19(plannedWorkouts.id, workoutId)).then((rows) => rows[0]);
         if (!workout) {
           return res.status(404).json({ error: "Workout not found" });
         }
@@ -14310,7 +17290,7 @@ function registerSessionCoachingRoutes(app2) {
           distance: workout.distance || void 0,
           duration: workout.duration || void 0
         });
-        const existing = await db.select().from(sessionInstructions).where(eq15(sessionInstructions.plannedWorkoutId, workoutId)).then((rows) => rows[0]);
+        const existing = await db.select().from(sessionInstructions).where(eq19(sessionInstructions.plannedWorkoutId, workoutId)).then((rows) => rows[0]);
         if (existing) {
           await db.update(sessionInstructions).set({
             preRunBrief: coaching.preRunBrief,
@@ -14321,7 +17301,7 @@ function registerSessionCoachingRoutes(app2) {
             insightFilters: coaching.insightFilters,
             toneReasoning: coaching.toneReasoning,
             updatedAt: /* @__PURE__ */ new Date()
-          }).where(eq15(sessionInstructions.plannedWorkoutId, workoutId));
+          }).where(eq19(sessionInstructions.plannedWorkoutId, workoutId));
         } else {
           await db.insert(sessionInstructions).values({
             plannedWorkoutId: workoutId,
@@ -14388,7 +17368,7 @@ function registerSessionCoachingRoutes(app2) {
     async (req, res) => {
       try {
         const { runId } = req.params;
-        const events2 = await db.select().from(coachingSessionEvents2).where(eq15(coachingSessionEvents2.runId, runId));
+        const events2 = await db.select().from(coachingSessionEvents2).where(eq19(coachingSessionEvents2.runId, runId));
         return res.json({ runId, events: events2, count: events2.length });
       } catch (error) {
         console.error("Error fetching coaching session events:", error);
@@ -14454,9 +17434,469 @@ function registerSessionCoachingRoutes(app2) {
   );
 }
 
+// server/route-recognition-service.ts
+init_db();
+init_schema();
+import { eq as eq20, and as and17, desc as desc8 } from "drizzle-orm";
+function haversineMetres(lat1, lng1, lat2, lng2) {
+  const R = 6371e3;
+  const \u03C61 = lat1 * Math.PI / 180;
+  const \u03C62 = lat2 * Math.PI / 180;
+  const \u0394\u03C6 = (lat2 - lat1) * Math.PI / 180;
+  const \u0394\u03BB = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(\u0394\u03C6 / 2) * Math.sin(\u0394\u03C6 / 2) + Math.cos(\u03C61) * Math.cos(\u03C62) * Math.sin(\u0394\u03BB / 2) * Math.sin(\u0394\u03BB / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+function scoreCandidate(candidate, lat, lng, timestamp2, intendedDistanceKm) {
+  const distM = haversineMetres(lat, lng, candidate.startLat, candidate.startLng);
+  const radius = candidate.startRadiusM ?? 75;
+  let gpsScore;
+  if (distM <= radius) {
+    gpsScore = 40;
+  } else if (distM <= radius * 4) {
+    gpsScore = Math.round(40 * (1 - (distM - radius) / (radius * 3)));
+  } else {
+    gpsScore = 0;
+  }
+  let distScore = 0;
+  const typicalKm = candidate.typicalDistanceKm;
+  if (intendedDistanceKm && typicalKm && typicalKm > 0) {
+    const pctDiff = Math.abs(intendedDistanceKm - typicalKm) / typicalKm;
+    if (pctDiff <= 0.05) distScore = 20;
+    else if (pctDiff <= 0.1) distScore = 15;
+    else if (pctDiff <= 0.2) distScore = 8;
+    else distScore = 0;
+  } else if (!intendedDistanceKm) {
+    distScore = 10;
+  }
+  const currentDay = timestamp2.getDay();
+  const typicalDays = candidate.typicalDaysOfWeek ?? [];
+  let dayScore = 0;
+  if (typicalDays.length === 0) {
+    dayScore = 7;
+  } else if (typicalDays.includes(currentDay)) {
+    dayScore = 15;
+  } else {
+    dayScore = 0;
+  }
+  const currentHour = timestamp2.getHours();
+  const currentMin = timestamp2.getMinutes();
+  const currentTotalMin = currentHour * 60 + currentMin;
+  const typicalTotalMin = (candidate.typicalStartHour ?? 0) * 60 + (candidate.typicalStartMinute ?? 0);
+  let timeScore = 0;
+  if (candidate.typicalStartHour === null || candidate.typicalStartHour === void 0) {
+    timeScore = 5;
+  } else {
+    const timeDiffMin = Math.abs(currentTotalMin - typicalTotalMin);
+    if (timeDiffMin <= 10) timeScore = 10;
+    else if (timeDiffMin <= 20) timeScore = 7;
+    else if (timeDiffMin <= 45) timeScore = 3;
+    else timeScore = 0;
+  }
+  const runCount = candidate.runCount ?? 0;
+  let freqScore;
+  if (runCount >= 4) freqScore = 10;
+  else if (runCount === 3) freqScore = 8;
+  else if (runCount === 2) freqScore = 5;
+  else freqScore = 0;
+  let recencyScore = 0;
+  if (candidate.lastRunAt) {
+    const daysSinceLastRun = (Date.now() - new Date(candidate.lastRunAt).getTime()) / (1e3 * 60 * 60 * 24);
+    if (daysSinceLastRun <= 14) recencyScore = 5;
+    else if (daysSinceLastRun <= 42) recencyScore = 3;
+    else recencyScore = 1;
+  }
+  const total = gpsScore + distScore + dayScore + timeScore + freqScore + recencyScore;
+  return {
+    gpsProximity: { score: gpsScore, max: 40, note: `${Math.round(distM)}m from usual start` },
+    distanceMatch: { score: distScore, max: 20, note: intendedDistanceKm ? `${intendedDistanceKm}km intended, typical ${typicalKm?.toFixed(1)}km` : "No target distance" },
+    dayOfWeek: { score: dayScore, max: 15, note: typicalDays.length ? `Day ${currentDay}, typical days: [${typicalDays.join(",")}]` : "No day pattern yet" },
+    timeOfDay: { score: timeScore, max: 10, note: `${currentHour}:${String(currentMin).padStart(2, "0")}, typical ${candidate.typicalStartHour ?? "?"}:${String(candidate.typicalStartMinute ?? 0).padStart(2, "0")}` },
+    runFrequency: { score: freqScore, max: 10, note: `${runCount} previous runs on this route` },
+    total: Math.min(100, total)
+  };
+}
+function confidenceLabel(score) {
+  if (score >= 80) return "certain";
+  if (score >= 60) return "confident";
+  if (score >= 40) return "tentative";
+  return "none";
+}
+function formatMs(ms) {
+  const totalSec = Math.round(ms / 1e3);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor(totalSec % 3600 / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+function formatSecPerKm(sec) {
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+function friendlyDate(d) {
+  const date = new Date(d);
+  const diffDays = Math.round((Date.now() - date.getTime()) / (1e3 * 60 * 60 * 24));
+  if (diffDays === 0) return "today";
+  if (diffDays === 1) return "yesterday";
+  if (diffDays < 7) return `${diffDays} days ago`;
+  if (diffDays < 14) return "last week";
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+function buildSplitComparisons(splitProfiles, lastRunSplits) {
+  return splitProfiles.map((profile) => {
+    const lastRunKm = lastRunSplits.find((s) => s.km === profile.km);
+    return {
+      km: profile.km,
+      avgSecPerKm: profile.avgSecPerKm,
+      lastRunSecPerKm: lastRunKm ? lastRunKm.time : void 0
+    };
+  });
+}
+function buildPreRunBrief(route, intelligence, confidence) {
+  const lines = [];
+  const name = route.displayName || route.name || "this route";
+  const runs3 = route.runCount;
+  if (confidence >= 80) {
+    lines.push(`${name} recognised \u2014 ${runs3} previous ${runs3 === 1 ? "run" : "runs"} loaded.`);
+  } else {
+    lines.push(`This looks like ${name} \u2014 loading ${runs3} previous ${runs3 === 1 ? "run" : "runs"}.`);
+  }
+  if (intelligence.personalBest) {
+    lines.push(`Your PB here is ${intelligence.personalBest.formatted} (${intelligence.personalBest.date}).`);
+  }
+  if (intelligence.lastRunStats) {
+    lines.push(`Last time: ${intelligence.lastRunStats.formatted} (${intelligence.lastRunStats.date}).`);
+  }
+  const notableSegs = route.notableSegments ?? [];
+  const hardSegs = notableSegs.filter((s) => s.severity === "hard" || s.severity === "brutal");
+  if (hardSegs.length > 0) {
+    const seg = hardSegs[0];
+    const pctPos = Math.round(seg.startPct * 100);
+    lines.push(`Watch out for the ${seg.name} at ${pctPos}% \u2014 ${seg.coachingNote}`);
+  }
+  return lines.join(" ");
+}
+async function recognizeRoute(userId, lat, lng, timestamp2, intendedDistanceKm) {
+  const candidates = await db.select().from(knownRoutes).where(eq20(knownRoutes.userId, userId));
+  if (candidates.length === 0) {
+    return { matched: false, confidence: 0, confidenceLabel: "none", knownRoute: null, routeIntelligence: null, confidenceBreakdown: null };
+  }
+  let bestCandidate = null;
+  let bestBreakdown = null;
+  let bestScore = 0;
+  for (const candidate of candidates) {
+    const breakdown = scoreCandidate(candidate, lat, lng, timestamp2, intendedDistanceKm);
+    if (breakdown.total > bestScore) {
+      bestScore = breakdown.total;
+      bestCandidate = candidate;
+      bestBreakdown = breakdown;
+    }
+  }
+  const score01 = bestScore / 100;
+  const label = confidenceLabel(bestScore);
+  if (bestScore < 40 || !bestCandidate) {
+    return { matched: false, confidence: score01, confidenceLabel: label, knownRoute: null, routeIntelligence: null, confidenceBreakdown: bestBreakdown };
+  }
+  const constituentIds = bestCandidate.constituentRunIds ?? [];
+  const intelligence = await buildRouteIntelligence(bestCandidate, constituentIds);
+  return {
+    matched: true,
+    confidence: Math.round(score01 * 100) / 100,
+    confidenceLabel: label,
+    knownRoute: {
+      id: bestCandidate.id,
+      name: bestCandidate.displayName || bestCandidate.name || "Known Route",
+      runCount: bestCandidate.runCount ?? 0,
+      typicalDistanceKm: bestCandidate.typicalDistanceKm ?? 0,
+      terrainType: bestCandidate.terrainType ?? "road",
+      elevationProfile: bestCandidate.elevationProfile ?? [],
+      notableSegments: bestCandidate.notableSegments ?? []
+    },
+    routeIntelligence: intelligence,
+    confidenceBreakdown: bestBreakdown
+  };
+}
+async function buildRouteIntelligence(route, runIds) {
+  if (runIds.length === 0) {
+    return { averageSplits: [], splitCount: 0, preRunBrief: "" };
+  }
+  const historicalRuns = await db.select({
+    id: runs.id,
+    duration: runs.duration,
+    completedAt: runs.completedAt,
+    kmSplits: runs.kmSplits,
+    distance: runs.distance
+  }).from(runs).where(and17(eq20(runs.userId, route.userId))).orderBy(desc8(runs.completedAt));
+  const filtered = historicalRuns.filter((r) => runIds.includes(r.id));
+  if (filtered.length === 0) {
+    return { averageSplits: [], splitCount: 0, preRunBrief: "" };
+  }
+  const pbRun = filtered.reduce((best, r) => !best || r.duration < best.duration ? r : best);
+  const personalBest = {
+    timeMs: pbRun.duration * 1e3,
+    formatted: formatMs(pbRun.duration * 1e3),
+    date: friendlyDate(pbRun.completedAt)
+  };
+  const lastRun = filtered[0];
+  const lastKmSplits = parseKmSplits(lastRun.kmSplits);
+  const lastRunStats = {
+    timeMs: lastRun.duration * 1e3,
+    formatted: formatMs(lastRun.duration * 1e3),
+    date: friendlyDate(lastRun.completedAt),
+    kmSplits: lastKmSplits
+  };
+  const splitProfiles = route.splitProfiles;
+  const averageSplits = splitProfiles ? buildSplitComparisons(splitProfiles, lastKmSplits) : [];
+  const intelligence = {
+    personalBest,
+    lastRunStats,
+    averageSplits,
+    splitCount: filtered.length
+  };
+  const preRunBrief = buildPreRunBrief(route, intelligence, 80);
+  return { ...intelligence, preRunBrief };
+}
+function parseKmSplits(raw) {
+  if (!raw || !Array.isArray(raw)) return [];
+  return raw.map((s) => ({
+    km: s.km ?? s.split ?? 0,
+    time: s.time ?? s.seconds ?? s.paceSeconds ?? 0,
+    pace: s.pace ?? formatSecPerKm(s.time ?? s.paceSeconds ?? 0)
+  }));
+}
+async function updateKnownRoutes(userId, completedRun) {
+  if (!completedRun.startLat || !completedRun.startLng) return;
+  const lat = completedRun.startLat;
+  const lng = completedRun.startLng;
+  const distKm = completedRun.distance;
+  const existingRoutes = await db.select().from(knownRoutes).where(eq20(knownRoutes.userId, userId));
+  const matchingRoute = existingRoutes.find((r) => {
+    const d = haversineMetres(lat, lng, r.startLat, r.startLng);
+    return d <= 100 && Math.abs((r.typicalDistanceKm ?? 0) - distKm) / distKm <= 0.15;
+  });
+  const kmSplits = parseKmSplits(completedRun.kmSplits);
+  const runAt = completedRun.completedAt;
+  const dayOfWeek = runAt.getDay();
+  const hour = runAt.getHours();
+  const minute = runAt.getMinutes();
+  if (matchingRoute) {
+    const currentIds = matchingRoute.constituentRunIds ?? [];
+    if (currentIds.includes(completedRun.id)) return;
+    const newIds = [...currentIds, completedRun.id];
+    const newRunCount = (matchingRoute.runCount ?? 0) + 1;
+    const newLat = (matchingRoute.startLat * (newRunCount - 1) + lat) / newRunCount;
+    const newLng = (matchingRoute.startLng * (newRunCount - 1) + lng) / newRunCount;
+    const newTypicalKm = ((matchingRoute.typicalDistanceKm ?? distKm) * (newRunCount - 1) + distKm) / newRunCount;
+    const currentDays = matchingRoute.typicalDaysOfWeek ?? [];
+    if (!currentDays.includes(dayOfWeek)) currentDays.push(dayOfWeek);
+    const prevTotalMin = (matchingRoute.typicalStartHour ?? hour) * 60 + (matchingRoute.typicalStartMinute ?? minute);
+    const newTotalMin = Math.round((prevTotalMin * (newRunCount - 1) + (hour * 60 + minute)) / newRunCount);
+    const newStartHour = Math.floor(newTotalMin / 60);
+    const newStartMinute = newTotalMin % 60;
+    const durationMs = completedRun.duration * 1e3;
+    const currentBestMs = matchingRoute.bestTimeMs ?? durationMs;
+    const newBestMs = Math.min(currentBestMs, durationMs);
+    const currentAvgMs = matchingRoute.avgTimeMs ?? durationMs;
+    const newAvgMs = Math.round((currentAvgMs * (newRunCount - 1) + durationMs) / newRunCount);
+    const paceSec = distKm > 0 ? completedRun.duration / distKm : 0;
+    const currentAvgPace = matchingRoute.avgPaceSecPerKm ?? paceSec;
+    const newAvgPace = (currentAvgPace * (newRunCount - 1) + paceSec) / newRunCount;
+    const updatedSplitProfiles = updateSplitProfiles(
+      matchingRoute.splitProfiles ?? [],
+      kmSplits,
+      newRunCount
+    );
+    const elevationProfile = completedRun.gpsTrack ? buildElevationProfile(completedRun.gpsTrack, distKm) : matchingRoute.elevationProfile;
+    const notableSegments = elevationProfile ? detectNotableSegments(elevationProfile, distKm) : matchingRoute.notableSegments;
+    const routeName = matchingRoute.name ?? generateRouteName(dayOfWeek, hour, newTypicalKm);
+    await db.update(knownRoutes).set({
+      startLat: newLat,
+      startLng: newLng,
+      typicalDistanceKm: newTypicalKm,
+      typicalDaysOfWeek: currentDays,
+      typicalStartHour: newStartHour,
+      typicalStartMinute: newStartMinute,
+      runCount: newRunCount,
+      lastRunAt: runAt,
+      constituentRunIds: newIds,
+      bestTimeMs: newBestMs,
+      avgTimeMs: newAvgMs,
+      avgPaceSecPerKm: newAvgPace,
+      splitProfiles: updatedSplitProfiles,
+      elevationProfile,
+      notableSegments,
+      terrainType: completedRun.terrainType || matchingRoute.terrainType,
+      name: routeName,
+      updatedAt: /* @__PURE__ */ new Date()
+    }).where(eq20(knownRoutes.id, matchingRoute.id));
+    console.log(`[RouteMemory] Updated known_route ${matchingRoute.id} (${routeName}) \u2014 run #${newRunCount}`);
+  } else {
+    const priorRuns = await db.select({
+      id: runs.id,
+      startLat: runs.startLat,
+      startLng: runs.startLng,
+      distance: runs.distance,
+      duration: runs.duration,
+      completedAt: runs.completedAt,
+      kmSplits: runs.kmSplits,
+      gpsTrack: runs.gpsTrack,
+      terrainType: runs.terrainType
+    }).from(runs).where(and17(eq20(runs.userId, userId))).orderBy(desc8(runs.completedAt));
+    const nearbyPrior = priorRuns.find((r) => {
+      if (!r.startLat || !r.startLng || r.id === completedRun.id) return false;
+      const d = haversineMetres(lat, lng, r.startLat, r.startLng);
+      const distMatch = Math.abs((r.distance ?? 0) - distKm) / distKm <= 0.15;
+      return d <= 100 && distMatch;
+    });
+    if (!nearbyPrior) return;
+    const allIds = [nearbyPrior.id, completedRun.id];
+    const avgLat = (nearbyPrior.startLat + lat) / 2;
+    const avgLng = (nearbyPrior.startLng + lng) / 2;
+    const avgKm = ((nearbyPrior.distance ?? distKm) + distKm) / 2;
+    const priorAt = nearbyPrior.completedAt;
+    const priorDay = priorAt.getDay();
+    const typicalDays = Array.from(/* @__PURE__ */ new Set([priorDay, dayOfWeek]));
+    const priorTotalMin = priorAt.getHours() * 60 + priorAt.getMinutes();
+    const avgTotalMin = Math.round((priorTotalMin + (hour * 60 + minute)) / 2);
+    const startHour = Math.floor(avgTotalMin / 60);
+    const startMinute = avgTotalMin % 60;
+    const dur1Ms = (nearbyPrior.duration ?? completedRun.duration) * 1e3;
+    const dur2Ms = completedRun.duration * 1e3;
+    const bestMs = Math.min(dur1Ms, dur2Ms);
+    const avgMs = Math.round((dur1Ms + dur2Ms) / 2);
+    const pace1 = avgKm > 0 ? (nearbyPrior.duration ?? completedRun.duration) / avgKm : 0;
+    const pace2 = distKm > 0 ? completedRun.duration / distKm : 0;
+    const avgPace = (pace1 + pace2) / 2;
+    const priorSplits = parseKmSplits(nearbyPrior.kmSplits);
+    const splitProfiles = buildInitialSplitProfiles(priorSplits, kmSplits);
+    const elevationProfile = completedRun.gpsTrack ? buildElevationProfile(completedRun.gpsTrack, distKm) : void 0;
+    const notableSegments = elevationProfile ? detectNotableSegments(elevationProfile, distKm) : [];
+    const routeName = generateRouteName(dayOfWeek, hour, avgKm);
+    await db.insert(knownRoutes).values({
+      userId,
+      name: routeName,
+      startLat: avgLat,
+      startLng: avgLng,
+      startRadiusM: 75,
+      typicalDistanceKm: avgKm,
+      elevationProfile,
+      notableSegments,
+      terrainType: completedRun.terrainType || nearbyPrior.terrainType,
+      typicalDaysOfWeek: typicalDays,
+      typicalStartHour: startHour,
+      typicalStartMinute: startMinute,
+      runCount: 2,
+      firstRunAt: priorAt,
+      lastRunAt: runAt,
+      constituentRunIds: allIds,
+      bestTimeMs: bestMs,
+      avgTimeMs: avgMs,
+      avgPaceSecPerKm: avgPace,
+      splitProfiles
+    });
+    console.log(`[RouteMemory] Created new known_route (${routeName}) for user ${userId}`);
+  }
+}
+function buildElevationProfile(gpsTrack, distanceKm) {
+  if (!gpsTrack || gpsTrack.length < 10) return void 0;
+  const withAlt = gpsTrack.filter((p) => p.altitude !== void 0 && p.altitude !== null);
+  if (withAlt.length < 5) return void 0;
+  const samples = 20;
+  const result = [];
+  for (let i = 0; i < samples; i++) {
+    const pct = i / (samples - 1);
+    const idx = Math.min(Math.floor(pct * (withAlt.length - 1)), withAlt.length - 1);
+    result.push({ pct, altM: Math.round(withAlt[idx].altitude) });
+  }
+  return result;
+}
+function detectNotableSegments(elevationProfile, distanceKm) {
+  if (!elevationProfile || elevationProfile.length < 4 || distanceKm <= 0) return [];
+  const segments2 = [];
+  const distanceM = distanceKm * 1e3;
+  for (let i = 0; i < elevationProfile.length - 2; i++) {
+    const p1 = elevationProfile[i];
+    const p2 = elevationProfile[i + 2];
+    const hDiff = p2.altM - p1.altM;
+    const hDistM = (p2.pct - p1.pct) * distanceM;
+    if (hDistM <= 0) continue;
+    const gradient = hDiff / hDistM * 100;
+    if (Math.abs(gradient) >= 4 && hDistM >= 150) {
+      const isUphill = gradient > 0;
+      const absGrad = Math.abs(gradient);
+      const severity = absGrad >= 10 ? "brutal" : absGrad >= 7 ? "hard" : absGrad >= 5 ? "moderate" : "easy";
+      const segName = isUphill ? `${severity === "brutal" ? "Brutal" : severity === "hard" ? "Tough" : ""} Hill`.trim() : "Descent";
+      const coachingNote = isUphill ? `${Math.round(hDistM)}m climb at ${absGrad.toFixed(1)}% \u2014 shorten stride, stay tall.` : `${Math.round(hDistM)}m descent \u2014 control your pace, stay light on your feet.`;
+      const lastSeg = segments2[segments2.length - 1];
+      if (lastSeg && Math.abs(lastSeg.startPct - p1.pct) < 0.05) continue;
+      segments2.push({
+        name: segName || (isUphill ? "Hill" : "Descent"),
+        startPct: p1.pct,
+        endPct: p2.pct,
+        gradient,
+        severity,
+        coachingNote
+      });
+    }
+  }
+  return segments2.sort((a, b) => Math.abs(b.gradient) - Math.abs(a.gradient)).slice(0, 3);
+}
+function buildInitialSplitProfiles(run1Splits, run2Splits) {
+  const allKms = Array.from(new Set([...run1Splits, ...run2Splits].map((s) => s.km))).sort((a, b) => a - b);
+  return allKms.map((km) => {
+    const s1 = run1Splits.find((s) => s.km === km);
+    const s2 = run2Splits.find((s) => s.km === km);
+    const times = [s1?.time, s2?.time].filter(Boolean);
+    if (times.length === 0) return null;
+    const avg4 = times.reduce((a, b) => a + b, 0) / times.length;
+    return {
+      km,
+      avgSecPerKm: Math.round(avg4),
+      bestSecPerKm: Math.min(...times),
+      worstSecPerKm: Math.max(...times),
+      runCount: times.length
+    };
+  }).filter(Boolean);
+}
+function updateSplitProfiles(existing, newSplits, totalRunCount) {
+  const result = [...existing];
+  for (const split of newSplits) {
+    const existing_idx = result.findIndex((p) => p.km === split.km);
+    if (existing_idx >= 0) {
+      const p = result[existing_idx];
+      const newAvg = Math.round((p.avgSecPerKm * p.runCount + split.time) / (p.runCount + 1));
+      result[existing_idx] = {
+        ...p,
+        avgSecPerKm: newAvg,
+        bestSecPerKm: Math.min(p.bestSecPerKm, split.time),
+        worstSecPerKm: Math.max(p.worstSecPerKm, split.time),
+        runCount: p.runCount + 1
+      };
+    } else {
+      result.push({
+        km: split.km,
+        avgSecPerKm: split.time,
+        bestSecPerKm: split.time,
+        worstSecPerKm: split.time,
+        runCount: 1
+      });
+    }
+  }
+  return result.sort((a, b) => a.km - b.km);
+}
+function generateRouteName(dayOfWeek, hour, distKm) {
+  const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const day = days[dayOfWeek];
+  const time = hour < 12 ? "Morning" : hour < 17 ? "Afternoon" : "Evening";
+  const dist = distKm < 3 ? "Short" : distKm < 7 ? "" : distKm < 12 ? "Long" : "Ultra";
+  return `${day} ${time}${dist ? " " + dist : ""} Run`.replace(/\s+/g, " ").trim();
+}
+
 // server/routes-samsung-companion.ts
 init_db();
-import { eq as eq16 } from "drizzle-orm";
+import { eq as eq21 } from "drizzle-orm";
 init_schema();
 var activeSamsungSessions = /* @__PURE__ */ new Map();
 async function registerSamsungCompanionRoutes(app2) {
@@ -14474,7 +17914,7 @@ async function registerSamsungCompanionRoutes(app2) {
         isActive: true
       };
       activeSamsungSessions.set(sessionId, session);
-      const user = await db.select().from(users).where(eq16(users.id, userId)).limit(1);
+      const user = await db.select().from(users).where(eq21(users.id, userId)).limit(1);
       const runnerName = user[0]?.displayName || "Runner";
       console.log(`\u2713 Samsung watch authenticated: ${sessionId} (${runnerName})`);
       res.json({
@@ -14575,7 +18015,7 @@ async function registerSamsungCompanionRoutes(app2) {
       if (!session) {
         return res.status(401).json({ error: "Invalid session" });
       }
-      const metrics = await db.select().from(garminRealtimeData).where(eq16(garminRealtimeData.sessionId, sessionId));
+      const metrics = await db.select().from(garminRealtimeData).where(eq21(garminRealtimeData.sessionId, sessionId));
       const lastMetric = metrics.length > 0 ? metrics[metrics.length - 1] : null;
       const totalDistance = lastMetric?.cumulativeDistance || 0;
       const totalDuration = lastMetric?.elapsedTime || 0;
@@ -14589,7 +18029,7 @@ async function registerSamsungCompanionRoutes(app2) {
         totalDuration,
         avgHeartRate,
         maxHeartRate
-      }).where(eq16(garminCompanionSessions.sessionId, sessionId));
+      }).where(eq21(garminCompanionSessions.sessionId, sessionId));
       activeSamsungSessions.delete(sessionId);
       console.log(
         `\u23F9\uFE0F Samsung watch session ended: ${sessionId} | ${(totalDistance / 1e3).toFixed(2)}km | ${totalTime.toFixed(0)}s | HR: ${avgHeartRate} bpm`
@@ -14730,7 +18170,7 @@ async function resolveGarminUser(payload) {
 
 // server/osm-segment-intelligence.ts
 init_db();
-import { sql as sql7 } from "drizzle-orm";
+import { sql as sql10 } from "drizzle-orm";
 function haversineDistance2(lat1, lon1, lat2, lon2) {
   const R = 6371e3;
   const \u03C61 = lat1 * Math.PI / 180;
@@ -14815,7 +18255,7 @@ async function recordSegmentUsage(runId, userId, segments2) {
     }));
     for (let i = 0; i < values.length; i += 100) {
       const batch = values.slice(i, i + 100);
-      await db.execute(sql7`
+      await db.execute(sql10`
         INSERT INTO segment_usage (osm_way_id, run_id, user_id, distance_meters, timestamp)
         SELECT * FROM json_populate_recordset(
           NULL::segment_usage,
@@ -14851,7 +18291,7 @@ async function getRoutePopularityScore(polyline3) {
     if (osmWayIds.length === 0) {
       return 0.5;
     }
-    const result = await db.execute(sql7`
+    const result = await db.execute(sql10`
       SELECT 
         osm_way_id,
         run_count,
@@ -14934,7 +18374,7 @@ function calculateBearing(p1, p2) {
 }
 
 // server/intelligent-route-generation.ts
-import axios2 from "axios";
+import axios4 from "axios";
 var GRAPHHOPPER_API_KEY = process.env.GRAPHHOPPER_API_KEY || "";
 var GRAPHHOPPER_BASE_URL = "https://graphhopper.com/api/1";
 var OVERPASS_API_URL = "https://overpass-api.de/api/interpreter";
@@ -14961,7 +18401,7 @@ async function findScenicFeatures(lat, lng, radiusMeters) {
       );
       out center;
     `;
-    const response = await axios2.post(OVERPASS_API_URL, `data=${encodeURIComponent(query)}`, {
+    const response = await axios4.post(OVERPASS_API_URL, `data=${encodeURIComponent(query)}`, {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       timeout: 12e3
     });
@@ -15047,7 +18487,7 @@ async function generateGraphHopperRoute(lat, lng, distanceMeters, seed = 0, pref
   return await generateGraphHopperRouteGet(lat, lng, distanceMeters, "hike", seed);
 }
 async function generateGraphHopperRouteGet(lat, lng, distanceMeters, profile, seed) {
-  const response = await axios2.get(`${GRAPHHOPPER_BASE_URL}/route`, {
+  const response = await axios4.get(`${GRAPHHOPPER_BASE_URL}/route`, {
     params: {
       point: `${lat},${lng}`,
       profile,
@@ -15093,7 +18533,7 @@ async function generateScenicWaypointRoute(startLat, startLng, waypoints) {
         ]
       }
     };
-    const response = await axios2.post(`${GRAPHHOPPER_BASE_URL}/route?key=${GRAPHHOPPER_API_KEY}`, body, {
+    const response = await axios4.post(`${GRAPHHOPPER_BASE_URL}/route?key=${GRAPHHOPPER_API_KEY}`, body, {
       headers: { "Content-Type": "application/json" },
       timeout: 3e4
     });
@@ -15101,7 +18541,7 @@ async function generateScenicWaypointRoute(startLat, startLng, waypoints) {
   } catch (postError) {
     console.log(`Scenic POST failed, trying GET fallback: ${postError.message}`);
     const pointParams = points.map((p) => `point=${p[1]},${p[0]}`).join("&");
-    const response = await axios2.get(
+    const response = await axios4.get(
       `${GRAPHHOPPER_BASE_URL}/route?${pointParams}`,
       {
         params: {
@@ -15563,8 +19003,10 @@ function encodeValue(value) {
 // server/routes.ts
 async function registerRoutes(app2) {
   app2.use(garmin_oauth_bridge_default);
+  app2.use(strava_oauth_bridge_default);
   app2.use("/api", routes_adaptation_default);
   app2.use("/api/my-data", routes_my_data_default);
+  app2.use("/api/coaching", real_time_coaching_integration_default);
   app2.use("/api", routes_achievements_default);
   registerSessionCoachingRoutes(app2);
   await registerSamsungCompanionRoutes(app2);
@@ -15592,14 +19034,14 @@ async function registerRoutes(app2) {
       const { userId } = req.params;
       if (req.user?.userId !== userId) return res.status(403).json({ error: "Forbidden" });
       const sentResult = await db.execute(
-        sql10`SELECT fr.id, fr.requester_id, fr.addressee_id, fr.status, fr.message, fr.created_at,
+        sql13`SELECT fr.id, fr.requester_id, fr.addressee_id, fr.status, fr.message, fr.created_at,
                    u.name AS addressee_name, u.profile_pic AS addressee_profile_pic
             FROM friend_requests fr
             LEFT JOIN users u ON u.id = fr.addressee_id
             WHERE fr.requester_id = ${userId} AND fr.status = 'pending'`
       );
       const receivedResult = await db.execute(
-        sql10`SELECT fr.id, fr.requester_id, fr.addressee_id, fr.status, fr.message, fr.created_at,
+        sql13`SELECT fr.id, fr.requester_id, fr.addressee_id, fr.status, fr.message, fr.created_at,
                    u.name AS requester_name, u.profile_pic AS requester_profile_pic
             FROM friend_requests fr
             LEFT JOIN users u ON u.id = fr.requester_id
@@ -15687,12 +19129,12 @@ async function registerRoutes(app2) {
       if (timezone) {
         try {
           DateTime2.now().setZone(timezone);
-          const existingPrefs = await db.select().from(notificationPreferences).where(eq20(notificationPreferences.userId, user.id)).limit(1);
+          const existingPrefs = await db.select().from(notificationPreferences).where(eq25(notificationPreferences.userId, user.id)).limit(1);
           if (existingPrefs.length > 0) {
             await db.update(notificationPreferences).set({
               coachingPlanReminderTimezone: timezone,
               updatedAt: /* @__PURE__ */ new Date()
-            }).where(eq20(notificationPreferences.userId, user.id));
+            }).where(eq25(notificationPreferences.userId, user.id));
           } else {
             await db.insert(notificationPreferences).values({
               userId: user.id,
@@ -15754,8 +19196,8 @@ async function registerRoutes(app2) {
       if (!email) return res.status(400).json({ error: "Email is required" });
       const user = await storage.getUserByEmail(email.toLowerCase().trim());
       if (!user) return res.json({ ok: true });
-      const crypto3 = await import("crypto");
-      const token = crypto3.randomBytes(32).toString("hex");
+      const crypto4 = await import("crypto");
+      const token = crypto4.randomBytes(32).toString("hex");
       const expiresAt = new Date(Date.now() + 60 * 60 * 1e3);
       await storage.createPasswordResetToken(token, user.id, expiresAt);
       const { sendPasswordResetEmail: sendPasswordResetEmail2 } = await Promise.resolve().then(() => (init_email_service(), email_service_exports));
@@ -15987,10 +19429,10 @@ async function registerRoutes(app2) {
       let garminAccessToken = null;
       try {
         const [garminDevice] = await db.select({ accessToken: connectedDevices.accessToken }).from(connectedDevices).where(
-          and16(
-            eq20(connectedDevices.userId, userId),
-            eq20(connectedDevices.deviceType, "garmin"),
-            eq20(connectedDevices.isActive, true)
+          and21(
+            eq25(connectedDevices.userId, userId),
+            eq25(connectedDevices.deviceType, "garmin"),
+            eq25(connectedDevices.isActive, true)
           )
         ).limit(1);
         garminAccessToken = garminDevice?.accessToken ?? null;
@@ -16137,8 +19579,8 @@ async function registerRoutes(app2) {
       const { userId } = req.params;
       const all = await db.select().from(friendRequests).where(
         or4(
-          eq20(friendRequests.requesterId, userId),
-          eq20(friendRequests.addresseeId, userId)
+          eq25(friendRequests.requesterId, userId),
+          eq25(friendRequests.addresseeId, userId)
         )
       );
       console.log(`[DEBUG] All friend requests involving ${userId}:`, JSON.stringify(all));
@@ -16244,19 +19686,37 @@ async function registerRoutes(app2) {
       cadence: run.cadence || 0,
       maxCadence: run.maxCadence || null,
       heartRate: run.avgHeartRate || 0,
-      routePoints: Array.isArray(run.gpsTrack) ? run.gpsTrack.map((pt) => ({
-        // Garmin-sourced points use 'lat'/'lng'; native app uses 'latitude'/'longitude'.
-        // Always normalise to 'latitude'/'longitude' so the Android LocationPoint model
-        // can deserialise the non-null fields without crashing.
-        latitude: pt.latitude ?? pt.lat ?? 0,
-        longitude: pt.longitude ?? pt.lng ?? 0,
-        timestamp: pt.timestamp ?? pt.time ?? 0,
-        speed: pt.speed ?? pt.pace ?? null,
-        altitude: pt.altitude ?? null,
-        heartRate: pt.heartRate ?? pt.hr ?? null,
-        bearing: pt.bearing ?? null,
-        cadence: pt.cadence ?? null
-      })) : [],
+      routePoints: (() => {
+        if (Array.isArray(run.gpsTrack)) {
+          return run.gpsTrack.map((pt) => ({
+            latitude: pt.latitude ?? pt.lat ?? 0,
+            longitude: pt.longitude ?? pt.lng ?? 0,
+            timestamp: pt.timestamp ?? pt.time ?? 0,
+            speed: pt.speed ?? pt.pace ?? null,
+            altitude: pt.altitude ?? null,
+            heartRate: pt.heartRate ?? pt.hr ?? null,
+            bearing: pt.bearing ?? null,
+            cadence: pt.cadence ?? null
+          }));
+        }
+        if (run.gpsTrack && typeof run.gpsTrack === "object" && run.gpsTrack.polyline) {
+          try {
+            const decoded = polylineCodec.decode(run.gpsTrack.polyline);
+            return decoded.map(([lat, lng]) => ({
+              latitude: lat,
+              longitude: lng,
+              timestamp: 0,
+              speed: null,
+              altitude: null,
+              heartRate: null,
+              bearing: null,
+              cadence: null
+            }));
+          } catch {
+          }
+        }
+        return [];
+      })(),
       kmSplits: Array.isArray(run.kmSplits) ? run.kmSplits : [],
       heartRateData: normalizeNumericSeries(run.heartRateData),
       paceData: normalizeNumericSeries(run.paceData),
@@ -16394,19 +19854,21 @@ async function registerRoutes(app2) {
   app2.get("/api/users/:userId/weather-impact", authMiddleware, async (req, res) => {
     try {
       const userId = req.params.userId;
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1e3);
-      const recentRuns = await storage.getUserRuns(userId, {
-        limit: 100,
-        // Cap at 100 — more than enough for 30-day weather analysis
+      const ninetyDaysAgo = /* @__PURE__ */ new Date();
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+      const allRecentRuns = await storage.getUserRuns(userId, {
+        limit: 500,
         offset: 0
       });
-      const windowedRuns = recentRuns.filter(
-        (r) => r.completedAt && new Date(r.completedAt) > thirtyDaysAgo && (r.distance ?? 0) > 0.5
+      const windowedRuns = allRecentRuns.filter(
+        (r) => r.completedAt && new Date(r.completedAt) >= ninetyDaysAgo && (r.distance ?? 0) > 0.5 && !!r.weatherData && // Only include runs with weather data
+        (!r.externalSource || r.externalSource === "airuncoach")
+        // Exclude Garmin-synced activities
       );
-      const runsWithWeather = windowedRuns.filter((r) => !!r.weatherData).length;
+      const runsWithWeather = windowedRuns.length;
       const weatherImpact = await calculateWeatherImpact(userId, windowedRuns);
-      console.log(`[Weather Impact] Analysis: ${windowedRuns.length} runs in 30d, ${runsWithWeather} with weather, hasEnoughData=${weatherImpact.hasEnoughData}`);
-      res.json(weatherImpact);
+      console.log(`[Weather Impact] Analysis: ${windowedRuns.length} AI app runs in 90d window with weather data, hasEnoughData=${weatherImpact.hasEnoughData}`);
+      res.json({ ...weatherImpact, dateRangeUsed: "90d" });
     } catch (error) {
       console.error("Weather impact analysis error:", error);
       res.status(500).json({ error: "Failed to compute weather impact analysis", details: error.message });
@@ -16527,7 +19989,7 @@ async function registerRoutes(app2) {
             await recordSegmentUsage(run.id, userId, osmSegments);
             const characteristics = analyzeRouteCharacteristics(run.gpsTrack);
             console.log(`Run ${run.id} characteristics:`, characteristics);
-            await db.execute(sql10`
+            await db.execute(sql13`
               UPDATE runs 
               SET route_characteristics = ${JSON.stringify(characteristics)}
               WHERE id = ${run.id}
@@ -16550,10 +20012,94 @@ async function registerRoutes(app2) {
           }
         })();
       });
+      setImmediate(() => {
+        checkAndGeneratePendingBlocks(userId).catch(
+          (err) => console.error("[Run] Rolling block check failed:", err)
+        );
+      });
+      setImmediate(() => {
+        (async () => {
+          try {
+            if (run.startLat && run.startLng) {
+              await updateKnownRoutes(userId, {
+                id: run.id,
+                startLat: run.startLat,
+                startLng: run.startLng,
+                distance: run.distance,
+                duration: run.duration,
+                completedAt: run.completedAt ?? /* @__PURE__ */ new Date(),
+                kmSplits: run.kmSplits,
+                gpsTrack: run.gpsTrack,
+                terrainType: run.terrainType ?? null
+              });
+            }
+          } catch (err) {
+            console.error("[RouteMemory] updateKnownRoutes failed (non-fatal):", err);
+          }
+        })();
+      });
       res.status(201).json(run);
     } catch (error) {
       console.error("Create run error:", error);
       res.status(500).json({ error: "Failed to create run" });
+    }
+  });
+  app2.post("/api/runs/recognize-route", authMiddleware, async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const { latitude, longitude, timestamp: timestamp2, intendedDistanceKm } = req.body;
+      if (typeof latitude !== "number" || typeof longitude !== "number") {
+        return res.status(400).json({ error: "latitude and longitude are required numbers" });
+      }
+      const ts = timestamp2 ? new Date(timestamp2) : /* @__PURE__ */ new Date();
+      const result = await recognizeRoute(userId, latitude, longitude, ts, intendedDistanceKm ?? void 0);
+      res.json(result);
+    } catch (error) {
+      console.error("[Route Recognition] Error:", error?.message ?? error);
+      res.json({ matched: false, confidence: 0, confidenceLabel: "none", knownRoute: null, routeIntelligence: null, confidenceBreakdown: null });
+    }
+  });
+  app2.get("/api/runs/known-routes", authMiddleware, async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const { knownRoutes: knownRoutesTable } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+      const { eq: eqFn } = await import("drizzle-orm");
+      const routes2 = await db.select().from(knownRoutesTable).where(eqFn(knownRoutesTable.userId, userId));
+      res.json(routes2);
+    } catch (error) {
+      console.error("[Known Routes] Error:", error?.message ?? error);
+      res.status(500).json({ error: "Failed to fetch known routes" });
+    }
+  });
+  app2.patch("/api/runs/:id/rename", authMiddleware, async (req, res) => {
+    try {
+      const run = await storage.getRun(req.params.id);
+      if (!run) return res.status(404).json({ error: "Run not found" });
+      if (req.user?.userId && run.userId !== req.user.userId) {
+        return res.status(403).json({ error: "Not authorized" });
+      }
+      const updated = await storage.updateRun(req.params.id, { name: req.body.name });
+      res.json(updated);
+    } catch (error) {
+      console.error("[PATCH /api/runs/:id/rename]", error);
+      res.status(500).json({ error: "Failed to rename run" });
+    }
+  });
+  app2.put("/api/runs/:id/struggle-points", authMiddleware, async (req, res) => {
+    try {
+      const run = await storage.getRun(req.params.id);
+      if (!run) return res.status(404).json({ error: "Run not found" });
+      if (req.user?.userId && run.userId !== req.user.userId) {
+        return res.status(403).json({ error: "Not authorized" });
+      }
+      const updated = await storage.updateRun(req.params.id, {
+        userComments: req.body.user_comments ?? req.body.userComments ?? run.userComments,
+        strugglePoints: req.body.struggle_points ?? req.body.strugglePoints ?? run.strugglePoints
+      });
+      res.json(updated);
+    } catch (error) {
+      console.error("[PUT /api/runs/:id/struggle-points]", error);
+      res.status(500).json({ error: "Failed to save struggle points" });
     }
   });
   app2.post("/api/runs/sync-progress", authMiddleware, async (req, res) => {
@@ -16596,7 +20142,9 @@ async function registerRoutes(app2) {
     try {
       const runId = req.params.id;
       const userId = req.user.userId;
-      console.log(`[comprehensive-analysis] Starting analysis for run ${runId}, user ${userId}`);
+      const garminDataSummary = req.body?.garminDataSummary || null;
+      const userProfileFromRequest = req.body?.userProfile || null;
+      console.log(`[comprehensive-analysis] Starting analysis for run ${runId}, user ${userId}` + (garminDataSummary?.deviceName ? ` [WITH Garmin data from ${garminDataSummary.deviceName}]` : ` [NO Garmin data]`));
       const existingAnalysis = await storage.getRunAnalysis(runId);
       console.log(`[comprehensive-analysis] Checked cache, found: ${!!existingAnalysis?.analysis}`);
       if (existingAnalysis?.analysis) {
@@ -16628,7 +20176,7 @@ async function registerRoutes(app2) {
       let garminActivity = null;
       try {
         garminActivity = await db.query.garminActivities.findFirst({
-          where: eq20(garminActivities.runId, runId)
+          where: eq25(garminActivities.runId, runId)
         });
       } catch (garminErr) {
         console.warn(`[comprehensive-analysis] Could not fetch Garmin activity (DB column missing?): ${garminErr?.message}`);
@@ -16637,17 +20185,18 @@ async function registerRoutes(app2) {
       let wellness = null;
       try {
         wellness = await db.query.garminWellnessMetrics.findFirst({
-          where: and16(
-            eq20(garminWellnessMetrics.userId, userId),
-            eq20(garminWellnessMetrics.date, runDate)
+          where: and21(
+            eq25(garminWellnessMetrics.userId, userId),
+            eq25(garminWellnessMetrics.date, runDate)
           )
         });
       } catch (wellnessErr) {
         console.warn(`[comprehensive-analysis] Could not fetch wellness metrics (DB column missing?): ${wellnessErr?.message}`);
       }
+      let weatherImpactAnalysis = null;
       const previousRuns = await db.query.runs.findMany({
-        where: eq20(runs.userId, userId),
-        orderBy: desc8(runs.completedAt),
+        where: eq25(runs.userId, userId),
+        orderBy: desc10(runs.completedAt),
         limit: 10
       });
       let sessionInstructions2 = null;
@@ -16656,16 +20205,16 @@ async function registerRoutes(app2) {
       if (run.linkedWorkoutId) {
         try {
           const plannedWorkout = await db.query.plannedWorkouts.findFirst({
-            where: eq20(plannedWorkouts.id, run.linkedWorkoutId)
+            where: eq25(plannedWorkouts.id, run.linkedWorkoutId)
           });
           if (plannedWorkout?.sessionInstructionsId) {
             sessionInstructions2 = await db.query.sessionInstructions.findFirst({
-              where: eq20(sessionInstructions2.id, plannedWorkout.sessionInstructionsId)
+              where: eq25(sessionInstructions2.id, plannedWorkout.sessionInstructionsId)
             });
             expectedSessionGoal = plannedWorkout.sessionGoal || void 0;
           }
           coachingEvents = await db.query.coachingSessionEvents.findMany({
-            where: eq20(coachingSessionEvents.runId, runId)
+            where: eq25(coachingSessionEvents.runId, runId)
           });
           console.log(`[comprehensive-analysis] Loaded session context: instructions=${!!sessionInstructions2}, events=${coachingEvents.length}`);
         } catch (sessionErr) {
@@ -16677,6 +20226,9 @@ async function registerRoutes(app2) {
       const analysisStartTime = Date.now();
       const analysis = await aiService.generateComprehensiveRunAnalysis({
         runData: run,
+        // NEW: Rich Garmin watch data from client (from ComprehensiveAnalysisRequest)
+        garminDataFromWatch: garminDataSummary,
+        userProfileContext: userProfileFromRequest,
         garminActivity: garminActivity ? {
           activityType: garminActivity.activityType || void 0,
           durationInSeconds: garminActivity.durationInSeconds || void 0,
@@ -16721,11 +20273,19 @@ async function registerRoutes(app2) {
           avgSpO2: wellness.avgSpO2 || void 0,
           avgWakingRespirationValue: wellness.avgWakingRespirationValue || void 0
         } : void 0,
-        previousRuns: previousRuns.filter((r) => r.id !== runId).slice(0, 5),
+        previousRuns: previousRuns.filter((r) => r.id !== runId).slice(0, 10),
         userProfile: user ? {
           fitnessLevel: user.fitnessLevel || void 0,
-          age: user.dob ? Math.floor((Date.now() - new Date(user.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1e3)) : void 0,
-          weight: user.weight ? parseFloat(user.weight) : void 0
+          age: user.dob ? (() => {
+            const dob = new Date(user.dob);
+            const ageMs = Date.now() - dob.getTime();
+            const ageYears = Math.floor(ageMs / (365.25 * 24 * 60 * 60 * 1e3));
+            return ageYears > 0 && ageYears < 150 ? ageYears : void 0;
+          })() : void 0,
+          weight: user.weight ? (() => {
+            const w = parseFloat(user.weight);
+            return w > 0 && w < 500 ? w : void 0;
+          })() : void 0
         } : void 0,
         coachName,
         coachTone,
@@ -16755,7 +20315,8 @@ async function registerRoutes(app2) {
           userEngagement: e.userEngagement,
           triggeredAt: e.triggeredAt
         })) : void 0,
-        expectedSessionGoal
+        expectedSessionGoal,
+        weatherImpactAnalysis: weatherImpactAnalysis || void 0
       });
       const analysisEndTime = Date.now();
       console.log(`[comprehensive-analysis] AI analysis generated in ${analysisEndTime - analysisStartTime}ms for run ${runId}`);
@@ -16774,6 +20335,31 @@ async function registerRoutes(app2) {
         analysis,
         hasGarminData: !!garminActivity,
         hasWellnessData: !!wellness
+      });
+      setImmediate(() => {
+        let weatherNote = null;
+        if (weatherImpactAnalysis && weatherImpactAnalysis.length > 20) {
+          const isGenericFallback = weatherImpactAnalysis.includes("still performed well");
+          if (!isGenericFallback) {
+            weatherNote = weatherImpactAnalysis;
+          }
+        }
+        const observation = {
+          date: (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+          runId,
+          distanceKm: Math.round((run.distance ?? 0) / 1e3 * 100) / 100,
+          workoutType: run.workoutType ?? null,
+          performanceScore: analysis.performanceScore ?? null,
+          patternObserved: analysis.runPatternAnalysis ?? null,
+          progressionNote: analysis.progressionTrend ?? null,
+          adaptationSignal: analysis.fitnessContext?.adaptationSignals ? analysis.fitnessContext.adaptationSignals + (weatherNote ? ` Weather note: ${weatherNote}` : "") : weatherNote ?? null,
+          struggleNote: analysis.strugglePointsAnalysis?.likelyReasons ?? null,
+          pacingNote: analysis.pacingStrategy?.assessment ?? null,
+          coachingSummary: analysis.summary ?? null
+        };
+        persistCoachingObservation(userId, observation).catch(
+          (err) => console.error("[Learning] Failed to persist coaching observation:", err)
+        );
       });
       setImmediate(() => {
         (async () => {
@@ -16809,7 +20395,7 @@ async function registerRoutes(app2) {
       }
       const { gpsData, heartRateData, routePoints, splitData, ...runSummary } = run;
       const [userRows, aiRunnerProfile] = await Promise.all([
-        db.select().from(users).where(eq20(users.id, userId)).limit(1),
+        db.select().from(users).where(eq25(users.id, userId)).limit(1),
         getRunnerProfile(userId).catch(() => null)
       ]);
       const coachName = userRows[0]?.coachName || "Coach";
@@ -17690,6 +21276,43 @@ ${contextJson}`;
       res.status(500).json({ error: "Failed to get weather" });
     }
   });
+  app2.get("/api/weather", async (req, res) => {
+    try {
+      const { lat, lng } = req.query;
+      if (!lat || !lng) {
+        return res.status(400).json({ error: "lat and lng are required" });
+      }
+      const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m&timezone=auto`);
+      if (!response.ok) {
+        throw new Error(`Open-Meteo API error: ${response.status}`);
+      }
+      const data = await response.json();
+      const current = data.current;
+      const weatherCodeToCondition = (code) => {
+        if (code === 0) return "Clear";
+        if (code <= 3) return "Partly Cloudy";
+        if (code <= 49) return "Foggy";
+        if (code <= 59) return "Drizzle";
+        if (code <= 69) return "Rain";
+        if (code <= 79) return "Snow";
+        if (code <= 84) return "Showers";
+        if (code <= 94) return "Thunderstorm";
+        return "Unknown";
+      };
+      res.json({
+        temp: current.temperature_2m,
+        feelsLike: current.apparent_temperature,
+        humidity: current.relative_humidity_2m,
+        windSpeed: Math.round(current.wind_speed_10m),
+        windDirection: current.wind_direction_10m,
+        condition: weatherCodeToCondition(current.weather_code),
+        weatherCode: current.weather_code
+      });
+    } catch (error) {
+      console.error("Weather error:", error);
+      res.status(500).json({ error: "Failed to get weather" });
+    }
+  });
   app2.get("/api/geocode/reverse", async (req, res) => {
     try {
       const { lat, lng } = req.query;
@@ -17723,6 +21346,94 @@ ${contextJson}`;
     } catch (error) {
       console.error("[Usage] GET /api/usage/current error:", error);
       res.status(500).json({ error: "Failed to fetch usage data" });
+    }
+  });
+  app2.get("/api/features/:featureName/available", authMiddleware, async (req, res) => {
+    try {
+      const { featureName } = req.params;
+      const userId = req.user.userId;
+      const user = await storage.getUser(userId);
+      const validFeatures = ["trainingPlansGenerated", "routesGenerated", "postRunAnalyses", "aiCoachingKm"];
+      if (!validFeatures.includes(featureName)) {
+        return res.status(400).json({
+          error: "Invalid feature name",
+          isAvailable: true
+          // Default to allowing if invalid
+        });
+      }
+      const { hasUnlimitedGrant: hasUnlimitedGrant2 } = await Promise.resolve().then(() => (init_coupon_service(), coupon_service_exports));
+      const hasPromoUnlimited = await hasUnlimitedGrant2(userId, featureName);
+      if (hasPromoUnlimited) {
+        const renewalDate2 = /* @__PURE__ */ new Date();
+        renewalDate2.setMonth(renewalDate2.getMonth() + 1);
+        return res.json({
+          isAvailable: true,
+          remaining: null,
+          limit: null,
+          used: 0,
+          renewalDate: renewalDate2.toISOString(),
+          isUnlimited: true,
+          message: `\u{1F381} You have unlimited ${featureName} from your promo code`,
+          grantedBy: "promo_code"
+        });
+      }
+      const usageData = await getUsageWithLimits(userId, user?.subscriptionTier);
+      const used = usageData.usage[featureName] || 0;
+      const limit = usageData.limits[featureName];
+      const remaining = usageData.remaining[featureName];
+      const isUnlimited = limit === null;
+      const isAvailable = isUnlimited || remaining !== null && remaining > 0;
+      const [year, month] = usageData.yearMonth.split("-");
+      const nextMonth = parseInt(month) === 12 ? 1 : parseInt(month) + 1;
+      const nextYear = parseInt(month) === 12 ? parseInt(year) + 1 : parseInt(year);
+      const renewalDate = new Date(nextYear, nextMonth - 1, 1).toISOString();
+      res.json({
+        isAvailable,
+        remaining: remaining === null ? null : Math.max(0, remaining),
+        limit: limit === null ? null : limit,
+        used,
+        renewalDate,
+        isUnlimited,
+        message: isUnlimited ? `You have unlimited ${featureName}` : isAvailable ? `You have ${remaining} of ${limit} ${featureName} remaining this month` : `You've reached your limit of ${limit} ${featureName} this month`
+      });
+    } catch (error) {
+      console.error("[Features] GET /api/features/:featureName/available error:", error);
+      res.json({
+        isAvailable: true,
+        remaining: null,
+        limit: null,
+        used: 0,
+        isUnlimited: true,
+        message: "Unable to verify limits, access granted"
+      });
+    }
+  });
+  app2.post("/api/promo-codes/redeem", authMiddleware, async (req, res) => {
+    try {
+      const { code } = req.body;
+      if (!code || typeof code !== "string") {
+        return res.status(400).json({ error: "Promo code is required" });
+      }
+      const { redeemPromoCode: redeemPromoCode2 } = await Promise.resolve().then(() => (init_coupon_service(), coupon_service_exports));
+      const result = await redeemPromoCode2(req.user.userId, code);
+      if (result.success) {
+        res.json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error) {
+      console.error("[PromoCode] POST /api/promo-codes/redeem error:", error);
+      res.status(500).json({ error: "Failed to redeem promo code" });
+    }
+  });
+  app2.get("/api/promo-codes/active-grants", authMiddleware, async (req, res) => {
+    try {
+      const { getUserActiveGrants: getUserActiveGrants2 } = await Promise.resolve().then(() => (init_coupon_service(), coupon_service_exports));
+      const grants = await getUserActiveGrants2(req.user.userId);
+      res.json({ grants });
+    } catch (error) {
+      console.error("[PromoCode] GET /api/promo-codes/active-grants error:", error);
+      res.status(500).json({ error: "Failed to fetch active grants" });
     }
   });
   app2.post("/api/push-subscriptions", authMiddleware, async (req, res) => {
@@ -18183,6 +21894,24 @@ ${contextJson}`;
       res.status(500).json({ error: "Failed to sync Garmin data" });
     }
   });
+  app2.get("/api/garmin/status", authMiddleware, async (req, res) => {
+    try {
+      const devices = await storage.getConnectedDevices(req.user.userId);
+      const garminDevice = devices.find((d) => d.deviceType === "garmin" && d.isActive);
+      res.json({
+        connected: !!garminDevice,
+        hasAccessToken: !!garminDevice?.accessToken,
+        lastSyncAt: garminDevice?.lastSyncAt || null,
+        deviceInfo: garminDevice ? {
+          id: garminDevice.id,
+          displayName: garminDevice.displayName
+        } : null
+      });
+    } catch (error) {
+      console.error("Garmin status check error:", error);
+      res.status(500).json({ error: "Failed to check Garmin status" });
+    }
+  });
   app2.get("/api/garmin/health-summary", authMiddleware, async (req, res) => {
     try {
       const devices = await storage.getConnectedDevices(req.user.userId);
@@ -18321,9 +22050,9 @@ ${contextJson}`;
       console.log(`[Garmin Enrich]    AI run start time: ${new Date(runStartTimeMs).toISOString()}`);
       console.log(`[Garmin Enrich]    Search window: ${new Date(searchStartSec * 1e3).toISOString()} to ${new Date(searchEndSec * 1e3).toISOString()}`);
       let localActivity = await db.query.garminActivities.findFirst({
-        where: (a, { and: and18, eq: eq22, gte: gte12, lte: lte6 }) => and18(
-          eq22(a.userId, req.user.userId),
-          gte12(a.startTimeInSeconds, searchStartSec),
+        where: (a, { and: and23, eq: eq27, gte: gte13, lte: lte6 }) => and23(
+          eq27(a.userId, req.user.userId),
+          gte13(a.startTimeInSeconds, searchStartSec),
           lte6(a.startTimeInSeconds, searchEndSec)
         )
       });
@@ -18401,8 +22130,12 @@ ${contextJson}`;
         avgStrideLength: parsed.runningDynamics?.strideLength,
         minElevation: raw.minElevationInMeters,
         maxElevation: raw.maxElevationInMeters,
-        // GPS track
-        gpsTrack: activityDetail.polyline ? { polyline: activityDetail.polyline } : run.gpsTrack,
+        // GPS track — always preserve the existing phone-recorded GPS array.
+        // Garmin's encoded polyline is stored in a separate field on activityDetail
+        // and cannot be directly used by Android (it expects a lat/lng array).
+        // Overwriting a good array with { polyline: "..." } was the root cause of
+        // GPS data appearing to vanish after linking Garmin Connect.
+        gpsTrack: run.gpsTrack,
         // Garmin tracking fields
         hasGarminData: true,
         garminActivityId: matchingActivityId,
@@ -18468,9 +22201,9 @@ ${contextJson}`;
       console.log("[Wellness Sync] Received wellness data:", JSON.stringify(wellness, null, 2));
       const dateStr = wellness.date;
       const existing = await db.query.garminWellnessMetrics.findFirst({
-        where: (metrics, { and: and18, eq: eq22 }) => and18(
-          eq22(metrics.userId, req.user.userId),
-          eq22(metrics.date, dateStr)
+        where: (metrics, { and: and23, eq: eq27 }) => and23(
+          eq27(metrics.userId, req.user.userId),
+          eq27(metrics.date, dateStr)
         )
       });
       const wellnessRecord = {
@@ -18516,7 +22249,7 @@ ${contextJson}`;
       console.log("[Wellness Sync] Existing record:", existing ? existing.id : "none");
       try {
         if (existing) {
-          await db.update(garminWellnessMetrics).set({ ...wellnessRecord, syncedAt: /* @__PURE__ */ new Date() }).where(eq20(garminWellnessMetrics.id, existing.id));
+          await db.update(garminWellnessMetrics).set({ ...wellnessRecord, syncedAt: /* @__PURE__ */ new Date() }).where(eq25(garminWellnessMetrics.id, existing.id));
           console.log("[Wellness Sync] Updated existing record:", existing.id);
         } else {
           await db.insert(garminWellnessMetrics).values(wellnessRecord);
@@ -18546,11 +22279,11 @@ ${contextJson}`;
       startDate.setDate(startDate.getDate() - numDays);
       const startDateStr = startDate.toISOString().split("T")[0];
       const metrics = await db.query.garminWellnessMetrics.findMany({
-        where: (m, { and: and18, eq: eq22, gte: gte12 }) => and18(
-          eq22(m.userId, req.user.userId),
-          gte12(m.date, startDateStr)
+        where: (m, { and: and23, eq: eq27, gte: gte13 }) => and23(
+          eq27(m.userId, req.user.userId),
+          gte13(m.date, startDateStr)
         ),
-        orderBy: (m, { desc: desc9 }) => [desc9(m.date)]
+        orderBy: (m, { desc: desc11 }) => [desc11(m.date)]
       });
       const latest = metrics[0];
       res.json({
@@ -18576,9 +22309,9 @@ ${contextJson}`;
       const garminDevice = devices.find((d) => d.deviceType === "garmin" && d.isActive);
       const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
       let todayWellness = await db.query.garminWellnessMetrics.findFirst({
-        where: (m, { and: and18, eq: eq22 }) => and18(
-          eq22(m.userId, req.user.userId),
-          eq22(m.date, today)
+        where: (m, { and: and23, eq: eq27 }) => and23(
+          eq27(m.userId, req.user.userId),
+          eq27(m.date, today)
         )
       });
       if (garminDevice?.accessToken && !todayWellness) {
@@ -18619,9 +22352,9 @@ ${contextJson}`;
             rawData: wellness
           });
           todayWellness = await db.query.garminWellnessMetrics.findFirst({
-            where: (m, { and: and18, eq: eq22 }) => and18(
-              eq22(m.userId, req.user.userId),
-              eq22(m.date, today)
+            where: (m, { and: and23, eq: eq27 }) => and23(
+              eq27(m.userId, req.user.userId),
+              eq27(m.date, today)
             )
           });
         } catch (syncError) {
@@ -18632,11 +22365,11 @@ ${contextJson}`;
       weekAgo.setDate(weekAgo.getDate() - 7);
       const weekAgoStr = weekAgo.toISOString().split("T")[0];
       const recentMetrics = await db.query.garminWellnessMetrics.findMany({
-        where: (m, { and: and18, eq: eq22, gte: gte12 }) => and18(
-          eq22(m.userId, req.user.userId),
-          gte12(m.date, weekAgoStr)
+        where: (m, { and: and23, eq: eq27, gte: gte13 }) => and23(
+          eq27(m.userId, req.user.userId),
+          gte13(m.date, weekAgoStr)
         ),
-        orderBy: (m, { desc: desc9 }) => [desc9(m.date)]
+        orderBy: (m, { desc: desc11 }) => [desc11(m.date)]
       });
       const avgSleepHours = recentMetrics.length > 0 ? recentMetrics.reduce((sum5, m) => sum5 + (m.totalSleepSeconds || 0), 0) / recentMetrics.length / 3600 : null;
       const avgBodyBattery = recentMetrics.length > 0 ? recentMetrics.reduce((sum5, m) => sum5 + (m.bodyBatteryCurrent || 0), 0) / recentMetrics.length : null;
@@ -18669,7 +22402,7 @@ ${contextJson}`;
   app2.get("/api/garmin/permissions", authMiddleware, async (req, res) => {
     try {
       const { getCurrentPermissions: getCurrentPermissions2 } = await Promise.resolve().then(() => (init_garmin_permissions_service(), garmin_permissions_service_exports));
-      const permissions = await getCurrentPermissions2(req.user.id);
+      const permissions = await getCurrentPermissions2(req.user.userId);
       res.json(permissions);
     } catch (error) {
       console.error("Get permissions error:", error);
@@ -18680,7 +22413,7 @@ ${contextJson}`;
     try {
       const { getReauthorizationUrl: getReauthorizationUrl2 } = await Promise.resolve().then(() => (init_garmin_permissions_service(), garmin_permissions_service_exports));
       const baseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
-      const authUrl = await getReauthorizationUrl2(req.user.id, baseUrl);
+      const authUrl = await getReauthorizationUrl2(req.user.userId, baseUrl);
       res.json({ authUrl });
     } catch (error) {
       console.error("Reauthorize error:", error);
@@ -18690,7 +22423,7 @@ ${contextJson}`;
   app2.post("/api/garmin/disconnect", authMiddleware, async (req, res) => {
     try {
       const { disconnectDevice: disconnectDevice2 } = await Promise.resolve().then(() => (init_garmin_permissions_service(), garmin_permissions_service_exports));
-      await disconnectDevice2(req.user.id);
+      await disconnectDevice2(req.user.userId);
       res.json({ success: true, message: "Device disconnected" });
     } catch (error) {
       console.error("Disconnect error:", error);
@@ -18710,10 +22443,10 @@ ${contextJson}`;
       const { garminUserId } = req.params;
       console.log(`\u{1F50D} Garmin requesting permissions for user: ${garminUserId}`);
       const device2 = await db.query.connectedDevices.findFirst({
-        where: (d, { and: and18, eq: eq22 }) => and18(
-          eq22(d.deviceType, "garmin"),
-          eq22(d.deviceId, garminUserId),
-          eq22(d.isActive, true)
+        where: (d, { and: and23, eq: eq27 }) => and23(
+          eq27(d.deviceType, "garmin"),
+          eq27(d.deviceId, garminUserId),
+          eq27(d.isActive, true)
         )
       });
       if (!device2) {
@@ -18753,7 +22486,7 @@ ${contextJson}`;
       }
       console.log(`\u{1F4E4} Upload to Garmin requested for run: ${runId}`);
       const run = await db.query.runs.findFirst({
-        where: (r, { eq: eq22 }) => eq22(r.id, runId)
+        where: (r, { eq: eq27 }) => eq27(r.id, runId)
       });
       if (!run) {
         return res.status(404).json({ error: "Run not found" });
@@ -18817,9 +22550,9 @@ ${contextJson}`;
   };
   const findUserByGarminToken = async (userAccessToken) => {
     const device2 = await db.query.connectedDevices.findFirst({
-      where: (d, { and: and18, eq: eq22 }) => and18(
-        eq22(d.deviceType, "garmin"),
-        eq22(d.accessToken, userAccessToken)
+      where: (d, { and: and23, eq: eq27 }) => and23(
+        eq27(d.deviceType, "garmin"),
+        eq27(d.accessToken, userAccessToken)
       )
     });
     return device2;
@@ -18844,9 +22577,9 @@ ${contextJson}`;
             device2 = await findUserByGarminToken(userAccessToken);
           } else if (activity.userId) {
             device2 = await db.query.connectedDevices.findFirst({
-              where: (d, { and: and18, eq: eq22 }) => and18(
-                eq22(d.deviceType, "garmin"),
-                eq22(d.deviceId, activity.userId)
+              where: (d, { and: and23, eq: eq27 }) => and23(
+                eq27(d.deviceType, "garmin"),
+                eq27(d.deviceId, activity.userId)
               )
             });
           }
@@ -19057,7 +22790,19 @@ ${contextJson}`;
               });
               console.log(`[Garmin Webhook] Created new run record ${newRun.id} from Garmin activity ${activity.activityId}`);
             }
-            await db.update(garminActivities).set({ runId, isProcessed: true }).where(eq20(garminActivities.id, garminActivity.id));
+            await db.update(garminActivities).set({ runId, isProcessed: true }).where(eq25(garminActivities.id, garminActivity.id));
+            try {
+              const runForCache = await db.query.runs.findFirst({
+                where: (r, { eq: eq27 }) => eq27(r.id, runId)
+              });
+              if (runForCache) {
+                onRunSaved(device2.userId, runForCache).catch(
+                  (err) => console.error("[Garmin Webhook] onRunSaved failed:", err)
+                );
+              }
+            } catch (cacheErr) {
+              console.error("[Garmin Webhook] Error updating stats cache:", cacheErr);
+            }
             if (notificationType) {
               try {
                 const notificationResult = await sendActivityNotification(
@@ -19168,7 +22913,7 @@ ${contextJson}`;
           }
           console.log(`[Garmin Webhook] Processing detailed activity ${activityId} for user ${device2.userId}`);
           const existingActivity = await db.query.garminActivities.findFirst({
-            where: eq20(garminActivities.garminActivityId, String(activityId))
+            where: eq25(garminActivities.garminActivityId, String(activityId))
           });
           if (existingActivity) {
             const processedSamples = processSamples(samples);
@@ -19179,7 +22924,7 @@ ${contextJson}`;
               splits: detail.splits || null,
               isProcessed: true,
               aiAnalysisGenerated: false
-            }).where(eq20(garminActivities.id, existingActivity.id));
+            }).where(eq25(garminActivities.id, existingActivity.id));
             console.log(`[Garmin Webhook] Updated activity ${activityId} with ${samples.length} samples`);
             if (existingActivity.runId) {
               const paceData = extractPaceData2(samples);
@@ -19187,7 +22932,7 @@ ${contextJson}`;
               await db.update(runs).set({
                 paceData: paceData.length > 0 ? { samples: paceData } : null,
                 kmSplits: splits
-              }).where(eq20(runs.id, existingActivity.runId));
+              }).where(eq25(runs.id, existingActivity.runId));
               console.log(`[Garmin Webhook] Updated runs record ${existingActivity.runId} with detailed metrics`);
             }
           } else {
@@ -19244,7 +22989,7 @@ ${contextJson}`;
       }
       console.log(`[Garmin Webhook] Processing ${sleeps.length} sleep records`);
       const devices = await db.query.connectedDevices.findMany({
-        where: eq20(connectedDevices.deviceType, "garmin")
+        where: eq25(connectedDevices.deviceType, "garmin")
       });
       if (devices.length === 0) {
         console.warn("[Garmin Webhook] No active Garmin devices found for sleep");
@@ -19302,13 +23047,13 @@ ${contextJson}`;
             syncedAt: /* @__PURE__ */ new Date()
           };
           const existing = await db.query.garminWellnessMetrics.findFirst({
-            where: and16(
-              eq20(garminWellnessMetrics.userId, userId),
-              eq20(garminWellnessMetrics.date, date)
+            where: and21(
+              eq25(garminWellnessMetrics.userId, userId),
+              eq25(garminWellnessMetrics.date, date)
             )
           });
           if (existing) {
-            await db.update(garminWellnessMetrics).set(sleepData).where(eq20(garminWellnessMetrics.id, existing.id));
+            await db.update(garminWellnessMetrics).set(sleepData).where(eq25(garminWellnessMetrics.id, existing.id));
             console.log(`[Garmin Webhook] Updated sleep for ${date}: score=${sleep.overallSleepScore?.value}, quality=${sleep.overallSleepScore?.qualifierKey}, deep=${deepPercent.toFixed(0)}%, REM=${remPercent.toFixed(0)}%, naps=${(sleep.naps || []).length}`);
           } else {
             await db.insert(garminWellnessMetrics).values(sleepData);
@@ -19342,7 +23087,7 @@ ${contextJson}`;
       }
       console.log(`[Garmin Webhook] Processing ${stressData.length} stress records`);
       const devices = await db.query.connectedDevices.findMany({
-        where: eq20(connectedDevices.deviceType, "garmin")
+        where: eq25(connectedDevices.deviceType, "garmin")
       });
       if (devices.length === 0) {
         console.warn("[Garmin Webhook] No active Garmin devices found for stress");
@@ -19412,13 +23157,13 @@ ${contextJson}`;
             syncedAt: /* @__PURE__ */ new Date()
           };
           const existing = await db.query.garminWellnessMetrics.findFirst({
-            where: and16(
-              eq20(garminWellnessMetrics.userId, userId),
-              eq20(garminWellnessMetrics.date, date)
+            where: and21(
+              eq25(garminWellnessMetrics.userId, userId),
+              eq25(garminWellnessMetrics.date, date)
             )
           });
           if (existing) {
-            await db.update(garminWellnessMetrics).set(stressFields).where(eq20(garminWellnessMetrics.id, existing.id));
+            await db.update(garminWellnessMetrics).set(stressFields).where(eq25(garminWellnessMetrics.id, existing.id));
             console.log(`[Garmin Webhook] Updated stress for ${date}: avg=${avgStress.toFixed(0)}/100, battery=${avgBodyBattery.toFixed(0)}/100 (${stress.bodyBatteryDynamicFeedbackEvent?.bodyBatteryLevel}), events=${activityEvents.length}`);
           } else {
             await db.insert(garminWellnessMetrics).values(stressFields);
@@ -19494,13 +23239,13 @@ ${contextJson}`;
             syncedAt: /* @__PURE__ */ new Date()
           };
           const existing = await db.query.garminWellnessMetrics.findFirst({
-            where: and16(
-              eq20(garminWellnessMetrics.userId, device2.userId),
-              eq20(garminWellnessMetrics.date, date)
+            where: and21(
+              eq25(garminWellnessMetrics.userId, device2.userId),
+              eq25(garminWellnessMetrics.date, date)
             )
           });
           if (existing) {
-            await db.update(garminWellnessMetrics).set(hrvFields).where(eq20(garminWellnessMetrics.id, existing.id));
+            await db.update(garminWellnessMetrics).set(hrvFields).where(eq25(garminWellnessMetrics.id, existing.id));
             console.log(`[Garmin Webhook] Updated HRV for ${date}: avg=${hrv.lastNightAvg}, status=${statusQualifier}`);
           } else {
             await db.insert(garminWellnessMetrics).values({
@@ -19548,7 +23293,7 @@ ${contextJson}`;
             const resolution = await resolveGarminUser(daily);
             if (resolution) {
               device2 = resolution.device ?? await db.query.connectedDevices.findFirst({
-                where: (d, { eq: eq22 }) => eq22(d.userId, resolution.userId)
+                where: (d, { eq: eq27 }) => eq27(d.userId, resolution.userId)
               });
             }
           }
@@ -19622,13 +23367,13 @@ ${contextJson}`;
             syncedAt: /* @__PURE__ */ new Date()
           };
           const existing = await db.query.garminWellnessMetrics.findFirst({
-            where: and16(
-              eq20(garminWellnessMetrics.userId, device2.userId),
-              eq20(garminWellnessMetrics.date, date)
+            where: and21(
+              eq25(garminWellnessMetrics.userId, device2.userId),
+              eq25(garminWellnessMetrics.date, date)
             )
           });
           if (existing) {
-            await db.update(garminWellnessMetrics).set(dailyFields).where(eq20(garminWellnessMetrics.id, existing.id));
+            await db.update(garminWellnessMetrics).set(dailyFields).where(eq25(garminWellnessMetrics.id, existing.id));
             console.log(`[Garmin Webhook] Updated daily summary for ${date}`);
           } else {
             await db.insert(garminWellnessMetrics).values({
@@ -19701,7 +23446,7 @@ ${contextJson}`;
       }
       console.log(`[Garmin Webhook] Processing ${pulseOxData.length} pulse ox records`);
       const devices = await db.query.connectedDevices.findMany({
-        where: eq20(connectedDevices.deviceType, "garmin")
+        where: eq25(connectedDevices.deviceType, "garmin")
       });
       if (devices.length === 0) {
         console.warn("[Garmin Webhook] No active Garmin devices found for pulse ox");
@@ -19734,13 +23479,13 @@ ${contextJson}`;
             syncedAt: /* @__PURE__ */ new Date()
           };
           const existing = await db.query.garminWellnessMetrics.findFirst({
-            where: and16(
-              eq20(garminWellnessMetrics.userId, userId),
-              eq20(garminWellnessMetrics.date, date)
+            where: and21(
+              eq25(garminWellnessMetrics.userId, userId),
+              eq25(garminWellnessMetrics.date, date)
             )
           });
           if (existing) {
-            await db.update(garminWellnessMetrics).set(poxFields).where(eq20(garminWellnessMetrics.id, existing.id));
+            await db.update(garminWellnessMetrics).set(poxFields).where(eq25(garminWellnessMetrics.id, existing.id));
             console.log(`[Garmin Webhook] Updated pulse ox for ${date}: avg=${avgSpO2.toFixed(1)}%, min=${minSpO2}%, type=${pox.onDemand ? "on-demand" : "sleep"}`);
           } else {
             await db.insert(garminWellnessMetrics).values({
@@ -19778,7 +23523,7 @@ ${contextJson}`;
       }
       console.log(`[Garmin Webhook] Processing ${respirations.length} respiration records`);
       const devices = await db.query.connectedDevices.findMany({
-        where: eq20(connectedDevices.deviceType, "garmin")
+        where: eq25(connectedDevices.deviceType, "garmin")
       });
       if (devices.length === 0) {
         console.warn("[Garmin Webhook] No active Garmin devices found for respiration");
@@ -19815,13 +23560,13 @@ ${contextJson}`;
             syncedAt: /* @__PURE__ */ new Date()
           };
           const existing = await db.query.garminWellnessMetrics.findFirst({
-            where: and16(
-              eq20(garminWellnessMetrics.userId, userId),
-              eq20(garminWellnessMetrics.date, date)
+            where: and21(
+              eq25(garminWellnessMetrics.userId, userId),
+              eq25(garminWellnessMetrics.date, date)
             )
           });
           if (existing) {
-            await db.update(garminWellnessMetrics).set(respFields).where(eq20(garminWellnessMetrics.id, existing.id));
+            await db.update(garminWellnessMetrics).set(respFields).where(eq25(garminWellnessMetrics.id, existing.id));
             console.log(`[Garmin Webhook] Updated respiration for ${date}: avg=${avgResp.toFixed(1)} bpm, range=${minResp}-${maxResp}`);
           } else {
             await db.insert(garminWellnessMetrics).values({
@@ -19871,11 +23616,11 @@ ${contextJson}`;
           const deviceName = device2.deviceName || "Garmin Device";
           console.log(`[Garmin Webhook] Processing deregistration for user ${userId}, device: ${deviceName}`);
           console.log(`[Garmin] Deleting Garmin data for user ${userId}...`);
-          await db.delete(garminActivities).where(eq20(garminActivities.userId, userId));
-          await db.delete(garminEpochsRaw).where(eq20(garminEpochsRaw.userId, userId));
-          await db.delete(garminEpochsAggregate).where(eq20(garminEpochsAggregate.userId, userId));
-          await db.delete(garminHealthSnapshots).where(eq20(garminHealthSnapshots.userId, userId));
-          await db.delete(garminWellnessMetrics).where(eq20(garminWellnessMetrics.userId, userId));
+          await db.delete(garminActivities).where(eq25(garminActivities.userId, userId));
+          await db.delete(garminEpochsRaw).where(eq25(garminEpochsRaw.userId, userId));
+          await db.delete(garminEpochsAggregate).where(eq25(garminEpochsAggregate.userId, userId));
+          await db.delete(garminHealthSnapshots).where(eq25(garminHealthSnapshots.userId, userId));
+          await db.delete(garminWellnessMetrics).where(eq25(garminWellnessMetrics.userId, userId));
           console.log(`[Garmin] Deleted all Garmin data for user ${userId}`);
           await db.update(connectedDevices).set({
             isActive: false,
@@ -19884,7 +23629,7 @@ ${contextJson}`;
             tokenExpiresAt: null,
             grantedScopes: null,
             updatedAt: /* @__PURE__ */ new Date()
-          }).where(eq20(connectedDevices.id, device2.id));
+          }).where(eq25(connectedDevices.id, device2.id));
           console.log(`[Garmin Webhook] Marked device as inactive for user ${userId}`);
           const { sendNotification } = await Promise.resolve().then(() => (init_notification_service(), notification_service_exports));
           try {
@@ -19922,7 +23667,7 @@ ${contextJson}`;
   app2.get("/api/garmin/webhooks/queue/stats", authMiddleware, async (req, res) => {
     try {
       const user = await db.query.users.findFirst({
-        where: eq20(users.id, req.user.userId)
+        where: eq25(users.id, req.user.userId)
       });
       if (!user?.isAdmin) {
         return res.status(403).json({ error: "Admin access required" });
@@ -19942,7 +23687,7 @@ ${contextJson}`;
   app2.get("/api/garmin/webhooks/queue/items", authMiddleware, async (req, res) => {
     try {
       const user = await db.query.users.findFirst({
-        where: eq20(users.id, req.user.userId)
+        where: eq25(users.id, req.user.userId)
       });
       if (!user?.isAdmin) {
         return res.status(403).json({ error: "Admin access required" });
@@ -19950,7 +23695,7 @@ ${contextJson}`;
       const { webhookFailureQueue: webhookFailureQueue3 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
       const items = await db.query.webhookFailureQueue.findMany({
         limit: 100,
-        orderBy: (t, { desc: desc9 }) => [desc9(t.createdAt)]
+        orderBy: (t, { desc: desc11 }) => [desc11(t.createdAt)]
       });
       res.json({
         success: true,
@@ -19965,7 +23710,7 @@ ${contextJson}`;
   app2.post("/api/garmin/webhooks/queue/retry/:webhookId", authMiddleware, async (req, res) => {
     try {
       const user = await db.query.users.findFirst({
-        where: eq20(users.id, req.user.userId)
+        where: eq25(users.id, req.user.userId)
       });
       if (!user?.isAdmin) {
         return res.status(403).json({ error: "Admin access required" });
@@ -19988,7 +23733,7 @@ ${contextJson}`;
   app2.post("/api/garmin/webhooks/queue/process", authMiddleware, async (req, res) => {
     try {
       const user = await db.query.users.findFirst({
-        where: eq20(users.id, req.user.userId)
+        where: eq25(users.id, req.user.userId)
       });
       if (!user?.isAdmin) {
         return res.status(403).json({ error: "Admin access required" });
@@ -20153,7 +23898,7 @@ ${contextJson}`;
       let userId = payload.userId;
       if (!userId && payload.userAccessToken) {
         const device2 = await db.query.connectedDevices.findFirst({
-          where: eq20(connectedDevices.accessToken, payload.userAccessToken)
+          where: eq25(connectedDevices.accessToken, payload.userAccessToken)
         });
         userId = device2?.deviceId;
       }
@@ -20195,7 +23940,7 @@ ${contextJson}`;
           const startTime = new Date((moveiq.startTimeInSeconds || 0) * 1e3);
           const calendarDate = moveiq.calendarDate || startTime.toISOString().split("T")[0];
           const devices = await db.query.connectedDevices.findMany({
-            where: eq20(connectedDevices.deviceType, "garmin")
+            where: eq25(connectedDevices.deviceType, "garmin")
           });
           if (devices.length === 0) {
             console.warn("[Garmin Webhook] No active Garmin devices found for MoveIQ");
@@ -20203,14 +23948,14 @@ ${contextJson}`;
           }
           for (const device2 of devices) {
             const matchingActivity = await db.query.garminActivities.findFirst({
-              where: and16(
-                eq20(garminActivities.userId, device2.userId),
-                eq20(sql10`DATE(to_timestamp(${garminActivities.startTimeInSeconds}))`, sql10`${calendarDate}::date`)
+              where: and21(
+                eq25(garminActivities.userId, device2.userId),
+                eq25(sql13`DATE(to_timestamp(${garminActivities.startTimeInSeconds}))`, sql13`${calendarDate}::date`)
               )
             });
             if (!matchingActivity) continue;
             const existingMoveiq = await db.query.garminMoveIQ.findFirst({
-              where: eq20(garminMoveIQ.summaryId, summaryId)
+              where: eq25(garminMoveIQ.summaryId, summaryId)
             });
             if (existingMoveiq) {
               await db.update(garminMoveIQ).set({
@@ -20218,7 +23963,7 @@ ${contextJson}`;
                 activitySubType,
                 detectedAt: /* @__PURE__ */ new Date(),
                 rawData: moveiq
-              }).where(eq20(garminMoveIQ.id, existingMoveiq.id));
+              }).where(eq25(garminMoveIQ.id, existingMoveiq.id));
               console.log(`[Garmin Webhook] Updated MoveIQ classification: ${activityType} - ${activitySubType}`);
             } else {
               await db.insert(garminMoveIQ).values({
@@ -20238,7 +23983,7 @@ ${contextJson}`;
             }
             await db.update(garminActivities).set({
               activitySubType
-            }).where(eq20(garminActivities.id, matchingActivity.id));
+            }).where(eq25(garminActivities.id, matchingActivity.id));
             if (matchingActivity.runId) {
               console.log(`[Garmin Webhook] Linked MoveIQ to run ${matchingActivity.runId}`);
             }
@@ -20280,18 +24025,18 @@ ${contextJson}`;
           }
           const measurementTime = new Date((bp.measurementTimeInSeconds || 0) * 1e3);
           const devices = await db.query.connectedDevices.findMany({
-            where: eq20(connectedDevices.deviceType, "garmin")
+            where: eq25(connectedDevices.deviceType, "garmin")
           });
           let userId;
           for (const device2 of devices) {
             const recentActivity = await db.query.runs.findFirst({
-              where: and16(
-                eq20(runs.userId, device2.userId),
-                gte10(runs.completedAt, new Date(measurementTime.getTime() - 24 * 60 * 60 * 1e3)),
+              where: and21(
+                eq25(runs.userId, device2.userId),
+                gte11(runs.completedAt, new Date(measurementTime.getTime() - 24 * 60 * 60 * 1e3)),
                 // Within 24 hours
                 lte5(runs.completedAt, new Date(measurementTime.getTime() + 24 * 60 * 60 * 1e3))
               ),
-              orderBy: desc8(runs.completedAt),
+              orderBy: desc10(runs.completedAt),
               limit: 1
             });
             if (recentActivity) {
@@ -20313,7 +24058,7 @@ ${contextJson}`;
           const classification = classifyBloodPressure2(bp.systolic, bp.diastolic);
           console.log(`[Garmin Webhook] Processing blood pressure for user ${userId}: ${bp.systolic}/${bp.diastolic} (${classification})`);
           const existing = await db.query.garminBloodPressure.findFirst({
-            where: eq20(garminBloodPressure.summaryId, summaryId)
+            where: eq25(garminBloodPressure.summaryId, summaryId)
           });
           if (existing) {
             await db.update(garminBloodPressure).set({
@@ -20322,7 +24067,7 @@ ${contextJson}`;
               pulse: bp.pulse,
               classification,
               rawData: bp
-            }).where(eq20(garminBloodPressure.id, existing.id));
+            }).where(eq25(garminBloodPressure.id, existing.id));
             console.log(`[Garmin Webhook] Updated blood pressure reading: ${bp.systolic}/${bp.diastolic}`);
           } else {
             await db.insert(garminBloodPressure).values({
@@ -20375,7 +24120,7 @@ ${contextJson}`;
       }
       console.log(`[Garmin Webhook] Processing ${epochs.length} epochs`);
       const devices = await db.query.connectedDevices.findMany({
-        where: eq20(connectedDevices.deviceType, "garmin")
+        where: eq25(connectedDevices.deviceType, "garmin")
       });
       if (devices.length === 0) {
         console.warn("[Garmin Webhook] No active Garmin devices found for epochs");
@@ -20386,9 +24131,9 @@ ${contextJson}`;
       for (const device2 of devices) {
         try {
           const existingAggregate = await db.query.garminEpochsAggregate.findFirst({
-            where: and16(
-              eq20(garminEpochsAggregate.userId, device2.userId),
-              eq20(garminEpochsAggregate.epochDate, epochDate)
+            where: and21(
+              eq25(garminEpochsAggregate.userId, device2.userId),
+              eq25(garminEpochsAggregate.epochDate, epochDate)
             )
           });
           if (existingAggregate?.compressedAt) {
@@ -20471,7 +24216,7 @@ ${contextJson}`;
               totalDistance,
               totalPushDistance,
               totalEpochs: epochs.length
-            }).where(eq20(garminEpochsAggregate.id, existingAggregate.id));
+            }).where(eq25(garminEpochsAggregate.id, existingAggregate.id));
             console.log(`[Garmin Webhook] Updated epochs aggregate for ${device2.userId}, date: ${epochDate}`);
           } else {
             await db.insert(garminEpochsAggregate).values({
@@ -20526,7 +24271,7 @@ ${contextJson}`;
       }
       console.log(`[Garmin Webhook] Processing ${snapshots.length} health snapshots`);
       const devices = await db.query.connectedDevices.findMany({
-        where: eq20(connectedDevices.deviceType, "garmin")
+        where: eq25(connectedDevices.deviceType, "garmin")
       });
       if (devices.length === 0) {
         console.warn("[Garmin Webhook] No active Garmin devices found for health snapshots");
@@ -20538,9 +24283,9 @@ ${contextJson}`;
           let userId;
           for (const device2 of devices) {
             const recentRun = await db.query.runs.findFirst({
-              where: and16(
-                eq20(runs.userId, device2.userId),
-                gte10(runs.completedAt, new Date((snapshot.startTimeInSeconds || 0) * 1e3 - 24 * 60 * 60 * 1e3)),
+              where: and21(
+                eq25(runs.userId, device2.userId),
+                gte11(runs.completedAt, new Date((snapshot.startTimeInSeconds || 0) * 1e3 - 24 * 60 * 60 * 1e3)),
                 lte5(runs.completedAt, new Date((snapshot.startTimeInSeconds || 0) * 1e3 + 24 * 60 * 60 * 1e3))
               ),
               limit: 1
@@ -20598,7 +24343,7 @@ ${contextJson}`;
             }
           }
           const existing = await db.query.garminHealthSnapshots.findFirst({
-            where: eq20(garminHealthSnapshots.summaryId, snapshot.summaryId)
+            where: eq25(garminHealthSnapshots.summaryId, snapshot.summaryId)
           });
           if (existing) {
             await db.update(garminHealthSnapshots).set({
@@ -20619,7 +24364,7 @@ ${contextJson}`;
               respAvgValue: respData.avg,
               respEpochs: respData.epochs,
               rawData: snapshot
-            }).where(eq20(garminHealthSnapshots.id, existing.id));
+            }).where(eq25(garminHealthSnapshots.id, existing.id));
             console.log(`[Garmin Webhook] Updated health snapshot ${snapshot.summaryId}`);
           } else {
             await db.insert(garminHealthSnapshots).values({
@@ -20679,7 +24424,7 @@ ${contextJson}`;
       }
       console.log(`[Garmin Webhook] Processing ${metricsData.length} user metrics records`);
       const devices = await db.query.connectedDevices.findMany({
-        where: eq20(connectedDevices.deviceType, "garmin")
+        where: eq25(connectedDevices.deviceType, "garmin")
       });
       if (devices.length === 0) {
         console.warn("[Garmin Webhook] No active Garmin devices found for user metrics");
@@ -20691,9 +24436,9 @@ ${contextJson}`;
           let userId;
           for (const device2 of devices) {
             const recentRun = await db.query.runs.findFirst({
-              where: and16(
-                eq20(runs.userId, device2.userId),
-                gte10(runs.completedAt, /* @__PURE__ */ new Date(`${date}T00:00:00`)),
+              where: and21(
+                eq25(runs.userId, device2.userId),
+                gte11(runs.completedAt, /* @__PURE__ */ new Date(`${date}T00:00:00`)),
                 lte5(runs.completedAt, /* @__PURE__ */ new Date(`${date}T23:59:59`))
               ),
               limit: 1
@@ -20745,13 +24490,13 @@ ${contextJson}`;
             syncedAt: /* @__PURE__ */ new Date()
           };
           const existing = await db.query.garminWellnessMetrics.findFirst({
-            where: and16(
-              eq20(garminWellnessMetrics.userId, userId),
-              eq20(garminWellnessMetrics.date, date)
+            where: and21(
+              eq25(garminWellnessMetrics.userId, userId),
+              eq25(garminWellnessMetrics.date, date)
             )
           });
           if (existing) {
-            await db.update(garminWellnessMetrics).set(metricsFields).where(eq20(garminWellnessMetrics.id, existing.id));
+            await db.update(garminWellnessMetrics).set(metricsFields).where(eq25(garminWellnessMetrics.id, existing.id));
             console.log(`[Garmin Webhook] Updated user metrics for ${date}: VO2Max=${metrics.vo2Max} (${vo2MaxCategory}), FitnessAge=${metrics.fitnessAge} (${fitnessAgeCategory})`);
           } else {
             await db.insert(garminWellnessMetrics).values(metricsFields);
@@ -20785,7 +24530,7 @@ ${contextJson}`;
       }
       console.log(`[Garmin Webhook] Processing ${temperatureData.length} skin temperature records`);
       const devices = await db.query.connectedDevices.findMany({
-        where: eq20(connectedDevices.deviceType, "garmin")
+        where: eq25(connectedDevices.deviceType, "garmin")
       });
       if (devices.length === 0) {
         console.warn("[Garmin Webhook] No active Garmin devices found for skin temperature");
@@ -20797,9 +24542,9 @@ ${contextJson}`;
           let userId;
           for (const device2 of devices) {
             const recentRun = await db.query.runs.findFirst({
-              where: and16(
-                eq20(runs.userId, device2.userId),
-                gte10(runs.completedAt, /* @__PURE__ */ new Date(`${date}T00:00:00`)),
+              where: and21(
+                eq25(runs.userId, device2.userId),
+                gte11(runs.completedAt, /* @__PURE__ */ new Date(`${date}T00:00:00`)),
                 lte5(runs.completedAt, /* @__PURE__ */ new Date(`${date}T23:59:59`))
               ),
               limit: 1
@@ -20824,9 +24569,9 @@ ${contextJson}`;
             trendType = "COOLING";
           }
           const existing = await db.query.garminSkinTemperature.findFirst({
-            where: and16(
-              eq20(garminSkinTemperature.userId, userId),
-              eq20(garminSkinTemperature.date, date)
+            where: and21(
+              eq25(garminSkinTemperature.userId, userId),
+              eq25(garminSkinTemperature.date, date)
             )
           });
           const tempFields = {
@@ -20844,7 +24589,7 @@ ${contextJson}`;
             syncedAt: /* @__PURE__ */ new Date()
           };
           if (existing) {
-            await db.update(garminSkinTemperature).set(tempFields).where(eq20(garminSkinTemperature.id, existing.id));
+            await db.update(garminSkinTemperature).set(tempFields).where(eq25(garminSkinTemperature.id, existing.id));
             console.log(`[Garmin Webhook] Updated skin temperature for ${date}: deviation=${deviationValue.toFixed(2)}\xB0C (calculated=${calculatedTemp.toFixed(1)}\xB0C), trend=${trendType}`);
           } else {
             await db.insert(garminSkinTemperature).values(tempFields);
@@ -20881,7 +24626,7 @@ ${contextJson}`;
       }
       console.log(`[Garmin Webhook] Processing ${cycleData.length} menstrual cycle records`);
       const devices = await db.query.connectedDevices.findMany({
-        where: eq20(connectedDevices.deviceType, "garmin")
+        where: eq25(connectedDevices.deviceType, "garmin")
       });
       if (devices.length === 0) {
         console.warn("[Garmin Webhook] No active Garmin devices found for menstrual cycle");
@@ -20893,9 +24638,9 @@ ${contextJson}`;
           let userId;
           for (const device2 of devices) {
             const recentRun = await db.query.runs.findFirst({
-              where: and16(
-                eq20(runs.userId, device2.userId),
-                gte10(runs.completedAt, /* @__PURE__ */ new Date(`${date}T00:00:00`)),
+              where: and21(
+                eq25(runs.userId, device2.userId),
+                gte11(runs.completedAt, /* @__PURE__ */ new Date(`${date}T00:00:00`)),
                 lte5(runs.completedAt, new Date((/* @__PURE__ */ new Date(`${date}T00:00:00`)).getTime() + 30 * 24 * 60 * 60 * 1e3))
                 // 30 days after
               ),
@@ -20973,14 +24718,14 @@ ${contextJson}`;
             });
           }
           const existingCycle = await db.query.garminWellnessMetrics.findFirst({
-            where: and16(
-              eq20(garminWellnessMetrics.userId, userId)
+            where: and21(
+              eq25(garminWellnessMetrics.userId, userId)
             ),
-            orderBy: (table) => desc8(table.createdAt),
+            orderBy: (table) => desc10(table.createdAt),
             limit: 1
           });
           if (existingCycle && existingCycle.cycleStartDate === cycle.periodStartDate) {
-            await db.update(garminWellnessMetrics).set(cycleFields).where(eq20(garminWellnessMetrics.id, existingCycle.id));
+            await db.update(garminWellnessMetrics).set(cycleFields).where(eq25(garminWellnessMetrics.id, existingCycle.id));
             if (cycle.pregnancySnapshot) {
               console.log(`[Garmin Webhook] Updated pregnancy for user ${userId}: ${pregnancy.title}, ${weeksOfPregnancy} weeks, due ${pregnancy.dueDate}`);
             } else {
@@ -21014,10 +24759,10 @@ ${contextJson}`;
     }
   });
   async function calculateWeatherImpact(userId, runs3) {
-    if (runs3.length < 3) {
+    if (runs3.length < 2) {
       return { hasEnoughData: false, runsAnalyzed: runs3.length, overallAvgPace: null };
     }
-    const parsePace = (paceStr) => {
+    const parsePace2 = (paceStr) => {
       if (!paceStr) return null;
       const match = paceStr.match(/(\d+):(\d+)/);
       if (match) {
@@ -21025,7 +24770,7 @@ ${contextJson}`;
       }
       return null;
     };
-    const paces = runs3.map((r) => parsePace(r.avgPace)).filter((p) => p !== null);
+    const paces = runs3.map((r) => parsePace2(r.avgPace)).filter((p) => p !== null);
     if (paces.length === 0) {
       return { hasEnoughData: false, runsAnalyzed: runs3.length, overallAvgPace: null };
     }
@@ -21041,7 +24786,7 @@ ${contextJson}`;
     const tempBuckets = {};
     const humidityBuckets = {};
     runs3.forEach((run) => {
-      const pace = parsePace(run.avgPace);
+      const pace = parsePace2(run.avgPace);
       if (!pace) return;
       if (run.completedAt) {
         const date = new Date(run.completedAt);
@@ -21129,13 +24874,45 @@ ${contextJson}`;
     })).sort((a, b) => (b.paceVsAvg || 0) - (a.paceVsAvg || 0));
     const validTimeAnalysis = timeOfDayAnalysis.filter((t) => t.paceVsAvg !== null);
     const validConditionAnalysis = conditionAnalysis.filter((c) => c.paceVsAvg !== null);
+    const validTemperatureAnalysis = temperatureAnalysis.filter((t) => t.paceVsAvg !== null);
     const validHumidityAnalysis = humidityAnalysis.filter((h) => h.paceVsAvg !== null);
     const bestTime = validTimeAnalysis.find((t) => t.paceVsAvg < 0);
     const worstTime = validTimeAnalysis.find((t) => t.paceVsAvg > 0);
     const bestCondition = validConditionAnalysis.find((c) => c.paceVsAvg < 0);
     const worstCondition = validConditionAnalysis.find((c) => c.paceVsAvg > 0);
+    const bestTemperature = validTemperatureAnalysis.find((t) => t.paceVsAvg < 0);
+    const worstTemperature = validTemperatureAnalysis.find((t) => t.paceVsAvg > 0);
     const bestHumidity = validHumidityAnalysis.find((h) => h.paceVsAvg < 0);
     const worstHumidity = validHumidityAnalysis.find((h) => h.paceVsAvg > 0);
+    const strengths = [];
+    if (bestTime) {
+      strengths.push({
+        label: bestTime.label,
+        type: "time_of_day",
+        improvement: Math.abs(bestTime.paceVsAvg).toFixed(1)
+      });
+    }
+    if (bestCondition) {
+      strengths.push({
+        label: bestCondition.condition,
+        type: "condition",
+        improvement: Math.abs(bestCondition.paceVsAvg).toFixed(0)
+      });
+    }
+    if (bestTemperature) {
+      strengths.push({
+        label: bestTemperature.label,
+        type: "temperature",
+        improvement: Math.abs(bestTemperature.paceVsAvg).toFixed(1)
+      });
+    }
+    if (bestHumidity) {
+      strengths.push({
+        label: bestHumidity.label,
+        type: "humidity",
+        improvement: Math.abs(bestHumidity.paceVsAvg).toFixed(1)
+      });
+    }
     return {
       hasEnoughData: true,
       runsAnalyzed: runs3.length,
@@ -21145,6 +24922,17 @@ ${contextJson}`;
       humidityAnalysis,
       timeOfDayAnalysis,
       insights: {
+        strengths: strengths.length > 0 ? strengths : void 0,
+        bestTime: bestTime ? {
+          label: bestTime.label,
+          type: "time_of_day",
+          improvement: Math.abs(bestTime.paceVsAvg).toFixed(1)
+        } : void 0,
+        worstTime: worstTime ? {
+          label: worstTime.label,
+          type: "time_of_day",
+          slowdown: Math.abs(worstTime.paceVsAvg).toFixed(1)
+        } : void 0,
         bestCondition: bestCondition ? {
           label: bestCondition.condition,
           type: "condition",
@@ -21154,6 +24942,16 @@ ${contextJson}`;
           label: worstCondition.condition,
           type: "condition",
           slowdown: Math.abs(worstCondition.paceVsAvg).toFixed(0)
+        } : void 0,
+        bestTemperature: bestTemperature ? {
+          label: bestTemperature.label,
+          type: "temperature",
+          improvement: Math.abs(bestTemperature.paceVsAvg).toFixed(1)
+        } : void 0,
+        worstTemperature: worstTemperature ? {
+          label: worstTemperature.label,
+          type: "temperature",
+          slowdown: Math.abs(worstTemperature.paceVsAvg).toFixed(1)
         } : void 0,
         bestHumidity: bestHumidity ? {
           label: bestHumidity.label,
@@ -21180,9 +24978,9 @@ ${contextJson}`;
       const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
       let wellness = {};
       const todayWellness = await db.query.garminWellnessMetrics.findFirst({
-        where: (m, { and: and18, eq: eq22 }) => and18(
-          eq22(m.userId, req.user.userId),
-          eq22(m.date, today)
+        where: (m, { and: and23, eq: eq27 }) => and23(
+          eq27(m.userId, req.user.userId),
+          eq27(m.date, today)
         )
       });
       if (todayWellness) {
@@ -21203,8 +25001,8 @@ ${contextJson}`;
       let weatherImpactData = null;
       try {
         const runs3 = await db.query.runs.findMany({
-          where: eq20(runs3.userId, req.user.userId),
-          orderBy: desc8(runs3.completedAt),
+          where: eq25(runs3.userId, req.user.userId),
+          orderBy: desc10(runs3.completedAt),
           limit: 30
         });
         if (runs3.length >= 3) {
@@ -21338,9 +25136,9 @@ ${contextJson}`;
         try {
           const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
           const todayWellness = await db.query.garminWellnessMetrics.findFirst({
-            where: (m, { and: and18, eq: eq22 }) => and18(
-              eq22(m.userId, req.user.userId),
-              eq22(m.date, today)
+            where: (m, { and: and23, eq: eq27 }) => and23(
+              eq27(m.userId, req.user.userId),
+              eq27(m.date, today)
             )
           });
           if (todayWellness) {
@@ -21364,7 +25162,7 @@ ${contextJson}`;
             distance || 5
           );
         } catch (e) {
-          console.log("Weather impact analysis failed");
+          console.warn("[Pre-run briefing] Weather impact analysis failed (non-fatal):", e?.message || e);
         }
       }
       const aiService = await Promise.resolve().then(() => (init_ai_service(), ai_service_exports));
@@ -21687,9 +25485,9 @@ ${contextJson}`;
       if (!context.wellness) {
         const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
         const todayWellness = await db.query.garminWellnessMetrics.findFirst({
-          where: (m, { and: and18, eq: eq22 }) => and18(
-            eq22(m.userId, req.user.userId),
-            eq22(m.date, today)
+          where: (m, { and: and23, eq: eq27 }) => and23(
+            eq27(m.userId, req.user.userId),
+            eq27(m.date, today)
           )
         });
         if (todayWellness) {
@@ -21743,9 +25541,9 @@ ${contextJson}`;
       const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
       let wellness = void 0;
       const todayWellness = await db.query.garminWellnessMetrics.findFirst({
-        where: (m, { and: and18, eq: eq22 }) => and18(
-          eq22(m.userId, req.user.userId),
-          eq22(m.date, today)
+        where: (m, { and: and23, eq: eq27 }) => and23(
+          eq27(m.userId, req.user.userId),
+          eq27(m.date, today)
         )
       });
       if (todayWellness) {
@@ -21822,6 +25620,15 @@ ${contextJson}`;
         { expiresIn: "30d" }
       );
       console.log(`[Companion] User ${user.email} authenticated from device ${deviceModel || deviceId}`);
+      const now = /* @__PURE__ */ new Date();
+      const watchAppUpdate = {
+        hasGarminWatchApp: true,
+        garminWatchAppLastSeenAt: now
+      };
+      if (!user.hasGarminWatchApp) {
+        watchAppUpdate.garminWatchAppFirstSeenAt = now;
+      }
+      await db.update(users).set(watchAppUpdate).where(eq25(users.id, user.id));
       res.json({
         success: true,
         token,
@@ -21863,7 +25670,7 @@ ${contextJson}`;
       if (!sessionId) {
         return res.status(400).json({ error: "Session ID required" });
       }
-      const existing = await db.select().from(garminCompanionSessions).where(eq20(garminCompanionSessions.sessionId, sessionId)).limit(1);
+      const existing = await db.select().from(garminCompanionSessions).where(eq25(garminCompanionSessions.sessionId, sessionId)).limit(1);
       if (existing.length > 0) {
         return res.json({ success: true, session: existing[0], message: "Session already exists" });
       }
@@ -21894,11 +25701,11 @@ ${contextJson}`;
       if (!sessionId || !runId) {
         return res.status(400).json({ error: "Session ID and Run ID required" });
       }
-      const [updated] = await db.update(garminCompanionSessions).set({ runId }).where(and16(
-        eq20(garminCompanionSessions.sessionId, sessionId),
-        eq20(garminCompanionSessions.userId, userId)
+      const [updated] = await db.update(garminCompanionSessions).set({ runId }).where(and21(
+        eq25(garminCompanionSessions.sessionId, sessionId),
+        eq25(garminCompanionSessions.userId, userId)
       )).returning();
-      await db.update(garminRealtimeData).set({ runId }).where(eq20(garminRealtimeData.sessionId, sessionId));
+      await db.update(garminRealtimeData).set({ runId }).where(eq25(garminRealtimeData.sessionId, sessionId));
       console.log(`[Companion] Session ${sessionId} linked to run ${runId}`);
       res.json({ success: true, session: updated });
     } catch (error) {
@@ -21914,7 +25721,7 @@ ${contextJson}`;
       if (!data.sessionId) {
         return res.status(400).json({ error: "Session ID required" });
       }
-      const sessions = await db.select().from(garminCompanionSessions).where(eq20(garminCompanionSessions.sessionId, data.sessionId)).limit(1);
+      const sessions = await db.select().from(garminCompanionSessions).where(eq25(garminCompanionSessions.sessionId, data.sessionId)).limit(1);
       const session = sessions[0];
       const runId = session?.runId || null;
       const [inserted] = await db.insert(garminRealtimeData).values({
@@ -21947,8 +25754,8 @@ ${contextJson}`;
       }).returning();
       await db.update(garminCompanionSessions).set({
         lastDataAt: /* @__PURE__ */ new Date(),
-        dataPointCount: sql10`data_point_count + 1`
-      }).where(eq20(garminCompanionSessions.sessionId, data.sessionId));
+        dataPointCount: sql13`data_point_count + 1`
+      }).where(eq25(garminCompanionSessions.sessionId, data.sessionId));
       const pendingCue = pendingCues.get(data.sessionId);
       if (pendingCue) {
         pendingCues.delete(data.sessionId);
@@ -21993,17 +25800,17 @@ ${contextJson}`;
       const userId = req.user.userId;
       let { sessionId } = req.query;
       if (!sessionId) {
-        const [active] = await db.select().from(garminCompanionSessions).where(and16(
-          eq20(garminCompanionSessions.userId, userId),
-          eq20(garminCompanionSessions.status, "active")
-        )).orderBy(sql10`started_at DESC`).limit(1);
+        const [active] = await db.select().from(garminCompanionSessions).where(and21(
+          eq25(garminCompanionSessions.userId, userId),
+          eq25(garminCompanionSessions.status, "active")
+        )).orderBy(sql13`started_at DESC`).limit(1);
         sessionId = active?.sessionId;
       }
       if (!sessionId) {
         return res.json({ active: false, metrics: null, session: null });
       }
-      const [latest] = await db.select().from(garminRealtimeData).where(eq20(garminRealtimeData.sessionId, sessionId)).orderBy(sql10`timestamp DESC`).limit(1);
-      const [session] = await db.select().from(garminCompanionSessions).where(eq20(garminCompanionSessions.sessionId, sessionId)).limit(1);
+      const [latest] = await db.select().from(garminRealtimeData).where(eq25(garminRealtimeData.sessionId, sessionId)).orderBy(sql13`timestamp DESC`).limit(1);
+      const [session] = await db.select().from(garminCompanionSessions).where(eq25(garminCompanionSessions.sessionId, sessionId)).limit(1);
       res.json({
         active: !!session,
         sessionId,
@@ -22024,7 +25831,7 @@ ${contextJson}`;
       if (!sessionId || !Array.isArray(dataPoints) || dataPoints.length === 0) {
         return res.status(400).json({ error: "Session ID and data points array required" });
       }
-      const sessions = await db.select().from(garminCompanionSessions).where(eq20(garminCompanionSessions.sessionId, sessionId)).limit(1);
+      const sessions = await db.select().from(garminCompanionSessions).where(eq25(garminCompanionSessions.sessionId, sessionId)).limit(1);
       const session = sessions[0];
       const runId = session?.runId || null;
       const values = dataPoints.map((data) => ({
@@ -22058,8 +25865,8 @@ ${contextJson}`;
       await db.insert(garminRealtimeData).values(values);
       await db.update(garminCompanionSessions).set({
         lastDataAt: /* @__PURE__ */ new Date(),
-        dataPointCount: sql10`data_point_count + ${dataPoints.length}`
-      }).where(eq20(garminCompanionSessions.sessionId, sessionId));
+        dataPointCount: sql13`data_point_count + ${dataPoints.length}`
+      }).where(eq25(garminCompanionSessions.sessionId, sessionId));
       console.log(`[Companion] Batch insert ${dataPoints.length} points for session ${sessionId}`);
       res.json({ success: true, count: dataPoints.length });
     } catch (error) {
@@ -22074,9 +25881,9 @@ ${contextJson}`;
       if (!sessionId || !status) {
         return res.status(400).json({ error: "Session ID and status required" });
       }
-      const [updated] = await db.update(garminCompanionSessions).set({ status }).where(and16(
-        eq20(garminCompanionSessions.sessionId, sessionId),
-        eq20(garminCompanionSessions.userId, userId)
+      const [updated] = await db.update(garminCompanionSessions).set({ status }).where(and21(
+        eq25(garminCompanionSessions.sessionId, sessionId),
+        eq25(garminCompanionSessions.userId, userId)
       )).returning();
       console.log(`[Companion] Session ${sessionId} status changed to ${status}`);
       res.json({ success: true, session: updated });
@@ -22094,7 +25901,7 @@ ${contextJson}`;
       }
       let stats = summary || {};
       if (!summary) {
-        const dataPoints = await db.select().from(garminRealtimeData).where(eq20(garminRealtimeData.sessionId, sessionId)).orderBy(garminRealtimeData.timestamp);
+        const dataPoints = await db.select().from(garminRealtimeData).where(eq25(garminRealtimeData.sessionId, sessionId)).orderBy(garminRealtimeData.timestamp);
         if (dataPoints.length > 0) {
           const heartRates = dataPoints.filter((d) => d.heartRate).map((d) => d.heartRate);
           const cadences = dataPoints.filter((d) => d.cadence).map((d) => d.cadence);
@@ -22123,12 +25930,66 @@ ${contextJson}`;
         avgPace: stats.avgPace,
         totalAscent: stats.totalAscent,
         totalDescent: stats.totalDescent
-      }).where(and16(
-        eq20(garminCompanionSessions.sessionId, sessionId),
-        eq20(garminCompanionSessions.userId, userId)
+      }).where(and21(
+        eq25(garminCompanionSessions.sessionId, sessionId),
+        eq25(garminCompanionSessions.userId, userId)
       )).returning();
       console.log(`[Companion] Session ${sessionId} ended - ${stats.totalDistance?.toFixed(0) || 0}m in ${stats.totalDuration || 0}s`);
-      res.json({ success: true, session: updated, summary: stats });
+      let newRunId = null;
+      try {
+        const distanceKm = stats.totalDistance ? stats.totalDistance / 1e3 : 0;
+        const durationSecs = stats.totalDuration || 0;
+        if (distanceKm >= 0.1 && durationSecs >= 30) {
+          let avgPaceStr = null;
+          if (stats.avgPace && stats.avgPace > 0) {
+            const totalSecs = Math.round(stats.avgPace);
+            const mins = Math.floor(totalSecs / 60);
+            const secs = totalSecs % 60;
+            avgPaceStr = `${mins}:${secs.toString().padStart(2, "0")}`;
+          }
+          const now = /* @__PURE__ */ new Date();
+          const [newRun] = await db.insert(runs).values({
+            userId,
+            distance: distanceKm,
+            duration: durationSecs,
+            avgPace: avgPaceStr,
+            avgHeartRate: stats.avgHeartRate ?? null,
+            maxHeartRate: stats.maxHeartRate ?? null,
+            cadence: stats.avgCadence ?? null,
+            elevationGain: stats.totalAscent ?? null,
+            elevationLoss: stats.totalDescent ?? null,
+            elevation: stats.totalAscent ?? null,
+            name: `Garmin Watch Run`,
+            runDate: now.toISOString().split("T")[0],
+            runTime: now.toTimeString().split(" ")[0].slice(0, 5),
+            completedAt: now,
+            externalId: sessionId,
+            externalSource: "garmin_companion",
+            hasGarminData: true,
+            difficulty: "moderate",
+            isPublic: false,
+            // Running dynamics
+            avgStrideLength: stats.avgStrideLength ?? null,
+            // Advanced Garmin metrics (stored in existing columns)
+            avgGroundContactTime: stats.avgGroundContactTime ?? null,
+            avgVerticalOscillation: stats.avgVerticalOscillation ?? null,
+            avgVerticalRatio: stats.avgVerticalRatio ?? null,
+            avgGroundContactBalance: stats.avgGroundContactBalance ?? null,
+            avgRunningPower: stats.avgRunningPower ?? null,
+            avgRespirationRate: stats.avgRespirationRate ?? null,
+            aerobicTrainingEffect: stats.aerobicTrainingEffect ?? null,
+            anaerobicTrainingEffect: stats.anaerobicTrainingEffect ?? null
+          }).returning();
+          newRunId = newRun.id;
+          await db.update(garminCompanionSessions).set({ linkedRunId: newRunId }).where(eq25(garminCompanionSessions.sessionId, sessionId));
+          console.log(`[Companion] Created run record ${newRunId} from standalone Garmin session ${sessionId} (${distanceKm.toFixed(2)}km)`);
+        } else {
+          console.log(`[Companion] Session ${sessionId} too short to save as run (${distanceKm.toFixed(3)}km, ${durationSecs}s)`);
+        }
+      } catch (runCreateError) {
+        console.error(`[Companion] Failed to create run from session ${sessionId}:`, runCreateError?.message);
+      }
+      res.json({ success: true, session: updated, summary: stats, runId: newRunId });
     } catch (error) {
       console.error("Companion session end error:", error);
       res.status(500).json({ error: "Failed to end session" });
@@ -22138,12 +25999,12 @@ ${contextJson}`;
     try {
       const { sessionId } = req.params;
       const { since } = req.query;
-      let query = db.select().from(garminRealtimeData).where(eq20(garminRealtimeData.sessionId, sessionId)).orderBy(garminRealtimeData.timestamp);
+      let query = db.select().from(garminRealtimeData).where(eq25(garminRealtimeData.sessionId, sessionId)).orderBy(garminRealtimeData.timestamp);
       if (since) {
         const sinceDate = new Date(since);
-        query = db.select().from(garminRealtimeData).where(and16(
-          eq20(garminRealtimeData.sessionId, sessionId),
-          sql10`timestamp > ${sinceDate}`
+        query = db.select().from(garminRealtimeData).where(and21(
+          eq25(garminRealtimeData.sessionId, sessionId),
+          sql13`timestamp > ${sinceDate}`
         )).orderBy(garminRealtimeData.timestamp);
       }
       const dataPoints = await query.limit(1e3);
@@ -22156,8 +26017,8 @@ ${contextJson}`;
   app2.get("/api/garmin-companion/session/:sessionId/latest", authMiddleware, async (req, res) => {
     try {
       const { sessionId } = req.params;
-      const [latest] = await db.select().from(garminRealtimeData).where(eq20(garminRealtimeData.sessionId, sessionId)).orderBy(sql10`timestamp DESC`).limit(1);
-      const [session] = await db.select().from(garminCompanionSessions).where(eq20(garminCompanionSessions.sessionId, sessionId)).limit(1);
+      const [latest] = await db.select().from(garminRealtimeData).where(eq25(garminRealtimeData.sessionId, sessionId)).orderBy(sql13`timestamp DESC`).limit(1);
+      const [session] = await db.select().from(garminCompanionSessions).where(eq25(garminCompanionSessions.sessionId, sessionId)).limit(1);
       res.json({ latest, session });
     } catch (error) {
       console.error("Get latest companion data error:", error);
@@ -22167,14 +26028,97 @@ ${contextJson}`;
   app2.get("/api/garmin-companion/sessions/active", authMiddleware, async (req, res) => {
     try {
       const userId = req.user.userId;
-      const sessions = await db.select().from(garminCompanionSessions).where(and16(
-        eq20(garminCompanionSessions.userId, userId),
-        eq20(garminCompanionSessions.status, "active")
-      )).orderBy(sql10`started_at DESC`);
+      const sessions = await db.select().from(garminCompanionSessions).where(and21(
+        eq25(garminCompanionSessions.userId, userId),
+        eq25(garminCompanionSessions.status, "active")
+      )).orderBy(sql13`started_at DESC`);
       res.json({ sessions });
     } catch (error) {
       console.error("Get active sessions error:", error);
       res.status(500).json({ error: "Failed to get active sessions" });
+    }
+  });
+  app2.post("/api/admin/garmin-watch-app/broadcast-update", async (req, res) => {
+    try {
+      const adminKey = process.env.ADMIN_API_KEY;
+      if (!adminKey) {
+        return res.status(503).json({ error: "Admin API not configured on this server" });
+      }
+      const providedKey = req.headers["x-admin-key"] || req.query["admin_key"] || req.body?.adminKey;
+      if (providedKey !== adminKey) {
+        console.warn("[Admin] Unauthorized broadcast-update attempt from", req.ip);
+        return res.status(401).json({ error: "Unauthorized \u2014 invalid admin key" });
+      }
+      const {
+        version,
+        releaseNote,
+        dryRun = false,
+        // Default Connect IQ store URL for AI Run Coach
+        storeUrl = "https://apps.garmin.com/en-NZ/apps/91452a05-d077-4707-a9a3-0e98277f6017"
+      } = req.body;
+      if (!version) {
+        return res.status(400).json({ error: "version is required (e.g. '2.4.0')" });
+      }
+      if (dryRun) {
+        const targets = await db.select({ id: users.id, email: users.email, hasFcm: users.fcmToken }).from(users).where(eq25(users.hasGarminWatchApp, true));
+        return res.json({
+          dryRun: true,
+          version,
+          storeUrl,
+          targeted: targets.length,
+          withFcmToken: targets.filter((u) => !!u.hasFcm).length,
+          withoutFcmToken: targets.filter((u) => !u.hasFcm).length,
+          users: targets.map((u) => ({ id: u.id, email: u.email, hasFcm: !!u.hasFcm }))
+        });
+      }
+      const { broadcastGarminWatchAppUpdate: broadcastGarminWatchAppUpdate2 } = await Promise.resolve().then(() => (init_notification_service(), notification_service_exports));
+      const results = await broadcastGarminWatchAppUpdate2(version, releaseNote || "", storeUrl);
+      console.log(
+        `[Admin] Garmin watch app broadcast v${version} complete \u2014 targeted: ${results.targeted}, push sent: ${results.pushSent}, in-app: ${results.inAppSent}`
+      );
+      res.json({
+        success: true,
+        version,
+        storeUrl,
+        targeted: results.targeted,
+        pushSent: results.pushSent,
+        pushFailed: results.pushFailed,
+        inAppSent: results.inAppSent,
+        message: `Broadcast sent to ${results.targeted} Garmin watch app users (${results.pushSent} push, ${results.inAppSent} in-app)`
+      });
+    } catch (error) {
+      console.error("[Admin] Garmin broadcast-update error:", error);
+      res.status(500).json({ error: "Broadcast failed", details: error?.message });
+    }
+  });
+  app2.get("/api/admin/garmin-watch-app/users", async (req, res) => {
+    try {
+      const adminKey = process.env.ADMIN_API_KEY;
+      if (!adminKey) return res.status(503).json({ error: "Admin API not configured" });
+      const providedKey = req.headers["x-admin-key"] || req.query["admin_key"];
+      if (providedKey !== adminKey) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const watchUsers = await db.select({
+        id: users.id,
+        email: users.email,
+        name: users.name,
+        hasFcmToken: users.fcmToken,
+        firstSeen: users.garminWatchAppFirstSeenAt,
+        lastSeen: users.garminWatchAppLastSeenAt,
+        appVersion: users.garminWatchAppVersion
+      }).from(users).where(eq25(users.hasGarminWatchApp, true)).orderBy(desc10(users.garminWatchAppLastSeenAt));
+      res.json({
+        total: watchUsers.length,
+        withFcmToken: watchUsers.filter((u) => !!u.hasFcmToken).length,
+        users: watchUsers.map((u) => ({
+          ...u,
+          hasFcmToken: !!u.hasFcmToken
+        }))
+      });
+    } catch (error) {
+      console.error("[Admin] Get Garmin watch users error:", error);
+      res.status(500).json({ error: "Failed to fetch users" });
     }
   });
   app2.put("/api/users/:id/coach-settings", authMiddleware, async (req, res) => {
@@ -22211,7 +26155,6 @@ ${contextJson}`;
         "South African",
         "Canadian",
         "Welsh",
-        "Indian",
         "Caribbean",
         "Scandinavian"
       ];
@@ -22342,7 +26285,7 @@ ${contextJson}`;
   });
   async function buildGroupRunResponse(gr, currentUserId) {
     const host = await storage.getUser(gr.hostUserId);
-    const allParticipants = await db.select().from(groupRunParticipants).where(eq20(groupRunParticipants.groupRunId, gr.id));
+    const allParticipants = await db.select().from(groupRunParticipants).where(eq25(groupRunParticipants.groupRunId, gr.id));
     const participantDetails = await Promise.all(
       allParticipants.map(async (p) => {
         const u = await storage.getUser(p.userId);
@@ -22480,9 +26423,9 @@ ${contextJson}`;
       if (!groupRun) {
         return res.status(404).json({ error: "Group run not found" });
       }
-      const participants = await db.select().from(groupRunParticipants).where(and16(
-        eq20(groupRunParticipants.groupRunId, groupRunId),
-        eq20(groupRunParticipants.userId, userId)
+      const participants = await db.select().from(groupRunParticipants).where(and21(
+        eq25(groupRunParticipants.groupRunId, groupRunId),
+        eq25(groupRunParticipants.userId, userId)
       ));
       if (participants.length > 0) {
         return res.status(409).json({ error: "Already joined this group run" });
@@ -22511,7 +26454,7 @@ ${contextJson}`;
       }
       const results = [];
       for (const uid of userIds) {
-        const existing = await db.select().from(groupRunParticipants).where(and16(eq20(groupRunParticipants.groupRunId, groupRunId), eq20(groupRunParticipants.userId, uid)));
+        const existing = await db.select().from(groupRunParticipants).where(and21(eq25(groupRunParticipants.groupRunId, groupRunId), eq25(groupRunParticipants.userId, uid)));
         if (existing.length > 0) continue;
         await db.insert(groupRunParticipants).values({
           groupRunId,
@@ -22537,14 +26480,14 @@ ${contextJson}`;
       if (!["accepted", "declined"].includes(response)) {
         return res.status(400).json({ error: "response must be 'accepted' or 'declined'" });
       }
-      const existing = await db.select().from(groupRunParticipants).where(and16(eq20(groupRunParticipants.groupRunId, groupRunId), eq20(groupRunParticipants.userId, userId)));
+      const existing = await db.select().from(groupRunParticipants).where(and21(eq25(groupRunParticipants.groupRunId, groupRunId), eq25(groupRunParticipants.userId, userId)));
       if (existing.length === 0) {
         return res.status(404).json({ error: "No invitation found for this user" });
       }
       await db.update(groupRunParticipants).set({
         invitationStatus: response,
         ...response === "accepted" ? { acceptedAt: /* @__PURE__ */ new Date(), joinedAt: /* @__PURE__ */ new Date() } : { declinedAt: /* @__PURE__ */ new Date() }
-      }).where(and16(eq20(groupRunParticipants.groupRunId, groupRunId), eq20(groupRunParticipants.userId, userId)));
+      }).where(and21(eq25(groupRunParticipants.groupRunId, groupRunId), eq25(groupRunParticipants.userId, userId)));
       const gr = await storage.getGroupRun(groupRunId);
       res.json(await buildGroupRunResponse(gr, userId));
     } catch (error) {
@@ -22556,7 +26499,7 @@ ${contextJson}`;
     try {
       const { groupRunId } = req.params;
       const userId = req.user.userId;
-      await db.update(groupRunParticipants).set({ readyToStart: true }).where(and16(eq20(groupRunParticipants.groupRunId, groupRunId), eq20(groupRunParticipants.userId, userId)));
+      await db.update(groupRunParticipants).set({ readyToStart: true }).where(and21(eq25(groupRunParticipants.groupRunId, groupRunId), eq25(groupRunParticipants.userId, userId)));
       const gr = await storage.getGroupRun(groupRunId);
       res.json(await buildGroupRunResponse(gr, userId));
     } catch (error) {
@@ -22571,7 +26514,7 @@ ${contextJson}`;
       const gr = await storage.getGroupRun(groupRunId);
       if (!gr) return res.status(404).json({ error: "Group run not found" });
       if (gr.hostUserId !== userId) return res.status(403).json({ error: "Only the organiser can start the run" });
-      await db.update(groupRuns).set({ status: "active", startedAt: /* @__PURE__ */ new Date() }).where(eq20(groupRuns.id, groupRunId));
+      await db.update(groupRuns).set({ status: "active", startedAt: /* @__PURE__ */ new Date() }).where(eq25(groupRuns.id, groupRunId));
       const updated = await storage.getGroupRun(groupRunId);
       res.json(await buildGroupRunResponse(updated, userId));
     } catch (error) {
@@ -22584,11 +26527,11 @@ ${contextJson}`;
       const { groupRunId } = req.params;
       const { runId } = req.body;
       const userId = req.user.userId;
-      await db.update(groupRunParticipants).set({ runId, completedAt: /* @__PURE__ */ new Date() }).where(and16(eq20(groupRunParticipants.groupRunId, groupRunId), eq20(groupRunParticipants.userId, userId)));
-      const allAccepted = await db.select().from(groupRunParticipants).where(and16(eq20(groupRunParticipants.groupRunId, groupRunId), eq20(groupRunParticipants.invitationStatus, "accepted")));
+      await db.update(groupRunParticipants).set({ runId, completedAt: /* @__PURE__ */ new Date() }).where(and21(eq25(groupRunParticipants.groupRunId, groupRunId), eq25(groupRunParticipants.userId, userId)));
+      const allAccepted = await db.select().from(groupRunParticipants).where(and21(eq25(groupRunParticipants.groupRunId, groupRunId), eq25(groupRunParticipants.invitationStatus, "accepted")));
       const allDone = allAccepted.every((p) => !!p.runId);
       if (allDone) {
-        await db.update(groupRuns).set({ status: "completed", completedAt: /* @__PURE__ */ new Date() }).where(eq20(groupRuns.id, groupRunId));
+        await db.update(groupRuns).set({ status: "completed", completedAt: /* @__PURE__ */ new Date() }).where(eq25(groupRuns.id, groupRunId));
       }
       const gr = await storage.getGroupRun(groupRunId);
       res.json(await buildGroupRunResponse(gr, userId));
@@ -22603,9 +26546,9 @@ ${contextJson}`;
       const userId = req.user.userId;
       const gr = await storage.getGroupRun(groupRunId);
       if (!gr) return res.status(404).json({ error: "Group run not found" });
-      const allParticipants = await db.select().from(groupRunParticipants).where(and16(
-        eq20(groupRunParticipants.groupRunId, groupRunId),
-        eq20(groupRunParticipants.invitationStatus, "accepted")
+      const allParticipants = await db.select().from(groupRunParticipants).where(and21(
+        eq25(groupRunParticipants.groupRunId, groupRunId),
+        eq25(groupRunParticipants.invitationStatus, "accepted")
       ));
       const results = await Promise.all(
         allParticipants.map(async (p) => {
@@ -22649,9 +26592,9 @@ ${contextJson}`;
       if (groupRun?.hostUserId === userId) {
         return res.status(400).json({ error: "Creators cannot leave their own group run. Delete it instead." });
       }
-      await db.delete(groupRunParticipants).where(and16(
-        eq20(groupRunParticipants.groupRunId, groupRunId),
-        eq20(groupRunParticipants.userId, userId)
+      await db.delete(groupRunParticipants).where(and21(
+        eq25(groupRunParticipants.groupRunId, groupRunId),
+        eq25(groupRunParticipants.userId, userId)
       ));
       res.status(204).send();
     } catch (error) {
@@ -22735,6 +26678,155 @@ ${contextJson}`;
       res.status(500).json({ error: "Failed to recalculate fitness data" });
     }
   });
+  app2.post("/api/runs/:runId/publish-strava", authMiddleware, async (req, res) => {
+    try {
+      const { runId } = req.params;
+      const userId = req.user.userId;
+      const run = await storage.getRun(runId);
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+      if (run.userId !== userId) {
+        return res.status(403).json({ error: "Not authorized" });
+      }
+      if (run.externalSource === "strava" && run.externalId) {
+        return res.status(400).json({
+          error: "Run already published to Strava",
+          activityId: run.externalId
+        });
+      }
+      const stravaDevices = await storage.getConnectedDevices(userId);
+      const stravaDevice = stravaDevices.find(
+        (d) => d.deviceType === "strava" && d.isActive
+      );
+      if (!stravaDevice) {
+        return res.status(400).json({ error: "Strava not connected" });
+      }
+      let accessToken = stravaDevice.accessToken;
+      if (stravaDevice.tokenExpiresAt && stravaDevice.tokenExpiresAt < /* @__PURE__ */ new Date()) {
+        if (!stravaDevice.refreshToken) {
+          return res.status(401).json({
+            error: "Token expired, please reconnect Strava"
+          });
+        }
+        try {
+          const {
+            accessToken: newToken,
+            refreshToken: newRefresh,
+            expiresAt
+          } = await refreshStravaToken(stravaDevice.refreshToken);
+          await storage.updateConnectedDevice(stravaDevice.id, {
+            accessToken: newToken,
+            refreshToken: newRefresh,
+            tokenExpiresAt: expiresAt,
+            updatedAt: /* @__PURE__ */ new Date()
+          });
+          accessToken = newToken;
+        } catch (error) {
+          return res.status(401).json({
+            error: "Strava token refresh failed, please reconnect"
+          });
+        }
+      }
+      const fitFile = await generateFitFile(run);
+      const { uploadId } = await uploadRunToStrava(
+        fitFile,
+        accessToken,
+        run.name || "AI Run Coach Run",
+        run.userComments || `Distance: ${run.distance}km | Duration: ${run.duration}s`,
+        `airuncoach-${runId}`
+      );
+      console.log(`[Strava] Starting async poll for upload ${uploadId}`);
+      pollUploadAndSaveActivity(uploadId, accessToken, runId, userId).catch(
+        (error) => {
+          console.error(
+            `[Strava] Background polling failed for run ${runId}:`,
+            error
+          );
+        }
+      );
+      res.json({
+        success: true,
+        uploadId,
+        message: "Run submitted to Strava. Publishing in background..."
+      });
+    } catch (error) {
+      console.error("[Strava Publish] Error:", error.message);
+      res.status(500).json({
+        error: `Failed to publish run: ${error.message}`
+      });
+    }
+  });
+  async function pollUploadAndSaveActivity(uploadId, accessToken, runId, userId) {
+    try {
+      const activityId = await pollUploadStatus(uploadId, accessToken, 30, 2e3);
+      await storage.updateRun(runId, {
+        externalId: activityId.toString(),
+        externalSource: "strava"
+      });
+      console.log(
+        `\u2705 [Strava] Run published successfully: activity ${activityId}`
+      );
+    } catch (error) {
+      console.error(
+        `[Strava] Failed to publish run ${runId}:`,
+        error.message
+      );
+    }
+  }
+  app2.get(
+    "/api/strava/connection-status",
+    authMiddleware,
+    async (req, res) => {
+      try {
+        const userId = req.user.userId;
+        const devices = await storage.getConnectedDevices(userId);
+        const device2 = devices.find((d) => d.deviceType === "strava");
+        if (!device2) {
+          return res.json({ connected: false });
+        }
+        const isExpired = device2.tokenExpiresAt && device2.tokenExpiresAt < /* @__PURE__ */ new Date();
+        res.json({
+          connected: device2.isActive && !isExpired,
+          athleteName: device2.deviceName || "Strava Athlete",
+          athleteId: device2.deviceId,
+          lastSync: device2.lastSyncAt,
+          tokenExpired: isExpired
+        });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    }
+  );
+  app2.get(
+    "/api/strava/activities",
+    authMiddleware,
+    async (req, res) => {
+      try {
+        const userId = req.user.userId;
+        const stravaRuns = await db.select().from(runs).where(
+          and21(
+            eq25(runs.userId, userId),
+            eq25(runs.externalSource, "strava")
+          )
+        ).orderBy(desc10(runs.completedAt));
+        res.json({
+          count: stravaRuns.length,
+          activities: stravaRuns.map((run) => ({
+            id: run.id,
+            name: run.name,
+            distance: run.distance,
+            duration: run.duration,
+            completedAt: run.completedAt,
+            stravaUrl: `https://www.strava.com/activities/${run.externalId}`,
+            stravaId: run.externalId
+          }))
+        });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    }
+  );
   app2.delete("/api/runs/:id", authMiddleware, async (req, res) => {
     try {
       const { id } = req.params;
@@ -22759,6 +26851,16 @@ ${contextJson}`;
     } catch (error) {
       console.error("Delete run error:", error);
       res.status(500).json({ error: "Failed to delete run" });
+    }
+  });
+  app2.get("/api/coaching/session-events/:runId", authMiddleware, async (req, res) => {
+    try {
+      const { runId } = req.params;
+      const events2 = await db.select().from(coachingSessionEvents).where(eq25(coachingSessionEvents.runId, runId)).orderBy(coachingSessionEvents.triggeredAt);
+      res.json({ events: events2 });
+    } catch (error) {
+      console.error("[GET /api/coaching/session-events/:runId]", error);
+      res.status(500).json({ error: "Failed to fetch coaching events" });
     }
   });
   app2.post("/api/coaching/run-analysis", authMiddleware, async (req, res) => {
@@ -22788,15 +26890,15 @@ ${contextJson}`;
         console.warn("Failed to persist post-run comments/struggle points:", e);
       }
       const user = await storage.getUser(run.userId);
-      const previousRuns = await db.select().from(runs).where(eq20(runs.userId, run.userId)).orderBy(desc8(runs.completedAt)).limit(10);
+      const previousRuns = await db.select().from(runs).where(eq25(runs.userId, run.userId)).orderBy(desc10(runs.completedAt)).limit(10);
       const coachName = body.coachName || user?.coachName || "AI Coach";
       const coachTone = body.coachTone || user?.coachTone || "energetic";
       let weatherImpactAnalysis = null;
       if (body.weather) {
         try {
           const recentRuns = await db.query.runs.findMany({
-            where: eq20(runs.userId, run.userId),
-            orderBy: desc8(runs.completedAt),
+            where: eq25(runs.userId, run.userId),
+            orderBy: desc10(runs.completedAt),
             limit: 30
           });
           if (recentRuns.length >= 3) {
@@ -22921,7 +27023,7 @@ ${contextJson}`;
         const aiService = await Promise.resolve().then(() => (init_ai_service(), ai_service_exports));
         ai = await aiService.generateComprehensiveRunAnalysis({
           runData: runDataForAi,
-          previousRuns: previousRuns.filter((r) => r.id !== runId).slice(0, 5),
+          previousRuns: previousRuns.filter((r) => r.id !== runId).slice(0, 10),
           weatherImpactAnalysis: weatherImpactAnalysis || void 0,
           userProfile: body.userProfile || (user ? {
             fitnessLevel: user.fitnessLevel || void 0,
@@ -23013,7 +27115,7 @@ ${contextJson}`;
       const latDelta = radiusKm * 0.01;
       const lngDelta = radiusKm * 0.01;
       const nearbySegments = await db.select().from(segments).where(
-        sql10`${segments.startLat} BETWEEN ${latitude - latDelta} AND ${latitude + latDelta}
+        sql13`${segments.startLat} BETWEEN ${latitude - latDelta} AND ${latitude + latDelta}
           AND ${segments.startLng} BETWEEN ${longitude - lngDelta} AND ${longitude + lngDelta}`
       ).limit(20);
       res.json(nearbySegments);
@@ -23029,7 +27131,7 @@ ${contextJson}`;
       let efforts = await db.select({
         effort: segmentEfforts,
         user: users
-      }).from(segmentEfforts).leftJoin(users, eq20(segmentEfforts.userId, users.id)).where(eq20(segmentEfforts.segmentId, id)).orderBy(segmentEfforts.elapsedTime).limit(100);
+      }).from(segmentEfforts).leftJoin(users, eq25(segmentEfforts.userId, users.id)).where(eq25(segmentEfforts.segmentId, id)).orderBy(segmentEfforts.elapsedTime).limit(100);
       if (timeframe === "yearly") {
         const yearAgo = /* @__PURE__ */ new Date();
         yearAgo.setFullYear(yearAgo.getFullYear() - 1);
@@ -23068,13 +27170,13 @@ ${contextJson}`;
       const { id } = req.params;
       const userId = req.user.userId;
       const existing = await db.select().from(segmentStars).where(
-        and16(
-          eq20(segmentStars.segmentId, id),
-          eq20(segmentStars.userId, userId)
+        and21(
+          eq25(segmentStars.segmentId, id),
+          eq25(segmentStars.userId, userId)
         )
       ).limit(1);
       if (existing.length > 0) {
-        await db.delete(segmentStars).where(eq20(segmentStars.id, existing[0].id));
+        await db.delete(segmentStars).where(eq25(segmentStars.id, existing[0].id));
         return res.json({ starred: false });
       } else {
         await db.insert(segmentStars).values({
@@ -23125,7 +27227,7 @@ ${contextJson}`;
       const efforts = await db.select({
         effort: segmentEfforts,
         segment: segments
-      }).from(segmentEfforts).leftJoin(segments, eq20(segmentEfforts.segmentId, segments.id)).where(eq20(segmentEfforts.userId, userId)).orderBy(desc8(segmentEfforts.createdAt)).limit(50);
+      }).from(segmentEfforts).leftJoin(segments, eq25(segmentEfforts.segmentId, segments.id)).where(eq25(segmentEfforts.userId, userId)).orderBy(desc10(segmentEfforts.createdAt)).limit(50);
       res.json(efforts.map((e) => ({
         id: e.effort.id,
         segmentId: e.segment?.id,
@@ -23148,7 +27250,7 @@ ${contextJson}`;
         gpsTrack: runs.gpsTrack,
         distance: runs.distance,
         completedAt: runs.completedAt
-      }).from(runs).where(eq20(runs.userId, userId)).orderBy(desc8(runs.completedAt));
+      }).from(runs).where(eq25(runs.userId, userId)).orderBy(desc10(runs.completedAt));
       const allPoints = [];
       for (const run of userRuns) {
         if (run.gpsTrack && Array.isArray(run.gpsTrack)) {
@@ -23219,6 +27321,8 @@ ${contextJson}`;
         // optional: goal ID to link this plan to
         userTimezone = null,
         // IANA timezone name, e.g. "Pacific/Auckland"
+        isPreEventPlan = false,
+        // true = pre-race sharpening block, not a build-up plan
         // User demographics — used as override if DB profile is incomplete
         age = null,
         gender = null,
@@ -23236,10 +27340,10 @@ ${contextJson}`;
         });
       }
       const existingActivePlan = await db.select({ id: trainingPlans.id }).from(trainingPlans).where(
-        and16(
-          eq20(trainingPlans.userId, userId),
-          eq20(trainingPlans.status, "active"),
-          eq20(trainingPlans.goalType, goalType)
+        and21(
+          eq25(trainingPlans.userId, userId),
+          eq25(trainingPlans.status, "active"),
+          eq25(trainingPlans.goalType, goalType)
         )
       ).limit(1);
       if (existingActivePlan.length > 0) {
@@ -23254,14 +27358,62 @@ ${contextJson}`;
       if (!goalType || !targetDistance) {
         return res.status(400).json({ error: "goalType and targetDistance are required" });
       }
+      if (!durationWeeks && !targetDate) {
+        return res.status(400).json({
+          error: "Either durationWeeks or targetDate must be provided"
+        });
+      }
+      if (durationWeeks && (!Number.isInteger(durationWeeks) || durationWeeks <= 0)) {
+        return res.status(400).json({
+          error: "durationWeeks must be a positive integer"
+        });
+      }
+      let parsedTargetDate;
+      if (targetDate) {
+        parsedTargetDate = new Date(targetDate);
+        if (isNaN(parsedTargetDate.getTime())) {
+          return res.status(400).json({
+            error: "targetDate must be a valid date (ISO 8601 format)"
+          });
+        }
+        if (parsedTargetDate.getTime() <= Date.now()) {
+          return res.status(400).json({
+            error: "targetDate must be in the future"
+          });
+        }
+      }
+      const safeTargetTime = (() => {
+        const v = Number(targetTime);
+        return !isNaN(v) && v > 0 ? Math.round(v) : void 0;
+      })();
+      const safeDaysPerWeek = (() => {
+        const v = Number(daysPerWeek);
+        return !isNaN(v) && v >= 1 && v <= 7 ? Math.round(v) : 4;
+      })();
+      const safeTargetDistance = (() => {
+        const v = Number(targetDistance);
+        return !isNaN(v) && v > 0 ? v : void 0;
+      })();
+      const safeAge = (() => {
+        const v = Number(age);
+        return !isNaN(v) && v > 0 && v < 120 ? Math.round(v) : null;
+      })();
+      const safeHeight = (() => {
+        const v = Number(height);
+        return !isNaN(v) && v > 0 ? v : null;
+      })();
+      const safeWeight = (() => {
+        const v = Number(weight);
+        return !isNaN(v) && v > 0 ? v : null;
+      })();
       const planId = await generateTrainingPlan(
         userId,
         goalType,
-        targetDistance,
-        targetTime,
-        targetDate ? new Date(targetDate) : void 0,
+        safeTargetDistance ?? targetDistance,
+        safeTargetTime,
+        parsedTargetDate,
         experienceLevel || "intermediate",
-        daysPerWeek || 4,
+        safeDaysPerWeek,
         regularSessions,
         firstSessionStart,
         durationWeeks,
@@ -23269,14 +27421,16 @@ ${contextJson}`;
         userTimezone || null,
         goalId || null,
         // Pass demographics as overrides — used when user's DB profile is missing values
-        age ? Number(age) : null,
+        safeAge,
         gender || null,
-        height ? Number(height) : null,
-        weight ? Number(weight) : null
+        safeHeight,
+        safeWeight,
+        // Plan intent: pre-event sharpening vs building up
+        isPreEventPlan === true
       );
       if (goalId) {
         try {
-          await db.update(goals).set({ linkedTrainingPlanId: planId }).where(eq20(goals.id, goalId));
+          await db.update(goals).set({ linkedTrainingPlanId: planId }).where(eq25(goals.id, goalId));
         } catch (linkErr) {
           console.warn(`[Training Plan] Could not link plan ${planId} to goal ${goalId}:`, linkErr);
         }
@@ -23297,18 +27451,20 @@ ${contextJson}`;
     try {
       const { userId } = req.params;
       const { status = "active" } = req.query;
+      const statusFilter = String(status);
+      const statusWhere = statusFilter === "cancelled" ? or4(eq25(trainingPlans.status, "cancelled"), eq25(trainingPlans.status, "abandoned")) : eq25(trainingPlans.status, statusFilter);
       const plans = await db.select().from(trainingPlans).where(
-        and16(
-          eq20(trainingPlans.userId, userId),
-          eq20(trainingPlans.status, String(status))
+        and21(
+          eq25(trainingPlans.userId, userId),
+          statusWhere
         )
-      ).orderBy(desc8(trainingPlans.createdAt));
+      ).orderBy(desc10(trainingPlans.createdAt));
       const plansWithCounts = await Promise.all(plans.map(async (plan) => {
-        const totalWorkouts = await db.select({ count: count5() }).from(plannedWorkouts).where(eq20(plannedWorkouts.trainingPlanId, plan.id));
+        const totalWorkouts = await db.select({ count: count5() }).from(plannedWorkouts).where(eq25(plannedWorkouts.trainingPlanId, plan.id));
         const completedWorkouts = await db.select({ count: count5() }).from(plannedWorkouts).where(
-          and16(
-            eq20(plannedWorkouts.trainingPlanId, plan.id),
-            eq20(plannedWorkouts.isCompleted, true)
+          and21(
+            eq25(plannedWorkouts.trainingPlanId, plan.id),
+            eq25(plannedWorkouts.isCompleted, true)
           )
         );
         return {
@@ -23327,56 +27483,84 @@ ${contextJson}`;
     try {
       const { planId } = req.params;
       const userId = req.user.userId;
-      const plan = await db.select().from(trainingPlans).where(eq20(trainingPlans.id, planId)).limit(1);
+      const plan = await db.select().from(trainingPlans).where(eq25(trainingPlans.id, planId)).limit(1);
       if (!plan[0]) {
         return res.status(404).json({ error: "Training plan not found" });
       }
-      const weeks = await db.select().from(weeklyPlans).where(eq20(weeklyPlans.trainingPlanId, planId)).orderBy(weeklyPlans.weekNumber);
+      const weeks = await db.select().from(weeklyPlans).where(eq25(weeklyPlans.trainingPlanId, planId)).orderBy(weeklyPlans.weekNumber);
       const weeksWithWorkouts = await Promise.all(
         weeks.map(async (week) => {
-          const workouts = await db.select().from(plannedWorkouts).where(eq20(plannedWorkouts.weeklyPlanId, week.id)).orderBy(plannedWorkouts.dayOfWeek);
+          const workouts = await db.select().from(plannedWorkouts).where(eq25(plannedWorkouts.weeklyPlanId, week.id)).orderBy(plannedWorkouts.dayOfWeek);
           return {
             ...week,
             workouts
           };
         })
       );
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1e3);
-      const recentRuns = await db.select().from(runs).where(
-        and16(
-          eq20(runs.userId, userId),
-          gte10(runs.completedAt, thirtyDaysAgo)
+      const now90 = new Date(Date.now() - 90 * 24 * 60 * 60 * 1e3);
+      const now180 = new Date(Date.now() - 180 * 24 * 60 * 60 * 1e3);
+      const allNativeRuns = await db.select().from(runs).where(
+        and21(
+          eq25(runs.userId, userId),
+          gte11(runs.completedAt, now180)
         )
-      ).orderBy(desc8(runs.completedAt)).limit(10);
+      ).orderBy(desc10(runs.completedAt)).limit(50);
+      const nativeOnly = allNativeRuns.filter((r) => !r.externalSource || r.externalSource === "airuncoach");
+      const runs90 = nativeOnly.filter((r) => r.completedAt && new Date(r.completedAt) >= now90);
+      const runs180 = nativeOnly;
+      let baselineRuns;
+      let baselineWindowLabel;
+      let baselineWindowDays;
+      if (runs90.length > 0) {
+        baselineRuns = runs90;
+        baselineWindowLabel = "last 90 days";
+        baselineWindowDays = 90;
+      } else if (runs180.length > 0) {
+        baselineRuns = runs180;
+        baselineWindowLabel = "last 180 days";
+        baselineWindowDays = 180;
+      } else {
+        baselineRuns = [];
+        baselineWindowLabel = "none";
+        baselineWindowDays = 0;
+      }
+      const [cachedStats] = await db.select({ longestRunKm: userStats.longestRunKm }).from(userStats).where(eq25(userStats.userId, userId));
+      const allTimeLongestRun = cachedStats?.longestRunKm ?? null;
       let performanceBaseline = null;
-      if (recentRuns.length === 0) {
+      if (baselineRuns.length === 0) {
         performanceBaseline = {
           hasHistory: false,
-          message: "You don't have any run history yet. Let's get started and see what you've got!"
+          message: "No AI Run Coach runs found in the last 180 days. Complete a run in the app to generate your baseline data.",
+          allTimeLongestRun: allTimeLongestRun != null ? Number(allTimeLongestRun).toFixed(1) : null
         };
       } else {
-        const totalDistance = recentRuns.reduce((sum5, r) => sum5 + (Number(r.distance) || 0), 0);
-        const avgDistance = totalDistance / recentRuns.length;
-        const runsPerWeek = recentRuns.length / Math.ceil(
-          ((/* @__PURE__ */ new Date()).getTime() - new Date(recentRuns[recentRuns.length - 1].completedAt || Date.now()).getTime()) / (7 * 24 * 60 * 60 * 1e3)
-        );
-        const paceValues = recentRuns.map((r) => {
+        const totalDistance = baselineRuns.reduce((sum5, r) => sum5 + (Number(r.distance) || 0), 0);
+        const avgDistance = totalDistance / baselineRuns.length;
+        const windowLongestRun = Math.max(...baselineRuns.map((r) => Number(r.distance) || 0));
+        const oldestRunDate = new Date(baselineRuns[baselineRuns.length - 1].completedAt || Date.now());
+        const newestRunDate = new Date(baselineRuns[0].completedAt || Date.now());
+        const spanDays = Math.max(1, Math.round((newestRunDate.getTime() - oldestRunDate.getTime()) / (24 * 60 * 60 * 1e3)));
+        const spanWeeks = Math.max(1, spanDays / 7);
+        const runsPerWeek = baselineRuns.length / spanWeeks;
+        const fmt = (d) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+        const dateRangeLabel = baselineRuns.length >= 2 ? `${fmt(oldestRunDate)} \u2013 ${fmt(newestRunDate)}` : fmt(newestRunDate);
+        const paceValues = baselineRuns.map((r) => {
           if (!r.avgPace) return null;
-          const paceStr = String(r.avgPace);
-          const parts = paceStr.split(":");
-          if (parts.length === 2) {
-            return parseInt(parts[0]) * 60 + parseInt(parts[1]);
-          }
+          const parts = String(r.avgPace).split(":");
+          if (parts.length === 2) return parseInt(parts[0]) * 60 + parseInt(parts[1]);
           return null;
         }).filter((v) => v !== null);
         const avgPaceSecs = paceValues.length > 0 ? paceValues.reduce((a, b) => a + b, 0) / paceValues.length : null;
-        const longestRun = Math.max(...recentRuns.map((r) => Number(r.distance) || 0));
         performanceBaseline = {
           hasHistory: true,
-          runsRecorded: recentRuns.length,
+          runsRecorded: baselineRuns.length,
+          baselineWindow: baselineWindowLabel,
+          dateRange: dateRangeLabel,
           runsPerWeek: runsPerWeek.toFixed(1),
           avgDistance: avgDistance.toFixed(2),
-          longestRun: longestRun.toFixed(1),
+          // Longest run uses all-time figure from My Data cache for consistency; falls back to window max
+          longestRun: allTimeLongestRun != null ? Number(allTimeLongestRun).toFixed(1) : windowLongestRun.toFixed(1),
+          longestRunSource: allTimeLongestRun != null ? "all_time" : "window",
           avgPace: avgPaceSecs ? `${Math.floor(avgPaceSecs / 60)}:${String(Math.round(avgPaceSecs % 60)).padStart(2, "0")}` : null
         };
       }
@@ -23395,12 +27579,12 @@ ${contextJson}`;
       const { planId } = req.params;
       const userId = req.user.userId;
       const { injuries = [] } = req.body;
-      const plan = await db.select().from(trainingPlans).where(and16(eq20(trainingPlans.id, planId), eq20(trainingPlans.userId, userId))).limit(1);
+      const plan = await db.select().from(trainingPlans).where(and21(eq25(trainingPlans.id, planId), eq25(trainingPlans.userId, userId))).limit(1);
       if (!plan[0]) {
         return res.status(404).json({ error: "Plan not found or not authorized" });
       }
-      const allWeeks = await db.select().from(weeklyPlans).where(eq20(weeklyPlans.trainingPlanId, planId)).orderBy(weeklyPlans.weekNumber);
-      const completedWorkoutsList = await db.select().from(plannedWorkouts).where(and16(eq20(plannedWorkouts.trainingPlanId, planId), eq20(plannedWorkouts.isCompleted, true)));
+      const allWeeks = await db.select().from(weeklyPlans).where(eq25(weeklyPlans.trainingPlanId, planId)).orderBy(weeklyPlans.weekNumber);
+      const completedWorkoutsList = await db.select().from(plannedWorkouts).where(and21(eq25(plannedWorkouts.trainingPlanId, planId), eq25(plannedWorkouts.isCompleted, true)));
       const completedWorkoutIds = new Set(completedWorkoutsList.map((w) => w.id));
       const today = /* @__PURE__ */ new Date();
       today.setHours(0, 0, 0, 0);
@@ -23455,10 +27639,10 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       if (!regeneratedData.weeks || !Array.isArray(regeneratedData.weeks) || regeneratedData.weeks.length === 0) {
         return res.status(500).json({ error: "AI failed to generate valid workout data" });
       }
-      const allWorkouts = await db.select().from(plannedWorkouts).where(eq20(plannedWorkouts.trainingPlanId, planId));
+      const allWorkouts = await db.select().from(plannedWorkouts).where(eq25(plannedWorkouts.trainingPlanId, planId));
       for (const w of allWorkouts) {
         if (!completedWorkoutIds.has(w.id) && (!w.scheduledDate || new Date(w.scheduledDate) >= today)) {
-          await db.delete(plannedWorkouts).where(eq20(plannedWorkouts.id, w.id));
+          await db.delete(plannedWorkouts).where(eq25(plannedWorkouts.id, w.id));
         }
       }
       let newWorkoutCount = 0;
@@ -23481,7 +27665,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
             totalDistance: week.totalDistance,
             focusArea: week.focusArea,
             intensityLevel: week.intensityLevel
-          }).where(eq20(weeklyPlans.id, weeklyPlan.id));
+          }).where(eq25(weeklyPlans.id, weeklyPlan.id));
         }
         for (const workout of week.workouts) {
           if (!workout.workoutType) continue;
@@ -23524,6 +27708,65 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       res.status(500).json({ error: error.message || "Failed to regenerate training plan" });
     }
   });
+  app2.post("/api/training-plans/:planId/next-block", authMiddleware, async (req, res) => {
+    try {
+      const { planId } = req.params;
+      const userId = req.user.userId;
+      const [plan] = await db.select().from(trainingPlans).where(
+        and21(eq25(trainingPlans.id, planId), eq25(trainingPlans.userId, userId))
+      );
+      if (!plan) {
+        return res.status(404).json({ error: "Plan not found" });
+      }
+      if (plan.generatedThroughWeek == null) {
+        return res.status(400).json({ error: "This is a legacy plan \u2014 all weeks are already generated" });
+      }
+      if ((plan.generatedThroughWeek ?? 0) >= plan.totalWeeks) {
+        return res.status(400).json({ error: "Plan is already fully generated", fullyGenerated: true });
+      }
+      res.json({ message: "Generating next training block \u2014 check back in ~30 seconds", status: "generating" });
+      setImmediate(() => {
+        generateNextBlock(planId, userId).catch(
+          (err) => console.error(`[NextBlock] Manual trigger failed for plan ${planId}:`, err)
+        );
+      });
+    } catch (err) {
+      console.error("Error triggering next block:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app2.get("/api/training-plans/:planId/block-status", authMiddleware, async (req, res) => {
+    try {
+      const { planId } = req.params;
+      const userId = req.user.userId;
+      const [plan] = await db.select().from(trainingPlans).where(
+        and21(eq25(trainingPlans.id, planId), eq25(trainingPlans.userId, userId))
+      );
+      if (!plan) return res.status(404).json({ error: "Plan not found" });
+      const isRolling = plan.generatedThroughWeek != null;
+      const generatedThroughWeek = plan.generatedThroughWeek ?? plan.totalWeeks;
+      const isFullyGenerated = generatedThroughWeek >= plan.totalWeeks;
+      const nextBlockAt = plan.nextBlockAt;
+      let nextBlockMessage = null;
+      if (!isFullyGenerated && nextBlockAt) {
+        const dateStr = nextBlockAt.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+        nextBlockMessage = `Your next training block will be generated on ${dateStr}. This ensures your plan evolves with your progress and adapts to your actual fitness.`;
+      }
+      res.json({
+        planId,
+        totalWeeks: plan.totalWeeks,
+        generatedThroughWeek,
+        isRolling,
+        isFullyGenerated,
+        nextBlockAt: nextBlockAt ?? null,
+        nextBlockMessage,
+        nextBlockReady: !isFullyGenerated && nextBlockAt != null && new Date(nextBlockAt) <= /* @__PURE__ */ new Date()
+      });
+    } catch (err) {
+      console.error("Error getting block status:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
   app2.post("/api/training-plans/:planId/adapt", authMiddleware, async (req, res) => {
     try {
       const { planId } = req.params;
@@ -23562,12 +27805,12 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const activities = await db.select({
         activity: feedActivities,
         user: users
-      }).from(feedActivities).leftJoin(users, eq20(feedActivities.userId, users.id)).where(
-        and16(
-          sql10`${feedActivities.userId} = ANY(${friendIds})`,
-          sql10`${feedActivities.visibility} IN ('public', 'friends')`
+      }).from(feedActivities).leftJoin(users, eq25(feedActivities.userId, users.id)).where(
+        and21(
+          sql13`${feedActivities.userId} = ANY(${friendIds})`,
+          sql13`${feedActivities.visibility} IN ('public', 'friends')`
         )
-      ).orderBy(desc8(feedActivities.createdAt)).limit(Number(limit)).offset(Number(offset));
+      ).orderBy(desc10(feedActivities.createdAt)).limit(Number(limit)).offset(Number(offset));
       res.json(activities.map((a) => ({
         id: a.activity.id,
         userId: a.user?.id,
@@ -23593,13 +27836,13 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const { reactionType } = req.body;
       const userId = req.user.userId;
       const existing = await db.select().from(reactions).where(
-        and16(
-          eq20(reactions.activityId, activityId),
-          eq20(reactions.userId, userId)
+        and21(
+          eq25(reactions.activityId, activityId),
+          eq25(reactions.userId, userId)
         )
       ).limit(1);
       if (existing.length > 0) {
-        await db.update(reactions).set({ reactionType }).where(eq20(reactions.id, existing[0].id));
+        await db.update(reactions).set({ reactionType }).where(eq25(reactions.id, existing[0].id));
       } else {
         await db.insert(reactions).values({
           activityId,
@@ -23607,8 +27850,8 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
           reactionType
         });
         await db.update(feedActivities).set({
-          reactionCount: sql10`${feedActivities.reactionCount} + 1`
-        }).where(eq20(feedActivities.id, activityId));
+          reactionCount: sql13`${feedActivities.reactionCount} + 1`
+        }).where(eq25(feedActivities.id, activityId));
       }
       res.json({ success: true });
     } catch (error) {
@@ -23630,8 +27873,8 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         comment: comment.trim()
       }).returning();
       await db.update(feedActivities).set({
-        commentCount: sql10`${feedActivities.commentCount} + 1`
-      }).where(eq20(feedActivities.id, activityId));
+        commentCount: sql13`${feedActivities.commentCount} + 1`
+      }).where(eq25(feedActivities.id, activityId));
       res.status(201).json(newComment[0]);
     } catch (error) {
       console.error("Add comment error:", error);
@@ -23644,7 +27887,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const comments = await db.select({
         comment: activityComments,
         user: users
-      }).from(activityComments).leftJoin(users, eq20(activityComments.userId, users.id)).where(eq20(activityComments.activityId, activityId)).orderBy(activityComments.createdAt);
+      }).from(activityComments).leftJoin(users, eq25(activityComments.userId, users.id)).where(eq25(activityComments.activityId, activityId)).orderBy(activityComments.createdAt);
       res.json(comments.map((c) => ({
         id: c.comment.id,
         userId: c.user?.id,
@@ -23670,20 +27913,20 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       })();
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
-      const todaysWorkouts = await db.select().from(plannedWorkouts).where(and16(
-        eq20(plannedWorkouts.trainingPlanId, planId),
-        gte10(plannedWorkouts.scheduledDate, today),
+      const todaysWorkouts = await db.select().from(plannedWorkouts).where(and21(
+        eq25(plannedWorkouts.trainingPlanId, planId),
+        gte11(plannedWorkouts.scheduledDate, today),
         lt4(plannedWorkouts.scheduledDate, tomorrow),
-        eq20(plannedWorkouts.isCompleted, false)
+        eq25(plannedWorkouts.isCompleted, false)
       )).orderBy(plannedWorkouts.scheduledDate).limit(1);
       if (todaysWorkouts.length > 0) {
         return res.json({ workout: todaysWorkouts[0], isToday: true, isOverdue: false });
       }
-      const overdueWorkouts = await db.select().from(plannedWorkouts).where(and16(
-        eq20(plannedWorkouts.trainingPlanId, planId),
+      const overdueWorkouts = await db.select().from(plannedWorkouts).where(and21(
+        eq25(plannedWorkouts.trainingPlanId, planId),
         lt4(plannedWorkouts.scheduledDate, today),
-        eq20(plannedWorkouts.isCompleted, false)
-      )).orderBy(desc8(plannedWorkouts.scheduledDate)).limit(1);
+        eq25(plannedWorkouts.isCompleted, false)
+      )).orderBy(desc10(plannedWorkouts.scheduledDate)).limit(1);
       if (overdueWorkouts.length > 0) {
         return res.json({ workout: overdueWorkouts[0], isToday: false, isOverdue: true });
       }
@@ -23696,12 +27939,12 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   app2.get("/api/training-plans/:planId/progress", authMiddleware, async (req, res) => {
     try {
       const { planId } = req.params;
-      const [plan] = await db.select().from(trainingPlans).where(eq20(trainingPlans.id, planId));
+      const [plan] = await db.select().from(trainingPlans).where(eq25(trainingPlans.id, planId));
       if (!plan) return res.status(404).json({ error: "Plan not found" });
-      const allWorkouts = await db.select().from(plannedWorkouts).where(eq20(plannedWorkouts.trainingPlanId, planId));
+      const allWorkouts = await db.select().from(plannedWorkouts).where(eq25(plannedWorkouts.trainingPlanId, planId));
       const completedCount = allWorkouts.filter((w) => w.isCompleted).length;
       const totalCount = allWorkouts.length;
-      const allWeeks = await db.select().from(weeklyPlans).where(eq20(weeklyPlans.trainingPlanId, planId)).orderBy(weeklyPlans.weekNumber);
+      const allWeeks = await db.select().from(weeklyPlans).where(eq25(weeklyPlans.trainingPlanId, planId)).orderBy(weeklyPlans.weekNumber);
       const weekStats = await Promise.all(allWeeks.map(async (week) => {
         const weekWorkouts = allWorkouts.filter((w) => w.weeklyPlanId === week.id);
         const completed = weekWorkouts.filter((w) => w.isCompleted).length;
@@ -23734,32 +27977,61 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       res.status(500).json({ error: "Failed to get plan progress" });
     }
   });
+  app2.get("/api/training-plans/:planId/adaptations", authMiddleware, async (req, res) => {
+    try {
+      const { planId } = req.params;
+      const [plan] = await db.select().from(trainingPlans).where(eq25(trainingPlans.id, planId));
+      if (!plan) return res.status(404).json({ error: "Plan not found" });
+      if (plan.userId !== req.user.userId) {
+        return res.status(403).json({ error: "Unauthorized" });
+      }
+      const adaptations = await db.select().from(planAdaptations).where(
+        eq25(planAdaptations.trainingPlanId, planId)
+      ).orderBy(desc10(planAdaptations.createdAt));
+      res.json({
+        planId,
+        count: adaptations.length,
+        adaptations: adaptations.map((a) => ({
+          id: a.id,
+          trainingPlanId: a.trainingPlanId,
+          adaptationDate: a.createdAt,
+          reason: a.reason,
+          changes: a.changes,
+          aiSuggestion: a.aiSuggestion,
+          userAccepted: a.userAccepted
+        }))
+      });
+    } catch (error) {
+      console.error("Get plan adaptations error:", error);
+      res.status(500).json({ error: "Failed to get plan adaptations" });
+    }
+  });
   app2.put("/api/training-plans/workouts/:workoutId/complete", authMiddleware, async (req, res) => {
     try {
       const { workoutId } = req.params;
       const { runId } = req.body;
       console.log(`\u2705 Completing workout ${workoutId}...`);
-      const updateResult = await db.update(plannedWorkouts).set({ isCompleted: true, completedRunId: runId || null }).where(eq20(plannedWorkouts.id, workoutId));
+      const updateResult = await db.update(plannedWorkouts).set({ isCompleted: true, completedRunId: runId || null }).where(eq25(plannedWorkouts.id, workoutId));
       console.log(`\u2705 Workout updated: ${workoutId}`);
-      const [workout] = await db.select().from(plannedWorkouts).where(eq20(plannedWorkouts.id, workoutId));
+      const [workout] = await db.select().from(plannedWorkouts).where(eq25(plannedWorkouts.id, workoutId));
       if (!workout) {
         console.error(`\u274C Workout not found after update: ${workoutId}`);
         return res.status(404).json({ error: "Workout not found after update" });
       }
       console.log(`\u2705 Confirmed: workout ${workoutId} isCompleted=${workout.isCompleted}`);
       if (workout.weeklyPlanId && workout.trainingPlanId) {
-        const weekWorkouts = await db.select().from(plannedWorkouts).where(eq20(plannedWorkouts.weeklyPlanId, workout.weeklyPlanId));
+        const weekWorkouts = await db.select().from(plannedWorkouts).where(eq25(plannedWorkouts.weeklyPlanId, workout.weeklyPlanId));
         const allComplete = weekWorkouts.every((w) => w.isCompleted);
         if (allComplete) {
-          const [week] = await db.select().from(weeklyPlans).where(eq20(weeklyPlans.id, workout.weeklyPlanId));
+          const [week] = await db.select().from(weeklyPlans).where(eq25(weeklyPlans.id, workout.weeklyPlanId));
           if (week) {
             console.log(`\u{1F4C5} Week ${week.weekNumber} complete, advancing to week ${week.weekNumber + 1}`);
-            await db.update(trainingPlans).set({ currentWeek: week.weekNumber + 1 }).where(eq20(trainingPlans.id, workout.trainingPlanId));
+            await db.update(trainingPlans).set({ currentWeek: week.weekNumber + 1 }).where(eq25(trainingPlans.id, workout.trainingPlanId));
           }
         }
-        const [plan] = await db.select().from(trainingPlans).where(eq20(trainingPlans.id, workout.trainingPlanId));
+        const [plan] = await db.select().from(trainingPlans).where(eq25(trainingPlans.id, workout.trainingPlanId));
         if (plan) {
-          const allWorkouts = await db.select().from(plannedWorkouts).where(eq20(plannedWorkouts.trainingPlanId, plan.id));
+          const allWorkouts = await db.select().from(plannedWorkouts).where(eq25(plannedWorkouts.trainingPlanId, plan.id));
           const completedCount = allWorkouts.filter((w) => w.isCompleted).length;
           const totalCount = allWorkouts.length;
           console.log(`\u2705 Plan ${plan.id}: ${completedCount}/${totalCount} completed (${(completedCount / totalCount * 100).toFixed(0)}%)`);
@@ -23787,26 +28059,55 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   app2.put("/api/training-plans/workouts/:workoutId/skip", authMiddleware, async (req, res) => {
     try {
       const { workoutId } = req.params;
-      await db.update(plannedWorkouts).set({ isCompleted: true }).where(eq20(plannedWorkouts.id, workoutId));
+      await db.update(plannedWorkouts).set({ isCompleted: true }).where(eq25(plannedWorkouts.id, workoutId));
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to skip workout" });
+    }
+  });
+  app2.patch("/api/training-plans/:planId/status", authMiddleware, async (req, res) => {
+    try {
+      const { planId } = req.params;
+      const { status } = req.body;
+      const normalisedStatus = status === "abandoned" ? "cancelled" : status;
+      const userId = req.user?.userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      const plan = await db.select().from(trainingPlans).where(and21(eq25(trainingPlans.id, planId), eq25(trainingPlans.userId, userId))).limit(1);
+      if (plan.length === 0) {
+        return res.status(404).json({ error: "Plan not found or not authorized" });
+      }
+      const validStatuses = ["active", "paused", "completed", "cancelled", "abandoned"];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` });
+      }
+      await db.update(trainingPlans).set({ status: normalisedStatus }).where(eq25(trainingPlans.id, planId));
+      res.status(200).json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update plan status" });
     }
   });
   app2.put("/api/training-plans/:planId/status", authMiddleware, async (req, res) => {
     try {
       const { planId } = req.params;
       const { status } = req.body;
+      const normalisedStatus = status === "abandoned" ? "cancelled" : status;
       const userId = req.user?.userId;
       if (!userId) {
         return res.status(401).json({ error: "Not authenticated" });
       }
-      const plan = await db.select().from(trainingPlans).where(and16(eq20(trainingPlans.id, planId), eq20(trainingPlans.userId, userId))).limit(1);
+      const plan = await db.select().from(trainingPlans).where(and21(eq25(trainingPlans.id, planId), eq25(trainingPlans.userId, userId))).limit(1);
       if (plan.length === 0) {
         return res.status(404).json({ error: "Plan not found or not authorized" });
       }
-      await db.update(trainingPlans).set({ status }).where(eq20(trainingPlans.id, planId));
-      res.json({ success: true, planId, status });
+      const validStatuses = ["active", "paused", "completed", "cancelled", "abandoned"];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` });
+      }
+      await db.update(trainingPlans).set({ status: normalisedStatus }).where(eq25(trainingPlans.id, planId));
+      res.setHeader("Content-Type", "application/json");
+      res.status(200).send();
     } catch (error) {
       res.status(500).json({ error: "Failed to update plan status" });
     }
@@ -23818,17 +28119,17 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       if (!userId) {
         return res.status(401).json({ error: "Not authenticated" });
       }
-      const plan = await db.select().from(trainingPlans).where(and16(eq20(trainingPlans.id, planId), eq20(trainingPlans.userId, userId))).limit(1);
+      const plan = await db.select().from(trainingPlans).where(and21(eq25(trainingPlans.id, planId), eq25(trainingPlans.userId, userId))).limit(1);
       if (plan.length === 0) {
         return res.status(404).json({ error: "Plan not found or not authorized" });
       }
-      const planWeeks = await db.select({ id: weeklyPlans.id }).from(weeklyPlans).where(eq20(weeklyPlans.trainingPlanId, planId));
+      const planWeeks = await db.select({ id: weeklyPlans.id }).from(weeklyPlans).where(eq25(weeklyPlans.trainingPlanId, planId));
       for (const week of planWeeks) {
-        await db.delete(plannedWorkouts).where(eq20(plannedWorkouts.weeklyPlanId, week.id));
+        await db.delete(plannedWorkouts).where(eq25(plannedWorkouts.weeklyPlanId, week.id));
       }
-      await db.delete(weeklyPlans).where(eq20(weeklyPlans.trainingPlanId, planId));
-      await db.delete(planAdaptations).where(eq20(planAdaptations.trainingPlanId, planId));
-      await db.delete(trainingPlans).where(eq20(trainingPlans.id, planId));
+      await db.delete(weeklyPlans).where(eq25(weeklyPlans.trainingPlanId, planId));
+      await db.delete(planAdaptations).where(eq25(planAdaptations.trainingPlanId, planId));
+      await db.delete(trainingPlans).where(eq25(trainingPlans.id, planId));
       res.json({ success: true, planId, message: "Training plan deleted permanently" });
     } catch (error) {
       console.error("Delete training plan error:", error);
@@ -23838,11 +28139,11 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   app2.get("/api/clubs", authMiddleware, async (req, res) => {
     try {
       const { search, city } = req.query;
-      let query = db.select().from(clubs).where(eq20(clubs.isPublic, true));
+      let query = db.select().from(clubs).where(eq25(clubs.isPublic, true));
       if (city) {
-        query = query.where(eq20(clubs.city, String(city)));
+        query = query.where(eq25(clubs.city, String(city)));
       }
-      const clubsList = await query.orderBy(desc8(clubs.memberCount)).limit(50);
+      const clubsList = await query.orderBy(desc10(clubs.memberCount)).limit(50);
       res.json(clubsList);
     } catch (error) {
       console.error("Get clubs error:", error);
@@ -23854,9 +28155,9 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const { clubId } = req.params;
       const userId = req.user.userId;
       const existing = await db.select().from(clubMemberships).where(
-        and16(
-          eq20(clubMemberships.clubId, clubId),
-          eq20(clubMemberships.userId, userId)
+        and21(
+          eq25(clubMemberships.clubId, clubId),
+          eq25(clubMemberships.userId, userId)
         )
       ).limit(1);
       if (existing.length > 0) {
@@ -23868,8 +28169,8 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         role: "member"
       });
       await db.update(clubs).set({
-        memberCount: sql10`${clubs.memberCount} + 1`
-      }).where(eq20(clubs.id, clubId));
+        memberCount: sql13`${clubs.memberCount} + 1`
+      }).where(eq25(clubs.id, clubId));
       res.json({ success: true, message: "Joined club successfully" });
     } catch (error) {
       console.error("Join club error:", error);
@@ -23880,9 +28181,9 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     try {
       const now = /* @__PURE__ */ new Date();
       const activeChallenges = await db.select().from(challenges).where(
-        and16(
-          eq20(challenges.isPublic, true),
-          gte10(challenges.endDate, now)
+        and21(
+          eq25(challenges.isPublic, true),
+          gte11(challenges.endDate, now)
         )
       ).orderBy(challenges.startDate).limit(50);
       res.json(activeChallenges);
@@ -23896,9 +28197,9 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const { challengeId } = req.params;
       const userId = req.user.userId;
       const existing = await db.select().from(challengeParticipants).where(
-        and16(
-          eq20(challengeParticipants.challengeId, challengeId),
-          eq20(challengeParticipants.userId, userId)
+        and21(
+          eq25(challengeParticipants.challengeId, challengeId),
+          eq25(challengeParticipants.userId, userId)
         )
       ).limit(1);
       if (existing.length > 0) {
@@ -23912,8 +28213,8 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         isCompleted: false
       });
       await db.update(challenges).set({
-        participantCount: sql10`${challenges.participantCount} + 1`
-      }).where(eq20(challenges.id, challengeId));
+        participantCount: sql13`${challenges.participantCount} + 1`
+      }).where(eq25(challenges.id, challengeId));
       res.json({ success: true, message: "Joined challenge successfully" });
     } catch (error) {
       console.error("Join challenge error:", error);
@@ -23955,7 +28256,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       if (!run) return res.status(404).json({ error: "Run not found" });
       if (run.userId !== req.user.userId) return res.status(403).json({ error: "You can only share your own runs" });
       const user = await storage.getUser(req.user.userId);
-      const existing = await db.select().from(sharedRuns).where(eq20(sharedRuns.runId, runId)).limit(1);
+      const existing = await db.select().from(sharedRuns).where(eq25(sharedRuns.runId, runId)).limit(1);
       if (existing.length > 0) {
         const share = existing[0];
         const shareUrl2 = `https://airuncoach.live/share/${share.shareToken}`;
@@ -23965,8 +28266,8 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
           deepLink: `airuncoach://run/${runId}?ref=${share.shareToken}`
         });
       }
-      const { randomBytes } = await import("node:crypto");
-      const shareToken = randomBytes(6).toString("base64url").slice(0, 8);
+      const { randomBytes: randomBytes2 } = await import("node:crypto");
+      const shareToken = randomBytes2(6).toString("base64url").slice(0, 8);
       const distanceKm = normalizeDistanceMeters(run) / 1e3;
       const durationSec = normalizeDurationSeconds(run);
       await db.insert(sharedRuns).values({
@@ -23992,12 +28293,12 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   });
   app2.get("/share/:token", async (req, res) => {
     try {
-      const results = await db.select().from(sharedRuns).where(eq20(sharedRuns.shareToken, req.params.token)).limit(1);
+      const results = await db.select().from(sharedRuns).where(eq25(sharedRuns.shareToken, req.params.token)).limit(1);
       if (results.length === 0) {
         return res.status(404).send(buildShareNotFoundPage());
       }
       const share = results[0];
-      await db.update(sharedRuns).set({ viewCount: (share.viewCount || 0) + 1 }).where(eq20(sharedRuns.id, share.id));
+      await db.update(sharedRuns).set({ viewCount: (share.viewCount || 0) + 1 }).where(eq25(sharedRuns.id, share.id));
       const html = buildShareLandingPage(share);
       res.setHeader("Content-Type", "text/html");
       res.send(html);
@@ -24008,7 +28309,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   });
   app2.get("/api/shared-run/:token", async (req, res) => {
     try {
-      const results = await db.select().from(sharedRuns).where(eq20(sharedRuns.shareToken, req.params.token)).limit(1);
+      const results = await db.select().from(sharedRuns).where(eq25(sharedRuns.shareToken, req.params.token)).limit(1);
       if (results.length === 0) {
         return res.status(404).json({ error: "Shared run not found" });
       }
@@ -24447,7 +28748,7 @@ init_notification_service();
 init_db();
 init_schema();
 import cron from "node-cron";
-import { eq as eq21, and as and17, gte as gte11, lt as lt5 } from "drizzle-orm";
+import { eq as eq26, and as and22, gte as gte12, lt as lt5 } from "drizzle-orm";
 import { DateTime as DateTime3 } from "luxon";
 var coachingPlanRemindersSent = /* @__PURE__ */ new Map();
 async function syncGarminForUser(device2) {
@@ -24543,7 +28844,7 @@ async function sendCoachingPlanReminders() {
       id: users.id,
       timezone: notificationPreferences.coachingPlanReminderTimezone,
       enabled: notificationPreferences.coachingPlanReminder
-    }).from(users).leftJoin(notificationPreferences, eq21(users.id, notificationPreferences.userId));
+    }).from(users).leftJoin(notificationPreferences, eq26(users.id, notificationPreferences.userId));
     if (allUsers.length === 0) {
       console.log("[Scheduler] No users found");
       return;
@@ -24575,9 +28876,9 @@ async function sendCoachingPlanReminders() {
           continue;
         }
         const activePlans = await db.select({ id: trainingPlans.id }).from(trainingPlans).where(
-          and17(
-            eq21(trainingPlans.userId, userId),
-            eq21(trainingPlans.status, "active")
+          and22(
+            eq26(trainingPlans.userId, userId),
+            eq26(trainingPlans.status, "active")
           )
         );
         if (activePlans.length === 0) {
@@ -24592,11 +28893,11 @@ async function sendCoachingPlanReminders() {
             intensity: plannedWorkouts.intensity,
             isCompleted: plannedWorkouts.isCompleted
           }).from(plannedWorkouts).where(
-            and17(
-              eq21(plannedWorkouts.trainingPlanId, plan.id),
-              gte11(plannedWorkouts.scheduledDate, userToday),
+            and22(
+              eq26(plannedWorkouts.trainingPlanId, plan.id),
+              gte12(plannedWorkouts.scheduledDate, userToday),
               lt5(plannedWorkouts.scheduledDate, userTomorrow),
-              eq21(plannedWorkouts.isCompleted, false)
+              eq26(plannedWorkouts.isCompleted, false)
             )
           ).limit(1);
           if (todaysWorkouts.length > 0) {
@@ -24713,6 +29014,53 @@ async function runAutoMigrations() {
     {
       name: "connected_devices.updated_at",
       sql: "ALTER TABLE connected_devices ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"
+    },
+    // ── Route Memory Engine ───────────────────────────────────────────────────
+    // known_routes: fingerprints of recurring routes per user.
+    // Auto-populated after a user runs the same location 2+ times.
+    {
+      name: "known_routes.create_table",
+      sql: `
+        CREATE TABLE IF NOT EXISTS known_routes (
+          id                   VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id              VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          name                 TEXT,
+          display_name         TEXT,
+          start_lat            REAL NOT NULL,
+          start_lng            REAL NOT NULL,
+          start_radius_m       REAL DEFAULT 75,
+          typical_distance_km  REAL,
+          elevation_profile    JSONB,
+          notable_segments     JSONB,
+          terrain_type         TEXT,
+          typical_days_of_week JSONB,
+          typical_start_hour   INTEGER,
+          typical_start_minute INTEGER,
+          run_count            INTEGER NOT NULL DEFAULT 0,
+          first_run_at         TIMESTAMP,
+          last_run_at          TIMESTAMP,
+          constituent_run_ids  JSONB,
+          best_time_ms         INTEGER,
+          avg_time_ms          INTEGER,
+          avg_pace_sec_per_km  REAL,
+          split_profiles       JSONB,
+          created_at           TIMESTAMP DEFAULT NOW(),
+          updated_at           TIMESTAMP DEFAULT NOW()
+        )
+      `
+    },
+    {
+      name: "idx_known_routes_user_location",
+      sql: "CREATE INDEX IF NOT EXISTS idx_known_routes_user_location ON known_routes(user_id, start_lat, start_lng)"
+    },
+    // Add Route Memory Engine columns to runs table
+    {
+      name: "runs.known_route_id",
+      sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS known_route_id VARCHAR"
+    },
+    {
+      name: "runs.route_confidence",
+      sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS route_confidence REAL"
     }
   ];
   let succeeded = 0;
@@ -24734,7 +29082,7 @@ async function runAutoMigrations() {
 // server/index.ts
 import * as fs from "fs";
 import * as path2 from "path";
-var app = express2();
+var app = express3();
 var log = console.log;
 var METRO_PORT = 8081;
 function setupCors(app2) {
@@ -24766,17 +29114,17 @@ function setupCors(app2) {
   });
 }
 function setupBodyParsing(app2) {
-  app2.use("/api/garmin/webhook", express2.json({ limit: "100mb" }));
-  app2.use("/api/garmin/webhooks", express2.json({ limit: "100mb" }));
+  app2.use("/api/garmin/webhook", express3.json({ limit: "100mb" }));
+  app2.use("/api/garmin/webhooks", express3.json({ limit: "100mb" }));
   app2.use(
-    express2.json({
+    express3.json({
       limit: "10mb",
       verify: (req, _res, buf) => {
         req.rawBody = buf;
       }
     })
   );
-  app2.use(express2.urlencoded({ extended: false, limit: "10mb" }));
+  app2.use(express3.urlencoded({ extended: false, limit: "10mb" }));
 }
 function setupCacheHeaders(app2) {
   app2.use((req, res, next) => {
@@ -24788,7 +29136,9 @@ function setupCacheHeaders(app2) {
         "/api/notifications",
         "/api/users/me",
         "/api/auth",
-        "/api/garmin"
+        "/api/garmin",
+        "/api/connected-devices"
+        // Connection state changes immediately on connect/disconnect
       ];
       const isNoCache = noCachePaths.some((p) => path3.startsWith(p));
       if (isNoCache) {
@@ -24874,13 +29224,34 @@ function serveLandingPage({
 function isBrowserRequest(req) {
   const platform = req.header("expo-platform");
   if (platform) return false;
-  const accept = req.header("accept") || "";
-  if (accept.includes("text/html")) return true;
   const ua = (req.header("user-agent") || "").toLowerCase();
-  if (ua.includes("mozilla") || ua.includes("chrome") || ua.includes("safari") || ua.includes("firefox") || ua.includes("edge")) {
-    if (!ua.includes("okhttp") && !ua.includes("expo") && !ua.includes("react-native")) {
+  if (ua.includes("okhttp") || ua.includes("expo") || ua.includes("react-native")) {
+    return false;
+  }
+  if (ua.includes("iphone") || ua.includes("ipad") || ua.includes("ipod")) {
+    if (!ua.includes("version/") || ua.includes("mobile")) {
+      if (!ua.match(/version\/[\d.]+.*safari/)) {
+        return false;
+      }
+    }
+  }
+  const accept = req.header("accept") || "";
+  if (accept.includes("application/json")) return false;
+  if (accept.includes("text/html")) return true;
+  if (ua.includes("firefox") || ua.includes("edge") || ua.includes("chrome")) {
+    return true;
+  }
+  if (ua.includes("safari")) {
+    if (ua.includes("macintosh") && ua.match(/version\/[\d.]+/)) {
       return true;
     }
+    return false;
+  }
+  if (ua.includes("mozilla")) {
+    if (ua.includes("macintosh") || ua.includes("windows") || ua.includes("x11")) {
+      return true;
+    }
+    return false;
   }
   return false;
 }
@@ -24904,12 +29275,12 @@ function configureExpoAndLanding(app2) {
     }
     next();
   });
-  app2.use("/assets", express2.static(path2.resolve(process.cwd(), "assets")));
-  app2.use("/logos", express2.static(path2.resolve(process.cwd(), "attached_assets/generated_images")));
-  app2.use(express2.static(path2.resolve(process.cwd(), "static-build")));
+  app2.use("/assets", express3.static(path2.resolve(process.cwd(), "assets")));
+  app2.use("/logos", express3.static(path2.resolve(process.cwd(), "attached_assets/generated_images")));
+  app2.use(express3.static(path2.resolve(process.cwd(), "static-build")));
   const webDistPath = path2.resolve(process.cwd(), "dist", "public");
   if (fs.existsSync(webDistPath)) {
-    app2.use(express2.static(webDistPath));
+    app2.use(express3.static(webDistPath));
     log(`Web app: Serving from ${webDistPath}`);
   }
   const metroProxy = createProxyMiddleware({
@@ -24982,14 +29353,14 @@ function setupErrorHandler(app2) {
       log("Production: Landing page template loaded");
     }
     const appName = getAppName();
-    app.use("/assets", express2.static(path2.resolve(process.cwd(), "assets")));
-    app.use("/logos", express2.static(path2.resolve(process.cwd(), "attached_assets/generated_images")));
-    app.use(express2.static(path2.resolve(process.cwd(), "static-build")));
+    app.use("/assets", express3.static(path2.resolve(process.cwd(), "assets")));
+    app.use("/logos", express3.static(path2.resolve(process.cwd(), "attached_assets/generated_images")));
+    app.use(express3.static(path2.resolve(process.cwd(), "static-build")));
     if (fs.existsSync(webDistPath)) {
-      app.use(express2.static(webDistPath));
+      app.use(express3.static(webDistPath));
     }
     if (fs.existsSync(expoDistPath)) {
-      app.use(express2.static(expoDistPath));
+      app.use(express3.static(expoDistPath));
     }
     app.get("/api/health", (_req, res) => {
       res.json({

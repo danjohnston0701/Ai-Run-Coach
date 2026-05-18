@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -47,6 +48,7 @@ fun ConnectedDevicesScreen(
     onNavigateToGarminConnect: () -> Unit = {},
     onNavigateToGarminWatchApp: () -> Unit = {},
     onNavigateToGarminPermissions: () -> Unit = {},
+    onNavigateToStrava: () -> Unit = {},
     viewModel: ConnectedDevicesViewModel = hiltViewModel()
 ) {
     val garminConnectionStatus by viewModel.garminConnectionStatus.collectAsState()
@@ -55,16 +57,17 @@ fun ConnectedDevicesScreen(
 
     val comingSoonDevices = remember {
         listOf(
-            DeviceInfo(
-                name = "Apple Watch",
-                description = "Connect via Apple HealthKit for real-time heart rate and health metrics",
-                icon = Icons.Default.Star,
-                supportsRealtimeHR = true,
-                supportsPostRunSync = true,
-                isAvailableOnAndroid = false,
-                requiresAppInstall = true,
-                onConnect = {}
-            ),
+            // Apple Watch and COROS removed per requirements
+            // DeviceInfo(
+            //     name = "Apple Watch",
+            //     description = "Connect via Apple HealthKit for real-time heart rate and health metrics",
+            //     icon = Icons.Default.Star,
+            //     supportsRealtimeHR = true,
+            //     supportsPostRunSync = true,
+            //     isAvailableOnAndroid = false,
+            //     requiresAppInstall = true,
+            //     onConnect = {}
+            // ),
             DeviceInfo(
                 name = "Samsung Galaxy Watch",
                 description = "Connect via Samsung Health for real-time heart rate tracking",
@@ -74,25 +77,17 @@ fun ConnectedDevicesScreen(
                 isAvailableOnAndroid = false,
                 requiresAppInstall = true,
                 onConnect = {}
-            ),
-            DeviceInfo(
-                name = "COROS",
-                description = "Connect via COROS API for post-run activity sync",
-                icon = Icons.Default.Place,
-                supportsRealtimeHR = false,
-                supportsPostRunSync = true,
-                isAvailableOnAndroid = true,
-                onConnect = {}
-            ),
-            DeviceInfo(
-                name = "Strava",
-                description = "Connect via Strava API for post-run activity sync",
-                icon = Icons.Default.LocationOn,
-                supportsRealtimeHR = false,
-                supportsPostRunSync = true,
-                isAvailableOnAndroid = true,
-                onConnect = {}
             )
+            // COROS removed per requirements
+            // DeviceInfo(
+            //     name = "COROS",
+            //     description = "Connect via COROS API for post-run activity sync",
+            //     icon = Icons.Default.Place,
+            //     supportsRealtimeHR = false,
+            //     supportsPostRunSync = true,
+            //     isAvailableOnAndroid = true,
+            //     onConnect = {}
+            // )
         )
     }
 
@@ -133,7 +128,7 @@ fun ConnectedDevicesScreen(
             // ── Page subtitle ─────────────────────────────────────────────────
             item {
                 Text(
-                    "Connect your Ai Run Coach app to your other fitness apps and devices. Watch apps provide realtime data and insights for AI processing and Coaching. Publish your completed runs to your Strava account. Or sync your Garmin Connect data into the Ai Run Coach app.",
+                    "Connect your Ai Run Coach app to your fitness devices and services. Get real-time coaching with your Garmin watch, and publish completed runs to Strava with full GPS data and metrics.",
                     style = AppTextStyles.body,
                     color = Colors.textSecondary,
                     modifier = Modifier.padding(top = 4.dp)
@@ -152,7 +147,24 @@ fun ConnectedDevicesScreen(
                 GarminWatchAppCard(onSetUp = onNavigateToGarminWatchApp)
             }
 
-            // ── Section: Garmin Connect ───────────────────────────────────────
+            // ── Section: Strava Integration ───────────────────────────────────
+            item {
+                SectionHeader(
+                    title = "Strava",
+                    subtitle = "Publish runs with GPS data",
+                    accentColor = Color(0xFFFC5200)  // Strava orange
+                )
+            }
+
+            item {
+                StravaIntegrationCard(onNavigateToStrava = onNavigateToStrava)
+            }
+
+            // ── Section: Garmin Connect (COMMENTED OUT) ───────────────────────
+            // This integration is disabled because Garmin Connect data cannot be
+            // used for AI processing. The data is not useful for the coaching engine.
+            // If needed in the future, uncomment below.
+            /*
             item {
                 SectionHeader(
                     title = "Garmin Connect",
@@ -170,6 +182,7 @@ fun ConnectedDevicesScreen(
                     onManagePermissions = onNavigateToGarminPermissions
                 )
             }
+            */
 
             // ── Section: Coming Soon ──────────────────────────────────────────
             item {
@@ -392,8 +405,112 @@ private fun WatchFeatureChips() {
     }
 }
 
-// ── Garmin Connect card ───────────────────────────────────────────────────────
+// ── Strava Integration card ──────────────────────────────────────────────────
 //
+// Integration with Strava API to publish completed runs with full GPS data,
+// heart rate, cadence, and elevation metrics. Enables route map generation.
+
+@Composable
+private fun StravaIntegrationCard(
+    onNavigateToStrava: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Colors.backgroundSecondary
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header row: Strava branding
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .background(Color(0xFFFC5200), RoundedCornerShape(8.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Using a circle placeholder for Strava logo
+                    // TODO: Replace with actual Strava logo drawable
+                    Text(
+                        "S",
+                        style = AppTextStyles.h2.copy(
+                            fontSize = 24.sp,
+                            color = Color.White
+                        ),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Strava Integration",
+                        style = AppTextStyles.h3,
+                        color = Colors.textPrimary
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        "Publish runs with complete GPS data",
+                        style = AppTextStyles.caption,
+                        color = Colors.textSecondary
+                    )
+                }
+            }
+
+            // Description
+            Text(
+                "Connect your Strava account to publish completed runs with full GPS tracks, heart rate, cadence, and elevation data. Strava generates beautiful route maps from your run data.",
+                style = AppTextStyles.caption,
+                color = Colors.textSecondary,
+                lineHeight = 18.sp
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Feature chips
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SmallChip(Icons.Default.LocationOn, "Route Map", Color(0xFFFC5200))
+                SmallChip(Icons.Default.Favorite, "All Metrics", Color(0xFFFC5200))
+                SmallChip(Icons.Default.Share, "Social Share", Color(0xFFFC5200))
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // CTA button
+            Button(
+                onClick = onNavigateToStrava,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFFC5200),
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Icon(
+                    Icons.Default.Link,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "Connect Strava Account",
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+        }
+    }
+}
+
+// ── Garmin Connect card (COMMENTED OUT) ───────────────────────────────────────
+//
+// This integration is disabled. Garmin Connect data cannot be used for AI processing.
 // Secondary integration — Garmin Connect OAuth for cloud activity sync and
 // historical run import. Data is displayed only; NOT used in AI processing.
 

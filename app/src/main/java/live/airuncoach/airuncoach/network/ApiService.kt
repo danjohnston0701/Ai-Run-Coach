@@ -567,6 +567,23 @@ interface ApiService {
     suspend fun checkFeatureAvailability(
         @Path("featureName") featureName: String
     ): live.airuncoach.airuncoach.viewmodel.FeatureAvailabilityResponse
+
+    // ========== STRAVA INTEGRATION ==========
+
+    @POST("/api/strava/auth/authorize")
+    suspend fun initiateStravaAuth(@Body body: Map<String, String> = emptyMap()): StravaAuthResponse
+
+    @GET("/api/strava/connection-status")
+    suspend fun checkStravaConnection(): StravaConnectionStatus
+
+    @POST("/api/strava/disconnect")
+    suspend fun disconnectStrava(): Response<Unit>
+
+    @POST("/api/runs/{runId}/publish-strava")
+    suspend fun publishRunToStrava(@Path("runId") runId: String): StravaPublishResponse
+
+    @GET("/api/strava/activities")
+    suspend fun getStravaActivities(): StravaActivitiesResponse
 }
 
 /**
@@ -576,6 +593,42 @@ data class MyDataResponse(
     val success: Boolean = true,
     val data: Map<String, Any> = emptyMap(),
     val message: String? = null
+)
+
+// ========== STRAVA RESPONSE MODELS ==========
+
+data class StravaAuthResponse(
+    val authUrl: String,
+    val state: String
+)
+
+data class StravaConnectionStatus(
+    val connected: Boolean,
+    val athleteName: String? = null,
+    val athleteId: String? = null,
+    val lastSync: String? = null,
+    val tokenExpired: Boolean = false
+)
+
+data class StravaPublishResponse(
+    val success: Boolean,
+    val activityId: String? = null,
+    val stravaUrl: String? = null,
+    val error: String? = null
+)
+
+data class StravaActivitiesResponse(
+    val activities: List<StravaActivityData> = emptyList()
+)
+
+data class StravaActivityData(
+    val id: String,
+    val name: String,
+    val distance: Double,
+    val duration: Int,
+    val completedAt: String,
+    val stravaUrl: String,
+    val stravaId: String
 )
 
 

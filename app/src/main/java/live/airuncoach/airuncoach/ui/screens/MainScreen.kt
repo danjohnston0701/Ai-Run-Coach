@@ -1034,7 +1034,8 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToGarminConnect = { navController.navigate("garmin_connect") },
                     onNavigateToGarminWatchApp = { navController.navigate("garmin_watch_app") },
-                    onNavigateToGarminPermissions = { navController.navigate("garmin_permissions") }
+                    onNavigateToGarminPermissions = { navController.navigate("garmin_permissions") },
+                    onNavigateToStrava = { navController.navigate("strava_oauth") }
                 )
             }
             composable("garmin_connect") { 
@@ -1051,6 +1052,17 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 // GarminPermissionsScreen - Manages Garmin data access permissions
                 // User can view which permissions are granted and re-authorize for new scopes
                 GarminPermissionsScreenWrapper(onNavigateBack = { navController.popBackStack() })
+            }
+            composable("strava_oauth") {
+                // Strava OAuth integration screen
+                // Launches browser for OAuth authorization, handles callback
+                StravaOAuthScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onAuthSuccess = { 
+                        // After successful auth, go back to Connected Devices
+                        navController.popBackStack()
+                    }
+                )
             }
             composable("subscription") {
                 SubscriptionScreen(
