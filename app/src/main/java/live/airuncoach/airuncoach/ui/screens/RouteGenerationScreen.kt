@@ -27,6 +27,9 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.foundation.border
+import kotlinx.coroutines.delay as coroutineDelay
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.android.gms.location.LocationServices
@@ -51,14 +54,24 @@ fun RouteGenerationScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
     
-    var distanceKm by remember { mutableStateOf(5.0f) }
+    var distanceKm by remember { mutableFloatStateOf(5.0f) }
     var preferTrails by remember { mutableStateOf(true) }
     var avoidHills by remember { mutableStateOf(false) }
     var currentLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var hasLocationPermission by remember { mutableStateOf(false) }
-    var locationRefreshTrigger by remember { mutableStateOf(0) }
+    var locationRefreshTrigger by remember { mutableIntStateOf(0) }
     var isGettingLocation by remember { mutableStateOf(false) }
     var gpsError by remember { mutableStateOf<String?>(null) }
+    var loadingStartTime by remember { mutableStateOf<Long?>(null) }
+    
+    // Track loading state change to reset timer
+    LaunchedEffect(isLoading) {
+        if (isLoading) {
+            loadingStartTime = System.currentTimeMillis()
+        } else {
+            loadingStartTime = null
+        }
+    }
     
     // Check permission status
     LaunchedEffect(Unit) {
@@ -404,7 +417,7 @@ fun RouteGenerationScreen(
                             )
                         }
                         
-                        Divider(modifier = Modifier.padding(vertical = Spacing.sm))
+                        HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.sm))
                         
                         Row(
                             modifier = Modifier
@@ -484,45 +497,161 @@ fun RouteGenerationScreen(
                     }
                 }
             }
-
-            // Error message
-            error?.let { errorMessage ->
+            
+            // Loading state with progress indicator and helpful message
+            if (isLoading) {
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = Colors.error.copy(alpha = 0.1f)),
+                        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Column(
-                            modifier = Modifier.padding(Spacing.md)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(Spacing.lg),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(Spacing.md)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(48.dp),
+                                color = Colors.primary,
+                                strokeWidth = 4.dp
+                            )
+                            Text(
+                                "Finding the Best Routes",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "Analyzing terrain, trails, and elevation...\nThis may take 10-30 seconds.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Colors.textSecondary,
+                                textAlign = TextAlign.Center
+                            )
+                            
+                            // Show elapsed time
+                            if (loadingStartTime != null) {
+                                var elapsedTime by remember { mutableIntStateOf(0) }
+                                LaunchedEffect(Unit) {
+                                    while (isLoading) {
+                                        elapsedTime = ((System.currentTimeMillis() - loadingStartTime!!) / 1000).toInt()
+                                        coroutineDelay(1000)
+                                    }
+                                }
                                 Text(
-                                    text = "⚠️",
-                                    style = MaterialTheme.typography.titleLarge
-                                )
-                                Spacer(Modifier.width(Spacing.sm))
-                                Text(
-                                    text = "Unable to Generate Routes",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Colors.error
+                                    "Elapsed: ${elapsedTime}s",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Colors.textSecondary
                                 )
                             }
-                            Spacer(Modifier.height(Spacing.sm))
-                            Text(
-                                text = errorMessage,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Colors.textPrimary
-                            )
+                        }
+                    }
+                }
+            }
+
+            // Error message - prominent and actionable
+            error?.let { errorMessage ->
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.5.dp, Colors.error, RoundedCornerShape(12.dp)),
+                        colors = CardDefaults.cardColors(containerColor = Colors.error.copy(alpha = 0.15f)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(Spacing.lg)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.Top,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "❌",
+                                    style = MaterialTheme.typography.displaySmall,
+                                    modifier = Modifier.padding(end = Spacing.md)
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Route Generation Failed",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Colors.error
+                                    )
+                                    Spacer(Modifier.height(Spacing.sm))
+                                    Text(
+                                        text = errorMessage,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Colors.textPrimary,
+                                        lineHeight = 1.5.em
+                                    )
+                                }
+                            }
+                            
                             Spacer(Modifier.height(Spacing.md))
-                            Text(
-                                text = "💡 Try: Reducing distance, moving to a different location, or changing route preferences",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Colors.textSecondary
-                            )
+                            
+                            // Helpful suggestions
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Colors.backgroundDefault.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                                    .padding(Spacing.md),
+                                verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+                            ) {
+                                Text(
+                                    text = "💡 Try one of these:",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Colors.textSecondary
+                                )
+                                Text(
+                                    text = "• Adjust the distance (try 3-7km)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Colors.textSecondary
+                                )
+                                Text(
+                                    text = "• Move to a different location with more paths",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Colors.textSecondary
+                                )
+                                Text(
+                                    text = "• Toggle trail preferences or hill avoidance",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Colors.textSecondary
+                                )
+                                Text(
+                                    text = "• Check your internet connection and try again",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Colors.textSecondary
+                                )
+                            }
+                            
+                            Spacer(Modifier.height(Spacing.md))
+                            
+                            // Retry button
+                            Button(
+                                onClick = {
+                                    currentLocation?.let { (lat, lng) ->
+                                        viewModel.generateIntelligentRoutes(
+                                            latitude = lat,
+                                            longitude = lng,
+                                            distanceKm = distanceKm.toDouble(),
+                                            preferTrails = preferTrails,
+                                            avoidHills = avoidHills
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Colors.primary
+                                ),
+                                enabled = currentLocation != null && !isLoading
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null)
+                                Spacer(Modifier.width(Spacing.sm))
+                                Text("Retry", fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }

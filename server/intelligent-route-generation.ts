@@ -255,41 +255,81 @@ async function generateGraphHopperRoute(
  */
 
 /**
- * GET route request (fallback — no custom_model, but uses hike profile)
+ * Rate limiting utility — ensure we don't hammer the API
+ */
+let lastApiCallTime = 0;
+const MIN_API_DELAY_MS = 200; // Minimum delay between API calls
+
+async function delayUntilNextRequest(): Promise<void> {
+  const now = Date.now();
+  const timeSinceLastCall = now - lastApiCallTime;
+  if (timeSinceLastCall < MIN_API_DELAY_MS) {
+    const delayMs = MIN_API_DELAY_MS - timeSinceLastCall;
+    console.log(`⏳ Rate limiting: waiting ${delayMs}ms...`);
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+  lastApiCallTime = Date.now();
+}
+
+/**
+ * GET route request with exponential backoff retry for rate limiting
  */
 async function generateGraphHopperRouteGet(
   lat: number,
   lng: number,
   distanceMeters: number,
   profile: 'foot' | 'hike' | 'bike',
-  seed: number
+  seed: number,
+  retryCount: number = 0
 ): Promise<any> {
-  const response = await axios.get(`${GRAPHHOPPER_BASE_URL}/route`, {
-    params: {
-      point: `${lat},${lng}`,
-      profile: profile,
-      algorithm: 'round_trip',
-      'round_trip.distance': distanceMeters,
-      'round_trip.seed': seed,
-      points_encoded: false,
-      elevation: true,
-      instructions: true,
-      details: ['road_class', 'surface'],
-      key: GRAPHHOPPER_API_KEY,
-    },
-    timeout: 30000,
-  });
-  return response.data;
+  const MAX_RETRIES = 3;
+  const BASE_RETRY_DELAY = 1000; // Start with 1 second
+  
+  try {
+    // Rate limiting — don't hammer the API
+    await delayUntilNextRequest();
+    
+    const response = await axios.get(`${GRAPHHOPPER_BASE_URL}/route`, {
+      params: {
+        point: `${lat},${lng}`,
+        profile: profile,
+        algorithm: 'round_trip',
+        'round_trip.distance': distanceMeters,
+        'round_trip.seed': seed,
+        points_encoded: false,
+        elevation: true,
+        instructions: true,
+        details: ['road_class', 'surface'],
+        key: GRAPHHOPPER_API_KEY,
+      },
+      timeout: 30000,
+    });
+    return response.data;
+  } catch (error: any) {
+    // Handle rate limiting (429) with exponential backoff
+    if (error.response?.status === 429 && retryCount < MAX_RETRIES) {
+      const delayMs = BASE_RETRY_DELAY * Math.pow(2, retryCount);
+      console.log(`⚠️ Rate limited (429). Retrying in ${delayMs}ms (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      return generateGraphHopperRouteGet(lat, lng, distanceMeters, profile, seed, retryCount + 1);
+    }
+    throw error;
+  }
 }
 
 /**
  * Generate a scenic loop route through specific waypoints
+ * Uses rate limiting and exponential backoff for 429 errors
  */
 async function generateScenicWaypointRoute(
   startLat: number,
   startLng: number,
-  waypoints: Array<{ lat: number; lng: number; name: string; type: string }>
+  waypoints: Array<{ lat: number; lng: number; name: string; type: string }>,
+  retryCount: number = 0
 ): Promise<any> {
+  const MAX_RETRIES = 3;
+  const BASE_RETRY_DELAY = 1000;
+  
   if (waypoints.length === 0) throw new Error("No waypoints provided");
 
   const points: Array<[number, number]> = [
@@ -299,6 +339,9 @@ async function generateScenicWaypointRoute(
   ];
 
   try {
+    // Rate limiting
+    await delayUntilNextRequest();
+    
     const body: any = {
       points,
       profile: "hike",
@@ -327,23 +370,46 @@ async function generateScenicWaypointRoute(
     });
     return response.data;
   } catch (postError: any) {
+    // Handle 429 rate limiting with exponential backoff
+    if (postError.response?.status === 429 && retryCount < MAX_RETRIES) {
+      const delayMs = BASE_RETRY_DELAY * Math.pow(2, retryCount);
+      console.log(`⚠️ Scenic POST rate limited (429). Retrying in ${delayMs}ms (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      return generateScenicWaypointRoute(startLat, startLng, waypoints, retryCount + 1);
+    }
+    
     console.log(`Scenic POST failed, trying GET fallback: ${postError.message}`);
-    const pointParams = points.map(p => `point=${p[1]},${p[0]}`).join('&');
-    const response = await axios.get(
-      `${GRAPHHOPPER_BASE_URL}/route?${pointParams}`,
-      {
-        params: {
-          profile: 'hike',
-          points_encoded: false,
-          elevation: true,
-          instructions: true,
-          details: ['road_class', 'surface'],
-          key: GRAPHHOPPER_API_KEY,
-        },
-        timeout: 30000,
+    
+    try {
+      // Rate limiting before GET fallback
+      await delayUntilNextRequest();
+      
+      const pointParams = points.map(p => `point=${p[1]},${p[0]}`).join('&');
+      const response = await axios.get(
+        `${GRAPHHOPPER_BASE_URL}/route?${pointParams}`,
+        {
+          params: {
+            profile: 'hike',
+            points_encoded: false,
+            elevation: true,
+            instructions: true,
+            details: ['road_class', 'surface'],
+            key: GRAPHHOPPER_API_KEY,
+          },
+          timeout: 30000,
+        }
+      );
+      return response.data;
+    } catch (getError: any) {
+      // Handle 429 on GET fallback as well
+      if (getError.response?.status === 429 && retryCount < MAX_RETRIES) {
+        const delayMs = BASE_RETRY_DELAY * Math.pow(2, retryCount);
+        console.log(`⚠️ Scenic GET rate limited (429). Retrying in ${delayMs}ms (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        return generateScenicWaypointRoute(startLat, startLng, waypoints, retryCount + 1);
       }
-    );
-    return response.data;
+      throw getError;
+    }
   }
 }
 
@@ -670,6 +736,7 @@ async function evaluateCandidates(
 
 /**
  * Fetch round-trip + scenic candidates from GraphHopper using a specific profile strategy.
+ * Uses SEQUENTIAL requests with rate limiting to avoid 429 (Too Many Requests) errors.
  */
 async function fetchCandidates(
   latitude: number,
@@ -681,12 +748,15 @@ async function fetchCandidates(
   useHikeProfile: boolean,
 ): Promise<Array<{ seed: number; ghResponse: any; isScenic: boolean }>> {
   const baseSeed = Math.floor(Math.random() * 1000);
-  const seedOffsets = [0, 17, 37, 53, 71, 89];
+  const seedOffsets = [0, 17, 37, 53]; // Reduced from 6 to 4 candidates for faster requests
   
   const profile = useHikeProfile ? 'hike' : 'foot';
   console.log(`🔄 Generating ${seedOffsets.length} round-trip candidates (${profileLabel}, ${profile} profile)...`);
 
-  const rtPromises = seedOffsets.map(async (offset) => {
+  const results: Array<{ seed: number; ghResponse: any; isScenic: boolean }> = [];
+
+  // SEQUENTIAL round-trip requests (not parallel)
+  for (const offset of seedOffsets) {
     const seed = baseSeed + offset;
     try {
       let ghResponse;
@@ -696,40 +766,51 @@ async function fetchCandidates(
         // foot profile — always use GET (no custom_model needed)
         ghResponse = await generateGraphHopperRouteGet(latitude, longitude, distanceMeters, 'foot', seed);
       }
-      return { seed, ghResponse, isScenic: false };
+      results.push({ seed, ghResponse, isScenic: false });
     } catch (error: any) {
       console.error(`[${profileLabel}] Seed ${seed} failed: ${error.message}`);
-      return { seed, ghResponse: null, isScenic: false };
-    }
-  });
-
-  const scenicPromises: Promise<{ seed: number; ghResponse: any; isScenic: boolean }>[] = [];
-  
-  if (useHikeProfile && scenicWaypoints.length >= 2) {
-    console.log(`🌿 Generating scenic waypoint candidates (${profileLabel})...`);
-    
-    scenicPromises.push((async () => {
-      try { return { seed: -1, ghResponse: await generateScenicWaypointRoute(latitude, longitude, scenicWaypoints), isScenic: true }; }
-      catch (e: any) { console.error(`[${profileLabel}] Scenic (all) failed: ${e.message}`); return { seed: -1, ghResponse: null, isScenic: true }; }
-    })());
-    
-    scenicPromises.push((async () => {
-      try { return { seed: -2, ghResponse: await generateScenicWaypointRoute(latitude, longitude, [...scenicWaypoints].reverse()), isScenic: true }; }
-      catch (e: any) { return { seed: -2, ghResponse: null, isScenic: true }; }
-    })());
-
-    if (scenicWaypoints.length >= 3) {
-      scenicPromises.push((async () => {
-        try {
-          const subset = scenicWaypoints.filter((_, i) => i % 2 === 0);
-          if (subset.length >= 2) return { seed: -3, ghResponse: await generateScenicWaypointRoute(latitude, longitude, subset), isScenic: true };
-          return { seed: -3, ghResponse: null, isScenic: true };
-        } catch (e: any) { return { seed: -3, ghResponse: null, isScenic: true }; }
-      })());
+      results.push({ seed, ghResponse: null, isScenic: false });
     }
   }
 
-  return Promise.all([...rtPromises, ...scenicPromises]);
+  // SEQUENTIAL scenic waypoint requests
+  if (useHikeProfile && scenicWaypoints.length >= 2) {
+    console.log(`🌿 Generating scenic waypoint candidates (${profileLabel})...`);
+    
+    // Scenic 1: Forward waypoints
+    try {
+      const ghResponse = await generateScenicWaypointRoute(latitude, longitude, scenicWaypoints);
+      results.push({ seed: -1, ghResponse, isScenic: true });
+    } catch (e: any) {
+      console.error(`[${profileLabel}] Scenic (all) failed: ${e.message}`);
+      results.push({ seed: -1, ghResponse: null, isScenic: true });
+    }
+    
+    // Scenic 2: Reversed waypoints
+    try {
+      const ghResponse = await generateScenicWaypointRoute(latitude, longitude, [...scenicWaypoints].reverse());
+      results.push({ seed: -2, ghResponse, isScenic: true });
+    } catch (e: any) {
+      console.error(`[${profileLabel}] Scenic (reversed) failed: ${e.message}`);
+      results.push({ seed: -2, ghResponse: null, isScenic: true });
+    }
+
+    // Scenic 3: Subset waypoints (only if 3+ waypoints exist)
+    if (scenicWaypoints.length >= 3) {
+      try {
+        const subset = scenicWaypoints.filter((_, i) => i % 2 === 0);
+        if (subset.length >= 2) {
+          const ghResponse = await generateScenicWaypointRoute(latitude, longitude, subset);
+          results.push({ seed: -3, ghResponse, isScenic: true });
+        }
+      } catch (e: any) {
+        console.error(`[${profileLabel}] Scenic (subset) failed: ${e.message}`);
+        results.push({ seed: -3, ghResponse: null, isScenic: true });
+      }
+    }
+  }
+
+  return results;
 }
 
 // ==================== MAIN ROUTE GENERATION ====================
