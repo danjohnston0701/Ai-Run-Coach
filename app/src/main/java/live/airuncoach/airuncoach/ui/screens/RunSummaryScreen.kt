@@ -86,6 +86,7 @@ import live.airuncoach.airuncoach.domain.model.AiCoachingNote
 import live.airuncoach.airuncoach.network.model.BasicRunInsights
 import live.airuncoach.airuncoach.network.model.ComprehensiveRunAnalysis
 import live.airuncoach.airuncoach.network.model.GarminInsights
+import live.airuncoach.airuncoach.network.model.GroupRunDebriefResponse
 import live.airuncoach.airuncoach.network.model.GroupRunParticipantResult
 import live.airuncoach.airuncoach.network.model.GroupRunResultsResponse
 import live.airuncoach.airuncoach.network.model.TechnicalAnalysis
