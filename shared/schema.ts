@@ -269,10 +269,8 @@ export const runs = pgTable("runs", {
   maxRespirationRate: real("max_respiration_rate"),           // breaths/min ��� fastest breathing
   respirationRateData: jsonb("respiration_rate_data"),        // number[] – breaths/min per 2s sample
 
-  // ── Extended Cadence, Stride & Movement ──────────────────────────────────────
+  // ── Extended Cadence, Stride & Movement ──────────────────────────────��───────
   minCadence: integer("min_cadence"),                         // spm – slowest cadence
-  maxStrideLength: real("max_stride_length"),                 // m – longest stride
-  minStrideLength: real("min_stride_length"),                 // m – shortest stride
   minVerticalOscillation: real("min_vertical_oscillation"),   // cm – best (most efficient) VO
   maxVerticalRatio: real("max_vertical_ratio"),               // % – worst efficiency
   minVerticalRatio: real("min_vertical_ratio"),               // % – best efficiency
@@ -321,7 +319,6 @@ export const runs = pgTable("runs", {
   powerToPaceRatioData: jsonb("power_to_pace_ratio_data"),   // number[] efficiency per sample
 
   // ── Basic Metrics Extended ───────────────────────────────────────────────────
-  totalSteps: integer("total_steps"),                         // total steps during run
   totalEnergy: integer("total_energy"),                       // kcal burned
 
   // ── Metadata ─────────────────────────────────────────────────────────────────
@@ -531,46 +528,6 @@ export const liveRunSessions = pgTable("live_run_sessions", {
   gpsTrack: jsonb("gps_track"),
   kmSplits: jsonb("km_splits"),
   lastSyncedAt: timestamp("last_synced_at").defaultNow(),
-});
-
-// Group Runs table
-export const groupRuns = pgTable("group_runs", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  hostUserId: varchar("host_user_id").notNull().references(() => users.id),
-  routeId: varchar("route_id").references(() => routes.id),
-  mode: text("mode").notNull().default("route"),
-  title: text("title"),
-  description: text("description"),
-  meetingPoint: text("meeting_point"),
-  meetingLat: real("meeting_lat"),
-  meetingLng: real("meeting_lng"),
-  targetDistance: real("target_distance"),
-  targetPace: text("target_pace"),
-  maxParticipants: integer("max_participants").default(10),
-  isPublic: boolean("is_public").default(true),
-  inviteToken: text("invite_token").notNull().unique(),
-  status: text("status").notNull().default("pending"),
-  plannedStartAt: timestamp("planned_start_at"),
-  startedAt: timestamp("started_at"),
-  completedAt: timestamp("completed_at"),
-  createdAt: timestamp("created_at").defaultNow(),
-});
-
-// Group Run Participants table
-export const groupRunParticipants = pgTable("group_run_participants", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  groupRunId: varchar("group_run_id").notNull().references(() => groupRuns.id),
-  userId: varchar("user_id").notNull().references(() => users.id),
-  role: text("role").notNull().default("participant"),
-  invitationStatus: text("invitation_status").notNull().default("pending"),
-  runId: varchar("run_id").references(() => runs.id),
-  joinedAt: timestamp("joined_at"),
-  completedAt: timestamp("completed_at"),
-  createdAt: timestamp("created_at").defaultNow(),
-  inviteExpiresAt: timestamp("invite_expires_at"),
-  acceptedAt: timestamp("accepted_at"),
-  declinedAt: timestamp("declined_at"),
-  readyToStart: boolean("ready_to_start").default(false),
 });
 
 // Push Subscriptions table
