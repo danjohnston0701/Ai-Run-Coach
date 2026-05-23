@@ -99,6 +99,20 @@ class RunSummaryViewModel @Inject constructor(
     private var targetDistance: Double? = null
     private var targetTime: Long? = null
 
+    // ── Group Run leaderboard ───────────────────────────────────────────────────
+    private val _linkedGroupRunId = MutableStateFlow<String?>(null)
+    val linkedGroupRunId: StateFlow<String?> = _linkedGroupRunId.asStateFlow()
+
+    private val _linkedGroupRunName = MutableStateFlow<String?>(null)
+    val linkedGroupRunName: StateFlow<String?> = _linkedGroupRunName.asStateFlow()
+
+    private val _groupRunResults = MutableStateFlow<GroupRunResultsResponse?>(null)
+    val groupRunResults: StateFlow<GroupRunResultsResponse?> = _groupRunResults.asStateFlow()
+
+    private val _isLoadingGroupRun = MutableStateFlow(false)
+    val isLoadingGroupRun: StateFlow<Boolean> = _isLoadingGroupRun.asStateFlow()
+    // ───────────────────────────────────────────────────────────────────────────
+
     init {
         checkGarminConnection()
     }
@@ -144,6 +158,9 @@ class RunSummaryViewModel @Inject constructor(
                 if (session.linkedWorkoutId != null && session.linkedPlanId != null) {
                     completeLinkedWorkout(session.linkedWorkoutId!!, runId, session.linkedPlanId!!)
                 }
+
+                // Check if this run is part of a group run — load leaderboard if so
+                loadLinkedGroupRun(runId)
                 
                 _isLoadingRun.value = false
             } catch (e: Exception) {
@@ -1065,6 +1082,50 @@ class RunSummaryViewModel @Inject constructor(
             }
         }
     }
+
+    // ── Group Run leaderboard loading ──────────────────────────────────────────
+
+    /**
+     * Checks if the given run belongs to a group run and, if so, loads the full
+     * leaderboard results. Silently does nothing if the run is not a group run.
+     */
+    private fun loadLinkedGroupRun(runId: String) {
+        viewModelScope.launch {
+            _isLoadingGroupRun.value = true
+            try {
+                val lookup = apiService.getGroupRunByRun(runId)
+                _linkedGroupRunId.value = lookup.groupRunId
+                _linkedGroupRunName.value = lookup.groupRunName
+                // Now load full leaderboard results
+                val results = apiService.getGroupRunResults(lookup.groupRunId)
+                _groupRunResults.value = results
+            } catch (_: Exception) {
+                // 404 means this is not a group run — that's perfectly normal, stay silent
+                _linkedGroupRunId.value = null
+                _groupRunResults.value = null
+            } finally {
+                _isLoadingGroupRun.value = false
+            }
+        }
+    }
+
+    /** Re-fetch the group run leaderboard (e.g. user taps refresh on the tab). */
+    fun refreshGroupRunResults() {
+        val groupRunId = _linkedGroupRunId.value ?: return
+        viewModelScope.launch {
+            _isLoadingGroupRun.value = true
+            try {
+                val results = apiService.getGroupRunResults(groupRunId)
+                _groupRunResults.value = results
+            } catch (_: Exception) {
+                // keep stale data
+            } finally {
+                _isLoadingGroupRun.value = false
+            }
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────
 
     private fun shareRunTextFallback(context: android.content.Context, session: RunSession) {
         val distance = String.format(Locale.US, "%.2f", session.getDistanceInKm())

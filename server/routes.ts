@@ -12886,9 +12886,12 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const { runId } = req.body as { runId: string };
 
       if (runId) {
+        // Link the participant row to the run
         await db.update(groupRunParticipants)
           .set({ runId })
           .where(and(eq(groupRunParticipants.groupRunId, id), eq(groupRunParticipants.userId, userId)));
+        // Also stamp the run itself so we can look up group runs by runId
+        await db.update(runs).set({ groupRunId: id }).where(eq(runs.id, runId));
       }
 
       // If organiser, mark whole run as completed
@@ -12903,6 +12906,25 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     } catch (error: any) {
       console.error("[POST /api/group-runs/:id/complete]", error);
       res.status(500).json({ error: "Failed to complete group run" });
+    }
+  });
+
+  // GET /api/group-runs/by-run/:runId — look up which group run a specific run belongs to
+  app.get("/api/group-runs/by-run/:runId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { runId } = req.params;
+      // First try the direct stamp on the run row (set by the complete endpoint)
+      const [runRow] = await db.select({ groupRunId: runs.groupRunId }).from(runs).where(eq(runs.id, runId));
+      const groupRunId = runRow?.groupRunId;
+      if (!groupRunId) return res.status(404).json({ error: "Not a group run" });
+
+      const [gr] = await db.select({ id: groupRuns.id, name: groupRuns.name }).from(groupRuns).where(eq(groupRuns.id, groupRunId));
+      if (!gr) return res.status(404).json({ error: "Group run not found" });
+
+      res.json({ groupRunId: gr.id, groupRunName: gr.name });
+    } catch (error: any) {
+      console.error("[GET /api/group-runs/by-run/:runId]", error);
+      res.status(500).json({ error: "Failed to look up group run" });
     }
   });
 
@@ -12932,10 +12954,15 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
             const [run] = await db.select({
               distance: runs.distance, duration: runs.duration,
               avgPace: runs.avgPace, avgHeartRate: runs.avgHeartRate, calories: runs.calories,
+              cadence: runs.cadence, elevationGain: runs.elevationGain,
               completedAt: runs.completedAt,
             }).from(runs).where(eq(runs.id, p.runId));
             if (run) {
-              stats = { distance: run.distance, duration: run.duration, avgPace: run.avgPace, avgHeartRate: run.avgHeartRate, calories: run.calories };
+              stats = {
+                distance: run.distance, duration: run.duration,
+                avgPace: run.avgPace, avgHeartRate: run.avgHeartRate, calories: run.calories,
+                avgCadence: run.cadence, totalElevationGain: run.elevationGain,
+              };
             }
           }
           return {

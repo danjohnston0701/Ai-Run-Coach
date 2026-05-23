@@ -60,5 +60,13 @@ data class GroupRunStats(
     @SerializedName("duration") val duration: Int,
     @SerializedName("avgPace") val avgPace: String?,
     @SerializedName("avgHeartRate") val avgHeartRate: Int?,
-    @SerializedName("calories") val calories: Int?
+    @SerializedName("calories") val calories: Int?,
+    @SerializedName("avgCadence") val avgCadence: Int? = null,
+    @SerializedName("totalElevationGain") val totalElevationGain: Double? = null
+)
+
+/** GET /api/group-runs/by-run/:runId — look up which group run a specific run belongs to */
+data class GroupRunLookupResponse(
+    @SerializedName("groupRunId") val groupRunId: String,
+    @SerializedName("groupRunName") val groupRunName: String?
 )

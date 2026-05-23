@@ -7,6 +7,7 @@ import live.airuncoach.airuncoach.network.model.InviteFriendsRequest
 import live.airuncoach.airuncoach.network.model.GroupRunRespondRequest
 import live.airuncoach.airuncoach.network.model.GroupRunCompleteRequest
 import live.airuncoach.airuncoach.network.model.GroupRunResultsResponse
+import live.airuncoach.airuncoach.network.model.GroupRunLookupResponse
 import live.airuncoach.airuncoach.network.model.*
 import live.airuncoach.airuncoach.network.model.GeneratePlanRequest
 import live.airuncoach.airuncoach.network.model.GeneratePlanResponse
@@ -162,6 +163,10 @@ interface ApiService {
 
     @GET("/api/group-runs/{id}/results")
     suspend fun getGroupRunResults(@Path("id") groupRunId: String): GroupRunResultsResponse
+
+    /** Look up which group run a specific run session belongs to. Returns 404 if not a group run. */
+    @GET("/api/group-runs/by-run/{runId}")
+    suspend fun getGroupRunByRun(@Path("runId") runId: String): GroupRunLookupResponse
 
     @DELETE("/api/group-runs/{id}/leave")
     suspend fun leaveGroupRun(@Path("id") groupRunId: String): Response<Unit>

@@ -24,7 +24,10 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -83,6 +86,8 @@ import live.airuncoach.airuncoach.domain.model.AiCoachingNote
 import live.airuncoach.airuncoach.network.model.BasicRunInsights
 import live.airuncoach.airuncoach.network.model.ComprehensiveRunAnalysis
 import live.airuncoach.airuncoach.network.model.GarminInsights
+import live.airuncoach.airuncoach.network.model.GroupRunParticipantResult
+import live.airuncoach.airuncoach.network.model.GroupRunResultsResponse
 import live.airuncoach.airuncoach.network.model.TechnicalAnalysis
 import live.airuncoach.airuncoach.ui.components.CoachingPlanBadge
 import live.airuncoach.airuncoach.ui.components.GarminAttributionBadge
@@ -140,6 +145,13 @@ fun RunSummaryScreenFlagship(
     val isAdmin = viewModel.isAdminUser()
     val isGarminConnected by viewModel.isGarminConnected.collectAsState()
     val runPersonalBests by viewModel.runPersonalBests.collectAsState()
+    // Group run leaderboard
+    val linkedGroupRunId by viewModel.linkedGroupRunId.collectAsState()
+    val linkedGroupRunName by viewModel.linkedGroupRunName.collectAsState()
+    val groupRunResults by viewModel.groupRunResults.collectAsState()
+    val isLoadingGroupRun by viewModel.isLoadingGroupRun.collectAsState()
+    val hasGroupRun = linkedGroupRunId != null
+    val groupRunTabOffset = if (hasGroupRun) 1 else 0
 
     LaunchedEffect(runId) {
         // Always reload when runId changes (navigating back and reopening should refresh data including coaching notes)
@@ -237,8 +249,8 @@ fun RunSummaryScreenFlagship(
                             .fillMaxSize()
                             .weight(1f)
                     ) {
-                        when (selectedTab) {
-                        0 -> AiInsightsTabContent(
+                        when {
+                        selectedTab == 0 -> AiInsightsTabContent(
                             run = session!!,
                             lastRunForDelta = lastRunForDelta,
                             analysisState = analysisState,
@@ -273,9 +285,22 @@ fun RunSummaryScreenFlagship(
                             personalBests = runPersonalBests,
                             aiConsentGranted = aiConsentGranted,
                             onRequestAiConsent = { showAiConsentSheet = true },
+                            hasGroupRun = hasGroupRun,
                         )
 
-                        1 -> SummaryTabContent(
+                        // Tab 1: Group Run leaderboard (only when run is linked to a group run)
+                        selectedTab == 1 && hasGroupRun -> GroupRunLeaderboardTab(
+                            run = session!!,
+                            groupRunName = linkedGroupRunName,
+                            results = groupRunResults,
+                            isLoading = isLoadingGroupRun,
+                            onRefresh = { viewModel.refreshGroupRunResults() },
+                            selectedTab = selectedTab,
+                            onTabSelected = { selectedTab = it },
+                            hasGroupRun = true,
+                        )
+
+                        selectedTab == 1 + groupRunTabOffset -> SummaryTabContent(
                             run = session!!,
                             lastRunForDelta = lastRunForDelta,
                             strugglePoints = strugglePoints,
@@ -283,27 +308,31 @@ fun RunSummaryScreenFlagship(
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it },
                             personalBests = runPersonalBests,
+                            hasGroupRun = hasGroupRun,
                         )
 
-                        2 -> GraphsTabContent(
+                        selectedTab == 2 + groupRunTabOffset -> GraphsTabContent(
                             run = session!!,
                             onDelete = { showDeleteConfirm = true },
                             selectedTab = selectedTab,
-                            onTabSelected = { selectedTab = it }
+                            onTabSelected = { selectedTab = it },
+                            hasGroupRun = hasGroupRun,
                         )
 
-                        3 -> DataTabFlagship(
+                        selectedTab == 3 + groupRunTabOffset -> DataTabFlagship(
                             run = session!!,
                             onDelete = { showDeleteConfirm = true },
                             selectedTab = selectedTab,
-                            onTabSelected = { selectedTab = it }
+                            onTabSelected = { selectedTab = it },
+                            hasGroupRun = hasGroupRun,
                         )
-                        4 -> AchievementsTabFlagship(
+                        selectedTab == 4 + groupRunTabOffset -> AchievementsTabFlagship(
                             run = session!!,
                             analysisState = analysisState,
                             onDelete = { showDeleteConfirm = true },
                             selectedTab = selectedTab,
-                            onTabSelected = { selectedTab = it }
+                            onTabSelected = { selectedTab = it },
+                            hasGroupRun = hasGroupRun,
                         )
                     }
                         }
@@ -609,8 +638,17 @@ private fun DifficultyPillFlagship(label: String) {
 }
 
 @Composable
-private fun RunTabsFlagship(selected: Int, onSelected: (Int) -> Unit) {
-    val labels = listOf("Ai Insights", "Summary", "Graphs", "Data", "Badges")
+private fun RunTabsFlagship(selected: Int, onSelected: (Int) -> Unit, hasGroupRun: Boolean = false) {
+    val labels = remember(hasGroupRun) {
+        buildList {
+            add("Ai Insights")
+            if (hasGroupRun) add("Group Run")
+            add("Summary")
+            add("Graphs")
+            add("Data")
+            add("Badges")
+        }
+    }
     ScrollableTabRow(
         selectedTabIndex = selected,
         containerColor = Colors.backgroundRoot,
@@ -631,6 +669,264 @@ private fun RunTabsFlagship(selected: Int, onSelected: (Int) -> Unit) {
                 },
                 selectedContentColor = Colors.primary,
                 unselectedContentColor = Colors.textMuted
+            )
+        }
+    }
+}
+
+/* ------------------------------- TAB: GROUP RUN LEADERBOARD ------------------------------ */
+
+@Composable
+private fun GroupRunLeaderboardTab(
+    run: RunSession,
+    groupRunName: String?,
+    results: GroupRunResultsResponse?,
+    isLoading: Boolean,
+    onRefresh: () -> Unit,
+    selectedTab: Int = 1,
+    onTabSelected: (Int) -> Unit = {},
+    hasGroupRun: Boolean = true,
+) {
+    // Track which stat the user wants to sort by
+    var activeFilter by remember { mutableStateOf("Pace") }
+    val filters = listOf("Pace", "Time", "Cadence", "HR", "Elevation")
+
+    // Sort results based on the active filter
+    val sortedResults = remember(results, activeFilter) {
+        val list = results?.results ?: emptyList()
+        when (activeFilter) {
+            "Pace"      -> list.sortedWith(compareBy(nullsLast()) { it.stats?.avgPace })
+            "Time"      -> list.sortedWith(compareBy(nullsLast()) { it.stats?.duration })
+            "Cadence"   -> list.sortedWith(compareByDescending(nullsFirst()) { it.stats?.avgCadence })
+            "HR"        -> list.sortedWith(compareBy(nullsLast()) { it.stats?.avgHeartRate })
+            "Elevation" -> list.sortedWith(compareByDescending(nullsFirst()) { it.stats?.totalElevationGain })
+            else        -> list
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = Spacing.lg),
+        contentPadding = PaddingValues(bottom = Spacing.xl),
+        verticalArrangement = Arrangement.spacedBy(Spacing.md)
+    ) {
+        // Tab bar (sticky navigation — same pattern as every other tab)
+        item {
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun)
+        }
+
+        // ── Group run name header ──────────────────────────────────────────────
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = groupRunName ?: "Group Run",
+                        style = AppTextStyles.h3.copy(fontWeight = FontWeight.ExtraBold),
+                        color = Colors.textPrimary
+                    )
+                    Text(
+                        text = "Leaderboard",
+                        style = AppTextStyles.small,
+                        color = Colors.textMuted
+                    )
+                }
+                IconButton(onClick = onRefresh) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = "Refresh leaderboard",
+                        tint = Colors.primary
+                    )
+                }
+            }
+        }
+
+        // ── Stat filter chips ──────────────────────────────────────────────────
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                filters.forEach { filter ->
+                    val isActive = filter == activeFilter
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(
+                                if (isActive) Colors.primary else Colors.backgroundSecondary
+                            )
+                            .clickable { activeFilter = filter }
+                            .padding(horizontal = Spacing.md, vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = filter,
+                            style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
+                            color = if (isActive) Color.White else Colors.textSecondary
+                        )
+                    }
+                }
+            }
+        }
+
+        // ── Loading / empty state ──────────────────────────────────────────────
+        if (isLoading) {
+            item {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.xl),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = Colors.primary)
+                }
+            }
+        } else if (sortedResults.isEmpty()) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Colors.backgroundSecondary, RoundedCornerShape(12.dp))
+                        .padding(Spacing.lg),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No results yet — runners will appear here once they finish.",
+                        style = AppTextStyles.body,
+                        color = Colors.textMuted,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+        } else {
+            // ── Leaderboard rows ───────────────────────────────────────────────
+            itemsIndexed(sortedResults) { index, participant ->
+                GroupRunLeaderboardRow(
+                    rank = index + 1,
+                    participant = participant,
+                    activeFilter = activeFilter
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GroupRunLeaderboardRow(
+    rank: Int,
+    participant: GroupRunParticipantResult,
+    activeFilter: String,
+) {
+    val rankEmoji = when (rank) {
+        1 -> "🥇"
+        2 -> "🥈"
+        3 -> "🥉"
+        else -> "#$rank"
+    }
+    val isCurrentUser = participant.isCurrentUser
+    val statValue: String = when (activeFilter) {
+        "Pace"      -> participant.stats?.avgPace?.let { "$it/km" } ?: "—"
+        "Time"      -> participant.stats?.duration?.let { ms ->
+            val totalSec = ms / 1000
+            val h = totalSec / 3600
+            val m = (totalSec % 3600) / 60
+            val s = totalSec % 60
+            if (h > 0) String.format(Locale.US, "%d:%02d:%02d", h, m, s)
+            else String.format(Locale.US, "%d:%02d", m, s)
+        } ?: "—"
+        "Cadence"   -> participant.stats?.avgCadence?.let { "$it spm" } ?: "—"
+        "HR"        -> participant.stats?.avgHeartRate?.let { "$it bpm" } ?: "—"
+        "Elevation" -> participant.stats?.totalElevationGain?.let {
+            String.format(Locale.US, "+%.0f m", it)
+        } ?: "—"
+        else -> "—"
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isCurrentUser)
+                Colors.primary.copy(alpha = 0.12f)
+            else
+                Colors.backgroundSecondary
+        ),
+        border = if (isCurrentUser) BorderStroke(1.5.dp, Colors.primary.copy(alpha = 0.4f)) else null
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+        ) {
+            // Rank badge
+            Text(
+                text = rankEmoji,
+                style = AppTextStyles.h3,
+                modifier = Modifier.widthIn(min = 40.dp)
+            )
+
+            // Avatar / initials
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Colors.primary.copy(alpha = 0.2f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = participant.userName.take(1).uppercase(),
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.primary
+                )
+            }
+
+            // Name + YOU label
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = participant.userName,
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                        color = Colors.textPrimary,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                    if (isCurrentUser) {
+                        Box(
+                            modifier = Modifier
+                                .background(Colors.primary, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 5.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                text = "YOU",
+                                style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+                if (participant.stats == null) {
+                    Text(
+                        text = "Still running…",
+                        style = AppTextStyles.small,
+                        color = Colors.textMuted
+                    )
+                }
+            }
+
+            // Active stat value
+            Text(
+                text = statValue,
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                color = if (isCurrentUser) Colors.primary else Colors.textPrimary
             )
         }
     }
@@ -665,6 +961,7 @@ private fun AiInsightsTabContent(
     personalBests: List<String> = emptyList(),
     aiConsentGranted: Boolean = true,
     onRequestAiConsent: () -> Unit = {},
+    hasGroupRun: Boolean = false,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -675,7 +972,7 @@ private fun AiInsightsTabContent(
     ) {
         // Tabs for navigation
         item {
-            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected)
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun)
         }
 
         // ── Garmin attribution — REQUIRED by Garmin API Brand Guidelines ──────
@@ -936,6 +1233,7 @@ private fun SummaryTabContent(
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
     personalBests: List<String> = emptyList(),
+    hasGroupRun: Boolean = false,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -946,7 +1244,7 @@ private fun SummaryTabContent(
     ) {
         // Tabs for navigation
         item {
-            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected)
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun)
         }
 
         // Personal Best banner — always visible when this run holds any PBs
@@ -1026,6 +1324,7 @@ private fun GraphsTabContent(
     onDelete: () -> Unit,
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
+    hasGroupRun: Boolean = false,
 ) {
     // State for collapsible sections — only used when Garmin data IS available
     var dynamicsExpanded by remember { mutableStateOf(true) }
@@ -1039,7 +1338,7 @@ private fun GraphsTabContent(
     ) {
         // Tabs for navigation
         item {
-            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected)
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun)
         }
 
         // ═══════════════════════════════════════════════════════════════════════
@@ -5825,6 +6124,7 @@ private fun DataTabFlagship(
     onDelete: () -> Unit = {},
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
+    hasGroupRun: Boolean = false,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -5835,7 +6135,7 @@ private fun DataTabFlagship(
     ) {
         // Tabs for navigation
         item {
-            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected)
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun)
         }
 
         // ==================== PACE SECTION ====================
@@ -6262,6 +6562,7 @@ private fun AchievementsTabFlagship(
     onDelete: () -> Unit = {},
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
+    hasGroupRun: Boolean = false,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -6272,7 +6573,7 @@ private fun AchievementsTabFlagship(
     ) {
         // Tabs for navigation
         item {
-            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected)
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun)
         }
 
         item {
