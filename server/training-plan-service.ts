@@ -481,6 +481,107 @@ Build progressively toward the ${targetDistance}km goal.`;
 })()}
 `;
 
+    // ── Goal context: a single, clean description of what this plan is for ──────
+    // This replaces all the fragmented if/else prompt patches. GPT-4 already has
+    // the coaching science for every goal type — we just need to tell it clearly
+    // what kind of plan this is and let it apply that knowledge.
+    const goalContext = (() => {
+      const gt = goalType.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+
+      // ── Pre-event / sharpening block ──────────────────────────────────────────
+      if (isPreEventPlan) {
+        return `⚡ PRE-EVENT SHARPENING BLOCK — ${weeksUntilTarget} WEEKS TO RACE DAY
+This athlete is already capable of completing ${targetDistance}km. They are ${weeksUntilTarget} weeks out from their event. This is NOT a build-up plan — it is a race-preparation block.
+Apply your expert coaching knowledge for pre-race preparation at this distance:
+- Weeks before the final taper (weeks 1–${Math.max(1, weeksUntilTarget - 2)}) should maintain near-full training load with confidence-building long runs and race-pace work
+- Taper begins in the final 1-2 weeks: volume reduces but intensity quality sessions continue
+- "Taper" means reducing FROM a high volume — long runs in week 1 must reflect a trained ${targetDistance}km athlete, not a beginner. A certified coach reviewing this plan should find the long runs and weekly volumes appropriate for ${targetDistance}km race preparation.
+- Focus: race-pace confidence, lactate threshold sharpening, neuromuscular activation, and arriving at the start line fresh`;
+      }
+
+      // ── Ultra / extreme distance ───────────────────────────────────────────────
+      if (gt === 'ultra' || gt === 'distance_ultra' || targetDistance > 42.2) {
+        return `🏔️ ULTRA / LONG-DISTANCE RACE GOAL — ${targetDistance}km
+Apply your coaching expertise for ultra-distance preparation. This is beyond standard road-racing principles. Key considerations your coaching knowledge prescribes for this event distance and timeline:
+- Time-on-feet and fatigue resistance are the primary training adaptations required
+- Peak long runs should approach a meaningful fraction of event distance — what a certified ultra coach would prescribe for ${targetDistance}km in ${weeksUntilTarget} weeks
+- Back-to-back long run weekends are a core ultra training tool
+- Easy-pace dominance with selective quality sessions
+- Terrain and elevation-specific work if appropriate
+Design the plan your expert coaching judgment says this athlete genuinely needs to complete ${targetDistance}km.`;
+      }
+
+      // ── Marathon ───────────────────────────────────────────────────────────────
+      if (gt === 'marathon' || gt === 'distance_marathon' || (targetDistance > 38 && targetDistance <= 42.3)) {
+        return `🏅 MARATHON GOAL — ${targetDistance}km
+Apply your certified coaching expertise for marathon preparation. Your training science knowledge defines what adequate marathon training looks like for a ${experienceLevel} runner with ${weeksUntilTarget} weeks available. Key coaching principles you should apply: appropriate long run progression toward peak distances, weekly volume build and deload cycles, the correct balance of easy/threshold/long work, and a proper 2-3 week taper. A plan a certified IAAF running coach would consider adequate and appropriate for marathon preparation at this athlete's level.`;
+      }
+
+      // ── Half marathon ─────────────────────────────────────────────────────────
+      if (gt === 'half_marathon' || gt === 'distance_half_marathon' || (targetDistance > 18 && targetDistance <= 22)) {
+        return `🏅 HALF MARATHON GOAL — ${targetDistance}km
+Apply your certified coaching expertise for half marathon preparation. Your training science knowledge defines what a proper half marathon training plan looks like — appropriate long run distances, weekly volume, lactate threshold development, and taper strategy for a ${experienceLevel} runner with ${weeksUntilTarget} weeks. A certified running coach reviewing this plan should find every session — especially the long runs and weekly volumes — to be appropriate and adequate half marathon preparation, not watered-down or beginner-level.`;
+      }
+
+      // ── 10km ──────────────────────────────────────────────────────────────────
+      if (gt === '10k' || gt === 'distance_10k' || (targetDistance > 8 && targetDistance <= 13)) {
+        return `🏅 10KM RACE GOAL — ${targetDistance}km
+Apply your certified coaching expertise for 10km preparation. Your training science knowledge defines what a proper 10km training plan looks like: long runs should substantially exceed race distance to build the aerobic endurance base a fast 10km requires, lactate threshold work is central, and the plan should be appropriate for a ${experienceLevel} runner targeting a strong 10km performance in ${weeksUntilTarget} weeks.`;
+      }
+
+      // ── 5km ───────────────────────────────────────────────────────────────────
+      if (gt === '5k' || gt === 'distance_5k' || (targetDistance > 0 && targetDistance <= 8)) {
+        return `🏅 5KM RACE GOAL — ${targetDistance}km
+Apply your certified coaching expertise for 5km performance. The 5km is a speed-endurance event requiring VO2max development, lactate threshold work, and neuromuscular sharpening. Long runs exceed race distance to build the aerobic base. Design the plan your coaching knowledge says is right for a ${experienceLevel} runner targeting a strong 5km in ${weeksUntilTarget} weeks.`;
+      }
+
+      // ── Custom race distance ───────────────────────────────────────────────────
+      if (gt === 'custom' && targetDistance > 0) {
+        return `🏅 CUSTOM RACE / DISTANCE GOAL — ${targetDistance}km
+Apply your coaching expertise for this specific distance. There is no standard template for ${targetDistance}km — use your training science judgment to determine the appropriate long run distances, weekly volumes, session composition, and periodisation for this event within ${weeksUntilTarget} weeks. Think carefully about what distance-specific physiological demands this event requires and design accordingly.`;
+      }
+
+      // ── Improve speed / PB ────────────────────────────────────────────────────
+      if (gt.includes('speed') || gt.includes('improve_speed') || gt.includes('faster')) {
+        return `⚡ SPEED IMPROVEMENT / PERSONAL BEST GOAL
+This athlete wants to run faster. Apply your coaching expertise for speed development: VO2max intervals, lactate threshold runs, strides, and neuromuscular development are the primary tools. Easy aerobic running provides the foundation. Session composition should shift progressively toward quality work as the plan progresses. Design what a certified coach would prescribe for meaningful speed improvement for a ${experienceLevel} runner in ${weeksUntilTarget} weeks.`;
+      }
+
+      // ── Build endurance ───────────────────────────────────────────────────────
+      if (gt.includes('endurance') || gt.includes('build_endurance') || gt.includes('stamina')) {
+        return `🏃 ENDURANCE BUILDING GOAL
+This athlete wants to build their aerobic base and run farther. Apply your coaching expertise for endurance development: progressive long runs are the centrepiece, easy-pace aerobic running dominates (80%+ of volume), and weekly mileage builds progressively. Design a plan that meaningfully develops this athlete's endurance capacity over ${weeksUntilTarget} weeks — appropriate progressive long runs, easy-paced aerobic volume, and judicious introduction of aerobic threshold work.`;
+      }
+
+      // ── Lose weight / body composition ────────────────────────────────────────
+      if (gt.includes('lose_weight') || gt.includes('weight') || gt.includes('body_composition')) {
+        return `💪 WEIGHT LOSS / BODY COMPOSITION GOAL
+This athlete is training primarily to lose weight and improve body composition. Apply your coaching expertise: frequent sessions (maximise caloric expenditure), a mix of longer easy runs (fat-burning aerobic zone) and moderate-intensity work, with progression in both distance and frequency over ${weeksUntilTarget} weeks. Consistency and sustainability matter more than maximum intensity. Design a plan a certified coach would prescribe for healthy, sustainable weight loss through running for a ${experienceLevel} runner.`;
+      }
+
+      // ── General fitness / maintain fitness ────────────────────────────────────
+      if (gt.includes('fitness') || gt.includes('maintain') || gt.includes('general')) {
+        return `🌟 GENERAL FITNESS / MAINTAIN FITNESS GOAL
+This athlete wants to improve or maintain their overall running fitness. Apply your coaching expertise for fitness-focused training: a balanced mix of easy runs, moderate effort runs, and some quality work to maintain aerobic fitness and running economy. Design a sustainable, enjoyable plan that improves or maintains this athlete's fitness over ${weeksUntilTarget} weeks — not overly intense, but genuinely progressive and effective.`;
+      }
+
+      // ── Comeback from injury ──────────────────────────────────────────────────
+      if (gt.includes('comeback') || gt.includes('injury') || gt.includes('return') || gt.includes('recovery')) {
+        return `🩺 RETURN TO RUNNING / COMEBACK FROM INJURY
+This athlete is returning to running after injury. Apply your coaching expertise for safe return-to-running: gradual progressive loading, run/walk intervals in early weeks if appropriate, no aggressive intensity work until base fitness is re-established, and careful monitoring of injury-affected areas. Design what a sports physiotherapist and coach would jointly prescribe for a safe, progressive return to full training over ${weeksUntilTarget} weeks.`;
+      }
+
+      // ── Consistency / habit building ──────────────────────────────────────────
+      if (gt.includes('consistency') || gt.includes('habit')) {
+        return `📅 CONSISTENCY / HABIT BUILDING GOAL
+This athlete wants to establish a consistent running habit. Apply your coaching expertise: sessions should be achievable and confidence-building, volume progresses gradually to avoid burnout, and variety keeps the plan engaging. The priority is building the habit of regular running — design a plan that a ${experienceLevel} runner can stick to and feel good completing over ${weeksUntilTarget} weeks.`;
+      }
+
+      // ── Fallback for any unrecognised goal type ────────────────────────────────
+      return `🏃 RUNNING GOAL: ${goalDescription || goalType}
+Apply your coaching expertise to design the best plan for this athlete's stated goal. Use your judgment to determine the appropriate training philosophy, session composition, distances, and periodisation for this specific goal over ${weeksUntilTarget} weeks.`;
+    })();
+
     // Generate plan with OpenAI
     const prompt = `═══════════════════════════════════════════════════════════════
 COACHING COMMISSION — ${weeksUntilTarget}-WEEK PERSONALISED TRAINING PLAN
@@ -490,15 +591,11 @@ ${isRollingPlan ? `BLOCK 1 OF ${Math.ceil(weeksUntilTarget / weeksToGenerate)} �
 You are designing a bespoke training plan for the athlete described below. You have full creative and technical authority as a coach — choose the training philosophy, session types, periodisation model, and pacing approach that YOU believe gives this specific athlete the best possible outcome. This is not a template to fill in. There is no prescribed methodology. You are the expert.
 ${isRollingPlan ? `
 📋 ROLLING BLOCK PLAN: The full programme is ${weeksUntilTarget} weeks. You are generating Block 1 — weeks 1 to ${weeksToGenerate}. Subsequent blocks will be generated as the athlete progresses, incorporating their real performance data. Design this block knowing it is the opening phase of a ${weeksUntilTarget}-week journey. Establish the right physiological foundation and make explicit in your weekDescription fields what training phase each week belongs to (so subsequent blocks can continue the progression coherently).
-` : ''}${isPreEventPlan ? `
-⚡ CONTEXT — PRE-EVENT SHARPENING BLOCK: This runner has specifically confirmed they are already capable of the event distance and are ${weeksUntilTarget} weeks from race day. This is a race-preparation block, not a build-up plan. Design accordingly — race-pace confidence, sharpening, taper strategy.
-
-⚠️ CRITICAL LONG-RUN RULE FOR PRE-EVENT PLANS: "Taper" means REDUCING from a high volume, NOT starting at low distances. Long runs in a pre-event block must still be meaningful:
-- In weeks 1–${Math.max(1, weeksUntilTarget - 2)}: the long run should be approximately ${Math.round(targetDistance * 0.70)}–${Math.round(targetDistance * 0.85)}km (70–85% of race distance)
-- In the penultimate week: approximately ${Math.round(targetDistance * 0.50)}–${Math.round(targetDistance * 0.65)}km (50–65% of race distance)
-- In the final race week: a short confidence run of ${Math.round(targetDistance * 0.25)}–${Math.round(targetDistance * 0.35)}km
-A long run of ${Math.round(targetDistance * 0.3)}km or less in a pre-event plan for a ${targetDistance}km race is UNACCEPTABLE — the athlete needs race-distance confidence, not beginner-level jogs.
 ` : ''}
+━━━ PLAN TYPE & PRIMARY OBJECTIVE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${goalContext}
+
 ━━━ THE ATHLETE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ${runnerProfileSection}
@@ -536,43 +633,6 @@ ${avgTimeAtGoalDistanceStr ? `- Average completion time: ${avgTimeAtGoalDistance
 ${bestTimeAtGoalStr ? `- Personal best: ${bestTimeAtGoalStr}` : ''}` : `
 No recorded sessions at exactly ${targetDistance}km — extrapolate from average pace and weekly volume.`}` : isPreEventPlan ? `NEW TO THIS APP — no run history in this system. The athlete has confirmed this is a pre-event block; they are already race-capable. Do NOT interpret missing data as low fitness.` : `NEW TO THIS APP — no run history yet. Design a plan appropriate for a ${experienceLevel} runner targeting ${targetDistance}km. The adaptive coaching system will refine future plan adaptations as real performance data accumulates.`}
 ${targetDate ? `- Race date: ${targetDate.toDateString()}` : ''}
-
-${(goalType === 'custom' && targetDistance > 21.1 && targetDistance <= 42.2) ? `
-━━━ CUSTOM MID-DISTANCE EVENT CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━
-
-This is a ${targetDistance}km custom event — between half marathon and marathon distance. Standard half marathon or marathon training templates don't directly apply. Apply your coaching expertise to determine the right approach for this specific distance and this specific athlete. Consider what peak long run distances, weekly volumes, and session composition are genuinely appropriate for ${targetDistance}km preparation within ${weeksUntilTarget} weeks.
-` : ''}
-${(goalType === 'ultra' || targetDistance > 42.2) ? `
-━━━ ULTRA / LONG-DISTANCE COACHING CONTEXT ━━━━━━━━━━━━━━━━━━━━
-
-This is a ${targetDistance}km ultra/long-distance event. Road-racing training principles do not directly translate. Key considerations for your coaching design:
-- Peak long run distances typically need to approach 55-65% of event distance to build the fatigue resistance required (~${Math.round(targetDistance * 0.55)}–${Math.round(targetDistance * 0.65)}km for this event)
-- Time-on-feet takes precedence over pace — easy and long runs should dominate overall volume
-- Back-to-back long run weekends are a primary ultra training tool — they build fatigue resistance that single long runs cannot replicate
-- Ultra courses are typically hilly — hillwork is relevant
-- Starting from this athlete's current ${Math.round(weeklyMileageBase)}km/week, design the volume build you believe is appropriate to prepare them for this event in ${weeksUntilTarget} weeks
-Apply your expertise to design the session composition, volume progression, and periodisation you genuinely believe is optimal for this ultra goal.
-` : (targetDistance > 5 && targetDistance <= 42.2) ? `
-━━━ LONG RUN REQUIREMENTS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-This is a ${targetDistance}km race goal. Long run distances must be proportionate to the race distance — a long run that is only 30–40% of the event distance is NOT adequate training. Use the following as MINIMUM benchmarks for the longest session in this plan:
-
-${targetDistance >= 21 && targetDistance <= 22 ? `HALF MARATHON (${targetDistance}km):
-- Peak long run (non-taper weeks): ${Math.round(targetDistance * 0.80)}–${Math.round(targetDistance * 0.90)}km (i.e. ~${Math.round(targetDistance * 0.80)}–${Math.round(targetDistance * 0.90)}km — this is a NON-NEGOTIABLE minimum for adequate half marathon preparation)
-- Early plan long runs: build from ~${Math.round(targetDistance * 0.55)}km toward the peak
-- Final taper long run (race week): ${Math.round(targetDistance * 0.25)}–${Math.round(targetDistance * 0.35)}km only
-A peak long run shorter than ${Math.round(targetDistance * 0.70)}km for a half marathon plan is inadequate and must NOT occur.` : targetDistance >= 38 && targetDistance <= 44 ? `MARATHON (${targetDistance}km):
-- Peak long run: ${Math.round(targetDistance * 0.72)}–${Math.round(targetDistance * 0.82)}km (i.e. ~${Math.round(targetDistance * 0.72)}–${Math.round(targetDistance * 0.82)}km)
-- Early plan long runs: build from ~${Math.round(targetDistance * 0.45)}km toward the peak
-- Final taper long run: ${Math.round(targetDistance * 0.25)}–${Math.round(targetDistance * 0.35)}km
-A peak long run shorter than ${Math.round(targetDistance * 0.65)}km for a marathon plan is inadequate.` : targetDistance >= 9 && targetDistance <= 12 ? `10KM GOAL (${targetDistance}km):
-- Peak long run: ${Math.round(targetDistance * 1.2)}–${Math.round(targetDistance * 1.5)}km (for a 10km race, the long run should EXCEED race distance — e.g. 12–15km)
-- This builds aerobic endurance well beyond race requirements, which is standard 10km coaching practice
-A peak long run shorter than ${Math.round(targetDistance * 0.9)}km for a 10km plan is inadequate.` : `RACE GOAL (${targetDistance}km):
-- Peak long run: ${Math.round(targetDistance * 0.75)}–${Math.round(targetDistance * 0.95)}km at minimum
-- A peak long run shorter than ${Math.round(targetDistance * 0.65)}km for this goal is NOT sufficient training
-- Long runs must progress meaningfully across the plan toward this peak`}
-` : ''}
 
 ━━━ SCHEDULE & LIFESTYLE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -627,7 +687,7 @@ Your plan must demonstrate clear progressive overload and phase structure. Speci
 ${isRollingPlan
   ? `- This is Block 1 (weeks 1–${weeksToGenerate} of the full ${weeksUntilTarget}-week plan). End the block at a sensible phase transition point (e.g. end of base phase). Do NOT include a taper in this block — taper weeks will appear in the final block.`
   : isPreEventPlan
-    ? `- PRE-EVENT BLOCK: Week 1 is near race-ready intensity with a long run of ${Math.round(targetDistance * 0.75)}–${Math.round(targetDistance * 0.85)}km. Progress through sharpening phases. Taper volume in the final 1-2 weeks only — earlier weeks must maintain near-full long-run distances. A weekly volume that is only beginner-level or a long run under ${Math.round(targetDistance * 0.55)}km in week 1 of a pre-event plan is completely wrong.`
+    ? `- PRE-EVENT BLOCK: apply the sharpening/taper structure your coaching expertise prescribes for a trained ${targetDistance}km athlete ${weeksUntilTarget} weeks from race day (detailed in the Plan Type section above)`
     : `- Final 1-2 weeks MUST taper — reduced volume and intensity to arrive at the event fresh`}
 
 NON-NEGOTIABLE STRUCTURAL CONSTRAINTS:
