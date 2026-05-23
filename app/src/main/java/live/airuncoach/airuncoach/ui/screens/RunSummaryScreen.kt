@@ -5965,7 +5965,8 @@ private fun RaceTimePredictorCard(run: RunSession) {
     val durationMin = run.duration / 60000.0
 
     // Riegel formula: T2 = T1 * (D2/D1)^1.06
-    data class RacePrediction(
+    // Named LocalRacePrediction to avoid clash with network model RacePrediction
+    data class LocalRacePrediction(
         val name: String,
         val distanceKm: Double,
         val predictedMinutes: Double
@@ -5973,10 +5974,10 @@ private fun RaceTimePredictorCard(run: RunSession) {
 
     val predictions = remember(distanceKm, durationMin) {
         listOf(
-            RacePrediction("5K", 5.0, durationMin * (5.0 / distanceKm).pow(1.06)),
-            RacePrediction("10K", 10.0, durationMin * (10.0 / distanceKm).pow(1.06)),
-            RacePrediction("Half Marathon", 21.0975, durationMin * (21.0975 / distanceKm).pow(1.06)),
-            RacePrediction("Marathon", 42.195, durationMin * (42.195 / distanceKm).pow(1.06))
+            LocalRacePrediction("5K", 5.0, durationMin * (5.0 / distanceKm).pow(1.06)),
+            LocalRacePrediction("10K", 10.0, durationMin * (10.0 / distanceKm).pow(1.06)),
+            LocalRacePrediction("Half Marathon", 21.0975, durationMin * (21.0975 / distanceKm).pow(1.06)),
+            LocalRacePrediction("Marathon", 42.195, durationMin * (42.195 / distanceKm).pow(1.06))
         ).filter { it.distanceKm > distanceKm * 0.8 } // Only show predictions for distances at/above current
     }
 

@@ -15,7 +15,11 @@ import axios from 'axios';
 
 const STRAVA_CLIENT_ID = process.env.STRAVA_CLIENT_ID;
 const STRAVA_CLIENT_SECRET = process.env.STRAVA_CLIENT_SECRET;
-const STRAVA_REDIRECT_URI = process.env.STRAVA_REDIRECT_URI || 'https://api.airuncoach.com/strava/callback';
+// STRAVA_REDIRECT_URI must be set in Replit Secrets AND must exactly match
+// the "Authorization Callback Domain" registered in your Strava API app settings.
+// e.g. https://airuncoach.live/strava/callback
+const STRAVA_REDIRECT_URI = process.env.STRAVA_REDIRECT_URI ||
+  `${(process.env.SITE_URL || 'https://airuncoach.live').replace(/\/$/, '')}/strava/callback`;
 
 // Strava OAuth endpoints
 const STRAVA_AUTH_URL = 'https://www.strava.com/oauth/authorize';
