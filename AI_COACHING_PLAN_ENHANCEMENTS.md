@@ -310,10 +310,42 @@ This is intentionally left broad and authoritative. Do not add specific training
 
 ---
 
+## Live Session Coaching — Pace Architecture
+
+> **Read this before changing any live run coaching logic.**
+
+### Problem: Race Goal Pace vs Session Target Pace
+
+The app tracks two completely different pace targets that must **not** be confused:
+
+| Pace | Source | Used for |
+|------|--------|----------|
+| **Race goal pace** | `targetTime / targetDistance` from the user's race goal (e.g. 1:48 half marathon = 5:07/km) | Finish-time projections, race-day pacing |
+| **Session target pace** | `DynamicCoachingPhase.targetPaceMin/Max` from the AI-generated coaching plan | Live coaching cues during a training session |
+
+### The Bug (Fixed 2026-05-23)
+
+The generic `checkPaceCoaching()` engine in `RunTrackingService` was using **race goal pace** (`targetPaceSecondsPerKm`) as its reference. It ran regardless of whether a coaching plan was active. This caused cues like *"you're running too slow, you should be at 5:10/km"* during an easy aerobic session whose target was 5:30/km.
+
+### Architecture (post-fix)
+
+- **`checkPaceCoaching()`** — Generic pace engine for free runs with a time target. Now **suppressed when `isCoachingPlanActive`**.
+- **`evaluateSessionConditionTriggers()`** — Dynamic coaching plan evaluator. Handles `pace_deviation` triggers using the *session's* `DynamicCoachingPhase.targetPaceMin/Max`. This is the primary path for coached sessions.
+- **`checkSessionPhaseTransitions()`** — Legacy fallback when `sessionInstructions` is loaded but no dynamic plan. Fires at phase start/end only.
+
+### Rule
+
+> When a `dynamicCoachingPlan` is active, **never** use `targetPaceSecondsPerKm` (race goal pace) as a reference for live coaching cues. Always use `dynamicCoachingPlan.phases[currentPhaseIndex].targetPaceMin/Max`.
+
+`initPaceCoaching()` now also picks up `dynamicCoachingPlan.targetMetrics.mainEffortPaceMin` as a fallback so that any path that still reads `targetPaceSecondsPerKm` gets the session pace, not the race goal pace.
+
+---
+
 ## Change Log
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-05-23 | **Fix**: Live coaching cues during trained sessions now use session target pace, not race goal pace. `checkPaceCoaching()` suppressed when a dynamic coaching plan is active. | pending |
 | 2026-05-23 | **Refactor**: Replaced all fragmented if/else prompt patches with `goalContext()` architecture. Added full coverage for non-race goals (lose weight, fitness, speed, endurance, consistency, comeback). | `b67cbb7` |
 | 2026-05-23 | **Fix**: Added LONG RUN REQUIREMENTS section with event-specific minimums for HM/marathon/10km. Also strengthened pre-event block language. | `1e9b67b` (superseded by refactor above) |
 | 2026-05-23 | **Fix**: Fixed `analyzeWeatherImpact` undefined reference in pre-run briefing. | `90e873c` |

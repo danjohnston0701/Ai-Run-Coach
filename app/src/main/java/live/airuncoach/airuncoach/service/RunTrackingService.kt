@@ -1358,7 +1358,16 @@ class RunTrackingService : Service(), SensorEventListener {
         if (tDist != null && tDist > 0 && tTime != null && tTime > 0) {
             val targetDistKm = tDist / 1000.0
             val targetTimeSeconds = tTime / 1000.0
-            targetPaceSecondsPerKm = targetTimeSeconds / targetDistKm
+            // Use the session's main effort pace if a coaching plan is loaded — this avoids the
+            // race goal pace (e.g. 5:07/km) being used as the reference during an aerobic session
+            // (target 5:30/km). If no plan pace is available, fall back to race goal pace.
+            val planMainEffortPace = dynamicCoachingPlan?.targetMetrics?.mainEffortPaceMin
+                ?: dynamicCoachingPlan?.targetMetrics?.mainEffortPaceMax
+            targetPaceSecondsPerKm = if (planMainEffortPace != null && planMainEffortPace > 0) {
+                planMainEffortPace.toDouble()
+            } else {
+                targetTimeSeconds / targetDistKm
+            }
             paceCoachingEnabled = true
             paceTargetAbandoned = false
             paceTargetAbandonedNotified = false
@@ -1390,6 +1399,11 @@ class RunTrackingService : Service(), SensorEventListener {
         if (totalDistance < PACE_FIRST_CHECK_M) return // Don't start until 100m
         if (!canFireCoaching()) return // Global coaching gate — prevents back-to-back with splits/nav/HR
         if (isNearKmBoundary()) return // Suppress within 200m of km marks — split coaching will fire there
+        // When a coached session plan is active (dynamic or legacy), it manages its own pace-deviation
+        // triggers using the session's actual target pace — not the user's race goal pace. Suppress the
+        // generic pace engine to prevent conflicting cues (e.g. "run faster to 5:10" during an aerobic
+        // 5:30/km session because the race goal pace is 5:10).
+        if (isCoachingPlanActive) return
         
         val now = System.currentTimeMillis()
         val tDist = targetDistance ?: return
