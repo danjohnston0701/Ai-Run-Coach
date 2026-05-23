@@ -123,6 +123,13 @@ class DataStreamer {
                     app.onCoachingCue(coachingText);
                 }
             }
+        } else if (responseCode == 401) {
+            // Token expired or invalid — clear the stored token so the watch re-enters
+            // the "Waiting for phone" state and the user is prompted to open the phone
+            // app, which will push a fresh token automatically.
+            Sys.println("DataStreamer: 401 Unauthorized — clearing stale auth token");
+            App.Storage.deleteValue("authToken");
+            _authToken = null;
         } else {
             Sys.println("Data send failed: " + responseCode);
         }

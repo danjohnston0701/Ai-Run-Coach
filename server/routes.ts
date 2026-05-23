@@ -8078,19 +8078,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
-      // Fetch weather impact data
+      // Fetch weather impact data — analyze user's historical runs to personalise briefing
       let weatherImpact: any;
-      if (startLocation?.lat && startLocation?.lng) {
-        try {
-          weatherImpact = await analyzeWeatherImpact(
-            startLocation.lat,
-            startLocation.lng,
-            distance || 5
-          );
-        } catch (e: any) {
-          console.warn('[Pre-run briefing] Weather impact analysis failed (non-fatal):', e?.message || e);
-          // Continue without weather impact - briefing still works without it
-        }
+      try {
+        const ninetyDaysAgo = new Date();
+        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+        const allRecentRuns = await storage.getUserRuns(req.user!.userId, { limit: 500, offset: 0 });
+        const runsWithWeather = allRecentRuns.filter((r: any) =>
+          r.completedAt &&
+          new Date(r.completedAt) >= ninetyDaysAgo &&
+          (r.distance ?? 0) > 0.5 &&
+          !!r.weatherData &&
+          (!r.externalSource || r.externalSource === 'airuncoach')
+        );
+        weatherImpact = await calculateWeatherImpact(req.user!.userId, runsWithWeather);
+      } catch (e: any) {
+        console.warn('[Pre-run briefing] Weather impact analysis failed (non-fatal):', e?.message || e);
+        // Continue without weather impact - briefing still works without it
       }
       
       const aiService = await import("./ai-service");
@@ -8707,8 +8711,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const jwt = await import("jsonwebtoken");
       const decoded = jwt.default.verify(token, process.env.SESSION_SECRET || "fallback-secret") as any;
       
-      if (decoded.type !== "companion") {
-        return res.status(401).json({ error: "Invalid token type" });
+      // Accept both dedicated companion tokens (type: "companion") and regular app tokens.
+      // The watch receives the phone's login JWT via Bluetooth and uses it directly for
+      // HTTP requests, so we must not reject tokens that lack the "companion" type claim.
+      if (!decoded.userId) {
+        return res.status(401).json({ error: "Invalid token" });
       }
       
       (req as any).companionUser = decoded;

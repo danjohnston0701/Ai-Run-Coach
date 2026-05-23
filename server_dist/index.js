@@ -11953,7 +11953,7 @@ import { sql as sql13 } from "drizzle-orm";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 var JWT_SECRET = process.env.SESSION_SECRET || "fallback-secret-key-change-in-production";
-var JWT_EXPIRES_IN = "7d";
+var JWT_EXPIRES_IN = "30d";
 function generateToken(payload) {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 }
@@ -18486,25 +18486,52 @@ function selectScenicWaypoints(features, startLat, startLng, targetDistanceKm) {
 async function generateGraphHopperRoute(lat, lng, distanceMeters, seed = 0, preferScenic = true) {
   return await generateGraphHopperRouteGet(lat, lng, distanceMeters, "hike", seed);
 }
-async function generateGraphHopperRouteGet(lat, lng, distanceMeters, profile, seed) {
-  const response = await axios4.get(`${GRAPHHOPPER_BASE_URL}/route`, {
-    params: {
-      point: `${lat},${lng}`,
-      profile,
-      algorithm: "round_trip",
-      "round_trip.distance": distanceMeters,
-      "round_trip.seed": seed,
-      points_encoded: false,
-      elevation: true,
-      instructions: true,
-      details: ["road_class", "surface"],
-      key: GRAPHHOPPER_API_KEY
-    },
-    timeout: 3e4
-  });
-  return response.data;
+var lastApiCallTime = 0;
+var MIN_API_DELAY_MS = 200;
+async function delayUntilNextRequest() {
+  const now = Date.now();
+  const timeSinceLastCall = now - lastApiCallTime;
+  if (timeSinceLastCall < MIN_API_DELAY_MS) {
+    const delayMs = MIN_API_DELAY_MS - timeSinceLastCall;
+    console.log(`\u23F3 Rate limiting: waiting ${delayMs}ms...`);
+    await new Promise((resolve2) => setTimeout(resolve2, delayMs));
+  }
+  lastApiCallTime = Date.now();
 }
-async function generateScenicWaypointRoute(startLat, startLng, waypoints) {
+async function generateGraphHopperRouteGet(lat, lng, distanceMeters, profile, seed, retryCount = 0) {
+  const MAX_RETRIES = 3;
+  const BASE_RETRY_DELAY = 1e3;
+  try {
+    await delayUntilNextRequest();
+    const response = await axios4.get(`${GRAPHHOPPER_BASE_URL}/route`, {
+      params: {
+        point: `${lat},${lng}`,
+        profile,
+        algorithm: "round_trip",
+        "round_trip.distance": distanceMeters,
+        "round_trip.seed": seed,
+        points_encoded: false,
+        elevation: true,
+        instructions: true,
+        details: ["road_class", "surface"],
+        key: GRAPHHOPPER_API_KEY
+      },
+      timeout: 3e4
+    });
+    return response.data;
+  } catch (error) {
+    if (error.response?.status === 429 && retryCount < MAX_RETRIES) {
+      const delayMs = BASE_RETRY_DELAY * Math.pow(2, retryCount);
+      console.log(`\u26A0\uFE0F Rate limited (429). Retrying in ${delayMs}ms (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+      await new Promise((resolve2) => setTimeout(resolve2, delayMs));
+      return generateGraphHopperRouteGet(lat, lng, distanceMeters, profile, seed, retryCount + 1);
+    }
+    throw error;
+  }
+}
+async function generateScenicWaypointRoute(startLat, startLng, waypoints, retryCount = 0) {
+  const MAX_RETRIES = 3;
+  const BASE_RETRY_DELAY = 1e3;
   if (waypoints.length === 0) throw new Error("No waypoints provided");
   const points = [
     [startLng, startLat],
@@ -18512,6 +18539,7 @@ async function generateScenicWaypointRoute(startLat, startLng, waypoints) {
     [startLng, startLat]
   ];
   try {
+    await delayUntilNextRequest();
     const body = {
       points,
       profile: "hike",
@@ -18539,23 +18567,40 @@ async function generateScenicWaypointRoute(startLat, startLng, waypoints) {
     });
     return response.data;
   } catch (postError) {
+    if (postError.response?.status === 429 && retryCount < MAX_RETRIES) {
+      const delayMs = BASE_RETRY_DELAY * Math.pow(2, retryCount);
+      console.log(`\u26A0\uFE0F Scenic POST rate limited (429). Retrying in ${delayMs}ms (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+      await new Promise((resolve2) => setTimeout(resolve2, delayMs));
+      return generateScenicWaypointRoute(startLat, startLng, waypoints, retryCount + 1);
+    }
     console.log(`Scenic POST failed, trying GET fallback: ${postError.message}`);
-    const pointParams = points.map((p) => `point=${p[1]},${p[0]}`).join("&");
-    const response = await axios4.get(
-      `${GRAPHHOPPER_BASE_URL}/route?${pointParams}`,
-      {
-        params: {
-          profile: "hike",
-          points_encoded: false,
-          elevation: true,
-          instructions: true,
-          details: ["road_class", "surface"],
-          key: GRAPHHOPPER_API_KEY
-        },
-        timeout: 3e4
+    try {
+      await delayUntilNextRequest();
+      const pointParams = points.map((p) => `point=${p[1]},${p[0]}`).join("&");
+      const response = await axios4.get(
+        `${GRAPHHOPPER_BASE_URL}/route?${pointParams}`,
+        {
+          params: {
+            profile: "hike",
+            points_encoded: false,
+            elevation: true,
+            instructions: true,
+            details: ["road_class", "surface"],
+            key: GRAPHHOPPER_API_KEY
+          },
+          timeout: 3e4
+        }
+      );
+      return response.data;
+    } catch (getError) {
+      if (getError.response?.status === 429 && retryCount < MAX_RETRIES) {
+        const delayMs = BASE_RETRY_DELAY * Math.pow(2, retryCount);
+        console.log(`\u26A0\uFE0F Scenic GET rate limited (429). Retrying in ${delayMs}ms (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+        await new Promise((resolve2) => setTimeout(resolve2, delayMs));
+        return generateScenicWaypointRoute(startLat, startLng, waypoints, retryCount + 1);
       }
-    );
-    return response.data;
+      throw getError;
+    }
   }
 }
 function analyzeRoadClasses(roadClassDetails) {
@@ -18820,10 +18865,11 @@ async function evaluateCandidates(allResults, latitude, longitude, distanceMeter
 }
 async function fetchCandidates(latitude, longitude, distanceMeters, preferTrails, scenicWaypoints, profileLabel, useHikeProfile) {
   const baseSeed = Math.floor(Math.random() * 1e3);
-  const seedOffsets = [0, 17, 37, 53, 71, 89];
+  const seedOffsets = [0, 17, 37, 53];
   const profile = useHikeProfile ? "hike" : "foot";
   console.log(`\u{1F504} Generating ${seedOffsets.length} round-trip candidates (${profileLabel}, ${profile} profile)...`);
-  const rtPromises = seedOffsets.map(async (offset) => {
+  const results = [];
+  for (const offset of seedOffsets) {
     const seed = baseSeed + offset;
     try {
       let ghResponse;
@@ -18832,43 +18878,42 @@ async function fetchCandidates(latitude, longitude, distanceMeters, preferTrails
       } else {
         ghResponse = await generateGraphHopperRouteGet(latitude, longitude, distanceMeters, "foot", seed);
       }
-      return { seed, ghResponse, isScenic: false };
+      results.push({ seed, ghResponse, isScenic: false });
     } catch (error) {
       console.error(`[${profileLabel}] Seed ${seed} failed: ${error.message}`);
-      return { seed, ghResponse: null, isScenic: false };
-    }
-  });
-  const scenicPromises = [];
-  if (useHikeProfile && scenicWaypoints.length >= 2) {
-    console.log(`\u{1F33F} Generating scenic waypoint candidates (${profileLabel})...`);
-    scenicPromises.push((async () => {
-      try {
-        return { seed: -1, ghResponse: await generateScenicWaypointRoute(latitude, longitude, scenicWaypoints), isScenic: true };
-      } catch (e) {
-        console.error(`[${profileLabel}] Scenic (all) failed: ${e.message}`);
-        return { seed: -1, ghResponse: null, isScenic: true };
-      }
-    })());
-    scenicPromises.push((async () => {
-      try {
-        return { seed: -2, ghResponse: await generateScenicWaypointRoute(latitude, longitude, [...scenicWaypoints].reverse()), isScenic: true };
-      } catch (e) {
-        return { seed: -2, ghResponse: null, isScenic: true };
-      }
-    })());
-    if (scenicWaypoints.length >= 3) {
-      scenicPromises.push((async () => {
-        try {
-          const subset = scenicWaypoints.filter((_, i) => i % 2 === 0);
-          if (subset.length >= 2) return { seed: -3, ghResponse: await generateScenicWaypointRoute(latitude, longitude, subset), isScenic: true };
-          return { seed: -3, ghResponse: null, isScenic: true };
-        } catch (e) {
-          return { seed: -3, ghResponse: null, isScenic: true };
-        }
-      })());
+      results.push({ seed, ghResponse: null, isScenic: false });
     }
   }
-  return Promise.all([...rtPromises, ...scenicPromises]);
+  if (useHikeProfile && scenicWaypoints.length >= 2) {
+    console.log(`\u{1F33F} Generating scenic waypoint candidates (${profileLabel})...`);
+    try {
+      const ghResponse = await generateScenicWaypointRoute(latitude, longitude, scenicWaypoints);
+      results.push({ seed: -1, ghResponse, isScenic: true });
+    } catch (e) {
+      console.error(`[${profileLabel}] Scenic (all) failed: ${e.message}`);
+      results.push({ seed: -1, ghResponse: null, isScenic: true });
+    }
+    try {
+      const ghResponse = await generateScenicWaypointRoute(latitude, longitude, [...scenicWaypoints].reverse());
+      results.push({ seed: -2, ghResponse, isScenic: true });
+    } catch (e) {
+      console.error(`[${profileLabel}] Scenic (reversed) failed: ${e.message}`);
+      results.push({ seed: -2, ghResponse: null, isScenic: true });
+    }
+    if (scenicWaypoints.length >= 3) {
+      try {
+        const subset = scenicWaypoints.filter((_, i) => i % 2 === 0);
+        if (subset.length >= 2) {
+          const ghResponse = await generateScenicWaypointRoute(latitude, longitude, subset);
+          results.push({ seed: -3, ghResponse, isScenic: true });
+        }
+      } catch (e) {
+        console.error(`[${profileLabel}] Scenic (subset) failed: ${e.message}`);
+        results.push({ seed: -3, ghResponse: null, isScenic: true });
+      }
+    }
+  }
+  return results;
 }
 async function generateIntelligentRoute(request) {
   const { latitude, longitude, distanceKm, preferTrails = true } = request;
@@ -25154,16 +25199,20 @@ ${contextJson}`;
         }
       }
       let weatherImpact;
-      if (startLocation?.lat && startLocation?.lng) {
-        try {
-          weatherImpact = await analyzeWeatherImpact(
-            startLocation.lat,
-            startLocation.lng,
-            distance || 5
-          );
-        } catch (e) {
-          console.warn("[Pre-run briefing] Weather impact analysis failed (non-fatal):", e?.message || e);
-        }
+      try {
+        const ninetyDaysAgo2 = new Date();
+        ninetyDaysAgo2.setDate(ninetyDaysAgo2.getDate() - 90);
+        const allRecentRuns2 = await storage.getUserRuns(req.user.userId, { limit: 500, offset: 0 });
+        const runsWithWeather2 = allRecentRuns2.filter((r) =>
+          r.completedAt &&
+          new Date(r.completedAt) >= ninetyDaysAgo2 &&
+          (r.distance ?? 0) > 0.5 &&
+          !!r.weatherData &&
+          (!r.externalSource || r.externalSource === "airuncoach")
+        );
+        weatherImpact = await calculateWeatherImpact(req.user.userId, runsWithWeather2);
+      } catch (e) {
+        console.warn("[Pre-run briefing] Weather impact analysis failed (non-fatal):", e?.message || e);
       }
       const aiService = await Promise.resolve().then(() => (init_ai_service(), ai_service_exports));
       const aiBriefing = await aiService.generateWellnessAwarePreRunBriefing({
@@ -25654,8 +25703,11 @@ ${contextJson}`;
       const token = authHeader.slice(7);
       const jwt2 = await import("jsonwebtoken");
       const decoded = jwt2.default.verify(token, process.env.SESSION_SECRET || "fallback-secret");
-      if (decoded.type !== "companion") {
-        return res.status(401).json({ error: "Invalid token type" });
+      // Accept both dedicated companion tokens (type: "companion") and regular app tokens.
+      // The watch receives the phone's login JWT via Bluetooth and uses it directly for
+      // HTTP requests, so we must not reject tokens that lack the "companion" type claim.
+      if (!decoded.userId) {
+        return res.status(401).json({ error: "Invalid token" });
       }
       req.companionUser = decoded;
       next();

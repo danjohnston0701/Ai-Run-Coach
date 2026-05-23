@@ -3,6 +3,7 @@ package live.airuncoach.airuncoach.ui.screens
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -145,48 +146,60 @@ fun CreateGroupRunScreen(
 
             Spacer(modifier = Modifier.height(Spacing.md))
 
-            // ── Date & Time picker ────────────────────────────────────────────
+            // ── Date & Time picker ────────────────────────────���───────────────
             val displayDate = if (dateTime.isNotEmpty()) formatGroupRunDate(dateTime) else "Tap to set date & time"
-            OutlinedTextField(
-                value = displayDate,
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("Date & Time *") },
-                trailingIcon = {
-                    Icon(
-                        painterResource(R.drawable.icon_calendar_vector),
-                        contentDescription = "Pick date",
-                        tint = Colors.primary
-                    )
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        val cal = Calendar.getInstance()
-                        DatePickerDialog(
-                            context,
-                            { _, year, month, day ->
-                                TimePickerDialog(
-                                    context,
-                                    { _, hour, minute ->
-                                        val ldt = LocalDateTime.of(year, month + 1, day, hour, minute)
-                                        val iso = ldt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) + "Z"
-                                        viewModel.onDateTimeChanged(iso)
-                                    },
-                                    cal.get(Calendar.HOUR_OF_DAY),
-                                    cal.get(Calendar.MINUTE),
-                                    false
-                                ).show()
-                            },
-                            cal.get(Calendar.YEAR),
-                            cal.get(Calendar.MONTH),
-                            cal.get(Calendar.DAY_OF_MONTH)
-                        ).apply {
-                            datePicker.minDate = System.currentTimeMillis()
-                        }.show()
+            // Wrap in a Box so a transparent overlay can reliably intercept taps.
+            // OutlinedTextField consumes touch internally, so Modifier.clickable on the
+            // field itself never fires — the overlay pattern is the standard Compose fix.
+            Box(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = displayDate,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Date & Time *") },
+                    trailingIcon = {
+                        Icon(
+                            painterResource(R.drawable.icon_calendar_vector),
+                            contentDescription = "Pick date",
+                            tint = Colors.primary
+                        )
                     },
-                colors = groupRunTextFieldColors()
-            )
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = groupRunTextFieldColors()
+                )
+                // Transparent click-interceptor — sits above the text field and opens the pickers
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() }
+                        ) {
+                            val cal = Calendar.getInstance()
+                            DatePickerDialog(
+                                context,
+                                { _, year, month, day ->
+                                    TimePickerDialog(
+                                        context,
+                                        { _, hour, minute ->
+                                            val ldt = LocalDateTime.of(year, month + 1, day, hour, minute)
+                                            val iso = ldt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) + "Z"
+                                            viewModel.onDateTimeChanged(iso)
+                                        },
+                                        cal.get(Calendar.HOUR_OF_DAY),
+                                        cal.get(Calendar.MINUTE),
+                                        false
+                                    ).show()
+                                },
+                                cal.get(Calendar.YEAR),
+                                cal.get(Calendar.MONTH),
+                                cal.get(Calendar.DAY_OF_MONTH)
+                            ).apply {
+                                datePicker.minDate = System.currentTimeMillis()
+                            }.show()
+                        }
+                )
+            }
 
             Spacer(modifier = Modifier.height(Spacing.md))
 

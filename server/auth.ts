@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { Request, Response, NextFunction } from "express";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "fallback-secret-key-change-in-production";
-const JWT_EXPIRES_IN = "7d";
+const JWT_EXPIRES_IN = "30d";
 
 export interface JwtPayload {
   userId: string;

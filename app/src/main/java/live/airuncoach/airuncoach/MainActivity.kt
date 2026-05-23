@@ -382,6 +382,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Proactively push the current auth token to the watch every time the app
+        // comes to the foreground. This keeps the watch token fresh so standalone
+        // (watch-only) runs succeed even if the previous token was near expiry.
+        try {
+            val sessionManager = SessionManager(this)
+            val token = sessionManager.getAuthToken()
+            val name  = sessionManager.getUserName() ?: ""
+            if (token != null) {
+                garminWatchManager.sendAuth(token, name)
+                Log.d("MainActivity", "onResume: refreshed auth token on Garmin watch")
+            }
+        } catch (e: Exception) {
+            Log.w("MainActivity", "onResume: could not refresh watch token (non-fatal): ${e.message}")
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         try {
