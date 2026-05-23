@@ -492,6 +492,12 @@ ${isRollingPlan ? `
 📋 ROLLING BLOCK PLAN: The full programme is ${weeksUntilTarget} weeks. You are generating Block 1 — weeks 1 to ${weeksToGenerate}. Subsequent blocks will be generated as the athlete progresses, incorporating their real performance data. Design this block knowing it is the opening phase of a ${weeksUntilTarget}-week journey. Establish the right physiological foundation and make explicit in your weekDescription fields what training phase each week belongs to (so subsequent blocks can continue the progression coherently).
 ` : ''}${isPreEventPlan ? `
 ⚡ CONTEXT — PRE-EVENT SHARPENING BLOCK: This runner has specifically confirmed they are already capable of the event distance and are ${weeksUntilTarget} weeks from race day. This is a race-preparation block, not a build-up plan. Design accordingly — race-pace confidence, sharpening, taper strategy.
+
+⚠️ CRITICAL LONG-RUN RULE FOR PRE-EVENT PLANS: "Taper" means REDUCING from a high volume, NOT starting at low distances. Long runs in a pre-event block must still be meaningful:
+- In weeks 1–${Math.max(1, weeksUntilTarget - 2)}: the long run should be approximately ${Math.round(targetDistance * 0.70)}–${Math.round(targetDistance * 0.85)}km (70–85% of race distance)
+- In the penultimate week: approximately ${Math.round(targetDistance * 0.50)}–${Math.round(targetDistance * 0.65)}km (50–65% of race distance)
+- In the final race week: a short confidence run of ${Math.round(targetDistance * 0.25)}–${Math.round(targetDistance * 0.35)}km
+A long run of ${Math.round(targetDistance * 0.3)}km or less in a pre-event plan for a ${targetDistance}km race is UNACCEPTABLE — the athlete needs race-distance confidence, not beginner-level jogs.
 ` : ''}
 ━━━ THE ATHLETE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -546,6 +552,26 @@ This is a ${targetDistance}km ultra/long-distance event. Road-racing training pr
 - Ultra courses are typically hilly — hillwork is relevant
 - Starting from this athlete's current ${Math.round(weeklyMileageBase)}km/week, design the volume build you believe is appropriate to prepare them for this event in ${weeksUntilTarget} weeks
 Apply your expertise to design the session composition, volume progression, and periodisation you genuinely believe is optimal for this ultra goal.
+` : (targetDistance > 5 && targetDistance <= 42.2) ? `
+━━━ LONG RUN REQUIREMENTS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This is a ${targetDistance}km race goal. Long run distances must be proportionate to the race distance — a long run that is only 30–40% of the event distance is NOT adequate training. Use the following as MINIMUM benchmarks for the longest session in this plan:
+
+${targetDistance >= 21 && targetDistance <= 22 ? `HALF MARATHON (${targetDistance}km):
+- Peak long run (non-taper weeks): ${Math.round(targetDistance * 0.80)}–${Math.round(targetDistance * 0.90)}km (i.e. ~${Math.round(targetDistance * 0.80)}–${Math.round(targetDistance * 0.90)}km — this is a NON-NEGOTIABLE minimum for adequate half marathon preparation)
+- Early plan long runs: build from ~${Math.round(targetDistance * 0.55)}km toward the peak
+- Final taper long run (race week): ${Math.round(targetDistance * 0.25)}–${Math.round(targetDistance * 0.35)}km only
+A peak long run shorter than ${Math.round(targetDistance * 0.70)}km for a half marathon plan is inadequate and must NOT occur.` : targetDistance >= 38 && targetDistance <= 44 ? `MARATHON (${targetDistance}km):
+- Peak long run: ${Math.round(targetDistance * 0.72)}–${Math.round(targetDistance * 0.82)}km (i.e. ~${Math.round(targetDistance * 0.72)}–${Math.round(targetDistance * 0.82)}km)
+- Early plan long runs: build from ~${Math.round(targetDistance * 0.45)}km toward the peak
+- Final taper long run: ${Math.round(targetDistance * 0.25)}–${Math.round(targetDistance * 0.35)}km
+A peak long run shorter than ${Math.round(targetDistance * 0.65)}km for a marathon plan is inadequate.` : targetDistance >= 9 && targetDistance <= 12 ? `10KM GOAL (${targetDistance}km):
+- Peak long run: ${Math.round(targetDistance * 1.2)}–${Math.round(targetDistance * 1.5)}km (for a 10km race, the long run should EXCEED race distance — e.g. 12–15km)
+- This builds aerobic endurance well beyond race requirements, which is standard 10km coaching practice
+A peak long run shorter than ${Math.round(targetDistance * 0.9)}km for a 10km plan is inadequate.` : `RACE GOAL (${targetDistance}km):
+- Peak long run: ${Math.round(targetDistance * 0.75)}–${Math.round(targetDistance * 0.95)}km at minimum
+- A peak long run shorter than ${Math.round(targetDistance * 0.65)}km for this goal is NOT sufficient training
+- Long runs must progress meaningfully across the plan toward this peak`}
 ` : ''}
 
 ━━━ SCHEDULE & LIFESTYLE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -601,7 +627,7 @@ Your plan must demonstrate clear progressive overload and phase structure. Speci
 ${isRollingPlan
   ? `- This is Block 1 (weeks 1–${weeksToGenerate} of the full ${weeksUntilTarget}-week plan). End the block at a sensible phase transition point (e.g. end of base phase). Do NOT include a taper in this block — taper weeks will appear in the final block.`
   : isPreEventPlan
-    ? `- PRE-EVENT BLOCK: Week 1 is near race-ready intensity. Progress through sharpening phases. Taper volume in the final 1-2 weeks.`
+    ? `- PRE-EVENT BLOCK: Week 1 is near race-ready intensity with a long run of ${Math.round(targetDistance * 0.75)}–${Math.round(targetDistance * 0.85)}km. Progress through sharpening phases. Taper volume in the final 1-2 weeks only — earlier weeks must maintain near-full long-run distances. A weekly volume that is only beginner-level or a long run under ${Math.round(targetDistance * 0.55)}km in week 1 of a pre-event plan is completely wrong.`
     : `- Final 1-2 weeks MUST taper — reduced volume and intensity to arrive at the event fresh`}
 
 NON-NEGOTIABLE STRUCTURAL CONSTRAINTS:
