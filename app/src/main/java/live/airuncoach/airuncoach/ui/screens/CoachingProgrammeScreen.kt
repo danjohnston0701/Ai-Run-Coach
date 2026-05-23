@@ -328,6 +328,17 @@ fun TrainingPlanDashboardScreen(
         }
     }
 
+    // Auto-open adaptation review screen when pending adaptations are present.
+    // Fires once per plan opening — once navigated, the flag prevents re-triggering
+    // if the user returns to this screen with adaptations still pending.
+    var hasAutoNavigatedToAdaptations by remember { mutableStateOf(false) }
+    LaunchedEffect(pendingAdaptationsCount) {
+        if (pendingAdaptationsCount > 0 && !hasAutoNavigatedToAdaptations) {
+            hasAutoNavigatedToAdaptations = true
+            onViewAdaptations(planId)
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -615,15 +626,43 @@ fun PlanDashboardContent(
             Spacer(modifier = Modifier.height(Spacing.lg))
         }
 
-        // ── Adaptations Button (only show if there are pending adaptations) ─────
+        // ── Adaptations re-entry chip (shown after auto-open, so user can return) ────
+        // The plan auto-opens AdaptationReviewScreen on first load when count > 0.
+        // This chip remains visible so the user can re-open adaptations after returning.
         if (pendingAdaptationsCount > 0) {
             item {
-                OutlinedButton(
+                Surface(
                     onClick = onViewAdaptations,
-                    modifier = Modifier.fillMaxWidth().height(44.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                    color = Colors.primary.copy(alpha = 0.10f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Colors.primary.copy(alpha = 0.35f))
                 ) {
-                    Text("📊 View Pending Adaptations ($pendingAdaptationsCount)", fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                    Row(
+                        modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                    ) {
+                        Text("📊", fontSize = 16.sp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Plan Adaptations Available",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                                color = Colors.primary
+                            )
+                            Text(
+                                "$pendingAdaptationsCount recommendation${if (pendingAdaptationsCount > 1) "s" else ""} ready to review",
+                                style = AppTextStyles.caption,
+                                color = Colors.textSecondary
+                            )
+                        }
+                        Icon(
+                            painter = painterResource(R.drawable.icon_chevron_right_vector),
+                            contentDescription = null,
+                            tint = Colors.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
