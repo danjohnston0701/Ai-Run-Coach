@@ -107,6 +107,53 @@ export async function runAutoMigrations(): Promise<void> {
       name: "runs.route_confidence",
       sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS route_confidence REAL",
     },
+
+    // ── Group Runs ────────────────────────────────────────────────────────────
+    {
+      name: "group_runs.create_table",
+      sql: `
+        CREATE TABLE IF NOT EXISTS group_runs (
+          id                VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+          name              TEXT NOT NULL,
+          description       TEXT NOT NULL DEFAULT '',
+          creator_id        VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          meeting_point     TEXT,
+          meeting_lat       REAL,
+          meeting_lng       REAL,
+          distance          REAL NOT NULL DEFAULT 5.0,
+          date_time         TIMESTAMP NOT NULL,
+          max_participants  INTEGER DEFAULT 10,
+          is_public         BOOLEAN NOT NULL DEFAULT TRUE,
+          status            TEXT NOT NULL DEFAULT 'upcoming',
+          invite_token      TEXT UNIQUE DEFAULT gen_random_uuid()::text,
+          created_at        TIMESTAMP DEFAULT NOW(),
+          updated_at        TIMESTAMP DEFAULT NOW()
+        )
+      `,
+    },
+    {
+      name: "group_run_participants.create_table",
+      sql: `
+        CREATE TABLE IF NOT EXISTS group_run_participants (
+          id                  VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+          group_run_id        VARCHAR NOT NULL REFERENCES group_runs(id) ON DELETE CASCADE,
+          user_id             VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          role                TEXT NOT NULL DEFAULT 'participant',
+          invitation_status   TEXT NOT NULL DEFAULT 'accepted',
+          ready_to_start      BOOLEAN NOT NULL DEFAULT FALSE,
+          run_id              VARCHAR REFERENCES runs(id),
+          joined_at           TIMESTAMP DEFAULT NOW()
+        )
+      `,
+    },
+    {
+      name: "idx_group_run_participants_group_run",
+      sql: "CREATE INDEX IF NOT EXISTS idx_group_run_participants_group_run ON group_run_participants(group_run_id)",
+    },
+    {
+      name: "idx_group_run_participants_user",
+      sql: "CREATE INDEX IF NOT EXISTS idx_group_run_participants_user ON group_run_participants(user_id)",
+    },
   ];
 
   let succeeded = 0;

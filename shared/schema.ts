@@ -1886,3 +1886,40 @@ export const monthlyUsage = pgTable("monthly_usage", {
 
 export type MonthlyUsage = typeof monthlyUsage.$inferSelect;
 export type InsertMonthlyUsage = typeof monthlyUsage.$inferInsert;
+
+// ─── Group Runs ──────────────────────────────────────────────────────────────
+
+export const groupRuns = pgTable("group_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  creatorId: varchar("creator_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  meetingPoint: text("meeting_point"),
+  meetingLat: real("meeting_lat"),
+  meetingLng: real("meeting_lng"),
+  distance: real("distance").notNull().default(5.0),        // km
+  dateTime: timestamp("date_time").notNull(),               // scheduled start time
+  maxParticipants: integer("max_participants").default(10),
+  isPublic: boolean("is_public").notNull().default(true),
+  status: text("status").notNull().default("upcoming"),     // upcoming|active|completed|cancelled
+  inviteToken: text("invite_token").unique().default(sql`gen_random_uuid()::text`),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type GroupRun = typeof groupRuns.$inferSelect;
+export type InsertGroupRun = typeof groupRuns.$inferInsert;
+
+export const groupRunParticipants = pgTable("group_run_participants", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  groupRunId: varchar("group_run_id").notNull().references(() => groupRuns.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  role: text("role").notNull().default("participant"),              // organiser|participant
+  invitationStatus: text("invitation_status").notNull().default("accepted"), // pending|accepted|declined
+  readyToStart: boolean("ready_to_start").notNull().default(false),
+  runId: varchar("run_id").references(() => runs.id),              // linked completed run
+  joinedAt: timestamp("joined_at").defaultNow(),
+});
+
+export type GroupRunParticipant = typeof groupRunParticipants.$inferSelect;
+export type InsertGroupRunParticipant = typeof groupRunParticipants.$inferInsert;

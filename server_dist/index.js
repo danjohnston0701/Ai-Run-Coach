@@ -28646,6 +28646,140 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       res.status(500).json({ error: "Failed to get trend data" });
     }
   });
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GROUP RUNS
+  // ═══════════════════════════════════════════════════════════════════════════
+  async function buildGroupRunResponse(groupRunId, requestingUserId) {
+    const [gr] = await db.select().from(groupRuns).where(eq(groupRuns.id, groupRunId));
+    if (!gr) return null;
+    const participants = await db
+      .select({ userId: groupRunParticipants.userId, role: groupRunParticipants.role, invitationStatus: groupRunParticipants.invitationStatus, readyToStart: groupRunParticipants.readyToStart, runId: groupRunParticipants.runId, name: users.name, profilePic: users.profilePic })
+      .from(groupRunParticipants)
+      .innerJoin(users, eq(users.id, groupRunParticipants.userId))
+      .where(eq(groupRunParticipants.groupRunId, groupRunId));
+    const myParticipant = participants.find(p => p.userId === requestingUserId);
+    const creator = await db.select({ name: users.name }).from(users).where(eq(users.id, gr.creatorId)).limit(1);
+    return {
+      id: gr.id, name: gr.name, description: gr.description, creatorId: gr.creatorId,
+      creatorName: creator[0]?.name ?? "Unknown",
+      meetingPoint: gr.meetingPoint, meetingLat: gr.meetingLat, meetingLng: gr.meetingLng,
+      distance: gr.distance, dateTime: gr.dateTime?.toISOString() ?? "",
+      maxParticipants: gr.maxParticipants,
+      currentParticipants: participants.filter(p => p.invitationStatus === "accepted").length,
+      isPublic: gr.isPublic, status: gr.status, inviteToken: gr.inviteToken,
+      createdAt: gr.createdAt?.toISOString() ?? null,
+      isJoined: !!myParticipant && myParticipant.invitationStatus === "accepted",
+      isOrganiser: gr.creatorId === requestingUserId,
+      myInvitationStatus: myParticipant?.invitationStatus ?? null,
+      participants: participants.map(p => ({ userId: p.userId, userName: p.name, profilePic: p.profilePic, invitationStatus: p.invitationStatus, role: p.role, runId: p.runId, readyToStart: p.readyToStart })),
+    };
+  }
+  app2.get("/api/group-runs", authMiddleware, async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const allRuns = await db.select({ id: groupRuns.id }).from(groupRuns).where(or(eq(groupRuns.isPublic, true), eq(groupRuns.creatorId, userId))).orderBy(desc(groupRuns.dateTime));
+      const participatingRunIds = await db.select({ groupRunId: groupRunParticipants.groupRunId }).from(groupRunParticipants).where(eq(groupRunParticipants.userId, userId));
+      const allIds = new Set([...allRuns.map(r => r.id), ...participatingRunIds.map(p => p.groupRunId)]);
+      const groupRunsData = await Promise.all([...allIds].map(id => buildGroupRunResponse(id, userId)));
+      const valid = groupRunsData.filter(Boolean);
+      res.json({ groupRuns: valid, count: valid.length, total: valid.length });
+    } catch (error) { console.error("[GET /api/group-runs]", error); res.status(500).json({ error: "Failed to fetch group runs" }); }
+  });
+  app2.get("/api/group-runs/:id", authMiddleware, async (req, res) => {
+    try {
+      const gr = await buildGroupRunResponse(req.params.id, req.user.userId);
+      if (!gr) return res.status(404).json({ error: "Group run not found" });
+      res.json(gr);
+    } catch (error) { console.error("[GET /api/group-runs/:id]", error); res.status(500).json({ error: "Failed to fetch group run" }); }
+  });
+  app2.post("/api/group-runs", authMiddleware, async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const { name, description, meetingPoint, meetingLat, meetingLng, distance, dateTime, maxParticipants, isPublic } = req.body;
+      if (!name || !dateTime || !distance) return res.status(400).json({ error: "name, dateTime and distance are required" });
+      const [newRun] = await db.insert(groupRuns).values({ name, description: description ?? "", creatorId: userId, meetingPoint: meetingPoint ?? null, meetingLat: meetingLat ?? null, meetingLng: meetingLng ?? null, distance: Number(distance), dateTime: new Date(dateTime), maxParticipants: maxParticipants ?? 10, isPublic: isPublic ?? true, status: "upcoming" }).returning();
+      await db.insert(groupRunParticipants).values({ groupRunId: newRun.id, userId, role: "organiser", invitationStatus: "accepted", readyToStart: false });
+      res.status(201).json(await buildGroupRunResponse(newRun.id, userId));
+    } catch (error) { console.error("[POST /api/group-runs]", error); res.status(500).json({ error: "Failed to create group run" }); }
+  });
+  app2.post("/api/group-runs/:id/invite", authMiddleware, async (req, res) => {
+    try {
+      const { id } = req.params; const userId = req.user.userId; const { userIds } = req.body;
+      const [gr] = await db.select().from(groupRuns).where(eq(groupRuns.id, id));
+      if (!gr) return res.status(404).json({ error: "Group run not found" });
+      if (gr.creatorId !== userId) return res.status(403).json({ error: "Only the organiser can invite" });
+      for (const uid of (userIds ?? [])) {
+        const existing = await db.select().from(groupRunParticipants).where(and(eq(groupRunParticipants.groupRunId, id), eq(groupRunParticipants.userId, uid)));
+        if (existing.length === 0) await db.insert(groupRunParticipants).values({ groupRunId: id, userId: uid, role: "participant", invitationStatus: "pending", readyToStart: false });
+      }
+      res.status(200).json({ invited: userIds?.length ?? 0 });
+    } catch (error) { console.error("[POST /api/group-runs/:id/invite]", error); res.status(500).json({ error: "Failed to invite" }); }
+  });
+  app2.post("/api/group-runs/:id/respond", authMiddleware, async (req, res) => {
+    try {
+      const { id } = req.params; const userId = req.user.userId; const { response: resp } = req.body;
+      if (!["accepted","declined"].includes(resp)) return res.status(400).json({ error: "response must be 'accepted' or 'declined'" });
+      const existing = await db.select().from(groupRunParticipants).where(and(eq(groupRunParticipants.groupRunId, id), eq(groupRunParticipants.userId, userId)));
+      if (existing.length === 0) await db.insert(groupRunParticipants).values({ groupRunId: id, userId, role: "participant", invitationStatus: resp, readyToStart: false });
+      else await db.update(groupRunParticipants).set({ invitationStatus: resp }).where(and(eq(groupRunParticipants.groupRunId, id), eq(groupRunParticipants.userId, userId)));
+      const gr = await buildGroupRunResponse(id, userId);
+      if (!gr) return res.status(404).json({ error: "Group run not found" });
+      res.json(gr);
+    } catch (error) { console.error("[POST /api/group-runs/:id/respond]", error); res.status(500).json({ error: "Failed to respond" }); }
+  });
+  app2.post("/api/group-runs/:id/ready", authMiddleware, async (req, res) => {
+    try {
+      const { id } = req.params; const userId = req.user.userId;
+      await db.update(groupRunParticipants).set({ readyToStart: true }).where(and(eq(groupRunParticipants.groupRunId, id), eq(groupRunParticipants.userId, userId)));
+      const gr = await buildGroupRunResponse(id, userId);
+      if (!gr) return res.status(404).json({ error: "Group run not found" });
+      res.json(gr);
+    } catch (error) { console.error("[POST /api/group-runs/:id/ready]", error); res.status(500).json({ error: "Failed to mark ready" }); }
+  });
+  app2.post("/api/group-runs/:id/start", authMiddleware, async (req, res) => {
+    try {
+      const { id } = req.params; const userId = req.user.userId;
+      const [gr] = await db.select().from(groupRuns).where(eq(groupRuns.id, id));
+      if (!gr) return res.status(404).json({ error: "Group run not found" });
+      if (gr.creatorId !== userId) return res.status(403).json({ error: "Only the organiser can start the run" });
+      await db.update(groupRuns).set({ status: "active", updatedAt: new Date() }).where(eq(groupRuns.id, id));
+      res.json(await buildGroupRunResponse(id, userId));
+    } catch (error) { console.error("[POST /api/group-runs/:id/start]", error); res.status(500).json({ error: "Failed to start group run" }); }
+  });
+  app2.post("/api/group-runs/:id/complete", authMiddleware, async (req, res) => {
+    try {
+      const { id } = req.params; const userId = req.user.userId; const { runId } = req.body;
+      if (runId) await db.update(groupRunParticipants).set({ runId }).where(and(eq(groupRunParticipants.groupRunId, id), eq(groupRunParticipants.userId, userId)));
+      const [gr] = await db.select().from(groupRuns).where(eq(groupRuns.id, id));
+      if (gr?.creatorId === userId) await db.update(groupRuns).set({ status: "completed", updatedAt: new Date() }).where(eq(groupRuns.id, id));
+      const updated = await buildGroupRunResponse(id, userId);
+      if (!updated) return res.status(404).json({ error: "Group run not found" });
+      res.json(updated);
+    } catch (error) { console.error("[POST /api/group-runs/:id/complete]", error); res.status(500).json({ error: "Failed to complete group run" }); }
+  });
+  app2.get("/api/group-runs/:id/results", authMiddleware, async (req, res) => {
+    try {
+      const { id } = req.params; const userId = req.user.userId;
+      const [gr] = await db.select({ name: groupRuns.name }).from(groupRuns).where(eq(groupRuns.id, id));
+      const participants = await db.select({ userId: groupRunParticipants.userId, runId: groupRunParticipants.runId, name: users.name, profilePic: users.profilePic }).from(groupRunParticipants).innerJoin(users, eq(users.id, groupRunParticipants.userId)).where(and(eq(groupRunParticipants.groupRunId, id), eq(groupRunParticipants.invitationStatus, "accepted")));
+      const results = await Promise.all(participants.map(async p => {
+        let stats = null;
+        if (p.runId) {
+          const [run] = await db.select({ distance: runs.distance, duration: runs.duration, avgPace: runs.avgPace, avgHeartRate: runs.avgHeartRate, calories: runs.calories }).from(runs).where(eq(runs.id, p.runId));
+          if (run) stats = { distance: run.distance, duration: run.duration, avgPace: run.avgPace, avgHeartRate: run.avgHeartRate, calories: run.calories };
+        }
+        return { userId: p.userId, userName: p.name, profilePic: p.profilePic, runId: p.runId, completedAt: null, isCurrentUser: p.userId === userId, stats };
+      }));
+      res.json({ groupRunId: id, groupRunName: gr?.name ?? null, results });
+    } catch (error) { console.error("[GET /api/group-runs/:id/results]", error); res.status(500).json({ error: "Failed to get results" }); }
+  });
+  app2.delete("/api/group-runs/:id/leave", authMiddleware, async (req, res) => {
+    try {
+      await db.delete(groupRunParticipants).where(and(eq(groupRunParticipants.groupRunId, req.params.id), eq(groupRunParticipants.userId, req.user.userId)));
+      res.status(204).send();
+    } catch (error) { console.error("[DELETE /api/group-runs/:id/leave]", error); res.status(500).json({ error: "Failed to leave group run" }); }
+  });
+
   const httpServer = createServer(app2);
   return httpServer;
 }
@@ -29166,6 +29300,22 @@ async function runAutoMigrations() {
     {
       name: "runs.route_confidence",
       sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS route_confidence REAL"
+    },
+    {
+      name: "group_runs.create_table",
+      sql: `CREATE TABLE IF NOT EXISTS group_runs (id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(), name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', creator_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE, meeting_point TEXT, meeting_lat REAL, meeting_lng REAL, distance REAL NOT NULL DEFAULT 5.0, date_time TIMESTAMP NOT NULL, max_participants INTEGER DEFAULT 10, is_public BOOLEAN NOT NULL DEFAULT TRUE, status TEXT NOT NULL DEFAULT 'upcoming', invite_token TEXT UNIQUE DEFAULT gen_random_uuid()::text, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW())`
+    },
+    {
+      name: "group_run_participants.create_table",
+      sql: `CREATE TABLE IF NOT EXISTS group_run_participants (id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(), group_run_id VARCHAR NOT NULL REFERENCES group_runs(id) ON DELETE CASCADE, user_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE, role TEXT NOT NULL DEFAULT 'participant', invitation_status TEXT NOT NULL DEFAULT 'accepted', ready_to_start BOOLEAN NOT NULL DEFAULT FALSE, run_id VARCHAR REFERENCES runs(id), joined_at TIMESTAMP DEFAULT NOW())`
+    },
+    {
+      name: "idx_group_run_participants_group_run",
+      sql: "CREATE INDEX IF NOT EXISTS idx_group_run_participants_group_run ON group_run_participants(group_run_id)"
+    },
+    {
+      name: "idx_group_run_participants_user",
+      sql: "CREATE INDEX IF NOT EXISTS idx_group_run_participants_user ON group_run_participants(user_id)"
     }
   ];
   let succeeded = 0;
