@@ -15349,9 +15349,9 @@ init_strava_oauth_service();
 import express2 from "express";
 import { eq as eq13, and as and12 } from "drizzle-orm";
 var router2 = express2.Router();
-router2.post("/api/strava/auth/authorize", async (req, res) => {
+router2.post("/api/strava/auth/authorize", authMiddleware, async (req, res) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: "Not authenticated" });
     }
@@ -15441,9 +15441,9 @@ router2.get("/strava/callback", async (req, res) => {
     );
   }
 });
-router2.post("/api/strava/disconnect", async (req, res) => {
+router2.post("/api/strava/disconnect", authMiddleware, async (req, res) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: "Not authenticated" });
     }

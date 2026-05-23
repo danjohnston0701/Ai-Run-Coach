@@ -10,6 +10,7 @@ import { db } from './db';
 import { sql, eq, and } from 'drizzle-orm';
 import { connectedDevices, oauthStateStore } from '@shared/schema';
 import { desc } from 'drizzle-orm';
+import { authMiddleware, type AuthenticatedRequest } from './auth';
 
 import {
   exchangeStravaCode,
@@ -23,13 +24,9 @@ const router = express.Router();
  * POST /api/strava/auth/authorize - Initiate OAuth flow
  * Generates auth URL and stores state in database
  */
-router.post('/api/strava/auth/authorize', async (req: Request, res: Response) => {
+router.post('/api/strava/auth/authorize', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = (req as any).user?.id;
-
-    if (!userId) {
-      return res.status(401).json({ error: 'Not authenticated' });
-    }
+    const userId = req.user!.userId;
 
     const {
       generateOAuthState,
@@ -168,13 +165,9 @@ router.get('/strava/callback', async (req: Request, res: Response) => {
  * POST /api/strava/disconnect - Disconnect Strava account
  * Marks device as inactive and deauthorizes with Strava
  */
-router.post('/api/strava/disconnect', async (req: Request, res: Response) => {
+router.post('/api/strava/disconnect', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = (req as any).user?.id;
-
-    if (!userId) {
-      return res.status(401).json({ error: 'Not authenticated' });
-    }
+    const userId = req.user!.userId;
 
     const [device] = await db
       .select()
