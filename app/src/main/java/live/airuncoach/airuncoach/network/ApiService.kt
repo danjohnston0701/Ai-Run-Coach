@@ -602,6 +602,9 @@ interface ApiService {
 
     @GET("/api/strava/activities")
     suspend fun getStravaActivities(): StravaActivitiesResponse
+
+    @POST("/api/strava/import-history")
+    suspend fun importStravaHistory(): StravaImportHistoryResponse
 }
 
 /**
@@ -647,6 +650,14 @@ data class StravaActivityData(
     val completedAt: String,
     val stravaUrl: String,
     val stravaId: String
+)
+
+data class StravaImportHistoryResponse(
+    val success: Boolean,
+    val imported: Int = 0,
+    val skipped: Int = 0,
+    val message: String? = null,
+    val error: String? = null
 )
 
 

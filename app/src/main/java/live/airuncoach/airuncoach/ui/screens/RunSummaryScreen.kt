@@ -5,6 +5,7 @@ package live.airuncoach.airuncoach.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import android.graphics.Bitmap
 import android.view.View
@@ -559,6 +560,52 @@ private fun RunSummaryTopBarFlagship(
 }
 
 /**
+ * Strava data attribution banner — REQUIRED by Strava API Brand Guidelines.
+ *
+ * Displays a "View on Strava" link in Strava orange (#FC5200) whenever a run
+ * screen is showing data that originated from Strava (externalSource == "strava").
+ *
+ * Per guidelines: "If you choose to link back to any original Strava data sources
+ * presented in your application you must use the following text format, 'View on Strava'.
+ * Text link should be identifiable as a link by using bold weight, underline, or orange color."
+ */
+@Composable
+private fun StravaAttributionBanner(stravaActivityId: String) {
+    val context = LocalContext.current
+    val stravaUrl = "https://www.strava.com/activities/$stravaActivityId"
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFFC5200).copy(alpha = 0.07f))
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        // Official "Powered by Strava" logo — per Strava API Brand Guidelines
+        Image(
+            painter = painterResource(id = R.drawable.ic_strava_powered_by),
+            contentDescription = "Powered by Strava",
+            modifier = Modifier.height(22.dp),
+            contentScale = ContentScale.Fit
+        )
+
+        // "View on Strava" link — bold + orange per brand guidelines
+        Text(
+            text = "View on Strava",
+            style = AppTextStyles.caption.copy(
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFFC5200)
+            ),
+            modifier = Modifier.clickable {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(stravaUrl))
+                context.startActivity(intent)
+            }
+        )
+    }
+}
+
+/**
  * Pinned Garmin attribution header that stays visible while scrolling
  */
 @Composable
@@ -1079,6 +1126,15 @@ private fun AiInsightsTabContent(
                     modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
                     style = GarminBadgeStyle.HEADER,
                 )
+            }
+        }
+
+        // ── Strava attribution — REQUIRED by Strava API Brand Guidelines ──────
+        // Must show "View on Strava" in bold or orange (#FC5200) whenever displaying
+        // data that originated from Strava.
+        if (run.externalSource == "strava" && !run.externalId.isNullOrBlank()) {
+            item {
+                StravaAttributionBanner(stravaActivityId = run.externalId!!)
             }
         }
 

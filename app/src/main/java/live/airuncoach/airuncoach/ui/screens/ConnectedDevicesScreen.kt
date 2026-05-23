@@ -1,7 +1,9 @@
 package live.airuncoach.airuncoach.ui.screens
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -10,7 +12,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -54,6 +55,11 @@ fun ConnectedDevicesScreen(
     val garminConnectionStatus by viewModel.garminConnectionStatus.collectAsState()
     val garminDeviceName by viewModel.garminDeviceName.collectAsState()
     val isGarminConnectConnected = garminConnectionStatus == "connected"
+
+    val stravaConnected by viewModel.stravaConnected.collectAsState()
+    val stravaAthleteName by viewModel.stravaAthleteName.collectAsState()
+    val stravaLoading by viewModel.stravaLoading.collectAsState()
+    val stravaImportStatus by viewModel.stravaImportStatus.collectAsState()
 
     val comingSoonDevices = remember {
         listOf(
@@ -157,7 +163,16 @@ fun ConnectedDevicesScreen(
             }
 
             item {
-                StravaIntegrationCard(onNavigateToStrava = onNavigateToStrava)
+                StravaIntegrationCard(
+                    isConnected = stravaConnected,
+                    athleteName = stravaAthleteName,
+                    isLoading = stravaLoading,
+                    importStatus = stravaImportStatus,
+                    onConnect = { viewModel.connectStrava() },
+                    onDisconnect = { viewModel.disconnectStrava() },
+                    onImportHistory = { viewModel.importStravaHistory() },
+                    onClearImportStatus = { viewModel.clearStravaImportStatus() }
+                )
             }
 
             // ── Section: Garmin Connect (COMMENTED OUT) ───────────────────────
@@ -408,11 +423,37 @@ private fun WatchFeatureChips() {
 // ── Strava Integration card ──────────────────────────────────────────────────
 //
 // Integration with Strava API to publish completed runs with full GPS data,
-// heart rate, cadence, and elevation metrics. Enables route map generation.
+// heart rate, cadence, and elevation metrics. Enables route map generation
+// and historic run import for AI coaching baseline data.
+
+/**
+ * Official "Compatible with Strava" logo per Strava API Brand Guidelines.
+ *
+ * SETUP: Replace the placeholder drawable with the real asset:
+ *   1. Download the orange PNG from https://developers.strava.com/guidelines/
+ *   2. Save as app/src/main/res/drawable/ic_strava_compatible_with.png (2x, 96px height)
+ *   3. Delete ic_strava_compatible_with.xml
+ */
+@Composable
+private fun StravaCompatibleBanner() {
+    Icon(
+        painter = painterResource(id = R.drawable.ic_strava_compatible_with),
+        contentDescription = "Compatible with Strava",
+        tint = Color.Unspecified,
+        modifier = Modifier.height(28.dp)
+    )
+}
 
 @Composable
 private fun StravaIntegrationCard(
-    onNavigateToStrava: () -> Unit
+    isConnected: Boolean,
+    athleteName: String?,
+    isLoading: Boolean,
+    importStatus: String?,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onImportHistory: () -> Unit,
+    onClearImportStatus: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -427,26 +468,14 @@ private fun StravaIntegrationCard(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header row: Strava branding
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .background(Color(0xFFFC5200), RoundedCornerShape(8.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    // Using a circle placeholder for Strava logo
-                    // TODO: Replace with actual Strava logo drawable
-                    Text(
-                        "S",
-                        style = AppTextStyles.h2.copy(
-                            fontSize = 24.sp,
-                            color = Color.White
-                        ),
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Spacer(modifier = Modifier.width(14.dp))
+            // "Compatible with Strava" banner
+            StravaCompatibleBanner()
+
+            // Title + connection status badge
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         "Strava Integration",
@@ -455,54 +484,230 @@ private fun StravaIntegrationCard(
                     )
                     Spacer(modifier = Modifier.height(3.dp))
                     Text(
-                        "Publish runs with complete GPS data",
+                        if (isConnected) "Publish runs · Import history"
+                        else "Publish runs with complete GPS data",
                         style = AppTextStyles.caption,
                         color = Colors.textSecondary
                     )
                 }
+                if (isConnected) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFF4CAF50).copy(alpha = 0.15f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .background(Color(0xFF4CAF50), CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                "Connected",
+                                style = AppTextStyles.caption.copy(
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = Color(0xFF4CAF50)
+                            )
+                        }
+                    }
+                }
             }
 
-            // Description
+            // Connected: show athlete name
+            if (isConnected && !athleteName.isNullOrBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFFFC5200).copy(alpha = 0.08f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Person,
+                            contentDescription = null,
+                            tint = Color(0xFFFC5200),
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(7.dp))
+                        Text(
+                            "Connected as $athleteName",
+                            style = AppTextStyles.caption.copy(fontSize = 12.sp),
+                            color = Color(0xFFFC5200)
+                        )
+                    }
+                }
+            }
+
+            // Description — changes based on connection state
             Text(
-                "Connect your Strava account to publish completed runs with full GPS tracks, heart rate, cadence, and elevation data. Strava generates beautiful route maps from your run data.",
+                if (isConnected)
+                    "Your Strava account is connected. Publish completed runs with full GPS tracks, heart rate, cadence, and elevation. Import your Strava run history to power AI coaching and plan recommendations."
+                else
+                    "Connect your Strava account to publish completed runs with full GPS tracks, heart rate, cadence, and elevation data. Share your Ai Run Coach sessions with your Strava community.",
                 style = AppTextStyles.caption,
                 color = Colors.textSecondary,
                 lineHeight = 18.sp
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
-
             // Feature chips
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 SmallChip(Icons.Default.LocationOn, "Route Map", Color(0xFFFC5200))
                 SmallChip(Icons.Default.Favorite, "All Metrics", Color(0xFFFC5200))
-                SmallChip(Icons.Default.Share, "Social Share", Color(0xFFFC5200))
+                if (isConnected)
+                    SmallChip(Icons.Default.Star, "AI Baseline", Color(0xFFFC5200))
+                else
+                    SmallChip(Icons.Default.Share, "Social Share", Color(0xFFFC5200))
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            // Import status message
+            if (!importStatus.isNullOrBlank() && importStatus != "importing") {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (importStatus.startsWith("Import failed"))
+                        Color(0xFFE53935).copy(alpha = 0.10f)
+                    else
+                        Color(0xFF4CAF50).copy(alpha = 0.10f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            if (importStatus.startsWith("Import failed")) Icons.Default.Warning else Icons.Default.Check,
+                            contentDescription = null,
+                            tint = if (importStatus.startsWith("Import failed")) Color(0xFFE53935) else Color(0xFF4CAF50),
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(7.dp))
+                        Text(
+                            importStatus,
+                            style = AppTextStyles.caption.copy(fontSize = 11.sp),
+                            color = if (importStatus.startsWith("Import failed")) Color(0xFFE53935) else Color(0xFF4CAF50),
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = onClearImportStatus,
+                            modifier = Modifier.size(20.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Dismiss",
+                                tint = Colors.textSecondary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
+            }
 
-            // CTA button
-            Button(
-                onClick = onNavigateToStrava,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFFC5200),
-                    contentColor = Color.White
-                ),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Icon(
-                    Icons.Default.Link,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    "Connect Strava Account",
-                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
-                )
+            Spacer(modifier = Modifier.height(2.dp))
+
+            if (isConnected) {
+                // Import history button
+                Button(
+                    onClick = onImportHistory,
+                    enabled = !isLoading && importStatus != "importing",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFFC5200),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    if (isLoading || importStatus == "importing") {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "Importing runs…",
+                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.Download,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "Import Run History",
+                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                }
+
+                // Disconnect button
+                OutlinedButton(
+                    onClick = onDisconnect,
+                    enabled = !isLoading,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Colors.textSecondary
+                    ),
+                    border = BorderStroke(1.dp, Colors.textSecondary.copy(alpha = 0.3f)),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(
+                        Icons.Default.LinkOff,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        "Disconnect Strava",
+                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.Medium)
+                    )
+                }
+            } else {
+                // Official "Connect with Strava" button per Strava API Brand Guidelines.
+                // SETUP: Replace the placeholder drawable with the real asset:
+                //   1. Download the orange PNG from https://developers.strava.com/guidelines/
+                //   2. Save as app/src/main/res/drawable/btn_strava_connect.png (2x, 96px height)
+                //   3. Delete btn_strava_connect.xml
+                if (isLoading) {
+                    Button(
+                        onClick = {},
+                        enabled = false,
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            disabledContainerColor = Color(0xFFFC5200).copy(alpha = 0.6f),
+                            disabledContentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Connecting…", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold))
+                    }
+                } else {
+                    Image(
+                        painter = painterResource(id = R.drawable.btn_strava_connect),
+                        contentDescription = "Connect with Strava",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .clickable { onConnect() }
+                    )
+                }
             }
         }
     }

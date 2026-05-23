@@ -34,6 +34,7 @@ import javax.inject.Inject
 import live.airuncoach.airuncoach.ui.navigation.RootNavigationGraph
 import live.airuncoach.airuncoach.ui.theme.AiRunCoachTheme
 import live.airuncoach.airuncoach.util.GarminConnectionState
+import live.airuncoach.airuncoach.util.StravaConnectionState
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -212,6 +213,7 @@ class MainActivity : ComponentActivity() {
         android.util.Log.d("MainActivity", "onNewIntent called")
         handleNotificationIntent(intent)
         handleGarminOAuthCallback(intent)
+        handleStravaOAuthCallback(intent)
     }
 
     /**
@@ -264,6 +266,18 @@ class MainActivity : ComponentActivity() {
         }
     }
     
+    private fun handleStravaOAuthCallback(intent: Intent?) {
+        intent?.data?.let { uri ->
+            if (uri.scheme == "airuncoach" && uri.host == "strava" && uri.path == "/auth-complete") {
+                val success = uri.getQueryParameter("success") == "true"
+                android.util.Log.d("MainActivity", if (success) "✅ Strava OAuth success" else "❌ Strava OAuth failed: ${uri.getQueryParameter("error")}")
+                if (success) {
+                    StravaConnectionState.notifyConnected()
+                }
+            }
+        }
+    }
+
     private fun handleGarminOAuthCallback(intent: Intent?) {
         intent?.data?.let { uri ->
             android.util.Log.d("MainActivity", "Received URI: $uri")

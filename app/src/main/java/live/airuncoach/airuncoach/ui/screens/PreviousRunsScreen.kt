@@ -1103,6 +1103,17 @@ fun RunListItem(run: RunSession, isPersonalBest: Boolean = false, onClick: () ->
                     }
                 }
                 
+                // Official "Powered by Strava" badge for imported runs — per Strava API Brand Guidelines
+                if (run.externalSource == "strava") {
+                    Spacer(modifier = Modifier.width(Spacing.sm))
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_strava_powered_by),
+                        contentDescription = "Powered by Strava",
+                        tint = Color.Unspecified,
+                        modifier = Modifier.height(16.dp)
+                    )
+                }
+
                 // Personal Best trophy badge
                 if (isPersonalBest) {
                     Spacer(modifier = Modifier.width(Spacing.sm))
