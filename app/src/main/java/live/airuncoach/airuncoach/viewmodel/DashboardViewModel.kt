@@ -16,12 +16,12 @@ import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.Dispatchers
 import live.airuncoach.airuncoach.BuildConfig
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.data.repository.RunRepository  // ⚡ For shared run caching
@@ -84,6 +84,10 @@ class DashboardViewModel @Inject constructor(
 
     private val _isAiCoachEnabled = MutableStateFlow(true)
     val isAiCoachEnabled: StateFlow<Boolean> = _isAiCoachEnabled.asStateFlow()
+
+    // Training Load / Recovery Engine
+    private val _trainingLoad = MutableStateFlow<live.airuncoach.airuncoach.network.model.TrainingLoadResponse?>(null)
+    val trainingLoad: StateFlow<live.airuncoach.airuncoach.network.model.TrainingLoadResponse?> = _trainingLoad.asStateFlow()  // Displayed in DashboardScreen
     
     // Track active run session
     val activeRunSession: StateFlow<RunSession?> = 
@@ -135,12 +139,32 @@ class DashboardViewModel @Inject constructor(
                 Log.e("DashboardViewModel", "Error loading weather: ${e.message}", e)
             }
         }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                loadTrainingLoad()
+            } catch (e: Exception) {
+                Log.e("DashboardViewModel", "Error loading training load: ${e.message}", e)
+            }
+        }
     }
     
     private fun loadAiCoachPreference() {
         _isAiCoachEnabled.value = sharedPrefs.getBoolean("ai_coach_enabled", true)
     }
     
+    private fun loadTrainingLoad() {
+        val userId = sessionManager.getUserId() ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _trainingLoad.value = apiService.getTrainingLoad(userId)
+            } catch (e: Exception) {
+                Log.w("DashboardViewModel", "Training load fetch failed (no data yet): ${e.message}")
+                _trainingLoad.value = null
+            }
+        }
+    }
+
     private fun loadWeather() {
         viewModelScope.launch {
             try {

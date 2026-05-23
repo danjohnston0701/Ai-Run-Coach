@@ -111,6 +111,18 @@ class RunSummaryViewModel @Inject constructor(
 
     private val _isLoadingGroupRun = MutableStateFlow(false)
     val isLoadingGroupRun: StateFlow<Boolean> = _isLoadingGroupRun.asStateFlow()
+
+    // ── Group Run Debrief ─────────────────────────────────────────────────────
+    private val _groupRunDebrief = MutableStateFlow<GroupRunDebriefResponse?>(null)
+    val groupRunDebrief: StateFlow<GroupRunDebriefResponse?> = _groupRunDebrief.asStateFlow()
+    private val _isLoadingDebrief = MutableStateFlow(false)
+    val isLoadingDebrief: StateFlow<Boolean> = _isLoadingDebrief.asStateFlow()
+
+    // ── Race Predictor ────────────────────────────────────────────────────────
+    private val _racePredictions = MutableStateFlow<RacePredictionsResponse?>(null)
+    val racePredictions: StateFlow<RacePredictionsResponse?> = _racePredictions.asStateFlow()
+    private val _isLoadingRacePredictions = MutableStateFlow(false)
+    val isLoadingRacePredictions: StateFlow<Boolean> = _isLoadingRacePredictions.asStateFlow()
     // ───────────────────────────────────────────────────────────────────────────
 
     init {
@@ -161,6 +173,9 @@ class RunSummaryViewModel @Inject constructor(
 
                 // Check if this run is part of a group run — load leaderboard if so
                 loadLinkedGroupRun(runId)
+
+                // Load race predictions (Riegel formula) for this run
+                loadRacePredictions(runId)
                 
                 _isLoadingRun.value = false
             } catch (e: Exception) {
@@ -1121,6 +1136,42 @@ class RunSummaryViewModel @Inject constructor(
                 // keep stale data
             } finally {
                 _isLoadingGroupRun.value = false
+            }
+        }
+    }
+
+    // ── Race Predictor ────────────────────────────────────────────────────────
+
+    private fun loadRacePredictions(runId: String) {
+        viewModelScope.launch {
+            _isLoadingRacePredictions.value = true
+            try {
+                val predictions = apiService.getRacePredictions(runId)
+                _racePredictions.value = predictions
+            } catch (_: Exception) {
+                // Not fatal — run may be too short or server error
+                _racePredictions.value = null
+            } finally {
+                _isLoadingRacePredictions.value = false
+            }
+        }
+    }
+
+    // ── Group Run Debrief ─────────────────────────────────────────────────────
+
+    /** Called from the leaderboard tab when the user taps "Get AI Debrief" */
+    fun loadGroupRunDebrief() {
+        val groupRunId = _linkedGroupRunId.value ?: return
+        if (_isLoadingDebrief.value) return
+        viewModelScope.launch {
+            _isLoadingDebrief.value = true
+            try {
+                val response = apiService.getGroupRunDebrief(groupRunId)
+                _groupRunDebrief.value = response
+            } catch (e: Exception) {
+                Log.e("RunSummaryViewModel", "Failed to load group run debrief: ${e.message}")
+            } finally {
+                _isLoadingDebrief.value = false
             }
         }
     }

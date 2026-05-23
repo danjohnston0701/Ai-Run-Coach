@@ -57,6 +57,7 @@ import live.airuncoach.airuncoach.ui.components.GarminAttributionBadge
 import live.airuncoach.airuncoach.ui.components.GarminBadgeStyle
 import live.airuncoach.airuncoach.ui.components.TargetTimeCard
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
+import live.airuncoach.airuncoach.network.model.TrainingLoadResponse
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
@@ -95,6 +96,7 @@ fun DashboardScreen(
     val recentRun by viewModel.recentRun.collectAsState()
     val isAiCoachEnabled by viewModel.isAiCoachEnabled.collectAsState()
     val activeRunSession by viewModel.activeRunSession.collectAsState()
+    val trainingLoad by viewModel.trainingLoad.collectAsState()
 
     // Optimize: Only load data once when screen is first shown
     LaunchedEffect(Unit) {
@@ -193,6 +195,13 @@ fun DashboardScreen(
             )
         }
         item { Spacer(modifier = Modifier.height(Spacing.md)) }
+        // Training Load & Recovery card
+        if (trainingLoad != null && trainingLoad!!.status != "no_data") {
+            item {
+                TrainingLoadCard(trainingLoad = trainingLoad!!)
+            }
+            item { Spacer(modifier = Modifier.height(Spacing.md)) }
+        }
         item {
             PreviousRunsCard(
                 recentRun = recentRun,
@@ -973,5 +982,96 @@ fun PreviousRunsCard(
                 )
             }
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Training Load & Recovery Card
+// ───��─────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun TrainingLoadCard(trainingLoad: TrainingLoadResponse) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A2E))
+    ) {
+        Column(modifier = Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        "${trainingLoad.recoveryEmoji()} ${trainingLoad.recoveryLabel()}",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                    Text(
+                        "Training Load",
+                        style = AppTextStyles.small,
+                        color = Colors.textMuted
+                    )
+                }
+            }
+
+            // CTL / ATL / TSB row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                TrainingLoadStat(
+                    label = "Fitness",
+                    sublabel = "CTL",
+                    value = "%.0f".format(trainingLoad.ctl)
+                )
+                TrainingLoadStat(
+                    label = "Fatigue",
+                    sublabel = "ATL",
+                    value = "%.0f".format(trainingLoad.atl)
+                )
+                TrainingLoadStat(
+                    label = "Form",
+                    sublabel = "TSB",
+                    value = "%+.0f".format(trainingLoad.tsb),
+                    valueColor = when {
+                        trainingLoad.tsb > 10  -> Color(0xFF4CAF50)
+                        trainingLoad.tsb < -30 -> Color(0xFFF44336)
+                        else                   -> Colors.textPrimary
+                    }
+                )
+            }
+
+            // Recommendations (first one only to keep it compact)
+            trainingLoad.recommendations?.firstOrNull()?.let { rec ->
+                Text(
+                    "💡 $rec",
+                    style = AppTextStyles.small,
+                    color = Colors.textMuted
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrainingLoadStat(
+    label: String,
+    sublabel: String,
+    value: String,
+                    valueColor: Color = Colors.textPrimary
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, style = AppTextStyles.small, color = Colors.textMuted)
+        Text(
+            value,
+            style = AppTextStyles.h3.copy(fontWeight = FontWeight.ExtraBold),
+            color = valueColor
+        )
+        Text(sublabel, style = AppTextStyles.caption, color = Colors.textMuted)
     }
 }

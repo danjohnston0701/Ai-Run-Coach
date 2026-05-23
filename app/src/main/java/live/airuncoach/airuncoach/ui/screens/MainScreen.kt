@@ -853,8 +853,15 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
 
                 LaunchedEffect(planCancelSuccess) {
                     if (planCancelSuccess && planId.isNotBlank()) {
-                        // Remove from the LIST ViewModel immediately so there's zero flicker
+                        // Optimistically remove from the list (zero-flicker) then refresh from
+                        // the server. Since abandonPlan() awaited the API before setting this
+                        // flag, the plan is already "cancelled" server-side, so the refresh
+                        // will return the correct active-only list.
                         listViewModel?.removePlanFromList(planId)
+                        listViewModel?.loadUserPlans("active")
+                        // Clear the flag here (not in the child composable) to avoid the race
+                        // where clearPlanActionSuccess() runs before this effect processes it.
+                        detailViewModel.clearPlanActionSuccess()
                     }
                 }
 

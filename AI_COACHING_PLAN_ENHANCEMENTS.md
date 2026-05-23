@@ -341,11 +341,44 @@ The generic `checkPaceCoaching()` engine in `RunTrackingService` was using **rac
 
 ---
 
+---
+
+## Feature: Race Predictor
+
+`GET /api/runs/:runId/race-predictions` uses the **Riegel formula** (`T2 = T1 × (D2/D1)^1.06`) to predict finish times for 5K, 10K, Half Marathon, and Marathon from any run.
+
+Predictions are flagged `reliable: false` if the source run is less than 25% of the target race distance (e.g. predicting a marathon from a 2km run). Shown in the **Data tab** of `RunSummaryScreen` as `RacePredictionsCard`.
+
+---
+
+## Feature: Training Load & Recovery Engine
+
+`GET /api/fitness/current/:userId` already existed. Now exposed in the Android app via `DashboardViewModel.loadTrainingLoad()` and displayed as `TrainingLoadCard` on the main dashboard.
+
+Shows:
+- **CTL** (Chronic Training Load / Fitness) — 42-day exponentially weighted TSS average
+- **ATL** (Acute Training Load / Fatigue) — 7-day average
+- **TSB** (Training Stress Balance / Form) = CTL - ATL
+- **Recovery status**: Race Ready 🟢 / Maintaining 🔵 / Building Fitness 🟡 / Overreached 🔴 / Too Easy ⚪
+- First recommendation from the server's `getFitnessRecommendations()` function
+
+The card only shows when `status != "no_data"` (i.e. user has logged enough runs to have meaningful metrics).
+
+---
+
+## Feature: Group Run AI Post-Run Debrief
+
+`POST /api/group-runs/:id/debrief` generates a 3-4 sentence AI narrative (GPT-4o) comparing the current user's performance vs the group. Computes rank, pace vs group average, and calls OpenAI with a coaching-voice prompt.
+
+On Android, shown in the `GroupRunLeaderboardTab` as a prompt card ("Get AI Group Debrief") that loads inline after tapping. State managed in `RunSummaryViewModel.loadGroupRunDebrief()`.
+
+---
+
 ## Change Log
 
 | Date | Change | Commit |
 |------|--------|--------|
-| 2026-05-23 | **Fix**: Live coaching cues during trained sessions now use session target pace, not race goal pace. `checkPaceCoaching()` suppressed when a dynamic coaching plan is active. | pending |
+| 2026-05-23 | **Feature**: Race Predictor (Riegel formula) on run summary Data tab. Training Load card on dashboard. Group Run AI Post-Run Debrief. Fix cancelled plan race condition. | pending |
+| 2026-05-23 | **Fix**: Live coaching cues during trained sessions now use session target pace, not race goal pace. `checkPaceCoaching()` suppressed when a dynamic coaching plan is active. | `c75609d` |
 | 2026-05-23 | **Refactor**: Replaced all fragmented if/else prompt patches with `goalContext()` architecture. Added full coverage for non-race goals (lose weight, fitness, speed, endurance, consistency, comeback). | `b67cbb7` |
-| 2026-05-23 | **Fix**: Added LONG RUN REQUIREMENTS section with event-specific minimums for HM/marathon/10km. Also strengthened pre-event block language. | `1e9b67b` (superseded by refactor above) |
 | 2026-05-23 | **Fix**: Fixed `analyzeWeatherImpact` undefined reference in pre-run briefing. | `90e873c` |

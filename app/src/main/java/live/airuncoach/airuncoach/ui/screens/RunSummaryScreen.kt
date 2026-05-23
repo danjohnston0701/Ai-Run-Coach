@@ -150,8 +150,14 @@ fun RunSummaryScreenFlagship(
     val linkedGroupRunName by viewModel.linkedGroupRunName.collectAsState()
     val groupRunResults by viewModel.groupRunResults.collectAsState()
     val isLoadingGroupRun by viewModel.isLoadingGroupRun.collectAsState()
+    val groupRunDebrief by viewModel.groupRunDebrief.collectAsState()
+    val isLoadingDebrief by viewModel.isLoadingDebrief.collectAsState()
     val hasGroupRun = linkedGroupRunId != null
     val groupRunTabOffset = if (hasGroupRun) 1 else 0
+
+    // Race Predictor
+    val racePredictions by viewModel.racePredictions.collectAsState()
+    val isLoadingRacePredictions by viewModel.isLoadingRacePredictions.collectAsState()
 
     LaunchedEffect(runId) {
         // Always reload when runId changes (navigating back and reopening should refresh data including coaching notes)
@@ -298,6 +304,9 @@ fun RunSummaryScreenFlagship(
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it },
                             hasGroupRun = true,
+                            debrief = groupRunDebrief,
+                            isLoadingDebrief = isLoadingDebrief,
+                            onRequestDebrief = { viewModel.loadGroupRunDebrief() },
                         )
 
                         selectedTab == 1 + groupRunTabOffset -> SummaryTabContent(
@@ -325,6 +334,8 @@ fun RunSummaryScreenFlagship(
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it },
                             hasGroupRun = hasGroupRun,
+                            racePredictions = racePredictions,
+                            isLoadingRacePredictions = isLoadingRacePredictions,
                         )
                         selectedTab == 4 + groupRunTabOffset -> AchievementsTabFlagship(
                             run = session!!,
@@ -686,6 +697,9 @@ private fun GroupRunLeaderboardTab(
     selectedTab: Int = 1,
     onTabSelected: (Int) -> Unit = {},
     hasGroupRun: Boolean = true,
+    debrief: GroupRunDebriefResponse? = null,
+    isLoadingDebrief: Boolean = false,
+    onRequestDebrief: () -> Unit = {},
 ) {
     // Track which stat the user wants to sort by
     var activeFilter by remember { mutableStateOf("Pace") }
@@ -741,6 +755,83 @@ private fun GroupRunLeaderboardTab(
                         contentDescription = "Refresh leaderboard",
                         tint = Colors.primary
                     )
+                }
+            }
+        }
+
+        // ── AI Debrief card ────────────────────────────────────────────────────
+        item {
+            when {
+                debrief != null -> {
+                    // Show the debrief text
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(
+                                androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                    listOf(Colors.primary.copy(alpha = 0.15f), Colors.backgroundSecondary)
+                                )
+                            )
+                            .padding(Spacing.md)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("🤖", style = AppTextStyles.h3)
+                                Spacer(Modifier.width(Spacing.sm))
+                                Text(
+                                    "AI Debrief",
+                                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                                    color = Colors.primary
+                                )
+                                debrief.rank?.let { rank ->
+                                    Spacer(Modifier.width(Spacing.sm))
+                                    Text(
+                                        "· Finished #$rank of ${debrief.totalFinishers}",
+                                        style = AppTextStyles.small,
+                                        color = Colors.textMuted
+                                    )
+                                }
+                            }
+                            Text(
+                                text = debrief.debrief,
+                                style = AppTextStyles.body,
+                                color = Colors.textPrimary
+                            )
+                        }
+                    }
+                }
+                isLoadingDebrief -> {
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Colors.primary, strokeWidth = 2.dp)
+                            Text("Generating AI debrief…", style = AppTextStyles.small, color = Colors.textMuted)
+                        }
+                    }
+                }
+                else -> {
+                    // Show "Get AI Debrief" button
+                    OutlinedButton(
+                        onClick = onRequestDebrief,
+                        modifier = Modifier.fillMaxWidth(),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Colors.primary),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.icon_ai_vector),
+                            contentDescription = null,
+                            tint = Colors.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(Spacing.sm))
+                        Text("Get AI Group Debrief", color = Colors.primary, style = AppTextStyles.body)
+                    }
                 }
             }
         }
@@ -6125,6 +6216,8 @@ private fun DataTabFlagship(
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
     hasGroupRun: Boolean = false,
+    racePredictions: RacePredictionsResponse? = null,
+    isLoadingRacePredictions: Boolean = false,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -6339,6 +6432,14 @@ private fun DataTabFlagship(
             }
         }
 
+        // ==================== RACE PREDICTIONS SECTION ====================
+        item {
+            RacePredictionsCard(
+                predictions = racePredictions,
+                isLoading = isLoadingRacePredictions
+            )
+        }
+
         // Delete run button at the bottom of the tab
         item {
             Spacer(modifier = Modifier.height(Spacing.md))
@@ -6428,6 +6529,108 @@ private fun DataSectionCard(
 }
 
 @Composable
+// ─────────────────────────────────────────────────────────────────────────────
+// Race Predictor Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun RacePredictionsCard(
+    predictions: RacePredictionsResponse?,
+    isLoading: Boolean,
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.5f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Text("🏆", style = AppTextStyles.h3)
+                Column {
+                    Text(
+                        "Race Predictions",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                    if (predictions != null) {
+                        Text(
+                            "Based on ${predictions.sourcePace} from this run · Riegel formula",
+                            style = AppTextStyles.small,
+                            color = Colors.textMuted
+                        )
+                    }
+                }
+            }
+
+            when {
+                isLoading -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                        modifier = Modifier.padding(vertical = Spacing.sm)
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Colors.primary, strokeWidth = 2.dp)
+                        Text("Calculating predictions…", style = AppTextStyles.small, color = Colors.textMuted)
+                    }
+                }
+                predictions != null -> {
+                    // Header row
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        Text("Race", style = AppTextStyles.caption, color = Colors.textMuted, modifier = Modifier.weight(1f))
+                        Text("Time", style = AppTextStyles.caption, color = Colors.textMuted, modifier = Modifier.width(90.dp))
+                        Text("Pace", style = AppTextStyles.caption, color = Colors.textMuted, modifier = Modifier.width(80.dp))
+                    }
+                    HorizontalDivider(color = Colors.border.copy(alpha = 0.5f))
+
+                    predictions.predictions.filter { it.reliable }.forEach { pred ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                pred.race,
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
+                                color = Colors.textPrimary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                pred.predictedTime,
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                                color = Colors.primary,
+                                modifier = Modifier.width(90.dp)
+                            )
+                            Text(
+                                pred.predictedPace,
+                                style = AppTextStyles.small,
+                                color = Colors.textMuted,
+                                modifier = Modifier.width(80.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        "⚡ Predictions assume race-specific effort. Accuracy improves with longer runs.",
+                        style = AppTextStyles.small,
+                        color = Colors.textMuted,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+                else -> {
+                    Text(
+                        "Run at least 1km to see race time predictions.",
+                        style = AppTextStyles.small,
+                        color = Colors.textMuted,
+                        modifier = Modifier.padding(vertical = Spacing.sm)
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ──────────────────────────────────────────────���──────────────────────────────
+
 private fun KmSplitsCard(kmSplits: List<KmSplit>) {
     // split.time is already the duration of just that km in milliseconds — no subtraction needed
     

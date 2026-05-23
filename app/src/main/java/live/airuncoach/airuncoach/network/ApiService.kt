@@ -171,6 +171,19 @@ interface ApiService {
     @DELETE("/api/group-runs/{id}/leave")
     suspend fun leaveGroupRun(@Path("id") groupRunId: String): Response<Unit>
 
+    /** Generate AI post-run debrief comparing current user vs group */
+    @POST("/api/group-runs/{id}/debrief")
+    suspend fun getGroupRunDebrief(@Path("id") groupRunId: String): GroupRunDebriefResponse
+
+    // ── Race Predictor ──────────────────────────────────────────────────────────
+    /** Riegel formula race time predictions based on any run */
+    @GET("/api/runs/{runId}/race-predictions")
+    suspend fun getRacePredictions(@Path("runId") runId: String): RacePredictionsResponse
+
+    // ── Training Load / Recovery ────────────────────────────────────────────────
+    @GET("/api/fitness/current/{userId}")
+    suspend fun getTrainingLoad(@Path("userId") userId: String): TrainingLoadResponse
+
     @GET("/api/events/grouped")
     suspend fun getEventsGrouped(): Map<String, List<Event>>
 

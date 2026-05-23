@@ -320,10 +320,13 @@ fun TrainingPlanDashboardScreen(
 
     LaunchedEffect(planId) { viewModel.loadPlanDetail(planId) }
 
-    // Navigate back only after the API call has completed and the list has been refreshed
+    // Navigate back once the API call has completed.
+    // NOTE: We deliberately do NOT call clearPlanActionSuccess() here — the ViewModel is
+    // scoped to this back-stack entry and gets destroyed on pop anyway. Clearing it early
+    // creates a race condition where MainScreen's cross-VM LaunchedEffect sees 'false'
+    // and skips calling loadUserPlans("active"), leaving the cancelled plan visible.
     LaunchedEffect(planActionSuccess) {
         if (planActionSuccess) {
-            viewModel.clearPlanActionSuccess()
             onNavigateBack()
         }
     }

@@ -1244,6 +1244,80 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Race Predictor ── GET /api/runs/:id/race-predictions ────────────────────
+  // Uses the Riegel formula (T2 = T1 �� (D2/D1)^1.06) to predict finish times
+  // for standard race distances based on any run's distance + duration.
+  app.get("/api/runs/:id/race-predictions", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const run = await storage.getRun(req.params.id);
+      if (!run) return res.status(404).json({ error: "Run not found" });
+
+      const distanceKm: number = Number(run.distance);
+      const durationSec: number = Number(run.duration);
+
+      if (!distanceKm || !durationSec || distanceKm < 1) {
+        return res.status(400).json({ error: "Run needs at least 1km of data for predictions" });
+      }
+
+      // Riegel formula: T2 = T1 × (D2 / D1) ^ 1.06
+      const riegel = (targetKm: number): number =>
+        durationSec * Math.pow(targetKm / distanceKm, 1.06);
+
+      const formatTime = (sec: number): string => {
+        const h = Math.floor(sec / 3600);
+        const m = Math.floor((sec % 3600) / 60);
+        const s = Math.round(sec % 60);
+        if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        return `${m}:${String(s).padStart(2, '0')}`;
+      };
+
+      const formatPace = (targetKm: number, timeSec: number): string => {
+        const secPerKm = timeSec / targetKm;
+        const m = Math.floor(secPerKm / 60);
+        const s = Math.round(secPerKm % 60);
+        return `${m}:${String(s).padStart(2, '0')}/km`;
+      };
+
+      const targets = [
+        { name: "5K",          distanceKm: 5 },
+        { name: "10K",         distanceKm: 10 },
+        { name: "Half Marathon", distanceKm: 21.0975 },
+        { name: "Marathon",    distanceKm: 42.195 },
+      ];
+
+      const predictions = targets.map(t => {
+        const predictedSec = riegel(t.distanceKm);
+        return {
+          race: t.name,
+          distanceKm: t.distanceKm,
+          predictedTimeSeconds: Math.round(predictedSec),
+          predictedTime: formatTime(predictedSec),
+          predictedPace: formatPace(t.distanceKm, predictedSec),
+          // Flag impossible predictions (e.g. predicting 5K from a 10K is fine, but
+          // predicting a marathon from a 100m sprint is not meaningful)
+          reliable: distanceKm >= t.distanceKm * 0.25,
+        };
+      });
+
+      // Include the source run context
+      const sourceRunPace = durationSec / distanceKm;
+      const m = Math.floor(sourceRunPace / 60);
+      const s = Math.round(sourceRunPace % 60);
+
+      res.json({
+        sourceRunId: run.id,
+        sourceDistanceKm: distanceKm,
+        sourceDurationSeconds: durationSec,
+        sourcePace: `${m}:${String(s).padStart(2, '0')}/km`,
+        predictions,
+        disclaimer: "Predictions use the Riegel formula and assume similar effort level. Accuracy improves with race-specific training."
+      });
+    } catch (error: any) {
+      console.error("Race predictor error:", error);
+      res.status(500).json({ error: "Failed to generate race predictions" });
+    }
+  });
+
   app.get("/api/runs/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       console.log(`[GET /api/runs/${req.params.id}] Fetching run for user: ${req.user?.userId}`);
@@ -12997,6 +13071,106 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     } catch (error: any) {
       console.error("[DELETE /api/group-runs/:id/leave]", error);
       res.status(500).json({ error: "Failed to leave group run" });
+    }
+  });
+
+  // POST /api/group-runs/:id/debrief — AI post-run narrative comparing user vs group
+  app.post("/api/group-runs/:id/debrief", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { id } = req.params;
+      const userId = req.user!.userId;
+
+      // Fetch the group run
+      const groupRun = await db.select().from(groupRuns).where(eq(groupRuns.id, id)).limit(1);
+      if (groupRun.length === 0) return res.status(404).json({ error: "Group run not found" });
+      const gr = groupRun[0];
+
+      // Fetch all participants with their linked runs
+      const participants = await db.select().from(groupRunParticipants)
+        .where(eq(groupRunParticipants.groupRunId, id));
+
+      if (participants.length < 2) {
+        return res.json({ debrief: "Not enough participants to generate a group comparison." });
+      }
+
+      // Fetch run data for each participant who has a linked run
+      const participantData = await Promise.all(participants.map(async p => {
+        const user = await db.select().from(users).where(eq(users.id, p.userId)).limit(1);
+        const name = user[0]?.username || "Runner";
+        if (!p.runId) return { name, userId: p.userId, role: p.role, hasRun: false };
+
+        const run = await storage.getRun(p.runId);
+        return {
+          name,
+          userId: p.userId,
+          role: p.role,
+          hasRun: true,
+          distanceKm: run ? Number(run.distance) : null,
+          durationSec: run ? Number(run.duration) : null,
+          avgPace: run?.avgPace || null,
+          avgHeartRate: run ? Number(run.avgHeartRate) : null,
+          avgCadence: run ? Number(run.avgCadence) : null,
+          totalElevationGain: run ? Number(run.totalElevationGain) : null,
+        };
+      }));
+
+      const finishers = participantData.filter(p => p.hasRun && p.durationSec);
+      const currentUser = participantData.find(p => p.userId === userId);
+
+      if (!currentUser?.hasRun) {
+        return res.json({ debrief: "Complete your run first to generate a personalised group debrief." });
+      }
+
+      // Sort finishers by pace (faster = lower sec/km)
+      const ranked = [...finishers].sort((a, b) => {
+        const paceA = (a.durationSec! / (a.distanceKm || 1));
+        const paceB = (b.durationSec! / (b.distanceKm || 1));
+        return paceA - paceB;
+      });
+
+      const userRank = ranked.findIndex(p => p.userId === userId) + 1;
+      const groupAvgPace = ranked.reduce((sum, p) => sum + (p.durationSec! / (p.distanceKm || 1)), 0) / ranked.length;
+      const userPace = currentUser.durationSec! / (currentUser.distanceKm || 1);
+      const paceVsGroupSec = groupAvgPace - userPace; // positive = user faster
+      const paceVsGroupPct = Math.abs(paceVsGroupSec / groupAvgPace * 100);
+
+      const prompt = `You are an elite running coach giving a personalised post-run debrief after a group run.
+
+GROUP RUN: "${gr.name || 'Group Run'}"
+Total participants who finished: ${finishers.length}
+Current user "${currentUser.name}" finished rank ${userRank} of ${finishers.length}
+
+CURRENT USER STATS:
+- Pace: ${currentUser.avgPace || 'unknown'}
+- HR: ${currentUser.avgHeartRate ? currentUser.avgHeartRate + ' bpm' : 'not recorded'}
+- Cadence: ${currentUser.avgCadence ? currentUser.avgCadence + ' spm' : 'not recorded'}
+- Elevation gain: ${currentUser.totalElevationGain ? currentUser.totalElevationGain + 'm' : 'not recorded'}
+
+GROUP COMPARISON:
+- User was ${paceVsGroupSec > 0 ? `${paceVsGroupPct.toFixed(1)}% faster` : `${paceVsGroupPct.toFixed(1)}% slower`} than group average pace
+- Top finisher: ${ranked[0]?.name} (${ranked[0]?.avgPace || 'unknown pace'})
+
+Write a 3-4 sentence personalised debrief in a warm, encouraging coaching voice. Include:
+1. A specific insight about their performance vs the group (pace, HR efficiency, or cadence)
+2. One genuine strength to build on
+3. One specific actionable focus for next time
+Keep it conversational, not clinical. No bullet points — just natural sentences.`;
+
+      const OpenAI = (await import("openai")).default;
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 300,
+        temperature: 0.7,
+      });
+
+      const debrief = completion.choices[0]?.message?.content?.trim() || "Great effort today!";
+      res.json({ debrief, rank: userRank, totalFinishers: finishers.length });
+    } catch (error: any) {
+      console.error("[POST /api/group-runs/:id/debrief]", error);
+      res.status(500).json({ error: "Failed to generate debrief" });
     }
   });
 
