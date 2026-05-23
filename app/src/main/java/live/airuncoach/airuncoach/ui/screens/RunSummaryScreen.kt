@@ -6531,7 +6531,6 @@ private fun DataSectionCard(
     }
 }
 
-@Composable
 // ─────────────────────────────────────────────────────────────────────────────
 // Race Predictor Card
 // ─────────────────────────────────────────────────────────────────────────────
@@ -6634,6 +6633,7 @@ private fun RacePredictionsCard(
 
 // ──────────────────────────────────────────────���──────────────────────────────
 
+@Composable
 private fun KmSplitsCard(kmSplits: List<KmSplit>) {
     // split.time is already the duration of just that km in milliseconds — no subtraction needed
     
