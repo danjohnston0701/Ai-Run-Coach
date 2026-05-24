@@ -77,7 +77,12 @@ class DataStreamer {
             "respirationRate"      => data.get("respirationRate"),
             // Training effect (firmware-computed, updates periodically)
             "aerobicTrainingEffect"    => data.get("aerobicTE"),
-            "anaerobicTrainingEffect"  => data.get("anaerobicTE")
+            "anaerobicTrainingEffect"  => data.get("anaerobicTE"),
+            // Cumulative elevation — watch computes these accurately via barometric/GPS
+            // fusion.  Sending every second ensures the backend fallback path always has
+            // valid ascent/descent totals even if the endSession summary call fails.
+            "cumulativeAscent"         => data.get("cumulativeAscent"),
+            "cumulativeDescent"        => data.get("cumulativeDescent")
         };
         
         // Add GPS if available

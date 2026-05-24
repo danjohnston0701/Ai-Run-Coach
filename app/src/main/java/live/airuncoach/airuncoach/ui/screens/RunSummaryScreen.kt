@@ -1492,13 +1492,22 @@ private fun GraphsTabContent(
         }
 
         // ═══════════════════════════════════════════════════════════════════════
+        // CORE CHARTS — Pace, Elevation, Cadence, HR (always shown when GPS data exists)
+        // ChartsSectionFlagship has internal guards for each chart so it is safe
+        // to call unconditionally — charts that lack data simply don't render.
+        // Previously this was nested inside the heartRateData guard, which caused
+        // the entire Graphs tab to be blank for phone-only runs with no HR sensor.
+        // ═══════════════════════════════════════════════════════════════════════
+
+        item { ChartsSectionFlagship(run = run) }
+
+        // ═══════════════════════════════════════════════════════════════════════
         // HEART RATE ANALYSIS SECTION
         // (Only shown when heart rate data exists from any source: Garmin/Apple/Samsung)
         // ═══════════════════════════════════════════════════════════════════════
-        
+
         if (run.heartRateData != null && run.heartRateData.isNotEmpty()) {
             stickyHeader {
-                // Just show title as header — no expandable toggle
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1512,11 +1521,8 @@ private fun GraphsTabContent(
                 }
             }
 
-            // Display heart rate content only when data exists
-            item { ChartsSectionFlagship(run = run) }
-
             // Show disclosure if heart rate data is from Garmin
-            if (run.hasGarminData && run.heartRateData != null) {
+            if (run.hasGarminData) {
                 item { GarminDataDisclosure(disclosureType = "chart") }
             }
 

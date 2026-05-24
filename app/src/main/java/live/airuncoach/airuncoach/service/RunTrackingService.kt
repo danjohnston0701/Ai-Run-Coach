@@ -130,6 +130,13 @@ class RunTrackingService : Service(), SensorEventListener {
     private var maxSpeed: Float = 0f
     private var currentPace: String = "0:00" // Real-time/instant pace based on recent GPS
     private var isTracking = false
+    // Watch speed smoothing — exponential moving average applied to raw Garmin GPS speed
+    // before converting to pace, to suppress brief GPS jitter spikes (which would otherwise
+    // appear as unrealistically fast pace e.g. "2:04" when the user is actually stationary).
+    private var smoothedWatchSpeedMs: Float = 0f
+    // How many watch GPS updates have arrived in this session.  GPS lock isn't stable in
+    // the first ~8 seconds so we show "–" until the signal settles.
+    private var watchGpsUpdateCount: Int = 0
     // Pause tracking — ensures paused time is excluded from all duration/pace calculations
     private var totalPausedMs: Long = 0          // Accumulated paused milliseconds
     private var pauseStartTime: Long = 0         // When the current pause started (0 = not paused)
@@ -207,6 +214,9 @@ class RunTrackingService : Service(), SensorEventListener {
     // Altitude smoothing - rolling window to filter GPS noise
     private val recentAltitudes = ArrayList<Double>() // Rolling window of recent altitudes
     private var smoothedAltitude: Double? = null // Smoothed altitude from rolling average
+    // Phone GPS elevation tracking — 60-second windowed means (see PHONE_ELEV_WINDOW constant)
+    private val phoneElevBuffer = ArrayList<Double>() // Accumulates raw altitudes for 60-second window
+    private var prevPhoneElevWindowMean: Double? = null // Mean from the previous completed 60-second window
     // Real-time grade: current slope % from smoothed altitude (NOT the whole-run average)
     // Used for isOnHill and hill coaching triggers — updated every GPS point
     private var currentSmoothedGrade: Double = 0.0
@@ -405,9 +415,29 @@ class RunTrackingService : Service(), SensorEventListener {
         private const val HILL_TOP_COOLDOWN_MS = 180_000 // 3 minutes
         private const val HR_COOLDOWN_MS = 180_000 // 3 minutes
 
-        // ELEVATION NOISE FILTER — GPS altitude is very noisy (±5-10m error)
-        // Only count elevation changes larger than this to avoid summing GPS jitter
-        private const val ELEVATION_NOISE_THRESHOLD = 1.5 // Ignore changes < 1.5m (they're GPS noise)
+        // ELEVATION NOISE FILTER — two thresholds because the GPS sources have very different
+        // update rates and accuracy profiles:
+        //
+        //   Phone GPS  — updates every ~1 s, altitude accuracy ±5–10 m.  Need a 1.5 m gate to
+        //                stop random zig-zag noise from inflating the gain total.
+        //
+        //   Garmin watch GPS — updates sent to phone every ~2 s (8 × 250 ms ticks), but the
+        //                watch barometric/GPS fusion altitude is far more accurate (±1 m).
+        //                At 5 min/km on a 15% hill, the altitude change per 2-second window is
+        //                only ~1.0 m — below the 1.5 m gate, so EVERYTHING gets discarded.
+        //                A 270 m ascent would show as ≈0–6 m in the database (exactly the
+        //                symptom: "6 m elevation on hilly terrain").  Use a 0.4 m gate instead.
+        private const val ELEVATION_NOISE_THRESHOLD        = 1.5 // Phone GPS  (±5-10 m, 1 Hz) — legacy, not used for gain
+        private const val ELEVATION_NOISE_THRESHOLD_GARMIN = 0.4 // Garmin GPS (±1 m, 0.5 Hz to phone)
+
+        // Phone GPS elevation gain — windowed mean approach.
+        // Problem: at 1 Hz and ±10 m GPS noise, per-sample altitude changes on a real 10% hill are
+        // only ~0.33 m/s — far below the 1.5 m per-sample threshold, so EVERY climb gets discarded.
+        // Solution: average 60 consecutive readings (1-minute window). The mean has noise ±1.3 m
+        // (10/√60). A 3% grade at 5 min/km yields +6 m per window — comfortably above the 1.5 m
+        // commit threshold.  False-positive rate on flat ground: ~5% per window ≈ 1 commit/hour.
+        private const val PHONE_ELEV_WINDOW            = 60  // Number of 1 Hz readings per window
+        private const val PHONE_ELEV_COMMIT_THRESHOLD  = 1.5 // Min net change (m) per 60-s window to count
         
         // ELEVATION-BASED TRIGGERS (Primary) — More reliable than grade % which can be noisy from GPS
         // Thresholds are deliberately conservative to avoid GPS drift false positives on flat terrain.
@@ -813,6 +843,8 @@ class RunTrackingService : Service(), SensorEventListener {
         lastCoachingTime = 0   // Reset cooldown for new run
         totalDistance = 0.0
         maxSpeed = 0f
+        smoothedWatchSpeedMs = 0f    // Reset EMA smoother for clean pace display on new run
+        watchGpsUpdateCount = 0      // Reset warm-up counter
         totalElevationGain = 0.0
         hasGpsElevation = false
         currentSmoothedGrade = 0.0
@@ -901,6 +933,8 @@ class RunTrackingService : Service(), SensorEventListener {
         rollingTerrainDetected = false
         recentAltitudes.clear()
         smoothedAltitude = null
+        phoneElevBuffer.clear()
+        prevPhoneElevWindowMean = null
         hrSum = 0
         hrCount = 0
         maxHr = 0
@@ -1837,15 +1871,33 @@ class RunTrackingService : Service(), SensorEventListener {
 
         // Immediately update pace from Garmin's own speed (more accurate & instant than
         // waiting for two consecutive GPS fixes and computing distance/time).
-        // speed = 0 (stationary) → pace "0:00"; speed > 0 → sec/km from watch firmware.
+        //
+        // Two-layer noise rejection:
+        //   1. EMA smoothing (α=0.3) — dampens brief GPS jitter spikes that occur when
+        //      near-stationary or during GPS multipath (e.g., a 1-second 8 m/s blip when
+        //      standing still no longer shows as "2:04 min/km").
+        //   2. 8-update warm-up gate — GPS lock is unstable in the first ~8 seconds so
+        //      we display "–" until the satellite fix has stabilised.
         if (speedMs != null) {
-            currentPace = if (speedMs > 0.2f) {
-                val paceSecPerKm = 1000.0 / speedMs.toDouble()
-                val minutes = (paceSecPerKm / 60).toInt()
-                val seconds = (paceSecPerKm % 60).toInt()
-                String.format("%d:%02d", minutes, seconds)
-            } else {
-                "0:00"  // stationary — show zero pace, not stale phone-GPS pace
+            watchGpsUpdateCount++
+            // EMA: weight 70% previous / 30% new reading.  A single bad spike takes
+            // several seconds to wash out, which is imperceptible during a real run.
+            smoothedWatchSpeedMs = 0.7f * smoothedWatchSpeedMs + 0.3f * speedMs
+
+            currentPace = when {
+                watchGpsUpdateCount < 8 -> {
+                    // GPS warming up — don't display erratic pace yet
+                    "–"
+                }
+                smoothedWatchSpeedMs > 0.5f -> {
+                    // 0.5 m/s ≈ 1.8 km/h — below this we treat the user as stationary.
+                    // (Old threshold was 0.2 m/s which let noisy near-zero readings through.)
+                    val paceSecPerKm = 1000.0 / smoothedWatchSpeedMs.toDouble()
+                    val minutes = (paceSecPerKm / 60).toInt()
+                    val seconds = (paceSecPerKm % 60).toInt()
+                    String.format("%d:%02d", minutes, seconds)
+                }
+                else -> "0:00"  // stationary — show zero pace, not stale phone-GPS pace
             }
         }
 
@@ -2123,11 +2175,39 @@ class RunTrackingService : Service(), SensorEventListener {
                 }
                 if (newPoint.altitude != null && prevPoint.altitude != null) {
                     hasGpsElevation = true   // GPS altitude is available for this run
-                    val elevChange = newPoint.altitude - prevPoint.altitude
-                    // Only count elevation changes > threshold to filter out GPS noise
-                    // GPS altitude has ±5-10m error, so ignore small fluctuations
-                    if (abs(elevChange) > ELEVATION_NOISE_THRESHOLD) {
-                        if (elevChange > 0) totalElevationGain += elevChange else totalElevationLoss += abs(elevChange)
+
+                    if (location.provider == "garmin") {
+                        // Garmin watch GPS: accurate altitude (±1 m), sent every ~2 s.
+                        // Use per-sample threshold — real hill changes are small but detectable.
+                        val elevChange = newPoint.altitude - prevPoint.altitude
+                        if (abs(elevChange) > ELEVATION_NOISE_THRESHOLD_GARMIN) {
+                            if (elevChange > 0) totalElevationGain += elevChange
+                            else totalElevationLoss += abs(elevChange)
+                        }
+                    } else {
+                        // Phone GPS: altitude accuracy ±5–10 m at 1 Hz.  Per-sample threshold
+                        // (1.5 m) discards virtually all real hill changes (a 10% hill at 5 min/km
+                        // only produces 0.33 m/s — never crosses the threshold).
+                        //
+                        // Instead: collect 60 consecutive readings (one per second), take their
+                        // mean, and compare to the previous 60-second mean.  Each mean has noise
+                        // ±1.3 m (10/√60), so a sustained 3% grade yields ~6 m per window —
+                        // easily detectable with a 1.5 m commit threshold.
+                        phoneElevBuffer.add(newPoint.altitude)
+                        if (phoneElevBuffer.size >= PHONE_ELEV_WINDOW) {
+                            val windowMean = phoneElevBuffer.average()
+                            val prevMean = prevPhoneElevWindowMean
+                            if (prevMean != null) {
+                                val change = windowMean - prevMean
+                                if (change > PHONE_ELEV_COMMIT_THRESHOLD) {
+                                    totalElevationGain += change
+                                } else if (change < -PHONE_ELEV_COMMIT_THRESHOLD) {
+                                    totalElevationLoss += abs(change)
+                                }
+                            }
+                            prevPhoneElevWindowMean = windowMean
+                            phoneElevBuffer.clear() // Start next 60-second window fresh
+                        }
                     }
                     
                     // Smooth altitude for elevation coaching (reduces GPS noise)
@@ -2610,6 +2690,10 @@ class RunTrackingService : Service(), SensorEventListener {
         stopTimer()  // Stop timer when paused
         fusedLocationClient.removeLocationUpdates(locationCallback)
         sensorManager.unregisterListener(this)
+        // Discard the partial phone elevation window — comparing across a pause gap would give
+        // a false elevation change equal to the altitude difference at the pause/resume points.
+        phoneElevBuffer.clear()
+        prevPhoneElevWindowMean = null
         updateNotification()
         Log.d("RunTrackingService", "Paused at ${pauseStartTime}ms, totalPausedMs so far: ${totalPausedMs}")
     }

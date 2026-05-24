@@ -217,7 +217,7 @@ class RunView extends Ui.View {
         _prevGpsLng = null;
         _pace = 0.0;
         _dispPace = 0.0;
-        _paceHistory = [];
+        _paceHistory = [];  // Clear history so stale readings do not bias the new run
 
         Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
         _gpsListening = true;
@@ -449,8 +449,10 @@ class RunView extends Ui.View {
                 if (actInfo.elapsedDistance != null) {
                     _distance = actInfo.elapsedDistance.toFloat();
                 }
-                // Pace (sec/km) — derived from Garmin's smoothed speed
-                if (actInfo.currentSpeed != null && actInfo.currentSpeed > 0.1) {
+                // Pace (sec/km) — derived from Garmin's Kalman-filtered speed.
+                // Use a 0.3 m/s minimum (approx 1 km/h) to avoid GPS noise when
+                // near-stationary generating false high-speed readings.
+                if (actInfo.currentSpeed != null && actInfo.currentSpeed > 0.3) {
                     _pace = 1000.0 / actInfo.currentSpeed.toFloat();
                 } else if (!_isPaused) {
                     _pace = 0.0;
@@ -503,9 +505,20 @@ class RunView extends Ui.View {
             }
         }
 
-        // Smoothed display values (light EMA for visual stability, phone-controlled
-        // uses phone data which is already smoothed on the phone side)
-        _dispPace     = _pace > 0 ? _pace : _dispPace * 0.90;
+        // ── Smoothed display values ────────────────────────────────────────────
+        // Pace uses the 5-second rolling history buffer to suppress GPS jitter
+        // spikes.  Previously _dispPace was set directly from raw _pace which
+        // allowed brief noise readings (e.g. actInfo.currentSpeed = 8 m/s when
+        // near-stationary) to show as absurdly fast pace like "2.04 min/km".
+        if (_pace > 0.0) {
+            _paceHistory.add(_pace);
+            if (_paceHistory.size() > _paceHistoryMax) {
+                _paceHistory = _paceHistory.slice(1, null);
+            }
+            _dispPace = _smoothedPace();
+        } else {
+            _dispPace = _dispPace * 0.80;
+        }
         _dispDistance = _dispDistance + (_distance - _dispDistance) * 0.20;
         _dispHR       = (_dispHR + (_heartRate - _dispHR) * 0.30).toNumber();
         _dispCadence  = (_dispCadence + (_cadence  - _dispCadence) * 0.30).toNumber();
@@ -564,7 +577,11 @@ class RunView extends Ui.View {
                         "respirationRate"       => _respRate,
                         // Training effect
                         "aerobicTE"             => _ate,
-                        "anaerobicTE"           => _anate
+                        "anaerobicTE"           => _anate,
+                        // Cumulative elevation (sent every second so backend fallback
+                        // path always has ascent/descent even if endSession is missed)
+                        "cumulativeAscent"      => _totalAscent,
+                        "cumulativeDescent"     => _totalDescent
                     });
                 }
             }
