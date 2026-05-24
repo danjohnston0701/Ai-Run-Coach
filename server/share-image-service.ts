@@ -397,23 +397,29 @@ function buildStatsGridSvg(
   headerSvg += `<line x1="${cx - 80}" y1="${headerY + 4}" x2="${cx + 80}" y2="${headerY + 4}" stroke="url(#fadeLine)" stroke-width="1.5"/>`;
   headerY += 18;
 
-  // ── Ring sizing — fill the width, nearly touching ───────────────────
+  // ── Ring sizing — fill the width, rows must never overlap ───────────
   // Layout constants
   const PAD_OUTSIDE = 22;   // from image edge to ring centre
-  const GAP_H = 16;         // horizontal gap between the two rings (edge-to-edge)
-  const GAP_V = 16;         // vertical gap between the two rows (edge-to-edge)
+  const GAP_H = 16;         // horizontal gap between ring path edges (columns)
   const CAPTION_H = 130;    // height reserved for caption text below rings
   const CAPTION_GAP = 28;   // space between bottom ring edge and caption separator
+  // Stroke = r*0.15, so the visual gap must be at least strokeW + desired padding.
+  // Solve: r*(4 + 0.15) + VISUAL_GAP_V + CAPTION_GAP + CAPTION_H ≤ availableH
+  const VISUAL_GAP_V = 28;  // minimum gap between the outer edges of ring strokes
 
   const ringAreaTop = headerY;
   const availableH = contentEndY - ringAreaTop;
 
   // Solve for r given two constraints:
   //   Width:  2*PAD_OUTSIDE + 4*r + GAP_H  ≤ w
-  //   Height: 4*r + GAP_V + CAPTION_GAP + CAPTION_H ≤ availableH
+  //   Height: r*4.15 + VISUAL_GAP_V + CAPTION_GAP + CAPTION_H ≤ availableH
   const rFromW = Math.floor((w - 2 * PAD_OUTSIDE - GAP_H) / 4);
-  const rFromH = Math.floor((availableH - GAP_V - CAPTION_GAP - CAPTION_H) / 4);
+  const rFromH = Math.floor((availableH - VISUAL_GAP_V - CAPTION_GAP - CAPTION_H) / 4.15);
   const ringR  = Math.max(40, Math.min(rFromW, rFromH));
+
+  // GAP_V: edge-to-edge gap between ring circle paths — must clear both strokes
+  const strokeW = Math.round(ringR * 0.15);
+  const GAP_V = strokeW + VISUAL_GAP_V;
 
   // Column centres (nearly touching the edges)
   const col1X = PAD_OUTSIDE + ringR;
