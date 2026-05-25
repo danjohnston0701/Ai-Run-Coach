@@ -330,6 +330,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/register-interest — public waitlist signup
+  app.post("/api/register-interest", async (req: Request, res: Response) => {
+    try {
+      const { name, email, country } = req.body;
+      if (!name?.trim() || !email?.trim() || !country?.trim()) {
+        return res.status(400).json({ error: "Name, email, and country are required" });
+      }
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({ error: "Invalid email address" });
+      }
+      const registration = await storage.createInterestRegistration({
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        country: country.trim(),
+      });
+      // Fire-and-forget confirmation emails
+      import("./email-service").then(({ sendInterestRegistrationEmail }) => {
+        sendInterestRegistrationEmail({ name: name.trim(), email: email.trim(), country: country.trim() })
+          .catch((err: Error) => console.error("Interest registration email failed:", err));
+      });
+      res.json({ ok: true, id: registration.id });
+    } catch (error: any) {
+      console.error("Interest registration error:", error);
+      res.status(500).json({ error: "Failed to save registration" });
+    }
+  });
+
   // POST /api/auth/forgot-password
   app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
     try {

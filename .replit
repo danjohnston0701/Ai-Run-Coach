@@ -13,3 +13,5 @@ externalPort = 80
 
 [agent]
 integrations = ["resend:1.0.0"]
+
+[workflows]

@@ -1889,3 +1889,16 @@ export const groupRunParticipants = pgTable("group_run_participants", {
 
 export type GroupRunParticipant = typeof groupRunParticipants.$inferSelect;
 export type InsertGroupRunParticipant = typeof groupRunParticipants.$inferInsert;
+
+// Interest registrations — pre-launch waitlist
+export const interestRegistrations = pgTable("interest_registrations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  country: text("country").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertInterestRegistrationSchema = createInsertSchema(interestRegistrations).omit({ id: true, createdAt: true });
+export type InsertInterestRegistration = z.infer<typeof insertInterestRegistrationSchema>;
+export type InterestRegistration = typeof interestRegistrations.$inferSelect;

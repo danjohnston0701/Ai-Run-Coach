@@ -4,14 +4,14 @@ import {
   groupRuns, groupRunParticipants, events, routeRatings, runAnalyses,
   connectedDevices, deviceData, garminWellnessMetrics, activityMergeLog, garminActivities,
   oauthStateStore, webhookFailureQueue, garminWebhookEvents, passwordResetTokens,
-  monthlyUsage,
+  monthlyUsage, interestRegistrations,
   type User, type InsertUser, type Run, type InsertRun,
   type Route, type InsertRoute, type Goal, type InsertGoal,
   type Friend, type FriendRequest, type Notification, type NotificationPreference,
   type LiveRunSession, type GroupRun, type GroupRunParticipant, type Event,
   type RouteRating, type RunAnalysis, type ConnectedDevice, type DeviceData,
   type GarminWellnessMetric, type OauthStateStore, type GarminWebhookEvent, type PasswordResetToken,
-  type MonthlyUsage
+  type MonthlyUsage, type InsertInterestRegistration, type InterestRegistration
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, or, and, desc, asc, ilike, sql, inArray, gte, lte, isNotNull, count, sum, avg, max, min } from "drizzle-orm";
@@ -158,6 +158,9 @@ export interface IStorage {
   // Monthly Usage Tracking
   getMonthlyUsage(userId: string, yearMonth: string): Promise<MonthlyUsage>;
   incrementUsage(userId: string, yearMonth: string, updates: Partial<Pick<MonthlyUsage, 'aiCoachingKm' | 'trainingPlansGenerated' | 'routesGenerated' | 'postRunAnalyses'>>): Promise<MonthlyUsage>;
+
+  // Interest Registrations
+  createInterestRegistration(data: InsertInterestRegistration): Promise<InterestRegistration>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1175,6 +1178,10 @@ export class DatabaseStorage implements IStorage {
       .returning();
 
     return updated;
+  }
+  async createInterestRegistration(data: InsertInterestRegistration): Promise<InterestRegistration> {
+    const [row] = await db.insert(interestRegistrations).values(data).returning();
+    return row;
   }
 }
 

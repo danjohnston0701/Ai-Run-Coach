@@ -112,6 +112,60 @@ export async function sendSupportEmail(opts: {
   });
 }
 
+export async function sendInterestRegistrationEmail(opts: {
+  name: string;
+  email: string;
+  country: string;
+}): Promise<void> {
+  const { client, fromEmail } = await getResendClient();
+  const notifyEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || fromEmail;
+
+  // Notify the team
+  await client.emails.send({
+    from: `AI Run Coach <${fromEmail}>`,
+    to: notifyEmail,
+    replyTo: opts.email,
+    subject: `[Interest Registration] ${opts.name} from ${opts.country}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; background: #0A0A1A; color: #ffffff; border-radius: 12px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #00D4FF 0%, #0099CC 100%); padding: 32px; text-align: center;">
+          <h1 style="margin: 0; font-size: 22px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #0A0A1A;">New Interest Registration</h1>
+        </div>
+        <div style="padding: 40px 32px;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr><td style="padding: 8px 0; color: #94a3b8; font-size: 13px; width: 80px;">Name</td><td style="padding: 8px 0; color: #ffffff;">${opts.name}</td></tr>
+            <tr><td style="padding: 8px 0; color: #94a3b8; font-size: 13px;">Email</td><td style="padding: 8px 0; color: #ffffff;">${opts.email}</td></tr>
+            <tr><td style="padding: 8px 0; color: #94a3b8; font-size: 13px;">Country</td><td style="padding: 8px 0; color: #ffffff;">${opts.country}</td></tr>
+          </table>
+        </div>
+      </div>
+    `,
+    text: `New interest registration:\nName: ${opts.name}\nEmail: ${opts.email}\nCountry: ${opts.country}`,
+  });
+
+  // Confirmation to the user
+  await client.emails.send({
+    from: `AI Run Coach <${fromEmail}>`,
+    to: opts.email,
+    subject: "You're on the list — AI Run Coach",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; background: #0A0A1A; color: #ffffff; border-radius: 12px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #00D4FF 0%, #0099CC 100%); padding: 32px; text-align: center;">
+          <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #0A0A1A;">AI Run Coach</h1>
+        </div>
+        <div style="padding: 40px 32px;">
+          <h2 style="margin: 0 0 16px; font-size: 20px; color: #ffffff;">Hi ${opts.name}, you're on the list! 🏃</h2>
+          <p style="margin: 0 0 16px; color: #94a3b8; line-height: 1.6;">Thanks for registering your interest in AI Run Coach. We'll keep you updated on our development progress and let you know as soon as the app is ready to download.</p>
+          <p style="margin: 0 0 24px; color: #94a3b8; line-height: 1.6;">In the meantime, feel free to explore our website to learn more about the features we're building for you.</p>
+          <a href="https://airuncoach.live" style="display: inline-block; background: #00D4FF; color: #0A0A1A; font-weight: 700; font-size: 14px; padding: 14px 32px; border-radius: 999px; text-decoration: none; letter-spacing: 1px; text-transform: uppercase;">Visit AI Run Coach</a>
+          <p style="margin: 32px 0 0; color: #64748b; font-size: 13px;">The AI Run Coach Team</p>
+        </div>
+      </div>
+    `,
+    text: `Hi ${opts.name},\n\nThanks for registering your interest in AI Run Coach! We'll keep you updated on development progress and let you know when the app is available to download.\n\nThe AI Run Coach Team`,
+  });
+}
+
 export async function sendPasswordResetEmail(to: string, resetToken: string): Promise<void> {
   const { client, fromEmail } = await getResendClient();
   const resetUrl = `https://airuncoach.live/reset-password?token=${resetToken}`;
