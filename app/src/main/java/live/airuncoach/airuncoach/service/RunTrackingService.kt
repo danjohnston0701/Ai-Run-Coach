@@ -726,20 +726,33 @@ class RunTrackingService : Service(), SensorEventListener {
 
     // ── Coaching plan session tiers ──────────────────────────────────────────────────────────
     //
-    // Tier 1 — "Managed sessions" (intervals, hill_repeats):
-    //   The dynamic coaching plan is the SOLE source of all coaching cues — it fires rep-start,
-    //   rep-end, speed-up, slow-down, and recovery instructions based on distance/time triggers.
-    //   ALL free-run prompts (km splits, struggle coaching, pace coaching) are suppressed because
-    //   they are irrelevant and would conflict with the structured rep sequence.
-    //
-    // Tier 2 — "Augmented sessions" (tempo, long_run, easy, recovery, threshold, race_pace):
+    // Tier 2 — "Augmented sessions" (ALLOWLIST — explicit continuous-effort types):
     //   The dynamic coaching plan handles session structure and phase transitions.
     //   Free-run prompts (km splits, struggle coaching, elevation, cadence) remain ACTIVE because
     //   these sessions are about sustained consistent effort where per-km feedback is valuable.
     //   Pace coaching (race-goal deviation) stays suppressed — the session plan manages effort.
     //
+    // Tier 1 — "Managed sessions" (EVERYTHING ELSE — default for unknown/new session types):
+    //   The dynamic coaching plan is the SOLE source of all coaching cues — it fires rep-start,
+    //   rep-end, speed-up, slow-down, and recovery instructions based on distance/time triggers.
+    //   ALL free-run prompts (km splits, struggle coaching, pace coaching) are suppressed because
+    //   they are irrelevant and would conflict with the structured rep sequence.
+    //   Any new session type not in the Tier 2 allowlist is treated as Tier 1 by default, which
+    //   is the safer choice — suppressing is always recoverable, accidental conflicts are not.
+    //
+    companion object {
+        /** Session types where sustained consistent effort makes free-run prompts (km splits,
+         *  struggle coaching) useful and relevant. Add new continuous-effort types here. */
+        private val TIER_2_SESSION_TYPES = setOf(
+            "tempo", "long_run", "easy", "recovery", "threshold", "race_pace"
+        )
+    }
+
+    /** True when this is a plan session that is NOT a continuous-effort type.
+     *  All free-run prompts (km splits, struggle) are suppressed for these sessions. */
     private val isIntervalTypeSession: Boolean
-        get() = planWorkoutType == "intervals" || planWorkoutType == "hill_repeats"
+        get() = isCoachingPlanActive && planWorkoutType != null &&
+                planWorkoutType !in TIER_2_SESSION_TYPES
 
     // Phase engine state — tracks position within the AI-designed session structure
     private var currentPhaseIndex: Int = 0      // Index into sessionInstructions.phases
