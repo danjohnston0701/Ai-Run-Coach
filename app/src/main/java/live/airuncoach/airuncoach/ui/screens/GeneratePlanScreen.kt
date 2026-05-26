@@ -727,6 +727,9 @@ fun GeneratePlanScreen(
                                                 style = AppTextStyles.small,
                                                 color = if (injury.status == InjuryStatus.RECOVERING) Colors.warning else Colors.textMuted
                                             )
+                                            injury.injuryDate?.let { date ->
+                                                Text("Injured: $date", style = AppTextStyles.small, color = Colors.textMuted)
+                                            }
                                             injury.notes?.let { notes ->
                                                 Text(notes, style = AppTextStyles.small, color = Colors.textMuted)
                                             }
@@ -929,11 +932,11 @@ fun GeneratePlanScreen(
                 showAddInjuryDialog = false
                 editingInjury = null
             },
-            onConfirm = { bodyPart, status, notes ->
+            onConfirm = { bodyPart, status, notes, injuryDate ->
                 if (editingInjury != null) {
-                    viewModel.updateInjury(editingInjury!!.id!!, bodyPart, status, notes)
+                    viewModel.updateInjury(editingInjury!!.id!!, bodyPart, status, notes, injuryDate)
                 } else {
-                    viewModel.addInjury(bodyPart, status, notes)
+                    viewModel.addInjury(bodyPart, status, notes, injuryDate)
                 }
                 showAddInjuryDialog = false
                 editingInjury = null
@@ -973,12 +976,13 @@ fun GeneratePlanScreen(
 fun AddInjuryDialog(
     injury: Injury?,
     onDismiss: () -> Unit,
-    onConfirm: (String, InjuryStatus, String?) -> Unit
+    onConfirm: (String, InjuryStatus, String?, String?) -> Unit  // bodyPart, status, notes, injuryDate (ISO)
 ) {
     var selectedBodyPart by remember { mutableStateOf(injury?.bodyPart ?: "") }
     var selectedStatus by remember { mutableStateOf(injury?.status ?: InjuryStatus.RECOVERING) }
     var notes by remember { mutableStateOf(injury?.notes ?: "") }
-    
+    var injuryDateText by remember { mutableStateOf(injury?.injuryDate ?: "") }
+
     val bodyParts = listOf("Knee", "Ankle", "Shin", "Hip", "Back", "Neck / Cervical Spine", "Foot", "Calf", "Hamstring", "Quad", "Groin", "Shoulder", "Wrist", "IT Band", "Achilles", "Plantar Fascia", "Other")
 
     AlertDialog(
@@ -1044,12 +1048,24 @@ fun AddInjuryDialog(
                     }
                 }
 
+                // Date of injury — helps AI calculate exact weeks since injury for rehab staging
+                Text("Date of Injury", style = AppTextStyles.small, color = Colors.textMuted)
+                OutlinedTextField(
+                    value = injuryDateText,
+                    onValueChange = { injuryDateText = it },
+                    placeholder = { Text("YYYY-MM-DD  (e.g. 2026-05-08)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    supportingText = { Text("Helps the AI calculate your exact recovery stage", color = Colors.textMuted, style = AppTextStyles.small) }
+                )
+
                 // Notes
-                Text("Details — tell the AI coach exactly what it is", style = AppTextStyles.small, color = Colors.textMuted)
+                Text("Details — describe the injury to the AI coach", style = AppTextStyles.small, color = Colors.textMuted)
                 OutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
-                    placeholder = { Text("e.g., Fractured C5 vertebra, 3 months post-injury. No jarring impact, no high-intensity effort yet.") },
+                    placeholder = { Text("e.g., Torn meniscus and sprained MCL. Pain 3/10 walking. Cleared for light activity by physio.") },
                     modifier = Modifier.fillMaxWidth(),
                     maxLines = 4
                 )
@@ -1057,7 +1073,11 @@ fun AddInjuryDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(selectedBodyPart, selectedStatus, notes.ifBlank { null }) },
+                onClick = {
+                    // Validate and normalise the date — only pass if it looks like YYYY-MM-DD
+                    val cleanDate = injuryDateText.trim().takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) }
+                    onConfirm(selectedBodyPart, selectedStatus, notes.ifBlank { null }, cleanDate)
+                },
                 enabled = selectedBodyPart.isNotBlank()
             ) {
                 Text(if (injury == null) "Add" else "Save")

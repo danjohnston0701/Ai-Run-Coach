@@ -11447,11 +11447,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       const injuryContext = validInjuries.length > 0 ? `
-INJURIES & LIMITATIONS (user updated mid-plan):
-${validInjuries.map((i: any) => `- ${i.bodyPart}: ${i.status}${i.notes ? ` — ${i.notes}` : ''}`).join("\n")}
-- For "active" injuries: AVOID all exercises that stress the affected area.
-- For "recovering" injuries: REDUCE intensity and impact. No speed work, hill repeats, or long runs.
-- For "healed" injuries: Gradually reintroduce normal training.
+⚕️ HEALTH CONDITIONS — YOU ARE NOW ACTING AS BOTH RUNNING COACH AND SPORTS PHYSIOTHERAPIST
+
+Active/Updated Injuries (athlete updated mid-plan — regenerate remaining weeks to reflect current status):
+${validInjuries.map((i: any) => {
+  const statusLabel = i.status === 'recovering' || i.status === 'RECOVERING' ? 'Recovering' :
+                     i.status === 'healed'     || i.status === 'HEALED'     ? 'Healed (recent)' :
+                     i.status === 'chronic'    || i.status === 'CHRONIC'    ? 'Chronic/ongoing' :
+                     i.status === 'active'     || i.status === 'ACTIVE'     ? 'Active (acute)' : i.status;
+  let weeksSince = '';
+  if (i.injuryDate) {
+    const msElapsed = Date.now() - new Date(i.injuryDate).getTime();
+    const weeks = Math.floor(msElapsed / (7 * 24 * 60 * 60 * 1000));
+    const days  = Math.floor((msElapsed % (7 * 24 * 60 * 60 * 1000)) / (24 * 60 * 60 * 1000));
+    weeksSince = weeks > 0
+      ? ` — injured ${weeks} week${weeks > 1 ? 's' : ''} ago (${new Date(i.injuryDate).toDateString()})`
+      : ` — injured ${days} day${days !== 1 ? 's' : ''} ago`;
+  }
+  return `- ${i.bodyPart}: ${statusLabel}${weeksSince}${i.notes ? `\n  Notes: "${i.notes}"` : ''}`;
+}).join('\n')}
+
+Apply your full sports physiotherapy and coaching knowledge to redesign the remaining weeks appropriately:
+1. TISSUE HEALING TIMELINE — Where is this athlete in the biological recovery process for this injury? What is physiologically appropriate at this stage?
+2. LOADING PROTOCOL — What return-to-running or modified loading does sports physiotherapy evidence prescribe for this injury right now?
+3. CONTRAINDICATED MOVEMENTS — What session types, intensities, or movement patterns are contraindicated?
+4. PROGRESSION CRITERIA — What must the athlete demonstrate before advancing each week?
+5. Every session's "instructions" field MUST include a symptom-monitoring note (acceptable pain level, stop-now criteria, expected next-day response).
+A conservative plan that protects the injury is always better than one that risks re-injury or setback.
 ` : '';
 
       const fitness = await getCurrentFitness(userId);

@@ -1232,6 +1232,9 @@ export const trainingPlans = pgTable("training_plans", {
   // nextBlockAt: when the next block should be generated (start of the last week of current block).
   generatedThroughWeek: integer("generated_through_week"),  // null = legacy plans (all weeks exist)
   nextBlockAt: timestamp("next_block_at"),                  // null = next block not yet scheduled
+  // Injury/safety — populated by AI when active injuries are present at plan creation time.
+  // Stored as a JSON string: { medicalClearanceRequired, prerequisiteChecks, stopCriteria, progressionGates, disclaimer }
+  safetyDisclaimer: text("safety_disclaimer"),
   createdAt: timestamp("created_at").defaultNow(),
   completedAt: timestamp("completed_at"),
 });

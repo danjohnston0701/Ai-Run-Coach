@@ -117,6 +117,28 @@ function mapAccentToLanguageCode(accent: string | undefined): string {
 }
 
 /**
+ * Sanitize text before sending to Polly TTS.
+ * Polly neural voices insert noticeable pauses on commas which sounds unnatural
+ * for fast-paced live coaching. We remove commas entirely — the AI is prompted
+ * to write comma-free sentences but this acts as a definitive safety net.
+ *
+ * Also strips other characters that cause audio artefacts:
+ *  - Semicolons → period + space (they pause heavily)
+ *  - Em-dashes used mid-sentence → space (natural rhythm break)
+ *  - Ellipsis → period (long trailing pause)
+ *  - Multiple spaces → single space (cleanup after replacements)
+ */
+export function sanitizeForTTS(text: string): string {
+  return text
+    .replace(/,/g, '')                    // Remove all commas
+    .replace(/;/g, '.')                   // Semicolon → period
+    .replace(/\s*—\s*/g, ' ')            // Em-dash → space
+    .replace(/\.\.\./g, '.')             // Ellipsis → single period
+    .replace(/  +/g, ' ')               // Collapse multiple spaces
+    .trim();
+}
+
+/**
  * Generate speech audio using AWS Polly Neural TTS
  * 
  * @param text - Text to synthesize
@@ -135,11 +157,9 @@ export async function synthesizeSpeech(
     throw new Error("Text content is required for TTS synthesis");
   }
 
-  // Enhance text with tone instructions if provided
-  let enhancedText = text;
-  if (tone) {
-    enhancedText = text; // Polly doesn't use SSML instructions like OpenAI
-  }
+  // Sanitize text before synthesis — removes commas and other characters
+  // that cause unnatural pauses in Polly neural voices
+  let enhancedText = sanitizeForTTS(text);
 
   const voiceId = mapAccentToPollyVoice(accent, gender);
   const languageCode = mapAccentToLanguageCode(accent);

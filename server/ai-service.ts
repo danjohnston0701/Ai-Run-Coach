@@ -109,6 +109,10 @@ const formatPaceForTTS = (pace: string | undefined): string => {
 // Pace format instruction for AI system messages
 const PACE_FORMAT_RULE = `PACE FORMAT: When speaking about pace, ALWAYS say it as "X minutes and Y seconds per kilometer" (e.g. "4 minutes and 32 seconds per kilometer"), NEVER as shorthand like "four thirty-two" or "4:32". This is critical because the runner is listening via audio while running and needs to clearly understand pace values.`;
 
+// TTS punctuation rule — applies to ALL live coaching responses sent to text-to-speech
+// Commas cause unnatural pauses in AWS Polly neural voices. Use short sentences instead.
+const TTS_COMMA_RULE = `TTS PUNCTUATION: Do NOT use commas anywhere in your response. Write in short complete sentences. Where you would normally use a comma to join clauses use a period and start a new sentence. Example — instead of "Great pace, keep pushing" write "Great pace. Keep pushing." Instead of "4 minutes, 30 seconds" write "4 minutes 30 seconds". This rule is absolute — the output goes directly to a text-to-speech engine and every comma causes an unnatural pause.`;
+
 // Helper to format seconds-per-km pace value to "X minutes and Y seconds" string
 const formatSecondsAsPace = (secondsPerKm: number): string => {
   if (!secondsPerKm || secondsPerKm <= 0 || secondsPerKm > 3600) return 'unknown';
@@ -291,7 +295,7 @@ Be encouraging, specific to the conditions, and give one actionable tip. Speak n
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep responses brief, encouraging, and actionable. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock((params as any).runnerProfile)}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep responses brief, encouraging, and actionable. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''} ${TTS_COMMA_RULE}${runnerProfileBlock((params as any).runnerProfile)}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 120,
@@ -594,7 +598,7 @@ Give a very brief (1-2 sentences) pace check-in. MUST cite their pace (${spokenC
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). When run history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(hasRoute || (typeof currentGrade === 'number' && Math.abs(currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}CRITICAL: NEVER praise a slow split when the runner is behind their target pace. Be honest about pace — if they need to pick it up, tell them clearly. ${toneDirective(coachTone)}${accentRule ? ' ' + accentRule : ''}${runnerProfileBlock(params.runnerProfile)}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). When run history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(hasRoute || (typeof currentGrade === 'number' && Math.abs(currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}CRITICAL: NEVER praise a slow split when the runner is behind their target pace. Be honest about pace — if they need to pick it up, tell them clearly. ${toneDirective(coachTone)}${accentRule ? ' ' + accentRule : ''} ${TTS_COMMA_RULE}${runnerProfileBlock(params.runnerProfile)}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 110,
@@ -1124,7 +1128,7 @@ CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", "Hello
 
 Runners want to hear their real numbers — weave in their actual stats (pace, distance, time, cadence, heart rate) naturally in your coaching message. This should feel like a coach who is watching their real performance, not vague encouragement. ${targetPace ? `Be clear about whether they are on track for target pace ${spokenTargetPace} — ${paceVerdict}. Do not praise a slow pace when they are behind target.` : ""}${targetTime && targetTime > 0 ? ` Address whether they are on track for their ${formatDurationForTTS(targetTime)} target time.` : ""}${cadenceCoachingDirective ? ' Incorporate the cadence coaching directive above.' : ""}${elevationInstruction ? ' Acknowledge the elevation context.' : ""}${hasRoute === true && !elevationInstruction ? ' Consider terrain if relevant.' : ""}`;
 
-    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful — always cite the runner's actual numbers (pace, distance, time etc). NEVER start with greetings like "Hey there", "Hey!", "Hi!" — jump straight into coaching. NEVER praise a poor split or slow pace when the runner is behind target — be honest and direct. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`;
+    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful — always cite the runner's actual numbers (pace, distance, time etc). NEVER start with greetings like "Hey there", "Hey!", "Hi!" — jump straight into coaching. NEVER praise a poor split or slow pace when the runner is behind target — be honest and direct. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''} ${TTS_COMMA_RULE}${runnerProfileBlock(params.runnerProfile)}`;
   }
 
   const completion = await openai.chat.completions.create({
@@ -1379,7 +1383,7 @@ Give a brief (1-2 sentences) supportive message tailored to this runner's fitnes
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Be supportive during tough moments — always reference actual data. Keep it brief. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Be supportive during tough moments — always reference actual data. Keep it brief. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''} ${TTS_COMMA_RULE}${runnerProfileBlock(params.runnerProfile)}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 100,
@@ -1516,7 +1520,7 @@ Give a coaching message (2-3 sentences). IMPORTANT: Tell them their PERSONALISED
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, an elite ${coachTone} running biomechanics coach. You specialize in cadence optimization and stride analysis. Give specific, actionable technique coaching — tell the runner exactly what to change and how. Reference actual numbers. No emojis. ${PACE_FORMAT_RULE} Keep it to 3-4 sentences that can be spoken in under 20 seconds. ${toneDirective(coachTone)}${cadenceAccentRule ? ' ' + cadenceAccentRule : ''}${runnerProfileBlock(params.runnerProfile)}` },
+      { role: "system", content: `You are ${coachName}, an elite ${coachTone} running biomechanics coach. You specialize in cadence optimization and stride analysis. Give specific, actionable technique coaching — tell the runner exactly what to change and how. Reference actual numbers. No emojis. ${PACE_FORMAT_RULE} Keep it to 3-4 sentences that can be spoken in under 20 seconds. ${toneDirective(coachTone)}${cadenceAccentRule ? ' ' + cadenceAccentRule : ''} ${TTS_COMMA_RULE}${runnerProfileBlock(params.runnerProfile)}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 200,
@@ -2142,6 +2146,9 @@ IMPORTANT: You are a fully qualified running coach with deep sports science know
 
   // Inject AI runner profile if available — gives every in-run cue full personal context
   prompt += runnerProfileBlock(context.runnerProfile);
+
+  // TTS punctuation rule — must be last so it overrides any earlier style guidance
+  prompt += `\n\n${TTS_COMMA_RULE}`;
   
   return prompt;
 }
@@ -4152,10 +4159,11 @@ Give the most intense, powerful 1-2 sentence motivational burst possible:
 
 ${typePrompt}
 ${PACE_FORMAT_RULE}
+${TTS_COMMA_RULE}
 
 Keep it to 2-3 spoken sentences (under 20 seconds of audio). Every word must add value.`;
 
-  const systemMsg = `You are ${coachName}, an elite ${coachTone} running coach delivering real-time audio coaching during a run. You combine data-driven insight with elite technique coaching. Reference the runner's actual numbers. Never give empty motivation — every word is backed by data or technique knowledge. ${systemExtra} ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${runnerProfileBlock(params.runnerProfile)}`;
+  const systemMsg = `You are ${coachName}, an elite ${coachTone} running coach delivering real-time audio coaching during a run. You combine data-driven insight with elite technique coaching. Reference the runner's actual numbers. Never give empty motivation — every word is backed by data or technique knowledge. ${systemExtra} ${PACE_FORMAT_RULE} ${toneDirective(coachTone)} ${TTS_COMMA_RULE}${runnerProfileBlock(params.runnerProfile)}`;
 
   try {
     const completion = await openai.chat.completions.create({

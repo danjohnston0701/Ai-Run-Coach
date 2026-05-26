@@ -300,7 +300,8 @@ class GeneratePlanViewModel @Inject constructor(
                     InjuryRequest(
                         bodyPart = injury.bodyPart.lowercase(),
                         status = injury.status.name.lowercase(),
-                        notes = injury.notes
+                        notes = injury.notes,
+                        injuryDate = injury.injuryDate  // ISO date — lets AI calculate weeks since injury for rehab staging
                     )
                 }
                 
@@ -404,12 +405,13 @@ class GeneratePlanViewModel @Inject constructor(
     /**
      * Add a new injury to be considered in plan design
      */
-    fun addInjury(bodyPart: String, status: InjuryStatus, notes: String? = null) {
+    fun addInjury(bodyPart: String, status: InjuryStatus, notes: String? = null, injuryDate: String? = null) {
         val newInjury = Injury(
             id = System.currentTimeMillis().toString(),
             bodyPart = bodyPart,
             status = status,
-            notes = notes
+            notes = notes,
+            injuryDate = injuryDate
         )
         _injuries.value = _injuries.value + newInjury
         saveInjuriesToProfile()
@@ -426,10 +428,10 @@ class GeneratePlanViewModel @Inject constructor(
     /**
      * Update an existing injury
      */
-    fun updateInjury(injuryId: String, bodyPart: String, status: InjuryStatus, notes: String?) {
+    fun updateInjury(injuryId: String, bodyPart: String, status: InjuryStatus, notes: String?, injuryDate: String? = null) {
         _injuries.value = _injuries.value.map { injury ->
             if (injury.id == injuryId) {
-                injury.copy(bodyPart = bodyPart, status = status, notes = notes)
+                injury.copy(bodyPart = bodyPart, status = status, notes = notes, injuryDate = injuryDate)
             } else {
                 injury
             }

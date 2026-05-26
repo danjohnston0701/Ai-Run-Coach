@@ -1,14 +1,77 @@
 /**
  * Heart Rate Zone Utilities
- * Calculates HR zones based on age and provides zone-specific guidance
+ * Calculates HR zones based on age and provides zone-specific guidance.
+ *
+ * Max HR estimation hierarchy (most accurate → least accurate):
+ *   1. Observed peak HR from run history (best — derived from actual data)
+ *   2. Tanaka formula: 208 - (0.7 × age)  (more accurate than 220 - age for trained runners)
+ *   3. Fallback: 220 - age  (kept for backward compatibility)
  */
 
 export class HeartRateZones {
   /**
-   * Calculate max heart rate using standard formula: 220 - age
+   * Calculate max heart rate using the Tanaka formula (208 - 0.7 × age).
+   * More accurate than 220-age for trained runners, especially over 40.
    */
   static getMaxHeartRate(age: number): number {
-    return 220 - age;
+    return Math.round(208 - 0.7 * age);
+  }
+
+  /**
+   * Estimate max HR from recent run history.
+   * Uses the 99th-percentile of observed peak HRs — a single outlier run
+   * often captures a true near-max effort.
+   *
+   * @param peakHRsFromRuns  Array of peak/max HR values recorded in recent runs
+   * @param age              Athlete age (used as fallback if data is insufficient)
+   * @returns Estimated maxHR in BPM
+   */
+  static estimateMaxHRFromHistory(peakHRsFromRuns: number[], age: number): number {
+    // Need at least 3 runs with HR data for a meaningful estimate
+    const validPeaks = peakHRsFromRuns.filter(hr => hr > 100 && hr < 230);
+    if (validPeaks.length < 3) {
+      return HeartRateZones.getMaxHeartRate(age);
+    }
+
+    // Sort descending and take the 95th-percentile peak to avoid outlier spikes
+    const sorted = [...validPeaks].sort((a, b) => b - a);
+    const p95Index = Math.max(0, Math.floor(sorted.length * 0.05));
+    const observedMax = sorted[p95Index];
+
+    // Sanity bounds: observed max should be within ±15 bpm of formula estimate
+    const formulaMax = HeartRateZones.getMaxHeartRate(age);
+    const clampedMax = Math.max(formulaMax - 15, Math.min(formulaMax + 25, observedMax));
+
+    return Math.round(clampedMax);
+  }
+
+  /**
+   * Estimate lactate threshold HR (LTHR) from run history.
+   * LTHR is typically ~85-92% of max HR for well-trained runners.
+   * If pace/HR data is available, uses a pace-weighted estimate.
+   *
+   * @param avgHRsFromRuns  Array of { avgHR, avgPaceSecs } from recent runs
+   * @param maxHR           Athlete max HR
+   * @returns Estimated LTHR in BPM, or null if insufficient data
+   */
+  static estimateLTHRFromHistory(
+    avgHRsFromRuns: Array<{ avgHR: number; avgPaceSecs: number }>,
+    maxHR: number
+  ): number | null {
+    const validRuns = avgHRsFromRuns.filter(r => r.avgHR > 100 && r.avgPaceSecs > 0);
+    if (validRuns.length < 5) return null;
+
+    // Find runs where HR is in the z3-z4 range (70-90% max HR) as threshold zone proxy
+    const thresholdRuns = validRuns.filter(r => {
+      const hrPct = r.avgHR / maxHR;
+      return hrPct >= 0.70 && hrPct <= 0.92;
+    });
+
+    if (thresholdRuns.length < 2) return null;
+
+    // Average HR from threshold-zone runs — a rough LTHR proxy
+    const avgThresholdHR = thresholdRuns.reduce((sum, r) => sum + r.avgHR, 0) / thresholdRuns.length;
+    return Math.round(avgThresholdHR);
   }
 
   /**

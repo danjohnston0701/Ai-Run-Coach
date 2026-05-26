@@ -13,6 +13,7 @@ import { HeartRateZones } from "./heart-rate-zones"; // Assuming we create this 
 import { generateSessionInstructions } from "./session-coaching-service";
 import { getRunnerProfile, runnerProfileBlock } from "./runner-profile-service";
 import { assessOrientationNeed, generateOrientationCoachingPrompt, type OrientationAssessment } from "./orientation-session-service";
+import { jsonrepair } from "jsonrepair";
 import OpenAI from "openai";
 
 const openai = new OpenAI({
@@ -51,6 +52,7 @@ export interface InjuryInput {
   bodyPart: string;
   status: string; // "active" | "recovering" | "healed"
   notes?: string;
+  injuryDate?: string; // ISO date string (e.g. "2026-05-08") — used to calculate weeks since injury
 }
 
 /**
@@ -69,6 +71,119 @@ export function getBlockSize(daysPerWeek: number): number {
   if (daysPerWeek === 4) return 4;
   if (daysPerWeek === 5) return 3;
   return 2; // 6-7 days/week
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST-GENERATION PLAN VALIDATOR
+// Deterministic safety checks run after AI generation before DB insert.
+// Catches structural errors, dangerous volume jumps, and impossible paces.
+// ─────────────────────────────────────────────────────────────────────────────
+interface ValidatePlanOptions {
+  weeksToGenerate: number;
+  daysPerWeek: number;
+  weeklyMileageBase: number;
+  hasActiveInjuries: boolean;
+  goalType: string;
+  targetDistance: number;
+}
+
+function validateGeneratedPlan(planData: any, opts: ValidatePlanOptions): void {
+  const { weeksToGenerate, daysPerWeek, weeklyMileageBase, hasActiveInjuries, goalType, targetDistance } = opts;
+  const warnings: string[] = [];
+  const errors: string[] = [];
+
+  if (!Array.isArray(planData.weeks)) {
+    errors.push("planData.weeks is not an array");
+  }
+
+  const weeks: any[] = planData.weeks ?? [];
+
+  // ── Structural checks ─────────────────────────────────────────────────────
+  if (weeks.length !== weeksToGenerate) {
+    warnings.push(`Week count mismatch: expected ${weeksToGenerate}, got ${weeks.length}`);
+  }
+
+  weeks.forEach((week: any, idx: number) => {
+    const weekNum = week.weekNumber ?? idx + 1;
+    const workouts: any[] = Array.isArray(week.workouts) ? week.workouts : [];
+
+    if (workouts.length !== daysPerWeek) {
+      warnings.push(`Week ${weekNum}: expected ${daysPerWeek} workouts, got ${workouts.length}`);
+    }
+
+    // ── Volume checks ──────────────────────────────────────────────────────
+    const weekDistKm = parseFloat(week.totalDistance) || 0;
+
+    if (idx > 0) {
+      const prevWeekDistKm = parseFloat(weeks[idx - 1].totalDistance) || 0;
+      if (prevWeekDistKm > 0) {
+        const jumpPct = (weekDistKm - prevWeekDistKm) / prevWeekDistKm;
+        // Flag single-week volume jumps over 30% (standard coaching 10% rule, relaxed to 30% for deload weeks and early build)
+        if (jumpPct > 0.30) {
+          warnings.push(`Week ${weekNum}: volume jumps ${Math.round(jumpPct * 100)}% from week ${weekNum - 1} (${prevWeekDistKm}km → ${weekDistKm}km) — exceeds 30% guideline`);
+        }
+      }
+    }
+
+    // Injured athletes: flag suspiciously high volume in early weeks
+    if (hasActiveInjuries && idx < 2 && weekDistKm > 20) {
+      warnings.push(`Week ${weekNum}: ${weekDistKm}km total volume may be too high for an athlete with active/recovering injuries in the early weeks`);
+    }
+
+    // ── Session-level checks ───────────────────────────────────────────────
+    workouts.forEach((wo: any) => {
+      const sessionKm = parseFloat(wo.distance) || 0;
+      const type = (wo.workoutType ?? '').toLowerCase();
+
+      // Session distance should not exceed total week distance
+      if (sessionKm > weekDistKm && weekDistKm > 0) {
+        warnings.push(`Week ${weekNum}, day ${wo.dayOfWeek}: session distance ${sessionKm}km exceeds week total ${weekDistKm}km`);
+      }
+
+      // Interval total sanity: intervalCount × intervalDistanceMeters should not exceed session distance
+      if (wo.intervalCount && wo.intervalDistanceMeters) {
+        const totalIntervalKm = (wo.intervalCount * wo.intervalDistanceMeters) / 1000;
+        if (totalIntervalKm > sessionKm && sessionKm > 0) {
+          warnings.push(`Week ${weekNum}, day ${wo.dayOfWeek}: interval total (${totalIntervalKm.toFixed(1)}km) exceeds session distance (${sessionKm}km)`);
+        }
+      }
+
+      // Pace sanity: flag if targetPace implies speed < 3:00/km or > 15:00/km
+      if (wo.targetPace && typeof wo.targetPace === 'string') {
+        const paceMatch = wo.targetPace.match(/(\d+):(\d{2})\s*\/km/);
+        if (paceMatch) {
+          const paceSecs = parseInt(paceMatch[1]) * 60 + parseInt(paceMatch[2]);
+          if (paceSecs < 180) {
+            warnings.push(`Week ${weekNum}, day ${wo.dayOfWeek}: targetPace ${wo.targetPace} is faster than 3:00/km — likely incorrect`);
+          }
+          if (paceSecs > 900) {
+            warnings.push(`Week ${weekNum}, day ${wo.dayOfWeek}: targetPace ${wo.targetPace} is slower than 15:00/km — likely incorrect`);
+          }
+        }
+      }
+
+      // Injured athletes: flag high-intensity sessions in early weeks
+      if (hasActiveInjuries && idx < 2) {
+        const highIntensityTypes = ['intervals', 'tempo', 'strides', 'hill_repeats', 'fartlek', 'race_pace', 'time_trial'];
+        if (highIntensityTypes.includes(type)) {
+          warnings.push(`Week ${weekNum}, day ${wo.dayOfWeek}: '${type}' session in week ${weekNum} may be inappropriate for an athlete with active/recovering injuries`);
+        }
+      }
+    });
+  });
+
+  // Log all warnings
+  if (warnings.length > 0) {
+    console.warn(`[Plan Validation] ${warnings.length} warning(s) detected:`);
+    warnings.forEach(w => console.warn(`  ⚠️  ${w}`));
+  } else {
+    console.log("[Plan Validation] ✅ All checks passed");
+  }
+
+  // Hard errors only for clearly corrupt structures
+  if (errors.length > 0) {
+    throw new Error(`[Plan Validation] Critical errors: ${errors.join('; ')}`);
+  }
 }
 
 export async function generateTrainingPlan(
@@ -354,7 +469,29 @@ export async function generateTrainingPlan(
       console.warn(`[Orientation] Error assessing orientation need, continuing without orientation:`, orientationErr);
       orientationAssessment = { needsOrientation: false, recommendedDistance: 0 };
     }
-    const maxHR = HeartRateZones.getMaxHeartRate(userAge);
+    // ── Max HR: use history-derived estimate when enough data exists, else Tanaka formula ──
+    // Collect peak HR from recent runs (stored as heartRate field which represents avg HR;
+    // we use the top-end values as a peak-HR proxy until dedicated maxHR fields are added)
+    const peakHRsFromHistory = recentRuns
+      .map(r => r.heartRate ?? 0)
+      .filter(hr => hr > 0);
+    const maxHR = HeartRateZones.estimateMaxHRFromHistory(peakHRsFromHistory, userAge);
+    const maxHRSource = peakHRsFromHistory.length >= 3 ? 'run-history' : 'tanaka-formula';
+    console.log(`[Training Plan] maxHR=${maxHR} (source: ${maxHRSource}, age=${userAge})`);
+
+    // ── LTHR estimation for enhanced zone targeting ──
+    const avgHrPaceData = recentRuns
+      .filter(r => r.heartRate && r.heartRate > 0 && r.avgPace)
+      .map(r => ({
+        avgHR: r.heartRate!,
+        avgPaceSecs: (() => {
+          if (!r.avgPace) return 0;
+          const parts = r.avgPace.replace(/\/km.*/, '').trim().split(':');
+          if (parts.length !== 2) return 0;
+          return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+        })(),
+      }));
+    const estimatedLTHR = HeartRateZones.estimateLTHRFromHistory(avgHrPaceData, maxHR);
 
     // Build context for AI
     const context = {
@@ -368,6 +505,8 @@ export async function generateTrainingPlan(
         bmiCategory,
         fitnessLevel: user[0]?.fitnessLevel || experienceLevel,
         maxHeartRate: maxHR,
+        maxHeartRateSource: maxHRSource,
+        estimatedLactateThresholdHR: estimatedLTHR,
       },
       deviceConnectivity: {
         hasConnectedDevice,
@@ -440,6 +579,8 @@ Runner Profile (Personal Details):
 - Training days per week: ${daysPerWeek}
 - Current fitness (CTL): ${fitness?.ctl || 'N/A'}
 - Training status: ${fitness?.status || 'N/A'}
+- Estimated max HR: ${maxHR} bpm (${maxHRSource === 'run-history' ? 'derived from run history — use this for zone calculations' : 'Tanaka formula estimate — use run history data when available'})
+${estimatedLTHR ? `- Estimated lactate threshold HR: ~${estimatedLTHR} bpm (derived from run history — use as anchor for Zone 3/4 boundary)` : ''}
 
 ${hasRunHistory ? `Recent Running History Summary:
 - Total runs on record: ${recentRuns.length}
@@ -653,26 +794,64 @@ ${regularSessions.map(s => {
 ` : ""}
 ━━━ HEALTH & INJURY CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-${injuries && injuries.length > 0 ? `Active Health Considerations (athlete safety is the priority — design around these):
-${injuries.map(i => {
-  const statusLabel = i.status === 'recovering' || i.status === 'RECOVERING' ? 'Recovering' :
-                     i.status === 'healed' || i.status === 'HEALED' ? 'Healed' :
-                     i.status === 'chronic' || i.status === 'CHRONIC' ? 'Chronic' :
-                     i.status === 'active' || i.status === 'ACTIVE' ? 'Active' : i.status;
-  return `- ${i.bodyPart}: ${statusLabel}${i.notes ? ` — ${i.notes}` : ''}`;
-}).join("\n")}
+${injuries && injuries.length > 0 ? (() => {
+  const hasActiveOrRecovering = injuries.some(i =>
+    ['active','recovering','ACTIVE','RECOVERING','chronic','CHRONIC'].includes(i.status)
+  );
 
-Apply appropriate load management: active/recovering = avoid stress to the affected area, substitute with low-impact alternatives; chronic = reduce intensity and impact; healed = gradual reintroduction, conservative volume progression. A plan that keeps this athlete healthy is always better than one that risks re-injury.` : `No current injuries or health limitations reported.`}
+  const injuryLines = injuries.map(i => {
+    const statusLabel = i.status === 'recovering' || i.status === 'RECOVERING' ? 'Recovering' :
+                       i.status === 'healed'     || i.status === 'HEALED'     ? 'Healed (recent)' :
+                       i.status === 'chronic'    || i.status === 'CHRONIC'    ? 'Chronic/ongoing' :
+                       i.status === 'active'     || i.status === 'ACTIVE'     ? 'Active (acute)' : i.status;
 
-━━━ APP COACHING CAPABILITIES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    let weeksSince = '';
+    if (i.injuryDate) {
+      const msElapsed = Date.now() - new Date(i.injuryDate).getTime();
+      const weeks = Math.floor(msElapsed / (7 * 24 * 60 * 60 * 1000));
+      const days  = Math.floor((msElapsed % (7 * 24 * 60 * 60 * 1000)) / (24 * 60 * 60 * 1000));
+      weeksSince = weeks > 0
+        ? ` — injured ${weeks} week${weeks > 1 ? 's' : ''} ago (${new Date(i.injuryDate).toDateString()})`
+        : ` — injured ${days} day${days !== 1 ? 's' : ''} ago (${new Date(i.injuryDate).toDateString()})`;
+    }
 
-The app delivers live AI coaching throughout every session. You can design sessions knowing we support:
-- Real-time GPS pace and distance tracking with live audio coaching cues
-- Heart rate zone monitoring with live alerts (when HR device is connected)
-- Interval/rep detection and lap tracking with per-rep coaching messages
-- Live pace deviation alerts when the athlete drifts off target
-- Pre-run briefings personalised to each session
-- Adaptive plan adjustments based on actual performance data from completed sessions
+    return `- ${i.bodyPart}: ${statusLabel}${weeksSince}${i.notes ? `\n  Athlete notes: "${i.notes}"` : ''}`;
+  }).join('\n');
+
+  const targetTimeStr = targetTime
+    ? `${Math.floor(targetTime / 60)}:${String(Math.round(targetTime % 60)).padStart(2, '0')}`
+    : 'not set';
+
+  return `⚕️ ACTIVE HEALTH CONDITIONS — APPLY CONSERVATIVE TRAINING MODIFICATIONS
+
+⚠️ IMPORTANT DISCLAIMER: This AI running coach provides training guidance only. Nothing in this plan constitutes medical advice, diagnosis, or treatment. The athlete should consult a qualified physiotherapist or sports medicine professional before starting any return-to-running program.
+
+COACHING PRIORITY ORDER (higher priority always overrides lower):
+1. SAFETY — Do not design sessions that risk re-injury or aggravate the condition
+2. INJURY RECOVERY — Match loading to the athlete's current rehabilitation stage
+3. GOAL ACHIEVEMENT — Work toward the performance target within the constraints of #1 and #2
+4. PERFORMANCE OPTIMISATION — Fine-tune paces and intensity only once #1–3 are satisfied
+
+${injuryLines}
+
+${hasActiveOrRecovering ? `This athlete has active or recovering injuries. Apply conservative training modifications informed by general sports rehabilitation principles. The performance goal (${goalType.toUpperCase()} in ${targetTimeStr}) is the eventual end target — it must not drive the early weeks.
+
+For each injury, consider these dimensions when designing each week:
+
+1. RECOVERY STAGE — How long ago did the injury occur? What is the typical recovery arc for this type of injury? Design sessions appropriate for where the athlete is right now, not where a healthy athlete would be at week 1 of a standard plan.
+
+2. APPROPRIATE LOADING — What loading is reasonable at this stage? Consider whether walk-run intervals, reduced volume, modified session types, or complete rest days are needed and for how long before progression is warranted.
+
+3. SESSIONS TO AVOID — Which session types (tempo, intervals, hills, strides, long runs) and surfaces should be avoided at this stage, and why? Exclude them from weeks where they are not appropriate.
+
+4. PROGRESSION CRITERIA — What must the athlete experience symptom-free before advancing each week? State these explicitly in each weekDescription.
+
+5. REGRESSION RULE — What symptoms or outcomes indicate the athlete should repeat or step back rather than progress?
+
+Every session's "instructions" field must include: acceptable discomfort level during the run, symptoms that mean stop immediately, and expected next-day response. Keep this brief and specific.` : `This injury is healed or in late-stage recovery. Apply gradual progressive loading — prioritise confidence and tissue resilience before targeting performance metrics.`}
+
+⚠️ MANDATORY JSON OUTPUT: Include a "safetyDisclaimer" object (see output spec). The disclaimer text must explicitly state this plan is AI-generated training guidance, not medical advice.`;
+})() : `No current injuries or health limitations reported.`}
 
 ━━━ WHAT TO DELIVER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -700,9 +879,24 @@ Return your complete coaching plan as JSON with this structure:
 {
   "planName": "A descriptive name reflecting this athlete's specific plan and approach",
   "totalWeeks": ${weeksToGenerate},
+  ${injuries && injuries.length > 0 ? `"safetyDisclaimer": {
+    "medicalClearanceRequired": true,
+    "prerequisiteChecks": [
+      "List the specific conditions the athlete MUST meet before starting ANY session in this plan — e.g. pain level, swelling, functional tests",
+      "Be specific to the actual injuries listed — not generic platitudes"
+    ],
+    "stopCriteria": [
+      "List the specific symptoms or signs during a session that mean STOP immediately and do not continue",
+      "Include both during-session and next-day warning signs"
+    ],
+    "progressionGates": [
+      "List the criteria the athlete must pass symptom-free before moving from week to week"
+    ],
+    "disclaimer": "A clear, plain-language paragraph that the athlete reads before starting the plan — covering: the nature of their injury, why this plan has been designed the way it has, what they must check before each session, when to seek medical advice, and an acknowledgement that this AI-generated plan is not a substitute for professional physiotherapy assessment."
+  },` : ''}
   "coachingProgrammeSummary": {
     "aiDeterminedFitnessLevel": "Your expert assessment of this athlete's actual fitness level based on all data provided",
-    "coachingApproach": "1-2 sentences describing the training methodology/philosophy you have chosen for this athlete and why",
+    "coachingApproach": "1-2 sentences describing the training methodology/philosophy you have chosen for this athlete and why — if injuries are present, explicitly describe the rehabilitation-first approach and how it transitions to performance work",
     "comment": "A personalised paragraph assessing this athlete — what you see in their data, what you are targeting, and how the plan is designed to get them there",
     "keyMetrics": {
       "estimatedAveragePace": "This athlete's comfortable aerobic training pace based on current fitness (not a PR pace)",
@@ -753,35 +947,29 @@ Return your complete coaching plan as JSON with this structure:
   ]
 }
 
-IMPORTANT NOTES ON OUTPUT:
-- workoutType is open — use whatever session classification you judge is right (e.g. "easy", "tempo", "intervals", "long_run", "fartlek", "strides", "progression_run", "hill_repeats", "race_pace", "recovery", "time_trial", "back_to_back_long", or any other type you deem appropriate). Use "rest" only for rest/off days.
-- Instructions must be concise but personalised (2-3 sentences) — state the session's purpose, a specific target metric for this athlete, and what physiological adaptation it drives at this stage of the plan.
-- The coachingApproach field should genuinely describe the methodology you have chosen (e.g. polarised training, threshold-focused, time-on-feet dominant, etc.) and your rationale for this athlete.
-- weekDescription for each week MUST reflect what makes that specific week different — name the training phase (e.g. "Aerobic foundation", "Threshold introduction", "Volume peak", "Race sharpening", "Taper"). Do not use generic descriptions like "Continue building fitness".
-
-STRUCTURAL CONSTRAINTS (these are non-negotiable for the app to function):
-- Generate EXACTLY ${weeksToGenerate} weeks — every single week from 1 to ${weeksToGenerate} must be fully listed
-- Each week must have EXACTLY ${daysPerWeek} workouts (after accounting for blocked days)
-- The "totalWeeks" field in your JSON must be ${weeksToGenerate}
-- Do not skip, summarise, or merge weeks
-
-COACHING SUMMARY NOTES:
-- coachingApproach: explain the training philosophy you have applied — this helps the athlete understand your coaching rationale
-- estimatedWeeklyMileage: show the PEAK weekly volume this plan builds toward, not the starting volume
-- For athletes with no previous run data: base your assessments on their stated fitness level and goal — do not default to conservative or beginner-level language unless genuinely warranted`;
+OUTPUT NOTES:
+- workoutType: use any appropriate label ("easy", "walk_run", "tempo", "intervals", "long_run", "fartlek", "strides", "progression_run", "hill_repeats", "race_pace", "recovery", "time_trial", "back_to_back_long", "rehab_strength", etc.). Use "rest" for rest days only.
+- safetyDisclaimer: required when injuries are present — the "disclaimer" text must address the athlete directly and state this is AI training guidance, not medical advice.
+- instructions: 2-3 sentences — session purpose, specific target metric for this athlete, physiological adaptation at this plan stage.
+- coachingApproach: name the methodology chosen (e.g. polarised, threshold-focused, time-on-feet) and why it suits this athlete.
+- weekDescription: name the specific training phase — not generic phrases like "continue building fitness".
+- estimatedWeeklyMileage: peak weekly volume, not starting volume.
+- For athletes with no run history: use stated fitness level — do not default to overly conservative language unless genuinely warranted.`;
 
     // Fetch AI runner profile for richer personalisation
     const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
 
     const systemPromptContent = `You are an elite AI running coach with deep expertise in exercise physiology, training periodisation, injury prevention, and performance optimisation. You have coached athletes across all levels and distances — from first-time 5K runners to ultra marathon competitors.
 
-You are NOT filling in a template or following a prescribed methodology. You are the expert making every decision: what training philosophy applies to this athlete, what session types they need, how to periodise their weeks, how to prescribe paces and intensity, and how to structure the plan to give them the best possible outcome.
+You have broad knowledge of general sports rehabilitation principles and conservative return-to-running progressions. When injuries are present you apply conservative training modifications informed by those principles — but you are not a medical professional and nothing you produce constitutes medical advice.
 
-You have access to the full spectrum of training science — polarised training, aerobic threshold development, high-intensity interval training, fatigue resistance, progressive overload, and adaptive periodisation. Apply whatever methodology you genuinely believe is optimal for this specific athlete and goal. Do not default to generic templates or one-size-fits-all structures.
+You are NOT filling in a template. You make every coaching decision: training philosophy, session types, periodisation, pacing, and structure. Apply whatever methodology you genuinely believe is optimal for this specific athlete and goal.
 
-Your coaching decisions should evolve with the athlete's data and the science. Every plan you design should reflect deep, personalised coaching judgement — not a formula.
+When injuries are present, the coaching priority order is always: Safety → Injury recovery → Goal achievement → Performance optimisation.
 
-Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunnerProfile)}`;
+Always respond with valid JSON only, no extra text.
+
+App capabilities available in every session: real-time GPS pace/distance, live audio coaching cues, HR zone monitoring (when device connected), interval/lap tracking, pace deviation alerts, pre-run briefings, and adaptive plan adjustments based on completed session data.${runnerProfileBlock(aiRunnerProfile)}`;
 
     // Helper to call OpenAI — retries once with compact instructions if the first attempt is truncated
     const callOpenAI = async (compactMode = false): Promise<any> => {
@@ -826,23 +1014,17 @@ Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunner
     try {
       planData = JSON.parse(rawContent);
     } catch (parseError: any) {
-      // Log the problematic content for debugging
-      console.error("Failed to parse plan JSON at position:", parseError.message);
-      console.error("Raw content length:", rawContent.length);
-      console.error("Content around error position (chars 14700-14900):", rawContent.substring(14700, 14900));
-      
-      // Try to fix common JSON issues like unescaped quotes and newlines
+      // First parse attempt failed — try jsonrepair which safely handles all common AI JSON issues
+      // (unescaped quotes, trailing commas, missing brackets, unescaped newlines, etc.)
+      console.warn("[Training Plan] Initial JSON parse failed, attempting jsonrepair recovery:", parseError.message);
+      console.warn("[Training Plan] Raw content length:", rawContent.length);
       try {
-        let fixedContent = rawContent;
-        // Replace unescaped newlines in string values (but keep actual JSON structure)
-        fixedContent = fixedContent.replace(/:\s*"([^"]*)\n([^"]*)"/, ': "$1\\n$2"');
-        // Escape unescaped quotes in the middle of strings
-        fixedContent = fixedContent.replace(/([^\\])"([^,}\]]*[^\\])"([^,}\]]*)"/, '$1\\"$2\\"$3');
-        
-        planData = JSON.parse(fixedContent);
-        console.log("Successfully recovered from JSON parse error using fallback fix");
-      } catch (recoveryError: any) {
-        throw new Error(`Invalid JSON from AI model: ${parseError.message}. Even after recovery attempt failed.`);
+        const repairedContent = jsonrepair(rawContent);
+        planData = JSON.parse(repairedContent);
+        console.log("[Training Plan] Successfully recovered malformed JSON using jsonrepair");
+      } catch (repairError: any) {
+        console.error("[Training Plan] jsonrepair recovery also failed:", repairError.message);
+        throw new Error(`Invalid JSON from AI model: ${parseError.message}. jsonrepair recovery failed: ${repairError.message}`);
       }
     }
 
@@ -898,6 +1080,28 @@ Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunner
       return triggerDate;
     })();
 
+    // ═══════════════════════════════════════════════════════════════
+    // POST-GENERATION VALIDATION — deterministic safety checks
+    // These catch AI mistakes before anything gets written to the DB.
+    // Warnings are logged but do NOT throw — we prefer a slightly-off
+    // plan over a hard failure. Hard errors only for clearly corrupt data.
+    // ═══════════════════════════════════════════════════════════════
+    validateGeneratedPlan(planData, {
+      weeksToGenerate,
+      daysPerWeek,
+      weeklyMileageBase,
+      hasActiveInjuries: injuries.some(i =>
+        ['active','recovering','ACTIVE','RECOVERING'].includes(i.status)
+      ),
+      goalType,
+      targetDistance,
+    });
+
+    // Extract safety disclaimer from AI output (present when injuries were provided)
+    const safetyDisclaimerJson = planData.safetyDisclaimer
+      ? JSON.stringify(planData.safetyDisclaimer)
+      : null;
+
     // Create training plan in database — totalWeeks is the FULL plan duration
     const plan = await db
       .insert(trainingPlans)
@@ -918,6 +1122,7 @@ Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunner
         aiGenerated: true,
         generatedThroughWeek: weeksToGenerate,  // how many weeks are actually in the DB now
         nextBlockAt,                             // when to generate the next block (null if full plan already generated)
+        safetyDisclaimer: safetyDisclaimerJson,  // AI-generated safety/medical disclaimer for injured athletes
       })
       .returning();
 

@@ -6,9 +6,10 @@ package live.airuncoach.airuncoach.domain.model
  */
 data class Injury(
     val id: String? = null,
-    val bodyPart: String,      // "knee", "ankle", "shin", "hip", "back", "foot", "calf", "hamstring", "quad", "groin", "other"
-    val status: InjuryStatus,  // recovering, healed, chronic
-    val notes: String? = null, // optional details about the injury
+    val bodyPart: String,           // "knee", "ankle", "shin", "hip", "back", "foot", "calf", "hamstring", "quad", "groin", "other"
+    val status: InjuryStatus,       // recovering, healed, chronic
+    val notes: String? = null,      // optional details about the injury
+    val injuryDate: String? = null, // ISO date string e.g. "2026-05-08" — when the injury occurred (helps AI calculate recovery stage)
     val createdAt: Long = System.currentTimeMillis()
 )
 

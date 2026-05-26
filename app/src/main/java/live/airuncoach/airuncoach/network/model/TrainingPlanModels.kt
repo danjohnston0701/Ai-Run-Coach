@@ -19,9 +19,10 @@ data class RegularSessionRequest(
  * User injury for AI to consider when designing training plan
  */
 data class InjuryRequest(
-    @SerializedName("bodyPart") val bodyPart: String,   // "knee", "ankle", "shin", etc.
-    @SerializedName("status") val status: String,       // "recovering", "healed", "chronic"
-    @SerializedName("notes") val notes: String? = null  // optional details
+    @SerializedName("bodyPart") val bodyPart: String,        // "knee", "ankle", "shin", etc.
+    @SerializedName("status") val status: String,            // "recovering", "healed", "chronic"
+    @SerializedName("notes") val notes: String? = null,      // optional details
+    @SerializedName("injuryDate") val injuryDate: String? = null  // ISO date e.g. "2026-05-08" — helps AI calculate weeks since injury
 )
 
 /** POST /api/training-plans/generate */
