@@ -238,11 +238,13 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     refreshKey = refreshKey
                 )
             }
-            composable(Screen.History.route) { 
+            composable(Screen.History.route) {
+                val currentBackStack by navController.currentBackStackEntryAsState()
                 PreviousRunsScreen(
                     onNavigateToRunSummary = {
                         navController.navigate("run_summary/$it")
-                    }
+                    },
+                    isActiveDestination = currentBackStack?.destination?.route == Screen.History.route
                 )
             }
             composable(Screen.Goals.route) {
@@ -604,10 +606,12 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 )
             }
             composable("previous_runs") {
+                val currentBackStack by navController.currentBackStackEntryAsState()
                 PreviousRunsScreen(
                     onNavigateToRunSummary = {
                         navController.navigate("run_summary/$it")
-                    }
+                    },
+                    isActiveDestination = currentBackStack?.destination?.route == "previous_runs"
                 )
             }
             composable("create_goal") {

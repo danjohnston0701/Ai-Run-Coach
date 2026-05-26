@@ -51,6 +51,7 @@ import kotlin.math.min
 fun PreviousRunsScreen(
     onNavigateToRunSummary: (String) -> Unit,
     onNavigateBack: () -> Unit = {},
+    isActiveDestination: Boolean = true,  // true when this route is the current nav destination
     viewModel: PreviousRunsViewModel = hiltViewModel()
 ) {
     val runs by viewModel.runs.collectAsState()
@@ -64,9 +65,14 @@ fun PreviousRunsScreen(
     
     var isWeatherImpactExpanded by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        viewModel.fetchRuns()
-        viewModel.calculateWeatherImpact()
+    // Reload the runs list whenever this screen becomes the active destination.
+    // This fires every time isActiveDestination becomes true (i.e. when we pop back from 
+    // run_summary or any child screen), so the user sees fresh data after a delete.
+    LaunchedEffect(isActiveDestination) {
+        if (isActiveDestination) {
+            viewModel.fetchRuns()
+            viewModel.calculateWeatherImpact()
+        }
     }
 
     Column(
