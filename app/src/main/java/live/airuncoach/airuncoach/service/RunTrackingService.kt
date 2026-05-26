@@ -724,6 +724,23 @@ class RunTrackingService : Service(), SensorEventListener {
     private val isCoachingPlanActive: Boolean
         get() = dynamicCoachingPlan != null || sessionInstructions != null
 
+    // ── Coaching plan session tiers ──────────────────────────────────────────────────────────
+    //
+    // Tier 1 — "Managed sessions" (intervals, hill_repeats):
+    //   The dynamic coaching plan is the SOLE source of all coaching cues — it fires rep-start,
+    //   rep-end, speed-up, slow-down, and recovery instructions based on distance/time triggers.
+    //   ALL free-run prompts (km splits, struggle coaching, pace coaching) are suppressed because
+    //   they are irrelevant and would conflict with the structured rep sequence.
+    //
+    // Tier 2 — "Augmented sessions" (tempo, long_run, easy, recovery, threshold, race_pace):
+    //   The dynamic coaching plan handles session structure and phase transitions.
+    //   Free-run prompts (km splits, struggle coaching, elevation, cadence) remain ACTIVE because
+    //   these sessions are about sustained consistent effort where per-km feedback is valuable.
+    //   Pace coaching (race-goal deviation) stays suppressed — the session plan manages effort.
+    //
+    private val isIntervalTypeSession: Boolean
+        get() = planWorkoutType == "intervals" || planWorkoutType == "hill_repeats"
+
     // Phase engine state — tracks position within the AI-designed session structure
     private var currentPhaseIndex: Int = 0      // Index into sessionInstructions.phases
     private var currentPhaseName: String? = null // e.g. "warmup", "interval_1_of_6"
@@ -2282,11 +2299,14 @@ class RunTrackingService : Service(), SensorEventListener {
             }
         }
 
-        // Suppress struggle detection for interval and hill repeat sessions.
-        // During these sessions, planned recovery jogs/walks between reps cause large pace drops
-        // that are completely intentional — firing struggle coaching here would be incorrect and
-        // confusing ("you're struggling" when the runner is following the plan perfectly).
-        if (planWorkoutType == "intervals" || planWorkoutType == "hill_repeats") return
+        // Tier 1 — Interval/hill repeat sessions: suppress struggle detection entirely.
+        // The dynamic coaching plan manages all cues including rep pacing and recovery.
+        // Recovery jogs between reps cause large intentional pace drops — the struggle engine
+        // would incorrectly fire "you're struggling" when the runner is executing the plan.
+        if (isIntervalTypeSession) {
+            isStruggling = false
+            return
+        }
         
         if (baselinePace > 0f) {
             val paceDropPercent = (smoothedPaceSeconds - baselinePace) / baselinePace * 100
@@ -2327,7 +2347,15 @@ class RunTrackingService : Service(), SensorEventListener {
             lastSplitTime = now
             splitPausedMs = 0  // Reset pause accumulator for next split
             Log.d("RunTrackingService", "Reached ${currentKm}km split")
-            
+
+            // Tier 1 — Interval/hill repeat sessions: the dynamic coaching plan manages all cues.
+            // Km splits are irrelevant — the runner is alternating between hard reps and recovery,
+            // so a per-km average pace has no coaching value and would conflict with rep instructions.
+            if (isIntervalTypeSession) {
+                Log.d("RunTrackingService", "Skipping km split coaching for interval session at ${currentKm}km")
+                return
+            }
+
             // Only trigger AI coaching at the user's chosen interval (1km, 2km, 3km, 5km, 10km)
             // Suppress split coaching in the final 500m — only motivation allowed
             val interval = coachingFeaturePrefs.kmSplitIntervalKm
