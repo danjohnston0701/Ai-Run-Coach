@@ -65,7 +65,7 @@ import {
   initializeAchievements
 } from "./achievements-service";
 import garminOAuthRouter from "./garmin-oauth-bridge";
-import stravaOAuthRouter from "./strava-oauth-bridge";
+import stravaOAuthRouter, { ensureStravaWebhookSubscription } from "./strava-oauth-bridge";
 import {
   extractHeartRateData,
   extractPaceData as extractPaceDataDetailed,
@@ -104,6 +104,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // ==================== STRAVA OAUTH BRIDGE ====================
   app.use(stravaOAuthRouter);
+
+  // Ensure Strava webhook subscription is active (runs asynchronously, won't block startup)
+  ensureStravaWebhookSubscription().catch(err =>
+    console.error('[Strava Webhook] Startup auto-register failed:', err.message)
+  );
   
   app.use("/api", adaptationRouter);
   app.use("/api/my-data", myDataRouter);
