@@ -476,6 +476,11 @@ export const goals = pgTable("goals", {
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+  // Injury Recovery goal fields (populated when healthTarget = "Injury Recovery")
+  injuryBodyPart: text("injury_body_part"),    // knee, ankle, hip, shin, foot, back, shoulder, other
+  injuryDate: text("injury_date"),              // ISO date string e.g. "2026-05-08"
+  injurySeverity: text("injury_severity"),      // active, recovering, chronic
+  injuryNotes: text("injury_notes"),            // free-text notes about the injury
 });
 
 // Notifications table

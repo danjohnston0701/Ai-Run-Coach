@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -39,8 +40,13 @@ enum class GoalType {
 fun CreateGoalScreen(
     onDismiss: () -> Unit = {},
     onCreateGoal: () -> Unit = {},
+    /** When true, after goal creation the caller is notified with the new goal ID
+     *  so navigation can route back into the plan generation wizard. */
+    onGoalCreatedForPlan: ((String) -> Unit)? = null,
     viewModel: GoalsViewModel = viewModel(factory = GoalsViewModelFactory(LocalContext.current))
 ) {
+    val returnToPlan = onGoalCreatedForPlan != null
+
     var selectedType by remember { mutableStateOf<GoalType?>(null) }
     var goalTitle by remember { mutableStateOf("") }
     var targetDate by remember { mutableStateOf("") }
@@ -65,6 +71,11 @@ fun CreateGoalScreen(
     var customHealthGoal by remember { mutableStateOf("") }
     var targetWeightKg by remember { mutableStateOf("") }
     var startingWeightKg by remember { mutableStateOf("") }
+    // Injury Recovery fields (shown when selectedHealthTarget == "Injury Recovery")
+    var injuryBodyPart by remember { mutableStateOf("") }
+    var injuryDate by remember { mutableStateOf("") }
+    var injurySeverity by remember { mutableStateOf("") }
+    var injuryNotes by remember { mutableStateOf("") }
     
     // Load user data to get current weight
     val sharedPrefs = LocalContext.current.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
@@ -92,13 +103,17 @@ fun CreateGoalScreen(
     
     // Handle state changes
     LaunchedEffect(createGoalState) {
-        when (createGoalState) {
+        when (val state = createGoalState) {
             is CreateGoalState.Success -> {
                 viewModel.resetCreateGoalState()
-                onCreateGoal()
+                if (returnToPlan && state.createdGoalId != null) {
+                    onGoalCreatedForPlan?.invoke(state.createdGoalId)
+                } else {
+                    onCreateGoal()
+                }
             }
             is CreateGoalState.Error -> {
-                showError = (createGoalState as CreateGoalState.Error).message
+                showError = state.message
             }
             else -> {}
         }
@@ -111,6 +126,8 @@ fun CreateGoalScreen(
             showError = "Please select a goal type"
         } else if (goalTitle.isBlank()) {
             showError = "Please enter a goal title"
+        } else if (selectedType == GoalType.HEALTH_WELLBEING && selectedHealthTarget == "Injury Recovery" && injuryBodyPart.isBlank()) {
+            showError = "Please select or enter the injured body part"
         } else {
             // Calculate time target in seconds
             val timeTargetSeconds = if (timeHours.isNotBlank() || timeMinutes.isNotBlank() || timeSeconds.isNotBlank()) {
@@ -128,6 +145,9 @@ fun CreateGoalScreen(
             
             // Parse weekly run target
             val finalWeeklyTarget = weeklyRunTarget.toIntOrNull()
+
+            // Injury Recovery fields — only sent when healthTarget = "Injury Recovery"
+            val isInjuryRecovery = finalHealthTarget == "Injury Recovery"
             
             viewModel.createGoal(
                 type = selectedType.toString(),
@@ -142,7 +162,11 @@ fun CreateGoalScreen(
                 healthTarget = finalHealthTarget,
                 weeklyRunTarget = finalWeeklyTarget,
                 targetWeightKg = targetWeightKg.toDoubleOrNull(),
-                startingWeightKg = startingWeightKg.toDoubleOrNull()
+                startingWeightKg = startingWeightKg.toDoubleOrNull(),
+                injuryBodyPart = if (isInjuryRecovery) injuryBodyPart.ifBlank { null } else null,
+                injuryDate = if (isInjuryRecovery) injuryDate.ifBlank { null } else null,
+                injurySeverity = if (isInjuryRecovery) injurySeverity.ifBlank { null } else null,
+                injuryNotes = if (isInjuryRecovery) injuryNotes.ifBlank { null } else null
             )
         }
     }
@@ -350,8 +374,8 @@ fun CreateGoalScreen(
                             HealthTargetSection(
                                 selectedTarget = selectedHealthTarget,
                                 customGoal = customHealthGoal,
-                                onTargetSelected = { selectedHealthTarget = it },
-                                onCustomGoalChange = { customHealthGoal = it }
+                                onTargetSelected = { selectedHealthTarget = it; customHealthGoal = "" },
+                                onCustomGoalChange = { customHealthGoal = it; selectedHealthTarget = "" }
                             )
                             Spacer(modifier = Modifier.height(Spacing.md))
                         }
@@ -363,6 +387,22 @@ fun CreateGoalScreen(
                                     targetWeight = targetWeightKg,
                                     onStartingWeightChange = { startingWeightKg = it },
                                     onTargetWeightChange = { targetWeightKg = it }
+                                )
+                                Spacer(modifier = Modifier.height(Spacing.md))
+                            }
+                        }
+                        // Injury Recovery inputs
+                        if (selectedHealthTarget == "Injury Recovery") {
+                            item {
+                                InjuryRecoverySection(
+                                    bodyPart = injuryBodyPart,
+                                    date = injuryDate,
+                                    severity = injurySeverity,
+                                    notes = injuryNotes,
+                                    onBodyPartChange = { injuryBodyPart = it },
+                                    onDateChange = { injuryDate = it },
+                                    onSeverityChange = { injurySeverity = it },
+                                    onNotesChange = { injuryNotes = it }
                                 )
                                 Spacer(modifier = Modifier.height(Spacing.md))
                             }
@@ -914,7 +954,19 @@ fun HealthTargetSection(
                 modifier = Modifier.weight(1f)
             )
         }
-        
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            // Injury Recovery — full-width chip with medical icon
+            DistanceChip(
+                text = "🩹 Injury Recovery",
+                isSelected = selectedTarget == "Injury Recovery",
+                onClick = { onTargetSelected("Injury Recovery") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
         // Custom health goal input
         BasicTextField(
             value = customGoal,
@@ -1055,6 +1107,156 @@ fun WeeklyRunTargetSection(
             text = "runs per week",
             style = AppTextStyles.body,
             color = Colors.textMuted
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Injury Recovery Section — shown when healthTarget = "Injury Recovery"
+// ──────────────────────────────────────���──────────────────────────────────────
+
+@Composable
+fun InjuryRecoverySection(
+    bodyPart: String,
+    date: String,
+    severity: String,
+    notes: String,
+    onBodyPartChange: (String) -> Unit,
+    onDateChange: (String) -> Unit,
+    onSeverityChange: (String) -> Unit,
+    onNotesChange: (String) -> Unit
+) {
+    val bodyParts = listOf("Knee", "Ankle", "Hip", "Shin", "Foot", "Back", "Shoulder", "Other")
+    val severities = listOf(
+        "active"     to "Active / Acute",
+        "recovering" to "Recovering",
+        "chronic"    to "Chronic / Ongoing"
+    )
+
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+        // ── Header ──────────────────────────────────────────────────────────
+        androidx.compose.material3.Surface(
+            shape = RoundedCornerShape(BorderRadius.sm),
+            color = androidx.compose.ui.graphics.Color(0xFFF59E0B).copy(alpha = 0.10f),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(Spacing.md),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                androidx.compose.material3.Text("⚕️", style = AppTextStyles.body)
+                androidx.compose.material3.Text(
+                    "These details help the AI design a safe, personalised recovery plan for you.",
+                    style = AppTextStyles.small,
+                    color = Colors.textSecondary
+                )
+            }
+        }
+
+        // ── Injured body part ────────────────────────────────────────────────
+        FormFieldLabel(text = "Injured Area *")
+        Spacer(modifier = Modifier.height(4.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            bodyParts.chunked(4).forEach { row ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
+                ) {
+                    row.forEach { part ->
+                        DistanceChip(
+                            text = part,
+                            isSelected = bodyPart.equals(part, ignoreCase = true),
+                            onClick = { onBodyPartChange(part.lowercase()) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    // Pad remaining cells if row is shorter than 4
+                    repeat(4 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
+                }
+            }
+        }
+        // Free-text fallback for unlisted body parts
+        BasicTextField(
+            value = if (bodyParts.none { it.equals(bodyPart, ignoreCase = true) }) bodyPart else "",
+            onValueChange = onBodyPartChange,
+            textStyle = AppTextStyles.body.copy(color = Colors.textPrimary),
+            cursorBrush = SolidColor(Colors.primary),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+                .clip(RoundedCornerShape(BorderRadius.sm))
+                .background(Colors.backgroundSecondary)
+                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            decorationBox = { innerTextField ->
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
+                    if (bodyParts.none { it.equals(bodyPart, ignoreCase = true) } && bodyPart.isEmpty()) {
+                        Text("Or describe the injury area...", style = AppTextStyles.body, color = Colors.textMuted)
+                    }
+                    innerTextField()
+                }
+            }
+        )
+
+        // ── Date of injury ───────────────────────────────────────────────────
+        FormFieldLabel(text = "Date of Injury")
+        BasicTextField(
+            value = date,
+            onValueChange = onDateChange,
+            textStyle = AppTextStyles.body.copy(color = Colors.textPrimary),
+            cursorBrush = SolidColor(Colors.primary),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+                .clip(RoundedCornerShape(BorderRadius.sm))
+                .background(Colors.backgroundSecondary)
+                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            decorationBox = { innerTextField ->
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
+                    if (date.isEmpty()) {
+                        Text("YYYY-MM-DD e.g. 2026-05-08", style = AppTextStyles.body, color = Colors.textMuted)
+                    }
+                    innerTextField()
+                }
+            }
+        )
+
+        // ── Severity / status ────────────────────────────────────────────────
+        FormFieldLabel(text = "Injury Status")
+        Spacer(modifier = Modifier.height(4.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            severities.forEach { (value, label) ->
+                DistanceChip(
+                    text = label,
+                    isSelected = severity == value,
+                    onClick = { onSeverityChange(value) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        // ── Notes ────────────────────────────────────────────────────────────
+        FormFieldLabel(text = "Injury Notes (optional)")
+        BasicTextField(
+            value = notes,
+            onValueChange = onNotesChange,
+            textStyle = AppTextStyles.body.copy(color = Colors.textPrimary),
+            cursorBrush = SolidColor(Colors.primary),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(80.dp)
+                .clip(RoundedCornerShape(BorderRadius.sm))
+                .background(Colors.backgroundSecondary)
+                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            decorationBox = { innerTextField ->
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopStart) {
+                    if (notes.isEmpty()) {
+                        Text("e.g. Torn meniscus, had surgery, cleared to walk...", style = AppTextStyles.body, color = Colors.textMuted)
+                    }
+                    innerTextField()
+                }
+            }
         )
     }
 }

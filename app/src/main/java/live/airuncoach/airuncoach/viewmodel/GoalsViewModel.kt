@@ -29,7 +29,8 @@ sealed class GoalsUiState {
 sealed class CreateGoalState {
     object Idle : CreateGoalState()
     object Loading : CreateGoalState()
-    object Success : CreateGoalState()
+    /** Carries the ID of the created goal so callers can navigate to plan generation */
+    data class Success(val createdGoalId: String? = null) : CreateGoalState()
     data class Error(val message: String) : CreateGoalState()
 }
 
@@ -173,7 +174,12 @@ class GoalsViewModel(
         healthTarget: String?,
         weeklyRunTarget: Int?,
         targetWeightKg: Double? = null,
-        startingWeightKg: Double? = null
+        startingWeightKg: Double? = null,
+        // Injury Recovery fields
+        injuryBodyPart: String? = null,
+        injuryDate: String? = null,
+        injurySeverity: String? = null,
+        injuryNotes: String? = null
     ) {
         viewModelScope.launch {
             try {
@@ -199,11 +205,15 @@ class GoalsViewModel(
                     healthTarget = healthTarget,
                     weeklyRunTarget = weeklyRunTarget,
                     targetWeightKg = targetWeightKg,
-                    startingWeightKg = startingWeightKg
+                    startingWeightKg = startingWeightKg,
+                    injuryBodyPart = injuryBodyPart,
+                    injuryDate = injuryDate,
+                    injurySeverity = injurySeverity,
+                    injuryNotes = injuryNotes
                 )
 
                 val createdGoal = apiService.createGoal(request)
-                _createGoalState.value = CreateGoalState.Success
+                _createGoalState.value = CreateGoalState.Success(createdGoalId = createdGoal.id)
                 
                 // Reset cache to ensure fresh data on next load
                 hasLoadedGoals = false
@@ -260,7 +270,7 @@ class GoalsViewModel(
                 )
 
                 apiService.updateGoal(goalId, request)
-                _createGoalState.value = CreateGoalState.Success
+                _createGoalState.value = CreateGoalState.Success()
                 
                 // Reset cache to ensure fresh data on next load
                 hasLoadedGoals = false

@@ -215,6 +215,27 @@ class GeneratePlanViewModel @Inject constructor(
                 _targetSeconds.value = (secs % 60).toString().padStart(2, '0')
             }
         }
+        // Auto-inject injury data from Injury Recovery goals
+        // Only add if no injuries are already in the list for this body part
+        if (goal.healthTarget == "Injury Recovery" && !goal.injuryBodyPart.isNullOrBlank()) {
+            val alreadyPresent = _injuries.value.any { it.bodyPart.equals(goal.injuryBodyPart, ignoreCase = true) }
+            if (!alreadyPresent) {
+                val injuryStatus = when (goal.injurySeverity?.lowercase()) {
+                    "chronic"   -> InjuryStatus.CHRONIC
+                    "healed"    -> InjuryStatus.HEALED
+                    else        -> InjuryStatus.RECOVERING  // covers "active", "recovering", and unknown
+                }
+                val autoInjury = Injury(
+                    id = "goal_${goal.id}",
+                    bodyPart = goal.injuryBodyPart,
+                    status = injuryStatus,
+                    notes = goal.injuryNotes,
+                    injuryDate = goal.injuryDate
+                )
+                _injuries.value = _injuries.value + autoInjury
+                Log.d("GeneratePlanVM", "Auto-injected injury from Injury Recovery goal: ${goal.injuryBodyPart}")
+            }
+        }
     }
 
     fun setGoalType(type: String) { _goalType.value = type }

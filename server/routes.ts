@@ -2428,6 +2428,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         weeklyRunTarget: req.body.weeklyRunTarget || null,
         targetWeightKg: req.body.targetWeightKg || null,
         startingWeightKg: req.body.startingWeightKg || null,
+        // Injury Recovery fields (populated when healthTarget = "Injury Recovery")
+        injuryBodyPart: req.body.injuryBodyPart || null,
+        injuryDate: req.body.injuryDate || null,
+        injurySeverity: req.body.injurySeverity || null,
+        injuryNotes: req.body.injuryNotes || null,
         status: 'active',
         progressPercent: 0,
       };
@@ -2451,6 +2456,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         weeklyRunTarget: rawGoal.weeklyRunTarget,
         targetWeightKg: (rawGoal as any).targetWeightKg ?? null,
         startingWeightKg: (rawGoal as any).startingWeightKg ?? null,
+        // Injury Recovery fields
+        injuryBodyPart: (rawGoal as any).injuryBodyPart ?? null,
+        injuryDate: (rawGoal as any).injuryDate ?? null,
+        injurySeverity: (rawGoal as any).injurySeverity ?? null,
+        injuryNotes: (rawGoal as any).injuryNotes ?? null,
         currentProgress: rawGoal.progressPercent ?? 0,
         isActive: rawGoal.status === 'active',
         isCompleted: !!rawGoal.completedAt,
@@ -11132,6 +11142,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const safeHeight = (() => { const v = Number(height); return (!isNaN(v) && v > 0) ? v : null; })();
       const safeWeight = (() => { const v = Number(weight); return (!isNaN(v) && v > 0) ? v : null; })();
 
+      // ── Auto-inject injury data from linked Injury Recovery goal ────────────
+      // If this plan is linked to an Injury Recovery goal and the request didn't
+      // already include an explicit injuries array, pull the injury data from the goal.
+      let effectiveInjuries = Array.isArray(injuries) ? injuries : [];
+      if (goalId && effectiveInjuries.length === 0) {
+        try {
+          const [linkedGoal] = await db.select().from(goals).where(eq(goals.id, goalId)).limit(1);
+          if (linkedGoal && (linkedGoal as any).healthTarget === 'Injury Recovery' && (linkedGoal as any).injuryBodyPart) {
+            effectiveInjuries = [{
+              bodyPart: (linkedGoal as any).injuryBodyPart,
+              status: (linkedGoal as any).injurySeverity || 'recovering',
+              notes: (linkedGoal as any).injuryNotes || null,
+              injuryDate: (linkedGoal as any).injuryDate || null,
+            }];
+            console.log(`[Training Plan] Auto-injected injury from Injury Recovery goal ${goalId}: ${(linkedGoal as any).injuryBodyPart}`);
+          }
+        } catch (goalErr) {
+          console.warn(`[Training Plan] Could not fetch goal ${goalId} for injury auto-injection:`, goalErr);
+        }
+      }
+
       const planId = await generateTrainingPlan(
         userId,
         goalType,
@@ -11143,7 +11174,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         regularSessions,
         firstSessionStart,
         durationWeeks,
-        Array.isArray(injuries) ? injuries : [],
+        effectiveInjuries,
         userTimezone || null,
         goalId || null,
         // Pass demographics as overrides — used when user's DB profile is missing values

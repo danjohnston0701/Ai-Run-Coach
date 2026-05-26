@@ -8,6 +8,7 @@ import android.os.Build
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
@@ -833,8 +834,65 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         navController.navigate("training_plan/$planId") {
                             popUpTo("generate_plan") { inclusive = true }
                         }
+                    },
+                    onCreateGoalFirst = {
+                        // Navigate to CreateGoalScreen in "returnToPlan" mode.
+                        // After goal creation the screen will navigate back to generate_plan
+                        // with the goal pre-filled via GoalPlanHolder.
+                        navController.navigate("create_goal_for_plan")
                     }
                 )
+            }
+
+            composable("create_goal_for_plan") {
+                CreateGoalScreen(
+                    onDismiss = { navController.popBackStack() },
+                    onCreateGoal = { navController.popBackStack() },
+                    onGoalCreatedForPlan = { goalId ->
+                        // Goal was created — route through a loader that sets GoalPlanHolder
+                        // then forwards into generate_plan with the goal pre-filled.
+                        navController.navigate("goals_select_for_plan/$goalId") {
+                            popUpTo("create_goal_for_plan") { inclusive = true }
+                        }
+                    }
+                )
+            }
+
+            composable("goals_select_for_plan/{goalId}") { backStackEntry ->
+                val goalId = backStackEntry.arguments?.getString("goalId") ?: run {
+                    navController.popBackStack()
+                    return@composable
+                }
+                val goalsVm: live.airuncoach.airuncoach.viewmodel.GoalsViewModel =
+                    androidx.lifecycle.viewmodel.compose.viewModel(
+                        factory = live.airuncoach.airuncoach.viewmodel.GoalsViewModelFactory(
+                            androidx.compose.ui.platform.LocalContext.current
+                        )
+                    )
+                val goalsState by goalsVm.goalsState.collectAsState()
+
+                LaunchedEffect(goalId) { goalsVm.loadGoals(forceRefresh = true) }
+
+                LaunchedEffect(goalsState) {
+                    if (goalsState is live.airuncoach.airuncoach.viewmodel.GoalsUiState.Success) {
+                        val allGoals = (goalsState as live.airuncoach.airuncoach.viewmodel.GoalsUiState.Success).goals
+                        val match = allGoals.firstOrNull { it.id == goalId }
+                        if (match != null) {
+                            live.airuncoach.airuncoach.util.GoalPlanHolder.prefilledGoal = match
+                        }
+                        navController.navigate("generate_plan") {
+                            popUpTo("goals_select_for_plan/$goalId") { inclusive = true }
+                        }
+                    }
+                }
+
+                // Brief loading screen while we wait
+                Box(
+                    modifier = Modifier.fillMaxSize().background(Colors.backgroundRoot),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = Colors.primary)
+                }
             }
             composable("training_plan/{planId}") { backStackEntry ->
                 val planId = backStackEntry.arguments?.getString("planId") ?: return@composable

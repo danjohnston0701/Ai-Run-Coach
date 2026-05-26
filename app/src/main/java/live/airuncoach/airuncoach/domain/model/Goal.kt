@@ -18,9 +18,14 @@ data class Goal(
     val timeTargetSeconds: Int? = null, // Total seconds for time target
     
     // Health & Wellbeing fields
-    val healthTarget: String? = null, // "Improve fitness", "Improve endurance", etc.
+    val healthTarget: String? = null, // "Improve fitness", "Improve endurance", "Injury Recovery", etc.
     val targetWeightKg: Double? = null, // Target weight for "Lose weight" goal
     val startingWeightKg: Double? = null, // Starting weight for "Lose weight" goal
+    // Injury Recovery fields (populated when healthTarget = "Injury Recovery")
+    val injuryBodyPart: String? = null,  // knee, ankle, hip, shin, foot, back, shoulder, other
+    val injuryDate: String? = null,      // ISO date e.g. "2026-05-08"
+    val injurySeverity: String? = null,  // active, recovering, chronic
+    val injuryNotes: String? = null,     // free-text notes about the injury
     
     // Consistency fields
     val weeklyRunTarget: Int? = null, // Number of runs per week

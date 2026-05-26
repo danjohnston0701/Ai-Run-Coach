@@ -20,7 +20,12 @@ data class CreateGoalRequest(
     val healthTarget: String? = null,
     val targetWeightKg: Double? = null,
     val startingWeightKg: Double? = null,
-    
+    // Injury Recovery fields (populated when healthTarget = "Injury Recovery")
+    val injuryBodyPart: String? = null,
+    val injuryDate: String? = null,
+    val injurySeverity: String? = null,
+    val injuryNotes: String? = null,
+
     // Consistency fields
     val weeklyRunTarget: Int? = null
 )

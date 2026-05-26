@@ -50,7 +50,9 @@ import live.airuncoach.airuncoach.viewmodel.GeneratePlanViewModel
 fun GeneratePlanScreen(
     prefilledGoal: Goal? = null,
     onNavigateBack: () -> Unit,
-    onPlanCreated: (String) -> Unit  // planId
+    onPlanCreated: (String) -> Unit,  // planId
+    /** Called when user taps "Create a goal first" — navigates to CreateGoalScreen in returnToPlan mode */
+    onCreateGoalFirst: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val consentManager = remember { AiConsentManager(context) }
@@ -135,7 +137,7 @@ fun GeneratePlanScreen(
                         .verticalScroll(rememberScrollState())
                         .padding(Spacing.lg)
                 ) {
-                    // Header — linked goal banner
+                    // Header — linked goal banner (shown when goal is pre-filled)
                     prefilledGoal?.let { goal ->
                         Card(
                             colors = CardDefaults.cardColors(containerColor = Colors.primary.copy(alpha = 0.12f)),
@@ -153,6 +155,14 @@ fun GeneratePlanScreen(
                                 }
                             }
                         }
+                        Spacer(modifier = Modifier.height(Spacing.lg))
+                    }
+
+                    // Goal-link nudge — shown when no goal is pre-filled
+                    if (prefilledGoal == null) {
+                        GoalLinkNudge(
+                            onCreateGoalFirst = onCreateGoalFirst
+                        )
                         Spacer(modifier = Modifier.height(Spacing.lg))
                     }
 
@@ -1559,5 +1569,62 @@ fun AddRegularSessionDialog(
             }
         }
     )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Goal Link Nudge — shown at the top of GeneratePlanScreen when no goal is linked
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun GoalLinkNudge(
+    onCreateGoalFirst: () -> Unit
+) {
+    var dismissed by remember { mutableStateOf(false) }
+    if (dismissed) return
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Colors.primary.copy(alpha = 0.25f))
+    ) {
+        Column(modifier = Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Icon(painterResource(R.drawable.icon_target_vector), null, tint = Colors.primary, modifier = Modifier.size(20.dp))
+                Text(
+                    "Link this plan to a goal?",
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.textPrimary
+                )
+            }
+            Text(
+                "Goals help the AI understand your motivation and give you a single place to track everything — injuries, progress, target times, and your plan — all together.",
+                style = AppTextStyles.small,
+                color = Colors.textSecondary,
+                lineHeight = 17.sp
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                Button(
+                    onClick = onCreateGoalFirst,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary, contentColor = Colors.buttonText),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
+                ) {
+                    Text("Create a goal first", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold))
+                }
+                OutlinedButton(
+                    onClick = { dismissed = true },
+                    modifier = Modifier.weight(1f),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Colors.backgroundTertiary)
+                ) {
+                    Text("Continue without goal", style = AppTextStyles.small, color = Colors.textMuted)
+                }
+            }
+        }
+    }
 }
 
