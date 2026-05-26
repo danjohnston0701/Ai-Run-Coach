@@ -36,6 +36,7 @@ fun GoalsScreen(
     onNavigateBack: (() -> Unit)? = null,
     onGeneratePlanForGoal: ((Goal) -> Unit)? = null,
     onNavigateToRunSummary: ((String) -> Unit)? = null,
+    isActiveDestination: Boolean = true,  // true when this route is the current nav destination
     viewModel: GoalsViewModel = viewModel(factory = GoalsViewModelFactory(LocalContext.current))
 ) {
     val goalsState by viewModel.goalsState.collectAsState()
@@ -49,16 +50,13 @@ fun GoalsScreen(
     var showCelebrationDialog by remember { mutableStateOf<Goal?>(null) }
     var celebrationRunDistance by remember { mutableStateOf("") }
 
-    // Refresh goals every time this screen becomes visible (e.g. after creating/deleting a goal)
-    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                viewModel.loadGoals()
-            }
+    // Reload the goals list whenever this screen becomes the active destination.
+    // This fires every time isActiveDestination becomes true (i.e. when we pop back from 
+    // create_goal or any child screen), so the user sees fresh data after creating a goal.
+    LaunchedEffect(isActiveDestination) {
+        if (isActiveDestination) {
+            viewModel.loadGoals(forceRefresh = true)
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     LaunchedEffect(showGoalDetails?.id) {
