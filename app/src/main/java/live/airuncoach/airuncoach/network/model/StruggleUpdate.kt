@@ -26,5 +26,8 @@ data class StruggleUpdate(
     @SerializedName("session_coaching_tone") val sessionCoachingTone: String? = null,
     @SerializedName("session_coaching_intensity") val sessionCoachingIntensity: String? = null,
     @SerializedName("session_structure") val sessionStructure: SessionStructure? = null,
-    @SerializedName("expected_metrics_filters") val expectedMetricsFilters: InsightFilters? = null
+    @SerializedName("expected_metrics_filters") val expectedMetricsFilters: InsightFilters? = null,
+    // Coaching plan session type — tells the AI this is a training run, not a race/goal attempt.
+    // Reframes the coaching message around the training objective rather than race goal pace.
+    @SerializedName("workoutType") val workoutType: String? = null
 )

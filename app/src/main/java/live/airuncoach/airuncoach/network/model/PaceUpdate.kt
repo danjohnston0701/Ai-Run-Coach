@@ -43,6 +43,9 @@ data class PaceUpdate(
     @SerializedName("linked_workout_id") val linkedWorkoutId: String? = null,
     @SerializedName("session_coaching_tone") val sessionCoachingTone: String? = null,
     @SerializedName("current_session_phase") val currentSessionPhase: String? = null,
+    // Coaching plan session type — when set, suppresses race-goal pace comparison and uses
+    // training-session framing instead ("building aerobic base", "tempo effort", etc.)
+    @SerializedName("workoutType") val workoutType: String? = null,
     // ========== Route Memory Engine ==========
     @SerializedName("routeIntelligence") val routeIntelligence: RouteIntelligenceContext? = null,
     @SerializedName("lastKmSplitSeconds") val lastKmSplitSeconds: Int? = null

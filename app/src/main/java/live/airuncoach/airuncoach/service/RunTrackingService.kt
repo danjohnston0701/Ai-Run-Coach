@@ -2281,6 +2281,12 @@ class RunTrackingService : Service(), SensorEventListener {
                 lastBaselineUpdateDistance = totalDistance
             }
         }
+
+        // Suppress struggle detection for interval and hill repeat sessions.
+        // During these sessions, planned recovery jogs/walks between reps cause large pace drops
+        // that are completely intentional — firing struggle coaching here would be incorrect and
+        // confusing ("you're struggling" when the runner is following the plan perfectly).
+        if (planWorkoutType == "intervals" || planWorkoutType == "hill_repeats") return
         
         if (baselinePace > 0f) {
             val paceDropPercent = (smoothedPaceSeconds - baselinePace) / baselinePace * 100
@@ -3819,7 +3825,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     sessionCoachingTone = sessionCoachingTone,
                     sessionCoachingIntensity = sessionCoachingIntensity,
                     sessionStructure = sessionInstructions?.sessionStructure,
-                    expectedMetricsFilters = sessionInstructions?.insightFilters
+                    expectedMetricsFilters = sessionInstructions?.insightFilters,
+                    workoutType = planWorkoutType  // Tells AI this is a training session (not a race)
                 )
                 val response = apiService.getStruggleCoaching(update)
                 // Note: Struggle point already added above before launching coroutine
@@ -3891,6 +3898,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     linkedWorkoutId = planWorkoutId,
                     sessionCoachingTone = sessionCoachingTone,
                     currentSessionPhase = null,  // Phase detection can be added later if needed
+                    workoutType = planWorkoutType,  // Tells AI this is a training session (not a race)
                     // ========== Route Memory Engine ==========
                     routeIntelligence = routeIntelligenceContext,
                     lastKmSplitSeconds = (split.time / 1000).toInt()

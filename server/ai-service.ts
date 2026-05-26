@@ -473,8 +473,12 @@ export async function generatePaceUpdate(params: {
   routeIntelligence?: RouteIntelligenceContext;
   // Seconds taken for the most recently completed km (for split delta comparison)
   lastKmSplitSeconds?: number;
+  // Training plan session type — when set, suppresses race-goal pace comparison and reframes
+  // coaching around the training objective (easy, tempo, long_run, recovery, etc.)
+  workoutType?: string;
 }): Promise<string> {
   const { distance, targetDistance, currentPace, elapsedTime, coachName, coachTone, isSplit, splitKm, splitPace, currentGrade, totalElevationGain, isOnHill, kmSplits, hasRoute, fitnessLevel, runnerName, runHistory } = params;
+  const workoutType = (params as any).workoutType as string | undefined;
   const accentRule = accentDirective((params as any).coachAccent);
   
   const progress = Math.round((distance / targetDistance) * 100);
@@ -534,8 +538,18 @@ CRITICAL: No GPS elevation data available for this run. Do NOT mention hills, te
   const spokenCurrentPace = formatPaceForTTS(currentPace);  // overall average pace
   const spokenSplitPace = formatPaceForTTS(splitPace);       // this km's split pace
   
+  // Training session context — builds a plan-aware framing block for the AI
+  // When workoutType is set this is a coaching plan session, NOT a race/goal attempt.
+  // We suppress the race-goal pace comparison (targetPace is the user's long-term race goal,
+  // not the session's prescribed pace) and frame the split around the training objective.
+  const isTrainingSession = !!workoutType;
+  const trainingSessionContext = isTrainingSession
+    ? `\nTraining Session Context: This km split is part of a SCHEDULED TRAINING SESSION (${workoutType!.replace(/_/g, ' ')} workout) in the runner's coaching plan — NOT a race or goal attempt. Do NOT compare their pace to a race target or imply they are "behind" or "ahead of target". Instead, frame the coaching around what this session is building (e.g. aerobic base, lactate threshold, endurance). Comment on split consistency and whether the effort level feels appropriate for a ${workoutType!.replace(/_/g, ' ')} session.`
+    : '';
+
   // Compute target pace comparison for split coaching (so AI can tell runner if they're on track)
-  const targetPaceParam = (params as any).targetPace as string | undefined;
+  // Suppress for training sessions — targetPace is the race goal, not the session's prescribed pace.
+  const targetPaceParam = isTrainingSession ? undefined : (params as any).targetPace as string | undefined;
   const spokenTargetPace = formatPaceForTTS(targetPaceParam);
   let splitTargetVerdict = '';
   if (targetPaceParam && splitPace) {
@@ -578,12 +592,13 @@ The runner just completed kilometer ${splitKm} with a split pace of ${spokenSpli
 - Overall average pace: ${spokenCurrentPace}
 - This split pace: ${spokenSplitPace}${targetPaceParam ? `\n- Target pace: ${spokenTargetPace}` : ''}
 ${splitTargetVerdict ? `\nPACE ASSESSMENT: ${splitTargetVerdict}` : ''}
+${trainingSessionContext}
 ${routeCtxBlock ? `\n${routeCtxBlock}` : ''}
 ${terrainContext}${paceTrend}
 ${noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${varietySeed}
-Give a brief (1-2 sentences) split update. ${routeCtxBlock ? 'PRIORITISE the route memory data — mention the split delta vs last run or average (faster/slower by X seconds) as this is the most impactful insight. If a terrain alert is present, mention that first. ' : ''}You MUST mention their SPLIT pace (${spokenSplitPace}) and${splitTargetVerdict ? ' whether they are on track for their target pace (CRITICAL — do NOT praise a slow split if they are behind target).' : ' at least one other data point (progress, time, or pace trend).'} ${hasRoute === true && isOnHill ? 'Acknowledge the hill effort. ' : ''}${paceTrend ? 'Comment on their pace trend.' : ''}`;
+Give a brief (1-2 sentences) split update. ${routeCtxBlock ? 'PRIORITISE the route memory data — mention the split delta vs last run or average (faster/slower by X seconds) as this is the most impactful insight. If a terrain alert is present, mention that first. ' : ''}You MUST mention their SPLIT pace (${spokenSplitPace}) and${splitTargetVerdict ? ' whether they are on track for their target pace (CRITICAL — do NOT praise a slow split if they are behind target).' : isTrainingSession ? ` how this split relates to the ${workoutType!.replace(/_/g, ' ')} session goal.` : ' at least one other data point (progress, time, or pace trend).'} ${hasRoute === true && isOnHill ? 'Acknowledge the hill effort. ' : ''}${paceTrend ? 'Comment on their pace trend.' : ''}`;
   } else {
     prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
 ${runnerContext ? `\nRunner context: ${runnerContext}` : ''}
@@ -1309,8 +1324,12 @@ export async function generateStruggleCoaching(params: {
   // Coaching plan context
   targetHeartRateZone?: number; // 1-5; if Zone 1-2, struggle coaching is not relevant
   runnerProfile?: string | null;
+  // Training plan session type — when set, reframes struggle coaching around training objective
+  // (e.g. "easy run fatigue is normal", "tempo effort naturally gets tough here")
+  workoutType?: string;
 }): Promise<string> {
   const { distance, elapsedTime, currentPace, baselinePace, paceDropPercent, currentGrade, totalElevationGain, coachName, coachTone, coachAccent, hasRoute, fitnessLevel, runnerName, runHistory, targetHeartRateZone } = params;
+  const workoutTypeStruggle = (params as any).workoutType as string | undefined;
   
   // For Zone 1-2 runs (aerobic/recovery focus), pace drops are intentional to build aerobic base
   if (targetHeartRateZone && targetHeartRateZone <= 2) {
@@ -1369,6 +1388,12 @@ CRITICAL: No GPS elevation data for this run. Do NOT mention hills, terrain, ele
     }
   }
 
+  // Training session reframe — when this is a coaching plan workout, give context-aware
+  // messaging that references the training goal rather than implying race-day failure
+  const trainingStruggleContext = workoutTypeStruggle
+    ? `\nTraining Session Context: This is a SCHEDULED TRAINING SESSION (${workoutTypeStruggle.replace(/_/g, ' ')} workout) — NOT a race. A pace drop here may be normal training fatigue. Frame your message around the training purpose: acknowledge the effort but remind them what this session is building. Do NOT imply they are failing a race or time goal.`
+    : '';
+
   const prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
 ${struggleRunnerContext ? `\nRunner context: ${struggleRunnerContext}` : ''}
 The runner is struggling. Their pace has dropped ${Math.round(paceDropPercent)}% from their baseline.
@@ -1376,6 +1401,7 @@ The runner is struggling. Their pace has dropped ${Math.round(paceDropPercent)}%
 - Distance: ${distance.toFixed(2)}km
 - Time: ${timeMin} minutes
 ${terrainContext}
+${trainingStruggleContext}
 ${noTerrainRule}
 ${PACE_FORMAT_RULE}
 Give a brief (1-2 sentences) supportive message tailored to this runner's fitness level and history. You MUST cite at least one specific number. Acknowledge their struggle, but encourage them to push through or adjust their strategy based on what you know about their recent form.`;
