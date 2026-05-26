@@ -18,10 +18,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import live.airuncoach.airuncoach.R
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.ui.theme.*
@@ -60,6 +63,23 @@ fun ConnectedDevicesScreen(
     val stravaAthleteName by viewModel.stravaAthleteName.collectAsState()
     val stravaLoading by viewModel.stravaLoading.collectAsState()
     val stravaImportStatus by viewModel.stravaImportStatus.collectAsState()
+
+    // Refresh both Garmin and Strava status whenever this screen is foregrounded.
+    // This covers the OAuth callback case: Chrome may block airuncoach:// redirects, so the
+    // deep link → onNewIntent path isn't guaranteed. The lifecycle observer acts as a
+    // belt-and-suspenders fallback — when the user returns from the browser, the status is
+    // always re-checked regardless of whether the deep link fired.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.checkStravaConnection()
+                viewModel.refreshGarminStatus()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     val comingSoonDevices = remember {
         listOf(

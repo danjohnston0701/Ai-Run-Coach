@@ -22,6 +22,71 @@ import {
 
 const router = express.Router();
 
+// ── App deep-link redirect helper ─────────────────────────────────────────────
+//
+// Chrome on Android blocks bare `airuncoach://` redirects that arrive via an
+// HTTP Location header (security policy since Chrome 25).  To reliably open the
+// app we serve a tiny HTML page that fires two attempts:
+//
+//   1. intent:// URI  — Chrome's native "open in app" mechanism, works in any
+//      Chrome version and respects the registered intent-filter in the manifest.
+//
+//   2. window.location fallback  — fires 100 ms later for non-Chrome browsers
+//      (Firefox, Samsung Internet, in-app WebViews) which support the plain
+//      airuncoach:// scheme but don't understand intent://.
+//
+// The app's ON_RESUME lifecycle observer in ConnectedDevicesScreen acts as a
+// second safety net: even if both redirects fail (e.g. split-screen edge cases),
+// the status is refreshed as soon as the user switches back to the app.
+//
+function sendAppRedirect(res: any, success: boolean, error?: string): void {
+  const params = success
+    ? 'success=true'
+    : `success=false&error=${error ?? 'unknown'}`;
+
+  // intent:// URI — understood by Chrome on Android
+  const intentUri = `intent://strava/auth-complete?${params}#Intent;scheme=airuncoach;package=live.airuncoach.airuncoach;S.browser_fallback_url=https%3A%2F%2Fairuncoach.live;end`;
+
+  // Plain custom-scheme URI — works in most non-Chrome browsers
+  const customUri = `airuncoach://strava/auth-complete?${params}`;
+
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${success ? 'Connected!' : 'Connection failed'} — Ai Run Coach</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; display: flex; justify-content: center;
+           align-items: center; min-height: 100vh; margin: 0; background: #0a0a0a; color: #fff; }
+    .card { text-align: center; padding: 2rem; }
+    .icon { font-size: 3rem; margin-bottom: 1rem; }
+    p { color: #aaa; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">${success ? '✅' : '❌'}</div>
+    <h2>${success ? 'Strava connected!' : 'Connection failed'}</h2>
+    <p>Returning to Ai Run Coach…</p>
+  </div>
+  <script>
+    // Chrome on Android: use intent:// scheme
+    var ua = navigator.userAgent;
+    if (/android/i.test(ua) && /chrome/i.test(ua)) {
+      window.location.href = '${intentUri}';
+    } else {
+      window.location.href = '${customUri}';
+    }
+    // Fallback: if the page is still visible after 1.5s the redirect failed
+    setTimeout(function() {
+      window.location.href = '${customUri}';
+    }, 1500);
+  </script>
+</body>
+</html>`);
+}
+
 /**
  * POST /api/strava/auth/authorize - Initiate OAuth flow
  * Generates auth URL and stores state in database
@@ -69,18 +134,12 @@ router.get('/strava/callback', async (req: Request, res: Response) => {
 
   // Handle user denial
   if (error) {
-    return res.redirect(
-      `airuncoach://strava/auth-complete?success=false&error=${encodeURIComponent(
-        error_description || error
-      )}`
-    );
+    return sendAppRedirect(res, false, encodeURIComponent(String(error_description || error)));
   }
 
   // Validate required parameters
   if (!code || !state) {
-    return res.redirect(
-      'airuncoach://strava/auth-complete?success=false&error=missing_parameters'
-    );
+    return sendAppRedirect(res, false, 'missing_parameters');
   }
 
   try {
@@ -153,15 +212,14 @@ router.get('/strava/callback', async (req: Request, res: Response) => {
       .delete(oauthStateStore)
       .where(eq(oauthStateStore.state, state as string));
 
-    // Redirect to app with success
-    res.redirect('airuncoach://strava/auth-complete?success=true');
+    // Redirect to app with success.
+    // Chrome on Android blocks bare `airuncoach://` redirects from server Location headers.
+    // Serve an HTML page that uses the intent:// scheme (Chrome's way of launching apps),
+    // with a fallback to the standard custom-scheme URI for other browsers.
+    sendAppRedirect(res, true);
   } catch (error: any) {
     console.error('[Strava Callback] Error:', error.message);
-    res.redirect(
-      `airuncoach://strava/auth-complete?success=false&error=${encodeURIComponent(
-        error.message
-      )}`
-    );
+    sendAppRedirect(res, false, encodeURIComponent(error.message));
   }
 });
 
