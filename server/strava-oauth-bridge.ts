@@ -337,9 +337,12 @@ router.post('/api/strava/import-history', authMiddleware, async (req: Authentica
       page++;
     }
 
-    // Filter to runs only (Strava type "Run" or sport_type "Run")
+    // Filter to running activities.
+    // The Strava API docs note that `type` is deprecated in favour of `sport_type`.
+    // Running sport_types: Run, TrailRun, VirtualRun.
+    const RUN_SPORT_TYPES = new Set(['Run', 'TrailRun', 'VirtualRun']);
     const runActivities = allActivities.filter(
-      a => a.type === 'Run' || a.sport_type === 'Run'
+      a => RUN_SPORT_TYPES.has(a.sport_type) || RUN_SPORT_TYPES.has(a.type)
     );
 
     console.log(`[Strava Import] Found ${runActivities.length} runs out of ${allActivities.length} activities for user ${userId}`);
@@ -379,6 +382,33 @@ router.post('/api/strava/import-history', authMiddleware, async (req: Authentica
         ? new Date(activity.start_date)
         : new Date();
 
+      // Decode summary_polyline into gpsTrack [{lat, lng}] points for route map display.
+      // SummaryActivity from GET /athlete/activities includes map.summary_polyline (encoded polyline).
+      let gpsTrack: { lat: number; lng: number }[] | undefined;
+      if (activity.map?.summary_polyline) {
+        try {
+          const polylineCodec = await import('@mapbox/polyline');
+          const decoded = polylineCodec.default.decode(activity.map.summary_polyline);
+          gpsTrack = decoded.map(([lat, lng]: [number, number]) => ({ lat, lng }));
+        } catch (e) {
+          // Non-fatal — just means no route map for this activity
+        }
+      }
+
+      // Map splits_metric to our kmSplits format (only present on DetailedActivity,
+      // but some SummaryActivity responses include it; store if available).
+      const kmSplits = Array.isArray(activity.splits_metric)
+        ? activity.splits_metric.map((s: any, i: number) => ({
+            km: i + 1,
+            distance: (s.distance ?? 0) / 1000,
+            duration: s.moving_time ?? s.elapsed_time ?? 0,
+            pace: s.average_speed > 0
+              ? `${Math.floor(1000 / s.average_speed / 60)}:${String(Math.round((1000 / s.average_speed) % 60)).padStart(2, '0')}`
+              : null,
+            elevation: s.elevation_difference ?? null,
+          }))
+        : undefined;
+
       await db.insert(runs).values({
         userId,
         externalId: stravaId,
@@ -401,6 +431,8 @@ router.post('/api/strava/import-history', authMiddleware, async (req: Authentica
         maxSpeed: activity.max_speed ?? undefined,
         completedAt: startDate,
         runDate: startDate.toISOString().split('T')[0],
+        gpsTrack: gpsTrack ?? undefined,
+        kmSplits: kmSplits ?? undefined,
       });
 
       imported++;
@@ -577,9 +609,10 @@ async function processStravaWebhookEvent(event: any): Promise<void> {
     );
     const activity = activityRes.data;
 
-    // Only import Run-type activities
-    if (activity.type !== 'Run' && activity.sport_type !== 'Run') {
-      console.log(`[Strava Webhook] Activity ${object_id} is ${activity.type} — not a run, skipping`);
+    // Only import running activities (Run, TrailRun, VirtualRun)
+    const RUN_SPORT_TYPES_WH = new Set(['Run', 'TrailRun', 'VirtualRun']);
+    if (!RUN_SPORT_TYPES_WH.has(activity.sport_type) && !RUN_SPORT_TYPES_WH.has(activity.type)) {
+      console.log(`[Strava Webhook] Activity ${object_id} is ${activity.sport_type ?? activity.type} — not a run, skipping`);
       return;
     }
 
@@ -590,6 +623,30 @@ async function processStravaWebhookEvent(event: any): Promise<void> {
       ? `${Math.floor(avgPaceSecPerKm / 60)}:${String(avgPaceSecPerKm % 60).padStart(2, '0')}`
       : null;
     const startDate = activity.start_date ? new Date(activity.start_date) : new Date();
+
+    // Decode full polyline from DetailedActivity → gpsTrack for route map display
+    let gpsTrackWh: { lat: number; lng: number }[] | undefined;
+    const polylineStr = activity.map?.polyline || activity.map?.summary_polyline;
+    if (polylineStr) {
+      try {
+        const polylineCodec = await import('@mapbox/polyline');
+        const decoded = polylineCodec.default.decode(polylineStr);
+        gpsTrackWh = decoded.map(([lat, lng]: [number, number]) => ({ lat, lng }));
+      } catch (e) { /* non-fatal */ }
+    }
+
+    // Map splits_metric → kmSplits (DetailedActivity always includes this for runs)
+    const kmSplitsWh = Array.isArray(activity.splits_metric)
+      ? activity.splits_metric.map((s: any, i: number) => ({
+          km: i + 1,
+          distance: (s.distance ?? 0) / 1000,
+          duration: s.moving_time ?? s.elapsed_time ?? 0,
+          pace: s.average_speed > 0
+            ? `${Math.floor(1000 / s.average_speed / 60)}:${String(Math.round((1000 / s.average_speed) % 60)).padStart(2, '0')}`
+            : null,
+          elevation: s.elevation_difference ?? null,
+        }))
+      : undefined;
 
     await db.insert(runs).values({
       userId,
@@ -613,6 +670,8 @@ async function processStravaWebhookEvent(event: any): Promise<void> {
       maxSpeed:      activity.max_speed     ?? undefined,
       completedAt:   startDate,
       runDate:       startDate.toISOString().split('T')[0],
+      gpsTrack:      gpsTrackWh ?? undefined,
+      kmSplits:      kmSplitsWh ?? undefined,
     });
 
     // Update lastSyncAt
