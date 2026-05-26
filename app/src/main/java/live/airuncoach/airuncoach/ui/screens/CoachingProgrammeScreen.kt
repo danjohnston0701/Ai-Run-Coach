@@ -1069,31 +1069,42 @@ fun WorkoutRow(workout: WorkoutDetails, onClick: () -> Unit) {
     val dayName = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat").getOrElse(((workout.dayOfWeek % 7) + 7) % 7) { "Day" }
     Row(
         modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.Top
     ) {
-        Text(dayName, style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.textMuted, modifier = Modifier.width(36.dp))
+        Text(dayName, style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.textMuted, modifier = Modifier.width(36.dp).padding(top = 2.dp))
         Spacer(modifier = Modifier.width(Spacing.sm))
-        Box(modifier = Modifier.size(8.dp).background(workoutTypeColor(workout.workoutType), RoundedCornerShape(4.dp)))
+        Box(modifier = Modifier.size(8.dp).background(workoutTypeColor(workout.workoutType), RoundedCornerShape(4.dp)).padding(top = 4.dp))
         Spacer(modifier = Modifier.width(Spacing.sm))
-        Text(
-            workout.description ?: workoutTypeLabel(workout.workoutType),
-            style = AppTextStyles.small,
-            color = Colors.textPrimary,
-            modifier = Modifier.weight(1f)
-        )
-        // Distance + pace stacked on the right
-        Column(horizontalAlignment = Alignment.End) {
-            workout.distance?.let {
-                Text("${it}km", style = AppTextStyles.small, color = Colors.textMuted)
-            }
-            workout.targetPace?.let { raw ->
-                val paceValue = raw.replace("/km", "").trim()
-                Text("$paceValue/km", style = AppTextStyles.small.copy(fontSize = 10.sp), color = Colors.textMuted)
+        
+        // Main content column: description on top, distance/pace below
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                workout.description ?: workoutTypeLabel(workout.workoutType),
+                style = AppTextStyles.small,
+                color = Colors.textPrimary
+            )
+            // Distance + pace instructions below the description
+            if (workout.distance != null || workout.targetPace != null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    workout.distance?.let {
+                        Text("${it}km", style = AppTextStyles.small, color = Colors.textMuted)
+                    }
+                    workout.targetPace?.let { raw ->
+                        val paceValue = raw.replace("/km", "").trim()
+                        Text("$paceValue/km", style = AppTextStyles.small.copy(fontSize = 10.sp), color = Colors.textMuted)
+                    }
+                }
             }
         }
+        
+        // Completion checkmark on the right
         if (workout.isCompleted) {
             Spacer(modifier = Modifier.width(Spacing.sm))
-            Icon(painterResource(R.drawable.icon_check_vector), null, tint = Colors.success, modifier = Modifier.size(14.dp))
+            Icon(painterResource(R.drawable.icon_check_vector), null, tint = Colors.success, modifier = Modifier.size(14.dp).padding(top = 2.dp))
         }
     }
 }
