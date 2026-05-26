@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
@@ -22,6 +23,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import java.util.Locale
+import org.json.JSONObject
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.HeartRateZones
 import live.airuncoach.airuncoach.domain.model.Injury
@@ -1586,6 +1588,104 @@ fun AiPlanSummary(details: TrainingPlanDetails) {
                 style = AppTextStyles.small.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic),
                 color = Colors.primary
             )
+
+            // ── Safety Disclaimer (only shown for injury-modified plans) ──────────
+            val safetyJson = details.plan.safetyDisclaimer
+            if (!safetyJson.isNullOrBlank()) {
+                val parsed = remember(safetyJson) {
+                    try {
+                        val obj = JSONObject(safetyJson)
+                        val checks = buildList<String> {
+                            obj.optJSONArray("prerequisiteChecks")?.let { arr ->
+                                for (i in 0 until arr.length()) add(arr.getString(i))
+                            }
+                        }
+                        val stops = buildList<String> {
+                            obj.optJSONArray("stopCriteria")?.let { arr ->
+                                for (i in 0 until arr.length()) add(arr.getString(i))
+                            }
+                        }
+                        Triple(obj.optString("disclaimer", ""), checks, stops)
+                    } catch (_: Exception) { null }
+                }
+                if (parsed != null) {
+                    val (disclaimerText, prerequisites, stopCriteria) = parsed
+
+                    Spacer(modifier = Modifier.height(Spacing.md))
+                    HorizontalDivider(color = Colors.backgroundTertiary)
+                    Spacer(modifier = Modifier.height(Spacing.md))
+
+                    // Header row
+                    val warningAmber = Color(0xFFF59E0B)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("⚠️", fontSize = 16.sp)
+                        Spacer(modifier = Modifier.width(Spacing.sm))
+                        Text(
+                            "Injury Modification — Important",
+                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                            color = warningAmber
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+
+                    // Disclaimer text
+                    if (disclaimerText.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = warningAmber.copy(alpha = 0.08f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                disclaimerText,
+                                style = AppTextStyles.small,
+                                color = Colors.textSecondary,
+                                lineHeight = 17.sp,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    }
+
+                    // Before you start checklist
+                    if (prerequisites.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(Spacing.sm))
+                        Text(
+                            "Before You Start",
+                            style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.textPrimary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        prerequisites.forEach { check ->
+                            Row(
+                                modifier = Modifier.padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Text("✓ ", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = warningAmber)
+                                Text(check, style = AppTextStyles.small, color = Colors.textSecondary, lineHeight = 16.sp)
+                            }
+                        }
+                    }
+
+                    // Stop criteria
+                    if (stopCriteria.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(Spacing.sm))
+                        Text(
+                            "Stop Immediately If",
+                            style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.textPrimary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        stopCriteria.forEach { criterion ->
+                            Row(
+                                modifier = Modifier.padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Text("✕ ", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Color(0xFFEF4444))
+                                Text(criterion, style = AppTextStyles.small, color = Colors.textSecondary, lineHeight = 16.sp)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

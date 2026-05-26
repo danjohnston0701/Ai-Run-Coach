@@ -753,6 +753,13 @@ ${targetTime ? (() => {
   const goalPaceStr = `${Math.floor(goalPaceSecs / 60)}:${String(goalPaceSecs % 60).padStart(2, "0")}/km`;
   const currentPaceStr = avgPaceStr || "not yet established";
   const currentTimeStr = avgTimeAtGoalDistanceStr || "unknown";
+  const hasActiveInjury = injuries && injuries.some(i =>
+    ['active','recovering','ACTIVE','RECOVERING','chronic','CHRONIC'].includes(i.status)
+  );
+  if (hasActiveInjury) {
+    return `Target finish time: ${Math.floor(targetTime / 60)}:${String(Math.round((targetTime % 60))).padStart(2,'0')} (${goalPaceStr} goal pace) — THIS IS THE LONG-TERM TARGET ONLY.
+⚠️ Due to active/recovering injuries, DO NOT use this goal pace or historical paces to set session paces. See PACING RULES in the Health & Injury section. Use effort descriptors only.`;
+  }
   return `Target finish time: ${Math.floor(targetTime / 60)}:${String(Math.round((targetTime % 60))).padStart(2,'0')} — equivalent to a ${goalPaceStr} goal pace
 Current performance at ${targetDistance}km: ${avgTimeAtGoalDistanceSecs ? `averages ${currentTimeStr} (${currentPaceStr}/km)` : `extrapolate from average pace of ${currentPaceStr}`}
 Apply your coaching expertise to determine appropriate training paces across all session types based on this athlete's current fitness and target goal.`;
@@ -763,8 +770,19 @@ Apply your coaching expertise to determine appropriate training paces across all
 ${hasRunHistory ? `Run History (last 90 days — ${recentRuns.length} sessions):
 - Weekly volume (last 30 days): ${weeklyMileageBase.toFixed(1)}km/week
 - Sessions last 30 days: ${runsLast30.length}
-${avgPaceStr ? `- Average pace: ${avgPaceStr}/km` : ''}
-${bestPaceStr ? `- Best recent pace: ${bestPaceStr}/km` : ''}
+${(() => {
+  const hasActiveInjury = injuries && injuries.some(i =>
+    ['active','recovering','ACTIVE','RECOVERING','chronic','CHRONIC'].includes(i.status)
+  );
+  const paceLines = [
+    avgPaceStr  ? `- Average pace: ${avgPaceStr}/km` : null,
+    bestPaceStr ? `- Best recent pace: ${bestPaceStr}/km` : null,
+  ].filter(Boolean).join('\n');
+  if (!paceLines) return '';
+  return hasActiveInjury
+    ? `${paceLines}\n⚠️ NOTE: These paces are background context only — DO NOT use them to anchor session paces. See PACING RULES in Health & Injury section.`
+    : paceLines;
+})()}
 ${paceTrend ? `- Pace trend: ${paceTrend}` : ''}
 ${fitness?.ctl ? `- Chronic Training Load (CTL): ${fitness.ctl}` : ''}
 ${fitness?.status ? `- Training status: ${fitness.status}` : ''}
@@ -835,6 +853,23 @@ COACHING PRIORITY ORDER (higher priority always overrides lower):
 ${injuryLines}
 
 ${hasActiveOrRecovering ? `This athlete has active or recovering injuries. Apply conservative training modifications informed by general sports rehabilitation principles. The performance goal (${goalType.toUpperCase()} in ${targetTimeStr}) is the eventual end target — it must not drive the early weeks.
+
+━━━ PACING RULES FOR INJURY-MODIFIED PLANS ━━━━━━━━━━━━━━━━━━━━
+
+⛔ DO NOT use the athlete's historical running paces OR their target finish time to set session paces.
+   The historical pace data (avg pace, best pace, goal pace) is provided as context about their background fitness ONLY.
+   It has NO bearing on appropriate pacing during injury rehabilitation.
+
+✅ ALL pacing in this plan must be expressed as effort descriptors — not specific minute/km targets.
+   Use language like: "comfortable conversational pace", "gentle jog where you can speak in full sentences",
+   "easy shuffle — no faster than feels totally comfortable", "brisk walk", "slow easy jog (RPE 2-3/10)".
+   DO NOT write "5:50/km" or "6:30/km" or any pace target for walk/run sessions or early-stage running.
+
+   Exception: Only once the injury section explicitly states the athlete is symptom-free and cleared for
+   progression (typically week 3+ depending on injury), session descriptions may describe effort zones
+   (e.g. "easy Zone 2 effort") but still avoid specific pace targets until the athlete is clearly recovered.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 For each injury, consider these dimensions when designing each week:
 

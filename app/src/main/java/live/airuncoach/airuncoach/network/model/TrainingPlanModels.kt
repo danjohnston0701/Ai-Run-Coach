@@ -76,7 +76,10 @@ data class TrainingPlanSummary(
     @SerializedName("totalWorkouts") val totalWorkouts: Int = 0,
     // Rolling block generation fields (null = legacy plan where all weeks are already generated)
     @SerializedName("generatedThroughWeek") val generatedThroughWeek: Int? = null,
-    @SerializedName("nextBlockAt") val nextBlockAt: String? = null
+    @SerializedName("nextBlockAt") val nextBlockAt: String? = null,
+    // AI-generated safety disclaimer JSON (present when plan was created with active/recovering injuries)
+    // JSON shape: { prerequisiteChecks: string[], stopCriteria: string[], progressionGates: string[], disclaimer: string }
+    @SerializedName("safetyDisclaimer") val safetyDisclaimer: String? = null
 )
 
 /** Full plan returned from GET /api/training-plans/details/:planId */
