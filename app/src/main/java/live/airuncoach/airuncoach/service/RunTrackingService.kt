@@ -541,6 +541,13 @@ class RunTrackingService : Service(), SensorEventListener {
          */
         @Volatile
         var routeIntelligenceContext: live.airuncoach.airuncoach.network.model.RouteIntelligenceContext? = null
+
+        /** Session types where sustained consistent effort makes free-run prompts (km splits,
+         *  struggle coaching) useful and relevant. Add new continuous-effort types here.
+         *  Everything NOT in this list is treated as Tier 1 (fully managed by the coaching plan). */
+        val TIER_2_SESSION_TYPES = setOf(
+            "tempo", "long_run", "easy", "recovery", "threshold", "race_pace"
+        )
     }
 
     override fun onCreate() {
@@ -740,14 +747,6 @@ class RunTrackingService : Service(), SensorEventListener {
     //   Any new session type not in the Tier 2 allowlist is treated as Tier 1 by default, which
     //   is the safer choice — suppressing is always recoverable, accidental conflicts are not.
     //
-    companion object {
-        /** Session types where sustained consistent effort makes free-run prompts (km splits,
-         *  struggle coaching) useful and relevant. Add new continuous-effort types here. */
-        private val TIER_2_SESSION_TYPES = setOf(
-            "tempo", "long_run", "easy", "recovery", "threshold", "race_pace"
-        )
-    }
-
     /** True when this is a plan session that is NOT a continuous-effort type.
      *  All free-run prompts (km splits, struggle) are suppressed for these sessions. */
     private val isIntervalTypeSession: Boolean
