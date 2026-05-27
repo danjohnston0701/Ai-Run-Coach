@@ -450,7 +450,7 @@ function buildStatsGridSvg(
   });
 
   // ── Caption area ─────────────────────────────────────────────────────
-  const captionFontSize = Math.min(Math.round(w * 0.030), 34);
+  const captionFontSize = Math.min(Math.round(w * 0.060), 68);
   const captionText = (customCaption || "").trim();
   const captionLineY = captionAreaY + captionFontSize + 10;
 
