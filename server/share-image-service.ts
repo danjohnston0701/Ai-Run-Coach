@@ -403,27 +403,29 @@ function buildStatsGridSvg(
   const GAP_H = 16;         // horizontal gap between ring path edges (columns)
   const CAPTION_H = 130;    // height reserved for caption text below rings
   const CAPTION_GAP = 28;   // space between bottom ring edge and caption separator
-  // Stroke = r*0.15, so the visual gap must be at least strokeW + desired padding.
+  // Stroke = r*0.15. The ringGlow filter (stdDeviation=6) adds ~18px of visible halo
+  // beyond each stroke edge. GAP_V must clear: strokeW + 2*glowSpread + breathing room.
   // Solve: r*(4 + 0.15) + VISUAL_GAP_V + CAPTION_GAP + CAPTION_H ≤ availableH
-  const VISUAL_GAP_V = 28;  // minimum gap between the outer edges of ring strokes
+  const GLOW_SPREAD  = 18;  // ~3× stdDeviation of the ringGlow filter
+  const VISUAL_GAP_V = GLOW_SPREAD * 2 + 28;  // clear both halos + 28px breathing room = 64
 
   const ringAreaTop = headerY;
   const availableH = contentEndY - ringAreaTop;
 
   // Solve for r given two constraints:
-  //   Width:  2*PAD_OUTSIDE + 4*r + GAP_H  ≤ w
+  //   Width:  4*r + GAP_H  ≤ w  (rings centred, so no PAD_OUTSIDE term)
   //   Height: r*4.15 + VISUAL_GAP_V + CAPTION_GAP + CAPTION_H ≤ availableH
-  const rFromW = Math.floor((w - 2 * PAD_OUTSIDE - GAP_H) / 4);
+  const rFromW = Math.floor((w - GAP_H) / 4);
   const rFromH = Math.floor((availableH - VISUAL_GAP_V - CAPTION_GAP - CAPTION_H) / 4.15);
   const ringR  = Math.max(40, Math.min(rFromW, rFromH));
 
-  // GAP_V: edge-to-edge gap between ring circle paths — must clear both strokes
+  // GAP_V: path-edge to path-edge gap (strokes + glow both clear)
   const strokeW = Math.round(ringR * 0.15);
   const GAP_V = strokeW + VISUAL_GAP_V;
 
-  // Column centres (nearly touching the edges)
-  const col1X = PAD_OUTSIDE + ringR;
-  const col2X = w - PAD_OUTSIDE - ringR;
+  // Column centres — always centred in the image regardless of ring size
+  const col1X = Math.round(w / 2 - ringR - GAP_H / 2);
+  const col2X = Math.round(w / 2 + ringR + GAP_H / 2);
 
   // Vertically centre the ring block + caption in the available area
   const ringBlockH   = 4 * ringR + GAP_V;
