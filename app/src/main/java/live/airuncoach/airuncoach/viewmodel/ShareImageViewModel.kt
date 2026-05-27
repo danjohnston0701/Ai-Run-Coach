@@ -58,8 +58,6 @@ data class ShareEditorState(
     ),
     val showRingPicker: Boolean = false,
     val ringPickerPosition: String? = null,
-    // Caption text shown below the stat rings on the share image
-    val customCaption: String = ""
 )
 
 @HiltViewModel
@@ -414,14 +412,8 @@ class ShareImageViewModel @Inject constructor(
             backgroundOpacity = if (s.customBackgroundBase64 != null) s.backgroundOpacity else null,
             backgroundBlur = if (s.customBackgroundBase64 != null) s.backgroundBlur else null,
             customStickers = s.customStickers.ifEmpty { null },
-            ringLayout = if (template.id == "stats-grid") s.ringLayout else null,
-            customCaption = if (template.id == "stats-grid" && s.customCaption.isNotBlank()) s.customCaption else null
+            ringLayout = if (template.id == "stats-grid") s.ringLayout else null
         )
-    }
-
-    fun setCustomCaption(caption: String) {
-        _state.update { it.copy(customCaption = caption) }
-        requestPreviewDebounced()
     }
 
     private suspend fun loadPreview() {
