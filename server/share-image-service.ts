@@ -826,91 +826,143 @@ function getRouteMapHeight(w: number, h: number): number {
   return Math.round(isVertical ? contentEndY * 0.6 : contentEndY * 0.58);
 }
 
+/** Color a split relative to the run's average pace (matches app's on-pace/slightly-slower/notably-slow logic). */
+function splitPaceColor(splitPaceSeconds: number, avgPaceSeconds: number): string {
+  const ratio = splitPaceSeconds / avgPaceSeconds;
+  if (ratio <= 1.05) return C.green;   // on pace or faster  (≤5 % off avg)
+  if (ratio <= 1.15) return C.yellow;  // slightly slower     (5–15 % off avg)
+  return C.orange;                      // notably slow        (>15 % off avg)
+}
+
 function buildSplitSummarySvg(w: number, h: number, run: RunDataForImage, userName?: string): string {
-  const pad = 40;
-  const contentEndY = h - LOGO_ZONE_H;
+  const pad          = 28;
+  const cx           = w / 2;
+  const contentEndY  = h - LOGO_ZONE_H;
 
-  let headerY = 65;
-  const dateText = esc(formatDate(run.completedAt, run.timezone));
-  const heroText = `${esc(run.distance?.toFixed(2) || "0")} km`;
-  const timeText = esc(formatDuration(run.duration || 0));
+  // Dark background colours (matches the app's card style)
+  const BG     = "#0A0F1A";
+  const CARD   = "#111827";
+  const TRACK  = "rgba(255,255,255,0.08)";
+  const TXT    = "#E2E8F0";
+  const TXT2   = "#94A3B8";
+  const BDR    = "rgba(255,255,255,0.10)";
 
+  // ── Header ───────────────────────────────────────────────────────
+  let headerY = 52;
   let headerSvg = "";
   if (userName) {
-    headerSvg += `<text x="${w / 2}" y="${headerY}" font-family="${FONT}" font-size="18" font-weight="700" fill="${C.textDark}" text-anchor="middle">${esc(userName)}</text>`;
-    headerY += 22;
+    headerSvg += `<text x="${cx}" y="${headerY}" font-family="${FONT}" font-size="22" font-weight="700" fill="${TXT}" text-anchor="middle">${esc(userName)}</text>`;
+    headerY += 30;
   }
-  headerSvg += `
-    <text x="${w / 2}" y="${headerY}" font-family="${FONT}" font-size="13" fill="${C.textLight}" text-anchor="middle" letter-spacing="0.5">${dateText}</text>
-    <text x="${w / 2}" y="${headerY + 46}" font-family="${FONT}" font-size="48" font-weight="900" fill="${C.textDark}" text-anchor="middle" letter-spacing="-1">${heroText}</text>
-    <text x="${w / 2}" y="${headerY + 72}" font-family="${FONT}" font-size="20" font-weight="600" fill="${C.cyan}" text-anchor="middle">${timeText}</text>
-    <line x1="${pad}" y1="${headerY + 88}" x2="${w - pad}" y2="${headerY + 88}" stroke="url(#fadeLine)" stroke-width="1"/>
-  `;
+  headerSvg += `<text x="${cx}" y="${headerY}" font-family="${FONT}" font-size="13" fill="${TXT2}" text-anchor="middle" letter-spacing="0.5">${esc(formatDate(run.completedAt, run.timezone))}</text>`;
+  headerY += 46;
 
-  const splitsStartY = headerY + 112;
+  // Hero stats — distance left, time right
+  const distVal = run.distance?.toFixed(2) || "0";
+  const timeVal = formatDuration(run.duration || 0);
   headerSvg += `
-    <text x="${pad + 10}" y="${splitsStartY - 8}" font-family="${FONT}" font-size="11" font-weight="600" fill="${C.textMuted}" letter-spacing="1.5">SPLIT</text>
-    <text x="${w / 2}" y="${splitsStartY - 8}" font-family="${FONT}" font-size="11" font-weight="600" fill="${C.textMuted}" text-anchor="middle" letter-spacing="1.5">PERFORMANCE</text>
-    <text x="${w - pad - 10}" y="${splitsStartY - 8}" font-family="${FONT}" font-size="11" font-weight="600" fill="${C.textMuted}" text-anchor="end" letter-spacing="1.5">PACE</text>
+    <text x="${cx - 10}" y="${headerY}" font-family="${FONT}" font-size="52" font-weight="900" fill="${TXT}" text-anchor="end" letter-spacing="-1">${esc(distVal)}</text>
+    <text x="${cx - 4}"  y="${headerY}" font-family="${FONT}" font-size="20" font-weight="500" fill="${TXT2}" text-anchor="start">km</text>
+    <text x="${cx}"      y="${headerY + 32}" font-family="${FONT}" font-size="20" font-weight="600" fill="${C.cyan}" text-anchor="middle">${esc(timeVal)}</text>
+    <line x1="${pad}" y1="${headerY + 50}" x2="${w - pad}" y2="${headerY + 50}" stroke="${BDR}" stroke-width="1"/>
   `;
+  const cardTop = headerY + 66;
 
+  // ── Split card ────────────────────────────────────────────────────
   const paceData = run.paceData || [];
-  const rowH = 52;
-  const maxSplits = Math.min(paceData.length, Math.floor((contentEndY - splitsStartY - 80) / rowH));
 
-  let splitRows = "";
-  if (paceData.length === 0) {
-    splitRows = `<text x="${w / 2}" y="${splitsStartY + 60}" font-family="${FONT}" font-size="18" fill="${C.textMuted}" text-anchor="middle">No split data available</text>`;
-  }
+  // Avg pace in seconds — prefer run.avgPace string, fall back to computed
+  const [avgM, avgS] = (run.avgPace || "").split(":").map(Number);
+  const avgPaceSec = (avgM > 0 || avgS > 0)
+    ? (avgM || 0) * 60 + (avgS || 0)
+    : (paceData.length > 0 ? paceData.reduce((a, p) => a + p.paceSeconds, 0) / paceData.length : 300);
 
-  const paceValues = paceData.map((p) => p.paceSeconds);
-  const minPace = paceValues.length > 0 ? Math.min(...paceValues) : 0;
-  const maxPace = paceValues.length > 0 ? Math.max(...paceValues) : 1;
-  const paceRange = maxPace - minPace || 1;
-  const bestSplitIdx = paceValues.indexOf(minPace);
+  // Pace range for bar-width scaling (slower = longer bar, faster = shorter)
+  const paceVals = paceData.map(p => p.paceSeconds);
+  const bestPace  = paceVals.length > 0 ? Math.min(...paceVals) : 0;
+  const worstPace = paceVals.length > 0 ? Math.max(...paceVals) : 1;
+  const paceRange = worstPace - bestPace || 1;
+  const bestIdx   = paceVals.indexOf(bestPace);
 
-  const barStartX = pad + 70;
-  const barMaxW = w - pad * 2 - 170;
+  // Row height: distribute available space evenly, min 48 max 72
+  const TITLE_H  = 48;
+  const LEGEND_H = 40;
+  const AVG_H    = 52;
+  const availH   = contentEndY - cardTop - LEGEND_H - AVG_H - 20;
+  const maxRows  = Math.min(paceData.length, 10);
+  const rowH     = Math.min(72, Math.max(48, Math.floor(availH / (maxRows || 1))));
+  const cardH    = TITLE_H + maxRows * rowH + LEGEND_H;
 
-  for (let i = 0; i < maxSplits; i++) {
+  const barLabelW = 64;
+  const barPaceW  = 80;
+  const barStartX = pad + 16 + barLabelW;
+  const barMaxW   = w - pad * 2 - 32 - barLabelW - barPaceW;
+
+  let cardSvg = `
+    <rect x="${pad}" y="${cardTop}" width="${w - pad * 2}" height="${cardH}" rx="20" fill="${CARD}"/>
+    <rect x="${pad}" y="${cardTop}" width="${w - pad * 2}" height="${cardH}" rx="20" fill="none" stroke="${BDR}" stroke-width="1"/>
+    <text x="${pad + 20}" y="${cardTop + 30}" font-family="${FONT}" font-size="13" font-weight="700" fill="${TXT2}" letter-spacing="2">KM SPLIT BREAKDOWN</text>
+  `;
+
+  for (let i = 0; i < maxRows; i++) {
     const split = paceData[i];
-    const ry = splitsStartY + i * rowH;
-    const barRatio = 0.4 + 0.6 * (1 - (split.paceSeconds - minPace) / paceRange);
-    const barW = barMaxW * barRatio;
-    const pc = paceColor(split.paceSeconds, minPace, maxPace);
-    const isBest = i === bestSplitIdx;
+    const rowY  = cardTop + TITLE_H + i * rowH;
+    const midY  = rowY + rowH / 2;
 
-    if (i % 2 === 0) {
-      splitRows += `<rect x="${pad}" y="${ry}" width="${w - pad * 2}" height="${rowH}" rx="8" fill="${C.bgSoft}" opacity="0.6"/>`;
+    // Separator
+    if (i > 0) cardSvg += `<line x1="${pad + 16}" y1="${rowY}" x2="${w - pad - 16}" y2="${rowY}" stroke="${BDR}" stroke-width="0.5"/>`;
+
+    // Bar width: slower = longer (15 % → 100 % linear across pace range)
+    const barRatio = 0.15 + 0.85 * ((split.paceSeconds - bestPace) / paceRange);
+    const barW     = Math.max(12, barMaxW * barRatio);
+    const color    = splitPaceColor(split.paceSeconds, avgPaceSec);
+    const isBest   = i === bestIdx;
+
+    // Km label
+    cardSvg += `<text x="${pad + 20}" y="${midY + 6}" font-family="${FONT}" font-size="15" font-weight="600" fill="${TXT2}">Km ${split.km}</text>`;
+
+    // Track
+    cardSvg += `<rect x="${barStartX}" y="${midY - 9}" width="${barMaxW}" height="18" rx="9" fill="${TRACK}"/>`;
+
+    // Fill
+    cardSvg += `<rect x="${barStartX}" y="${midY - 9}" width="${barW}" height="18" rx="9" fill="${color}"/>`;
+
+    // BEST badge
+    if (isBest && maxRows > 1) {
+      cardSvg += `<text x="${barStartX + barW + 6}" y="${midY + 5}" font-family="${FONT}" font-size="10" font-weight="700" fill="${C.green}" letter-spacing="0.5">BEST</text>`;
     }
 
-    splitRows += `<text x="${pad + 14}" y="${ry + 32}" font-family="${FONT}" font-size="16" font-weight="700" fill="${C.textDark}">Km ${split.km}</text>`;
-    splitRows += `<rect x="${barStartX}" y="${ry + 18}" width="${barW}" height="18" rx="9" fill="${pc}" opacity="0.15"/>`;
-    splitRows += `<rect x="${barStartX}" y="${ry + 18}" width="${barW * 0.85}" height="18" rx="9" fill="${pc}" opacity="0.4"/>`;
-
-    if (isBest && maxSplits > 1) {
-      splitRows += `<text x="${barStartX + barW + 6}" y="${ry + 32}" font-family="${FONT}" font-size="10" font-weight="700" fill="${C.green}" letter-spacing="0.5">BEST</text>`;
-    }
-
-    splitRows += `<text x="${w - pad - 14}" y="${ry + 32}" font-family="${FONT}" font-size="18" font-weight="700" fill="${pc}" text-anchor="end">${esc(split.pace)}</text>`;
+    // Pace value
+    cardSvg += `<text x="${w - pad - 20}" y="${midY + 6}" font-family="${FONT}" font-size="17" font-weight="700" fill="${color}" text-anchor="end">${esc(split.pace)}</text>`;
   }
 
-  const summaryY = splitsStartY + maxSplits * rowH + 16;
-  let summarySvg = "";
-  if (maxSplits > 0) {
-    summarySvg = `
-      <line x1="${pad}" y1="${summaryY - 4}" x2="${w - pad}" y2="${summaryY - 4}" stroke="${C.border}" stroke-width="1"/>
-      <text x="${pad + 14}" y="${summaryY + 22}" font-family="${FONT}" font-size="14" font-weight="600" fill="${C.textLight}">AVG PACE</text>
-      <text x="${w - pad - 14}" y="${summaryY + 22}" font-family="${FONT}" font-size="22" font-weight="800" fill="${C.cyan}" text-anchor="end">${esc(run.avgPace || "--:--")} /km</text>
-    `;
-  }
+  // Legend
+  const legendY = cardTop + TITLE_H + maxRows * rowH + 12;
+  const legendItems = [
+    { col: C.green,  label: "On pace" },
+    { col: C.yellow, label: "Slightly slower" },
+    { col: C.orange, label: "Notably slow" },
+  ];
+  const lItemW = (w - pad * 2 - 32) / 3;
+  legendItems.forEach(({ col, label }, idx) => {
+    const lx = pad + 16 + idx * lItemW;
+    cardSvg += `<circle cx="${lx + 6}" cy="${legendY + 8}" r="5" fill="${col}"/>
+      <text x="${lx + 16}" y="${legendY + 13}" font-family="${FONT}" font-size="11" fill="${TXT2}">${label}</text>`;
+  });
+
+  // Avg pace footer
+  const avgY = cardTop + cardH + 28;
+  const avgSvg = maxRows > 0 ? `
+    <text x="${pad + 16}" y="${avgY + 18}" font-family="${FONT}" font-size="13" font-weight="600" fill="${TXT2}" letter-spacing="1">AVG PACE</text>
+    <text x="${w - pad - 16}" y="${avgY + 18}" font-family="${FONT}" font-size="24" font-weight="800" fill="${C.cyan}" text-anchor="end">${esc(run.avgPace || "--:--")} /km</text>
+  ` : "";
 
   return `
     ${globalDefs(w, h)}
-    <rect width="${w}" height="${h}" fill="${C.bg}"/>
+    <rect width="${w}" height="${h}" fill="${BG}"/>
     ${headerSvg}
-    ${splitRows}
-    ${summarySvg}
+    ${cardSvg}
+    ${avgSvg}
   `;
 }
 
