@@ -481,6 +481,7 @@ export const goals = pgTable("goals", {
   injuryDate: text("injury_date"),              // ISO date string e.g. "2026-05-08"
   injurySeverity: text("injury_severity"),      // active, recovering, chronic
   injuryNotes: text("injury_notes"),            // free-text notes about the injury
+  injurySide: text("injury_side"),              // left, right, both (for bilateral body parts)
 });
 
 // Notifications table

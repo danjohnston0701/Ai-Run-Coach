@@ -2388,6 +2388,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         weeklyRunTarget: goal.weeklyRunTarget,
         targetWeightKg: (goal as any).targetWeightKg ?? null,
         startingWeightKg: (goal as any).startingWeightKg ?? null,
+        // Injury Recovery fields
+        injuryBodyPart: (goal as any).injuryBodyPart ?? null,
+        injuryDate: (goal as any).injuryDate ?? null,
+        injurySeverity: (goal as any).injurySeverity ?? null,
+        injuryNotes: (goal as any).injuryNotes ?? null,
+        injurySide: (goal as any).injurySide ?? null,
         currentProgress: goal.progressPercent ?? 0,
         isActive: goal.status === 'active',
         isCompleted: !!goal.completedAt,
@@ -2433,6 +2439,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         injuryDate: req.body.injuryDate || null,
         injurySeverity: req.body.injurySeverity || null,
         injuryNotes: req.body.injuryNotes || null,
+        injurySide: req.body.injurySide || null,
         status: 'active',
         progressPercent: 0,
       };
@@ -2461,6 +2468,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         injuryDate: (rawGoal as any).injuryDate ?? null,
         injurySeverity: (rawGoal as any).injurySeverity ?? null,
         injuryNotes: (rawGoal as any).injuryNotes ?? null,
+        injurySide: (rawGoal as any).injurySide ?? null,
         currentProgress: rawGoal.progressPercent ?? 0,
         isActive: rawGoal.status === 'active',
         isCompleted: !!rawGoal.completedAt,
@@ -2494,6 +2502,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         weeklyRunTarget: req.body.weeklyRunTarget || null,
         targetWeightKg: req.body.targetWeightKg || null,
         startingWeightKg: req.body.startingWeightKg || null,
+        // Injury Recovery fields
+        injuryBodyPart: req.body.injuryBodyPart || null,
+        injuryDate: req.body.injuryDate || null,
+        injurySeverity: req.body.injurySeverity || null,
+        injuryNotes: req.body.injuryNotes || null,
+        injurySide: req.body.injurySide || null,
       };
 
       // Handle completion / status fields sent by the app
