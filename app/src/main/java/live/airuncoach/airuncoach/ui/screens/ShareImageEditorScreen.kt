@@ -607,8 +607,7 @@ private fun ControlStrip(
                         }
                         DropdownMenu(
                             expanded = sizeMenuExpanded,
-                            onDismissRequest = { sizeMenuExpanded = false },
-                            containerColor = Color(0xFF1A2332)
+                            onDismissRequest = { sizeMenuExpanded = false }
                         ) {
                             tmpl.aspectRatios.forEach { ratio ->
                                 val label = when (ratio) {
