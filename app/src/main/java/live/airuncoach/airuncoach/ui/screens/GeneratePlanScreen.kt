@@ -27,6 +27,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import java.util.Locale
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.data.AiConsentManager
 import live.airuncoach.airuncoach.domain.model.Goal
