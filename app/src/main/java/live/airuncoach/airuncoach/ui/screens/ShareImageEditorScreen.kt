@@ -552,14 +552,14 @@ private fun ControlStrip(
                 )
             }
 
-            // Template chips row + aspect ratio pills (single combined row)
+            // Template chips row + compact size dropdown on the far right
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Templates
+                // Templates — fill all available width
                 LazyRow(
                     modifier = Modifier.weight(1f),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -573,17 +573,71 @@ private fun ControlStrip(
                     }
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
 
-                // Aspect ratio toggles
+                // Compact size dropdown on the far right
                 selectedTemplate?.let { tmpl ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        tmpl.aspectRatios.forEach { ratio ->
-                            AspectRatioChip(
-                                ratio = ratio,
-                                isSelected = ratio == selectedAspectRatio,
-                                onClick = { onSelectAspectRatio(ratio) }
-                            )
+                    var sizeMenuExpanded by remember { mutableStateOf(false) }
+                    val sizeLabel = when (selectedAspectRatio) {
+                        "1:1"  -> "Square"
+                        "9:16" -> "Story"
+                        "4:5"  -> "Post"
+                        else   -> selectedAspectRatio
+                    }
+                    Box {
+                        Surface(
+                            onClick = { sizeMenuExpanded = true },
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF1A2332),
+                            border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.4f)),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Text(
+                                    text = sizeLabel,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Colors.primary
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.ExpandMore,
+                                    contentDescription = "Change size",
+                                    tint = Colors.primary,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = sizeMenuExpanded,
+                            onDismissRequest = { sizeMenuExpanded = false },
+                            containerColor = Color(0xFF1A2332)
+                        ) {
+                            tmpl.aspectRatios.forEach { ratio ->
+                                val label = when (ratio) {
+                                    "1:1"  -> "Square"
+                                    "9:16" -> "Story"
+                                    "4:5"  -> "Post"
+                                    else   -> ratio
+                                }
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = label,
+                                            fontSize = 13.sp,
+                                            fontWeight = if (ratio == selectedAspectRatio) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (ratio == selectedAspectRatio) Colors.primary else Colors.textPrimary
+                                        )
+                                    },
+                                    onClick = {
+                                        onSelectAspectRatio(ratio)
+                                        sizeMenuExpanded = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }
