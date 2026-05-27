@@ -215,10 +215,11 @@ class GoalsViewModel(
                 val createdGoal = apiService.createGoal(request)
                 _createGoalState.value = CreateGoalState.Success(createdGoalId = createdGoal.id)
                 
-                // Reset cache to ensure fresh data on next load
+                // Don't call loadGoals() here — it would set _goalsState to Loading, causing the
+                // GoalsScreen to show a spinner after navigation back. Instead, mark the cache as
+                // stale so loadGoals() will refresh when GoalsScreen reappears / its init block runs.
+                // The combine() in init{} will automatically refetch when needed.
                 hasLoadedGoals = false
-                // Reload goals to update the list
-                loadGoals(forceRefresh = true)
             } catch (e: Exception) {
                 _createGoalState.value = CreateGoalState.Error(e.message ?: "Failed to create goal")
                 android.util.Log.e("GoalsViewModel", "Failed to create goal: ${e.message}", e)
