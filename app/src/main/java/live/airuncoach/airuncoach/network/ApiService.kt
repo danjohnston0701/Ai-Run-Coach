@@ -591,6 +591,11 @@ interface ApiService {
     @POST("/api/strava/auth/authorize")
     suspend fun initiateStravaAuth(@Body body: Map<String, String> = emptyMap()): StravaAuthResponse
 
+    // Force a fresh network fetch — bypass OkHttp's HTTP cache entirely.
+    // Without this, OkHttp serves the last cached response (e.g. connected=false)
+    // even after a successful OAuth callback, because the server's Cache-Control
+    // header wasn't present in earlier responses already stored in the 50MB cache.
+    @Headers("Cache-Control: no-cache, no-store")
     @GET("/api/strava/connection-status")
     suspend fun checkStravaConnection(): StravaConnectionStatus
 

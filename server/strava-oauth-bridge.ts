@@ -143,14 +143,26 @@ router.get('/strava/callback', async (req: Request, res: Response) => {
   }
 
   try {
-    // Verify state exists and retrieve user ID
+    // Verify state exists and retrieve user ID.
+    // Chrome can replay the same redirect URL (e.g. when the user presses back on the
+    // Strava auth page after the first callback completed). In that case the same
+    // state parameter arrives again. We handle this by NOT deleting the state on first
+    // use — instead we mark it with nonce='PROCESSED'. On a replay, we see the
+    // 'PROCESSED' marker and return success immediately without re-exchanging the code.
     const [stateRecord] = await db
       .select()
       .from(oauthStateStore)
       .where(eq(oauthStateStore.state, state as string));
 
     if (!stateRecord) {
+      // Truly unknown state — genuine CSRF or very old expired+cleaned-up state
       throw new Error('Invalid state parameter - possible CSRF attack');
+    }
+
+    // If this state was already processed successfully, just redirect to app with success
+    if (stateRecord.nonce === 'PROCESSED') {
+      console.log('[Strava Callback] State already processed (Chrome replay) — returning success');
+      return sendAppRedirect(res, true);
     }
 
     const userId = stateRecord.userId;
@@ -207,9 +219,12 @@ router.get('/strava/callback', async (req: Request, res: Response) => {
       console.log('[Strava Callback] Created new device');
     }
 
-    // Clean up state
+    // Mark state as processed (instead of deleting) so Chrome replays of the same
+    // redirect URL return success rather than throwing a CSRF error.
+    // The record will expire naturally via the expiresAt timestamp (10 minutes).
     await db
-      .delete(oauthStateStore)
+      .update(oauthStateStore)
+      .set({ nonce: 'PROCESSED' })
       .where(eq(oauthStateStore.state, state as string));
 
     // Redirect to app with success.
