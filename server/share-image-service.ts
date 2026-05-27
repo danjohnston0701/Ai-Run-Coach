@@ -618,6 +618,127 @@ function buildGpsRouteElite(
   `;
 }
 
+// ── Web Mercator projection helpers ──────────────────────────────────────────
+
+/** Compute the map centre + integer zoom that fits the GPS track with padding. */
+function computeMapView(
+  track: Array<{ lat: number; lng: number }>,
+  reqW: number, reqH: number
+): { centerLat: number; centerLng: number; zoom: number } {
+  const lats = track.map(p => p.lat);
+  const lngs = track.map(p => p.lng);
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+  const centerLat = (minLat + maxLat) / 2;
+  const centerLng = (minLng + maxLng) / 2;
+
+  // World-pixel span at zoom 0 (256-px tile)
+  const mY = (lat: number) => {
+    const r = lat * Math.PI / 180;
+    return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * 256;
+  };
+  const latSpan = mY(minLat) - mY(maxLat);
+  const lngSpan = (maxLng - minLng) / 360 * 256;
+
+  // 30 % padding on every side → multiply span by 1.6
+  const pad = 1.6;
+  const zLat = latSpan > 0 ? Math.log2(reqH / (latSpan * pad)) : 17;
+  const zLng = lngSpan > 0 ? Math.log2(reqW / (lngSpan * pad)) : 17;
+  const zoom = Math.max(1, Math.min(17, Math.floor(Math.min(zLat, zLng))));
+  return { centerLat, centerLng, zoom };
+}
+
+/**
+ * Build an SVG string that draws the pace-coloured route using the same
+ * Web Mercator projection as the Google Static Maps tile.
+ * svgW / svgH are the SVG canvas dimensions (= mapRegionH area).
+ * reqW / reqH are the *logical* tile dimensions passed to the Static Maps API.
+ */
+function buildMercatorRouteSvg(
+  svgW: number, svgH: number,
+  track: Array<{ lat: number; lng: number }>,
+  paceData: Array<{ km: number; pace: string; paceSeconds: number }> | undefined,
+  centerLat: number, centerLng: number,
+  zoom: number,
+  reqW: number, reqH: number
+): string {
+  if (!track || track.length < 2) return "";
+
+  // Thin the track to ≤ 600 pts to keep SVG size manageable
+  const MAX_PTS = 600;
+  let pts = track;
+  if (pts.length > MAX_PTS) {
+    const step = pts.length / MAX_PTS;
+    const thinned: Array<{ lat: number; lng: number }> = [];
+    for (let i = 0; i < MAX_PTS - 1; i++) thinned.push(pts[Math.floor(i * step)]);
+    thinned.push(pts[pts.length - 1]);
+    pts = thinned;
+  }
+
+  const tileScale = Math.pow(2, zoom) * 256;
+  const pixRatio  = svgW / reqW; // logical → SVG pixel scale factor
+
+  const mX = (lng: number) => (lng + 180) / 360 * tileScale;
+  const mY = (lat: number) => {
+    const r = lat * Math.PI / 180;
+    return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * tileScale;
+  };
+  const cX = mX(centerLng);
+  const cY = mY(centerLat);
+
+  const mapped = pts.map(p => ({
+    x: +(svgW / 2 + (mX(p.lng) - cX) * pixRatio).toFixed(1),
+    y: +(svgH / 2 + (mY(p.lat) - cY) * pixRatio).toFixed(1),
+  }));
+
+  let glowSvg = "";
+  let routeSvg = "";
+
+  if (paceData && paceData.length > 0) {
+    const secs    = paceData.map(p => p.paceSeconds);
+    const fastest = Math.min(...secs);
+    const slowest = Math.max(...secs);
+    for (let i = 0; i < mapped.length - 1; i++) {
+      const pIdx  = Math.min(Math.floor(i / (mapped.length / paceData.length)), paceData.length - 1);
+      const color = paceColor(paceData[pIdx].paceSeconds, fastest, slowest);
+      const a = mapped[i], b = mapped[i + 1];
+      glowSvg  += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="#00D4FF" stroke-width="16" stroke-linecap="round" opacity="0.18"/>`;
+      routeSvg += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${color}" stroke-width="6" stroke-linecap="round"/>`;
+    }
+  } else {
+    const polyPts = mapped.map(p => `${p.x},${p.y}`).join(" ");
+    glowSvg  = `<polyline points="${polyPts}" fill="none" stroke="#00D4FF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" opacity="0.18"/>`;
+    routeSvg = `<polyline points="${polyPts}" fill="none" stroke="#00D4FF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>`;
+  }
+
+  // km markers
+  let kmMarkers = "";
+  if (paceData && paceData.length > 1) {
+    paceData.forEach((_pd, idx) => {
+      if (idx === 0) return;
+      const mIdx = Math.min(Math.round((idx / paceData.length) * mapped.length), mapped.length - 1);
+      const pt = mapped[mIdx];
+      kmMarkers += `<circle cx="${pt.x}" cy="${pt.y}" r="12" fill="white" stroke="#ccc" stroke-width="1.5"/>
+        <text x="${pt.x}" y="${(pt.y + 4).toFixed(1)}" font-family="${FONT}" font-size="11" font-weight="700" fill="#333" text-anchor="middle">${idx}</text>`;
+    });
+  }
+
+  const sp = mapped[0];
+  const ep = mapped[mapped.length - 1];
+
+  return `
+    ${glowSvg}
+    ${routeSvg}
+    ${kmMarkers}
+    <circle cx="${sp.x}" cy="${sp.y}" r="14" fill="${C.green}" stroke="white" stroke-width="3"/>
+    <circle cx="${sp.x}" cy="${sp.y}" r="5"  fill="white"/>
+    <circle cx="${ep.x}" cy="${ep.y}" r="14" fill="${C.red}"   stroke="white" stroke-width="3"/>
+    <circle cx="${ep.x}" cy="${ep.y}" r="4"  fill="white"/>
+  `;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function buildRouteMapSvg(w: number, h: number, run: RunDataForImage, userName?: string, hasMapTile?: boolean): string {
   const isVertical = h > w;
   const contentEndY = h - LOGO_ZONE_H;
@@ -1193,22 +1314,39 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
 
   if (template.id === "route-map" && req.runData.gpsTrack && req.runData.gpsTrack.length > 1) {
     const mapRegionH = getRouteMapHeight(w, h);
-    const mapTileBuffer = await fetchMapTileWithRoute(req.runData.gpsTrack, w, mapRegionH, req.runData.paceData);
-    if (mapTileBuffer) {
+    const mapResult = await fetchMapTileWithRoute(req.runData.gpsTrack, w, mapRegionH, req.runData.paceData);
+    if (mapResult) {
       try {
-        const overlaySvg = buildRouteMapSvg(w, h, req.runData, req.userName, true);
-        const overlaySvgFull = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${overlaySvg}${stickersSvg}</svg>`;
-        const overlayBuffer = await sharp(Buffer.from(overlaySvgFull)).png().toBuffer();
+        const { buffer: mapBuf, centerLat, centerLng, zoom, reqW, reqH } = mapResult;
 
-        const mapResized = await sharp(mapTileBuffer).resize(w, mapRegionH, { fit: "cover" }).png().toBuffer();
-        console.log(`Map composite: canvas=${w}x${h}, mapRegion=${w}x${mapRegionH}, mapResized=${mapResized.length} bytes, overlay=${overlayBuffer.length} bytes`);
+        // Layer 1: clean map background — fill (not crop) to avoid geographic shift
+        const mapResized = await sharp(mapBuf)
+          .resize(w, mapRegionH, { fit: "fill" })
+          .png().toBuffer();
+
+        // Layer 2: pace-coloured route via Web Mercator projection (full GPS granularity)
+        const routeSvgContent = buildMercatorRouteSvg(
+          w, mapRegionH,
+          req.runData.gpsTrack, req.runData.paceData,
+          centerLat, centerLng, zoom, reqW, reqH
+        );
+        const routeSvgFull = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${mapRegionH}" viewBox="0 0 ${w} ${mapRegionH}">${routeSvgContent}</svg>`;
+        const routeBuffer = await sharp(Buffer.from(routeSvgFull)).png().toBuffer();
+
+        // Layer 3: stat cards, pace legend, footer — no route drawn here
+        const statsSvg = buildRouteMapSvg(w, h, req.runData, req.userName, true);
+        const statsSvgFull = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${statsSvg}${stickersSvg}</svg>`;
+        const statsBuffer = await sharp(Buffer.from(statsSvgFull)).png().toBuffer();
+
+        console.log(`Map composite: map=${mapResized.length}b route=${routeBuffer.length}b stats=${statsBuffer.length}b`);
 
         svgBuffer = await sharp({
           create: { width: w, height: h, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 255 } }
         })
           .composite([
-            { input: mapResized, top: 0, left: 0 },
-            { input: overlayBuffer, top: 0, left: 0 },
+            { input: mapResized,  top: 0, left: 0 },
+            { input: routeBuffer, top: 0, left: 0 },
+            { input: statsBuffer, top: 0, left: 0 },
           ])
           .png({ quality: 95 })
           .toBuffer();
@@ -1345,11 +1483,25 @@ function encodePolyline(points: Array<{ lat: number; lng: number }>): string {
   return encoded;
 }
 
+interface MapTileResult {
+  buffer: Buffer;
+  centerLat: number;
+  centerLng: number;
+  zoom: number;
+  reqW: number;
+  reqH: number;
+}
+
+/**
+ * Fetches a clean map background tile (no route drawn by Google).
+ * The route is rendered as a separate Mercator-projected SVG overlay so we
+ * get unlimited granularity and full pace-colour accuracy.
+ */
 async function fetchMapTileWithRoute(
   gpsTrack: Array<{ lat: number; lng: number }>,
   tileW: number, tileH: number,
-  paceData?: Array<{ km: number; pace: string; paceSeconds: number }>
-): Promise<Buffer | null> {
+  _paceData?: Array<{ km: number; pace: string; paceSeconds: number }>
+): Promise<MapTileResult | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_API_KEY;
   if (!apiKey) {
     console.error("No Google Maps API key found");
@@ -1359,7 +1511,9 @@ async function fetchMapTileWithRoute(
   const reqW = Math.min(Math.round(tileW / 2), 640);
   const reqH = Math.min(Math.round(tileH / 2), 640);
 
-  const lightStyle = [
+  const { centerLat, centerLng, zoom } = computeMapView(gpsTrack, reqW, reqH);
+
+  const mapStyle = [
     "style=feature:poi|visibility:off",
     "style=feature:transit|visibility:off",
     "style=feature:road|element:labels|visibility:simplified",
@@ -1371,55 +1525,10 @@ async function fetchMapTileWithRoute(
     "style=feature:road|element:geometry.stroke|color:0xe2e8f0",
   ].join("&");
 
-  // ── Build pace-coloured path segments (one path= per km segment) ──
-  // Google Static Maps accepts multiple path= params, each with its own colour.
-  let pathParams: string;
-  if (paceData && paceData.length > 1) {
-    const paceSeconds = paceData.map(p => p.paceSeconds);
-    const fastest = Math.min(...paceSeconds);
-    const slowest = Math.max(...paceSeconds);
+  // Clean background — no path/markers (route is drawn as an SVG overlay)
+  const url = `https://maps.googleapis.com/maps/api/staticmap?size=${reqW}x${reqH}&scale=2&maptype=roadmap&center=${centerLat.toFixed(6)},${centerLng.toFixed(6)}&zoom=${zoom}&${mapStyle}&key=${apiKey}`;
 
-    // Map each km segment to a slice of the GPS track
-    const paths: string[] = [];
-    const totalPts = gpsTrack.length;
-    for (let i = 0; i < paceData.length; i++) {
-      const segStart = Math.floor((i / paceData.length) * totalPts);
-      // Overlap by 1 point so segments join cleanly
-      const segEnd   = Math.min(Math.floor(((i + 1) / paceData.length) * totalPts) + 1, totalPts);
-      const seg      = gpsTrack.slice(segStart, segEnd);
-
-      // Sample each segment down to ≤14 points to keep URL short
-      const maxPts = 14;
-      const sampled: Array<{ lat: number; lng: number }> = [];
-      const step = seg.length / Math.min(seg.length, maxPts);
-      for (let j = 0; j < Math.min(seg.length, maxPts); j++) sampled.push(seg[Math.floor(j * step)]);
-      if (sampled[sampled.length - 1] !== seg[seg.length - 1]) sampled.push(seg[seg.length - 1]);
-
-      const hex   = paceColor(paceData[i].paceSeconds, fastest, slowest).replace("#", "");
-      const color = `0x${hex}EE`; // ~93% opaque
-      paths.push(`path=color:${color}|weight:6|enc:${encodeURIComponent(encodePolyline(sampled))}`);
-    }
-    pathParams = paths.join("&");
-  } else {
-    // No pace data — fall back to single cyan route
-    const sampleCount = Math.min(gpsTrack.length, 60);
-    const step = gpsTrack.length / sampleCount;
-    const sampled: Array<{ lat: number; lng: number }> = [];
-    for (let i = 0; i < sampleCount; i++) sampled.push(gpsTrack[Math.floor(i * step)]);
-    sampled.push(gpsTrack[gpsTrack.length - 1]);
-    pathParams = `path=color:0x00D4FFEE|weight:6|enc:${encodeURIComponent(encodePolyline(sampled))}`;
-  }
-
-  const startPt = gpsTrack[0];
-  const endPt = gpsTrack[gpsTrack.length - 1];
-  const markers = [
-    `markers=color:0x00E676|size:small|label:S|${startPt.lat.toFixed(5)},${startPt.lng.toFixed(5)}`,
-    `markers=color:0xFF5252|size:small|label:F|${endPt.lat.toFixed(5)},${endPt.lng.toFixed(5)}`,
-  ].join("&");
-
-  const url = `https://maps.googleapis.com/maps/api/staticmap?size=${reqW}x${reqH}&scale=2&maptype=roadmap&${lightStyle}&${pathParams}&${markers}&key=${apiKey}`;
-
-  console.log("Map tile URL length:", url.length, "chars");
+  console.log(`Map tile: center=${centerLat.toFixed(4)},${centerLng.toFixed(4)} zoom=${zoom} urlLen=${url.length}`);
 
   try {
     const controller = new AbortController();
@@ -1434,15 +1543,13 @@ async function fetchMapTileWithRoute(
     const contentType = resp.headers.get("content-type") || "";
     if (!contentType.includes("image")) {
       const body = await resp.text().catch(() => "");
-      console.error("Map tile returned non-image content:", contentType, body.substring(0, 200));
+      console.error("Map tile returned non-image:", contentType, body.substring(0, 200));
       return null;
     }
     const buf = Buffer.from(await resp.arrayBuffer());
-    if (buf.length < 1000) {
-      console.error("Map tile suspiciously small:", buf.length, "bytes — may be an error image");
-    }
-    console.log("Map tile fetched:", buf.length, "bytes");
-    return buf;
+    if (buf.length < 1000) console.error("Map tile suspiciously small:", buf.length, "bytes");
+    console.log(`Map tile fetched: ${buf.length} bytes`);
+    return { buffer: buf, centerLat, centerLng, zoom, reqW, reqH };
   } catch (err: any) {
     console.error("Map tile fetch error:", err.message);
     return null;
