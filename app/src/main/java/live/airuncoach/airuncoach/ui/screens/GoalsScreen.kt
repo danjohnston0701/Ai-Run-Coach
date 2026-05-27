@@ -174,12 +174,22 @@ fun GoalsScreen(
                                 ),
                                 color = if (selectedTab == index) Colors.primary else Color(0xFF8B9AA8)
                             )
-                            // Show count badge
+                            // Show count badge for this specific tab
                             val count = when (goalsState) {
-                                is GoalsUiState.Success -> (goalsState as GoalsUiState.Success).goals.size
+                                is GoalsUiState.Success -> {
+                                    val goals = (goalsState as GoalsUiState.Success).goals
+                                    goals.filter { goal ->
+                                        when (index) {
+                                            0 -> goal.isActive && !goal.isCompleted  // Active tab
+                                            1 -> goal.isCompleted  // Completed tab
+                                            2 -> !goal.isActive && !goal.isCompleted  // Abandoned tab
+                                            else -> false
+                                        }
+                                    }.size
+                                }
                                 else -> 0
                             }
-                            if (selectedTab == index && count > 0) {
+                            if (count > 0) {
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Box(
                                     modifier = Modifier
@@ -210,11 +220,21 @@ fun GoalsScreen(
                     }
                 }
                 is GoalsUiState.Success -> {
-                    if (state.goals.isEmpty()) {
+                    // Filter goals based on selected tab
+                    val filteredGoals = state.goals.filter { goal ->
+                        when (selectedTab) {
+                            0 -> goal.isActive && !goal.isCompleted  // Active tab
+                            1 -> goal.isCompleted  // Completed tab
+                            2 -> !goal.isActive && !goal.isCompleted  // Abandoned tab
+                            else -> true
+                        }
+                    }
+                    
+                    if (filteredGoals.isEmpty()) {
                         EmptyGoalsState(tab = selectedTab, onCreateGoal = onCreateGoal)
                     } else {
                         GoalsListContent(
-                            goals = state.goals,
+                            goals = filteredGoals,
                             onGoalClick = { goal -> showGoalDetails = goal },
                             onDeleteClick = { goal -> goalToDelete = goal },
                             onEditClick = { goal -> goalToEdit = goal },
