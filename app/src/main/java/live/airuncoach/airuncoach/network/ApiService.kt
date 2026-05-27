@@ -54,6 +54,10 @@ interface ApiService {
         @Body request: UpdateCoachSettingsRequest
     ): User
 
+    // Force fresh fetch — bypass OkHttp cache to ensure newly created goals appear.
+    // Without this, OkHttp serves cached responses and new goals don't show up
+    // until the cache naturally expires.
+    @Headers("Cache-Control: no-cache, no-store")
     @GET("/api/goals/{userId}")
     suspend fun getGoals(@Path("userId") userId: String): List<Goal>
 
