@@ -1059,15 +1059,9 @@ fun AddInjuryDialog(
                 }
 
                 // Date of injury — helps AI calculate exact weeks since injury for rehab staging
-                Text("Date of Injury", style = AppTextStyles.small, color = Colors.textMuted)
-                OutlinedTextField(
-                    value = injuryDateText,
-                    onValueChange = { injuryDateText = it },
-                    placeholder = { Text("YYYY-MM-DD  (e.g. 2026-05-08)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    supportingText = { Text("Helps the AI calculate your exact recovery stage", color = Colors.textMuted, style = AppTextStyles.small) }
+                DateOfInjuryPickerDialog(
+                    selectedDate = injuryDateText,
+                    onDateSelected = { injuryDateText = it }
                 )
 
                 // Notes
@@ -1624,6 +1618,67 @@ private fun GoalLinkNudge(
                     Text("Continue without goal", style = AppTextStyles.small, color = Colors.textMuted)
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateOfInjuryPickerDialog(
+    selectedDate: String,
+    onDateSelected: (String) -> Unit
+) {
+    var showDatePicker by remember { mutableStateOf(false) }
+    val datePickerState = rememberDatePickerState()
+    
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text("Date of Injury", style = AppTextStyles.small, color = Colors.textMuted)
+        OutlinedTextField(
+            value = selectedDate,
+            onValueChange = {},
+            readOnly = true,
+            placeholder = { Text("Select date (YYYY-MM-DD)") },
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showDatePicker = true },
+            trailingIcon = {
+                Icon(
+                    painter = painterResource(id = R.drawable.icon_calendar),
+                    contentDescription = "Pick date",
+                    modifier = Modifier.clickable { showDatePicker = true }
+                )
+            },
+            supportingText = { Text("Helps the AI calculate your exact recovery stage", color = Colors.textMuted, style = AppTextStyles.small) }
+        )
+    }
+    
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { millis ->
+                            // Convert millis to ISO date string (YYYY-MM-DD)
+                            val calendar = java.util.Calendar.getInstance().apply { timeInMillis = millis }
+                            val year = calendar.get(java.util.Calendar.YEAR)
+                            val month = String.format(Locale.US, "%02d", calendar.get(java.util.Calendar.MONTH) + 1)
+                            val day = String.format(Locale.US, "%02d", calendar.get(java.util.Calendar.DAY_OF_MONTH))
+                            onDateSelected("$year-$month-$day")
+                        }
+                        showDatePicker = false
+                    }
+                ) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
         }
     }
 }
