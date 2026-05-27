@@ -937,23 +937,21 @@ fun HealthTargetSection(
                 modifier = Modifier.weight(1f)
             )
         }
-        // Better recovery — single chip in row
-        DistanceChip(
-            text = "Better recovery",
-            isSelected = selectedTarget == "Better recovery",
-            onClick = { onTargetSelected("Better recovery") },
-            modifier = Modifier.fillMaxWidth()
-        )
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
-            // Injury Recovery — full-width chip with medical icon
+            DistanceChip(
+                text = "Better recovery",
+                isSelected = selectedTarget == "Better recovery",
+                onClick = { onTargetSelected("Better recovery") },
+                modifier = Modifier.weight(1f)
+            )
             DistanceChip(
                 text = "🩹 Injury Recovery",
                 isSelected = selectedTarget == "Injury Recovery",
                 onClick = { onTargetSelected("Injury Recovery") },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.weight(1f)
             )
         }
 
