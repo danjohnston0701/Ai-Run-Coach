@@ -649,7 +649,7 @@ function buildRouteMapSvg(w: number, h: number, run: RunDataForImage, userName?:
   });
 
   let legend = "";
-  if (run.paceData && run.paceData.length > 0 && !hasMapTile) {
+  if (run.paceData && run.paceData.length > 0) {
     const paceSeconds = run.paceData.map(p => p.paceSeconds);
     const fastest = Math.min(...paceSeconds);
     const slowest = Math.max(...paceSeconds);
@@ -1371,16 +1371,44 @@ async function fetchMapTileWithRoute(
     "style=feature:road|element:geometry.stroke|color:0xe2e8f0",
   ].join("&");
 
-  const sampleCount = Math.min(gpsTrack.length, 60);
-  const step = gpsTrack.length / sampleCount;
-  const sampled: Array<{ lat: number; lng: number }> = [];
-  for (let i = 0; i < sampleCount; i++) {
-    sampled.push(gpsTrack[Math.floor(i * step)]);
-  }
-  sampled.push(gpsTrack[gpsTrack.length - 1]);
+  // ── Build pace-coloured path segments (one path= per km segment) ──
+  // Google Static Maps accepts multiple path= params, each with its own colour.
+  let pathParams: string;
+  if (paceData && paceData.length > 1) {
+    const paceSeconds = paceData.map(p => p.paceSeconds);
+    const fastest = Math.min(...paceSeconds);
+    const slowest = Math.max(...paceSeconds);
 
-  const encodedPath = encodePolyline(sampled);
-  const pathParam = `path=color:0x00D4FFCC|weight:5|enc:${encodeURIComponent(encodedPath)}`;
+    // Map each km segment to a slice of the GPS track
+    const paths: string[] = [];
+    const totalPts = gpsTrack.length;
+    for (let i = 0; i < paceData.length; i++) {
+      const segStart = Math.floor((i / paceData.length) * totalPts);
+      // Overlap by 1 point so segments join cleanly
+      const segEnd   = Math.min(Math.floor(((i + 1) / paceData.length) * totalPts) + 1, totalPts);
+      const seg      = gpsTrack.slice(segStart, segEnd);
+
+      // Sample each segment down to ≤14 points to keep URL short
+      const maxPts = 14;
+      const sampled: Array<{ lat: number; lng: number }> = [];
+      const step = seg.length / Math.min(seg.length, maxPts);
+      for (let j = 0; j < Math.min(seg.length, maxPts); j++) sampled.push(seg[Math.floor(j * step)]);
+      if (sampled[sampled.length - 1] !== seg[seg.length - 1]) sampled.push(seg[seg.length - 1]);
+
+      const hex   = paceColor(paceData[i].paceSeconds, fastest, slowest).replace("#", "");
+      const color = `0x${hex}EE`; // ~93% opaque
+      paths.push(`path=color:${color}|weight:6|enc:${encodeURIComponent(encodePolyline(sampled))}`);
+    }
+    pathParams = paths.join("&");
+  } else {
+    // No pace data — fall back to single cyan route
+    const sampleCount = Math.min(gpsTrack.length, 60);
+    const step = gpsTrack.length / sampleCount;
+    const sampled: Array<{ lat: number; lng: number }> = [];
+    for (let i = 0; i < sampleCount; i++) sampled.push(gpsTrack[Math.floor(i * step)]);
+    sampled.push(gpsTrack[gpsTrack.length - 1]);
+    pathParams = `path=color:0x00D4FFEE|weight:6|enc:${encodeURIComponent(encodePolyline(sampled))}`;
+  }
 
   const startPt = gpsTrack[0];
   const endPt = gpsTrack[gpsTrack.length - 1];
@@ -1389,7 +1417,7 @@ async function fetchMapTileWithRoute(
     `markers=color:0xFF5252|size:small|label:F|${endPt.lat.toFixed(5)},${endPt.lng.toFixed(5)}`,
   ].join("&");
 
-  const url = `https://maps.googleapis.com/maps/api/staticmap?size=${reqW}x${reqH}&scale=2&maptype=roadmap&${lightStyle}&${pathParam}&${markers}&key=${apiKey}`;
+  const url = `https://maps.googleapis.com/maps/api/staticmap?size=${reqW}x${reqH}&scale=2&maptype=roadmap&${lightStyle}&${pathParams}&${markers}&key=${apiKey}`;
 
   console.log("Map tile URL length:", url.length, "chars");
 
