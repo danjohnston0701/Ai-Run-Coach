@@ -937,23 +937,13 @@ fun HealthTargetSection(
                 modifier = Modifier.weight(1f)
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-        ) {
-            DistanceChip(
-                text = "Better recovery",
-                isSelected = selectedTarget == "Better recovery",
-                onClick = { onTargetSelected("Better recovery") },
-                modifier = Modifier.weight(1f)
-            )
-            DistanceChip(
-                text = "Mental wellbeing",
-                isSelected = selectedTarget == "Mental wellbeing",
-                onClick = { onTargetSelected("Mental wellbeing") },
-                modifier = Modifier.weight(1f)
-            )
-        }
+        // Better recovery — single chip in row
+        DistanceChip(
+            text = "Better recovery",
+            isSelected = selectedTarget == "Better recovery",
+            onClick = { onTargetSelected("Better recovery") },
+            modifier = Modifier.fillMaxWidth()
+        )
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
