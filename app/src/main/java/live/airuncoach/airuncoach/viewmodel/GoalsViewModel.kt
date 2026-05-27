@@ -104,6 +104,17 @@ class GoalsViewModel(
                     _allGoals.value = goals
                     hasLoadedGoals = true
                     android.util.Log.d("GoalsViewModel", "✅ Successfully loaded ${goals.size} goals")
+                    
+                    // Explicitly set Success state. The combine() flow should do this,
+                    // but explicitly setting ensures the UI always sees Success after a
+                    // successful load, not stuck on Loading.
+                    val selectedTabValue = _selectedTab.value
+                    val filteredGoals = when (selectedTabValue) {
+                        0 -> goals.filter { it.isActive && !it.isCompleted }
+                        1 -> goals.filter { it.isCompleted }
+                        else -> goals.filter { !it.isActive && !it.isCompleted }
+                    }
+                    _goalsState.value = GoalsUiState.Success(filteredGoals)
                 } else {
                     _goalsState.value = GoalsUiState.Error("User not logged in")
                 }
