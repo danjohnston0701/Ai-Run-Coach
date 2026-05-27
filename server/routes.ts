@@ -10330,6 +10330,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     "/api/strava/connection-status",
     authMiddleware,
     async (req: AuthenticatedRequest, res: Response) => {
+      // Prevent OkHttp / any HTTP cache from storing this response.
+      // The connected/disconnected state must always be fetched fresh from the DB
+      // so that disconnect → app restart correctly reflects the new state.
+      res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+      res.set("Pragma", "no-cache");
+
       try {
         const userId = req.user!.userId;
 

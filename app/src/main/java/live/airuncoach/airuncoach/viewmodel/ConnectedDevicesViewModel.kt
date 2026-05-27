@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -61,10 +62,12 @@ class ConnectedDevicesViewModel @Inject constructor(
             }
         }
 
-        // Re-check whenever MainActivity signals a successful Strava OAuth callback
+        // Re-check whenever MainActivity signals a successful Strava OAuth callback.
+        // Use onStravaOAuthSuccess() which adds a short delay so the backend DB write
+        // has committed before we query connection-status.
         viewModelScope.launch {
             StravaConnectionState.refreshTick.collect { tick ->
-                if (tick > 0) checkStravaConnection()
+                if (tick > 0) onStravaOAuthSuccess()
             }
         }
     }
@@ -130,11 +133,26 @@ class ConnectedDevicesViewModel @Inject constructor(
                 val status = apiService.checkStravaConnection()
                 _stravaConnected.value = status.connected
                 _stravaAthleteName.value = status.athleteName
+                Log.d(TAG, "Strava connection status: connected=${status.connected}, athlete=${status.athleteName}")
             } catch (e: Exception) {
-                Log.e(TAG, "Error checking Strava connection", e)
-                _stravaConnected.value = false
-                _stravaAthleteName.value = null
+                // Don't wipe the connected state on a transient network error — a flaky
+                // connection right after returning from the browser would falsely show
+                // "not connected". Keep the previous value; the next ON_RESUME will retry.
+                Log.e(TAG, "Error checking Strava connection (keeping previous state)", e)
             }
+        }
+    }
+
+    /**
+     * Called by MainActivity after a successful Strava OAuth deep link lands.
+     * We wait 1.5 s before re-checking so the backend DB write (which happens on the
+     * server side milliseconds before it redirects back to the app) has time to commit
+     * and any in-flight OkHttp cache entries are bypassed.
+     */
+    fun onStravaOAuthSuccess() {
+        viewModelScope.launch {
+            delay(1_500)          // let the backend transaction settle
+            checkStravaConnection()
         }
     }
 

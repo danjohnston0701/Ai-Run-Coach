@@ -73,7 +73,10 @@ fun ConnectedDevicesScreen(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                viewModel.checkStravaConnection()
+                // Use onStravaOAuthSuccess() so there's a short delay before the
+                // status check — covers the case where ON_RESUME fires the instant
+                // the app returns from Chrome but the backend commit isn't done yet.
+                viewModel.onStravaOAuthSuccess()
                 viewModel.refreshGarminStatus()
             }
         }

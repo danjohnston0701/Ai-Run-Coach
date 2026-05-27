@@ -245,7 +245,8 @@ router.post('/api/strava/disconnect', authMiddleware, async (req: AuthenticatedR
       return res.status(404).json({ error: 'Strava not connected' });
     }
 
-    // Deauthorize with Strava
+    // Deauthorize with Strava (non-fatal — a 404 just means the token already expired
+    // or the athlete already revoked access in the Strava app, both of which are fine)
     if (device.accessToken) {
       try {
         const { deregisterFromStrava } = await import('./strava-upload-service');
@@ -255,11 +256,20 @@ router.post('/api/strava/disconnect', authMiddleware, async (req: AuthenticatedR
       }
     }
 
-    // Mark device as inactive
+    // Mark ALL strava device rows for this user inactive, not just the first one.
+    // Duplicate rows can accumulate if the user connected multiple times; deactivating
+    // only the first row left the others active and caused "still connected" after restart.
     await db
       .update(connectedDevices)
-      .set({ isActive: false })
-      .where(eq(connectedDevices.id, device.id));
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(
+        and(
+          eq(connectedDevices.userId, userId),
+          eq(connectedDevices.deviceType, 'strava')
+        )
+      );
+
+    console.log(`[Strava Disconnect] Deactivated all Strava device rows for user ${userId}`);
 
     res.json({ success: true, message: 'Strava disconnected' });
   } catch (error: any) {
