@@ -614,7 +614,25 @@ interface ApiService {
 
     @POST("/api/strava/import-history")
     suspend fun importStravaHistory(): StravaImportHistoryResponse
+
+    /**
+     * Request a fresh 365-day companion JWT for the watch.
+     * Called by the phone on every app open / watch connect, so the token on
+     * the watch is silently renewed and the 1-year expiry is never reached in practice.
+     */
+    @POST("/api/garmin-companion/refresh-watch-token")
+    suspend fun refreshWatchToken(@Body body: RefreshWatchTokenRequest): RefreshWatchTokenResponse
 }
+
+data class RefreshWatchTokenRequest(
+    val deviceId: String? = null,
+    val deviceModel: String? = null
+)
+
+data class RefreshWatchTokenResponse(
+    val token: String,
+    val expiresIn: Long
+)
 
 /**
  * Generic response wrapper for My Data endpoints

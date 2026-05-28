@@ -33,6 +33,7 @@ import live.airuncoach.airuncoach.service.RunTrackingService
 import javax.inject.Inject
 import live.airuncoach.airuncoach.ui.navigation.RootNavigationGraph
 import live.airuncoach.airuncoach.ui.theme.AiRunCoachTheme
+import live.airuncoach.airuncoach.network.RefreshWatchTokenRequest
 import live.airuncoach.airuncoach.util.GarminConnectionState
 import live.airuncoach.airuncoach.util.StravaConnectionState
 
@@ -378,14 +379,14 @@ class MainActivity : ComponentActivity() {
             val sessionManager = SessionManager(this)
 
             garminWatchManager.onWatchAppReady = {
-                // Watch companion app is resolved and listening — push auth immediately
-                val token = sessionManager.getAuthToken()
-                val name  = sessionManager.getUserName() ?: ""
-                if (token != null) {
-                    Log.d("MainActivity", "Watch app ready — sending auth token to watch")
-                    garminWatchManager.sendAuth(token, name)
-                } else {
-                    Log.d("MainActivity", "Watch app ready but user not logged in — skipping auth push")
+                // Watch companion app is resolved and listening.
+                // Request a fresh 365-day companion token from the backend and push it to
+                // the watch.  This replaces the user's regular short-lived JWT, meaning the
+                // watch token is silently renewed on every phone connection and the 1-year
+                // expiry is never reached in practice.
+                val name = sessionManager.getUserName() ?: ""
+                lifecycleScope.launch {
+                    pushFreshWatchToken(name)
                 }
             }
             garminWatchManager.initialize()
@@ -398,19 +399,43 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Proactively push the current auth token to the watch every time the app
-        // comes to the foreground. This keeps the watch token fresh so standalone
-        // (watch-only) runs succeed even if the previous token was near expiry.
+        // Every time the app comes to the foreground, silently request a fresh 365-day
+        // companion token and push it to the watch.  This means the token is limitlessly
+        // renewed — as long as the user opens the phone app at least once a year.
+        val name = try { SessionManager(this).getUserName() ?: "" } catch (e: Exception) { "" }
+        lifecycleScope.launch {
+            pushFreshWatchToken(name)
+        }
+    }
+
+    /**
+     * Calls refreshWatchToken to obtain a fresh 365-day companion JWT,
+     * then forwards it to the watch via sendAuth.
+     *
+     * Falls back to the stored regular JWT if the network call fails — so the watch
+     * always gets *some* valid token rather than nothing.
+     */
+    private suspend fun pushFreshWatchToken(runnerName: String) {
         try {
-            val sessionManager = SessionManager(this)
-            val token = sessionManager.getAuthToken()
-            val name  = sessionManager.getUserName() ?: ""
-            if (token != null) {
-                garminWatchManager.sendAuth(token, name)
-                Log.d("MainActivity", "onResume: refreshed auth token on Garmin watch")
-            }
+            val deviceModel = garminWatchManager.getConnectedDeviceName()
+            val response = RetrofitClient.apiService.refreshWatchToken(
+                RefreshWatchTokenRequest(deviceModel = deviceModel)
+            )
+            garminWatchManager.sendAuth(response.token, runnerName)
+            Log.d("MainActivity", "✅ Fresh 365d watch token pushed (device: $deviceModel)")
         } catch (e: Exception) {
-            Log.w("MainActivity", "onResume: could not refresh watch token (non-fatal): ${e.message}")
+            // Network unavailable or user not logged in — fall back to the stored JWT
+            Log.d("MainActivity", "Watch token refresh unavailable, falling back to stored token: ${e.message}")
+            try {
+                val sessionManager = SessionManager(this@MainActivity)
+                val fallbackToken = sessionManager.getAuthToken()
+                if (fallbackToken != null) {
+                    garminWatchManager.sendAuth(fallbackToken, runnerName)
+                    Log.d("MainActivity", "Fallback token pushed to watch")
+                }
+            } catch (fe: Exception) {
+                Log.w("MainActivity", "Could not push any token to watch (non-fatal): ${fe.message}")
+            }
         }
     }
 

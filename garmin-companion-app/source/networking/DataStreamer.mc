@@ -16,20 +16,24 @@ class DataStreamer {
     private var _pendingRequests = 0;
     
     function initialize() {
-        // Load auth token from storage
+        // Load auth token from storage — do NOT make any Comm.makeWebRequest calls here.
+        // Calling Comm during the initialize() / constructor phase (before getInitialView
+        // returns) is a known ConnectIQ crash trigger (IQ error icon on watch face).
+        // Session creation is deferred to prepareSession(), called explicitly by RunView
+        // just before a run starts, when the Comm subsystem is fully initialised.
         _authToken = App.Storage.getValue("authToken");
-        _sessionId = App.Storage.getValue("sessionId");
-        
-        // If no session, create one
-        if (_sessionId == null) {
-            _sessionId = generateSessionId();
-            App.Storage.setValue("sessionId", _sessionId);
-            
-            // Start session on backend
-            startSession();
-        }
-        
-        Sys.println("DataStreamer initialized with session: " + _sessionId);
+        _sessionId = null;  // Always start fresh — do not re-use stale session IDs from storage
+        App.Storage.deleteValue("sessionId");  // Clean up any leftover from a previous run
+        Sys.println("DataStreamer initialised (auth=" + (_authToken != null ? "yes" : "no") + ")");
+    }
+
+    // Prepare a new session — call this just before the run starts (from RunView.startRun).
+    // Safe to call at run-time; Comm subsystem is guaranteed ready by this point.
+    function prepareSession() {
+        _sessionId = generateSessionId();
+        App.Storage.setValue("sessionId", _sessionId);
+        startSession();
+        Sys.println("DataStreamer: session prepared — " + _sessionId);
     }
     
     // Update GPS coordinates
@@ -117,26 +121,34 @@ class DataStreamer {
         _pendingRequests--;
 
         if (responseCode == 200) {
+            // Notify RunView: HTTP is reachable — reset failure counter so offline
+            // buffer stays dormant in Scenario 3 (phone nearby, app not open).
+            var app = Application.getApp();
+            if (app has :onHttpSuccess) { app.onHttpSuccess(); }
+
             // Deliver coaching cue to the active RunView if one was piggybacked on the response
             if (data != null && data.get("coaching") != null) {
                 var coachingText = data.get("coaching");
                 Sys.println("Coaching cue received: " + coachingText);
-
-                // Notify RunView via the app object so it can display the cue overlay
-                var app = Application.getApp();
-                if (app has :onCoachingCue) {
-                    app.onCoachingCue(coachingText);
-                }
+                if (app has :onCoachingCue) { app.onCoachingCue(coachingText); }
             }
         } else if (responseCode == 401) {
-            // Token expired or invalid — clear the stored token so the watch re-enters
-            // the "Waiting for phone" state and the user is prompted to open the phone
-            // app, which will push a fresh token automatically.
-            Sys.println("DataStreamer: 401 Unauthorized — clearing stale auth token");
-            App.Storage.deleteValue("authToken");
-            _authToken = null;
+            // Token expired or invalid.
+            // IMPORTANT: do NOT delete the stored token during a run. If we clear it
+            // mid-run the user is locked out until they reconnect their phone — exactly
+            // the situation we want to avoid.  Instead, flag it as expired so the NEXT
+            // app open will prompt re-auth, while this run can continue in offline mode.
+            Sys.println("DataStreamer: 401 Unauthorized — token may be expired, switching to offline buffer");
+            _authToken = null;  // Stop sending HTTP requests for this session
+            // (App.Storage token is intentionally kept so the next open can show a proper
+            //  "reconnect needed" prompt rather than a generic "waiting for phone" screen)
+            var app = Application.getApp();
+            if (app has :onHttpFailure) { app.onHttpFailure(); }
         } else {
+            // Notify RunView: HTTP failed — increment failure counter
             Sys.println("Data send failed: " + responseCode);
+            var app = Application.getApp();
+            if (app has :onHttpFailure) { app.onHttpFailure(); }
         }
     }
     

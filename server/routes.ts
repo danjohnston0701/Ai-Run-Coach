@@ -8792,12 +8792,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ error: "Invalid credentials" });
       }
       
-      // Generate a companion session token (JWT)
+      // Generate a companion session token (JWT).
+      // Watch tokens are long-lived (1 year) because the watch cannot refresh tokens
+      // independently — it only receives new tokens when the user opens the phone app.
+      // A 30-day expiry caused IQ error crashes on watch cold-opens after a month of use.
       const jwt = await import("jsonwebtoken");
       const token = jwt.default.sign(
         { userId: user.id, type: "companion", deviceId },
         process.env.SESSION_SECRET || "fallback-secret",
-        { expiresIn: "30d" }
+        { expiresIn: "365d" }
       );
       
       console.log(`[Companion] User ${user.email} authenticated from device ${deviceModel || deviceId}`);
@@ -8830,6 +8833,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
+  // ── Watch token refresh — called by phone app when watch connects ───────���────
+  // The phone calls this (with its own auth JWT) to generate a fresh 365-day
+  // companion token, then forwards it to the watch over Bluetooth.  This means
+  // every time the user opens the phone app with their watch nearby, the token
+  // on the watch is silently renewed — in practice the 1-year expiry is never hit.
+  app.post("/api/garmin-companion/refresh-watch-token", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.id;
+      const { deviceId, deviceModel } = req.body;
+
+      const jwt = await import("jsonwebtoken");
+      const freshToken = jwt.default.sign(
+        { userId, type: "companion", deviceId: deviceId || "phone-issued" },
+        process.env.SESSION_SECRET || "fallback-secret",
+        { expiresIn: "365d" }
+      );
+
+      // Update last-seen timestamp so we know the watch is still in active use
+      await db
+        .update(users)
+        .set({ garminWatchAppLastSeenAt: new Date() })
+        .where(eq(users.id, userId));
+
+      console.log(`[Companion] Token refreshed for user ${userId} (device: ${deviceModel || deviceId || "unknown"})`);
+      res.json({ token: freshToken, expiresIn: 365 * 24 * 60 * 60 });
+    } catch (error: any) {
+      console.error("Watch token refresh error:", error);
+      res.status(500).json({ error: "Token refresh failed" });
+    }
+  });
+
   // Middleware for companion app authentication
   const companionAuthMiddleware = async (req: Request, res: Response, next: Function) => {
     try {

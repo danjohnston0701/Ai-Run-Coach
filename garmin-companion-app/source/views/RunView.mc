@@ -142,6 +142,12 @@ class RunView extends Ui.View {
     private const OFFLINE_TICK_INTERVAL = 60;   // 60 x 250ms = 15 s
     private const OFFLINE_MAX_POINTS    = 360;  // 360 x 15s  = 90 min
 
+    // ── HTTP health tracking (offline-buffer activation) ─────────────────────
+    // If 5 consecutive HTTP sends fail (relay unavailable = no phone), switch to
+    // offline buffer mode. Reset to 0 on every successful HTTP response.
+    private var _httpConsecutiveFails   = 0;
+    private const HTTP_FAIL_THRESHOLD   = 5;
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     function initialize() {
@@ -217,6 +223,30 @@ class RunView extends Ui.View {
     function isPaused()  { return _isPaused; }
     function isRunning() { return _isRunning; }
 
+    // ── HTTP health callbacks (called by AiRunCoachApp from DataStreamer) ──────
+
+    // HTTP POST succeeded — phone relay (Garmin Connect) is reachable.
+    // Reset failure counter so offline buffer stays dormant (Scenario 3).
+    function onHttpSuccess() {
+        if (_httpConsecutiveFails > 0) {
+            _httpConsecutiveFails = 0;
+            // If we were in offline mode, show a brief "Phone reconnected" note
+            if (_isRunning) {
+                setStatusMessage("Connected - streaming live");
+            }
+        }
+    }
+
+    // HTTP POST failed — increment failure counter.
+    // Once we hit the threshold we know the phone relay is genuinely unavailable
+    // and activate the offline buffer.
+    function onHttpFailure() {
+        _httpConsecutiveFails += 1;
+        if (_httpConsecutiveFails == HTTP_FAIL_THRESHOLD && _isRunning) {
+            setStatusMessage("No relay: offline buffer active");
+        }
+    }
+
     function startRun() {
         if (_isRunning) { return; }
         if (!_gpsReady) { _vibeShort(); return; }
@@ -245,18 +275,22 @@ class RunView extends Ui.View {
         _sumGcb = 0.0; _sumPower = 0; _sumResp = 0.0; _sampleN = 0;
         _totalAscent = 0.0; _totalDescent = 0.0; _lastAlt = null;
 
-        // Reset offline buffer
-        _offlineBuffer     = [];
-        _offlineTicks      = 0;
-        _offlineBufferFull = false;
-        if (!_isConnected) {
-            setStatusMessage("No phone: charts up to 90min");
-        }
+        // Reset offline buffer and HTTP health counter
+        _offlineBuffer          = [];
+        _offlineTicks           = 0;
+        _offlineBufferFull      = false;
+        _httpConsecutiveFails   = 0;
+        // Don't show "No phone" at start — HTTP may still work via Garmin Connect
+        // relay even when the phone app hasn't opened. We show the notice only once
+        // HTTP has actually failed enough times to confirm the relay is unavailable.
+
+        // Prepare backend session (safe to call Comm here — app is fully initialised)
+        if (_dataStreamer != null) { _dataStreamer.prepareSession(); }
 
         // Always start local Garmin session AND notify phone (phone must activate its run session for coaching)
         _startSession();
         _phoneLink.sendCommand("start");
-        Sys.println(">>> startRun() — session started, start command sent to phone");
+        Sys.println(">>> startRun() — session prepared, start command sent to phone");
         _vibeShort();
         Ui.requestUpdate();
     }
@@ -608,9 +642,13 @@ class RunView extends Ui.View {
                 _lastAlt = _lastGpsAlt;
             }
 
-            // ── Offline buffer capture (every 15 s, phone-less runs only) ────
-            // Only active when phone is not connected and run is not paused.
-            if (!_isConnected && !_isPaused) {
+            // ── Offline buffer capture (every 15 s, truly phone-less runs only) ─
+            // Only activates when HTTP has been failing consistently, meaning the
+            // Garmin Connect relay is genuinely unavailable (no phone in range).
+            // Scenario 3 (phone in pocket, app not open): HTTP works fine via relay,
+            // so _httpConsecutiveFails stays low and buffer never activates.
+            var _httpOfflineMode = (_httpConsecutiveFails >= HTTP_FAIL_THRESHOLD);
+            if (_httpOfflineMode && !_isPaused) {
                 _offlineTicks += 1;
                 if (_offlineTicks >= OFFLINE_TICK_INTERVAL) {
                     _offlineTicks = 0;
@@ -623,7 +661,7 @@ class RunView extends Ui.View {
                         _offlineBuffer.add([_elapsedTime, latE5, lngE5, altDm, _heartRate, _cadence, paceDs]);
                     } else if (!_offlineBufferFull) {
                         _offlineBufferFull = true;
-                        setStatusMessage("Chart buffer full - 90min");
+                        setStatusMessage("Offline buffer full - 90min");
                     }
                 }
             }
@@ -925,11 +963,12 @@ class RunView extends Ui.View {
 
         var dots = ""; for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, cy - 20, Gfx.FONT_SMALL, "Waiting" + dots, Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, cy - 22, Gfx.FONT_SMALL, "Waiting" + dots, Gfx.TEXT_JUSTIFY_CENTER);
         dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, cy + 10, Gfx.FONT_TINY, "Open AI Run Coach app", Gfx.TEXT_JUSTIFY_CENTER);
-        dc.drawText(cx, cy + 28, Gfx.FONT_TINY, "on your phone to", Gfx.TEXT_JUSTIFY_CENTER);
-        dc.drawText(cx, (h * 0.74).toNumber(), Gfx.FONT_TINY, "connect your account", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, cy + 8,  Gfx.FONT_XTINY, "Open Ai Run Coach on your", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, cy + 22, Gfx.FONT_XTINY, "phone to connect.", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.setColor(0x00AA55, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, cy + 40, Gfx.FONT_XTINY, "You only need to do this once.", Gfx.TEXT_JUSTIFY_CENTER);
     }
 
     // ── Start hint: green half-moon at top-right button + play icon ──────────

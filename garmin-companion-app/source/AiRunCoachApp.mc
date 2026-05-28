@@ -46,4 +46,22 @@ class AiRunCoachApp extends App.AppBase {
             Ui.requestUpdate();
         }
     }
+
+    // Called by DataStreamer when an HTTP data POST receives a 200 response.
+    // Resets the HTTP failure counter so the offline buffer stays dormant when
+    // Scenario 3 applies (watch-initiated run, phone in pocket via Garmin relay).
+    function onHttpSuccess() {
+        if (_runView != null) {
+            _runView.onHttpSuccess();
+        }
+    }
+
+    // Called by DataStreamer when an HTTP data POST fails (non-200 / network error).
+    // After HTTP_FAIL_THRESHOLD consecutive failures RunView activates the offline
+    // buffer — this only happens when the phone is genuinely out of range.
+    function onHttpFailure() {
+        if (_runView != null) {
+            _runView.onHttpFailure();
+        }
+    }
 }

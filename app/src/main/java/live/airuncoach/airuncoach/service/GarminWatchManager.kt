@@ -1,7 +1,14 @@
 package live.airuncoach.airuncoach.service
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
+import android.os.Build
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import com.garmin.android.connectiq.ConnectIQ
 import com.garmin.android.connectiq.IQApp
 import com.garmin.android.connectiq.IQDevice
@@ -83,6 +90,63 @@ class GarminWatchManager(private val context: Context) {
         /** SharedPreferences key — the watch app version last reported via the "hello" message. */
         const val PREF_WATCH_APP_VERSION = "garmin_watch_installed_version"
         private const val PREFS_NAME = "garmin_watch_prefs"
+        // Notification IDs / channel for watch-initiated (Scenario 3) passive monitoring
+        private const val NOTIF_CHANNEL_ID  = "garmin_watch_run"
+        private const val NOTIF_ID_WATCH_RUN = 9001
+    }
+
+    // ── Scenario 3: passive notification for watch-initiated runs ────────────
+
+    /**
+     * Show a persistent notification when the watch starts a run without the
+     * phone app being in the foreground (Scenario 3). The watch is already
+     * streaming full data to the backend via the Garmin Connect relay — this
+     * notification just lets the user know so they can open the app after their
+     * run to see their summary.
+     */
+    private fun showWatchRunNotification() {
+        try {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            // Create channel (no-op on API < 26)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    NOTIF_CHANNEL_ID,
+                    "Watch Run",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply { description = "Shows when a Garmin watch run is in progress" }
+                nm.createNotificationChannel(channel)
+            }
+            // Tap notification → open app
+            val mainClass = context.packageManager.getLaunchIntentForPackage(context.packageName)
+            val tapIntent = PendingIntent.getActivity(
+                context, 0,
+                mainClass ?: Intent(),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val notif = NotificationCompat.Builder(context, NOTIF_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_media_play)
+                .setContentTitle("Garmin Watch Run in Progress")
+                .setContentText("Your run is being recorded. Open Ai Run Coach to see your summary when you're done.")
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setOngoing(true)
+                .setContentIntent(tapIntent)
+                .build()
+            // POST_NOTIFICATIONS requires explicit grant on Android 13+. The SecurityException
+            // is caught below so a missing permission is non-fatal (notification just won't show).
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                NotificationManagerCompat.from(context).notify(NOTIF_ID_WATCH_RUN, notif)
+            }
+            Log.d(TAG, "Watch-initiated run notification shown (Scenario 3)")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to show watch run notification: ${e.message}")
+        }
+    }
+
+    private fun cancelWatchRunNotification() {
+        NotificationManagerCompat.from(context).cancel(NOTIF_ID_WATCH_RUN)
+        Log.d(TAG, "Watch-initiated run notification dismissed")
     }
 
     // ── Public state ──────────────────────────────────────────────────────────
@@ -351,7 +415,16 @@ class GarminWatchManager(private val context: Context) {
                 "command" -> {
                     val action = map["action"] as? String ?: return
                     Log.d(TAG, "Watch command: $action")
-                    onWatchCommand?.invoke(action)
+                    // If no ViewModel has registered a handler (user is not on the Run screen)
+                    // show a passive notification so the user knows a watch run is in progress.
+                    if (onWatchCommand == null) {
+                        when (action) {
+                            "start" -> showWatchRunNotification()
+                            "stop"  -> cancelWatchRunNotification()
+                        }
+                    } else {
+                        onWatchCommand?.invoke(action)
+                    }
                 }
                 "watchData" -> {
                     // Full biometric frame streamed from the watch every ~2 s.
