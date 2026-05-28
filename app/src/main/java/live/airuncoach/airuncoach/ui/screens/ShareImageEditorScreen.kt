@@ -69,7 +69,7 @@ fun ShareImageEditorScreen(
 
     var isStickerPanelExpanded by remember { mutableStateOf(false) }
     var isBackgroundPanelExpanded by remember { mutableStateOf(false) }
-    var isRingsPanelExpanded by remember { mutableStateOf(true) }
+    var isRingsPanelExpanded by remember { mutableStateOf(false) }
 
     // Collapsible control strip state
     var isControlStripExpanded by remember { mutableStateOf(true) }
@@ -273,16 +273,6 @@ fun ShareImageEditorScreen(
                 }
             }
 
-            // ─── Garmin attribution — floating top-right (Garmin API Brand Guidelines) ───
-            // Run data displayed in shared images may originate from a Garmin device.
-            // Attribution must be visible to the user above the fold.
-            GarminAttributionBadge(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .statusBarsPadding()
-                    .padding(end = 12.dp, top = 14.dp),
-                style = GarminBadgeStyle.INLINE,
-            )
         }
 
         // ─── Error snackbar ───

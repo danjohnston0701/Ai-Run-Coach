@@ -371,8 +371,7 @@ function buildStatsGridSvg(
   w: number, h: number,
   run: RunDataForImage,
   userName?: string,
-  ringLayout?: { topLeft?: string; topRight?: string; bottomLeft?: string; bottomRight?: string },
-  customCaption?: string
+  ringLayout?: { topLeft?: string; topRight?: string; bottomLeft?: string; bottomRight?: string }
 ): string {
   const cx = w / 2;
   const contentEndY = h - LOGO_ZONE_H;
@@ -397,44 +396,36 @@ function buildStatsGridSvg(
   headerSvg += `<line x1="${cx - 80}" y1="${headerY + 4}" x2="${cx + 80}" y2="${headerY + 4}" stroke="url(#fadeLine)" stroke-width="1.5"/>`;
   headerY += 18;
 
-  // ── Ring sizing — fill the width, rows must never overlap ───────────
-  // Layout constants
-  const PAD_OUTSIDE = 22;   // from image edge to ring centre
-  const GAP_H = 16;         // horizontal gap between ring path edges (columns)
-  const CAPTION_H = 130;    // height reserved for caption text below rings
-  const CAPTION_GAP = 28;   // space between bottom ring edge and caption separator
-  // Stroke = r*0.15. The ringGlow filter (stdDeviation=6) adds ~18px of visible halo
-  // beyond each stroke edge. GAP_V must clear: strokeW + 2*glowSpread + breathing room.
-  // Solve: r*(4 + 0.15) + VISUAL_GAP_V + CAPTION_GAP + CAPTION_H ≤ availableH
-  const GLOW_SPREAD  = 18;  // ~3× stdDeviation of the ringGlow filter
-  const VISUAL_GAP_V = GLOW_SPREAD * 2 + 28;  // clear both halos + 28px breathing room = 64
+  // ── Ring sizing — no overlap guaranteed ────────────────────────────
+  const GAP_H = 20;          // minimum gap between outer stroke edges (horizontal)
+  // Glow filter (stdDeviation=6) adds ~18px halo beyond stroke edge.
+  const GLOW_SPREAD  = 18;
+  const VISUAL_GAP_V = GLOW_SPREAD * 2 + 28;  // 64px — clears both halos + breathing room
 
   const ringAreaTop = headerY;
-  const availableH = contentEndY - ringAreaTop;
+  const availableH  = contentEndY - ringAreaTop;
 
-  // Solve for r given two constraints:
-  //   Width:  4*r + GAP_H  ≤ w  (rings centred, so no PAD_OUTSIDE term)
-  //   Height: r*4.15 + VISUAL_GAP_V + CAPTION_GAP + CAPTION_H ≤ availableH
-  const rFromW = Math.floor((w - GAP_H) / 4);
-  const rFromH = Math.floor((availableH - VISUAL_GAP_V - CAPTION_GAP - CAPTION_H) / 4.15);
+  // Outer stroke edge = ringR * 1.075 (stroke = r*0.15, extends r*0.075 outward).
+  // Two rings side-by-side: ringR*4.3 + GAP_H ≤ w  →  rFromW = (w - GAP_H) / 4.3
+  // Two rows stacked:       ringR*4.15 + VISUAL_GAP_V ≤ availableH
+  const rFromW = Math.floor((w - GAP_H) / 4.3);
+  const rFromH = Math.floor((availableH - VISUAL_GAP_V) / 4.15);
   const ringR  = Math.max(40, Math.min(rFromW, rFromH));
 
-  // GAP_V: path-edge to path-edge gap (strokes + glow both clear)
   const strokeW = Math.round(ringR * 0.15);
-  const GAP_V = strokeW + VISUAL_GAP_V;
+  const GAP_V   = strokeW + VISUAL_GAP_V;
 
-  // Column centres — always centred in the image regardless of ring size
-  const col1X = Math.round(w / 2 - ringR - GAP_H / 2);
-  const col2X = Math.round(w / 2 + ringR + GAP_H / 2);
+  // Column centres: separated so outer stroke edges have exactly GAP_H gap
+  // D = 2*ringR + strokeW + GAP_H = ringR*2.15 + GAP_H
+  const col1X = Math.round(cx - (ringR * 2.15 + GAP_H) / 2);
+  const col2X = Math.round(cx + (ringR * 2.15 + GAP_H) / 2);
 
-  // Vertically centre the ring block + caption in the available area
-  const ringBlockH   = 4 * ringR + GAP_V;
-  const totalBlockH  = ringBlockH + CAPTION_GAP + CAPTION_H;
-  const topPad       = Math.max(ringR * 0.1, Math.floor((availableH - totalBlockH) / 2));
+  // Vertically centre the ring block in the available area
+  const ringBlockH = 4 * ringR + GAP_V;
+  const topPad     = Math.max(ringR * 0.1, Math.floor((availableH - ringBlockH) / 2));
 
-  const row1CY      = ringAreaTop + topPad + ringR;
-  const row2CY      = row1CY + 2 * ringR + GAP_V;
-  const captionAreaY = row2CY + ringR + CAPTION_GAP;
+  const row1CY = ringAreaTop + topPad + ringR;
+  const row2CY = row1CY + 2 * ringR + GAP_V;
 
   // ── Four rings ───────────────────────────────────────────────────────
   const rings = [
@@ -449,25 +440,11 @@ function buildStatsGridSvg(
     ringSvg += metricRing(r.cx, r.cy, ringR, r.label, r.value, r.unit, r.grad, r.prog, r.track);
   });
 
-  // ── Caption area ─────────────────────────────────────────────────────
-  const captionFontSize = Math.min(Math.round(w * 0.060), 68);
-  const captionText = (customCaption || "").trim();
-  const captionLineY = captionAreaY + captionFontSize + 10;
-
-  const captionSvg = `
-    <line x1="${cx - 100}" y1="${captionAreaY}" x2="${cx + 100}" y2="${captionAreaY}" stroke="${C.border}" stroke-width="1.5" opacity="0.5"/>
-    ${captionText
-      ? `<text x="${cx}" y="${captionLineY}" font-family="${FONT}" font-size="${captionFontSize}" font-weight="500" fill="${C.textMid}" text-anchor="middle">${esc(captionText)}</text>`
-      : `<text x="${cx}" y="${captionLineY}" font-family="${FONT}" font-size="${captionFontSize}" font-weight="400" fill="${C.textMuted}" text-anchor="middle" opacity="0.4">Add a caption...</text>`
-    }
-  `;
-
   return `
     ${globalDefs(w, h)}
     <rect width="${w}" height="${h}" fill="${C.bg}"/>
     ${headerSvg}
     ${ringSvg}
-    ${captionSvg}
   `;
 }
 
@@ -1280,7 +1257,7 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
 
   switch (template.id) {
     case "stats-grid":
-      svgContent = buildStatsGridSvg(w, h, req.runData, req.userName, req.ringLayout, req.customCaption);
+      svgContent = buildStatsGridSvg(w, h, req.runData, req.userName, req.ringLayout);
       break;
     case "run-metrics":
       svgContent = buildRunMetricsSvg(w, h, req.runData, req.userName);
@@ -1298,7 +1275,7 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
       svgContent = buildMinimalSvg(w, h, req.runData, req.userName);
       break;
     default:
-      svgContent = buildStatsGridSvg(w, h, req.runData, req.userName, req.ringLayout, req.customCaption);
+      svgContent = buildStatsGridSvg(w, h, req.runData, req.userName, req.ringLayout);
   }
 
   let stickersSvg = "";
