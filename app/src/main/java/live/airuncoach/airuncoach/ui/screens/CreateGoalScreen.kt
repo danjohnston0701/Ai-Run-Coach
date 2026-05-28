@@ -931,12 +931,14 @@ fun HealthTargetSection(
                 modifier = Modifier.weight(1f)
             )
             DistanceChip(
-                text = "Build strength",
-                isSelected = selectedTarget == "Build strength",
-                onClick = { onTargetSelected("Build strength") },
+                text = " Injury Recovery",
+                isSelected = selectedTarget == "Injury Recovery",
+                onClick = { onTargetSelected("Injury Recovery") },
                 modifier = Modifier.weight(1f)
             )
+
         }
+        /* //hide 3rd row of health targets
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
@@ -948,12 +950,14 @@ fun HealthTargetSection(
                 modifier = Modifier.weight(1f)
             )
             DistanceChip(
-                text = "🩹 Injury Recovery",
-                isSelected = selectedTarget == "Injury Recovery",
-                onClick = { onTargetSelected("Injury Recovery") },
+                text = "Build strength",
+                isSelected = selectedTarget == "Build strength",
+                onClick = { onTargetSelected("Build strength") },
                 modifier = Modifier.weight(1f)
             )
         }
+        */
+
 
         // Custom health goal input
         BasicTextField(
@@ -974,7 +978,7 @@ fun HealthTargetSection(
                 ) {
                     if (customGoal.isEmpty()) {
                         Text(
-                            text = "Or enter custom health goal...",
+                            text = "Or enter your own health goal...",
                             style = AppTextStyles.body,
                             color = Colors.textMuted
                         )
