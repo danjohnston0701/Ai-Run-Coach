@@ -335,7 +335,7 @@ private fun GarminWatchAppCard(onSetUp: () -> Unit) {
 
             // Description
             Text(
-                "Install the Ai Run Coach companion app on your Garmin watch. Your watch GPS, heart rate, and running metrics stream live to your phone for real-time coaching cues — for a totally elite experience.",
+                "Install the Ai Run Coach companion app on your Garmin watch. Run with your phone for live coaching and full charts, or leave it at home — the watch buffers your run and uploads everything when you're back in range.",
                 style = AppTextStyles.caption,
                 color = Colors.textSecondary,
                 lineHeight = 18.sp
@@ -348,7 +348,7 @@ private fun GarminWatchAppCard(onSetUp: () -> Unit) {
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // "No Garmin Connect needed" info badge
+            // Phone-connected mode highlight
             Surface(
                 shape = RoundedCornerShape(8.dp),
                 color = Colors.primary.copy(alpha = 0.08f),
@@ -366,9 +366,39 @@ private fun GarminWatchAppCard(onSetUp: () -> Unit) {
                     )
                     Spacer(modifier = Modifier.width(7.dp))
                     Text(
-                        "Automatically syncs your run activity to Garmin Connect.",
+                        "With phone: live coaching, full charts & unlimited run length.",
                         style = AppTextStyles.caption.copy(fontSize = 11.sp),
                         color = Colors.primary
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Phone-free mode callout
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Color(0xFFFF8C00).copy(alpha = 0.10f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        Icons.Default.Info,
+                        contentDescription = null,
+                        tint = Color(0xFFFF8C00),
+                        modifier = Modifier
+                            .size(15.dp)
+                            .padding(top = 1.dp)
+                    )
+                    Spacer(modifier = Modifier.width(7.dp))
+                    Text(
+                        "Without phone: GPS route, heart rate & pace charts buffered for up to 90 minutes. Data uploads automatically when you open the app after your run.",
+                        style = AppTextStyles.caption.copy(fontSize = 11.sp),
+                        color = Color(0xFFFF8C00),
+                        lineHeight = 16.sp
                     )
                 }
             }
@@ -405,10 +435,11 @@ private fun GarminWatchAppCard(onSetUp: () -> Unit) {
 @Composable
 private fun WatchFeatureChips() {
     val chips = listOf(
-        Pair(Icons.Default.LocationOn, "23+ Biometric Sensors"),     // Ground contact, vertical oscillation, training effect, etc.
-        Pair(Icons.Default.Favorite, "Personal HR Zones"),            // Based on user's actual max HR
-        Pair(Icons.Default.Star, "Advanced Running Metrics"),                    // GCT, stride, bounce tracking
-        Pair(Icons.Default.Info, "Real-Time Coaching")                // AI-powered form & pacing cues
+        Pair(Icons.Default.LocationOn, "23+ Biometric Sensors"),  // Ground contact, vertical oscillation, etc.
+        Pair(Icons.Default.Favorite, "Personal HR Zones"),        // Based on user's actual max HR
+        Pair(Icons.Default.Star, "Advanced Running Metrics"),     // GCT, stride, bounce tracking
+        Pair(Icons.Default.Info, "Real-Time Coaching"),           // AI-powered form & pacing cues
+        Pair(Icons.Default.Phone, "Phone-Free Runs (90 min)")     // Offline buffer feature
     )
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         chips.chunked(2).forEach { row ->
