@@ -240,6 +240,50 @@ class DataStreamer {
         }
     }
 
+    // Upload buffered data from a standalone (phone-less) run.
+    // Called automatically when the phone app reconnects after the run.
+    // sessionId    : the session ID from that run (read from App.Storage)
+    // points       : Array of compact Arrays [elapsed_s, lat_e5, lng_e5, alt_dm, hr, cad, pace_ds]
+    // distanceM    : total distance in metres
+    // durationSec  : total elapsed time in seconds
+    // totalAscent  : total ascent in metres
+    function uploadOfflineBatch(sessionId, points, distanceM, durationSec, totalAscent) {
+        if (_authToken == null) {
+            Sys.println("DataStreamer.uploadOfflineBatch: no auth token");
+            return;
+        }
+        if (points == null || points.size() == 0) {
+            Sys.println("DataStreamer.uploadOfflineBatch: no points to upload");
+            return;
+        }
+        var payload = {
+            "sessionId"   => sessionId,
+            "points"      => points,
+            "distanceM"   => (distanceM   != null) ? distanceM   : 0.0,
+            "durationSec" => (durationSec != null) ? durationSec : 0,
+            "totalAscent" => (totalAscent != null) ? totalAscent : 0.0
+        };
+        var url = _baseUrl + "/api/garmin-companion/session/" + sessionId + "/upload-batch";
+        var options = {
+            :method => Comm.HTTP_REQUEST_METHOD_POST,
+            :headers => {
+                "Content-Type" => Comm.REQUEST_CONTENT_TYPE_JSON,
+                "Authorization" => "Bearer " + _authToken
+            },
+            :responseType => Comm.HTTP_RESPONSE_CONTENT_TYPE_JSON
+        };
+        Comm.makeWebRequest(url, payload, options, method(:onBatchUploaded));
+        Sys.println("DataStreamer: uploading offline batch (" + points.size() + " pts, session=" + sessionId + ")");
+    }
+
+    function onBatchUploaded(responseCode as Lang.Number, data as Lang.Dictionary or Lang.String or Null) as Void {
+        if (responseCode == 200) {
+            Sys.println("DataStreamer: offline batch upload success");
+        } else {
+            Sys.println("DataStreamer: offline batch upload failed: " + responseCode);
+        }
+    }
+
     // Generate random session ID
     private function generateSessionId() {
         var chars = "abcdefghijklmnopqrstuvwxyz0123456789";

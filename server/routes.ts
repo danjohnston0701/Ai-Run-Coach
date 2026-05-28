@@ -9182,7 +9182,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/garmin-companion/session/end", companionAuthMiddleware, async (req: Request, res: Response) => {
     try {
       const { userId } = (req as any).companionUser;
-      const { sessionId, summary } = req.body;
+      const { sessionId, summary, kmSplits } = req.body;
       
       if (!sessionId) {
         return res.status(400).json({ error: "Session ID required" });
@@ -9255,6 +9255,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
 
           const now = new Date();
+          // ── Reconstruct chart data from km splits (standalone watch runs) ───
+          // When no per-second data points exist (phone-less run), km splits
+          // provide enough data to render pace, HR, and elevation charts.
+          let heartRateData: any[] | null = null;
+          let paceData: any[] | null = null;
+          let altitudeData: any[] | null = null;
+          let storedKmSplits: any[] | null = null;
+
+          if (kmSplits && Array.isArray(kmSplits) && kmSplits.length > 0) {
+            storedKmSplits = kmSplits;
+
+            // Build simple time-series arrays from km splits for chart rendering.
+            // Each entry is placed at the midpoint of the km (elapsed seconds).
+            let elapsed = 0;
+            heartRateData = [];
+            paceData      = [];
+            altitudeData  = [];
+            for (const split of kmSplits) {
+              const midpoint = elapsed + Math.round((split.duration || 0) / 2);
+              if (split.hr != null) {
+                heartRateData.push({ time: midpoint, value: split.hr });
+              }
+              if (split.pace != null && split.pace > 0) {
+                paceData.push({ time: midpoint, value: split.pace });
+              }
+              elapsed += (split.duration || 0);
+            }
+            // Build cumulative elevation series
+            let cumAscent = 0;
+            for (const split of kmSplits) {
+              cumAscent += (split.elevGain || 0);
+              altitudeData.push({ km: split.km, value: cumAscent });
+            }
+            if (heartRateData.length === 0) heartRateData = null;
+            if (paceData.length === 0)      paceData      = null;
+            if (altitudeData.length === 0)  altitudeData  = null;
+          }
+
           const [newRun] = await db.insert(runs).values({
             userId,
             distance: distanceKm,
@@ -9286,6 +9324,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             avgRespirationRate: stats.avgRespirationRate ?? null,
             aerobicTrainingEffect: stats.aerobicTrainingEffect ?? null,
             anaerobicTrainingEffect: stats.anaerobicTrainingEffect ?? null,
+            // Per-km split data — powers charts for phone-less runs
+            kmSplits: storedKmSplits,
+            heartRateData: heartRateData,
+            paceData: paceData,
+            altitudeData: altitudeData,
           }).returning();
 
           newRunId = newRun.id;
@@ -9311,6 +9354,144 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
+  // ── Offline batch upload ──────────────────────────────────────────────────
+  // Receives the 15-second buffered data points from a watch-only run and
+  // patches the existing run record (created by session/end) with full chart
+  // data: GPS track, HR series, pace series, altitude series, cadence series.
+  //
+  // Point format (compact Array from watch):
+  //   [elapsed_s, lat_e5, lng_e5, alt_dm, hr, cadence, pace_ds]
+  //   lat_e5  = lat  × 100000  (integer)
+  //   lng_e5  = lng  × 100000  (integer)
+  //   alt_dm  = alt  × 10      (integer, decimetres)
+  //   pace_ds = pace × 10      (integer, deciseconds/km)
+  app.post("/api/garmin-companion/session/:sessionId/upload-batch", companionAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const { userId } = (req as any).companionUser;
+      const { sessionId } = req.params;
+      const { points, distanceM, durationSec, totalAscent } = req.body;
+
+      if (!points || !Array.isArray(points) || points.length === 0) {
+        return res.status(400).json({ error: "No points provided" });
+      }
+
+      // Find the existing run record created by session/end
+      const [existingRun] = await db
+        .select()
+        .from(runs)
+        .where(and(eq(runs.userId, userId), eq(runs.externalId, sessionId)));
+
+      if (!existingRun) {
+        console.warn(`[Offline Batch] No run found for session ${sessionId} — batch discarded`);
+        return res.status(404).json({ error: "Run not found for this session" });
+      }
+
+      // ── Decode compact points into chart series ──────────────────────────
+      const gpsTrack:       { lat: number; lng: number; altitude?: number; timestamp: number }[] = [];
+      const heartRateData:  { time: number; value: number }[] = [];
+      const paceData:       { time: number; value: number }[] = [];
+      const altitudeData:   { time: number; value: number }[] = [];
+      const cadenceData:    { time: number; value: number }[] = [];
+
+      for (const pt of points) {
+        const [elapsed_s, lat_e5, lng_e5, alt_dm, hr, cadence, pace_ds] = pt;
+        const lat  = lat_e5  / 100000.0;
+        const lng  = lng_e5  / 100000.0;
+        const altM = alt_dm  / 10.0;
+        const pace = pace_ds / 10.0;
+
+        if (lat_e5 !== 0 && lng_e5 !== 0) {
+          const gpsPt: any = { lat, lng, timestamp: elapsed_s };
+          if (alt_dm !== 0) gpsPt.altitude = altM;
+          gpsTrack.push(gpsPt);
+        }
+        if (hr > 0)              heartRateData.push({ time: elapsed_s, value: hr });
+        if (pace > 0 && pace < 1200) paceData.push({ time: elapsed_s, value: pace });
+        if (alt_dm !== 0)        altitudeData.push({ time: elapsed_s, value: altM });
+        if (cadence > 0)         cadenceData.push({ time: elapsed_s, value: cadence });
+      }
+
+      // ── Build km splits via time-proportional interpolation ─────────────
+      // Without per-point distance we estimate using total distance ÷ total time.
+      const totalDistKm  = (distanceM  || existingRun.distance || 0) / 1000;
+      const totalDurSec  = durationSec || existingRun.duration  || 0;
+      const kmSplits: any[] = [];
+
+      if (totalDistKm > 0.5 && totalDurSec > 0 && points.length > 1) {
+        const secPerKm   = totalDurSec / totalDistKm;
+        const kmCount    = Math.floor(totalDistKm);
+        let prevKmEndSec = 0;
+
+        for (let km = 1; km <= kmCount; km++) {
+          const kmEndSec   = Math.round(km * secPerKm);
+          const kmStartSec = prevKmEndSec;
+          const splitDur   = kmEndSec - kmStartSec;
+
+          // Average metrics from points in this km's time window
+          const kmPts = points.filter((p: number[]) => p[0] >= kmStartSec && p[0] <= kmEndSec);
+          const hrPts = kmPts.filter((p: number[]) => p[4] > 0);
+          const cadPts = kmPts.filter((p: number[]) => p[5] > 0);
+          const elevPts = kmPts.filter((p: number[]) => p[3] !== 0);
+
+          let elevGain = 0;
+          for (let i = 1; i < elevPts.length; i++) {
+            const delta = (elevPts[i][3] - elevPts[i-1][3]) / 10.0;
+            if (delta > 0.1) elevGain += delta;
+          }
+
+          kmSplits.push({
+            km,
+            distance: 1000,
+            duration: splitDur,
+            pace: splitDur,           // sec/km for this 1-km segment
+            hr:      hrPts.length  > 0 ? Math.round(hrPts.reduce((s: number, p: number[]) => s + p[4], 0) / hrPts.length)  : null,
+            cadence: cadPts.length > 0 ? Math.round(cadPts.reduce((s: number, p: number[]) => s + p[5], 0) / cadPts.length) : null,
+            elevGain: Math.round(elevGain * 10) / 10,
+          });
+
+          prevKmEndSec = kmEndSec;
+        }
+      }
+
+      // ── Recompute elevation gain from the altitude series ────────────────
+      let computedAscent: number | null = null;
+      if (altitudeData.length > 1) {
+        let asc = 0;
+        for (let i = 1; i < altitudeData.length; i++) {
+          const delta = altitudeData[i].value - altitudeData[i-1].value;
+          if (delta > 0.3) asc += delta;    // 0.3m noise floor for 15-sec GPS alt
+        }
+        if (asc > 0) computedAscent = Math.round(asc * 10) / 10;
+      }
+      // Fall back to the watch-accumulated totalAscent which is computed
+      // at full 250ms resolution and is therefore more accurate.
+      const finalAscent = totalAscent && totalAscent > 0 ? totalAscent : computedAscent;
+
+      // ── Patch the run record ─────────────────��───────────────────────────
+      const updatePayload: any = {
+        gpsTrack:      gpsTrack.length      > 0 ? gpsTrack      : undefined,
+        heartRateData: heartRateData.length > 0 ? heartRateData : undefined,
+        paceData:      paceData.length      > 0 ? paceData      : undefined,
+        altitudeData:  altitudeData.length  > 0 ? altitudeData  : undefined,
+        cadenceData:   cadenceData.length   > 0 ? cadenceData   : undefined,
+        kmSplits:      kmSplits.length      > 0 ? kmSplits      : undefined,
+      };
+      if (finalAscent != null) {
+        updatePayload.elevationGain = finalAscent;
+        updatePayload.elevation     = finalAscent;
+      }
+
+      await db.update(runs).set(updatePayload).where(eq(runs.id, existingRun.id));
+
+      console.log(`[Offline Batch] Session ${sessionId}: ${points.length} pts → GPS:${gpsTrack.length} HR:${heartRateData.length} pace:${paceData.length} alt:${altitudeData.length} splits:${kmSplits.length}`);
+      res.json({ success: true, points: points.length, gpsPoints: gpsTrack.length, splits: kmSplits.length });
+
+    } catch (error: any) {
+      console.error("[Offline Batch] Error:", error);
+      res.status(500).json({ error: "Failed to process offline batch" });
+    }
+  });
+
   // Get active session data (for phone app to read real-time data)
   app.get("/api/garmin-companion/session/:sessionId/data", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {

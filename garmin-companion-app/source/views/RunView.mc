@@ -127,6 +127,21 @@ class RunView extends Ui.View {
     private var _totalDescent = 0.0; // Elevation loss (m)
     private var _lastAlt      = null; // Last altitude for delta calc
 
+    // ── Offline buffer (standalone runs — no phone) ───────────────────────────
+    // Samples every 15 s (OFFLINE_TICK_INTERVAL x 250ms tick = 15 s).
+    // Capped at 360 points = 90 minutes of coverage.
+    // Each point is a compact 7-element Array to minimise heap use:
+    //   [elapsed_s, lat_e5, lng_e5, alt_dm, hr, cadence, pace_ds]
+    //   lat_e5  = latitude  x 100000 (integer)
+    //   lng_e5  = longitude x 100000 (integer)
+    //   alt_dm  = altitude  x 10     (integer, decimetres)
+    //   pace_ds = pace      x 10     (integer, deciseconds/km)
+    private var _offlineBuffer          = [];
+    private var _offlineTicks           = 0;
+    private var _offlineBufferFull      = false;
+    private const OFFLINE_TICK_INTERVAL = 60;   // 60 x 250ms = 15 s
+    private const OFFLINE_MAX_POINTS    = 360;  // 360 x 15s  = 90 min
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     function initialize() {
@@ -230,6 +245,14 @@ class RunView extends Ui.View {
         _sumGcb = 0.0; _sumPower = 0; _sumResp = 0.0; _sampleN = 0;
         _totalAscent = 0.0; _totalDescent = 0.0; _lastAlt = null;
 
+        // Reset offline buffer
+        _offlineBuffer     = [];
+        _offlineTicks      = 0;
+        _offlineBufferFull = false;
+        if (!_isConnected) {
+            setStatusMessage("No phone: charts up to 90min");
+        }
+
         // Always start local Garmin session AND notify phone (phone must activate its run session for coaching)
         _startSession();
         _phoneLink.sendCommand("start");
@@ -284,6 +307,21 @@ class RunView extends Ui.View {
         // Always notify phone, always stop local recording
         _phoneLink.sendCommand("stop");
         _stopSession();
+
+        // ── Save offline buffer so it uploads when phone reconnects ──────────
+        // Read sessionId BEFORE endSession() clears it from App.Storage
+        if (!_isConnected && _offlineBuffer.size() > 0) {
+            var sid = App.Storage.getValue("sessionId");
+            if (sid != null) {
+                App.Storage.setValue("offlineBatchSessionId", sid);
+                App.Storage.setValue("offlineBatchPoints",    _offlineBuffer);
+                App.Storage.setValue("offlineBatchDistance",  _distance);
+                App.Storage.setValue("offlineBatchDuration",  _elapsedTime);
+                App.Storage.setValue("offlineBatchAscent",    _totalAscent);
+                Sys.println("Offline batch saved: " + _offlineBuffer.size() + " pts, session=" + sid);
+            }
+        }
+
         // Only call DataStreamer.endSession() for STANDALONE watch runs (no phone connection).
         // When the phone is connected (_isConnected), the phone owns the run session and saves
         // it to the backend itself.  Calling endSession() here would create a duplicate run record
@@ -374,6 +412,22 @@ class RunView extends Ui.View {
                 }
             }
             if (rname != null) { App.Storage.setValue("runnerName", rname); }
+
+                // ── Upload any pending offline batch from a previous phone-less run ──
+                var pendingSid = App.Storage.getValue("offlineBatchSessionId");
+                var pendingPts = App.Storage.getValue("offlineBatchPoints");
+                if (pendingSid != null && pendingPts != null && pendingPts.size() > 0) {
+                    Sys.println("Pending offline batch: " + pendingPts.size() + " pts for " + pendingSid);
+                    var pendingDist = App.Storage.getValue("offlineBatchDistance");
+                    var pendingDur  = App.Storage.getValue("offlineBatchDuration");
+                    var pendingAsc  = App.Storage.getValue("offlineBatchAscent");
+                    _dataStreamer.uploadOfflineBatch(pendingSid, pendingPts, pendingDist, pendingDur, pendingAsc);
+                    App.Storage.deleteValue("offlineBatchSessionId");
+                    App.Storage.deleteValue("offlineBatchPoints");
+                    App.Storage.deleteValue("offlineBatchDistance");
+                    App.Storage.deleteValue("offlineBatchDuration");
+                    App.Storage.deleteValue("offlineBatchAscent");
+                }
             Ui.requestUpdate();
 
         } else if (t.equals("preparedRun")) {
@@ -552,6 +606,26 @@ class RunView extends Ui.View {
                     if (delta < -0.1){ _totalDescent -= delta; }
                 }
                 _lastAlt = _lastGpsAlt;
+            }
+
+            // ── Offline buffer capture (every 15 s, phone-less runs only) ────
+            // Only active when phone is not connected and run is not paused.
+            if (!_isConnected && !_isPaused) {
+                _offlineTicks += 1;
+                if (_offlineTicks >= OFFLINE_TICK_INTERVAL) {
+                    _offlineTicks = 0;
+                    if (_offlineBuffer.size() < OFFLINE_MAX_POINTS) {
+                        // Encode to compact integers to minimise heap
+                        var latE5  = (_lastGpsLat != null) ? (_lastGpsLat * 100000.0).toNumber() : 0;
+                        var lngE5  = (_lastGpsLng != null) ? (_lastGpsLng * 100000.0).toNumber() : 0;
+                        var altDm  = (_lastGpsAlt != null) ? (_lastGpsAlt * 10.0).toNumber()     : 0;
+                        var paceDs = (_pace > 0.0)          ? (_pace * 10.0).toNumber()           : 0;
+                        _offlineBuffer.add([_elapsedTime, latE5, lngE5, altDm, _heartRate, _cadence, paceDs]);
+                    } else if (!_offlineBufferFull) {
+                        _offlineBufferFull = true;
+                        setStatusMessage("Chart buffer full - 90min");
+                    }
+                }
             }
 
             _streamAccumMs += _tickMs;
@@ -785,6 +859,10 @@ class RunView extends Ui.View {
         if (_statusMessage.length() > 0) {
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, y, Gfx.FONT_XTINY, _statusMessage, Gfx.TEXT_JUSTIFY_CENTER);
+        } else if (!_isRunning && !_isConnected && _isAuthenticated) {
+            // Offline mode: amber notice so user knows charts are limited
+            dc.setColor(0xFFAA00, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, y, Gfx.FONT_XTINY, "OFFLINE - 90min charts", Gfx.TEXT_JUSTIFY_CENTER);
         } else if (!_isRunning) {
             dc.setColor(0x555555, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, y, Gfx.FONT_XTINY, "PRESS START", Gfx.TEXT_JUSTIFY_CENTER);
