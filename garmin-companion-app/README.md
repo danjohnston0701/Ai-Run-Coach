@@ -190,17 +190,36 @@ Sys.println("Debug message: " + value);
 
 ## Publishing
 
-1. Build release version:
+### Step 1 — Build the store package (.iq)
+
+The store requires a multi-device `.iq` package (NOT a single-device `.prg` file).
+
 ```bash
-monkeyc -o bin/AiRunCoach.prg -f monkey.jungle -y developer_key.der -w -r
+SDK=$(ls -d "$HOME/Library/Application Support/Garmin/ConnectIQ/Sdks/"*/ | sort -V | tail -1)
+"$SDK/bin/monkeyc" \
+  -o "bin/AiRunCoach_v<VERSION>.iq" \
+  -f monkey.jungle \
+  -y developer_key.der \
+  --package-app \
+  -r
 ```
 
-2. Go to: https://apps.garmin.com/en-US/developer/
-3. Click "Submit for Publishing"
-4. Upload `.prg` file
-5. Add screenshots (minimum 3)
-6. Add description
-7. Submit for review (3-5 business days)
+- Replace `<VERSION>` with the version number from `manifest.xml` (e.g. `2.4.6`)
+- Bump `version="x.x.x"` in `manifest.xml` before each store submission
+- Build output: `bin/AiRunCoach_v<VERSION>.iq` (approx 1.6 MB, 7-zip archive)
+- Successful build prints: `55 OUT OF 55 DEVICES BUILT` then `BUILD SUCCESSFUL`
+
+### Step 2 — Upload to Connect IQ Developer Portal
+
+1. Go to: https://apps.garmin.com/developer/dashboard
+2. Find **Ai Run Coach** → click **Edit**
+3. Click **"New Version"**
+4. Upload the `bin/AiRunCoach_v<VERSION>.iq` file
+5. The portal auto-reads the version from the embedded manifest
+6. Add release notes describing the changes
+7. Click **"Submit for Review"** — this triggers the approval email (typically 1–2 hours)
+
+> Note: Just uploading the file without clicking "Submit for Review" saves it as a draft only — no approval email will be sent.
 
 ## License
 
