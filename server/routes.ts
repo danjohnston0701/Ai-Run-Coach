@@ -1245,6 +1245,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.params.userId;
 
       // Fetch all runs from the last 12 months with weather data
+      // We'll limit the analysis to the most recent 30 runs
       const twelvMonthsAgo = new Date();
       twelvMonthsAgo.setDate(twelvMonthsAgo.getDate() - 365);
       
@@ -1264,13 +1265,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         (!r.externalSource || r.externalSource === 'airuncoach')  // Exclude Garmin-synced activities
       );
 
-      const runsWithWeather = windowedRuns.length;
+      // Limit to the most recent 30 runs for analysis
+      const runsForAnalysis = windowedRuns.slice(0, 30);
 
       // Use the existing calculateWeatherImpact function
-      const weatherImpact = await calculateWeatherImpact(userId, windowedRuns);
-      console.log(`[Weather Impact] Analysis: ${windowedRuns.length} AI app runs in 12-month window with weather data, hasEnoughData=${weatherImpact.hasEnoughData}`);
+      const weatherImpact = await calculateWeatherImpact(userId, runsForAnalysis);
+      console.log(`[Weather Impact] Analysis: ${runsForAnalysis.length} AI app runs (most recent 30 from 12-month window) with weather data, hasEnoughData=${weatherImpact.hasEnoughData}`);
 
-      res.json({ ...weatherImpact, dateRangeUsed: "12m" });
+      res.json({ ...weatherImpact, dateRangeUsed: "12m", runsAnalyzed: runsForAnalysis.length });
     } catch (error: any) {
       console.error("Weather impact analysis error:", error);
       res.status(500).json({ error: "Failed to compute weather impact analysis", details: error.message });
