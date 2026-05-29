@@ -1244,21 +1244,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.params.userId;
 
-      // Fetch all runs from the last 90 days with weather data
-      const ninetyDaysAgo = new Date();
-      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+      // Fetch all runs from the last 12 months with weather data
+      const twelvMonthsAgo = new Date();
+      twelvMonthsAgo.setDate(twelvMonthsAgo.getDate() - 365);
       
       const allRecentRuns = await storage.getUserRuns(userId, {
         limit: 500,
         offset: 0,
       });
 
-      // Filter for runs within 90 days with weather data
+      // Filter for runs within 12 months with weather data
       // IMPORTANT: Exclude ALL Garmin-synced activities (externalSource === 'garmin')
       // These have significantly less data and taint the analysis
       const windowedRuns = allRecentRuns.filter(r =>
         r.completedAt &&
-        new Date(r.completedAt) >= ninetyDaysAgo &&
+        new Date(r.completedAt) >= twelvMonthsAgo &&
         (r.distance ?? 0) > 0.5 &&
         !!r.weatherData &&  // Only include runs with weather data
         (!r.externalSource || r.externalSource === 'airuncoach')  // Exclude Garmin-synced activities
@@ -1268,9 +1268,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Use the existing calculateWeatherImpact function
       const weatherImpact = await calculateWeatherImpact(userId, windowedRuns);
-      console.log(`[Weather Impact] Analysis: ${windowedRuns.length} AI app runs in 90d window with weather data, hasEnoughData=${weatherImpact.hasEnoughData}`);
+      console.log(`[Weather Impact] Analysis: ${windowedRuns.length} AI app runs in 12-month window with weather data, hasEnoughData=${weatherImpact.hasEnoughData}`);
 
-      res.json({ ...weatherImpact, dateRangeUsed: "90d" });
+      res.json({ ...weatherImpact, dateRangeUsed: "12m" });
     } catch (error: any) {
       console.error("Weather impact analysis error:", error);
       res.status(500).json({ error: "Failed to compute weather impact analysis", details: error.message });
