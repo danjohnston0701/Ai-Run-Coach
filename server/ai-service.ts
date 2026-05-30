@@ -230,22 +230,76 @@ const getVarietySeed = (): string =>
   COACHING_VARIETY_SEEDS[Math.floor(Math.random() * COACHING_VARIETY_SEEDS.length)];
 
 export interface CoachingContext {
+  // ── Current Run Metrics ───────────────────────────────────────────────────
   distance?: number;
   duration?: number;
-  pace?: string;
-  heartRate?: number;
-  elevation?: number;
-  elevationChange?: string;
+  pace?: string;                    // Average pace in "M:SS" format
+  currentPace?: string;             // Real-time pace (different from average)
+  targetPace?: string;              // Target pace in "M:SS" format (e.g., "5:30")
+  totalDistance?: number;
+  
+  // ── Heart Rate & Effort ───────────────────────────────────────────────────
+  heartRate?: number;               // Current HR
+  avgHeartRate?: number;            // Average HR during run
+  maxHeartRate?: number;            // Max HR reached
+  minHeartRate?: number;            // Min HR during run
+  
+  // ── Cadence & Running Dynamics ────────────────────────────────────────────
+  cadence?: number;                 // Current cadence (spm)
+  avgCadence?: number;              // Average cadence
+  maxCadence?: number;              // Max cadence reached
+  avgStrideLength?: number;         // Average stride length (meters)
+  avgGroundContactTime?: number;    // Average ground contact time (ms)
+  avgVerticalOscillation?: number;  // Average vertical bounce (cm)
+  
+  // ── Elevation & Terrain ───────────────────────────────────────────────────
+  elevation?: number;               // Current elevation (meters)
+  elevationChange?: string;         // "flat"|"hilly"|"mountainous"
+  elevationGain?: number;           // Total meters climbed
+  elevationLoss?: number;           // Total meters descended
+  avgGradient?: number;             // Average gradient (%)
+  maxGradient?: number;             // Steepest gradient (%)
+  currentGrade?: number;            // Current slope (%)
+  
+  // ── Time Tracking ─────────────────────────────────────────────────────────
+  targetTime?: number;              // Target finish time (seconds)
+  elapsedTime?: number;             // Time elapsed (seconds)
+  movingTime?: number;              // Moving time excluding pauses (seconds)
+  
+  // ── Environment & Weather ─────────────────────────────────────────────────
   weather?: any;
+  
+  // ── Run State & Phase ─────────────────────────────────────────────────────
   phase?: CoachingPhase;
   isStruggling?: boolean;
-  cadence?: number;
+  
+  // ── Training Context ──────────────────────────────────────────────────────
   activityType?: string;
+  workoutType?: string;             // "easy"|"tempo"|"intervals"|"long_run"|etc
+  workoutIntensity?: string;        // "z1"-"z5" or intensity level
+  
+  // ── Energy & Training Effect ──────────────────────────────────────────────
+  calories?: number;                // Estimated calorie burn
+  aerobicTrainingEffect?: number;   // 0-5 scale
+  anaerobicTrainingEffect?: number; // 0-5 scale
+  trainingEffectLabel?: string;     // "Recovery"|"Base"|"Tempo"|"Threshold"|"VO2 Max"
+  recoveryTimeMinutes?: number;     // Minutes until full recovery
+  vo2MaxEstimate?: number;          // Estimated VO2 max (ml/kg/min)
+  
+  // ── Runner Profile ────────────────────────────────────────────────────────
+  runnerAge?: number;
+  runnerHeight?: number;            // cm
+  runnerWeight?: number;            // kg
   userFitnessLevel?: string;
+  runnerProfile?: string | null;    // AI runner profile — "What I know about you"
+  
+  // ── Coach Settings ────────────────────────────────────────────────────────
+  coachName?: string;
   coachTone?: string;
   coachAccent?: string;
-  totalDistance?: number;
-  runnerProfile?: string | null; // AI runner profile — "What I know about you"
+  
+  // ── Wellness Context (from Garmin) ────────────────────────────────────────
+  wellness?: WellnessContext;
 }
 
 export async function getCoachingResponse(message: string, context: CoachingContext): Promise<string> {
@@ -2157,6 +2211,118 @@ IMPORTANT: You are a fully qualified running coach with deep sports science know
     }
   }
 
+  // CRITICAL: Include pace context with proper interpretation
+  // ⚠️ PACE INTERPRETATION: In running, pace is TIME per km (minutes:seconds).
+  // LOWER pace values = FASTER running. HIGHER pace values = SLOWER running.
+  // Example: 5:00/km is faster than 5:30/km (difference of 30 seconds slower).
+  if (context.pace || context.targetPace) {
+    let paceInfo = '\n\nPACE DATA:';
+    
+    if (context.pace) {
+      paceInfo += `\n- Current pace: ${context.pace}/km`;
+    }
+    
+    if (context.targetPace) {
+      paceInfo += `\n- Target pace: ${context.targetPace}/km`;
+    }
+    
+    // If both are present, calculate and interpret the difference
+    if (context.pace && context.targetPace) {
+      const currentParts = context.pace.split(':').map(Number);
+      const targetParts = context.targetPace.split(':').map(Number);
+      
+      if (currentParts.length === 2 && targetParts.length === 2) {
+        const currentSec = currentParts[0] * 60 + currentParts[1];
+        const targetSec = targetParts[0] * 60 + targetParts[1];
+        const diffSec = currentSec - targetSec;
+        
+        paceInfo += '\n\nPACE COMPARISON (CRITICAL for your response):';
+        if (diffSec > 15) {
+          paceInfo += `\n- Runner is ${Math.abs(diffSec)} seconds/km SLOWER than target → they are BEHIND pace and need to PICK UP SPEED.`;
+        } else if (diffSec < -15) {
+          paceInfo += `\n- Runner is ${Math.abs(diffSec)} seconds/km FASTER than target → they are AHEAD of pace and should ease off slightly to avoid burning out.`;
+        } else {
+          paceInfo += `\n- Runner is within ${Math.abs(diffSec)} seconds/km of target → they are ON PACE. Positive reinforcement.`;
+        }
+      }
+    }
+    
+    prompt += paceInfo;
+  }
+
+  // COMPREHENSIVE: Heart Rate Data (beyond current HR)
+  if (context.avgHeartRate || context.maxHeartRate || context.minHeartRate) {
+    let hrData = '\n\nHEART RATE SUMMARY:';
+    if (context.avgHeartRate) hrData += `\n- Average: ${context.avgHeartRate} BPM`;
+    if (context.minHeartRate) hrData += `\n- Minimum: ${context.minHeartRate} BPM`;
+    if (context.maxHeartRate) hrData += `\n- Maximum: ${context.maxHeartRate} BPM`;
+    prompt += hrData;
+  }
+
+  // COMPREHENSIVE: Cadence & Running Dynamics
+  if (context.avgCadence || context.cadence || context.maxCadence || context.avgStrideLength || context.avgGroundContactTime || context.avgVerticalOscillation) {
+    let cadenceData = '\n\nCADENCE & RUNNING DYNAMICS:';
+    if (context.avgCadence) cadenceData += `\n- Average cadence: ${context.avgCadence} spm`;
+    if (context.cadence && context.cadence !== context.avgCadence) cadenceData += `\n- Current cadence: ${context.cadence} spm`;
+    if (context.maxCadence) cadenceData += `\n- Max cadence: ${context.maxCadence} spm`;
+    if (context.avgStrideLength) cadenceData += `\n- Average stride length: ${context.avgStrideLength.toFixed(2)}m`;
+    if (context.avgGroundContactTime) cadenceData += `\n- Ground contact time: ${context.avgGroundContactTime.toFixed(0)}ms (${context.avgGroundContactTime > 300 ? 'relatively high' : context.avgGroundContactTime < 200 ? 'efficient' : 'normal'})`;
+    if (context.avgVerticalOscillation) cadenceData += `\n- Vertical oscillation: ${context.avgVerticalOscillation.toFixed(1)}cm (${context.avgVerticalOscillation > 10 ? 'high bounce' : context.avgVerticalOscillation < 6 ? 'very efficient' : 'efficient'})`;
+    prompt += cadenceData;
+  }
+
+  // COMPREHENSIVE: Elevation & Terrain
+  if (context.elevationGain || context.elevationLoss || context.avgGradient || context.maxGradient || context.currentGrade) {
+    let elevationData = '\n\nELEVATION & TERRAIN:';
+    if (context.elevationGain) elevationData += `\n- Elevation climbed: ${context.elevationGain.toFixed(0)}m`;
+    if (context.elevationLoss) elevationData += `\n- Elevation descended: ${context.elevationLoss.toFixed(0)}m`;
+    if (context.avgGradient) elevationData += `\n- Average gradient: ${context.avgGradient.toFixed(1)}%`;
+    if (context.currentGrade) elevationData += `\n- Current gradient: ${context.currentGrade.toFixed(1)}% (${context.currentGrade > 5 ? 'steep climb' : context.currentGrade < -5 ? 'steep descent' : context.currentGrade > 0 ? 'gradual climb' : 'gentle descent'})`;
+    if (context.maxGradient) elevationData += `\n- Steepest segment: ${context.maxGradient.toFixed(1)}%`;
+    prompt += elevationData;
+  }
+
+  // COMPREHENSIVE: Time & Progress
+  if (context.elapsedTime || context.movingTime || context.targetTime) {
+    let timeData = '\n\nTIME & PROGRESS:';
+    if (context.elapsedTime) {
+      const min = Math.floor(context.elapsedTime / 60);
+      const sec = context.elapsedTime % 60;
+      timeData += `\n- Elapsed: ${min}m${sec.toString().padStart(2, '0')}s`;
+    }
+    if (context.movingTime && context.movingTime !== context.elapsedTime) {
+      const min = Math.floor(context.movingTime / 60);
+      const sec = context.movingTime % 60;
+      timeData += `\n- Moving time: ${min}m${sec.toString().padStart(2, '0')}s`;
+    }
+    if (context.targetTime) {
+      const min = Math.floor(context.targetTime / 60);
+      const sec = context.targetTime % 60;
+      timeData += `\n- Target finish time: ${min}m${sec.toString().padStart(2, '0')}s`;
+      if (context.elapsedTime && context.targetTime) {
+        const remaining = Math.max(0, context.targetTime - context.elapsedTime);
+        const remMin = Math.floor(remaining / 60);
+        const remSec = remaining % 60;
+        timeData += `\n- Time remaining (at target): ${remaining > 0 ? `${remMin}m${remSec.toString().padStart(2, '0')}s` : 'time up!'}`;
+      }
+    }
+    prompt += timeData;
+  }
+
+  // COMPREHENSIVE: Training Load & Recovery
+  if (context.workoutType || context.workoutIntensity || context.calories || context.trainingEffectLabel || context.aerobicTrainingEffect || context.recoveryTimeMinutes) {
+    let trainingData = '\n\nTRAINING LOAD:';
+    if (context.workoutType) trainingData += `\n- Workout type: ${context.workoutType}`;
+    if (context.workoutIntensity) trainingData += `\n- Zone/Intensity: ${context.workoutIntensity}`;
+    if (context.calories) trainingData += `\n- Estimated energy expenditure: ${context.calories} kcal`;
+    if (context.trainingEffectLabel) trainingData += `\n- Training effect: ${context.trainingEffectLabel}`;
+    if (context.aerobicTrainingEffect) trainingData += `\n- Aerobic benefit: ${context.aerobicTrainingEffect.toFixed(1)}/5.0`;
+    if (context.anaerobicTrainingEffect) trainingData += `\n- Anaerobic benefit: ${context.anaerobicTrainingEffect.toFixed(1)}/5.0`;
+    if (context.recoveryTimeMinutes) trainingData += `\n- Recovery time needed: ~${context.recoveryTimeMinutes} minutes`;
+    if (context.vo2MaxEstimate) trainingData += `\n- Estimated VO2 max: ${context.vo2MaxEstimate.toFixed(1)} ml/kg/min`;
+    prompt += trainingData;
+  }
+
   // Include user's fitness level for tailored coaching
   if (context.userFitnessLevel) {
     prompt += `\n\nRunner's fitness level: ${context.userFitnessLevel}. Tailor your advice complexity, pacing expectations, and encouragement style to this level.`;
@@ -3026,6 +3192,293 @@ export interface ComprehensiveRunAnalysis {
   };
 }
 
+/**
+ * ELEVATION-ADJUSTED CONSISTENCY ANALYSIS
+ * 
+ * Correlates pace variance with elevation changes to provide fair, context-aware
+ * consistency scoring. A 3:00/min variance on a hilly run is excellent; on flat
+ * terrain, it's concerning. This analysis makes that distinction.
+ */
+
+interface ElevationConsistencyAnalysis {
+  expectedVarianceMin: number;  // seconds
+  expectedVarianceMax: number;  // seconds
+  terrainClassification: 'flat' | 'rolling' | 'hilly' | 'mountainous';
+  elevationPerKm: number;
+  paceVarianceExplainedByElevation: number;  // 0-100 percent
+  elevationAdjustment: number;  // -20 to +20 score adjustment
+  explanation: string;
+}
+
+/**
+ * Calculate the expected pace variance baseline for a given terrain profile.
+ * This allows us to assess consistency fairly based on route difficulty.
+ */
+function calculateExpectedPaceVarianceBaseline(params: {
+  elevationGain: number;
+  elevationLoss: number;
+  distanceKm: number;
+}): { min: number; max: number; classification: string; elevationPerKm: number } {
+  const avgElevationPerKm = params.elevationGain / (params.distanceKm || 1);
+  
+  if (avgElevationPerKm < 5) {
+    // Flat route — expect very tight consistency
+    return {
+      min: 30,  // 0:30 spread
+      max: 60,  // 1:00 spread
+      classification: 'flat',
+      elevationPerKm: avgElevationPerKm
+    };
+  } else if (avgElevationPerKm < 15) {
+    // Rolling route — expect moderate variance
+    return {
+      min: 60,  // 1:00 spread
+      max: 120,  // 2:00 spread
+      classification: 'rolling',
+      elevationPerKm: avgElevationPerKm
+    };
+  } else if (avgElevationPerKm < 30) {
+    // Hilly route — expect significant variance
+    return {
+      min: 120,  // 2:00 spread
+      max: 240,  // 4:00 spread
+      classification: 'hilly',
+      elevationPerKm: avgElevationPerKm
+    };
+  } else {
+    // Mountainous — expect very high variance
+    return {
+      min: 240,  // 4:00 spread
+      max: 360,  // 6:00 spread
+      classification: 'mountainous',
+      elevationPerKm: avgElevationPerKm
+    };
+  }
+}
+
+/**
+ * Analyze each split to determine how much of the pace variance is attributable
+ * to elevation changes vs. form/effort issues.
+ * 
+ * Rule of thumb: 1% grade ≈ 5-8 seconds per km slower (we use 6s/km/%)
+ */
+function analyzeElevationImpactOnSplits(splits: Array<{
+  pace?: string;
+  avgGrade?: number;
+  elevGain?: number;
+  elevLoss?: number;
+}> | undefined): {
+  terrainDrivenVariance: number;  // 0-100 percent
+  effortDrivenVariance: number;   // 0-100 percent
+  splitAnalysis: Array<{
+    paceChangeSeconds: number;
+    expectedFromGrade: number;
+    unexplained: number;
+    terrainDriven: boolean;
+  }>;
+} {
+  if (!splits || splits.length < 2) {
+    // Not enough data to analyze
+    return {
+      terrainDrivenVariance: 50,  // Assume balanced
+      effortDrivenVariance: 50,
+      splitAnalysis: []
+    };
+  }
+
+  const gradeImpactFactor = 6;  // seconds per km per 1% grade
+  let terrainDrivenCount = 0;
+  let effortDrivenCount = 0;
+  const splitAnalysis = [];
+
+  for (let i = 1; i < splits.length; i++) {
+    const current = splits[i];
+    const previous = splits[i - 1];
+
+    if (!current.pace || !previous.pace || current.avgGrade === undefined) {
+      continue;
+    }
+
+    try {
+      const currentSec = paceStringToSeconds(current.pace);
+      const prevSec = paceStringToSeconds(previous.pace);
+      const paceChangeSeconds = currentSec - prevSec;
+
+      // Expected slowdown based on grade
+      const expectedSlowdown = (current.avgGrade || 0) * gradeImpactFactor;
+      const unexplained = paceChangeSeconds - expectedSlowdown;
+
+      const isTerrainDriven = Math.abs(unexplained) < 5;  // Within 5 second tolerance
+
+      if (isTerrainDriven) {
+        terrainDrivenCount++;
+      } else {
+        effortDrivenCount++;
+      }
+
+      splitAnalysis.push({
+        paceChangeSeconds,
+        expectedFromGrade: expectedSlowdown,
+        unexplained,
+        terrainDriven: isTerrainDriven
+      });
+    } catch (e) {
+      // Silently skip malformed pace data
+      continue;
+    }
+  }
+
+  const totalSplits = terrainDrivenCount + effortDrivenCount;
+  const terrainDrivenVariance = totalSplits > 0 ? (terrainDrivenCount / totalSplits) * 100 : 50;
+
+  return {
+    terrainDrivenVariance,
+    effortDrivenVariance: 100 - terrainDrivenVariance,
+    splitAnalysis
+  };
+}
+
+/**
+ * Calculate the elevation-adjusted consistency score.
+ * 
+ * This compares actual pace variance against elevation-aware expectations,
+ * then adjusts the score based on whether variance is terrain-driven or effort-driven.
+ */
+function calculateElevationAdjustedConsistencyScore(params: {
+  actualPaceSpreadSeconds: number;
+  expectedVarianceMin: number;
+  expectedVarianceMax: number;
+  terrainClassification: string;
+  terrainDrivenPercentage: number;  // How much of variance is due to elevation
+}): ElevationConsistencyAnalysis {
+  let baseScore = 100;
+
+  // Step 1: Base score from variance vs. expected baseline
+  if (params.actualPaceSpreadSeconds <= params.expectedVarianceMin) {
+    // Tighter than expected — excellent!
+    baseScore = 95 + Math.min(5, params.expectedVarianceMin - params.actualPaceSpreadSeconds);
+  } else if (params.actualPaceSpreadSeconds <= params.expectedVarianceMax) {
+    // Within expected range — proportional score
+    const percentage =
+      (params.actualPaceSpreadSeconds - params.expectedVarianceMin) /
+      (params.expectedVarianceMax - params.expectedVarianceMin);
+    baseScore = 70 + 30 * (1 - percentage);  // 70-100 range
+  } else {
+    // Exceeds expected variance
+    const overage = params.actualPaceSpreadSeconds - params.expectedVarianceMax;
+    baseScore = Math.max(40, 70 - overage / 10);  // Floor at 40
+  }
+
+  // Step 2: Adjustment based on terrain-driven vs. effort-driven variance
+  let elevationAdjustment = 0;
+  let explanation = '';
+
+  if (params.terrainClassification === 'flat') {
+    // On flat terrain, almost all variance should be terrain-driven (form consistency)
+    if (params.terrainDrivenPercentage >= 80) {
+      elevationAdjustment = +5;
+      explanation = `On flat terrain, your variance was primarily from consistent effort — excellent discipline.`;
+    } else if (params.terrainDrivenPercentage >= 50) {
+      elevationAdjustment = 0;
+      explanation = `Your pace varied moderately on flat terrain, suggesting some effort drift.`;
+    } else {
+      elevationAdjustment = -10;
+      explanation = `On flat terrain, your variance suggests form degradation or inconsistent effort.`;
+    }
+  } else if (params.terrainClassification === 'rolling') {
+    // Rolling terrain: expect some natural variance
+    if (params.terrainDrivenPercentage >= 80) {
+      elevationAdjustment = +8;
+      explanation = `Your pace variance matched the rolling terrain perfectly — excellent effort management.`;
+    } else if (params.terrainDrivenPercentage >= 50) {
+      elevationAdjustment = +3;
+      explanation = `Most of your variance was terrain-driven; some effort drift in the latter stages.`;
+    } else {
+      elevationAdjustment = -5;
+      explanation = `Your variance wasn't fully explained by rolling terrain — suggests fatigue impact.`;
+    }
+  } else if (params.terrainClassification === 'hilly') {
+    // Hilly terrain: large variance is expected and intelligent
+    if (params.terrainDrivenPercentage >= 85) {
+      elevationAdjustment = +15;
+      explanation = `Exceptional hill running — your pace varied perfectly with the terrain while maintaining consistent effort.`;
+    } else if (params.terrainDrivenPercentage >= 70) {
+      elevationAdjustment = +10;
+      explanation = `Your pace variance was well-aligned with elevation changes — smart pacing on hills.`;
+    } else if (params.terrainDrivenPercentage >= 50) {
+      elevationAdjustment = +5;
+      explanation = `Mostly terrain-driven variance; some effort issues but good overall hill management.`;
+    } else {
+      elevationAdjustment = 0;
+      explanation = `Your variance exceeded what terrain would predict — fatigue and effort management matters here.`;
+    }
+  } else if (params.terrainClassification === 'mountainous') {
+    // Mountainous: very high variance is expected and shows smart pacing
+    if (params.terrainDrivenPercentage >= 80) {
+      elevationAdjustment = +15;
+      explanation = `Excellent mountainous terrain management — your pace variance reflects intelligent hill strategy.`;
+    } else if (params.terrainDrivenPercentage >= 60) {
+      elevationAdjustment = +8;
+      explanation = `Good terrain awareness in mountainous conditions; some fatigue showing in the latter segments.`;
+    } else {
+      elevationAdjustment = 0;
+      explanation = `Mountainous running is challenging; your variance shows cumulative fatigue effects.`;
+    }
+  }
+
+  const finalScore = Math.max(0, Math.min(100, Math.round(baseScore + elevationAdjustment)));
+
+  return {
+    expectedVarianceMin: params.expectedVarianceMin,
+    expectedVarianceMax: params.expectedVarianceMax,
+    terrainClassification: params.terrainClassification,
+    elevationPerKm: params.expectedVarianceMin / 10,  // Approximation for display
+    paceVarianceExplainedByElevation: Math.round(params.terrainDrivenPercentage),
+    elevationAdjustment: Math.round(elevationAdjustment),
+    explanation
+  };
+}
+
+/**
+ * Generate elevation-aware consistency feedback for the post-run summary.
+ * This gets added to the AI prompt to inform the consistency score calculation.
+ */
+function buildElevationConsistencyContext(params: {
+  elevationGain?: number;
+  elevationLoss?: number;
+  distanceKm?: number;
+  kmSplitSummaries?: Array<{ pace?: string; avgGrade?: number; elevGain?: number; elevLoss?: number }>;
+  paceSpreadSeconds?: number;
+}): ElevationConsistencyAnalysis | null {
+  if (!params.distanceKm || params.distanceKm === 0) {
+    return null;
+  }
+
+  const elevationGain = params.elevationGain || 0;
+  const elevationLoss = params.elevationLoss || 0;
+
+  // Calculate expected variance baseline
+  const baseline = calculateExpectedPaceVarianceBaseline({
+    elevationGain,
+    elevationLoss,
+    distanceKm: params.distanceKm
+  });
+
+  // Analyze how much variance is elevation-driven
+  const elevation Impact = analyzeElevationImpactOnSplits(params.kmSplitSummaries);
+
+  // Calculate adjusted score
+  const analysis = calculateElevationAdjustedConsistencyScore({
+    actualPaceSpreadSeconds: params.paceSpreadSeconds || 0,
+    expectedVarianceMin: baseline.min,
+    expectedVarianceMax: baseline.max,
+    terrainClassification: baseline.classification,
+    terrainDrivenPercentage: elevationImpact.terrainDrivenVariance
+  });
+
+  return analysis;
+}
+
 export async function generateComprehensiveRunAnalysis(params: {
   runData: any;
   
@@ -3473,6 +3926,42 @@ These are real pace drops the runner confirmed as genuine difficulties — not s
 Take these notes into account when assessing performance and writing your summary — the runner may have context about conditions, how they felt, or external factors that the data alone can't show.\n`;
   }
 
+  // Add elevation-aware consistency context
+  const distanceKm = (runData.distanceInMeters || runData.distance || garminActivity?.distanceInMeters || 0) / 1000;
+  const elevationConsistencyAnalysis = buildElevationConsistencyContext({
+    elevationGain: runData.elevationGain || garminActivity?.elevationGain || 0,
+    elevationLoss: runData.elevationLoss || garminActivity?.elevationLoss || 0,
+    distanceKm,
+    kmSplitSummaries: runData.kmSplitSummaries,
+    paceSpreadSeconds: runData.paceSpreadSeconds
+  });
+
+  if (elevationConsistencyAnalysis) {
+    const formatVarianceSeconds = (seconds: number) => {
+      const min = Math.floor(seconds / 60);
+      const sec = Math.round(seconds % 60);
+      return `${min}:${sec.toString().padStart(2, '0')}`;
+    };
+
+    prompt += `
+## ELEVATION-AWARE CONSISTENCY CONTEXT:
+This run is classified as: ${elevationConsistencyAnalysis.terrainClassification.toUpperCase()} terrain (${elevationConsistencyAnalysis.elevationPerKm.toFixed(1)}m elevation gain per km).
+
+For this terrain type, we expect pace variance between ${formatVarianceSeconds(elevationConsistencyAnalysis.expectedVarianceMin)} and ${formatVarianceSeconds(elevationConsistencyAnalysis.expectedVarianceMax)}.
+
+Actual pace variance: ${runData.paceSpreadSeconds ? formatVarianceSeconds(runData.paceSpreadSeconds) : 'unknown'}
+Variance explained by elevation: ${elevationConsistencyAnalysis.paceVarianceExplainedByElevation}%
+
+CRITICAL FOR CONSISTENCY SCORE:
+- On FLAT terrain: Pace variance is purely about form/effort consistency — tighter spread is better
+- On ROLLING/HILLY/MOUNTAINOUS terrain: Pace variance matching elevation changes is INTELLIGENT pacing, not inconsistency
+- If variance is elevation-driven (split pace matches grade changes): SCORE HIGHER for smart pacing
+- If variance is unexplained by terrain: SCORE LOWER for fatigue/form issues
+
+Context: "${elevationConsistencyAnalysis.explanation}"
+`;
+  }
+
   // Build dynamic JSON schema based on available data
   let analysisSchema = `## ANALYSIS REQUIRED:
 Based on ALL the data above, provide a comprehensive JSON coaching analysis. Always include:
@@ -3482,7 +3971,7 @@ Based on ALL the data above, provide a comprehensive JSON coaching analysis. Alw
   "performanceBreakdown": {
     "executionScore": <1-100: Did they follow the plan?>,
     "effortScore": <1-100: How hard did they push relative to what was prescribed?>,
-    "consistencyScore": <1-100: How steady was pace/effort?>
+    "consistencyScore": <1-100: How steady was pace/effort? ELEVATION-AWARE: Use the elevation context provided above. On flat terrain, score based on pace variance alone. On rolling/hilly/mountainous terrain, score higher if variance matches elevation changes (intelligent pacing) and lower if variance exceeds what terrain would predict (fatigue/form issues). Compare actual variance to the expected baseline for this terrain type.>
   },
   "highlights": ["3-5 specific positive aspects of this run"],
   "struggles": ["Real challenges or areas to improve"],
@@ -3510,7 +3999,7 @@ Based on ALL the data above, provide a comprehensive JSON coaching analysis. Alw
   },
   "mentalGame": {
     "effortQuality": "How hard did they really push vs what was prescribed?",
-    "paceVariability": "Why did pace change? Fatigue, terrain, pacing strategy?",
+    "paceVariability": "Why did pace change? Terrain, effort/fatigue, pacing strategy? CRITICAL: First correlate pace changes with elevation — if splits slow on climbs (proportional to grade), that's SMART effort-based running. If pace varies unexplained by terrain, that indicates fatigue or form issues. Use elevation context provided above to distinguish terrain-driven variance (praise!) from fatigue-driven variance (coaching).",
     "coachingForNextTime": "Mental strategies or focus points for similar workouts"
   },
   "strugglePointsAnalysis": {
@@ -3527,11 +4016,11 @@ Based on ALL the data above, provide a comprehensive JSON coaching analysis. Alw
   if (hasGarminMetrics) {
     analysisSchema += `,
   "technicalAnalysis": {
-    "paceAnalysis": "Pace consistency, splits, efficiency - use actual data",
+    "paceAnalysis": "Pace consistency, splits, efficiency - use actual data. Reference the elevation context above when evaluating consistency fairness.",
     "heartRateAnalysis": "HR zones, cardiovascular response, zones used",
     "cadenceAnalysis": "Step rate assessment and efficiency",
     "runningDynamics": "Stride, ground contact, oscillation if available",
-    "elevationPerformance": "How they handled hills/elevation"
+    "elevationPerformance": "How they handled hills/elevation. If the run had elevation: Assess whether their pace/HR/cadence changes matched the climb difficulty proportionally. Smart hill running = pace down proportionally to grade, HR elevated (normal), cadence maintained. Grade-to-pace correlation indicates excellent hill technique. Use the elevation analysis context provided above."
   },
   "trainingLoadAssessment": "Training stimulus (aerobic/anaerobic effect) and what it means",
   "garminInsights": {

@@ -378,15 +378,68 @@ private func sendMessageToCoach(_ message: String) {
 private func buildCoachingContext() -> CoachingContext {
     // Populate with current run session data — all fields optional
     return CoachingContext(
+        // ── Current Run Metrics ────────────────────────────────────────
         distance: currentSession?.distanceKm,
         duration: currentSession?.elapsedSeconds,
-        pace: currentSession?.currentPace,
+        pace: currentSession?.averagePace,
+        currentPace: currentSession?.currentPace,
+        targetPace: currentSession?.targetPace,
         totalDistance: targetDistanceKm,
+        
+        // ── Heart Rate & Effort ────────────────────────────────────────
         heartRate: currentSession?.heartRate,
+        avgHeartRate: currentSession?.avgHeartRate,
+        maxHeartRate: currentSession?.maxHeartRate,
+        minHeartRate: currentSession?.minHeartRate,
+        
+        // ── Cadence & Running Dynamics ─────────────────────────────────
         cadence: currentSession?.cadence,
+        avgCadence: currentSession?.avgCadence,
+        maxCadence: currentSession?.maxCadence,
+        avgStrideLength: currentSession?.avgStrideLength,
+        avgGroundContactTime: currentSession?.avgGroundContactTime,
+        avgVerticalOscillation: currentSession?.avgVerticalOscillation,
+        
+        // ── Elevation & Terrain ──────────────────────���─────────────────
         elevation: currentSession?.totalElevationGain,
+        elevationChange: nil,
+        elevationGain: currentSession?.totalElevationGain,
+        elevationLoss: currentSession?.totalElevationLoss,
+        avgGradient: currentSession?.avgGradient,
+        maxGradient: currentSession?.maxGradient,
+        currentGrade: currentSession?.currentGrade,
+        totalElevationGain: currentSession?.totalElevationGain,
+        
+        // ── Time Tracking ────────────────────────────────────────────────
+        targetTime: currentSession?.targetTime,
+        elapsedTime: currentSession?.elapsedSeconds,
+        movingTime: currentSession?.movingTime,
+        
+        // ── Environment & Weather ────────────────────────────────────────
+        weather: currentSession?.weatherAtStart,
+        
+        // ── Run State & Phase ────────────────────────────────────────────
         phase: currentSession?.phase,
         isStruggling: currentSession?.isStruggling,
+        
+        // ── Training Context ──────────────────────────────────────────────
+        activityType: "run",
+        workoutType: currentSession?.workoutType,
+        workoutIntensity: currentSession?.workoutIntensity,
+        
+        // ── Energy & Training Effect ──────────────────────────────────────
+        calories: currentSession?.calories,
+        aerobicTrainingEffect: currentSession?.aerobicTrainingEffect,
+        anaerobicTrainingEffect: currentSession?.anaerobicTrainingEffect,
+        trainingEffectLabel: currentSession?.trainingEffectLabel,
+        recoveryTimeMinutes: currentSession?.recoveryTimeMinutes,
+        vo2MaxEstimate: currentSession?.vo2MaxEstimate,
+        
+        // ── Runner Profile ───────────────────────────────────────────────
+        runnerAge: userProfile?.age,
+        runnerHeight: userProfile?.height,
+        runnerWeight: userProfile?.weight,
+        userFitnessLevel: userProfile?.fitnessLevel,
         coachName: userProfile?.coachName,
         coachTone: userProfile?.coachTone,
         coachGender: userProfile?.coachGender,

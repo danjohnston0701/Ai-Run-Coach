@@ -1311,25 +1311,74 @@ class RunSessionViewModel @Inject constructor(
                 val request = TalkToCoachRequest(
                     message = message,
                     context = CoachingContext(
+                        // ── Current Run Metrics ────────────────────────────────────────
                         distance = runSession.value?.getDistanceInKm(),
                         duration = (runSession.value?.duration?.div(1000))?.toInt(),
                         pace = runSession.value?.averagePace,
+                        currentPace = runSession.value?.currentPace,
+                        targetPace = null,  // Backend will infer from training plan if available
                         totalDistance = runSession.value?.getDistanceInKm(),
+                        
+                        // ── Heart Rate & Effort ────────────────────────────────────────
                         heartRate = runSession.value?.heartRate?.takeIf { it > 0 },
+                        avgHeartRate = runSession.value?.heartRate?.takeIf { it > 0 },  // May be improved later
+                        maxHeartRate = null,  // TODO: track during run
+                        minHeartRate = null,  // TODO: track during run
+                        
+                        // ── Cadence & Running Dynamics ─────────────────────────────────
                         cadence = runSession.value?.cadence?.takeIf { it > 0 },
+                        avgCadence = runSession.value?.cadence?.takeIf { it > 0 },
+                        maxCadence = runSession.value?.maxCadence,
+                        avgStrideLength = runSession.value?.avgStrideLength?.toDouble(),
+                        avgGroundContactTime = runSession.value?.avgGroundContactTime,
+                        avgVerticalOscillation = runSession.value?.avgVerticalOscillation,
+                        
+                        // ── Elevation & Terrain ────────────────────────────────────────
                         elevation = runSession.value?.totalElevationGain,
                         elevationChange = null,
+                        elevationGain = runSession.value?.totalElevationGain,
+                        elevationLoss = runSession.value?.totalElevationLoss,
+                        avgGradient = runSession.value?.averageGradient,
+                        maxGradient = runSession.value?.maxGradient,
                         currentGrade = null,
                         totalElevationGain = runSession.value?.totalElevationGain,
+                        
+                        // ── Time Tracking ────────────────────────────────────────────────
+                        targetTime = null,  // TODO: fetch from session
+                        elapsedTime = (runSession.value?.duration?.div(1000))?.toInt(),
+                        movingTime = null,  // TODO: track separately
+                        
+                        // ── Environment & Weather ────────────────────────────────────────
                         weather = runSession.value?.weatherAtStart,
+                        
+                        // ── Run State & Phase ────────────────────────────────────────────
                         phase = runSession.value?.phase,
                         isStruggling = runSession.value?.isStruggling,
+                        
+                        // ── Training Context ──────────────────────────────────────────────
                         activityType = "run",
-                        userFitnessLevel = null,
+                        workoutType = runSession.value?.workoutType,
+                        workoutIntensity = runSession.value?.workoutIntensity,
+                        
+                        // ── Energy & Training Effect ──────────────────────────────────────
+                        calories = runSession.value?.activeCalories,
+                        aerobicTrainingEffect = runSession.value?.aerobicTrainingEffect,
+                        anaerobicTrainingEffect = runSession.value?.anaerobicTrainingEffect,
+                        trainingEffectLabel = runSession.value?.trainingEffectLabel,
+                        recoveryTimeMinutes = runSession.value?.recoveryTimeMinutes,
+                        vo2MaxEstimate = runSession.value?.vo2MaxEstimate,
+                        
+                        // ── Runner Profile ───────────────────────────────────────────────
+                        runnerAge = user?.age?.toInt(),
+                        runnerHeight = user?.height?.toInt(),
+                        runnerWeight = user?.weight?.toInt(),
+                        userFitnessLevel = user?.fitnessLevel,
                         coachName = user?.coachName,
                         coachTone = user?.coachTone,
                         coachGender = user?.coachGender,
                         coachAccent = user?.coachAccent,
+                        
+                        // ── Wellness (from Garmin) ───────────────────────────────────────
                         wellness = _runState.value.wellnessContext
                     )
                 )

@@ -8708,6 +8708,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
+      // If no target pace provided in context, try to infer from training plan or race goal
+      if (!context.targetPace && (context.distance !== undefined && context.totalDistance !== undefined)) {
+        try {
+          // Look for active training plan with session pace
+          const activePlan = await db.query.trainingPlans.findFirst({
+            where: (p, { eq, and }) => and(
+              eq(p.userId, req.user!.userId),
+              eq(p.isActive, true)
+            ),
+          });
+          
+          if (activePlan && activePlan.mainEffortPaceMin && activePlan.mainEffortPaceMax) {
+            // Use average of pace range
+            const avgSeconds = (activePlan.mainEffortPaceMin + activePlan.mainEffortPaceMax) / 2;
+            const minPart = Math.floor(avgSeconds / 60);
+            const secPart = Math.round(avgSeconds % 60);
+            context.targetPace = `${minPart}:${secPart.toString().padStart(2, '0')}`;
+          } else if (user?.raceGoalPace) {
+            // Fallback to race goal pace if available
+            context.targetPace = user.raceGoalPace;
+          }
+        } catch (paceError) {
+          // Silently fail — proceed without target pace
+          console.debug("Could not determine target pace:", paceError);
+        }
+      }
+      
       const effectiveTone = getPhaseTone(
         baseTone,
         context.distance,
