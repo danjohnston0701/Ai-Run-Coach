@@ -202,3 +202,23 @@ data class PlanProgressStats(
     @SerializedName("totalWorkouts") val totalWorkouts: Int = 0,
     @SerializedName("overallCompletion") val overallCompletion: Double = 0.0
 )
+
+/** Single workout schedule change for reschedule requests */
+data class WorkoutScheduleUpdate(
+    @SerializedName("workoutId") val workoutId: String,
+    @SerializedName("dayOfWeek") val dayOfWeek: Int,  // 0=Sun, 1=Mon, etc.
+    @SerializedName("scheduledDate") val scheduledDate: String  // ISO date "yyyy-MM-dd"
+)
+
+/** PUT /api/training-plans/:planId/reschedule */
+data class RescheduleSessionsRequest(
+    @SerializedName("weekNumber") val weekNumber: Int,
+    @SerializedName("updates") val updates: List<WorkoutScheduleUpdate>
+)
+
+/** Response from reschedule */
+data class RescheduleSessionsResponse(
+    @SerializedName("success") val success: Boolean,
+    @SerializedName("message") val message: String? = null,
+    @SerializedName("planProgress") val planProgress: PlanProgressStats? = null
+)

@@ -859,6 +859,7 @@ fun PlanDashboardContent(
                     }
                 },
                 planId = details.plan.id,
+                planCreatedAt = details.plan.createdAt,
                 viewModel = viewModel
             )
             Spacer(modifier = Modifier.height(Spacing.sm))
@@ -1118,9 +1119,12 @@ fun ExpandableWeekCard(
     onWorkoutTap: (WorkoutDetails) -> Unit,
     onCompleteWorkout: (WorkoutDetails) -> Unit,
     planId: String,
+    planCreatedAt: String? = null,
     viewModel: TrainingPlanViewModel? = null
 ) {
     var isExpanded by remember { mutableStateOf(isCurrent) }
+    var showChangeScheduleDialog by remember { mutableStateOf(false) }
+    val actionLoading by (viewModel?.actionLoading?.collectAsState() ?: remember { MutableStateFlow(false) })
     val skippedCount = week.workouts.count { it.isSkipped() }
     val completedCount = week.workouts.count { it.isCompleted && !it.isSkipped() }
     
@@ -1251,6 +1255,21 @@ fun ExpandableWeekCard(
 
                     HorizontalDivider(color = Colors.backgroundTertiary, thickness = 1.dp, modifier = Modifier.padding(vertical = Spacing.md))
 
+                    // Change Schedule Button
+                    Button(
+                        onClick = { showChangeScheduleDialog = true },
+                        modifier = Modifier.fillMaxWidth().height(40.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Colors.primary.copy(alpha = 0.1f)),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(painterResource(R.drawable.icon_calendar_vector), null, modifier = Modifier.size(16.dp), tint = Colors.primary)
+                        Spacer(modifier = Modifier.width(Spacing.sm))
+                        Text("Change Schedule", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.primary)
+                    }
+
+                    Spacer(modifier = Modifier.height(Spacing.md))
+                    HorizontalDivider(color = Colors.backgroundTertiary, thickness = 1.dp, modifier = Modifier.padding(vertical = Spacing.md))
+
                     // Workouts list
                     week.workouts.sortedBy { it.dayOfWeek }.forEach { workout ->
                         ExpandedWeekWorkoutRow(
@@ -1272,6 +1291,20 @@ fun ExpandableWeekCard(
                 }
             }
         }
+    }
+
+    // Change Schedule Dialog
+    if (showChangeScheduleDialog) {
+        ChangeScheduleDialog(
+            week = week,
+            planCreatedAt = planCreatedAt,
+            onDismiss = { showChangeScheduleDialog = false },
+            onConfirm = { weekNumber, updates ->
+                showChangeScheduleDialog = false
+                viewModel?.rescheduleWeekSessions(planId, weekNumber, updates)
+            },
+            isLoading = actionLoading
+        )
     }
 }
 

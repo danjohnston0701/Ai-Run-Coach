@@ -361,5 +361,33 @@ class TrainingPlanViewModel @Inject constructor(
         }
     }
 
+    fun rescheduleWeekSessions(
+        planId: String,
+        weekNumber: Int,
+        updates: List<live.airuncoach.airuncoach.network.model.WorkoutScheduleUpdate>
+    ) {
+        viewModelScope.launch {
+            _actionLoading.value = true
+            try {
+                val request = live.airuncoach.airuncoach.network.model.RescheduleSessionsRequest(
+                    weekNumber = weekNumber,
+                    updates = updates
+                )
+                val response = apiService.rescheduleWeekSessions(planId, request)
+                if (!response.isSuccessful) {
+                    throw Exception("Server returned ${response.code()}: ${response.errorBody()?.string()}")
+                }
+                Log.d("TrainingPlanVM", "✅ Week $weekNumber rescheduled successfully")
+                // Reload plan detail to reflect updated schedule
+                loadPlanDetail(planId)
+            } catch (e: Exception) {
+                Log.e("TrainingPlanVM", "❌ Failed to reschedule sessions: ${e.message}", e)
+                _actionError.value = "Failed to reschedule: ${e.message}"
+            } finally {
+                _actionLoading.value = false
+            }
+        }
+    }
+
     fun clearActionError() { _actionError.value = null }
 }

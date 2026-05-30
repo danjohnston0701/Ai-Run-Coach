@@ -361,6 +361,12 @@ interface ApiService {
     @PUT("/api/training-plans/workouts/{workoutId}/skip")
     suspend fun skipWorkout(@Path("workoutId") workoutId: String): Response<Unit>
 
+    @PUT("/api/training-plans/{planId}/reschedule")
+    suspend fun rescheduleWeekSessions(
+        @Path("planId") planId: String,
+        @Body request: RescheduleSessionsRequest
+    ): Response<RescheduleSessionsResponse>
+
     @PUT("/api/training-plans/{planId}/status")
     suspend fun updatePlanStatus(
         @Path("planId") planId: String,
