@@ -106,17 +106,21 @@ class MainActivity : ComponentActivity() {
         // Active-run notification (tap on the ongoing run notification)
         val launchToActiveRun = intent?.getBooleanExtra(RunTrackingService.EXTRA_ACTIVE_RUN, false) == true
 
+        // Observer session invitation (live_run_invite notification)
+        val observerSessionId = intent?.getStringExtra("deeplink_observer_session_id")
+
         // Garmin watch update notification
         val isGarminUpdateNotification = intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE
         val garminUpdateVersion     = if (isGarminUpdateNotification) intent?.getStringExtra("version")     ?: "" else null
         val garminUpdateReleaseNote = if (isGarminUpdateNotification) intent?.getStringExtra("releaseNote") ?: "" else null
 
-        Log.d("MainActivity", "Deep link — uriRun=$uriRunId notifRun=$notifRunId activeRun=$launchToActiveRun garminUpdate=$garminUpdateVersion")
+        Log.d("MainActivity", "Deep link — uriRun=$uriRunId notifRun=$notifRunId activeRun=$launchToActiveRun observerSession=$observerSessionId garminUpdate=$garminUpdateVersion")
 
         // Store inner-nav destinations so MainScreen can handle them once its
         // NavHost is ready. run_summary and run_session are NOT in the root NavHost.
         when {
             launchToActiveRun -> pendingDeepLink.value = "run_session"
+            observerSessionId != null -> pendingDeepLink.value = "observer_session/$observerSessionId"
             anyRunId != null  -> pendingDeepLink.value = "run_summary/$anyRunId"
         }
         
@@ -250,6 +254,14 @@ class MainActivity : ComponentActivity() {
                 val releaseNote = intent.getStringExtra("releaseNote") ?: ""
                 Log.d("MainActivity", "Warm launch: Garmin watch update v$version")
                 _pendingGarminUpdate.value = Pair(version, releaseNote)
+            }
+            // Observer session invitation → inner nav observer_session
+            intent?.hasExtra("deeplink_observer_session_id") == true -> {
+                val sessionId = intent.getStringExtra("deeplink_observer_session_id")
+                if (!sessionId.isNullOrBlank()) {
+                    Log.d("MainActivity", "Warm launch: observer_session/$sessionId")
+                    pendingDeepLink.value = "observer_session/$sessionId"
+                }
             }
             // Run-completed / enriched / new_activity → inner nav run_summary
             intent?.hasExtra("deeplink_run_id") == true -> {

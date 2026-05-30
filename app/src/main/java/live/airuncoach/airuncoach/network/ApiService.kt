@@ -622,6 +622,16 @@ interface ApiService {
      */
     @POST("/api/garmin-companion/refresh-watch-token")
     suspend fun refreshWatchToken(@Body body: RefreshWatchTokenRequest): RefreshWatchTokenResponse
+
+    // ========== LIVE RUN SESSIONS ==========
+    
+    /**
+     * Get live session data for a runner.
+     * Observers use this to view real-time location, pace, distance, and metrics.
+     * @param sessionId The live session ID
+     */
+    @GET("/api/live-sessions/{sessionId}")
+    suspend fun getLiveSession(@Path("sessionId") sessionId: String): live.airuncoach.airuncoach.viewmodel.LiveSessionApiResponse
 }
 
 data class RefreshWatchTokenRequest(

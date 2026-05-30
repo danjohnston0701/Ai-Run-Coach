@@ -608,6 +608,14 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
+            // Observer run session (invited to watch a friend's live run)
+            composable("observer_session/{sessionId}") { backStackEntry ->
+                val sessionId = backStackEntry.arguments?.getString("sessionId") ?: ""
+                ObserverRunSessionScreen(
+                    sessionId = sessionId,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
             composable("previous_runs") {
                 val currentBackStack by navController.currentBackStackEntryAsState()
                 PreviousRunsScreen(

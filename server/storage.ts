@@ -95,6 +95,8 @@ export interface IStorage {
   createLiveSession(session: any): Promise<LiveRunSession>;
   updateLiveSession(id: string, data: Partial<LiveRunSession>): Promise<LiveRunSession | undefined>;
   endLiveSession(sessionKey: string): Promise<void>;
+  inviteObserver(sessionId: string, observerId: string): Promise<LiveRunSession | undefined>;
+  checkFriendship(userId1: string, userId2: string): Promise<boolean>;
   
   // Events
   getEvents(): Promise<Event[]>;
@@ -796,6 +798,48 @@ export class DatabaseStorage implements IStorage {
     await db.update(liveRunSessions)
       .set({ isActive: false })
       .where(eq(liveRunSessions.sessionKey, sessionKey));
+  }
+
+  async inviteObserver(sessionId: string, observerId: string): Promise<LiveRunSession | undefined> {
+    // Get current session
+    const session = await this.getLiveSession(sessionId);
+    if (!session) return undefined;
+
+    // Build observers array - initialize if null
+    const observers = (session.observers as any[] | null) || [];
+    
+    // Check if observer already invited
+    const alreadyInvited = observers.some(obs => obs.userId === observerId);
+    if (alreadyInvited) {
+      return session; // Already invited, return existing
+    }
+
+    // Add new observer invitation
+    observers.push({
+      userId: observerId,
+      status: "invited",
+      invitedAt: Date.now(),
+    });
+
+    // Update session with new observers list
+    const [updated] = await db.update(liveRunSessions)
+      .set({ observers })
+      .where(eq(liveRunSessions.id, sessionId))
+      .returning();
+    return updated || undefined;
+  }
+
+  async checkFriendship(userId1: string, userId2: string): Promise<boolean> {
+    const [friendship] = await db.select()
+      .from(friends)
+      .where(
+        or(
+          and(eq(friends.userId, userId1), eq(friends.friendId, userId2)),
+          and(eq(friends.userId, userId2), eq(friends.friendId, userId1))
+        )
+      )
+      .limit(1);
+    return !!friendship;
   }
 
   // Events

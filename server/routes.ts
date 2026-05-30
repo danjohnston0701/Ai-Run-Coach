@@ -2747,6 +2747,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Invite observer to watch a live run session
+  app.post("/api/live-sessions/:sessionId/invite-observer", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      const { runnerId, friendId } = req.body;
+
+      // Validate session exists and belongs to runnerId
+      const session = await storage.getLiveSession(sessionId);
+      if (!session) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+      if (session.userId !== runnerId) {
+        return res.status(403).json({ error: "Unauthorized: session does not belong to this user" });
+      }
+
+      // Validate friendship
+      const isFriend = await storage.checkFriendship(runnerId, friendId);
+      if (!isFriend) {
+        return res.status(403).json({ error: "Users are not friends" });
+      }
+
+      // Invite observer
+      const updatedSession = await storage.inviteObserver(sessionId, friendId);
+      if (!updatedSession) {
+        return res.status(500).json({ error: "Failed to invite observer" });
+      }
+
+      // Get friend's info for notification
+      const friend = await storage.getUser(friendId);
+      const runner = await storage.getUser(runnerId);
+
+      if (!friend || !runner) {
+        return res.status(500).json({ error: "Could not fetch user information" });
+      }
+
+      // Send push notification to friend
+      const notificationService = await import("./notification-service");
+      const pushSent = await notificationService.sendFirebasePush(
+        friendId,
+        `${runner.name} invited you to watch their run`,
+        "Watch their live location and route in real-time",
+        {
+          type: "live_run_invite",
+          sessionId,
+          runnerId,
+          runnerName: runner.name || "A runner",
+          routeId: session.routeId || "",
+          hasStarted: session.hasStarted ? "true" : "false",
+        }
+      );
+
+      console.log(`[Live Sessions] Invited ${friendId} to watch ${runnerId}'s run (session ${sessionId}). Push sent: ${pushSent}`);
+
+      res.json({ success: true, pushSent });
+    } catch (error: any) {
+      console.error("Invite observer error:", error);
+      res.status(500).json({ error: "Failed to invite observer" });
+    }
+  });
+
   // ==================== GROUP RUNS ====================
   
   app.get("/api/group-runs", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {

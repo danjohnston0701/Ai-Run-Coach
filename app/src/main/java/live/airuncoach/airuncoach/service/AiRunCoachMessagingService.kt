@@ -77,25 +77,27 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
 
         val type     = message.data["type"]
         val runId    = message.data["runId"]?.takeIf { it.isNotBlank() }
+        val sessionId = message.data["sessionId"]?.takeIf { it.isNotBlank() }
         val storeUrl = message.data["storeUrl"]?.takeIf { it.isNotBlank() }
         val title    = message.notification?.title ?: message.data["title"] ?: "AI Run Coach"
         val body     = message.notification?.body  ?: message.data["body"]  ?: ""
 
-        showNotification(title, body, type, runId, storeUrl, message.data)
+        showNotification(title, body, type, runId, sessionId, storeUrl, message.data)
     }
 
     private fun showNotification(
         title: String,
         body: String,
         type: String?,
-        runId: String?,
+        runId: String? = null,
+        sessionId: String? = null,
         storeUrl: String? = null,
         data: Map<String, String> = emptyMap()
     ) {
         val channelId = when (type) {
             "run_enriched", "new_activity" -> CHANNEL_GARMIN_SYNC
-            "garmin_watch_update"          -> CHANNEL_GARMIN_WATCH_UPDATES
-            else                           -> CHANNEL_GENERAL
+            "garmin_watch_update" -> CHANNEL_GARMIN_WATCH_UPDATES
+            else -> CHANNEL_GENERAL
         }
         ensureNotificationChannel(channelId)
 
@@ -109,37 +111,57 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
         //
         // Routing through MainActivity (our own app) always succeeds. MainActivity then
         // opens the URL from an Activity context where it always reaches the browser.
-        val pendingIntent = if (type == "garmin_watch_update") {
-            val url = storeUrl ?: CONNECT_IQ_STORE_URL
-            // Pass version and releaseNote so the in-app update screen can display them
-            val notifVersion = data?.get("version") ?: ""
-            val notifReleaseNote = data?.get("releaseNote") ?: ""
-            val mainIntent = Intent(this, MainActivity::class.java).apply {
-                action = ACTION_OPEN_CONNECT_IQ_STORE
-                putExtra(EXTRA_STORE_URL, url)
-                putExtra("version", notifVersion)
-                putExtra("releaseNote", notifReleaseNote)
-                // No SINGLE_TOP — we want a fresh onCreate so the LaunchedEffect
-                // always picks up the intent and navigates to the update screen.
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        val pendingIntent = when {
+            type == "garmin_watch_update" -> {
+                val url = storeUrl ?: CONNECT_IQ_STORE_URL
+                // Pass version and releaseNote so the in-app update screen can display them
+                val notifVersion = data["version"] ?: ""
+                val notifReleaseNote = data["releaseNote"] ?: ""
+                val mainIntent = Intent(this, MainActivity::class.java).apply {
+                    action = ACTION_OPEN_CONNECT_IQ_STORE
+                    putExtra(EXTRA_STORE_URL, url)
+                    putExtra("version", notifVersion)
+                    putExtra("releaseNote", notifReleaseNote)
+                    // No SINGLE_TOP — we want a fresh onCreate so the LaunchedEffect
+                    // always picks up the intent and navigates to the update screen.
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+                PendingIntent.getActivity(
+                    this,
+                    REQUEST_CODE_GARMIN_WATCH_UPDATE,
+                    mainIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                )
             }
-            PendingIntent.getActivity(
-                this,
-                REQUEST_CODE_GARMIN_WATCH_UPDATE,
-                mainIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-        } else {
-            val intent = Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                if (runId != null) putExtra("deeplink_run_id", runId)
+            type == "live_run_invite" -> {
+                // Observer invited to watch a live run
+                val mainIntent = Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    if (sessionId != null) {
+                        putExtra("deeplink_observer_session_id", sessionId)
+                    }
+                    putExtra("runner_name", data["runnerName"] ?: "")
+                }
+                PendingIntent.getActivity(
+                    this,
+                    REQUEST_CODE_GENERAL,
+                    mainIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                )
             }
-            PendingIntent.getActivity(
-                this,
-                REQUEST_CODE_GENERAL,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
+            else -> {
+                // Regular notifications (run_enriched, new_activity, etc.)
+                val intent = Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    if (runId != null) putExtra("deeplink_run_id", runId)
+                }
+                PendingIntent.getActivity(
+                    this,
+                    REQUEST_CODE_GENERAL,
+                    intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                )
+            }
         }
 
         val notification = NotificationCompat.Builder(this, channelId)

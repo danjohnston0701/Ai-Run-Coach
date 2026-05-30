@@ -527,12 +527,14 @@ export const liveRunSessions = pgTable("live_run_sessions", {
   elapsedTime: integer("elapsed_time").default(0),
   distanceCovered: real("distance_covered").default(0),
   sharedWithFriends: boolean("shared_with_friends").default(false),
-  startedAt: timestamp("started_at").defaultNow(),
+  startedAt: timestamp("started_at"),  // When the run actually started (not created)
+  hasStarted: boolean("has_started").default(false),  // Whether the runner has begun the run
   sessionKey: text("session_key"),
   difficulty: text("difficulty"),
   cadence: integer("cadence"),
   gpsTrack: jsonb("gps_track"),
   kmSplits: jsonb("km_splits"),
+  observers: jsonb("observers"),  // JSON array of { userId, status, invitedAt }
   lastSyncedAt: timestamp("last_synced_at").defaultNow(),
 });
 
