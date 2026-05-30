@@ -48,7 +48,7 @@ fun ObserverRunSessionScreen(
                 title = { 
                     Text(
                         if (liveSession?.hasStarted == true) "Live Run" else "Run Invitation",
-                        style = AppTextStyles.headlineMedium.copy(fontSize = 16.sp),
+                        style = AppTextStyles.h4,
                         color = Color.White
                     )
                 },
@@ -193,7 +193,7 @@ fun WaitingForRunnerScreen(
 
             Text(
                 "Waiting for $runnerName to start the run session",
-                style = AppTextStyles.headlineMedium.copy(fontSize = 18.sp),
+                style = AppTextStyles.h3,
                 textAlign = TextAlign.Center,
                 color = Colors.textPrimary
             )
@@ -316,7 +316,7 @@ fun MetricsPanel(session: ObserverLiveRunSession) {
         // Runner name and status
         Text(
             "${session.runnerName}'s Run",
-            style = AppTextStyles.headlineSmall,
+            style = AppTextStyles.h3,
             color = Colors.textPrimary
         )
 
@@ -378,7 +378,7 @@ fun MetricBox(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(label, style = AppTextStyles.caption, color = Colors.textMuted, fontSize = 10.sp)
-        Text(value, style = AppTextStyles.headlineSmall.copy(fontSize = 16.sp), color = Colors.primary)
+        Text(value, style = AppTextStyles.h4, color = Colors.primary)
     }
 }
 
