@@ -10720,6 +10720,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   /**
    * GET /api/strava/connection-status
    * Check Strava connection status for current user
+   * 
+   * Auto-refreshes token if expired (Strava tokens last 6 hours)
+   * so users stay connected without manual reconnection
    */
   app.get(
     "/api/strava/connection-status",
@@ -10744,12 +10747,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const isExpired =
           device.tokenExpiresAt && device.tokenExpiresAt < new Date();
 
+        // Auto-refresh token if expired and we have a refresh token
+        let refreshedDevice = device;
+        if (isExpired && device.refreshToken) {
+          try {
+            console.log(`[Strava] Token expired for user ${userId}, auto-refreshing...`);
+            const refreshed = await refreshStravaToken(device.refreshToken);
+            
+            // Update device with new tokens
+            await db.update(connectedDevices)
+              .set({
+                accessToken: refreshed.accessToken,
+                refreshToken: refreshed.refreshToken,
+                tokenExpiresAt: refreshed.expiresAt,
+                updatedAt: new Date(),
+              })
+              .where(eq(connectedDevices.id, device.id));
+            
+            console.log(`[Strava] Token auto-refreshed successfully for user ${userId}`);
+            
+            // Use the refreshed data for response
+            refreshedDevice = {
+              ...device,
+              accessToken: refreshed.accessToken,
+              refreshToken: refreshed.refreshToken,
+              tokenExpiresAt: refreshed.expiresAt,
+            };
+          } catch (refreshError: any) {
+            console.error(`[Strava] Auto-refresh failed for user ${userId}:`, refreshError.message);
+            // Token refresh failed - device is truly disconnected now
+            return res.json({
+              connected: false,
+              athleteName: device.deviceName,
+              athleteId: device.deviceId,
+              lastSync: device.lastSyncAt,
+              tokenExpired: true,
+              tokenRefreshError: "Token refresh failed - please reconnect Strava",
+            });
+          }
+        }
+
         res.json({
-          connected: device.isActive && !isExpired,
-          athleteName: device.deviceName || "Strava Athlete",
-          athleteId: device.deviceId,
-          lastSync: device.lastSyncAt,
-          tokenExpired: isExpired,
+          connected: refreshedDevice.isActive && !(refreshedDevice.tokenExpiresAt && refreshedDevice.tokenExpiresAt < new Date()),
+          athleteName: refreshedDevice.deviceName || "Strava Athlete",
+          athleteId: refreshedDevice.deviceId,
+          lastSync: refreshedDevice.lastSyncAt,
+          tokenExpired: false,
         });
       } catch (error: any) {
         res.status(500).json({ error: error.message });
