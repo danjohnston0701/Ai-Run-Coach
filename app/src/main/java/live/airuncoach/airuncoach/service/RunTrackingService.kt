@@ -1387,6 +1387,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     format = response.format,
                     fallbackText = response.message,
                     accent = currentUser?.coachAccent,
+                    gender = currentUser?.coachGender,
                     onComplete = {
                         _latestCoachingText.value = null
                     }
@@ -1401,6 +1402,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     format = null,
                     fallbackText = navigationText,
                     accent = currentUser?.coachAccent,
+                    gender = currentUser?.coachGender,
                     onComplete = {
                         _latestCoachingText.value = null
                     }
@@ -3187,6 +3189,7 @@ class RunTrackingService : Service(), SensorEventListener {
             format = format,
             fallbackText = fallbackText,
             accent = currentUser?.coachAccent,
+            gender = currentUser?.coachGender,
             onComplete = {
                 // Clear coaching text when audio finishes
                 _latestCoachingText.value = null
@@ -3470,6 +3473,7 @@ class RunTrackingService : Service(), SensorEventListener {
                         format = null,
                         fallbackText = message,
                         accent = currentUser?.coachAccent,
+                        gender = currentUser?.coachGender,
                         onComplete = { _latestCoachingText.value = null }
                     )
                 }
@@ -3706,6 +3710,7 @@ class RunTrackingService : Service(), SensorEventListener {
                         format = null,
                         fallbackText = message,
                         accent = currentUser?.coachAccent,
+                        gender = currentUser?.coachGender,
                         onComplete = { _latestCoachingText.value = null }
                     )
                 }
@@ -4271,12 +4276,99 @@ class RunTrackingService : Service(), SensorEventListener {
 
     /**
      * Fire a short motivational start prompt when the run begins.
-     * Short, direct, under 10 words — just to confirm AI is active.
+     * Uses a prompt generated with the user's tone preference via TTS.
      */
     private fun fireStartCoaching() {
         if (!coachingFeaturePrefs.motivationalCoachingEnabled) return
 
-        // 50 start prompts — variety to keep it fresh
+        // Try to get a tone-appropriate prompt; fall back to generic if it fails
+        serviceScope.launch {
+            try {
+                val tone = currentUser?.coachTone ?: "encouraging"
+                val startPrompt = generateStartPromptByTone(tone)
+                
+                // Log as a coaching note for the run history
+                coachingHistory.add(AiCoachingNote(
+                    time = 0,
+                    message = startPrompt
+                ))
+                
+                // Fire via audio immediately (with tone applied via accent/gender in TTS)
+                if (!isMuted) {
+                    playCoachingAudio(null, null, startPrompt)
+                }
+                
+                Log.d("RunTrackingService", "Start coaching (tone=$tone): $startPrompt")
+            } catch (e: Exception) {
+                Log.w("RunTrackingService", "Start prompt generation failed, using fallback: ${e.message}")
+                // Fallback: use generic prompts if something fails
+                fireStartCoachingFallback()
+            }
+        }
+    }
+    
+    /**
+     * Generate a start prompt tailored to the user's coaching tone preference.
+     */
+    private fun generateStartPromptByTone(tone: String): String {
+        return when (tone.lowercase()) {
+            "technical" -> {
+                val prompts = listOf(
+                    "Focus on form, steady cadence, optimize your stride.",
+                    "Maintain steady effort, monitor your pace zones.",
+                    "Execute your running technique, control your effort.",
+                    "Optimize pace, focus on rhythm and efficiency.",
+                    "Engage core, maintain form, control your pace."
+                )
+                prompts.random()
+            }
+            "calm" -> {
+                val prompts = listOf(
+                    "Breathe easy, enjoy the moment, you've got this.",
+                    "Find your rhythm, settle into a comfortable pace.",
+                    "Take it easy, trust your training, relax.",
+                    "Ease into it, trust your body, breathe.",
+                    "Let's flow, stay composed, find your groove."
+                )
+                prompts.random()
+            }
+            "motivational" -> {
+                val prompts = listOf(
+                    "This is your moment — let's crush it!",
+                    "Push hard, chase greatness, leave it all out there!",
+                    "You're stronger than you think — prove it today!",
+                    "Go all in, embrace the challenge, dominate!",
+                    "This is your time — show what you're made of!"
+                )
+                prompts.random()
+            }
+            "playful" -> {
+                val prompts = listOf(
+                    "Let's have fun out there, one foot after another!",
+                    "Time to play, bring your energy, enjoy the run!",
+                    "Make it fun, smile and go, running is awesome!",
+                    "Let's play, have a blast, enjoy every step!",
+                    "Have fun, be silly, embrace the joy of running!"
+                )
+                prompts.random()
+            }
+            else -> { // "encouraging" or default
+                val prompts = listOf(
+                    "Let's go! You've got this.",
+                    "You're ready — let's run.",
+                    "Trust your training — let's go.",
+                    "Great start — keep it going.",
+                    "You've got everything you need."
+                )
+                prompts.random()
+            }
+        }
+    }
+    
+    /**
+     * Fallback function: generic start prompts when AI generation fails.
+     */
+    private fun fireStartCoachingFallback() {
         val prompts = listOf(
             // Action & Energy
             "Let's go! You've got this.",
@@ -4348,21 +4440,21 @@ class RunTrackingService : Service(), SensorEventListener {
             "Today's run becomes tomorrow's strength.",
             "This run is yours — make it count."
         )
+        
         val startMessage = prompts.random()
-        val startTime = System.currentTimeMillis()
-
-        // Also log as a coaching note for the run history
+        
+        // Log as a coaching note for the run history
         coachingHistory.add(AiCoachingNote(
             time = 0,
             message = startMessage
         ))
-
+        
         // Fire via audio immediately
         if (!isMuted) {
             playCoachingAudio(null, null, startMessage)
         }
-
-        Log.d("RunTrackingService", "Start coaching: $startMessage")
+        
+        Log.d("RunTrackingService", "Fallback start coaching: $startMessage")
     }
 
     private fun buildBaseEliteRequest(type: String, distKm: Double, duration: Long, avgSpeed: Float): EliteCoachingRequest {

@@ -100,7 +100,7 @@ fun CoachingProgrammeScreen(
         containerColor = Colors.backgroundRoot,
         contentWindowInsets = WindowInsets(0)
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Column(modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())) {
             // Tab Row: Active / Completed / Abandoned
             TabRow(
                 selectedTabIndex = selectedTab,
@@ -127,7 +127,6 @@ fun CoachingProgrammeScreen(
                     Tab(
                         selected = selectedTab == index,
                         onClick = { viewModel.selectTab(index) },
-                        modifier = Modifier.padding(vertical = Spacing.md),
                         selectedContentColor = Colors.primary,
                         unselectedContentColor = Colors.textMuted
                     ) {
@@ -1124,7 +1123,7 @@ fun ExpandableWeekCard(
 ) {
     var isExpanded by remember { mutableStateOf(isCurrent) }
     var showChangeScheduleDialog by remember { mutableStateOf(false) }
-    val actionLoading by (viewModel?.actionLoading?.collectAsState() ?: remember { MutableStateFlow(false) })
+    val actionLoading by (viewModel?.actionLoading?.collectAsState() ?: remember { mutableStateOf(false) })
     val skippedCount = week.workouts.count { it.isSkipped() }
     val completedCount = week.workouts.count { it.isCompleted && !it.isSkipped() }
     

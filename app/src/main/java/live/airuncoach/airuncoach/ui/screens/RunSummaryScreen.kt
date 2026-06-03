@@ -96,6 +96,8 @@ import live.airuncoach.airuncoach.network.model.TechnicalAnalysis
 import live.airuncoach.airuncoach.ui.components.CoachingPlanBadge
 import live.airuncoach.airuncoach.ui.components.GarminAttributionBadge
 import live.airuncoach.airuncoach.ui.components.GarminBadgeStyle
+import live.airuncoach.airuncoach.ui.components.TrainingLoadCard
+import live.airuncoach.airuncoach.analytics.calculateTrainingLoad
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
@@ -6312,6 +6314,11 @@ private fun DataTabFlagship(
                     if (worstPace != null) add("Slowest Km Pace" to worstPace.pace.replace("/km", "") + "/km")
                 }
             )
+        }
+
+        // ==================== TRAINING LOAD SECTION ====================
+        item {
+            TrainingLoadCard(run)
         }
 
         // ==================== SPEED SECTION ====================

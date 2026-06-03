@@ -2112,10 +2112,21 @@ export async function reassessTrainingPlansWithRunData(
         // ── NEW: Fetch coaching events from this session to compute compliance ──
         // These events were logged by the live coaching engine during the run.
         // They tell us exactly how often the runner deviated from targets.
-        const sessionEvents = await db
-          .select()
-          .from(coachingSessionEvents)
-          .where(eq(coachingSessionEvents.runId, runId));
+        let sessionEvents: any[] = [];
+        try {
+          sessionEvents = await db
+            .select()
+            .from(coachingSessionEvents)
+            .where(eq(coachingSessionEvents.runId, runId));
+        } catch (tableError: any) {
+          // Table might not exist yet in this database - continue with empty events
+          if (tableError.message?.includes('does not exist')) {
+            console.warn(`[Plan Reassessment] coaching_session_events table not found - continuing without session coaching data`);
+            sessionEvents = [];
+          } else {
+            throw tableError;
+          }
+        }
 
         // Compute session compliance from coaching events
         const hrZoneHighAlerts  = sessionEvents.filter(e => e.eventType === "hr_zone_high").length;

@@ -239,11 +239,10 @@ const getVarietySeed = (): string =>
 const getPaceContextDirective = (
   recentPaceSecPerKm: number | undefined,
   fitnessLevel?: string,
-  sessionTargetPaceMin?: number,
-  sessionType: string = 'run'
+  sessionTargetPaceMin?: number
 ): string => {
   if (!recentPaceSecPerKm || recentPaceSecPerKm <= 0) {
-    return `ACTIVITY CONTEXT: No recent pace data available. Coach based on EFFORT FEEL (heart rate zone, perceived exertion, breathing) rather than absolute pace targets. Activity: ${sessionType}.`;
+    return `PACE CONTEXT: No recent pace data available. Coach based on EFFORT FEEL (heart rate zone, perceived exertion, breathing) rather than absolute pace targets.`;
   }
 
   // Convert seconds/km to human-readable pace
@@ -251,96 +250,34 @@ const getPaceContextDirective = (
   const paceSec = Math.round(recentPaceSecPerKm % 60);
   const recentPaceStr = `${paceMin}:${paceSec.toString().padStart(2, '0')}`;
 
-  // Categorize pace zone - adjust thresholds for walking vs running
+  // Categorize pace zone based on typical running paces
   let paceCategory = 'moderate';
   let paceDescription = 'moderate/steady pace';
   let typeLabel = 'intermediate runner';
-  let activityLabel = sessionType === 'walk' ? 'walker' : 'runner';
 
-  if (sessionType === 'walk') {
-    // Walking pace thresholds (typically 10:00-18:00/km)
-    if (recentPaceSecPerKm <= 720) {
-      // ≤ 12:00/km — brisk walking
-      paceCategory = 'fast';
-      paceDescription = 'brisk/power walking pace';
-      typeLabel = 'brisk walker';
-    } else if (recentPaceSecPerKm <= 900) {
-      // ≤ 15:00/km — moderate walking
-      paceCategory = 'moderate';
-      paceDescription = 'moderate/steady walking pace';
-      typeLabel = 'steady walker';
-    } else {
-      // > 15:00/km — easy/leisurely walking
-      paceCategory = 'easy';
-      paceDescription = 'easy/leisurely walking pace';
-      typeLabel = 'relaxed walker';
-    }
+  if (recentPaceSecPerKm <= 360) {
+    // ≤ 6:00/km — elite/competitive
+    paceCategory = 'fast';
+    paceDescription = 'competitive/fast pace';
+    typeLabel = 'competitive/elite runner';
+  } else if (recentPaceSecPerKm <= 480) {
+    // ≤ 8:00/km — moderate
+    paceCategory = 'moderate';
+    paceDescription = 'moderate/steady pace';
+    typeLabel = 'intermediate runner';
+  } else if (recentPaceSecPerKm <= 600) {
+    // ≤ 10:00/km — easy/building
+    paceCategory = 'easy';
+    paceDescription = 'easy/conversational pace';
+    typeLabel = 'developing runner';
   } else {
-    // Running pace thresholds
-    if (recentPaceSecPerKm <= 360) {
-      // ≤ 6:00/km — elite/competitive
-      paceCategory = 'fast';
-      paceDescription = 'competitive/fast pace';
-      typeLabel = 'competitive/elite runner';
-    } else if (recentPaceSecPerKm <= 480) {
-      // ≤ 8:00/km — moderate
-      paceCategory = 'moderate';
-      paceDescription = 'moderate/steady pace';
-      typeLabel = 'intermediate runner';
-    } else if (recentPaceSecPerKm <= 600) {
-      // ≤ 10:00/km — easy/building
-      paceCategory = 'easy';
-      paceDescription = 'easy/conversational pace';
-      typeLabel = 'developing runner';
-    } else {
-      // > 10:00/km — very easy/base building (or slow walker starting as runner)
-      paceCategory = 'very_easy';
-      paceDescription = 'very easy/sustainable pace';
-      typeLabel = 'base-building runner';
-    }
+    // > 10:00/km — very easy/base building
+    paceCategory = 'very_easy';
+    paceDescription = 'very easy/sustainable pace';
+    typeLabel = 'base-building runner';
   }
 
-  const directives = sessionType === 'walk' ? {
-    fast: `ACTIVITY CONTEXT: ${typeLabel} - typical pace ${recentPaceStr}/km
-This ${activityLabel} walks at a brisk pace. They're fit and energetic. Coach accordingly:
-- Brisk walking at ${recentPaceStr}/km is strong aerobic work for them — acknowledge the intensity
-- When they ease off pace on recovery walks (15:00+/km), encourage them to enjoy the relaxation
-- Focus on maintaining good form (posture, arm swing, cadence) rather than pushing harder
-- Celebrate their consistency and steady effort — walking is about sustainable fitness
-- If they want more challenge, suggest longer durations or varied terrain rather than pure speed
-- HEART RATE and EFFORT FEEL are more important than pace — help them build aerobic endurance
-- Recovery walks should feel genuinely easy — coach them to slow down and enjoy the movement`,
-
-    moderate: `ACTIVITY CONTEXT: ${typeLabel} - typical pace ${recentPaceStr}/km
-This ${activityLabel} maintains a steady, consistent pace. Coach with this perspective:
-- Their steady walking pace (${recentPaceStr}/km) is perfect for building aerobic fitness and endurance
-- EFFORT FEEL and sustainable movement are what matter — not chasing arbitrary pace targets
-- Recovery walks 1-2 minutes slower are perfectly normal and valuable for recovery
-- Encourage strong posture, rhythmic arm movement, and consistent cadence at THIS comfortable pace
-- If pace drops, it usually signals fatigue or conditions — coach around effort level, not pace magnitude
-- Praise consistency and effort management rather than speed — relative effort is what builds fitness
-- Focus on form cues (cadence, posture, breathing) to improve efficiency naturally`,
-
-    easy: `ACTIVITY CONTEXT: ${typeLabel} - typical pace ${recentPaceStr}/km
-This ${activityLabel} is building fitness at a sustainable pace. Coach carefully:
-- This pace (${recentPaceStr}/km) IS their appropriate pace for building aerobic base — never suggest it's "slow"
-- Steady, sustainable walking at THIS pace = perfect foundation for fitness development
-- Recovery walks at 1-2 minutes slower pace are excellent — coach them to embrace the slower effort
-- Heart rate zone adherence is MORE important than hitting an absolute pace target
-- Focus coaching on consistency, smooth movement, and enjoying the activity
-- Celebrate their steady effort at THIS pace — it's building the foundation for greater fitness
-- Encourage rhythm and form (steady cadence, relaxed arms) more than pace increases`,
-
-    very_easy: `ACTIVITY CONTEXT: ${typeLabel} - typical pace ${recentPaceStr}/km
-This ${activityLabel} is building base fitness at a comfortable, sustainable pace:
-- This pace (${recentPaceStr}/km) IS appropriate for their current fitness level — never apologize for it
-- Sessions are about CONSISTENCY, sustainable movement, and building aerobic base — not speed
-- Encourage relaxation, steady cadence, and enjoyable movement at this natural pace
-- "Easy" means sustainable — if they're maintaining steady effort, they're executing perfectly
-- If they naturally walk faster, encourage them to ease back for true recovery sessions
-- Build confidence in their steady pace — it's the foundation for fitness development
-- Reference EFFORT LEVEL and how it FEELS more than any external pace comparison`,
-  } : {
+  const directives = {
     fast: `PACE CONTEXT: ${typeLabel} - typical pace ${recentPaceStr}/km
 This runner is fast. Their fitness level is high. Coach accordingly:
 - When they run at their target pace (${recentPaceStr}/km), they're doing MODERATE effort — don't oversell it
@@ -684,12 +621,9 @@ export async function generatePaceUpdate(params: {
   // Training plan session type — when set, suppresses race-goal pace comparison and reframes
   // coaching around the training objective (easy, tempo, long_run, recovery, etc.)
   workoutType?: string;
-  // Activity type — "run", "walk", or "interval"
-  sessionType?: string;
 }): Promise<string> {
   const { distance, targetDistance, currentPace, elapsedTime, coachName, coachTone, isSplit, splitKm, splitPace, currentGrade, totalElevationGain, isOnHill, kmSplits, hasRoute, fitnessLevel, runnerName, runHistory } = params;
   const workoutType = (params as any).workoutType as string | undefined;
-  const sessionType = (params as any).sessionType as string | undefined;
   const accentRule = accentDirective((params as any).coachAccent);
   
   const progress = Math.round((distance / targetDistance) * 100);
@@ -824,11 +758,7 @@ Give a very brief (1-2 sentences) pace check-in. MUST cite their pace (${spokenC
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). When run history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(hasRoute || (typeof currentGrade === 'number' && Math.abs(currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}CRITICAL: NEVER praise a slow split when the runner is behind their target pace. Be honest about pace — if they need to pick it up, tell them clearly.
-
-${getPaceContextDirective(runHistory?.avgPaceSecondsPerKm || (params as any).recentPaceAvgSecPerKm, fitnessLevel, undefined, sessionType || 'run')}
-
-${toneDirective(coachTone)}${accentRule ? ' ' + accentRule : ''} ${TTS_COMMA_RULE}${runnerProfileBlock(params.runnerProfile)}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). When run history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(hasRoute || (typeof currentGrade === 'number' && Math.abs(currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}CRITICAL: NEVER praise a slow split when the runner is behind their target pace. Be honest about pace — if they need to pick it up, tell them clearly. ${toneDirective(coachTone)}${accentRule ? ' ' + accentRule : ''} ${TTS_COMMA_RULE}${runnerProfileBlock(params.runnerProfile)}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 110,
@@ -4479,13 +4409,6 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
     return `Great work maintaining Zone ${targetHeartRateZone}! Keep the effort steady to the finish. Focus on your breathing and heart rate, not the pace.`;
   }
 
-  // For training plan sessions, disable "push hard" final sprint coaching
-  // Training sessions are about executing the plan, not racing — "finish strong" is not relevant
-  if ((coachingType === 'final_500m' || coachingType === 'final_100m') && trainingPlanId && workoutType) {
-    // Instead of sprint motivation, focus on steady effort and plan completion
-    return `Excellent effort on this ${workoutType.replace(/_/g, ' ')} session! Keep your current effort steady for the final stretch. You're right on track with your training plan.`;
-  }
-
   const timeMin = Math.floor(elapsedTime / 60);
   const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
   const remaining = targetDistance ? (targetDistance - distance).toFixed(1) : '?';
@@ -5108,8 +5031,6 @@ TRIGGER FREQUENCY:
 - "once": fires only the first time (use for phase_start, milestones, rep_start/end)
 - "on_condition": fires whenever condition is true, max once per 90 seconds (use for reactive HR/pace triggers)
 
-
-${getPaceContextDirective(runnerProfile.recentPaceAvgSecPerKm, runnerProfile.fitnessLevel, targetPaceMin, sessionType || 'run')}
 ${toneDirective(coachTone)}
 ${accentDirective(params.coachAccent)}
 ${runnerProfileBlock(params.aiRunnerProfile)}

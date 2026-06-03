@@ -42,7 +42,7 @@ export async function registerSamsungCompanionRoutes(app: Express) {
    */
   app.post('/api/samsung-companion/auth', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.userId;
       if (!userId) {
         return res.status(401).json({ error: 'Not authenticated' });
       }
@@ -68,7 +68,7 @@ export async function registerSamsungCompanionRoutes(app: Express) {
 
       res.json({
         sessionId,
-        authToken: req.user?.id, // Use user ID as token for watch
+        authToken: req.user?.userId, // Use user ID as token for watch
         runnerName,
         timestamp: Date.now(),
       });
@@ -84,7 +84,7 @@ export async function registerSamsungCompanionRoutes(app: Express) {
    */
   app.post('/api/samsung-companion/session/start', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.userId;
       if (!userId) {
         return res.status(401).json({ error: 'Not authenticated' });
       }
@@ -253,7 +253,7 @@ export async function registerSamsungCompanionRoutes(app: Express) {
    */
   app.get('/api/samsung-companion/status', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.userId;
       if (!userId) {
         return res.status(401).json({ error: 'Not authenticated' });
       }

@@ -745,6 +745,7 @@ class RunSessionViewModel @Inject constructor(
                             format = briefing.format,
                             fallbackText = speechText,
                             accent = user?.coachAccent,
+                            gender = user?.coachGender,
                             onComplete = {
                                 isBriefingAudioPlaying = false
                                 _runState.update { it.copy(coachText = "") }

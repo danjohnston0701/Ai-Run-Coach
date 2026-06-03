@@ -10,6 +10,7 @@ import live.airuncoach.airuncoach.data.GarminAuthManager
 import live.airuncoach.airuncoach.data.HealthConnectRepository
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.data.SyncQueue
+import live.airuncoach.airuncoach.data.repository.RunRepository
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.service.GarminWatchManager
@@ -60,5 +61,11 @@ object AppModule {
     @Provides
     fun provideGarminWatchManager(@ApplicationContext context: Context): GarminWatchManager {
         return GarminWatchManager(context)
+    }
+
+    @Singleton
+    @Provides
+    fun provideRunRepository(apiService: ApiService): RunRepository {
+        return RunRepository(apiService)
     }
 }

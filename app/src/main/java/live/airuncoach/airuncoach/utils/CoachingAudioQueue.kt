@@ -36,6 +36,7 @@ object CoachingAudioQueue {
         val context: Context,
         val isNavigation: Boolean = false,  // Navigation requests get priority
         val accent: String? = null,  // Voice accent/locale for TTS (e.g., "scottish", "australian")
+        val gender: String? = null,  // Voice gender for TTS (e.g., "male", "female")
         val onComplete: (() -> Unit)? = null
     )
 
@@ -77,10 +78,11 @@ object CoachingAudioQueue {
         format: String?,
         fallbackText: String?,
         accent: String? = null,
+        gender: String? = null,
         onComplete: (() -> Unit)? = null
     ) {
         init(context)
-        val request = AudioRequest(base64Audio, format, fallbackText, context, isNavigation = true, accent = accent, onComplete = onComplete)
+        val request = AudioRequest(base64Audio, format, fallbackText, context, isNavigation = true, accent = accent, gender = gender, onComplete = onComplete)
         
         // If coaching audio is currently playing, interrupt it for navigation
         if (isPlaying.get()) {
@@ -123,9 +125,10 @@ object CoachingAudioQueue {
         format: String?,
         fallbackText: String?,
         accent: String? = null,
+        gender: String? = null,
         onComplete: (() -> Unit)? = null
     ) {
-        enqueue(AudioRequest(base64Audio, format, fallbackText, context, isNavigation = false, accent = accent, onComplete = onComplete))
+        enqueue(AudioRequest(base64Audio, format, fallbackText, context, isNavigation = false, accent = accent, gender = gender, onComplete = onComplete))
     }
 
     /**
@@ -228,7 +231,7 @@ object CoachingAudioQueue {
                 if (tts != null) {
                     // Expand abbreviations for TTS clarity (e.g., "bpm" → "beats per minute")
                     val expandedText = AbbreviationExpander.expandForSpeech(next.fallbackText)
-                    tts.speak(expandedText, accent = next.accent, onComplete = onDone)
+                    tts.speak(expandedText, accent = next.accent, gender = next.gender, onComplete = onDone)
                 } else {
                     Log.e(TAG, "TextToSpeechHelper not initialized")
                     onDone()

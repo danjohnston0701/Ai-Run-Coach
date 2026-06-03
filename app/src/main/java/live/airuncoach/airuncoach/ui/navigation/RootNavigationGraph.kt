@@ -17,6 +17,8 @@ import live.airuncoach.airuncoach.ui.screens.LoginScreen
 import live.airuncoach.airuncoach.ui.screens.SignUpScreen
 import live.airuncoach.airuncoach.ui.screens.LocationPermissionScreen
 import live.airuncoach.airuncoach.ui.screens.MainScreen
+import live.airuncoach.airuncoach.ui.screens.PersonalDetailsScreen
+import live.airuncoach.airuncoach.ui.screens.CoachSettingsScreen
 
 @Composable
 fun RootNavigationGraph(navController: NavHostController) {
@@ -118,6 +120,28 @@ fun RootNavigationGraph(navController: NavHostController) {
                 onNavigateToLogin = {
                     navController.navigate(AppRoutes.LOGIN) {
                         popUpTo(AppRoutes.MAIN) { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable("personal_details") {
+            PersonalDetailsScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToCoachSettings = {
+                    navController.navigate("coach_settings") {
+                        popUpTo("personal_details") { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable("coach_settings") {
+            CoachSettingsScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToDashboard = {
+                    navController.navigate(AppRoutes.LOCATION_PERMISSION) {
+                        popUpTo("coach_settings") { inclusive = true }
                     }
                 }
             )

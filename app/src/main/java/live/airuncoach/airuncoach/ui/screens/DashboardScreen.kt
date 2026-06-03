@@ -195,13 +195,13 @@ fun DashboardScreen(
             )
         }
         item { Spacer(modifier = Modifier.height(Spacing.md)) }
-        // Training Load & Recovery card
-        if (trainingLoad != null && trainingLoad!!.status != "no_data") {
-            item {
-                TrainingLoadCard(trainingLoad = trainingLoad!!)
-            }
-            item { Spacer(modifier = Modifier.height(Spacing.md)) }
-        }
+        // Training Load & Recovery card - Now displayed in Run Summary Data tab instead
+        // if (trainingLoad != null && trainingLoad!!.status != "no_data") {
+        //     item {
+        //         TrainingLoadCard(trainingLoad = trainingLoad!!)
+        //     }
+        //     item { Spacer(modifier = Modifier.height(Spacing.md)) }
+        // }
         item {
             PreviousRunsCard(
                 recentRun = recentRun,

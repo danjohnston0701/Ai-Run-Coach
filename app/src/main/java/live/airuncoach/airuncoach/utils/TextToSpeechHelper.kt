@@ -15,6 +15,7 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
     private var pendingText: String? = null
     private var pendingUtteranceId: String? = null
     private var pendingAccent: String? = null
+    private var pendingGender: String? = null
     
     @Volatile
     private var onCompleteCallback: (() -> Unit)? = null
@@ -22,12 +23,15 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
     
     // Current accent - updates TTS voice when set
     private var currentAccent: String = "british"
+    // Current voice gender (male/female)
+    private var currentGender: String = "male"
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             setAccentLocale(currentAccent)
+            setVoiceGender(currentGender)
             isReady = true
-            Log.d("TTS", "TextToSpeech engine initialized successfully with accent: $currentAccent")
+            Log.d("TTS", "TextToSpeech engine initialized successfully with accent: $currentAccent, gender: $currentGender")
 
             // Set up the listener once during init (not every speak call)
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -60,6 +64,12 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
                     setAccentLocale(accent)
                     currentAccent = accent
                     pendingAccent = null
+                }
+                // Set pending gender if one was queued
+                pendingGender?.let { gender ->
+                    setVoiceGender(gender)
+                    currentGender = gender
+                    pendingGender = null
                 }
                 speakInternal(text, pendingUtteranceId ?: "tts_pending")
                 pendingText = null
@@ -97,6 +107,49 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
     }
     
     /**
+     * Set the TTS voice gender (male/female)
+     * Note: Not all TTS engines support voice selection; this attempts to select by pitch
+     */
+    @Suppress("DEPRECATION")
+    private fun setVoiceGender(gender: String) {
+        try {
+            // Try to get available voices and select based on gender
+            // On API 21+, we can access Voice objects
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                val voices = tts.voices
+                val selectedVoice = voices?.find { voice ->
+                    when (gender.lowercase()) {
+                        "female" -> voice.name.lowercase().contains("female") || 
+                                  voice.name.lowercase().contains("woman") ||
+                                  voice.name.lowercase().contains("queen")
+                        "male" -> voice.name.lowercase().contains("male") || 
+                                voice.name.lowercase().contains("man") ||
+                                voice.name.lowercase().contains("king")
+                        else -> false
+                    }
+                }
+                
+                if (selectedVoice != null) {
+                    tts.voice = selectedVoice
+                    Log.d("TTS", "Voice gender set to: $gender (${selectedVoice.name})")
+                    return
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("TTS", "Could not set voice gender: ${e.message}")
+        }
+        
+        // Fallback: pitch adjustment for gender (male = lower pitch, female = higher pitch)
+        val pitch = when (gender.lowercase()) {
+            "female" -> 1.5f
+            "male" -> 0.8f
+            else -> 1.0f
+        }
+        tts.setPitch(pitch)
+        Log.d("TTS", "Voice gender set via pitch adjustment: $gender (pitch: $pitch)")
+    }
+    
+    /**
      * Set accent before speaking (can be called before or after TTS initialization)
      */
     fun setAccent(accent: String) {
@@ -110,6 +163,20 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
         }
     }
     
+    /**
+     * Set voice gender before speaking (can be called before or after TTS initialization)
+     */
+    fun setGender(gender: String) {
+        currentGender = gender
+        if (isReady) {
+            setVoiceGender(gender)
+            Log.d("TTS", "Voice gender changed to: $gender")
+        } else {
+            Log.d("TTS", "Voice gender queued for when TTS initializes: $gender")
+            pendingGender = gender
+        }
+    }
+    
     private fun invokeComplete() {
         val callback = onCompleteCallback
         onCompleteCallback = null
@@ -119,12 +186,13 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
     }
 
     /**
-     * Speak text with optional accent override. If engine isn't ready yet, queues the text for when it initializes.
+     * Speak text with optional accent and gender override. If engine isn't ready yet, queues the text for when it initializes.
      */
     fun speak(
         text: String,
         utteranceId: String = "tts_utterance_${System.currentTimeMillis()}",
         accent: String? = null,
+        gender: String? = null,
         onComplete: (() -> Unit)? = null
     ) {
         onCompleteCallback = onComplete
@@ -132,6 +200,11 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
         // Update accent if provided
         if (accent != null && accent != currentAccent) {
             setAccent(accent)
+        }
+        
+        // Update gender if provided
+        if (gender != null && gender != currentGender) {
+            setGender(gender)
         }
 
         if (isReady) {
@@ -142,6 +215,9 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
             pendingUtteranceId = utteranceId
             if (accent != null) {
                 pendingAccent = accent
+            }
+            if (gender != null) {
+                pendingGender = gender
             }
         }
     }

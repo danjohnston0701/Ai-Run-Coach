@@ -22,7 +22,9 @@ import javax.inject.Inject
 class ConnectedDevicesViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val garminAuthManager: GarminAuthManager,
-    private val apiService: ApiService
+    private val apiService: ApiService,
+    private val runRepository: live.airuncoach.airuncoach.data.repository.RunRepository,
+    private val sessionManager: live.airuncoach.airuncoach.data.SessionManager
 ) : ViewModel() {
 
     // ── Garmin ────────────────────────────────────────────────────────────────
@@ -198,7 +200,18 @@ class ConnectedDevicesViewModel @Inject constructor(
             try {
                 _stravaLoading.value = true
                 _stravaImportStatus.value = "importing"
+                
                 val response = apiService.importStravaHistory()
+                
+                // Invalidate runs cache if import was successful so runs list refreshes
+                if (response.success) {
+                    val userId = sessionManager.getUserId()
+                    if (!userId.isNullOrBlank()) {
+                        runRepository.invalidateRunsForUser(userId)
+                        Log.d(TAG, "Invalidated runs cache after successful Strava import for user $userId")
+                    }
+                }
+                
                 _stravaImportStatus.value = if (response.success)
                     "Imported ${response.imported} runs from Strava"
                 else

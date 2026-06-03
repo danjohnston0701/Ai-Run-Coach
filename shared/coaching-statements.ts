@@ -1,19 +1,35 @@
 export type CoachingPhase = 'early' | 'mid' | 'late' | 'final' | 'generic';
 export type CoachingCategory = 'form' | 'motivation' | 'breathing' | 'pacing' | 'mental';
+export type ActivityType = 'run' | 'walk' | 'all';
 
 export interface CoachingStatement {
   id: string;
   text: string;
   category: CoachingCategory;
   phase: CoachingPhase;
+  activityType?: ActivityType;  // Defaults to 'all' if not specified
 }
 
+// Phase thresholds calibrated for different activity types
 export const DEFAULT_PHASE_THRESHOLDS = {
   early: { maxKm: 2, maxPercent: 10 },
   mid: { minKm: 3, maxKm: 5, minPercent: 40, maxPercent: 50 },
   late: { minKm: 7, minPercent: 75, maxPercent: 90 },
   final: { minPercent: 90 },
 };
+
+// Walking-optimized phase thresholds (longer early phase, earlier transition to late)
+export const WALKING_PHASE_THRESHOLDS = {
+  early: { maxKm: 1.5, maxPercent: 15 },  // Walkers benefit from longer warm-up
+  mid: { minKm: 2, maxKm: 4, minPercent: 20, maxPercent: 70 },  // Longer middle section
+  late: { minKm: 5, minPercent: 70, maxPercent: 90 },
+  final: { minPercent: 90 },
+};
+
+// Get phase thresholds based on activity type
+export function getPhaseThresholds(activityType: ActivityType = 'run') {
+  return activityType === 'walk' ? WALKING_PHASE_THRESHOLDS : DEFAULT_PHASE_THRESHOLDS;
+}
 
 export const MAX_STATEMENT_USES = 3;
 
@@ -67,6 +83,42 @@ export const COACHING_STATEMENTS: CoachingStatement[] = [
   { id: 'generic_8', text: "Remember why you started. Keep going, you're making progress.", category: 'motivation', phase: 'generic' },
   { id: 'generic_9', text: "Breathe deep and reset. The next kilometer is yours to own.", category: 'breathing', phase: 'generic' },
   { id: 'generic_10', text: "Your body is capable of amazing things. Trust the process and keep moving forward.", category: 'motivation', phase: 'generic' },
+
+  // WALKING-SPECIFIC STATEMENTS
+  // WALKING EARLY PHASE
+  { id: 'walk_early_1', text: "Nice steady start. Keep your shoulders relaxed and let your arms swing naturally at your sides.", category: 'form', phase: 'early', activityType: 'walk' },
+  { id: 'walk_early_2', text: "Focus on a gentle heel-to-toe foot strike. Land with a smooth roll through your foot.", category: 'form', phase: 'early', activityType: 'walk' },
+  { id: 'walk_early_3', text: "Find your natural rhythm. A steady, comfortable pace is exactly where you want to be.", category: 'pacing', phase: 'early', activityType: 'walk' },
+  { id: 'walk_early_4', text: "Keep your head up and eyes forward. Feel the freedom of steady movement.", category: 'form', phase: 'early', activityType: 'walk' },
+  { id: 'walk_early_5', text: "Engage your core gently to support your posture. Tall spine, relaxed shoulders.", category: 'form', phase: 'early', activityType: 'walk' },
+  { id: 'walk_early_6', text: "Your breathing should be steady and conversational. If you can't chat, you're going too fast for this walk.", category: 'breathing', phase: 'early', activityType: 'walk' },
+
+  // WALKING MID PHASE
+  { id: 'walk_mid_1', text: "You're finding your groove. This steady effort is building your aerobic foundation beautifully.", category: 'motivation', phase: 'mid', activityType: 'walk' },
+  { id: 'walk_mid_2', text: "Keep your arm swing relaxed and rhythmic. Let them swing from the elbow, not rigid at your sides.", category: 'form', phase: 'mid', activityType: 'walk' },
+  { id: 'walk_mid_3', text: "Take a moment to notice your surroundings. Walking is as much about the journey as the destination.", category: 'mental', phase: 'mid', activityType: 'walk' },
+  { id: 'walk_mid_4', text: "Your cadence is consistent and strong. This is excellent pace work for building endurance.", category: 'form', phase: 'mid', activityType: 'walk' },
+  { id: 'walk_mid_5', text: "Maintain your tall posture. Good form now means more distance later without fatigue.", category: 'form', phase: 'mid', activityType: 'walk' },
+  { id: 'walk_mid_6', text: "You're in the sweet spot. This is where the real fitness gains happen—steady, consistent, sustainable effort.", category: 'motivation', phase: 'mid', activityType: 'walk' },
+  { id: 'walk_mid_7', text: "Feel your breathing. It should be easy and natural, supporting your effort without strain.", category: 'breathing', phase: 'mid', activityType: 'walk' },
+  { id: 'walk_mid_8', text: "Relax your hands and face. Let any tension melt away. You're moving beautifully.", category: 'form', phase: 'mid', activityType: 'walk' },
+
+  // WALKING LATE PHASE
+  { id: 'walk_late_1', text: "You're more than halfway there. Keep that same steady rhythm—consistency is your strength.", category: 'motivation', phase: 'late', activityType: 'walk' },
+  { id: 'walk_late_2', text: "Check your posture one more time. Shoulders back, chest open, head high.", category: 'form', phase: 'late', activityType: 'walk' },
+  { id: 'walk_late_3', text: "If you're feeling any fatigue, that's normal. This is where resilience builds. You've got this.", category: 'mental', phase: 'late', activityType: 'walk' },
+  { id: 'walk_late_4', text: "Your body is strong and capable. You're proving that right now with every step.", category: 'motivation', phase: 'late', activityType: 'walk' },
+  { id: 'walk_late_5', text: "Keep your cadence steady. Small, consistent steps are more efficient than trying to lengthen your stride.", category: 'form', phase: 'late', activityType: 'walk' },
+  { id: 'walk_late_6', text: "Take a deep breath. Your body is working well. Enjoy the strength you're building.", category: 'breathing', phase: 'late', activityType: 'walk' },
+  { id: 'walk_late_7', text: "Stay present. These final kilometers are where you discover your true resilience.", category: 'mental', phase: 'late', activityType: 'walk' },
+
+  // WALKING FINAL PHASE
+  { id: 'walk_final_1', text: "You're almost there! These last steps are a testament to your commitment.", category: 'motivation', phase: 'final', activityType: 'walk' },
+  { id: 'walk_final_2', text: "Finish strong with the same steady pace you've maintained. No rush, just excellence.", category: 'pacing', phase: 'final', activityType: 'walk' },
+  { id: 'walk_final_3', text: "Look how far you've come. This final stretch is a celebration of your effort.", category: 'motivation', phase: 'final', activityType: 'walk' },
+  { id: 'walk_final_4', text: "Keep your form perfect through the end. A strong finish is the best memory of any walk.", category: 'form', phase: 'final', activityType: 'walk' },
+  { id: 'walk_final_5', text: "You've earned this. Finish with pride, knowing you gave your all.", category: 'motivation', phase: 'final', activityType: 'walk' },
+  { id: 'walk_final_6', text: "Last stretch. Keep that rhythm, keep that posture. You're crossing the finish strong.", category: 'pacing', phase: 'final', activityType: 'walk' },
 ];
 
 export interface StatementUsage {
@@ -75,43 +127,51 @@ export interface StatementUsage {
 
 export function determinePhase(
   distanceKm: number,
-  totalDistanceKm: number | null
+  totalDistanceKm: number | null,
+  activityType: ActivityType = 'run'
 ): CoachingPhase {
+  const thresholds = getPhaseThresholds(activityType);
   const percentComplete = totalDistanceKm && totalDistanceKm > 0
     ? (distanceKm / totalDistanceKm) * 100
     : null;
 
   if (percentComplete !== null) {
-    if (percentComplete >= 90) return 'final';
-    if (percentComplete >= 75) return 'late';
-    if (percentComplete >= 40 && percentComplete <= 50) return 'mid';
-    if (percentComplete <= 10) return 'early';
+    if (percentComplete >= thresholds.final.minPercent) return 'final';
+    if (percentComplete >= thresholds.late.minPercent) return 'late';
+    if (percentComplete >= thresholds.mid.minPercent && percentComplete <= thresholds.mid.maxPercent) return 'mid';
+    if (percentComplete <= thresholds.early.maxPercent) return 'early';
     return 'generic';
   }
 
-  if (distanceKm <= 2) return 'early';
-  if (distanceKm >= 3 && distanceKm <= 5) return 'mid';
+  // Fallback to distance-based when total distance is unknown
+  if (distanceKm <= thresholds.early.maxKm) return 'early';
+  if (distanceKm >= thresholds.mid.minKm && distanceKm <= thresholds.mid.maxKm) return 'mid';
+  if (distanceKm >= thresholds.late.minKm) return 'late';
   return 'generic';
 }
 
 export function getAvailableStatements(
   currentPhase: CoachingPhase,
-  usageCounts: StatementUsage
+  usageCounts: StatementUsage,
+  activityType: ActivityType = 'all'
 ): CoachingStatement[] {
   return COACHING_STATEMENTS.filter(statement => {
     const phaseMatch = statement.phase === currentPhase || statement.phase === 'generic';
     const usageCount = usageCounts[statement.id] || 0;
     const withinLimit = usageCount < MAX_STATEMENT_USES;
-    return phaseMatch && withinLimit;
+    // Match activity type: statement is compatible if it's for 'all' activities, or specifically for this activity
+    const activityMatch = !statement.activityType || statement.activityType === 'all' || statement.activityType === activityType;
+    return phaseMatch && withinLimit && activityMatch;
   });
 }
 
 export function selectStatement(
   currentPhase: CoachingPhase,
   usageCounts: StatementUsage,
-  preferPhaseSpecific: boolean = true
+  preferPhaseSpecific: boolean = true,
+  activityType: ActivityType = 'all'
 ): CoachingStatement | null {
-  const available = getAvailableStatements(currentPhase, usageCounts);
+  const available = getAvailableStatements(currentPhase, usageCounts, activityType);
 
   if (available.length === 0) return null;
 

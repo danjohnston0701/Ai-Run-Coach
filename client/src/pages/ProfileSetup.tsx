@@ -6,6 +6,11 @@ import { ArrowRight, Camera, Upload, User } from "lucide-react";
 import { toast } from "sonner";
 
 const FITNESS_LEVELS = ["Unfit", "Casual", "Athletic", "Very Fit", "Elite"];
+const SESSION_TYPES = [
+  { value: "run", label: "Running" },
+  { value: "walk", label: "Walking" },
+  { value: "interval", label: "Interval Training" }
+];
 
 interface ProfileData {
   name: string;
@@ -17,6 +22,7 @@ interface ProfileData {
   desiredFitnessLevel: string;
   coachName: string;
   profilePic?: string;
+  defaultSessionType: string;
 }
 
 export default function ProfileSetup() {
@@ -34,6 +40,7 @@ export default function ProfileSetup() {
     desiredFitnessLevel: "Athletic",
     coachName: "",
     profilePic: "",
+    defaultSessionType: "run",
   });
 
   useEffect(() => {
@@ -51,6 +58,7 @@ export default function ProfileSetup() {
         desiredFitnessLevel: parsed.desiredFitnessLevel || "Athletic",
         coachName: parsed.coachName || "",
         profilePic: parsed.profilePic || "",
+        defaultSessionType: parsed.defaultSessionType || "run",
       }));
     }
   }, []);
@@ -118,6 +126,7 @@ export default function ProfileSetup() {
             desiredFitnessLevel: profile.desiredFitnessLevel,
             coachName: profile.coachName,
             profilePic: profile.profilePic,
+            defaultSessionType: profile.defaultSessionType,
           }),
         });
         if (res.ok) {
@@ -333,6 +342,23 @@ export default function ProfileSetup() {
             >
               {FITNESS_LEVELS.map(level => (
                 <option key={level} value={level}>{level}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Default Session Type */}
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+              Preferred Activity Type
+            </label>
+            <select
+              value={profile.defaultSessionType}
+              onChange={(e) => handleChange("defaultSessionType", e.target.value)}
+              className="w-full px-3 py-2 bg-card border border-white/10 rounded-lg text-foreground focus:outline-none focus:border-primary transition-colors"
+              data-testid="select-session-type"
+            >
+              {SESSION_TYPES.map(type => (
+                <option key={type.value} value={type.value}>{type.label}</option>
               ))}
             </select>
           </div>

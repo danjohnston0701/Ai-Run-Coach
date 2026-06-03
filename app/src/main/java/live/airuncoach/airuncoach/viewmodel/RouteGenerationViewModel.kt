@@ -84,7 +84,7 @@ class RouteGenerationViewModel @Inject constructor(
         preferTrails: Boolean = true,
         avoidHills: Boolean = false,
         targetTime: Int? = null,
-        aiCoachEnabled: Boolean = true
+        aiCoachEnabled: Boolean = false
     ) {
         viewModelScope.launch {
             _isLoading.value = true

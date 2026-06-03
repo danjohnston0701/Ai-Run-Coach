@@ -257,17 +257,26 @@ export function registerSessionCoachingRoutes(app: Express) {
         }
 
         // Log the coaching event
-        await db.insert(coachingSessionEvents).values({
-          runId,
-          plannedWorkoutId,
-          eventType,
-          eventPhase,
-          coachingMessage,
-          coachingAudioUrl,
-          userMetrics,
-          toneUsed,
-          userEngagement,
-        });
+        try {
+          await db.insert(coachingSessionEvents).values({
+            runId,
+            plannedWorkoutId,
+            eventType,
+            eventPhase,
+            coachingMessage,
+            coachingAudioUrl,
+            userMetrics,
+            toneUsed,
+            userEngagement,
+          });
+        } catch (insertError: any) {
+          // If table doesn't exist, log a warning but continue
+          if (insertError.message?.includes('does not exist')) {
+            console.warn("coaching_session_events table not found - event not logged but continuing");
+          } else {
+            throw insertError;
+          }
+        }
 
         return res.json({ success: true, message: "Coaching event logged" });
       } catch (error) {

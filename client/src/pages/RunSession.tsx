@@ -674,6 +674,7 @@ export default function RunSession() {
     routeId: urlRouteId,
     targetTimeSeconds: urlTargetTimeSeconds,
     exerciseType: urlExerciseType,
+    sessionType: urlExerciseType === "walking" ? "walk" : "run",  // Normalize to "run" or "walk"
     eventId: "" as string | undefined,
   });
 
@@ -2706,30 +2707,38 @@ export default function RunSession() {
     };
   }, [active, motionPermission]);
 
+  // Get split frequency in km based on session type
+  // Walkers get 500m splits, runners get 1km splits
+  const getSplitFrequency = (sessionType?: string): number => {
+    return sessionType === "walk" ? 0.5 : 1.0;
+  };
+
   useEffect(() => {
     if (!active || gpsStatus !== "active") return;
     
-    const currentKm = Math.floor(distance);
+    const splitFrequency = getSplitFrequency(sessionMetadataRef.current.sessionType);
+    const currentSplitDistance = Math.floor(distance / splitFrequency) * splitFrequency;
     
-    if (currentKm > lastKmAnnounced && currentKm > 0) {
-      console.log(`[Km Split] ${currentKm}km reached! active=${active}, gpsStatus=${gpsStatus}, aiCoachEnabled=${aiCoachEnabled}, audioEnabled=${audioEnabled}`);
-      setLastKmAnnounced(currentKm);
+    if (currentSplitDistance > lastKmAnnounced && currentSplitDistance > 0) {
+      const splitLabel = splitFrequency === 0.5 ? `${currentSplitDistance}km` : `${Math.round(currentSplitDistance * 10) / 10}km`;
+      console.log(`[Split] ${splitLabel} reached! active=${active}, gpsStatus=${gpsStatus}, aiCoachEnabled=${aiCoachEnabled}, audioEnabled=${audioEnabled}`);
+      setLastKmAnnounced(currentSplitDistance);
       
       const splitTime = time;
       setKmSplits(prev => [...prev, splitTime]);
       
       const lastSplitTime = kmSplits.length > 0 ? kmSplits[kmSplits.length - 1] : 0;
-      const thisKmTime = splitTime - lastSplitTime;
+      const thisSplitTime = splitTime - lastSplitTime;
       
-      // Last km pace (as min/km format)
-      const lastKmPaceMins = Math.floor(thisKmTime / 60);
-      const lastKmPaceSecs = Math.floor(thisKmTime % 60);
+      // Last split pace (as min/km format)
+      const lastSplitPaceMins = Math.floor(thisSplitTime / 60);
+      const lastSplitPaceSecs = Math.floor(thisSplitTime % 60);
       
       const targetDistNum = parseFloat(sessionMetadataRef.current.targetDistance);
-      const remainingKm = targetDistNum - currentKm;
+      const remainingKm = targetDistNum - currentSplitDistance;
       
       // Overall average pace
-      const avgPaceSeconds = time / currentKm;
+      const avgPaceSeconds = time / currentSplitDistance;
       const avgPaceMins = Math.floor(avgPaceSeconds / 60);
       const avgPaceSecs = Math.floor(avgPaceSeconds % 60);
       
@@ -2820,7 +2829,7 @@ export default function RunSession() {
         announcement += `Target pace: ${targetPaceStr} per kilometer. `;
       }
       announcement += `Overall pace: ${avgPaceMins}:${avgPaceSecs.toString().padStart(2, '0')} per kilometer. `;
-      announcement += `Last km pace: ${lastKmPaceMins}:${lastKmPaceSecs.toString().padStart(2, '0')} per kilometer. `;
+      announcement += `Last split pace: ${lastSplitPaceMins}:${lastSplitPaceSecs.toString().padStart(2, '0')} per kilometer. `;
       
       if (remainingKm > 0) {
         announcement += `${remainingKm.toFixed(1)} kilometers to go. `;
@@ -2859,7 +2868,7 @@ export default function RunSession() {
       announcement += motivation;
       
       speak(announcement, { domain: 'coach' });
-      setMessage(`${currentKm}km - ${lastKmPaceMins}:${lastKmPaceSecs.toString().padStart(2, '0')} split`);
+      setMessage(`${splitLabel} - ${lastSplitPaceMins}:${lastSplitPaceSecs.toString().padStart(2, '0')} split`);
       setLastMessageTime(Date.now());
       
       // Log km split to coaching logs
@@ -2918,7 +2927,8 @@ export default function RunSession() {
               routeId,
               userId,
               coachTone: coachSettings.tone || 'motivational',
-              coachName: userProfile?.coachName || 'AI Coach'
+              coachName: userProfile?.coachName || 'AI Coach',
+              sessionType: sessionMetadataRef.current.sessionType
             })
           });
           
@@ -3267,6 +3277,7 @@ export default function RunSession() {
           sessionKey: sessionIdRef.current,
           cadence: cadence || undefined,
           exerciseType: sessionMetadataRef.current.exerciseType || 'running',
+          sessionType: sessionMetadataRef.current.sessionType || 'run',
         })
       });
       
@@ -3724,12 +3735,19 @@ export default function RunSession() {
             console.log('[Save] Run saved to database successfully:', savedRun.id);
             return { success: true, savedRun };
           } else {
-            const errorText = await response.text();
-            console.error(`[Save] Attempt ${attempt} failed with status:`, response.status, 'Error:', errorText);
+            let errorMsg = await response.text();
+            try {
+              // Try to parse as JSON for better error messaging
+              const errorJson = JSON.parse(errorMsg);
+              errorMsg = errorJson.error || errorMsg;
+            } catch {
+              // Fall back to text if not JSON
+            }
+            console.error(`[Save] Attempt ${attempt} failed with status:`, response.status, 'Error:', errorMsg);
             
             // Don't retry on 4xx errors (client errors)
             if (response.status >= 400 && response.status < 500) {
-              return { success: false, error: errorText };
+              return { success: false, error: errorMsg };
             }
           }
         } catch (err) {
@@ -3849,18 +3867,48 @@ export default function RunSession() {
             return result.savedRun.id;
           } else {
             console.error('[Save] All database save attempts failed:', result.error);
-            // Show persistent warning for failed sync
-            toast.error('Run saved locally - will sync when connection improves', { duration: 8000 });
-            toast.info('Your run data is safe. Go to Run History to manually sync later.', { duration: 10000 });
+            
+            // Check if it's a validation error (like zero distance)
+            const isValidationError = result.error && (
+              result.error.includes('distance') || 
+              result.error.includes('GPS') ||
+              result.error.includes('validation')
+            );
+            
+            if (isValidationError) {
+              // Show user-friendly error for validation failures
+              toast.error(result.error || 'Run data is incomplete. Please check your GPS signal and try again.', { duration: 10000 });
+              toast.info('Make sure you have GPS enabled and a stable signal during your run.', { duration: 8000 });
+            } else {
+              // Show persistent warning for network/connection issues
+              toast.error('Run saved locally - will sync when connection improves', { duration: 8000 });
+              toast.info('Your run data is safe. Go to Run History to manually sync later.', { duration: 10000 });
+            }
+            
+            // Still save to localStorage even though database save failed
+            const runHistory = localStorage.getItem("runHistory");
+            const runs = runHistory ? JSON.parse(runHistory) : [];
+            runs.push(localRunData);
+            localStorage.setItem("runHistory", JSON.stringify(runs));
+            localStorage.removeItem("activeRoute");
+            return localRunId;
           }
         }
       } catch (err) {
         console.error('[Save] Failed to save run to database, using localStorage:', err);
         toast.error('Network error - run saved locally. Sync from Run History later.', { duration: 8000 });
+        
+        // Save to localStorage as fallback
+        const runHistory = localStorage.getItem("runHistory");
+        const runs = runHistory ? JSON.parse(runHistory) : [];
+        runs.push(localRunData);
+        localStorage.setItem("runHistory", JSON.stringify(runs));
+        localStorage.removeItem("activeRoute");
+        return localRunId;
       }
     }
     
-    // Fallback: save to localStorage with pending sync flag
+    // Fallback: save to localStorage with pending sync flag (for users not logged in)
     const runHistory = localStorage.getItem("runHistory");
     const runs = runHistory ? JSON.parse(runHistory) : [];
     runs.push(localRunData);

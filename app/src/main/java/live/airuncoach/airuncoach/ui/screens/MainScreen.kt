@@ -9,18 +9,15 @@ import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -77,6 +74,7 @@ val items = listOf(
 @Composable
 fun MainScreen(onNavigateToLogin: () -> Unit) {
     val navController = rememberNavController()
+    var showLocationPermissionDialog by remember { mutableStateOf(false) }
 
     // Permission requests are now handled in LocationPermissionScreen
     // Only request notification permission here if needed
@@ -231,7 +229,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         navController.navigate(Screen.History.route)
                     },
                     onNavigateToLocationPermission = {
-                        navController.navigate(AppRoutes.LOCATION_PERMISSION)
+                        showLocationPermissionDialog = true
                     },
                     onCreateGoal = {
                         navController.navigate("create_goal")
@@ -491,7 +489,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 val targetSeconds by viewModel.targetSeconds.collectAsState()
                 val originalTargetDistanceKm by viewModel.originalTargetDistanceKm.collectAsState()
                 var selectedRouteId by remember { mutableStateOf<String?>(null) }
-                var aiCoachEnabled by remember { mutableStateOf(true) }
+                var aiCoachEnabled by remember { mutableStateOf(false) }
                 
                 RouteSelectionScreen(
                     routes = routes,
@@ -762,7 +760,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                                     preferTrails = true,
                                     avoidHills = false,
                                     targetTime = targetTimeMinutes,
-                                    aiCoachEnabled = true
+                                    aiCoachEnabled = false
                                 )
                                 
                                 // Navigate to loading screen
@@ -816,7 +814,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                                 preferTrails = true,
                                 avoidHills = false,
                                 targetTime = targetTimeMinutes,
-                                aiCoachEnabled = true
+                                aiCoachEnabled = false
                             )
                             
                             navController.navigate("route_generating/${params.distance.toInt()}") {
@@ -1149,6 +1147,40 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onNavigateToLogin = onNavigateToLogin
                 )
             }
+        }
+    }
+    
+    // Show location permission dialog when requested
+    if (showLocationPermissionDialog) {
+        LocationPermissionDialog(
+            onDismiss = { showLocationPermissionDialog = false },
+            onPermissionGranted = { showLocationPermissionDialog = false }
+        )
+    }
+}
+
+@Composable
+private fun LocationPermissionDialog(
+    onDismiss: () -> Unit,
+    onPermissionGranted: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.32f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .background(Colors.backgroundRoot, shape = RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(16.dp))
+                .clickable(enabled = false) {} // Prevent clicks from propagating to the scrim
+        ) {
+            LocationPermissionScreen(
+                onPermissionGranted = onPermissionGranted
+            )
         }
     }
 }

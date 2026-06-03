@@ -59,6 +59,9 @@ export const users = pgTable("users", {
   garminWatchAppFirstSeenAt: timestamp("garmin_watch_app_first_seen_at"),   // When they first authenticated from the watch
   garminWatchAppLastSeenAt: timestamp("garmin_watch_app_last_seen_at"),     // Most recent companion auth
   garminWatchAppVersion: text("garmin_watch_app_version"),                   // Last-reported IQ app version
+
+  // Session type preference
+  defaultSessionType: text("default_session_type").default("run"), // "run" | "walk" | "interval" — user's preferred activity type
 });
 
 // Friends table

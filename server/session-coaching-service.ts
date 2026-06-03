@@ -279,11 +279,20 @@ export async function generateSessionInstructions(
 ) {
   // Fetch AI runner profile once — reuse in both parallel calls
   const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
+  
+  // Fetch user's recent pace for pace-aware coaching
+  const user = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, userId))
+    .then((rows) => rows[0])
+    .catch(() => null);
+  const recentPaceSecPerKm = (user as any)?.recentPaceAvgSecPerKm;
 
   // Run tone determination and session design in parallel
   const [toneDecision, sessionDesign] = await Promise.all([
     determineSessonCoachingTone({ userId, plannedWorkoutId, ...workoutData }),
-    generateAiSessionDesign(workoutData, aiRunnerProfile),
+    generateAiSessionDesign(workoutData, aiRunnerProfile, recentPaceSecPerKm),
   ]);
 
   return {
@@ -303,7 +312,7 @@ export async function generateSessionInstructions(
  *
  * Returns both as a single AI call to keep latency and cost low.
  */
-async function generateAiSessionDesign(workout: SessionToneRequest, aiRunnerProfile?: string | null): Promise<{
+async function generateAiSessionDesign(workout: SessionToneRequest, aiRunnerProfile?: string | null, recentPaceSecPerKm?: number): Promise<{
   preRunBrief: string;
   sessionStructure: any;
 }> {
@@ -384,13 +393,13 @@ For hr_alert and pace_deviation triggers: messages must address the real-time si
 
     return {
       preRunBrief: parsed.preRunBrief || buildFallbackBrief(workout),
-      sessionStructure: parsed.sessionStructure || buildFallbackStructure(workout),
+      sessionStructure: parsed.sessionStructure || buildFallbackStructure(workout, recentPaceSecPerKm),
     };
   } catch (e) {
     console.error("Failed to generate AI session design, using fallback:", e);
     return {
       preRunBrief: buildFallbackBrief(workout),
-      sessionStructure: buildFallbackStructure(workout),
+      sessionStructure: buildFallbackStructure(workout, recentPaceSecPerKm),
     };
   }
 }
@@ -409,8 +418,12 @@ function buildFallbackBrief(workout: SessionToneRequest): string {
 
 /**
  * Fallback session structure when AI call fails
+ * Now pace-aware to generate appropriate cues for different runner speeds
  */
-function buildFallbackStructure(workout: SessionToneRequest): any {
+function buildFallbackStructure(workout: SessionToneRequest, recentPaceSecPerKm?: number): any {
+  // Determine if runner is slower (>8:00/km) to adjust messaging
+  const isSlowerRunner = !recentPaceSecPerKm || recentPaceSecPerKm > 480; // > 8:00/km
+  
   if (workout.workoutType === "intervals" || workout.workoutType === "hill_repeats") {
     return {
       type: workout.workoutType,
@@ -422,8 +435,14 @@ function buildFallbackStructure(workout: SessionToneRequest): any {
       ],
       coachingTriggers: [
         { phase: "warmup", trigger: "at_end", message: "Warmup done. Get ready to push — first rep in 200m." },
-        { phase: "main_set", trigger: "rep_start", message: "GO! Push hard, stay tall, drive those arms." },
-        { phase: "main_set", trigger: "rep_end", message: "Rep done. Shake it out, breathe, recover fully." },
+        { phase: "main_set", trigger: "rep_start", 
+          message: isSlowerRunner 
+            ? "Rep starts. Find your effort zone. Steady controlled effort." 
+            : "GO! Push hard, stay tall, drive those arms." },
+        { phase: "main_set", trigger: "rep_end", 
+          message: isSlowerRunner
+            ? "Rep done. Recover with easy jogging." 
+            : "Rep done. Shake it out, breathe, recover fully." },
         { phase: "cooldown", trigger: "at_start", message: "Strong work today. Easy jog to cool down now." },
       ],
     };
@@ -438,8 +457,14 @@ function buildFallbackStructure(workout: SessionToneRequest): any {
       ],
       coachingTriggers: [
         { phase: "warmup", trigger: "at_end", message: "Build into tempo pace now. Controlled, uncomfortable but manageable." },
-        { phase: "tempo_block", trigger: "at_start", message: "Tempo effort. Find your rhythm, breathe steady, hold the pace." },
-        { phase: "tempo_block", trigger: "every_km", message: "Stay locked in. This discomfort is building your engine." },
+        { phase: "tempo_block", trigger: "at_start", 
+          message: isSlowerRunner
+            ? "Tempo effort. Find a steady, challenging pace. Breathe steady."
+            : "Tempo effort. Find your rhythm, breathe steady, hold the pace." },
+        { phase: "tempo_block", trigger: "every_km", 
+          message: isSlowerRunner
+            ? "Maintaining effort. You're building your aerobic capacity."
+            : "Stay locked in. This discomfort is building your engine." },
         { phase: "cooldown", trigger: "at_start", message: "Excellent tempo work. Easy jog to finish." },
       ],
     };

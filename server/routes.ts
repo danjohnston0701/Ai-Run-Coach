@@ -1375,6 +1375,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user!.userId;
       const runData = req.body;
       
+      // Validate required fields before processing
+      // Support both iOS (distance_meters) and Android (distance in km) formats
+      let distance = runData.distance || 0;
+      if (!distance && runData.distance_meters) {
+        distance = runData.distance_meters / 1000.0; // Convert meters to km
+        console.log(`[POST /api/runs] Converted iOS distance_meters=${runData.distance_meters} to distance=${distance}km`);
+      }
+      
+      if (!distance || distance <= 0) {
+        console.error(`[POST /api/runs] Run validation failed: distance must be > 0, got ${distance}`);
+        return res.status(400).json({ 
+          error: "Run must have a distance greater than 0. Please check your GPS data and try again.",
+          details: "No distance recorded during run session"
+        });
+      }
+      
       // Normalize duration to seconds for database storage
       // Android app sends duration in milliseconds; if > 86400 it's definitely ms
       const rawDuration = runData.duration || 0;
@@ -1402,23 +1418,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[POST /api/runs] Calculated totalSteps: ${runData.cadence} steps/min × ${durationMinutes.toFixed(1)} min = ${totalSteps} steps`);
       }
 
+      // Helper to safely parse dates - handles both ISO strings and Unix timestamps
+      const parseDate = (val: any): Date | undefined => {
+        if (!val) return undefined;
+        if (val instanceof Date) return val;
+        // If it's a string, try to parse it
+        if (typeof val === 'string') return new Date(val);
+        // If it's a number, treat as milliseconds if < year 3000, else seconds
+        if (typeof val === 'number') {
+          return val > 1e10 ? new Date(val) : new Date(val * 1000);
+        }
+        return undefined;
+      };
+
       // Convert timestamp fields from numbers to Date objects for database compatibility
       const processedRunData = {
         ...runData,
+        distance, // Use the validated/converted distance
         duration: durationInSeconds,
         totalSteps, // Use calculated or provided value
-        completedAt: runData.completedAt ? new Date(runData.completedAt) : undefined,
-        startTime: runData.startTime ? new Date(runData.startTime) : undefined,
-        endTime: runData.endTime ? new Date(runData.endTime) : undefined,
+        completedAt: parseDate(runData.completedAt),
+        startTime: parseDate(runData.startTime || runData.start_time),
+        endTime: parseDate(runData.endTime || runData.end_time),
         // Convert aiCoachingNotes timestamps if present
         aiCoachingNotes: runData.aiCoachingNotes?.map((note: any) => ({
           ...note,
-          time: note.time ? new Date(note.time) : undefined,
+          time: parseDate(note.time),
         })),
         // Convert strugglePoints timestamps if present
         strugglePoints: runData.strugglePoints?.map((sp: any) => ({
           ...sp,
-          timestamp: sp.timestamp ? new Date(sp.timestamp) : undefined,
+          timestamp: parseDate(sp.timestamp),
         })),
       };
 
@@ -1441,10 +1471,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // MISSING COLUMN FIX: Android sends startTime (epoch ms) but the runs table has
       // no startTime column.  Store it as startedAt (we add this column in the migration).
-      const startedAt = runData.startTime ? new Date(runData.startTime) : null;
+      // Support both startTime (Android) and start_time (iOS)
+      const startedAt = parseDate(runData.startTime || runData.start_time) ?? null;
 
+      console.log(`[POST /api/runs] Distance handling — received distance: ${distance}km${runData.distance_meters ? ` (from ${runData.distance_meters}m)` : ''}`);
       console.log(`[POST /api/runs] Target fields — targetDistance: ${targetDistance} km, targetTime: ${targetTime} ms, wasTargetAchieved: ${wasTargetAchieved}`);
       console.log(`[POST /api/runs] Elevation fields — steepestIncline: ${steepestIncline}%, steepestDecline: ${steepestDecline}%`);
+      console.log(`[POST /api/runs] Date fields — startedAt: ${processedRunData.startTime}, completedAt: ${processedRunData.completedAt}`);
 
       // Create run with TSS and calculated steps
       console.log(`[POST /api/runs] Creating run for user: ${userId}`);
@@ -3132,15 +3165,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Alias for iOS app compatibility: GET /api/weather redirects to /api/weather/current
+  // Supports optional lat/lng parameters; if missing, returns gracefully instead of error
   app.get("/api/weather", async (req: Request, res: Response) => {
     try {
       const { lat, lng } = req.query;
+      
+      // If location not provided, return null weather data (don't fail with 400)
+      // iOS app should pass coordinates but can gracefully handle missing weather
       if (!lat || !lng) {
-        return res.status(400).json({ error: "lat and lng are required" });
+        console.warn(`[GET /api/weather] Called without location parameters (lat: ${lat}, lng: ${lng})`);
+        return res.json({
+          temp: null,
+          feelsLike: null,
+          humidity: null,
+          windSpeed: null,
+          windDirection: null,
+          condition: null,
+          weatherCode: null,
+        });
       }
       
-      // Forward to the /api/weather/current endpoint
-      const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m&timezone=auto`);
+      // Fetch weather data from Open-Meteo API
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m&timezone=auto`;
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`Open-Meteo API error: ${response.status}`);
       }
@@ -3171,7 +3218,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       console.error("Weather error:", error);
-      res.status(500).json({ error: "Failed to get weather" });
+      // Return null weather data on error instead of 500
+      res.json({
+        temp: null,
+        feelsLike: null,
+        humidity: null,
+        windSpeed: null,
+        windDirection: null,
+        condition: null,
+        weatherCode: null,
+      });
     }
   });
 
@@ -8446,6 +8502,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       req.body.coachTone = effectiveTone;
 
+      // Sanitize numeric fields to prevent type errors in AI service
+      // Ensure currentGrade is a number or undefined, not null or string
+      if (req.body.currentGrade !== undefined && typeof req.body.currentGrade !== 'number') {
+        const parsed = parseFloat(req.body.currentGrade);
+        req.body.currentGrade = isNaN(parsed) ? undefined : parsed;
+      }
+
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
       const message = await aiService.generatePaceUpdate({ ...req.body, runnerProfile });
@@ -8929,7 +8992,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // on the watch is silently renewed — in practice the 1-year expiry is never hit.
   app.post("/api/garmin-companion/refresh-watch-token", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const userId = req.user!.id;
+      const userId = req.user!.userId;
       const { deviceId, deviceModel } = req.body;
 
       const jwt = await import("jsonwebtoken");
