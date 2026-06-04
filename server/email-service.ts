@@ -116,9 +116,15 @@ export async function sendInterestRegistrationEmail(opts: {
   name: string;
   email: string;
   country: string;
+  message?: string;
 }): Promise<void> {
   const { client, fromEmail } = await getResendClient();
   const notifyEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || fromEmail;
+
+  const messageRow = opts.message
+    ? `<tr><td style="padding: 8px 0; color: #94a3b8; font-size: 13px; width: 80px; vertical-align: top;">Message</td><td style="padding: 8px 0; color: #ffffff; white-space: pre-wrap;">${opts.message}</td></tr>`
+    : "";
+  const messageText = opts.message ? `\nMessage: ${opts.message}` : "";
 
   // Notify the team
   await client.emails.send({
@@ -136,11 +142,12 @@ export async function sendInterestRegistrationEmail(opts: {
             <tr><td style="padding: 8px 0; color: #94a3b8; font-size: 13px; width: 80px;">Name</td><td style="padding: 8px 0; color: #ffffff;">${opts.name}</td></tr>
             <tr><td style="padding: 8px 0; color: #94a3b8; font-size: 13px;">Email</td><td style="padding: 8px 0; color: #ffffff;">${opts.email}</td></tr>
             <tr><td style="padding: 8px 0; color: #94a3b8; font-size: 13px;">Country</td><td style="padding: 8px 0; color: #ffffff;">${opts.country}</td></tr>
+            ${messageRow}
           </table>
         </div>
       </div>
     `,
-    text: `New interest registration:\nName: ${opts.name}\nEmail: ${opts.email}\nCountry: ${opts.country}`,
+    text: `New interest registration:\nName: ${opts.name}\nEmail: ${opts.email}\nCountry: ${opts.country}${messageText}`,
   });
 
   // Confirmation to the user

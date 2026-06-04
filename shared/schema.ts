@@ -1901,6 +1901,7 @@ export const interestRegistrations = pgTable("interest_registrations", {
   name: text("name").notNull(),
   email: text("email").notNull(),
   country: text("country").notNull(),
+  message: text("message"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

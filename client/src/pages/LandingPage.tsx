@@ -45,6 +45,8 @@ export default function LandingPage() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [notRobot, setNotRobot] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
 
   const features = [
@@ -71,13 +73,17 @@ export default function LandingPage() {
       setError("Please fill in all fields.");
       return;
     }
+    if (!notRobot) {
+      setError("Please confirm you're not a robot.");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
       const res = await fetch("/api/register-interest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), email: email.trim(), country }),
+        body: JSON.stringify({ name: name.trim(), email: email.trim(), country, message: message.trim() || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Something went wrong");
@@ -309,6 +315,41 @@ export default function LandingPage() {
                             <option key={c} value={c}>{c}</option>
                           ))}
                         </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs uppercase tracking-widest text-muted-foreground font-medium">Message <span className="normal-case tracking-normal opacity-50">(optional)</span></label>
+                        <textarea
+                          value={message}
+                          onChange={(e) => setMessage(e.target.value)}
+                          placeholder="Any questions, features you'd love to see, or just say hi..."
+                          rows={3}
+                          className="w-full rounded-xl bg-background/50 border border-white/10 focus:border-primary/60 text-sm px-3 py-2.5 text-foreground outline-none focus:ring-1 focus:ring-primary/40 transition-colors resize-none placeholder:text-muted-foreground/50"
+                          data-testid="textarea-message"
+                        />
+                      </div>
+
+                      <div
+                        className={`flex items-center justify-between rounded-xl border px-4 py-3 transition-colors cursor-pointer select-none ${notRobot ? "border-primary/60 bg-primary/5" : "border-white/10 bg-background/50"}`}
+                        onClick={() => setNotRobot((v) => !v)}
+                        data-testid="captcha-not-robot"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`w-5 h-5 rounded flex items-center justify-center border-2 transition-colors flex-shrink-0 ${notRobot ? "border-primary bg-primary" : "border-white/30 bg-transparent"}`}>
+                            {notRobot && (
+                              <svg viewBox="0 0 12 10" fill="none" className="w-3 h-3">
+                                <path d="M1 5l3.5 3.5L11 1" stroke="#000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            )}
+                          </div>
+                          <span className="text-sm font-medium text-foreground">I'm not a robot</span>
+                        </div>
+                        <div className="flex flex-col items-center opacity-40">
+                          <svg viewBox="0 0 64 64" className="w-8 h-8" fill="currentColor">
+                            <path d="M32 4C16.536 4 4 16.536 4 32s12.536 28 28 28 28-12.536 28-28S47.464 4 32 4zm0 4c13.255 0 24 10.745 24 24S45.255 56 32 56 8 45.255 8 32 18.745 8 32 8zm-8 14a4 4 0 100 8 4 4 0 000-8zm16 0a4 4 0 100 8 4 4 0 000-8zm-8 10c-5.523 0-10 3.134-10 7h20c0-3.866-4.477-7-10-7z"/>
+                          </svg>
+                          <span className="text-[8px] uppercase tracking-wider mt-0.5">reCAPTCHA</span>
+                        </div>
                       </div>
 
                       {error && (

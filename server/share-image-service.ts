@@ -342,23 +342,23 @@ function getMetricData(metric: string, run: RunDataForImage): RingMetricData {
     }
     case "calories": {
       const cal = run.calories || 0;
-      return { label: "Calories", unit: "kcal", value: cal ? cal.toString() : "--", grad: "greenRingGrad", prog: cal ? Math.min(0.3 + cal / 600 * 0.6, 0.95) : 0.5, track: "#00E676" };
+      return { label: "Calories", unit: "kcal", value: cal ? cal.toString() : "0", grad: "greenRingGrad", prog: cal ? Math.min(0.3 + cal / 600 * 0.6, 0.95) : 0.3, track: "#00E676" };
     }
     case "elevationGain": {
       const eg = run.elevationGain || 0;
-      return { label: "Elev Gain", unit: "m", value: eg ? `${Math.round(eg)}` : "--", grad: "orangeRingGrad", prog: eg ? Math.min(0.3 + eg / 200 * 0.6, 0.95) : 0.5, track: "#FF6B35" };
+      return { label: "Elev Gain", unit: "m", value: `${Math.round(eg)}`, grad: "orangeRingGrad", prog: eg ? Math.min(0.3 + eg / 200 * 0.6, 0.95) : 0.3, track: "#FF6B35" };
     }
     case "elevationLoss": {
       const el = run.elevationLoss || 0;
-      return { label: "Elev Loss", unit: "m", value: el ? `${Math.round(el)}` : "--", grad: "blueRingGrad", prog: el ? Math.min(0.3 + el / 200 * 0.6, 0.95) : 0.5, track: "#42A5F5" };
+      return { label: "Elev Loss", unit: "m", value: `${Math.round(el)}`, grad: "blueRingGrad", prog: el ? Math.min(0.3 + el / 200 * 0.6, 0.95) : 0.3, track: "#42A5F5" };
     }
     case "cadence": {
       const cad = run.cadence || 0;
-      return { label: "Cadence", unit: "spm", value: cad ? cad.toString() : "--", grad: "greenRingGrad", prog: cad ? Math.min(0.3 + (cad - 140) / 50 * 0.6, 0.95) : 0.5, track: "#00E676" };
+      return { label: "Cadence", unit: "spm", value: cad ? cad.toString() : "0", grad: "greenRingGrad", prog: cad ? Math.min(0.3 + (cad - 140) / 50 * 0.6, 0.95) : 0.3, track: "#00E676" };
     }
     case "steps": {
       const steps = run.totalSteps || 0;
-      return { label: "Steps", unit: "", value: steps ? steps.toLocaleString() : "--", grad: "cyanRingGrad", prog: steps ? Math.min(0.3 + steps / 10000 * 0.6, 0.95) : 0.5, track: "#00E5FF" };
+      return { label: "Steps", unit: "", value: steps ? steps.toLocaleString() : "0", grad: "cyanRingGrad", prog: steps ? Math.min(0.3 + steps / 10000 * 0.6, 0.95) : 0.3, track: "#00E5FF" };
     }
     default: {
       const d = run.distance || 0;

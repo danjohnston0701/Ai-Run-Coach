@@ -333,7 +333,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // POST /api/register-interest — public waitlist signup
   app.post("/api/register-interest", async (req: Request, res: Response) => {
     try {
-      const { name, email, country } = req.body;
+      const { name, email, country, message } = req.body;
       if (!name?.trim() || !email?.trim() || !country?.trim()) {
         return res.status(400).json({ error: "Name, email, and country are required" });
       }
@@ -345,10 +345,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         name: name.trim(),
         email: email.trim().toLowerCase(),
         country: country.trim(),
+        message: message?.trim() || null,
       });
       // Fire-and-forget confirmation emails
       import("./email-service").then(({ sendInterestRegistrationEmail }) => {
-        sendInterestRegistrationEmail({ name: name.trim(), email: email.trim(), country: country.trim() })
+        sendInterestRegistrationEmail({ name: name.trim(), email: email.trim(), country: country.trim(), message: message?.trim() || undefined })
           .catch((err: Error) => console.error("Interest registration email failed:", err));
       });
       res.json({ ok: true, id: registration.id });
