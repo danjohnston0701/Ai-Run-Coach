@@ -25,29 +25,17 @@ export const TIER_LIMITS: Record<string, TierLimits> = {
     routesGenerated: 3,
     postRunAnalyses: 5,
   },
-  starter: {
+  lite: {
     aiCoachingKm: 50,
     trainingPlansGenerated: 3,
     routesGenerated: 10,
     postRunAnalyses: 15,
   },
-  regular: {
+  standard: {
     aiCoachingKm: 200,
     trainingPlansGenerated: 10,
     routesGenerated: 30,
     postRunAnalyses: 50,
-  },
-  premium: {
-    aiCoachingKm: Infinity,
-    trainingPlansGenerated: Infinity,
-    routesGenerated: Infinity,
-    postRunAnalyses: Infinity,
-  },
-  pro: {
-    aiCoachingKm: Infinity,
-    trainingPlansGenerated: Infinity,
-    routesGenerated: Infinity,
-    postRunAnalyses: Infinity,
   },
 };
 
