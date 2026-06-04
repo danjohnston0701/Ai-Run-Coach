@@ -456,8 +456,10 @@ function validateRoute(
   
   const distanceDiffPercent = Math.abs(actualDistanceMeters - targetDistanceMeters) / targetDistanceMeters;
   if (distanceDiffPercent > 0.15) {
-    issues.push({ type: 'DISTANCE_MISMATCH', location: coordinates[0], severity: 'HIGH' });
-    console.log(`⚠️ Distance mismatch: ${(distanceDiffPercent * 100).toFixed(1)}% off target (max 15%)`);
+    // Use MEDIUM severity — the hard-reject pass already enforces the tiered distance tolerance
+    // before validateRoute is called, so if a route reaches here it's within acceptable bounds.
+    issues.push({ type: 'DISTANCE_MISMATCH', location: coordinates[0], severity: 'MEDIUM' });
+    console.log(`⚠️ Distance mismatch: ${(distanceDiffPercent * 100).toFixed(1)}% off target`);
   }
   
   // Macro U-turn detection
@@ -467,7 +469,9 @@ function validateRoute(
   if (sampled[sampled.length - 1] !== coordinates[coordinates.length - 1]) sampled.push(coordinates[coordinates.length - 1]);
   
   for (let i = 1; i < sampled.length - 1; i++) {
-    if (calculateAngle(sampled[i - 1], sampled[i], sampled[i + 1]) > 150) {
+    // Use 170° threshold (was 150°) — only flag near-perfect hairpins.
+    // Street corners and tight bends on short routes often exceed 150° legitimately.
+    if (calculateAngle(sampled[i - 1], sampled[i], sampled[i + 1]) > 170) {
       issues.push({ type: 'U_TURN', location: sampled[i], severity: 'HIGH' });
     }
   }
