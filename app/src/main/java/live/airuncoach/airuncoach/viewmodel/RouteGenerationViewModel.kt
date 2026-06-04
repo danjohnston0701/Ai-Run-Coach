@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import live.airuncoach.airuncoach.domain.model.GeneratedRoute
 import live.airuncoach.airuncoach.domain.model.LatLng
 import live.airuncoach.airuncoach.domain.model.RouteDifficulty
@@ -36,6 +38,9 @@ class RouteGenerationViewModel @Inject constructor(
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
+    
+    // Track ongoing generation job to ensure completion
+    private var currentGenerationJob: Job? = null
 
     // Carry target time + original distance from setup screen through to route selection → run session
     private val _hasTargetTime = MutableStateFlow(false)
@@ -86,7 +91,10 @@ class RouteGenerationViewModel @Inject constructor(
         targetTime: Int? = null,
         aiCoachEnabled: Boolean = false
     ) {
-        viewModelScope.launch {
+        // Cancel any previous generation job
+        currentGenerationJob?.cancel()
+        
+        currentGenerationJob = viewModelScope.launch {
             _isLoading.value = true
             _error.value = null
             
@@ -147,6 +155,11 @@ class RouteGenerationViewModel @Inject constructor(
                 }
                 _error.value = errorMsg
                 Log.e("RouteGeneration", "❌ HTTP ERROR ${e.code()}: ${e.message()}", e)
+            } catch (e: CancellationException) {
+                // Log cancellation but DON'T re-throw (we've already cleaned up)
+                Log.w("RouteGeneration", "⚠️ Route generation was cancelled (likely due to navigation)", e)
+                // Keep error state as-is; don't override with cancellation message
+                // Do NOT re-throw here - we handle the cancellation gracefully
             } catch (e: Exception) {
                 _error.value = "An unexpected error occurred while generating routes. Please try again."
                 Log.e("RouteGeneration", "❌ UNEXPECTED ERROR: ${e.message}", e)

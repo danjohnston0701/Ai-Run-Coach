@@ -75,6 +75,7 @@ val items = listOf(
 fun MainScreen(onNavigateToLogin: () -> Unit) {
     val navController = rememberNavController()
     var showLocationPermissionDialog by remember { mutableStateOf(false) }
+    var onLocationPermissionGranted: (() -> Unit)? by remember { mutableStateOf(null) }
 
     // Permission requests are now handled in LocationPermissionScreen
     // Only request notification permission here if needed
@@ -229,6 +230,8 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         navController.navigate(Screen.History.route)
                     },
                     onNavigateToLocationPermission = {
+                        // Store the callback to refresh permissions when dialog closes
+                        onLocationPermissionGranted = { dashboardViewModel.checkLocationPermission() }
                         showLocationPermissionDialog = true
                     },
                     onCreateGoal = {
@@ -351,10 +354,6 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             // ── Run Route Availability Check ──────────────────────────────────
             composable("check_route_availability") { backStackEntry ->
                 val featureLimitViewModel: live.airuncoach.airuncoach.viewmodel.FeatureLimitViewModel = hiltViewModel()
-                val parentEntry = remember(backStackEntry) {
-                    navController.getBackStackEntry(navController.graph.id)
-                }
-                val routeGenViewModel: RouteGenerationViewModel = hiltViewModel(parentEntry)
                 val availability by featureLimitViewModel.runRouteAvailability.collectAsState()
                 val isLoading by featureLimitViewModel.runRouteLoading.collectAsState()
 
@@ -371,13 +370,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                             // Get stored params from holder
                             val params = live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.peek()
                             if (params != null) {
-                                // Call the API to generate routes
-                                routeGenViewModel.generateIntelligentRoutes(
-                                    latitude = params.latitude,
-                                    longitude = params.longitude,
-                                    distanceKm = params.distance.toDouble()
-                                )
-                                // Navigate to loading screen
+                                // Navigate to loading screen - route generation will happen there
                                 navController.navigate("route_generating/${params.distance.toInt()}") {
                                     popUpTo("check_route_availability") { inclusive = true }
                                 }
@@ -414,13 +407,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         // Get stored params from holder
                         val params = live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.peek()
                         if (params != null) {
-                            // Call the API to generate routes
-                            routeGenViewModel.generateIntelligentRoutes(
-                                latitude = params.latitude,
-                                longitude = params.longitude,
-                                distanceKm = params.distance.toDouble()
-                            )
-                            // Navigate to loading screen
+                            // Navigate to loading screen - route generation will happen there
                             navController.navigate("route_generating/${params.distance.toInt()}") {
                                 popUpTo("check_route_availability") { inclusive = true }
                             }
@@ -452,6 +439,31 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 val routes by viewModel.routes.collectAsState()
                 val isLoading by viewModel.isLoading.collectAsState()
                 val error by viewModel.error.collectAsState()
+                
+                // Trigger route generation when this screen is first shown
+                LaunchedEffect(Unit) {
+                    val params = live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.peek()
+                    if (params != null && routes.isEmpty() && !isLoading) {
+                        Log.d("RouteNavigation", "🚀 Starting route generation from route_generating screen")
+                        
+                        // Store target time + distance so it persists through route generation → selection → run session
+                        viewModel.setTargetTime(params.hasTime, params.hours, params.minutes, params.seconds, params.distance.toDouble())
+                        
+                        // Generate routes with GPS location
+                        val targetTimeMinutes = if (params.hasTime) params.hours * 60 + params.minutes else null
+                        
+                        viewModel.generateIntelligentRoutes(
+                            latitude = params.latitude,
+                            longitude = params.longitude,
+                            distanceKm = params.distance.toDouble(),
+                            activityType = "run",
+                            preferTrails = true,
+                            avoidHills = false,
+                            targetTime = targetTimeMinutes,
+                            aiCoachEnabled = false
+                        )
+                    }
+                }
                 
                 // Always show the loading screen content
                 RouteGeneratingLoadingScreen(
@@ -749,21 +761,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                                 // Store target time + distance so it persists through route generation → selection → run session
                                 routeViewMod.setTargetTime(params.hasTime, params.hours, params.minutes, params.seconds, params.distance.toDouble())
                                 
-                                // Generate routes with GPS location
-                                val targetTimeMinutes = if (params.hasTime) params.hours * 60 + params.minutes else null
-                                
-                                routeViewMod.generateIntelligentRoutes(
-                                    latitude = params.latitude,
-                                    longitude = params.longitude,
-                                    distanceKm = params.distance.toDouble(),
-                                    activityType = "run",
-                                    preferTrails = true,
-                                    avoidHills = false,
-                                    targetTime = targetTimeMinutes,
-                                    aiCoachEnabled = false
-                                )
-                                
-                                // Navigate to loading screen
+                                // Navigate to loading screen - route generation will happen there
                                 navController.navigate("route_generating/${params.distance.toInt()}") {
                                     popUpTo("check_route_availability") { inclusive = true }
                                 }
@@ -802,21 +800,10 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         LaunchedEffect(Unit) {
                             featureLimitViewModel.resetRunRouteAvailability()
                             
-                            // Proceed with route generation
+                            // Store target time + distance so it persists through route generation → selection → run session
                             routeViewMod.setTargetTime(params.hasTime, params.hours, params.minutes, params.seconds, params.distance.toDouble())
-                            val targetTimeMinutes = if (params.hasTime) params.hours * 60 + params.minutes else null
                             
-                            routeViewMod.generateIntelligentRoutes(
-                                latitude = params.latitude,
-                                longitude = params.longitude,
-                                distanceKm = params.distance.toDouble(),
-                                activityType = "run",
-                                preferTrails = true,
-                                avoidHills = false,
-                                targetTime = targetTimeMinutes,
-                                aiCoachEnabled = false
-                            )
-                            
+                            // Navigate to loading screen - route generation will happen there
                             navController.navigate("route_generating/${params.distance.toInt()}") {
                                 popUpTo("check_route_availability") { inclusive = true }
                             }
@@ -1154,7 +1141,10 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
     if (showLocationPermissionDialog) {
         LocationPermissionDialog(
             onDismiss = { showLocationPermissionDialog = false },
-            onPermissionGranted = { showLocationPermissionDialog = false }
+            onPermissionGranted = {
+                showLocationPermissionDialog = false
+                onLocationPermissionGranted?.invoke()
+            }
         )
     }
 }
