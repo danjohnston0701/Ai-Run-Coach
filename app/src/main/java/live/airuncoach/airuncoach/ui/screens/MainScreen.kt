@@ -305,6 +305,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 val viewModel: RouteGenerationViewModel = hiltViewModel(parentEntry)
                 val featureLimitViewModel: live.airuncoach.airuncoach.viewmodel.FeatureLimitViewModel = hiltViewModel()
 
+                var isNavigatingToRoute by remember { mutableStateOf(false) }
                 MapMyRunSetupScreen(
                     mode = mode,
                     initialDistance = dist,
@@ -314,6 +315,10 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     initialSeconds = s,
                     onNavigateBack = { navController.popBackStack() },
                     onGenerateRoute = { distance, hasTime, hours, minutes, seconds, _, _, latitude, longitude ->
+                        // Guard against double-taps - only allow one navigation at a time
+                        if (isNavigatingToRoute) return@MapMyRunSetupScreen
+                        isNavigatingToRoute = true
+                        
                         // Store route generation params to RouteGenerationParamsHolder for later use
                         live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.setParams(
                             distance = distance,

@@ -684,10 +684,14 @@ async function evaluateCandidates(
     let coordinates = path.points.coordinates as Array<[number, number]>;
     const label = `[${tierLabel}] ${isScenic ? `Scenic(${seed})` : `Seed ${seed}`}`;
     
-    // Hard reject: distance must be within ±15% of target
+    // Hard reject: distance must be within tolerance of target.
+    // GraphHopper round_trip is less accurate for short routes, so use wider tolerance for <5km.
+    const distanceTolerance = distanceMeters < 3000 ? 0.50  // ±50% for <3km (very short routes)
+                            : distanceMeters < 5000 ? 0.35  // ±35% for 3–5km (short routes)
+                            : 0.15;                          // ±15% for 5km+ (standard)
     const distanceDiffPercent = Math.abs(path.distance - distanceMeters) / distanceMeters;
-    if (distanceDiffPercent > 0.15) {
-      console.log(`${label}: Rejected - distance ${(path.distance / 1000).toFixed(2)}km is ${(distanceDiffPercent * 100).toFixed(1)}% off target ${(distanceMeters / 1000).toFixed(1)}km (max ±15%)`);
+    if (distanceDiffPercent > distanceTolerance) {
+      console.log(`${label}: Rejected - distance ${(path.distance / 1000).toFixed(2)}km is ${(distanceDiffPercent * 100).toFixed(1)}% off target ${(distanceMeters / 1000).toFixed(1)}km (max ±${(distanceTolerance * 100).toFixed(0)}%)`);
       rejected.push({ raw: result, metrics: { loopQuality: 0, backtrackRatio: 0, compactness: 0, angularSpread: 0, proximityOverlap: 0 } });
       continue;
     }
