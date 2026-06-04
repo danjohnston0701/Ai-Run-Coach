@@ -3626,7 +3626,7 @@ function buildElevationConsistencyContext(params: {
   });
 
   // Analyze how much variance is elevation-driven
-  const elevation Impact = analyzeElevationImpactOnSplits(params.kmSplitSummaries);
+  const elevationImpact = analyzeElevationImpactOnSplits(params.kmSplitSummaries);
 
   // Calculate adjusted score
   const analysis = calculateElevationAdjustedConsistencyScore({
