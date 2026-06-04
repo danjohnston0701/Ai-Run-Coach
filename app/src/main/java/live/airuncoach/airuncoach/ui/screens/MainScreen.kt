@@ -442,7 +442,8 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 
                 // Trigger route generation when this screen is first shown
                 LaunchedEffect(Unit) {
-                    val params = live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.peek()
+                    // Consume params here - this is the definitive place generation happens
+                    val params = live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.consume()
                     if (params != null && routes.isEmpty() && !isLoading) {
                         Log.d("RouteNavigation", "🚀 Starting route generation from route_generating screen")
                         
@@ -462,6 +463,8 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                             targetTime = targetTimeMinutes,
                             aiCoachEnabled = false
                         )
+                    } else if (params == null) {
+                        Log.e("RouteNavigation", "❌ No route params available - cannot generate routes")
                     }
                 }
                 
@@ -736,7 +739,6 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             // ── Run Route Availability Check ─────────────────────────────────
             composable("check_route_availability") {
                 val featureLimitViewModel: live.airuncoach.airuncoach.viewmodel.FeatureLimitViewModel = hiltViewModel()
-                val routeViewMod: RouteGenerationViewModel = hiltViewModel()
                 val availability by featureLimitViewModel.runRouteAvailability.collectAsState()
                 val isLoading by featureLimitViewModel.runRouteLoading.collectAsState()
                 
@@ -753,14 +755,11 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 } else if (availability != null) {
                     if (availability!!.isAvailable) {
                         // User can create route - proceed with generation
-                        val params = live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.consume()
+                        // Use peek() NOT consume() so params are still available in route_generating
+                        val params = live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.peek()
                         if (params != null) {
                             LaunchedEffect(Unit) {
                                 featureLimitViewModel.resetRunRouteAvailability()
-                                
-                                // Store target time + distance so it persists through route generation → selection → run session
-                                routeViewMod.setTargetTime(params.hasTime, params.hours, params.minutes, params.seconds, params.distance.toDouble())
-                                
                                 // Navigate to loading screen - route generation will happen there
                                 navController.navigate("route_generating/${params.distance.toInt()}") {
                                     popUpTo("check_route_availability") { inclusive = true }
@@ -795,14 +794,11 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     }
                 } else {
                     // Default: allow access (error case)
-                    val params = live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.consume()
+                    // Use peek() NOT consume() so params are still available in route_generating
+                    val params = live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.peek()
                     if (params != null) {
                         LaunchedEffect(Unit) {
                             featureLimitViewModel.resetRunRouteAvailability()
-                            
-                            // Store target time + distance so it persists through route generation → selection → run session
-                            routeViewMod.setTargetTime(params.hasTime, params.hours, params.minutes, params.seconds, params.distance.toDouble())
-                            
                             // Navigate to loading screen - route generation will happen there
                             navController.navigate("route_generating/${params.distance.toInt()}") {
                                 popUpTo("check_route_availability") { inclusive = true }
