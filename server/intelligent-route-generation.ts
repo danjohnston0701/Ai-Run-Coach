@@ -732,7 +732,8 @@ async function evaluateCandidates(
     const validation = validateRoute(coordinates, path.distance, distanceMeters, roadClassDetails);
     if (!validation.isValid) { console.log(`${label}: Rejected - invalid`); rejected.push({ raw: result, metrics }); continue; }
     
-    const popularityScore = await getRoutePopularityScore(coordinates);
+    // Use .catch() as a safety net — a DB error here should never reject a good route
+    const popularityScore = await getRoutePopularityScore(coordinates).catch(() => 0.5);
     accepted.push({ route: path, validation, popularityScore, terrainScore: roadAnalysis.terrainScore, loopQuality, backtrackRatio, compactness, angularSpread, proximityOverlap, coordinates, isScenic });
     console.log(`${label}: ✅ Accepted`);
   }

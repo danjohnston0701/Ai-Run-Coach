@@ -154,6 +154,14 @@ export async function runAutoMigrations(): Promise<void> {
       name: "idx_group_run_participants_user",
       sql: "CREATE INDEX IF NOT EXISTS idx_group_run_participants_user ON group_run_participants(user_id)",
     },
+
+    // ── users.default_session_type ────────────────────────────────────────────
+    // Added to allow users to set a preferred activity type (run/walk/interval).
+    // Column was added to shared/schema.ts but DB migration was not applied.
+    {
+      name: "users.default_session_type",
+      sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS default_session_type TEXT DEFAULT 'run'",
+    },
   ];
 
   let succeeded = 0;

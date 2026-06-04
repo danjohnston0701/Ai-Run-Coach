@@ -277,6 +277,9 @@ export async function getRoutePopularityScore(
       return 0.5; // Default popularity score for routes with no data yet
     }
     
+    // Use IN (...) with individual parameters instead of ANY($1::text[])
+    // because Postgres cannot cast a bound record parameter to text[]
+    const placeholders = sql.join(osmWayIds.map(id => sql`${id}`), sql`, `);
     const result = await db.execute(sql`
       SELECT 
         osm_way_id,
@@ -284,7 +287,7 @@ export async function getRoutePopularityScore(
         unique_users,
         avg_rating
       FROM segment_popularity
-      WHERE osm_way_id = ANY(${osmWayIds}::text[])
+      WHERE osm_way_id IN (${placeholders})
     `);
     
     if (result.rows.length === 0) {
