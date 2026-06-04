@@ -473,23 +473,28 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     }
                 }
                 
-                // Always show the loading screen content
+                // Show loading screen (or error state if generation failed)
                 RouteGeneratingLoadingScreen(
                     distanceKm = distanceKm,
-                    coachName = coachName
+                    coachName = coachName,
+                    error = if (!isLoading) error else null,
+                    onRetry = {
+                        viewModel.retryGeneration()
+                    },
+                    onGoBack = {
+                        viewModel.clearError()
+                        navController.popBackStack()
+                    }
                 )
                 
-                // Auto-navigate when routes are ready OR if there's an error
-                LaunchedEffect(routes.size, isLoading, error) {
+                // Auto-navigate when routes are ready
+                LaunchedEffect(routes.size, isLoading) {
                     Log.d("RouteNavigation", "📊 Routes size: ${routes.size}, isLoading: $isLoading, error: $error")
                     if (routes.isNotEmpty() && !isLoading) {
                         Log.d("RouteNavigation", "✨ AUTO-NAVIGATING to route selection with ${routes.size} routes")
                         navController.navigate("route_selection/${distanceKm.toInt()}") {
                             popUpTo("route_generating/${distanceKm.toInt()}") { inclusive = true }
                         }
-                    } else if (error != null && !isLoading) {
-                        Log.d("RouteNavigation", "❌ ERROR occurred, navigating back to route generation")
-                        navController.popBackStack()
                     }
                 }
             }

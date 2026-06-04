@@ -42,6 +42,14 @@ class RouteGenerationViewModel @Inject constructor(
     // Track ongoing generation job to ensure completion
     private var currentGenerationJob: Job? = null
 
+    // Store last generation params so the user can retry without re-entering setup
+    private data class GenerationParams(
+        val latitude: Double, val longitude: Double, val distanceKm: Double,
+        val activityType: String, val preferTrails: Boolean, val avoidHills: Boolean,
+        val targetTime: Int?, val aiCoachEnabled: Boolean
+    )
+    private var lastGenerationParams: GenerationParams? = null
+
     // Carry target time + original distance from setup screen through to route selection → run session
     private val _hasTargetTime = MutableStateFlow(false)
     val hasTargetTime: StateFlow<Boolean> = _hasTargetTime.asStateFlow()
@@ -91,6 +99,11 @@ class RouteGenerationViewModel @Inject constructor(
         targetTime: Int? = null,
         aiCoachEnabled: Boolean = false
     ) {
+        // Store params for retry
+        lastGenerationParams = GenerationParams(
+            latitude, longitude, distanceKm, activityType, preferTrails, avoidHills, targetTime, aiCoachEnabled
+        )
+
         // Cancel any previous generation job
         currentGenerationJob?.cancel()
         
@@ -173,6 +186,25 @@ class RouteGenerationViewModel @Inject constructor(
     
     fun clearRoutes() {
         _routes.value = emptyList()
+    }
+
+    fun clearError() {
+        _error.value = null
+    }
+
+    /** Re-runs the last generation request — useful for the "Try Again" button on the error screen. */
+    fun retryGeneration() {
+        val p = lastGenerationParams ?: return
+        generateIntelligentRoutes(
+            latitude = p.latitude,
+            longitude = p.longitude,
+            distanceKm = p.distanceKm,
+            activityType = p.activityType,
+            preferTrails = p.preferTrails,
+            avoidHills = p.avoidHills,
+            targetTime = p.targetTime,
+            aiCoachEnabled = p.aiCoachEnabled
+        )
     }
 
     private fun RouteOption.toGeneratedRoute(): GeneratedRoute {
