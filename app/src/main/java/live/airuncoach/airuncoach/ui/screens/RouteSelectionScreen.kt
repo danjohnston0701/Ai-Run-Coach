@@ -84,7 +84,10 @@ fun RouteSelectionScreen(
                 )
             )
         },
-        containerColor = Color(0xFF0A1628)
+        containerColor = Color(0xFF0A1628),
+        // The outer MainScreen Scaffold already handles bottom nav bar insets.
+        // Setting WindowInsets(0) here prevents double-padding above the nav bar.
+        contentWindowInsets = WindowInsets(0)
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             LazyColumn(

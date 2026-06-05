@@ -299,6 +299,10 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 val h = backStackEntry.arguments?.getString("h")?.toIntOrNull() ?: 0
                 val m = backStackEntry.arguments?.getString("m")?.toIntOrNull() ?: 0
                 val s = backStackEntry.arguments?.getString("s")?.toIntOrNull() ?: 0
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry(navController.graph.id)
+                }
+                val routeViewModel: RouteGenerationViewModel = hiltViewModel(parentEntry)
                 var isNavigatingToRoute by remember { mutableStateOf(false) }
                 MapMyRunSetupScreen(
                     mode = mode,
@@ -312,6 +316,12 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         // Guard against double-taps - only allow one navigation at a time
                         if (isNavigatingToRoute) return@MapMyRunSetupScreen
                         isNavigatingToRoute = true
+                        
+                        // Clear any previous routes/error so route_generating starts fresh
+                        // (without this, stale routes from a previous generation cause immediate
+                        //  auto-navigation to route_selection with old results)
+                        routeViewModel.clearRoutes()
+                        routeViewModel.clearError()
                         
                         // Store route generation params to RouteGenerationParamsHolder for later use
                         live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.setParams(
