@@ -551,12 +551,12 @@ fun SearchUserCard(
                 Spacer(modifier = Modifier.width(Spacing.md))
                 Column {
                     Text(
-                        text = user.name,
+                        text = (user.name as? String) ?: "User",
                         style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
                         color = Colors.textPrimary
                     )
                     Text(
-                        text = user.email,
+                        text = (user.email as? String) ?: "",
                         style = AppTextStyles.caption,
                         color = Colors.textSecondary
                     )

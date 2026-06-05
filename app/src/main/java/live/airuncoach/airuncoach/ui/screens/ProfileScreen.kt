@@ -313,7 +313,7 @@ fun ProfileScreen(
                 )
             }
         }
-        item { Spacer(modifier = Modifier.height(Spacing.xxl)) }
+        item { Spacer(modifier = Modifier.height(Spacing.md)) }
     }
 
     // Upload loading overlay
@@ -414,7 +414,9 @@ fun ProfileHeader(user: User, cacheBuster: Long, isUploading: Boolean = false, o
             )
         }
         Text(
-            text = user.name,
+            // Gson can set non-nullable fields to null if the server omits "name".
+            // Safe cast + Elvis prevents a NullPointerException in Compose's text renderer.
+            text = (user.name as? String) ?: "User",
             style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
             color = Colors.textPrimary
         )
